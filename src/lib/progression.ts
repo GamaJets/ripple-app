@@ -6,7 +6,7 @@
 // and unit-testable. Cardio and bodyweight-only entries are skipped.
 import type { WorkoutEntry } from './mockData';
 import { est1RM } from './streaks';
-import { liftLabel, liftDeltaIn, type WeightUnit } from './units';
+import { liftLabel, liftDeltaIn, plain, type WeightUnit } from './units';
 
 export type ProgressAction = 'increase' | 'reps' | 'hold' | 'deload';
 
@@ -39,7 +39,47 @@ function latestByExercise(log: WorkoutEntry[]): Map<string, WorkoutEntry> {
   return seen;
 }
 
-export function suggestProgression(log: WorkoutEntry[], topRange = 12, bottomRange = 8): ProgressionTip[] {
+/**
+ * ── Why this takes a unit, and why it has no default ──────────────────────
+ *
+ * `rationale` is prose a member reads, and it was built here with "kg" written
+ * into the template — seven times. A member set to pounds opened Targets and
+ * read "Target Load 132 lb" in the panel with "In range at 60kg" printed
+ * directly underneath it: one lift, two units, one card. Nothing was stored
+ * wrong, which is why it survived so long.
+ *
+ * The parameter is `unit?: WeightUnit` and NOT `unit: WeightUnit = 'kg'`. A
+ * default here would be the same defect wearing a parameter — `money()` in
+ * src/lib/gymRecord.ts lost its `= 'AED'` for exactly this reason, and this is
+ * a pure module with no member in scope to guess about. Every caller that
+ * renders `rationale` passes the member's own unit; a caller that has none gets
+ * a sentence with the LOAD left out rather than a sentence in a unit nobody
+ * chose. The unit-free wording is deliberately still useful advice ("repeat the
+ * same weight and build reps") rather than a dash, because unlike an amount of
+ * money, the coaching decision does not depend on the unit at all.
+ *
+ * The DECISION is untouched: the increment ladder stays metric — 2.5 kg is a
+ * plate pair, not a converted number — and `lastWeight` / `nextWeight` stay
+ * kilograms, because the Targets screen renders them through `liftIn` and the
+ * workout log is metric. Only the wording moves.
+ */
+export function suggestProgression(
+  log: WorkoutEntry[],
+  unit?: WeightUnit,
+  topRange = 12,
+  bottomRange = 8,
+): ProgressionTip[] {
+  /** A stored load as the member reads it, or null when nobody has told us how
+   *  they read. Null is what selects the unit-free wording below. */
+  const load = (kg: number) => (unit ? liftLabel(kg, unit) : null);
+  /** A progression step as the member reads it. Converted as a SPAN, so a
+   *  2.5 kg bump is "5.5 lb" every week rather than 5 or 6 depending on where
+   *  the two loads happened to sit inside their rounding. */
+  const bump = (kg: number) => {
+    if (!unit) return null;
+    const v = liftDeltaIn(kg, unit);
+    return v == null ? null : `${plain(v)} ${unit}`;
+  };
   const latest = latestByExercise(log);
   const tips: ProgressionTip[] = [];
   for (const [exercise, e] of latest) {
@@ -52,27 +92,35 @@ export function suggestProgression(log: WorkoutEntry[], topRange = 12, bottomRan
     // Did every top-weight set clear the top of the range?
     const allClearedTop = atTop.every(([r]) => r >= topRange);
 
+    const at = load(lastWeight);
     let action: ProgressAction, nextWeight = lastWeight, nextReps = `${bottomRange}-${topRange}`, rationale = '';
     if (allClearedTop) {
       action = 'increase';
       nextWeight = Math.round((lastWeight + step(exercise)) * 2) / 2;
       nextReps = `${bottomRange}-${topRange}`;
-      rationale = `Cleared ${topRange}+ reps on every top set — add ${step(exercise)}kg and reset to ${bottomRange}.`;
+      const add = bump(step(exercise));
+      rationale = `Cleared ${topRange}+ reps on every top set — add ${add ?? 'a step'} and reset to ${bottomRange}.`;
     } else if (lastReps >= bottomRange) {
       action = 'reps';
       nextWeight = lastWeight;
       nextReps = `${Math.min(topRange, lastReps + 1)}+`;
-      rationale = `In range at ${lastWeight}kg — hold the weight and chase one more rep (aim ${Math.min(topRange, lastReps + 1)}).`;
+      rationale = `In range${at ? ` at ${at}` : ''} — hold the weight and chase one more rep (aim ${Math.min(topRange, lastReps + 1)}).`;
     } else if (lastReps >= Math.max(3, bottomRange - 3)) {
       action = 'hold';
       nextWeight = lastWeight;
       nextReps = `${bottomRange}-${topRange}`;
-      rationale = `Just under range — repeat ${lastWeight}kg and build reps before adding load.`;
+      rationale = `Just under range — repeat ${at ?? 'the same weight'} and build reps before adding load.`;
     } else {
       action = 'deload';
       nextWeight = Math.round((lastWeight * 0.9) * 2) / 2;
       nextReps = `${bottomRange}-${topRange}`;
-      rationale = `Reps fell off — ease to ~${Math.round(lastWeight * 0.9)}kg and rebuild.`;
+      // The figure named is the one the card shows as the target, not a second
+      // rounding of the same 10% — two numbers a rep apart on one card is how a
+      // member decides the suggestion is guesswork.
+      const easeTo = load(nextWeight);
+      rationale = easeTo
+        ? `Reps fell off — ease to ~${easeTo} and rebuild.`
+        : 'Reps fell off — ease off about 10% and rebuild.';
     }
     // RPE / "felt" signal: the hardest feel logged on the top-weight sets (captured
     // per set in session mode) governs how aggressively to progress.
@@ -85,13 +133,13 @@ export function suggestProgression(log: WorkoutEntry[], topRange = 12, bottomRan
     const feltEasy = topFeels.length > 0 && topFeels.every((f) => f === 'easy');
     if (feltHard && action === 'increase') {
       action = 'reps'; nextWeight = lastWeight; nextReps = `${Math.min(topRange, lastReps)}+`;
-      rationale = `Cleared the range but the top sets felt hard — hold ${lastWeight}kg and bank the reps before adding load.`;
+      rationale = `Cleared the range but the top sets felt hard — hold ${at ?? 'the same weight'} and bank the reps before adding load.`;
     } else if (feltHard && action === 'reps') {
       action = 'hold'; nextWeight = lastWeight; nextReps = `${bottomRange}-${topRange}`;
-      rationale = `In range but it felt hard — repeat ${lastWeight}kg to consolidate before progressing.`;
+      rationale = `In range but it felt hard — repeat ${at ?? 'the same weight'} to consolidate before progressing.`;
     } else if (feltEasy && action === 'reps') {
       action = 'increase'; nextWeight = Math.round((lastWeight + step(exercise)) * 2) / 2; nextReps = `${bottomRange}-${topRange}`;
-      rationale = `In range and every top set felt easy — add ${step(exercise)}kg now.`;
+      rationale = `In range and every top set felt easy — add ${bump(step(exercise)) ?? 'a step'} now.`;
     } else if (feltEasy && action === 'increase') {
       rationale = rationale + ' Top sets felt easy — add with confidence.';
     }
@@ -128,7 +176,12 @@ export function suggestNextWeight(
   lastSets: [number, number][] | undefined,
   range: RepRange | null,
   increment = 2.5,
-  unit: WeightUnit = 'kg',
+  // No `= 'kg'`. That default was an invented unit in a pure module — the same
+  // shape as `money(cents, currency = 'AED')`, which this codebase already had
+  // to unpick after it reached disk. An omitted unit now means "nobody has told
+  // us how this member reads", and the sentence below leaves the load out
+  // rather than stating it in a unit nobody chose.
+  unit?: WeightUnit,
 ): Suggestion | null {
   if (!lastSets || lastSets.length === 0) return null;
   let topW = 0, repsAtTop = 0;
@@ -141,11 +194,23 @@ export function suggestNextWeight(
   // `weight` stays kilograms — it is fed straight back into the log, the
   // warm-up ramp and the PR check, all of which are metric. Only `reason` is
   // prose, and prose is read rather than computed on.
-  const read = (kg: number) => liftLabel(kg, unit) ?? `${kg} ${unit}`;
+  const read = (kg: number) => (unit ? liftLabel(kg, unit) : null);
+  const top = read(topW);
   if (range && repsAtTop >= range.high) {
-    return { weight: round(topW + increment), up: true, reason: `You hit ${repsAtTop} reps at ${read(topW)} — add ${liftDeltaIn(increment, unit) ?? increment} ${unit}` };
+    const add = unit ? `${plain(liftDeltaIn(increment, unit) ?? increment)} ${unit}` : 'a step';
+    return {
+      weight: round(topW + increment),
+      up: true,
+      reason: `You hit ${repsAtTop} reps at ${top ?? 'your top weight'} — add ${add}`,
+    };
   }
-  return { weight: round(topW), up: false, reason: range ? `Match ${read(topW)}, aim for ${range.high} reps` : `Match last: ${read(topW)}` };
+  return {
+    weight: round(topW),
+    up: false,
+    reason: range
+      ? `Match ${top ?? 'your last top weight'}, aim for ${range.high} reps`
+      : `Match last: ${top ?? 'your last top weight'}`,
+  };
 }
 
 /**
@@ -166,7 +231,7 @@ export function suggestNextWeight(
  * why a second, imperial ladder would be a second progression model), and what
  * moves is the wording.
  */
-export function suggestForExercise(log: WorkoutEntry[], exerciseName: string, reps: string, increment = 2.5, unit: WeightUnit = 'kg'): Suggestion | null {
+export function suggestForExercise(log: WorkoutEntry[], exerciseName: string, reps: string, increment = 2.5, unit?: WeightUnit): Suggestion | null {
   return suggestNextWeight(lastSetsFor(log, exerciseName), parseRepRange(reps), increment, unit);
 }
 

@@ -40,6 +40,8 @@ import { useFoodLog } from '../../src/ui/foodLog';
 import { notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Meter, QuickRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { useSettings } from '../../src/ui/settings';
+import { weightLabel, kgToLb, type WeightUnit } from '../../src/lib/units';
 
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
@@ -78,7 +80,25 @@ const DAY_TYPES = [
 //  · The plan was NOT derived at all. No target, no date, no weigh-in — the
 //    old enum behaviour, unchanged, but named as such rather than passed off
 //    as goal-driven.
-const kgRate = (n: number) => Math.abs(n).toFixed(2).replace(/0$/, '').replace(/\.$/, '');
+/**
+ * A rate of weight change per week, in the unit the member reads in.
+ *
+ * The STORE is right here and the LABEL was wrong: `plannedRateKg`,
+ * `requiredRateKg` and the observed pace are all genuinely kilograms per week,
+ * and every one of them was printed with " kg a week" typed after it. A member
+ * reading in pounds was told their plan moves them 0.5 kg a week — a figure in
+ * a unit they had never chosen, on the screen that explains where their whole
+ * calorie target comes from.
+ *
+ * Converted through `kgToLb`, which is exact by definition, rather than through
+ * `weightDeltaIn`: that rounds a difference to the whole pound, and 0.25 kg a
+ * week — an ordinary, deliberate, slow cut — would come out as "1 lb a week",
+ * double the truth. A rate is not a scale reading with a tenth of a kilogram of
+ * slop in it; it is a number this app computed, so it keeps the two decimal
+ * places the metric side has always shown.
+ */
+const rateIn = (kgPerWeek: number, unit: WeightUnit) =>
+  Math.abs(unit === 'lb' ? kgToLb(kgPerWeek) : kgPerWeek).toFixed(2).replace(/0$/, '').replace(/\.$/, '');
 const onDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
 /**
@@ -89,7 +109,11 @@ const onDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { mont
  * in its own right further down the screen; attributing their ±250 to the
  * client's goal rate would make this sentence's arithmetic not add up.
  */
-function targetBasis(plan: EnergyPlan, goalLabel: string): string {
+function targetBasis(plan: EnergyPlan, goalLabel: string, wu: WeightUnit): string {
+  /** A stored bodyweight as the member reads it. `weightLabel` returns null for
+   *  nothing, and there is nothing here: every one of these branches is only
+   *  reached because the plan HAS a target and a current weight. */
+  const w = (kg: number) => weightLabel(kg, wu) ?? '';
   if (plan.kind === 'enum') {
     switch (plan.reason) {
       case 'no-goal':
@@ -101,7 +125,10 @@ function targetBasis(plan: EnergyPlan, goalLabel: string): string {
       case 'no-readings':
         return `You’ve set a target weight, but there’s no weigh-in to measure from yet. Add one and this is built from your goal; for now it’s your general goal (${goalLabel}).`;
       case 'date-passed':
-        return `Your goal’s date has gone by, so there’s no time left to spread the remaining kilos over. Set a new date under Goals. Until then this is your general goal (${goalLabel}).`;
+        // "the remaining kilos" was a unit typed into prose. It is the same defect
+        // as a label, and it is worse for being invisible to a search for a
+        // figure: there is no number beside it to look wrong.
+        return `Your goal’s date has gone by, so there’s no time left to spread the remaining weight over. Set a new date under Goals. Until then this is your general goal (${goalLabel}).`;
       case 'date-too-soon':
         return `Your goal’s date is less than a week away — too soon to tell you whether a plan is working before it arrives. This is your general goal (${goalLabel}) instead.`;
       case 'reached':
@@ -114,9 +141,9 @@ function targetBasis(plan: EnergyPlan, goalLabel: string): string {
   // that "0.05 kg a week" would dress up a rounding error as a plan.
   const pace = Math.abs(plan.plannedRateKg) < 0.05
     ? 'holding you where you are'
-    : `${kgRate(plan.plannedRateKg)} kg a week`;
+    : `${rateIn(plan.plannedRateKg, wu)} ${wu} a week`;
   if (plan.onTime) {
-    return `Built from your goal: ${plan.targetKg} kg by ${onDate(plan.targetDateMs)}. From ${plan.currentKg} kg that’s ${pace}, which sets your baseline at ${plan.kcal.toLocaleString()} kcal a day.`;
+    return `Built from your goal: ${w(plan.targetKg)} by ${onDate(plan.targetDateMs)}. From ${w(plan.currentKg)} that’s ${pace}, which sets your baseline at ${plan.kcal.toLocaleString()} kcal a day.`;
   }
   const why = plan.limitedBy === 'floor'
     ? `going faster would mean eating more than ${Math.round(MAX_DEFICIT_FRACTION_OF_TDEE * 100)}% below what your body uses in a day`
@@ -126,8 +153,8 @@ function targetBasis(plan: EnergyPlan, goalLabel: string): string {
   // inventing the very number the sentence exists to correct.
   const tail = plan.etaMs != null
     ? ` and gets you there around ${onDate(plan.etaMs)}, later than the ${onDate(plan.targetDateMs)} you set.`
-    : `, which does not reach ${plan.targetKg} kg by ${onDate(plan.targetDateMs)}. There is no pace here to put a finish date on, so that stays a dash.`;
-  return `Your date needs ${kgRate(plan.requiredRateKg)} kg a week, and ${why}. This plan is built on ${pace} instead${tail} Move the date or the target under Goals if you want them to meet.`;
+    : `, which does not reach ${w(plan.targetKg)} by ${onDate(plan.targetDateMs)}. There is no pace here to put a finish date on, so that stays a dash.`;
+  return `Your date needs ${rateIn(plan.requiredRateKg, wu)} ${wu} a week, and ${why}. This plan is built on ${pace} instead${tail} Move the date or the target under Goals if you want them to meet.`;
 }
 
 export default function Nutrition() {
@@ -135,6 +162,11 @@ export default function Nutrition() {
   const c = useClientData();
   const router = useRouter();
   const { appName } = useBrand();
+  // The unit this member reads bodyweight in. Chosen if they have chosen;
+  // otherwise their phone's region, and Settings says so — see
+  // src/lib/unitPreference.ts. What it is never again is a hardcoded 'kg'
+  // typed after a figure, which is what every sentence on this screen did.
+  const wu = useSettings().weightUnit;
   const _adj = useCoachNutrition().get(c.id);
   const coachAdjust = c.coachingMode === 'solo' ? null : _adj;
   const goals = useGoalTracker().goals;
@@ -403,7 +435,7 @@ export default function Nutrition() {
             title="Why This Target"
             note={energyPlan.kind === 'derived' && !energyPlan.onTime ? 'Slower than your date' : undefined}
           />
-          <Text style={{ ...ty.label, color: t.ink2 }}>{targetBasis(energyPlan, GOAL_LABEL[c.goal])}</Text>
+          <Text style={{ ...ty.label, color: t.ink2 }}>{targetBasis(energyPlan, GOAL_LABEL[c.goal], wu)}</Text>
           {/* Their measured pace, from the same arithmetic the Goals screen
               uses. Absent — not zero — until their weigh-ins span enough days
               to be a trend rather than water. */}
@@ -411,7 +443,7 @@ export default function Nutrition() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
               {Math.abs(observedPace) < 0.05
                 ? 'Your weigh-ins haven’t moved yet.'
-                : `Your weigh-ins are moving at ${kgRate(observedPace)} kg a week ${observedPace < 0 ? 'down' : 'up'}.`}
+                : `Your weigh-ins are moving at ${rateIn(observedPace, wu)} ${wu} a week ${observedPace < 0 ? 'down' : 'up'}.`}
             </Text>
           ) : null}
         </Section>

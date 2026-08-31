@@ -78,6 +78,7 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import { workoutKind, KIND_LABEL, WORKOUT_KINDS, type WorkoutKind } from '../../src/lib/workoutKind';
 import { dateParts } from '../../src/lib/localDate';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+import { useRecurringSeries } from '../../src/ui/availability';
 import { buildProgram } from '../../src/lib/programs';
 import { scheduledFocus } from '../../src/lib/checklist';
 import {
@@ -192,6 +193,13 @@ export default function Calendar() {
   // nowhere to read it. The alert at the moment of cancelling is not a record;
   // this is.
   const { charges: myFees, status: feeStatus, reload: reloadFees } = useLateCancelCharges();
+  // The arrangements behind some of the bookings on this screen. Only the count
+  // and the read's honesty are used here — the arrangement itself, and the two
+  // ways out of it, live on app/(client)/standing.tsx, because "cancel this one"
+  // and "stop this repeating" are different acts with different prices and a
+  // row on a calendar has nowhere to say so.
+  const { series: standingSeries, status: standingStatus } = useRecurringSeries();
+  const standingCount = standingSeries.filter((s) => s.active).length;
   // Same rule this screen already applies to the workout log and to planned
   // days (`logKnown`, `planStatus`), applied at last to the sessions themselves.
   // An empty `sessions` means either "your coach has opened nothing and you have
@@ -635,6 +643,39 @@ export default function Calendar() {
         </Section>
 
         <Rule />
+
+        {/* ── the hour that repeats ───────────────────────────────────────
+            A standing appointment is why some of the sessions on the grid
+            below are there, and until this row existed nothing in the client
+            app said so: the member saw the same Tuesday appear week after week
+            from an arrangement they could not see, could not name and could
+            not leave. The only exit they had was to cancel each occurrence one
+            at a time, which is also the most expensive one — each of those is
+            an ordinary cancellation and each inside the notice window records
+            its own fee.
+
+            The row is drawn whatever the read did. Hidden on 'error' it would
+            be hidden from exactly the member whose arrangement could not be
+            confirmed, which is the one who most needs the way in. */}
+        {standingStatus !== 'ready' || standingCount > 0 ? (
+          <>
+            <Section>
+              <SectionHead title="Standing Appointments" />
+              <ListRow icon="clock" title="Your Weekly Slots"
+                note={standingStatus === 'error'
+                  ? 'Could not be read — this is not a statement that you have none'
+                  : standingStatus === 'loading'
+                    ? 'Checking'
+                    : standingStatus === 'partial'
+                      ? 'Part of the list loaded — open to see it'
+                      : standingCount === 1
+                        ? 'One hour booked for you every week'
+                        : `${standingCount} hours booked for you every week`}
+                onPress={() => router.push('/(client)/standing')} />
+            </Section>
+            <Rule />
+          </>
+        ) : null}
 
         {/* ── month ──────────────────────────────────────────────────────── */}
         <Section>

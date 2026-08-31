@@ -57,7 +57,22 @@ Deno.serve(async (req: Request) => {
   if (!recipient) return json({ ok: true, skipped: 'no recipient' });
 
   // In-app notification (backs the bell) — best-effort.
-  try { await admin.from('notifications').insert({ user_id: recipient, icon: 'message', body: text }); } catch { /* ignore */ }
+  //
+  // `title` and `route` are written now, and they are the same two values the
+  // push below already carries. This row predates both columns (part 122 added
+  // them), so every message notification ever written here has been a body with
+  // no heading and nowhere to go: in the coach's inbox it renders under the
+  // screen's own name and says "Nothing to open", because '/(trainer)/chat'
+  // needs a clientId to know whose thread to open and the row did not carry
+  // one — while this function computed exactly that string, twelve lines up,
+  // for the push. The client's side was masked: src/ui/notifications.tsx
+  // recognises a routeless 'message' row and sends it to '/(client)/messages',
+  // which is right for a client because there is only one thread. There is no
+  // such fallback for a coach, and there cannot be.
+  //
+  // Rows written before this change keep that fallback and stay inert for
+  // coaches; nothing here rewrites them.
+  try { await admin.from('notifications').insert({ user_id: recipient, icon: 'message', title, body: text, route }); } catch { /* ignore */ }
 
   // Expo push to the recipient's devices — best-effort.
   try {

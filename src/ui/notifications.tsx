@@ -40,9 +40,16 @@
 // Every other shared store in this folder is a context provider mounted in
 // app/_layout.tsx. This one is a plain hook that each screen calls for itself,
 // which costs one read per visit to the inbox and buys not having to touch a
-// layout file. Nothing else needs this data yet — the dashboard bell that
-// should carry an unread count is in a file this work does not own, and when
-// somebody wires it up, promoting this to a provider is the change to make.
+// layout file.
+//
+// There are now two callers per app — the inbox screen, and `NotificationBell`
+// below, which is the dashboard bell — so a dashboard visit costs one read and
+// opening the inbox from it costs a second. That is the price of not mounting
+// a provider in a layout file, and it is still the right trade: the read is one
+// capped select on a table nobody writes to often, and the alternative is a
+// fourteenth provider in app/_layout.tsx. If a third caller appears, or if the
+// bell ever needs to update without a remount, promoting this to a provider is
+// the change to make.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,7 +58,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
-import { inboxAge, inboxIcon, safeRoute } from '../lib/notifyInbox';
+import { inboxAge, inboxIcon, safeRoute, unreadBadge } from '../lib/notifyInbox';
 import type { AppVariant } from '../lib/variant';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
@@ -247,6 +254,81 @@ export function useNotifications(group: AppVariant): InboxValue {
   };
 }
 
+/* ── The bell ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Each app's inbox, written out in full.
+ *
+ * Assembled as '/(' + group + ')/notifications' this would be invisible to
+ * scripts/check-reachable.mjs, which greps for the literal `(group)/name` and
+ * says so in its own header: a route built at runtime cannot be seen, and a
+ * screen reached only that way is reported unreachable. Three literals cost
+ * nothing and keep the bell counting as a real way in.
+ */
+const INBOX_ROUTE: Record<AppVariant, string> = {
+  client: '/(client)/notifications',
+  trainer: '/(trainer)/notifications',
+  owner: '/(owner)/notifications',
+};
+
+/**
+ * The bell in a dashboard header, with a mark that is true.
+ *
+ * The client app's bell has existed since before the inbox did and routed to
+ * the message thread, because there was nowhere else for it to go. It goes here
+ * now, and the coach and owner dashboards get the same control.
+ *
+ * WHAT THE MARK MEANS, and why it is not `unread > 0`: the count is taken over
+ * the rows this hook is HOLDING, and how much of the set that is depends on how
+ * the read went. src/lib/notifyInbox.ts `unreadBadge` decides; the four
+ * outcomes it can return are drawn here and nowhere else. The one that matters
+ * is 'unknown' — a read that failed must not render as an unmarked bell, since
+ * an unmarked bell is the app stating "nothing for you" in the one place
+ * somebody checks before deciding not to open the inbox at all.
+ */
+export function NotificationBell({ group }: { group: AppVariant }) {
+  const t = useTheme();
+  const router = useRouter();
+  const { unread, status } = useNotifications(group);
+  const badge = unreadBadge(unread, status);
+  return (
+    <View>
+      {/* The spoken label carries the count, or the fact that there is not one.
+          A badge nobody can see is the same defect as a badge that is wrong. */}
+      <Ghost
+        icon="bell"
+        a11yLabel={badge.kind === 'none' ? 'Notifications' : badge.a11y}
+        onPress={() => router.push(INBOX_ROUTE[group] as any)}
+      />
+      {/* pointerEvents none: the mark sits over the corner of a 38pt target and
+          must not be the thing a thumb lands on. Hidden from the screen reader
+          because the Ghost above already says all of this in words. */}
+      <View
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={{ position: 'absolute', top: badge.kind === 'count' ? -4 : 2, right: badge.kind === 'count' ? -4 : 2 }}
+      >
+        {badge.kind === 'count' ? (
+          <View style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: radius.pill, backgroundColor: t.brand, borderWidth: 2, borderColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ ...ty.micro, fontWeight: '700', color: t.brandInk }} numberOfLines={1}>{badge.label}</Text>
+          </View>
+        ) : badge.kind === 'some' ? (
+          // Truncated read: there IS something unread, and the number would be
+          // a floor over an unknown fraction of the set. A solid dot says the
+          // true half and does not print the false half.
+          <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: t.brand, borderWidth: 2, borderColor: t.bg }} />
+        ) : badge.kind === 'unknown' ? (
+          // Hollow, in the quiet ink rather than the brand: this is not "you
+          // have some", it is "we could not find out". Drawing nothing here is
+          // the failure this whole component exists to avoid.
+          <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: t.bg, borderWidth: 1.5, borderColor: t.ink3 }} />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 /* ── The screen ───────────────────────────────────────────────────────────── */
 
 export interface InboxFraming {
@@ -287,7 +369,12 @@ export function NotificationInbox(f: InboxFraming) {
   // we are holding; under 'error' those are a cached copy of unknown age and
   // under 'partial' they are a prefix, so in both cases a badge reading "3" is
   // a figure computed from an unknown fraction of the set. It is not shown.
-  const counted = status === 'ready';
+  //
+  // The same decision as the bell's, taken by the same function, so the pill up
+  // here and the mark on the dashboard cannot come to disagree about what a
+  // failed read means. It also formats: this is a count of rows in a table with
+  // no ceiling, and `1204 new` is what num() exists to stop.
+  const badge = unreadBadge(unread, status);
 
   const onMarkAll = async () => {
     if (busy) return;
@@ -328,9 +415,9 @@ export function NotificationInbox(f: InboxFraming) {
             <Text style={{ ...ty.micro, color: t.ink3 }}>{f.kicker}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{f.title}</Text>
           </View>
-          {counted && unread > 0 ? (
+          {badge.kind === 'count' ? (
             <View style={{ paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: t.brand }}>
-              <Text style={{ ...ty.micro, fontWeight: '700', color: t.brandInk }}>{unread} new</Text>
+              <Text style={{ ...ty.micro, fontWeight: '700', color: t.brandInk }}>{badge.label} new</Text>
             </View>
           ) : null}
         </View>

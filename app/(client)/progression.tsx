@@ -40,7 +40,7 @@ export default function Progression() {
   // of 1.25 lb fractionals can actually make.
   const wu = useSettings().weightUnit;
   const unitNote = convertedNote(wu);
-  const tips = suggestProgression(log);
+  const tips = suggestProgression(log, wu);
   const G = layout.gutter;
 
   return (

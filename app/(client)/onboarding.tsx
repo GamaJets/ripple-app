@@ -34,7 +34,8 @@ import { Cta, Ghost, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightToKg, heightToCm, heightIn, weightIn, heightParts, kgToLb, cmToIn } from '../../src/lib/units';
+import { weightToKg, heightToCm, heightIn, weightIn, heightParts, kgToLb, cmToIn,
+  type WeightUnit, type LengthUnit } from '../../src/lib/units';
 import { dayLabel } from '../../src/lib/bodyFigures';
 import { ALLERGENS, type Allergen } from '../../src/lib/meals';
 import type { Goal, Diet } from '../../src/lib/types';
@@ -118,12 +119,36 @@ export default function Onboarding() {
     ? `${latestScan.source || 'scan'}, ${dayLabel(latestScan.takenAt)}`
     : null;
 
-  // The units this account reads in. Nothing on this screen offers to change
-  // them — a first run is not the place for a settings control, and Settings
-  // and the profile sheet both already own that toggle.
+  // ── The units this account reads in, and where the app asks for them ─────
+  //
+  // This screen used to say the opposite: "Nothing on this screen offers to
+  // change them — a first run is not the place for a settings control, and
+  // Settings and the profile sheet both already own that toggle." That is right
+  // for a preference that only decides how a figure is DRAWN, and it is wrong
+  // for this one, because on this step the unit is not a display preference at
+  // all — it is half of the value being written down. The member types 180 into
+  // a box and this preference is what decides whether the record receives
+  // 81.6 kg or 180 kg, permanently, before a single calorie target is computed
+  // from it. `clients.weight_unit` is NULL until somebody taps a unit, so
+  // without this the first thing a new American member ever types is stored
+  // against a unit nobody asked them about.
+  //
+  // So it is asked here, once, beside the field it governs — not as a banner on
+  // every screen that happens to print a weight, which is a nag that answers
+  // nothing, and not left to Settings, which a member who is about to give the
+  // app their body weight has no reason to visit first. Answering it writes to
+  // the account through `st.set`, so it is answered for good and on every
+  // handset, and Settings shows it as chosen from then on.
+  //
+  // These are read LIVE rather than from the captured `stInit` values: the
+  // whole point is that a tap on this step changes what the boxes below mean.
   const st = stInit;
-  const wu = wuInit;
-  const lu = luInit;
+  const wu = st.weightUnit;
+  const lu = st.lengthUnit;
+  // True while the tinted pill is the app's reading of the phone's region
+  // rather than an answer. Both are checked because either can be unset on its
+  // own — a member may have picked pounds long ago and never touched height.
+  const unitsGuessed = st.weightSource === 'device' || st.lengthSource === 'device';
 
   // The same bounds, said in the unit being typed. Rounded to whole units so
   // the comparison is against a number of the same shape as the one in the box.
@@ -134,6 +159,46 @@ export default function Onboarding() {
   const [diet, setDiet] = useState<Diet>(c.diet);
   const [avoid, setAvoid] = useState<Allergen[]>(c.avoid || []);
   const [injAreas, setInjAreas] = useState<string[]>([]);
+
+  /**
+   * Switch the unit the weight box is being typed in, and carry what is already
+   * in it across.
+   *
+   * The carrying is the whole point. A member who typed 180 with "lb" lit and
+   * then taps "kg" means the same body — leaving the digits where they are and
+   * relabelling them is precisely the stored-record corruption this screen's
+   * header is about, except done by the app rather than by the missing
+   * preference. The value goes out to kilograms and back through the same
+   * functions the record uses, and units.test.ts sweeps that trip for
+   * losslessness at these grains, so nothing is shaved off by switching twice.
+   *
+   * An unreadable or empty box stays empty rather than becoming a 0.
+   */
+  const changeWeightUnit = (u: WeightUnit) => {
+    if (u === wu) return;
+    const kg = weightToKg(weight, wu);
+    const carried = kg == null ? null : weightIn(kg, u);
+    setWeight(carried == null ? '' : String(carried));
+    st.set({ weightUnit: u });
+  };
+
+  /** The same for height, which is one box in metric and two in imperial — so
+   *  the carry has to go through centimetres, not through the digits. */
+  const changeLengthUnit = (u: LengthUnit) => {
+    if (u === lu) return;
+    const cm = heightToCm(height, lu, heightInVal);
+    if (cm == null) { setHeight(''); setHeightInVal(''); }
+    else if (u === 'in') {
+      const parts = heightParts(cm);
+      setHeight(parts ? String(parts.feet) : '');
+      setHeightInVal(parts ? String(parts.inches) : '');
+    } else {
+      const whole = heightIn(cm, 'cm');
+      setHeight(whole == null ? '' : String(whole));
+      setHeightInVal('');
+    }
+    st.set({ lengthUnit: u });
+  };
 
   const finish = async () => {
     if (name.trim()) c.setName(name.trim());
@@ -198,6 +263,27 @@ export default function Onboarding() {
         {prefilled ? (
           <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.xl }}>
             Filled in from your most recent measurement{lastScanLabel ? ` — ${lastScanLabel}` : ''}. Change anything that has moved on.
+          </Text>
+        ) : null}
+        {/* ── The question, asked where the answer changes the record ─────
+            Not a settings control that has wandered onto a first run. On every
+            other screen the unit decides how a figure is drawn; here it decides
+            what gets STORED, so it belongs directly above the two boxes it
+            governs. Whichever pill is lit is what the boxes below are read as,
+            and the line under it says whether that was a person's answer or the
+            app's reading of the phone. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginBottom: unitsGuessed ? sp.sm : sp.lg }}>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Weight in</Text>
+          <Pill on={wu === 'kg'} label="kg" onPress={() => changeWeightUnit('kg')} />
+          <Pill on={wu === 'lb'} label="lb" onPress={() => changeWeightUnit('lb')} />
+          <Text style={{ ...ty.micro, color: t.ink3 }}>· height in</Text>
+          <Pill on={lu === 'cm'} label="cm" onPress={() => changeLengthUnit('cm')} />
+          <Pill on={lu === 'in'} label="ft / in" onPress={() => changeLengthUnit('in')} />
+        </View>
+        {unitsGuessed ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+            We&#8217;ve gone by your phone&#8217;s region — tap to change it. Your weight is stored once, and
+            in the wrong unit it is out by more than double.
           </Text>
         ) : null}
         {/* The units were placeholders, and `prefilled` above is the case that

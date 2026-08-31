@@ -59,6 +59,9 @@
 // a new booking, a coach asking about an injury. Those are the five that a
 // client or coach who missed the banner genuinely has no other way to learn.
 
+import { num } from './format';
+import type { LoadStatus } from '../ui/loadStatus';
+
 /** Icons the inbox draws. A subset of `IconName` in src/ui/Icon.tsx — narrowed
  *  here rather than imported because src/lib may not reach into src/ui (that
  *  file is .tsx and pulls in react-native-svg, which does not compile under
@@ -173,6 +176,20 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   { where: 'src/ui/injuryAcks.tsx', title: 'Your coach has read your injuries', body: 'They have seen what you disclosed.', route: '/(client)/injuries' },
   { where: 'src/ui/sessions.tsx', title: 'A PT slot just opened', body: 'Tue 6:30 PM with your coach just opened up.', route: '/(client)/calendar' },
   { where: 'src/ui/sessions.tsx', title: 'Session cancelled', body: 'A client cancelled Tue 6:30 PM. The slot re-opened.', route: '/(trainer)/calendar' },
+  // Waitlist promotion. Sent from two places — the coach cancelling a session
+  // on their grid, and the client cancelling their own — and it is the one push
+  // in this list that reports a booking somebody did not make themselves, so it
+  // is the one an inbox row matters most for.
+  { where: 'app/(trainer)/calendar.tsx', title: 'The slot you were waiting for is yours', body: '6:30 PM on Tue freed up and you were next on the list — it is booked for you.', route: '/(client)/calendar' },
+  { where: 'src/ui/sessions.tsx', title: 'The slot you were waiting for is yours', body: 'Tue 6:30 PM with your coach just freed up and you were next on the list.', route: '/(client)/calendar' },
+  { where: 'src/ui/intake.ts', title: 'Your coach asked for your intake', body: 'They need your intake form before your first session.', route: '/(client)/intake' },
+  // The coach's check-in nudge. It does NOT go through sendPush() — it invokes
+  // the send-push function directly — so recordInbox() never sees it, and it is
+  // listed here so that reading this catalogue does not leave somebody
+  // believing it is one of the pushes this file decides about. It needs no row
+  // either way: it writes a `messages` row first, and part 26's trigger records
+  // that, which is the same reason the chat rule drops it.
+  { where: 'app/(trainer)/dashboard.tsx', title: 'A nudge from your coach', body: 'Hey Sam — checking in! How is your week going?', route: '/(client)/messages' },
 ];
 
 /* ── Where a stored row is allowed to send you ─────────────────────────────
@@ -249,4 +266,73 @@ export function inboxAge(iso: string | null | undefined, now: number = Date.now(
   if (ms < WEEK) return `${Math.floor(ms / DAY)}d`;
   if (ms < YEAR) return `${Math.floor(ms / WEEK)}w`;
   return `${Math.floor(ms / YEAR)}y`;
+}
+
+/* ── What the bell shows ───────────────────────────────────────────────────
+ *
+ * A bell with no badge over eleven unread notifications is worse than no bell:
+ * it is a control that has been looked at and, silently, answered the question
+ * wrongly. So the mark on the bell is decided here rather than in the header of
+ * each of the three dashboards, where it would be decided three times.
+ *
+ * The rule that makes this a function and not a `count > 0 &&` is LoadStatus.
+ * `unread` is counted over the rows the inbox is HOLDING, and what that set is
+ * depends entirely on how the read went:
+ *
+ *   'loading' — nothing has come back yet. A cached copy may already be on
+ *               screen, but drawing a figure from it means the bell prints a
+ *               number and then changes it a moment later, which teaches people
+ *               the number is a guess. Nothing is drawn.
+ *   'ready'   — the whole set, from the server. This is the only status under
+ *               which a FIGURE may be shown, and zero genuinely means zero.
+ *   'partial' — a prefix of the newest rows (src/lib/rowCap.ts caps the read).
+ *               Unread rows older than the cap are not in the count, so the
+ *               count is a floor and not a total — src/ui/loadStatus.ts forbids
+ *               a figure over a truncated read. A mark, no number.
+ *   'error'   — the server did not answer. Whatever is held is a cached copy of
+ *               unknown age, and an EMPTY one means "could not be read", never
+ *               "you have none". This is the case the whole type exists for:
+ *               drawing nothing here would state, in the most glanceable place
+ *               in the app, a fact nobody has established.
+ *
+ * The count is put through num() because it is a count of rows in a table with
+ * no ceiling: a gym pushing an offer a day to a member who never opens the
+ * inbox reaches four digits in three years, and `1204` unseparated is the
+ * defect scripts/check-numbers.mjs exists for.
+ */
+export type UnreadBadge =
+  /** Draw nothing. Either there is nothing unread, or nothing is known yet. */
+  | { kind: 'none' }
+  /** An exact figure, already formatted. */
+  | { kind: 'count'; label: string; a11y: string }
+  /** At least one unread, over a set we do not have all of. No figure. */
+  | { kind: 'some'; a11y: string }
+  /** The read failed. Not the same as none, and must not look like it. */
+  | { kind: 'unknown'; a11y: string };
+
+/**
+ * The mark to draw on a notifications bell.
+ *
+ * `unread` is the number of unread rows the caller is holding — for 'partial'
+ * and 'error' that is a floor and a stale copy respectively, which is why
+ * neither of those returns a figure.
+ */
+export function unreadBadge(unread: number, status: LoadStatus): UnreadBadge {
+  const n = Number.isFinite(unread) && unread > 0 ? Math.floor(unread) : 0;
+  // Said before anything else: under 'error' the number in hand is not evidence
+  // either way, so both the zero case and the non-zero case answer the same.
+  if (status === 'error') {
+    return { kind: 'unknown', a11y: 'Notifications. Unread count could not be read.' };
+  }
+  if (status === 'loading') return { kind: 'none' };
+  if (status === 'partial') {
+    // Zero over a prefix is not zero over the set: the rows past the cap are
+    // the OLDEST, and an unread one among them is exactly the notification
+    // somebody has not got to yet.
+    return n > 0
+      ? { kind: 'some', a11y: 'Notifications. You have unread notifications.' }
+      : { kind: 'unknown', a11y: 'Notifications. Unread count could not be read.' };
+  }
+  if (n === 0) return { kind: 'none' };
+  return { kind: 'count', label: num(n), a11y: `Notifications. ${num(n)} unread.` };
 }

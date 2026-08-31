@@ -114,7 +114,16 @@ export function progressChange(
  * gained weight on purpose is not "down 3 kg", and the same screen has been
  * fixed for that before (see app/(client)/social.tsx).
  */
-export function progressChangeLines(rows: ProgressRow[], unit: WeightUnit = 'kg'): string[] {
+export function progressChangeLines(
+  rows: ProgressRow[],
+  // No `= 'kg'`. A defaulted unit in a pure module is the same defect as
+  // `money(cents, currency = 'AED')` was: `clients.weight_unit` is NULL until
+  // somebody taps one, and a caller with no unit to pass is a caller that does
+  // not know — not a caller who means kilograms. Every call site in the product
+  // already passes the member's own unit; the default only ever stood between a
+  // forgotten one and a compile error.
+  unit: WeightUnit,
+): string[] {
   return progressMetrics(unit).flatMap((spec) => {
     const c = progressChange(rows, spec.key);
     if (!c) return [];
@@ -152,7 +161,13 @@ export function progressSpanLabel(rows: ProgressRow[]): string {
  * With fewer than two scans there is no change to report, so it states the
  * latest reading instead of dressing a single scan up as progress.
  */
-export function progressSummary(name: string, rows: ProgressRow[], brand = 'Repple', unit: WeightUnit = 'kg'): string {
+export function progressSummary(
+  name: string,
+  rows: ProgressRow[],
+  brand = 'Repple',
+  // As above: the unit arrives, it is never assumed.
+  unit: WeightUnit,
+): string {
   const first = (name || '').split(' ')[0] || 'My';
   const head = `${first === 'My' ? 'My' : first + "'s"} progress — ${brand}`;
   if (!rows.length) return `${head}\nNo scans recorded yet.`;

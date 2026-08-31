@@ -46,6 +46,7 @@ import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag } from '../../src/ui/kit';
+import { NotificationBell } from '../../src/ui/notifications';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
@@ -737,6 +738,12 @@ export default function TrainerClients() {
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
             <Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} />
+            {/* A client booking a slot and a client cancelling one are the two
+                events that change what a coach's day looks like, and until the
+                inbox shipped they existed only as a push — on a build that
+                cannot receive one. The row on Me is the way in for somebody
+                looking for it; this is the way in for somebody glancing. */}
+            <NotificationBell group="trainer" />
           </View>
         </View>
 

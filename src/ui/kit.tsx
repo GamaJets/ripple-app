@@ -492,7 +492,12 @@ export function Field({ label, hint, children, style, a11y }: {
         >
           {label}
         </Text>
-        {hint ? <Text style={{ ...ty.micro, color: t.ink3, opacity: 0.75 }}>{hint}</Text> : null}
+        {/* Not `ty.micro`: that face is uppercased, and an uppercased aside
+            reads as loudly as the label it is qualifying — "CALORIES KCAL ·
+            LEAVE BLANK IF UNKNOWN" is one shout where it should be a word and
+            then a murmur. The label keeps the uppercase because it is the
+            heading; the hint is a sentence and is set as one. */}
+        {hint ? <Text style={{ ...ty.caption, color: t.ink3 }}>{hint}</Text> : null}
       </View>
       {children}
     </View>

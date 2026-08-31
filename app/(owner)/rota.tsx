@@ -185,8 +185,18 @@ export default function OwnerRota() {
       : `${nameOf(s.trainerId, s.trainerName)} goes back on the rota for this shift.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: verb, style: next === 'cancelled' ? 'destructive' : 'default', onPress: async () => {
+        // Said out loud. A pull that did not happen leaves the rota looking
+        // covered for an hour nobody is working, which is the one thing this
+        // screen exists to make visible — and a silent `reportError` left the
+        // owner reading the reloaded list as confirmation.
         try { await setShiftStatus(supabase, s.id, next); await load(); }
-        catch (e) { reportError('rota.status', e); }
+        catch (e) {
+          reportError('rota.status', e);
+          Alert.alert(
+            next === 'cancelled' ? 'Could not pull that shift' : 'Could not put that shift back',
+            (e instanceof Error && e.message) || 'The rota is unchanged. Check your connection and try again.',
+          );
+        }
       } },
     ]);
   };

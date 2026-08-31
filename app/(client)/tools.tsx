@@ -24,6 +24,26 @@
 // `clientData` and NOTHING else, and when either is missing it says so and
 // offers the way to record them. It never fills in a body — that fallback (70 kg
 // / 20%) is exactly what `clientData` was changed to stop handing out.
+//
+// ── The whole screen was in kilograms, whatever the client had chosen ──────
+//
+// Every other screen in the app reads weights through `useSettings().weightUnit`
+// and src/lib/units.ts. This one hardcoded kg in both calculators. A client who
+// thinks in pounds typed 225, the 1RM tab estimated a one-rep max from 225 KG —
+// and printed no unit anywhere near the box, so there was nothing on screen to
+// contradict it. That is the failure this codebase cares most about: a wrong
+// number presented as a right one.
+//
+// The plate tab was worse than a mislabel. Plate maths is not unit-agnostic: a
+// 20 kg Olympic bar and a 45 lb American bar are different bars, and the plates
+// on the two racks are different objects. Converting the metric answer would
+// hand a pounds reader an 11.34 kg plate to go and find. So the denominations
+// live in src/lib/plateMath.ts, one set per unit, native arithmetic in each.
+//
+// The house rule that the record is metric is kept: what the client types goes
+// through `readLift` — the same kilogram round trip a logged set makes — before
+// anything is estimated or loaded, so this screen and the workout log cannot
+// disagree about what "225" was.
 import { useState, useEffect } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';

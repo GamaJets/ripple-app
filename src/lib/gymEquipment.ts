@@ -14,6 +14,8 @@
 // gym. If nothing of a kind is recorded, the capacity check returns null and
 // says why — it never reports 0, which would tell a gym its class cannot run.
 
+import { assertWrote } from './wroteRows';
+
 type Queryable = { from: (table: string) => any };
 
 export type EquipmentStatus = 'in_service' | 'out_of_service' | 'retired';
@@ -267,15 +269,28 @@ export async function setStatus(
 ): Promise<void> {
   const patch: Record<string, unknown> = { status };
   if (note !== undefined) patch.note = note;
-  const { error } = await sb.from('gym_equipment').update(patch).eq('id', id);
-  if (error) throw error;
+  // Counted, because an UPDATE matching zero rows is not an error — see
+  // src/lib/wroteRows.ts. This is the write on the register with the most
+  // physical consequence: a machine taken out of service is a machine nobody is
+  // supposed to stand on, and an owner or trainer whose update matched nothing
+  // watched the list reload with it still marked in service and reasonably read
+  // that as the tap not having registered rather than as the save having been
+  // refused.
+  const r = await sb.from('gym_equipment').update(patch, { count: 'exact' }).eq('id', id);
+  if (r.error) throw r.error;
+  assertWrote(status === 'out_of_service' ? 'Taking that out of service' : 'That equipment', r);
 }
 
 /** Record a service. Clears the note, since whatever it said is presumably done. */
 export async function recordService(sb: Queryable, id: string, onIso?: string): Promise<void> {
-  const { error } = await sb
+  // Counted for the same reason, and with a maintenance record's own edge: a
+  // service that was never written leaves the machine on the due list, so the
+  // next person to look reads it as overdue and services it twice — or, having
+  // been told it was recorded, trusts the date that is not there.
+  const r = await sb
     .from('gym_equipment')
-    .update({ last_serviced_on: onIso ?? new Date().toISOString().slice(0, 10), note: null })
+    .update({ last_serviced_on: onIso ?? new Date().toISOString().slice(0, 10), note: null }, { count: 'exact' })
     .eq('id', id);
-  if (error) throw error;
+  if (r.error) throw r.error;
+  assertWrote('That service', r);
 }

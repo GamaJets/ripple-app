@@ -34,6 +34,8 @@ import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../
 import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Field } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { useSettings } from '../../src/ui/settings';
+import { liftLabel } from '../../src/lib/units';
 
 // "km", "m" and "mi" are three glyphs a screen reader says as themselves — and
 // "mi" spoken aloud is not a word. The distance toggle says the whole thing.
@@ -51,6 +53,9 @@ function parseMachine(raw: string): string {
 }
 
 export default function ScanMachine() {
+  // See app/(client)/library.tsx: the logged load is stored in kilograms and
+  // read out in whatever unit this member reads in.
+  const wu = useSettings().weightUnit;
   const t = useTheme();
   const router = useRouter();
   const { addWorkouts } = useWorkoutLog();
@@ -333,7 +338,11 @@ export default function ScanMachine() {
                       {sets.map((s, i) => (
                         <Pressable key={i} onPress={() => setSets((p) => p.filter((_, j) => j !== i))}
                           style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{s.kg || '–'}kg</Text>
+                          {/* The stored load is kilograms whatever the member
+                              reads in, so printing it with "kg" typed after it
+                              showed a pounds member a figure they never lifted.
+                              A blank load is still a dash rather than a 0. */}
+                          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{s.kg ? liftLabel(s.kg, wu) : '–'}</Text>
                           <Icon name="minus" size={12} color={t.ink3} />
                         </Pressable>
                       ))}

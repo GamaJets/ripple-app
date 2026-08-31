@@ -10,6 +10,7 @@
 // spreadsheet and a dispute in a gym.
 
 import { assertWhole, capLimit } from './rowCap';
+import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
 
@@ -94,8 +95,15 @@ export async function createPlan(
 export async function setPlanActive(sb: Queryable, planId: string, active: boolean): Promise<void> {
   // Retired rather than deleted: memberships sold on a plan keep pointing at it,
   // and a price book with holes in it cannot be audited.
-  const { error } = await sb.from('membership_plans').update({ active }).eq('id', planId);
-  if (error) throw error;
+  //
+  // Counted, because an UPDATE matching zero rows is not an error — see
+  // src/lib/wroteRows.ts. `membership_plans_owner` is the only policy granting
+  // UPDATE and it is `is_owner_of(tenant_id)`, so anybody else retires nothing
+  // and, without this, is told the plan is off the price book while it is still
+  // on sale.
+  const r = await sb.from('membership_plans').update({ active }, { count: 'exact' }).eq('id', planId);
+  if (r.error) throw r.error;
+  assertWrote(active ? 'That plan' : 'Retiring that plan', r);
 }
 
 /* ── memberships ───────────────────────────────────────────────────────────── */
@@ -146,11 +154,24 @@ export async function createMembership(
   if (error) throw error;
 }
 
+/**
+ * Freeze, cancel or reactivate a membership.
+ *
+ * The count is checked because this is money. A PostgREST UPDATE that matches
+ * zero rows returns 204 with no error, so before this the desk flow was: the
+ * owner taps Freeze, the confirmation closes, the list reloads, and the
+ * membership is still active — and the only signal that nothing happened is a
+ * status the owner has already stopped looking at. `memberships_owner`
+ * (`is_owner_of(tenant_id)`) is the only policy granting UPDATE, so an owner of
+ * another gym, a trainer, or a stale id all land in exactly that silence, and a
+ * membership somebody was told was frozen keeps billing them.
+ */
 export async function setMembershipStatus(
   sb: Queryable, membershipId: string, status: MembershipStatus,
 ): Promise<void> {
-  const { error } = await sb.from('memberships').update({ status }).eq('id', membershipId);
-  if (error) throw error;
+  const r = await sb.from('memberships').update({ status }, { count: 'exact' }).eq('id', membershipId);
+  if (r.error) throw r.error;
+  assertWrote('That membership', r);
 }
 
 /* ── payments ──────────────────────────────────────────────────────────────── */
@@ -306,25 +327,24 @@ export function summarise(
  * not printed bare (a bare "6,300.00" is read in whatever money the reader is
  * thinking in) and it is not printed in a guess.
  *
- * ── WHY THE PARAMETER IS STILL OPTIONAL IN THE TYPE ───────────────────────
+ * ── THE PARAMETER IS NOW REQUIRED ─────────────────────────────────────────
  *
- * `currency?:` rather than `currency:` buys exactly one thing: it does not
- * break `src/lib/exportShare.ts:385`, the last bare call in the tree, which
- * belongs to another change in flight tonight. That call now renders a dash
- * instead of a fabricated dirham figure, so it is already correct — it is
- * merely less explicit than it should be.
+ * It was `currency?:` for exactly one reason: `src/lib/exportShare.ts` was the
+ * last bare call in the tree and belonged to another change. That call now
+ * takes `OwnerReportData.currency` and passes it, so the exemption is spent and
+ * the rule is a TYPE ERROR rather than a lint. `scripts/check-currency.mjs`
+ * still enforces the arity statically — it catches the same mistake in the
+ * console's JS-shaped call sites and in anything that reaches this through an
+ * `any` — but a forgotten currency now fails to compile first, which is where
+ * a rule about a permanent record belongs.
  *
- * The arity rule is enforced anyway, statically, by `scripts/check-currency.mjs`
- * in preflight: a `money(...)` call with one argument fails the build unless it
- * carries a `currency-ok:` marker or is named in that script's KNOWN map (where
- * exportShare.ts sits, with its reason). When that file is free, changing
- * `currency?:` to `currency:` here and deleting its KNOWN entry is a two-token
- * edit that will compile on the first try.
+ * Passing an explicit `null` is still allowed and still means "nobody has told
+ * us", which renders a dash. That is the point: the caller has to have looked.
  *
  * `gymMoney` in src/ui/tenant.tsx and `amount()` in studio-web/lib/currency.ts
  * both take a currency and are the preferred doors.
  */
-export function money(cents: number | null | undefined, currency?: string | null): string | null {
+export function money(cents: number | null | undefined, currency: string | null | undefined): string | null {
   if (cents == null) return null;
   // Not `currency ?? ''`: an empty-string currency is the same fact as a null
   // one — nobody has said — and printing " 6,300.00" with a leading space is

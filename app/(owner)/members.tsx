@@ -176,8 +176,21 @@ export default function OwnerMembers() {
     Alert.alert(`${verb} this membership?`, `${m.memberName ?? 'This member'} · ${m.planName ?? 'no plan'}`, [
       { text: 'Back', style: 'cancel' },
       { text: verb, style: next === 'cancelled' ? 'destructive' : 'default', onPress: async () => {
+        // The failure was silent before this: `setMembershipStatus` could not
+        // tell a refused write from a successful one (a PostgREST UPDATE
+        // matching zero rows is not an error), and even when it DID throw, the
+        // only thing that happened was a line in the error log. The owner saw
+        // the dialog close and the list reload, which is exactly what success
+        // looks like, and a membership they believe they froze goes on billing.
+        // It now counts the rows, and what it says is said out loud.
         try { await setMembershipStatus(supabase, m.id, next); await load(); }
-        catch (e) { reportError('members.status', e); }
+        catch (e) {
+          reportError('members.status', e);
+          Alert.alert(
+            `Could not ${verb.toLowerCase()} that membership`,
+            (e instanceof Error && e.message) || 'Nothing was changed. Check your connection and try again.',
+          );
+        }
       } },
     ]);
   };

@@ -104,7 +104,7 @@ ok(compareDelta(null, null) === null, 'two unmeasured days give no delta');
 /* ── the rows ───────────────────────────────────────────────────────────── */
 
 {
-  const rows = compareRows(PHOTO_A, PHOTO_B, SCANS);
+  const rows = compareRows(PHOTO_A, PHOTO_B, SCANS, 'kg');
   ok(rows.length === 3, `three rows, always — got ${rows.length}`);
   ok(rows.map((r) => r.key).join(',') === 'weightKg,bodyFatPct,skeletalMuscleKg', 'the rows are in reading order');
   const w = rows[0], f = rows[1], m = rows[2];
@@ -116,7 +116,7 @@ ok(compareDelta(null, null) === null, 'two unmeasured days give no delta');
 // One day scanned, one not. This is the common case and the one most likely to
 // be got wrong: the measured side still shows, and the delta must not.
 {
-  const rows = compareRows('2026-08-06T10:00:00.000Z', PHOTO_B, SCANS);
+  const rows = compareRows('2026-08-06T10:00:00.000Z', PHOTO_B, SCANS, 'kg');
   ok(rows.every((r) => r.before === null), 'the unscanned day carries no figures');
   ok(rows[0].after === 80.1, 'the scanned day still shows its own reading');
   ok(rows.every((r) => r.delta === null), 'and NO row claims a change, because there is nothing to change from');
@@ -124,7 +124,7 @@ ok(compareDelta(null, null) === null, 'two unmeasured days give no delta');
 
 // Neither day scanned: three labelled rows of dashes, not a vanished table.
 {
-  const rows = compareRows('2026-08-05T10:00:00.000Z', '2026-08-06T10:00:00.000Z', SCANS);
+  const rows = compareRows('2026-08-05T10:00:00.000Z', '2026-08-06T10:00:00.000Z', SCANS, 'kg');
   ok(rows.length === 3, 'the rows are still there when nothing was measured — a missing row states nothing');
   ok(rows.every((r) => r.before === null && r.after === null && r.delta === null), 'and every cell is empty');
 }
@@ -133,7 +133,7 @@ ok(compareDelta(null, null) === null, 'two unmeasured days give no delta');
 // project has already had once: nobody has 0 kg of skeletal muscle.
 {
   const noSmm: ScanReading[] = [scan('2026-08-01', 82.4, 24.1, null), scan('2026-08-11', 80.1, 22.6, null)];
-  const rows = compareRows(PHOTO_A, PHOTO_B, noSmm);
+  const rows = compareRows(PHOTO_A, PHOTO_B, noSmm, 'kg');
   ok(rows[2].before === null && rows[2].after === null, 'a null muscle reading stays null rather than becoming 0 kg');
   ok(rows[2].delta === null, 'and two unreported muscle figures produce no muscle change');
   ok(rows[0].delta === -2.3, 'while the columns that WERE reported still compare normally');
@@ -152,16 +152,16 @@ ok(deltaText(null, 'kg') === '—', 'an uncomputable change is a dash');
 /* ── the sentence under the numbers ─────────────────────────────────────── */
 
 {
-  const both = compareBasis(compareRows(PHOTO_A, PHOTO_B, SCANS));
+  const both = compareBasis(compareRows(PHOTO_A, PHOTO_B, SCANS, 'kg'));
   ok(both.includes('recorded on that day'), 'when both days were scanned, the panel says where the figures came from');
 
-  const neither = compareBasis(compareRows('2026-08-05T10:00:00.000Z', '2026-08-06T10:00:00.000Z', SCANS));
+  const neither = compareBasis(compareRows('2026-08-05T10:00:00.000Z', '2026-08-06T10:00:00.000Z', SCANS, 'kg'));
   ok(neither.includes('Neither'), 'when neither day was scanned, the panel says so rather than showing blank cells');
 
-  const onlyLater = compareBasis(compareRows('2026-08-06T10:00:00.000Z', PHOTO_B, SCANS));
+  const onlyLater = compareBasis(compareRows('2026-08-06T10:00:00.000Z', PHOTO_B, SCANS, 'kg'));
   ok(onlyLater.includes('Only the later day'), 'a half-measured pair names WHICH day is missing its scan');
 
-  const onlyEarlier = compareBasis(compareRows(PHOTO_A, '2026-08-06T10:00:00.000Z', SCANS));
+  const onlyEarlier = compareBasis(compareRows(PHOTO_A, '2026-08-06T10:00:00.000Z', SCANS, 'kg'));
   ok(onlyEarlier.includes('Only the earlier day'), 'and it names the other one correctly too');
   ok(onlyEarlier !== onlyLater, 'the two half-measured sentences are not the same sentence');
 }
@@ -206,11 +206,14 @@ ok(spanLabel(null) === '—', 'an unparseable interval is a dash, not "0 days ap
     'body fat is identical in pounds and in kilograms');
   ok(metric[1].before === rows[1].before && metric[1].delta === rows[1].delta, 'and provably so, side by side');
 
-  // Default unchanged: every existing call site, and the assertions above this
-  // block, must still get exactly the kilograms they got before.
-  const bare = compareRows(PHOTO_A, PHOTO_B, SCANS);
-  ok(bare[0].unit === 'kg' && bare[0].before === 82.4 && bare[0].delta === -2.3,
-    'omitting the unit is metric, unchanged');
+  // The unit is now REQUIRED — `unit: WeightUnit = 'kg'` was an invented unit
+  // in a pure module, the same shape as `money(cents, currency = 'AED')`, and
+  // every call above states its unit rather than leaning on a default. What is
+  // asserted here is what that default used to hide: metric is untouched when
+  // metric is what was asked for.
+  const metricAsked = compareRows(PHOTO_A, PHOTO_B, SCANS, 'kg');
+  ok(metricAsked[0].unit === 'kg' && metricAsked[0].before === 82.4 && metricAsked[0].delta === -2.3,
+    'asking for kilograms gives kilograms, unchanged');
 }
 
 // A missing reading survives the conversion as a missing reading. A unit
@@ -285,7 +288,7 @@ ok(spanLabel(null) === '—', 'an unparseable interval is a dash, not "0 days ap
    before any of them taps it. */
 
 {
-  const rows = compareRows(PHOTO_A, PHOTO_B, SCANS);
+  const rows = compareRows(PHOTO_A, PHOTO_B, SCANS, 'kg');
   const s = compareSummary('1 Aug 2026', '11 Aug 2026', 10, rows);
 
   ok(s.includes('1 Aug 2026 → 11 Aug 2026'), 'both dates are in it, in the order they happened');
@@ -302,7 +305,7 @@ ok(spanLabel(null) === '—', 'an unparseable interval is a dash, not "0 days ap
 {
   // The unmeasured case has to survive the trip. A share that quietly dropped
   // the dashes would read as a comparison of two measured days.
-  const rows = compareRows('2026-08-06T10:00:00.000Z', PHOTO_B, SCANS);
+  const rows = compareRows('2026-08-06T10:00:00.000Z', PHOTO_B, SCANS, 'kg');
   const s = compareSummary('6 Aug 2026', '11 Aug 2026', 5, rows);
   ok(s.includes('Weight: — → 80.1 kg (—)'), 'an unscanned day goes out as a dash on both the reading and the change');
   ok(s.includes('Only the later day has an InBody scan'), 'and the reason is sent with it, not left on the screen');

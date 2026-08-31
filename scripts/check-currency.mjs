@@ -48,6 +48,29 @@
 //  4. A HARDCODED WEIGHT UNIT BESIDE A FIGURE. `${kg} kg`, `{weight} lb`.
 //     Same rule, same reason: the client chose a unit or they did not.
 //
+//  5. AN INVENTED UNIT. `weightUnit: 'kg'` as a default, `unit: WeightUnit =
+//     'kg'` as a parameter, `?? 'lb'` as a fallback. This is rule 1 for units,
+//     and it is the rule that would have caught the defect the other four were
+//     only symptoms of.
+//
+//     `src/ui/settings.tsx` declared `DEFAULTS.weightUnit = 'kg'` and resolved
+//     the NULL column to it BEFORE `useSettings()` handed anything to a screen.
+//     The store was honest — `clients.weight_unit` is null until somebody taps
+//     a unit — and by the time any of the thirty screens that read it got a
+//     look, "chose kilograms" and "was never asked" were the same value. A
+//     member in the United States was shown kilograms everywhere, stated with
+//     the confidence of their own choice, and told nothing. Five pure modules
+//     had the same thing in a parameter: `unit: WeightUnit = 'kg'`, so a
+//     forgotten argument was a silent relabel rather than a compile error, and
+//     one of them (`parseWorkoutText`) decides what gets WRITTEN to the log.
+//
+//     What is legitimate, and what the `unit-ok:` marker is for: a table that
+//     translates a KNOWN region, or a known metric, to the unit it is measured
+//     in. `src/lib/unitPreference.ts` maps US→lb the way src/lib/billing.ts
+//     maps gbp→£ — that is a translation of something somebody said, not a
+//     stand-in for something nobody said. The difference is whether an answer
+//     existed.
+//
 // ── what it deliberately does not flag ────────────────────────────────────
 //
 // A currency code in a PICKER — the list an owner chooses from is a list of
@@ -93,14 +116,15 @@ const ROOT = process.cwd();
  * and means something different: that line is CORRECT and will stay.
  */
 const KNOWN = new Map([
-  ['src/lib/exportShare.ts:money-arity', { count: 1, why:
-    'The owner platform report calls money() with no currency, so it renders a dash rather than a ' +
-    'figure. That is already the honest outcome — it was a fabricated "AED 6,300.00" before money() ' +
-    'lost its default. The edit: give OwnerReportData a `currency: string | null`, pass ' +
-    'tenant.currency from app/(owner)/dashboard.tsx, and print the metric only when it is set. That ' +
-    "file belongs to another change in flight; when it lands, delete this entry and change money()'s " +
-    '`currency?:` to `currency:` in src/lib/gymRecord.ts, which is what makes the rule a type error ' +
-    'rather than a lint.' }],
+  // src/lib/exportShare.ts:money-arity — CLOSED. `OwnerReportData` now carries
+  // `currency: string | null`, app/(owner)/dashboard.tsx passes the gym's own
+  // `tenants.currency`, and the report prints the value line for a gym that has
+  // chosen a currency and withholds it — with a sentence saying why — for one
+  // that has not. With the last bare call gone, `money()` in src/lib/gymRecord.ts
+  // takes `currency: string | null | undefined` REQUIRED, so a forgotten
+  // currency is now a compile error and this rule no longer rests on the lint
+  // alone. The entry is deleted rather than zeroed: a zero is still an
+  // exemption, and there is nothing left to exempt.
 
   ['src/lib/gymSessions.ts:currency', { count: 2, why:
     'The original offence, and the only currency one left in the tree. `recordSettlement` writes ' +
@@ -117,36 +141,53 @@ const KNOWN = new Map([
   // ── the unit backlog ────────────────────────────────────────────────────
   //
   // `clients.weight_unit` is nullable and NULL means never chosen, not
-  // kilograms — but `src/ui/settings.tsx` still defaults it to 'kg' (see
-  // DEFAULTS there), so a client who has never picked one is shown, and told,
-  // kilograms. These are the places that then print the unit as a literal
-  // rather than reading the client's own. Every one of them is a real defect
-  // for a client reading in pounds; none of them is a wrong NUMBER, which is
-  // why they are a ratchet rather than a stop-ship.
+  // kilograms. These are the places that print the unit as a literal rather
+  // than reading the member's own. Every one of them is a real defect for a
+  // member reading in pounds; none of them is a wrong NUMBER, which is why they
+  // are a ratchet rather than a stop-ship.
   //
-  // The fix in each case is the same and it is not local: render through
-  // `src/lib/units.ts` with `useSettings().weightUnit`, which is how the
-  // screens that get this right already do it. The prerequisite is making that
-  // preference nullable so "never chosen" is expressible at all.
-  ['src/lib/progression.ts:unit', { count: 7, why:
-    'Coaching cues built as prose — "Try 60kg" — in a pure module with no access to a client. The ' +
-    'unit has to arrive as an argument, the way the currency now arrives at money(). Has its own ' +
-    'progression.test.ts, so the change is assertable.' }],
+  // The prerequisite this list used to name — "making that preference nullable
+  // so 'never chosen' is expressible at all" — IS DONE. `src/ui/settings.tsx`
+  // no longer resolves a NULL column to 'kg' before a screen sees it: the store
+  // is null until somebody answers, `useSettings()` reports `weightChosen` and
+  // `weightSource` beside the unit it renders, and an unanswered preference
+  // falls to the handset's region and SAYS SO where the answer can be given.
+  // src/lib/unitPreference.ts sets out why that side of the trade-off was taken
+  // over withholding the figure the way `money()` does. Rule 5 below is what
+  // stops a default unit coming back.
+  //
+  // The fix for each entry that remains is the same and it is not local: render
+  // through `src/lib/units.ts` with `useSettings().weightUnit`, which is how the
+  // screens that get this right already do it.
+  // src/lib/progression.ts:unit — CLOSED by another change landing tonight: the
+  // module now takes the unit as an argument, exactly as the entry said it had
+  // to, so the seven prose cues no longer name a unit the module invented. The
+  // entry is deleted rather than zeroed, for the same reason as the one above.
   // app/(client)/tools.tsx:unit — was 7, now 0. The calculators read the member's
   // own kg/lb preference, so the entry is gone rather than zeroed: a zero would
   // still be an exemption, and there is nothing left to exempt.
-  ['app/(client)/nutrition.tsx:unit', { count: 5, why:
-    'Rate-of-change and target sentences on the meal plan. `plan.targetKg` is genuinely stored in ' +
-    'kilograms — it is the LABEL that is wrong, not the store.' }],
+  // app/(client)/nutrition.tsx:unit — was 5, now 0. The store was always right
+  // and the label was wrong, exactly as the entry said. The target and current
+  // weights read through `weightLabel`; the three rates go through a local
+  // `rateIn` rather than `weightDeltaIn`, because rounding a rate to the whole
+  // pound would print an ordinary 0.25 kg-a-week cut as "1 lb a week", double
+  // the truth. One more was found while fixing them and is not a figure at all:
+  // "no time left to spread the remaining kilos over", a unit typed into prose
+  // with no number beside it to look wrong.
   ['app/(trainer)/dashboard.tsx:unit', { count: 2, why:
     "A client's weight delta on the coach's roster. The coach reads in THEIR unit and the client's " +
     'delta is stored in kg, so this one needs `useSettings().weightUnit` on the coach side, not the ' +
     "client's — see app/(trainer)/client-training.tsx, which already distinguishes the two." }],
   ['app/(client)/calendar.tsx:unit', { count: 1, why: 'A logged set summary in a day cell.' }],
   ['app/(client)/coach.tsx:unit', { count: 1, why: 'The next-weight suggestion, rendered from progression.ts above.' }],
-  ['app/(client)/library.tsx:unit', { count: 1, why: 'A previous-set label on an exercise card.' }],
-  ['app/(client)/scan-machine.tsx:unit', { count: 1, why: 'A scan readout.' }],
-  ['app/(trainer)/leaderboard.tsx:unit', { count: 1, why: 'A weight delta in the leaderboard row, same shape as the trainer dashboard.' }],
+  // app/(client)/library.tsx:unit — was 1, now 0. The banked-set chip reads
+  // through `liftLabel`, and so does its accessibility label, which said
+  // "kilos" out loud and was the copy of the bug nobody could see.
+  // app/(client)/scan-machine.tsx:unit — was 1, now 0. The logged-set chip
+  // reads through `liftLabel`; a set with no load is still a dash, not a 0.
+  // app/(trainer)/leaderboard.tsx:unit — was 1, now 0. The COACH's unit, as
+  // the trainer-dashboard entry below still asks for, and converted as a span
+  // through `weightDeltaIn` so a steady 0.4 kg does not flicker between 0 and 1.
   ['studio-web/app/coach/roster/page.tsx:unit', { count: 1, why:
     'The console has no unit preference at all to read — it renders the stored metric value, so the ' +
     'honest short-term label is "kg (stored)" and the real fix is a console-side preference.' }],
@@ -170,6 +211,39 @@ const SYMBOL = '[$£€¥₹₩₽]';
  *  and "cm" is rare enough to have produced nothing, so including them would
  *  cost more in silenced lines than it catches. */
 const WEIGHT_UNIT = '(?:kgs?|lbs?)';
+
+/** For rule 5, where the unit is a QUOTED LITERAL rather than a word floating
+ *  in prose. Length is included here and absent above for that reason: `'in'`
+ *  in quotes, assigned to something called a unit, is unambiguous in a way that
+ *  a bare "in" between two words is not. */
+const ANY_UNIT = "(?:kgs?|lbs?|cm|in)";
+
+/** The names a unit preference goes by in this tree. */
+const UNIT_NAME = '(?:weightUnit|lengthUnit|weight_unit|length_unit)';
+
+/**
+ * Rule 5's shapes, one per line so each can be argued with separately.
+ *
+ * Deliberately NOT matched: `unit: 'kg'` as a plain object field. That is how
+ * src/lib/inbodyMetrics.ts and src/lib/goalTargets.ts describe what a METRIC is
+ * measured in — fat mass is in kilograms because the InBody reports kilograms,
+ * which is a fact about the machine and not a guess about a reader. Only the
+ * preference's own names (`weightUnit`, `lengthUnit`) are matched in that
+ * position, which is exactly where the DEFAULTS bug lived.
+ */
+const INVENTED_UNIT = [
+  // `?? 'kg'`, `|| 'lb'` — a unit standing in for one nobody set.
+  new RegExp(`(?:\\?\\?|\\|\\|)\\s*'${ANY_UNIT}'`),
+  // `weightUnit: 'kg'` — the DEFAULTS bug itself.
+  new RegExp(`\\b${UNIT_NAME}\\s*\\??\\s*:\\s*'${ANY_UNIT}'`),
+  // `unit: WeightUnit = 'kg'` / `wu = 'kg'` — a defaulted parameter. The `=` is
+  // guarded against `===`, which is a comparison and is how every one of these
+  // unions is legitimately narrowed.
+  new RegExp(`\\b(?:unit|wu|lu|${UNIT_NAME})\\s*(?::\\s*(?:Weight|Length)Unit\\s*)?(?<![=!<>])=(?!=)\\s*'${ANY_UNIT}'`),
+  // `return 'kg'` — the same invention with a function wrapped round it, which
+  // is the shape studio-web/app/close/page.tsx hid a currency in.
+  new RegExp(`\\breturn\\s*'${ANY_UNIT}'`),
+];
 
 const files = [];
 function walk(dir) {
@@ -346,6 +420,18 @@ for (const file of files) {
     if (beside) {
       flag(file, i, 'currency', `a currency typed beside a figure — ${(line.match(beside) || [''])[0].trim()}`,
         'Let the formatter state the currency (money()/gymMoney()/amount()), so the figure and its currency cannot drift apart.');
+      return;
+    }
+
+    // ── 5. an invented unit ──────────────────────────────────────────────
+    // Before rule 4's early return, not after it: every shape of this rule
+    // mentions a unit preference by name, which is precisely what that return
+    // treats as evidence the line is written correctly.
+    const madeUp = INVENTED_UNIT.find((r) => r.test(line));
+    if (madeUp) {
+      flag(file, i, 'unit-default', `a unit nobody chose, as a default — ${(line.match(madeUp) || [''])[0].trim()}`,
+        'Take the unit as an argument and let an absent one stay absent. clients.weight_unit is NULL '
+        + 'until somebody taps a unit, and a caller with none to pass does not know rather than means kg.');
       return;
     }
 

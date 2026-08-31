@@ -16,8 +16,9 @@
 //      untrusted on the way out of the database, exactly as a route param is in
 //      src/lib/backTo.ts.
 import {
-  KNOWN_PUSHES, inboxAge, inboxDecision, inboxIcon, safeRoute, type InboxIcon,
+  KNOWN_PUSHES, inboxAge, inboxDecision, inboxIcon, safeRoute, unreadBadge, type InboxIcon,
 } from './notifyInbox';
+import type { LoadStatus } from '../ui/loadStatus';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -31,9 +32,15 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
 
 const byTitle = (title: string) => KNOWN_PUSHES.filter((p) => p.title === title);
 
-// Recorded: the five kinds a person who missed the banner has no other way to
-// learn about.
-for (const p of KNOWN_PUSHES.filter((x) => ['Session booked', 'Session cancelled', 'A new offer', 'New booking', 'Your coach asked about an injury'].includes(x.title))) {
+// Recorded: the kinds a person who missed the banner has no other way to learn
+// about. The waitlist promotion is in this list because it reports a booking
+// the recipient did not make themselves — the one notification here that
+// changes somebody's diary without them touching it.
+for (const p of KNOWN_PUSHES.filter((x) => [
+  'Session booked', 'Session cancelled', 'A new offer', 'New booking',
+  'Your coach asked about an injury', 'Your coach asked for your intake',
+  'The slot you were waiting for is yours',
+].includes(x.title))) {
   ok(inboxDecision(p.title, p.body, p.route).record, `“${p.title}” from ${p.where} is worth an inbox row`);
 }
 
@@ -49,17 +56,19 @@ for (const p of KNOWN_PUSHES.filter((x) => /just opened|has read your/i.test(x.t
 
 // The catalogue is the thing the two rules above are read against, so it has to
 // still contain them. An empty filter passes a `for` loop silently.
-ok(KNOWN_PUSHES.length >= 12, 'the catalogue still lists every push in the repo');
+ok(KNOWN_PUSHES.length >= 16, 'the catalogue still lists every push in the repo');
 ok(byTitle('Session cancelled').length === 2, 'both cancellation pushes are listed — the coach one and the client one');
-// Six of the twelve: three that route to a chat thread (two from messaging.ts,
-// one from the coach's broadcast, all three already written by part 26), two
-// slot races, and one read receipt. Stated as a total so that a rule which
-// starts dropping something it did not drop before fails here rather than
-// quietly emptying somebody's inbox.
-eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 6,
-  'six of the twelve pushes are deliberately not recorded');
-eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 6,
-  'the other six are');
+ok(byTitle('The slot you were waiting for is yours').length === 2,
+  'both waitlist promotions are listed — the coach cancelling and the client cancelling send the same news');
+// Seven of the sixteen: four that route to a chat thread (two from messaging.ts,
+// one from the coach's broadcast, one from the coach's nudge, all four already
+// written by part 26), two slot races, and one read receipt. Stated as a total
+// so that a rule which starts dropping something it did not drop before fails
+// here rather than quietly emptying somebody's inbox.
+eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 7,
+  'seven of the sixteen pushes are deliberately not recorded');
+eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 9,
+  'the other nine are');
 
 /* ── the rule that actually matters: chat is decided by route ──────────── */
 
@@ -74,6 +83,12 @@ eq(inboxDecision('Tam W.', 'Can we move to 7?', '/(trainer)/chat?clientId=abc').
 // profiles.full_name), so this is not hypothetical.
 eq(inboxDecision('Your coach', 'New plan is up.', '/(client)/messages').record, false,
   'the notify-message fallback title is still a chat message');
+
+// The coach's check-in nudge carries no "message" in its heading and is still
+// a chat message: it writes a `messages` row, part 26's trigger records that
+// row, and a second one written here is the duplicate this rule exists to stop.
+eq(inboxDecision('A nudge from your coach', 'How is your week going?', '/(client)/messages').record, false,
+  'the nudge is a chat message however it is titled');
 
 // And the converse: the word "message" somewhere else is not a chat message.
 eq(inboxDecision('Message from your coach', 'Session times move next week.', '/(client)/calendar').record, true,
@@ -187,6 +202,68 @@ eq(inboxAge(null, T), '', 'a missing timestamp shows nothing');
 const sameEverywhere = ['Just now', '1m', '59m', '1h', '23h', '1d', '6d', '1w', '1y'];
 for (const label of sameEverywhere) {
   ok(!/\d{4}|Jan|Yesterday|\//.test(label), `“${label}” carries no calendar in it`);
+}
+
+/* ── the mark on the bell ──────────────────────────────────────────────────
+ *
+ * The defect this is aimed at is a bell that says "nothing here" because the
+ * read failed. It is the LoadStatus rule applied to the smallest piece of UI in
+ * the app: an empty list under 'error' means "could not be read", and rendering
+ * it as an unmarked bell states the opposite in the one place a person looks
+ * before deciding not to open the inbox at all.
+ */
+
+// 'ready' is the only status that may print a figure, and it is exact.
+eq(unreadBadge(0, 'ready').kind, 'none', 'nothing unread and the server answered — no mark');
+eq(unreadBadge(3, 'ready').kind, 'count', 'three unread over a whole read is a figure');
+eq((unreadBadge(3, 'ready') as { label: string }).label, '3', 'the figure is the count');
+eq((unreadBadge(11, 'ready') as { a11y: string }).a11y, 'Notifications. 11 unread.',
+  'a screen reader is told the number, not just that there is a badge');
+
+// A count of rows in a table with no ceiling. `1204` unseparated is the defect
+// scripts/check-numbers.mjs exists for, and the bell is a place a sweep would
+// miss because the value never appears in the JSX as a number.
+eq((unreadBadge(1204, 'ready') as { label: string }).label, '1,204', 'four digits carry a separator');
+eq((unreadBadge(12045, 'ready') as { label: string }).label, '12,045', 'five digits too');
+
+// 'error': the only case where the answer is the same whatever is in hand. An
+// empty cache and a cache with nine unread rows are both "we do not know".
+eq(unreadBadge(0, 'error').kind, 'unknown', 'a failed read is NOT "no unread"');
+eq(unreadBadge(9, 'error').kind, 'unknown', 'a stale cache is not a count either');
+eq((unreadBadge(0, 'error') as { a11y: string }).a11y, 'Notifications. Unread count could not be read.',
+  'the failure is spoken, not left to a silent bell');
+
+// 'partial': the rows past the cap are the OLDEST, so zero unread among the
+// newest is not zero unread. Neither branch prints a figure — a count over an
+// unknown fraction of the set is what src/ui/loadStatus.ts forbids.
+eq(unreadBadge(3, 'partial').kind, 'some', 'a truncated read shows a mark, not a number');
+eq(unreadBadge(0, 'partial').kind, 'unknown', 'no unread in the newest rows is not no unread');
+ok(!Object.prototype.hasOwnProperty.call(unreadBadge(3, 'partial'), 'label'),
+  'nothing under partial carries a figure to render');
+
+// 'loading': the first read is in flight and a cached copy may already be on
+// screen. Drawing a figure from it means printing a number and changing it a
+// moment later.
+eq(unreadBadge(5, 'loading').kind, 'none', 'nothing is claimed before the first read lands');
+eq(unreadBadge(0, 'loading').kind, 'none', 'including when the cache is empty');
+
+// The count arrives from `items.filter(…).length` today, but this is a public
+// function and a wrong number must not reach a badge as "NaN" or "-1".
+eq(unreadBadge(-1, 'ready').kind, 'none', 'a negative count is not a badge');
+eq(unreadBadge(Number.NaN, 'ready').kind, 'none', 'NaN is not a badge');
+eq((unreadBadge(3.7, 'ready') as { label: string }).label, '3', 'a fractional count is floored, not rounded up');
+
+// Whatever the status, a mark that is drawn is a mark that can be spoken, and
+// no mark ever renders a raw unseparated four-digit number.
+const STATUSES: LoadStatus[] = ['loading', 'ready', 'partial', 'error'];
+for (const st of STATUSES) {
+  for (const n of [0, 1, 11, 999, 1000, 1204, 99999]) {
+    const b = unreadBadge(n, st);
+    if (b.kind === 'none') continue;
+    ok(typeof (b as { a11y: string }).a11y === 'string' && (b as { a11y: string }).a11y.length > 0,
+      `${st}/${n}: a drawn mark says what it means`);
+    if (b.kind === 'count') ok(!/^\d{4,}$/.test(b.label), `${st}/${n}: “${b.label}” carries its separator`);
+  }
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

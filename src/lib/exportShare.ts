@@ -321,11 +321,19 @@ export type { ProgressRow, ProgressMetric } from './progressExport';
  * side without dragging their screen's context along with it. `scans.tsx`
  * passes what `useSettings()` already gave it.
  *
- * It defaults to kilograms so that every existing call site — and the node
- * suite, which asserts on these without a settings provider to give it one —
- * keeps producing exactly the document it produced before.
+ * It used to default to kilograms "so that every existing call site keeps
+ * producing exactly the document it produced before". That default was the
+ * defect in miniature: `clients.weight_unit` is NULL until somebody taps a
+ * unit, so a forgotten argument here was a pounds member's export silently
+ * relabelled rather than a compile error — the same shape as
+ * `money(cents, currency = 'AED')`, which this file has already been through.
+ * There is exactly one call site and it has always passed the member's unit.
+ *
+ * `accent` became `string | undefined` rather than `accent?:` only so that the
+ * unit can be required after it; TypeScript will not let a required parameter
+ * follow an optional one. The caller already passes both.
  */
-export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple', accent?: string, unit: WeightUnit = 'kg'): { html: string; text: string } {
+export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple', accent: string | undefined, unit: WeightUnit): { html: string; text: string } {
   const first = (name || '').split(' ')[0] || 'Your';
   // Point by point, because each cell is a reading rather than a change, and
   // through weightIn so a missing figure stays missing: `figure()` turns the
@@ -367,6 +375,16 @@ export interface OwnerReportData {
   avgClientsPerTrainer: number | null;
   cohorts: { label: string; total: number; active: number; pct: number }[];
   generatedOn: string;
+  /**
+   * The gym's own currency (`tenants.currency`), or NULL when it has not
+   * chosen one. Required rather than optional, and NOT defaulted: this
+   * document leaves the app. On screen a wrong figure is corrected by the next
+   * refresh; in a bank's or a landlord's inbox it is permanent, and nothing in
+   * a PDF says which money it is denominated in beyond the code printed beside
+   * the number. A caller that does not know the gym's currency passes null and
+   * the value line is withheld.
+   */
+  currency: string | null;
 }
 
 export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: string; text: string } {
@@ -374,28 +392,48 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     ['Trainers', String(d.trainers)],
     ['Clients', String(d.clients)],
     ['Sessions · 30d', String(d.sessions30)],
-    // The last surface in the owner app that still said "$". Everything the
-    // gym is denominated in is AED — every money column in the operating record
-    // defaults to it and `money()` does too — so a report that went out with a
-    // dollar sign was the one artefact of the lot that leaves the app and gets
-    // forwarded. `payroll30` is a MAJOR-unit amount (session_fee is whole
-    // currency and payroll30For multiplies by it) and `money()` takes minor
-    // units, which is the mismatch that once printed AED 63.00 for a gym owed
-    // AED 6,300 — so it is converted here rather than assumed either way.
-    ['Value of those sessions', money(d.payroll30 == null ? null : Math.round(d.payroll30 * 100)) ?? '\u2014'],
+    // The last surface in the owner app that still said "$", and then the last
+    // bare `money()` call in the tree. It said "$" over a gym denominated in
+    // something else; it then rendered a dash for EVERY gym, because it called
+    // `money()` with no currency at all and `money()` refuses to guess one. A
+    // dash is honest and it is still a report that says nothing about the
+    // figure an owner opened it for. The gym's currency now arrives with the
+    // data, so the line prints for a gym that has chosen one and is withheld
+    // for a gym that has not — which is a different silence, and the note under
+    // the table says which.
+    //
+    // `payroll30` is a MAJOR-unit amount (session_fee is whole currency and
+    // payroll30For multiplies by it) and `money()` takes minor units, which is
+    // the mismatch that once printed AED 63.00 for a gym owed AED 6,300 — so it
+    // is converted here rather than assumed either way.
+    ['Value of those sessions',
+      money(d.payroll30 == null ? null : Math.round(d.payroll30 * 100), d.currency) ?? '\u2014'],
     ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : String(d.avgClientsPerTrainer)],
     ['Trainers needing a look', String(d.atRiskCount)],
     ['Clients with those trainers', String(d.atRiskClients)],
   ];
 
+  // Why the value line may be a dash, said in the document rather than only on
+  // the screen that made it. A recipient holding a report with one dash in it
+  // cannot tell "the gym has not set a session fee" from "the gym has not set a
+  // currency" from "we could not work it out", and all three are things they
+  // would ask about.
+  const valueNote = d.payroll30 == null
+    ? 'The value of those sessions is blank because no session fee is set.'
+    : d.currency
+    ? null
+    : 'The value of those sessions is blank because this gym has not set its currency, and an amount with no currency is not a figure.';
+
   const mRows = metrics.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${esc(v)}</td></tr>`).join('');
   const cRows = d.cohorts.map((c) => `<tr><td>${esc(c.label)}</td><td class="r">${c.active}/${c.total}</td><td class="r">${c.pct}%</td></tr>`).join('');
   const body = `
     <table><thead><tr><th>Metric</th><th class="r">Value</th></tr></thead><tbody>${mRows}</tbody></table>
+    ${valueNote ? `<p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${esc(valueNote)}</p>` : ''}
     <table><thead><tr><th>Cohort (signup)</th><th class="r">Active</th><th class="r">Retention</th></tr></thead><tbody>${cRows || '<tr><td colspan="3">No cohorts yet</td></tr>'}</tbody></table>`;
   const html = page(`Platform report — ${d.generatedOn}`, body, brand);
   const text = `${brand} — Platform report (${d.generatedOn})\n` +
     metrics.map(([k, v]) => `${k}: ${v}`).join('\n') +
+    (valueNote ? `\n\n${valueNote}` : '') +
     (d.cohorts.length ? '\n\nCohort retention:\n' + d.cohorts.map((c) => `${c.label}: ${c.active}/${c.total} (${c.pct}%)`).join('\n') : '');
   return { html, text };
 }

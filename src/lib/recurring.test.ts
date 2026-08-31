@@ -268,5 +268,38 @@ ok(/No cancellation fee is charged for any of them, however close they are/.test
 ok(/next session stays booked/i.test(seriesDetail(51, farOff)),
   'and the next one is explicitly said to survive, so nobody taps this meaning to cancel it');
 
+// ── The promise that must not be made when there is nothing to promise ─────
+//
+// Every branch of this sentence used to end "The next session stays booked —
+// cancel that one separately if you need to", including the branch for an
+// arrangement with NOTHING on the books. There is no next session there: the
+// horizon has not been written, or every occurrence was cancelled singly. A
+// member reading it goes to their calendar for a Tuesday that is not on it,
+// and the one sentence they were given to act on describes a session that does
+// not exist. The caller's own screens hand this an empty string when they have
+// no next occurrence (`s.nextAt ?? ''`), so the empty string is the case that
+// actually reaches it.
+for (const none of ['', '   ', null, undefined, 'next Tuesday'] as const) {
+  const line = seriesDetail(0, none as any);
+  ok(!/stays booked/i.test(line),
+    `no next occurrence (${JSON.stringify(none)}) promises no surviving session`);
+  ok(/no sessions on the books at all/i.test(line),
+    'and says plainly that there are none, rather than implying one is left');
+  ok(/nothing is removed and nothing is charged/i.test(line),
+    'and still states the price, which is nothing');
+}
+// The mirror, so the fix cannot be "delete the sentence". A real next
+// occurrence still gets the promise, at both ends of the count.
+ok(/next session stays booked/i.test(seriesDetail(0, farOff)),
+  'one session on the books and nothing after it: that one still survives, and is said to');
+ok(/no sessions after this one/i.test(seriesDetail(0, farOff)),
+  'and "after this one" is only said when there IS a this one');
+ok(/next session stays booked/i.test(seriesDetail(3, inWindow)),
+  'a next occurrence inside the notice window survives too — that is the whole point of it');
+// Straight through `cancelOptions`, because that is what the screens call and
+// the empty string is what they pass.
+ok(!/stays booked/i.test(pick(cancelOptions({ startsAt: '', policy: policy(), upcoming: 0, now: NOW }), 'series').detail),
+  'and the option built for a series with no next occurrence carries no such promise either');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`recurring: ok (${sweep} end-series combinations swept, none of them charged)`);

@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, fig } from '../../src/ui/kit';
+import { NotificationBell } from '../../src/ui/notifications';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { num } from '../../src/lib/format';
@@ -110,6 +111,13 @@ export default function OwnerOverview() {
       avgClientsPerTrainer: roll.avgClientsPerTrainer,
       cohorts: cohorts(trainers as TrainerLike[]),
       generatedOn: new Date().toLocaleDateString(),
+      // The gym's own currency, and `?? null` rather than a fallback. Until
+      // this arrived the report's one money line rendered a dash for every gym
+      // — `money()` refuses to guess — and before that it printed dirhams at
+      // gyms that have never seen one. Null is passed through honestly so a gym
+      // that has not chosen a currency gets the withheld line and the sentence
+      // under the table saying why, rather than a figure in somebody's guess.
+      currency: cur,
     });
     const how = await shareDoc(doc.html, doc.text, 'Platform report');
     if (how === 'text') Alert.alert('Report shared', 'Shared as text — branded PDF export turns on after the next native build.');
@@ -136,6 +144,12 @@ export default function OwnerOverview() {
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
             <Ghost icon="search" onPress={() => router.push('/(owner)/explore')} />
+            {/* Quiet by design — nothing in the product addresses an owner
+                today except what a coach in their gym sends them. It is here
+                anyway, and it is here with a mark that distinguishes "nothing
+                for you" from "we could not find out", which is the difference
+                that matters on a screen an owner reads at a glance. */}
+            <NotificationBell group="owner" />
             <Ghost icon="share" onPress={exportReport} />
           </View>
         </View>

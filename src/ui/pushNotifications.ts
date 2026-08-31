@@ -4,7 +4,8 @@
 // no-ops instead of crashing, and lights up automatically once rebuilt.
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { inboxDecision } from '../lib/notifyInbox';
+import { inboxDecision, safeRoute } from '../lib/notifyInbox';
+import { VARIANT, type AppVariant } from '../lib/variant';
 
 let Notifications: any = null;
 let Device: any = null;
@@ -184,13 +185,49 @@ export async function cancelReminders(ids: string[]): Promise<void> {
   for (const id of ids) { try { await Notifications.cancelScheduledNotificationAsync(id); } catch { /* ignore */ } }
 }
 
-/** Route when a notification is tapped (content.data.route). Handles both a tap
- *  while running and the tap that cold-launches the app. Returns an unsubscribe. */
+/** This build's own inbox, written out in full — see the same table in
+ *  src/ui/notifications.tsx: a route assembled from the group at runtime is
+ *  invisible to scripts/check-reachable.mjs. */
+const INBOX_ROUTE: Record<AppVariant, string> = {
+  client: '/(client)/notifications',
+  trainer: '/(trainer)/notifications',
+  owner: '/(owner)/notifications',
+};
+
+/**
+ * Route when a notification is tapped (content.data.route). Handles both a tap
+ * while running and the tap that cold-launches the app. Returns an unsubscribe.
+ *
+ * ── Why the route is checked here and not by the caller ────────────────────
+ *
+ * `data.route` arrives from OUTSIDE the app. It is whatever the send-push edge
+ * function was handed, and notify_users() next door caps the length of the
+ * stored copy and checks nothing else about it, on purpose — the database is
+ * not where this app's list of screens belongs. The caller is app/_layout.tsx,
+ * which does `router.push(route as any)`: an external URL, a traversal, or a
+ * route naming a group this binary does not contain all reach expo-router
+ * unexamined. The inbox already refuses those on the way out of the table
+ * (safeRoute, src/lib/notifyInbox.ts); the push path is the same untrusted
+ * string arriving by the other door, and it was not being checked at all.
+ *
+ * ── Where an unusable route goes ───────────────────────────────────────────
+ *
+ * To this build's inbox, not to nowhere and not to the front door. These are
+ * three binaries from one tree and each contains only its own route group, so
+ * the commonest unusable route is not an attack — it is a coach's
+ * '/(trainer)/calendar' notification read on a phone running the client app
+ * after a role change or on a shared account. The thing the person tapped is a
+ * notification, the notification is recorded in the inbox, and the inbox is a
+ * screen this build definitely has. What is NOT invented is a destination for
+ * the notification's SUBJECT: the inbox row itself says "Nothing to open" when
+ * its route is one this app will not follow.
+ */
 export function addNotificationTapListener(onRoute: (route: string) => void): () => void {
   if (!Notifications?.addNotificationResponseReceivedListener) return () => {};
   const handle = (resp: any) => {
     const r = resp?.notification?.request?.content?.data?.route;
-    if (r) onRoute(String(r));
+    if (!r) return;
+    onRoute(safeRoute(String(r), VARIANT) ?? INBOX_ROUTE[VARIANT]);
   };
   const sub = Notifications.addNotificationResponseReceivedListener(handle);
   try { Notifications.getLastNotificationResponseAsync?.().then((resp: any) => { if (resp) handle(resp); }); } catch { /* ignore */ }

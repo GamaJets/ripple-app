@@ -433,6 +433,14 @@ export default function MyCoach() {
               <ListRow icon="message" title="Message" note="Your thread with them" onPress={() => go('/(client)/messages')} />
               <ListRow icon="calendar" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
               <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
+              {/* A standing appointment is an agreement between these two
+                  people, which is what makes this the screen it belongs on —
+                  and part 135 is explicit that EITHER party may end one. The
+                  row is unconditional rather than shown only to members who
+                  have one: the read that would decide it can fail, and a row
+                  hidden on a failed read hides the way out from the member
+                  whose arrangement could not be confirmed. */}
+              <ListRow icon="clock" title="Standing Appointments" note="The same hour with them every week" onPress={() => go('/(client)/standing')} />
               {/* On the screen about this coach, because that is the only place
                   the answer to "whose waiver is this?" is already on the page.
                   The same row is in the Me hub for the member who is looking

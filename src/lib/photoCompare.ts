@@ -215,7 +215,13 @@ export function compareRows(
   beforeISO: string,
   afterISO: string,
   scans: ScanReading[] | null | undefined,
-  unit: WeightUnit = 'kg',
+  // No `= 'kg'`. A defaulted unit in a pure module is the same defect as
+  // `money(cents, currency = 'AED')` was: `clients.weight_unit` is NULL until
+  // somebody taps one, and a caller with no unit to pass is a caller that does
+  // not know — not a caller who means kilograms. Every call site in the product
+  // already passes the member's own unit; the default only ever stood between a
+  // forgotten one and a compile error.
+  unit: WeightUnit,
 ): CompareRow[] {
   const b = readingOn(beforeISO, scans);
   const a = readingOn(afterISO, scans);

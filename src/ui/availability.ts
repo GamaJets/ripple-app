@@ -273,6 +273,16 @@ const toNum = (v: unknown): number => {
 };
 
 /**
+ * Standing appointments this hook is willing to show, and the number
+ * `my_session_series()` is built around: part 143 selects `SERIES_CAP + 1` so
+ * that the 501st row exists purely as evidence there were more. Stated here
+ * because the two numbers have to agree and only one of them is in this file —
+ * if the function's limit ever changes, this is the constant that changes with
+ * it, and the mismatch that would otherwise report every full page as partial.
+ */
+const SERIES_CAP = 500;
+
+/**
  * Every standing appointment the signed-in person is a party to.
  *
  * One hook for both apps: `my_session_series()` returns the coach's and the
@@ -283,6 +293,16 @@ const toNum = (v: unknown): number => {
  * arrangements could not be READ, not that there are none — and "you have no
  * standing appointments" said to somebody who trains every Tuesday is exactly
  * the class of sentence this codebase keeps having to take back.
+ *
+ * 'partial' is the other half of it, and it was missing. `my_session_series()`
+ * carries a row limit, this hook took whatever came back and called it 'ready',
+ * and a truncated read would therefore have arrived as the whole set — the
+ * silent failure src/lib/rowCap.ts exists for, on a list whose length screens
+ * print. Nobody has that many standing appointments today; that is a fact about
+ * this month's data and not a property of the schema, and it is the assumption
+ * under every truncation bug in this repo. Part 143 raised the function's limit
+ * to `SERIES_CAP + 1` so a full page and a cut one stop looking the same, and
+ * `capped()` below drops the probe row and says which one this is.
  */
 export function useRecurringSeries() {
   const authRev = useAuthRevision();
@@ -299,8 +319,14 @@ export function useRecurringSeries() {
       if (!sess?.session) { setSeries([]); setStatus('ready'); return; }
       const { data, error } = await supabase.rpc('my_session_series');
       if (error) { setStatus('error'); return; }
-      setSeries(shapeSeries((data ?? []) as RawSeries[]));
-      setStatus('ready');
+      // The probe row is dropped and the fact that there was one is kept. Doing
+      // one without the other is the mistake rowCap.ts was written about: slice
+      // without the flag and the screen shows a prefix as the whole set; flag
+      // without the slice and a row that was asked for to be COUNTED gets
+      // rendered to somebody as a real arrangement.
+      const page = capped((data ?? []) as RawSeries[], SERIES_CAP);
+      setSeries(shapeSeries(page.rows));
+      setStatus(page.truncated ? 'partial' : 'ready');
     } catch { setStatus('error'); }
   }, []);
 

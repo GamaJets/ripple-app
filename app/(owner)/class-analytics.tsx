@@ -120,13 +120,38 @@ export default function OwnerClassAnalytics() {
   const maxKind = Math.max(1, ...byKind.map(([, v]) => v.attended));
   const G = layout.gutter;
 
-  const rateField = (
+  // ── the rate field, and why it is not offered without a currency ─────────
+  //
+  // Every output of this field goes through `gymMoney(..., cur)`, which returns
+  // null when the gym has not set `tenants.currency` — so at such a gym the
+  // hero, the section note and every per-trainer figure render a dash no matter
+  // what is typed. The field was still drawn, with an empty prefix where the
+  // code should be (`{cur}` renders nothing for null) and a screen reader saying
+  // "Pay per attendee in null". An owner typed a rate, watched the payroll stay
+  // a dash, and had nothing to tell them the missing piece was a setting two
+  // screens away rather than a broken screen.
+  //
+  // A control whose every result is withheld is a control that does nothing, so
+  // it is replaced by the reason and the way to fix it. The check-in and class
+  // counts above are unaffected — they are not money and they still stand.
+  const rateField = cur ? (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
       <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Pay per attendee</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
         <Text style={{ ...ty.label, color: t.ink3 }}>{cur}</Text>
         <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" accessibilityLabel={`Pay per attendee in ${cur}`}
           style={{ ...ty.body, ...numeric, color: t.ink, paddingVertical: 9, minWidth: 44 }} />
+      </View>
+    </View>
+  ) : (
+    <View style={{ marginBottom: sp.md }}>
+      <Text style={{ ...ty.label, color: t.ink2 }}>Your gym has not set a currency.</Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+        A pay rate with no currency is not an amount, so payroll stays blank until you choose one.
+        Check-ins and fill rates below are unaffected.
+      </Text>
+      <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+        <Ghost label="Set It In Operations" onPress={() => router.push('/(owner)/ops')} />
       </View>
     </View>
   );
@@ -185,7 +210,14 @@ export default function OwnerClassAnalytics() {
               // stated and the money is not — an unguarded ${} would read
               // "× null" to an owner.
               ? `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · set your gym's currency to value them`
-              : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · enter your per-check-in rate below`}
+              // No rate typed. Which of the two things to ask for depends on
+              // whether there is a rate field at all — with no gym currency
+              // there is not, and telling an owner to enter a rate "below"
+              // when nothing below takes one is the kind of instruction that
+              // makes a working screen look broken.
+              : cur
+              ? `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · enter your per-check-in rate below`
+              : `${totals.attended} check-ins · ${totals.classes} classes · ${totals.showPct ?? '—'}% turned up · set your gym's currency to value them`}
           />
 
           <Rule />

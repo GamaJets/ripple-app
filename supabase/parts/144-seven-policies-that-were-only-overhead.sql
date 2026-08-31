@@ -1,0 +1,144 @@
+-- ─────────────────────────────────────────────────────────────────────────
+-- The seven policies 142 recorded but would not endorse, and the two
+-- narrowings it would not decide.
+--
+-- 142-twenty-six-more-policies-that-only-existed-live.sql wrote every live
+-- policy into the repo so the file would stop lying about what is running. It
+-- named seven of them strictly redundant with a policy this repo already
+-- declares, and then deliberately stopped: "dropping them is a separate change
+-- with its own evidence to gather." This is that change, and this is that
+-- evidence.
+--
+-- They are the reason the performance advisor reported 570
+-- multiple_permissive_policy findings. Postgres evaluates EVERY permissive
+-- policy for a role+command and ORs the results, so a redundant one is a
+-- second predicate executed per row, per query, forever, to reach a verdict the
+-- first one had already reached.
+--
+-- ── How each was proven, and why reading was not enough ───────────────────
+--
+-- Reading two predicates and agreeing they look alike is how you drop the one
+-- policy that was the only thing letting somebody read their own records. So
+-- none of this was done by reading. For each policy the method was:
+--
+--   1 · Both definitions read from pg_policies on the live project — the
+--       actual qual and with_check, not what any file claims.
+--   2 · Commands and roles compared. All seven pairs match on both: every
+--       policy involved is PERMISSIVE and granted to {public}, and no FOR ALL
+--       is asked to hide behind a FOR SELECT.
+--   3 · Fixtures seeded on the live tables (five of the six were empty, so
+--       there was nothing to test against otherwise), then EVERY one of the 20
+--       real users impersonated via request.jwt.claims under the
+--       `authenticated` role, and the exact set of rows each could see
+--       recorded — with the narrow policy present, and again with it dropped.
+--       Then the writes: UPDATE and DELETE row counts, and INSERTs both
+--       permitted and forbidden, for every user against every FOR ALL policy.
+--   4 · The half that actually matters: not "does the wide one admit these
+--       rows" but "is there ANY row the narrow one admits and the wide one
+--       does not". That is a search for a counterexample over the full cross
+--       product of live rows and live users, in both directions.
+--
+-- The whole harness ran inside a transaction that was rolled back, so the
+-- fixtures and the trial drops never existed outside it. Table counts were
+-- re-measured afterwards against their pre-run values and all 25 matched.
+--
+-- Result: 0 rows lost, for every user, on every table, for every command —
+-- dropping each policy alone, and dropping all seven together. 0 errors.
+-- And the test was not vacuous: the narrow predicates admitted 8, 8, 8, 16,
+-- 160, 32 and 20 (user, row) pairs respectively, and the write probes
+-- discriminated properly — trainers permitted, non-trainers refused.
+--
+--   bc_self  ⊂ cust_read   billing_customers · SELECT · {public}
+--   ca_self  ⊂ conn_read   connect_accounts  · SELECT · {public}
+--   sub_self ⊂ sub_read    subscriptions     · SELECT · {public}
+--     All three are the same shape and the strongest case of the seven. The
+--     wide policy's qual is literally `<narrow qual> OR EXISTS(... owner ...)`.
+--     The narrow predicate is a syntactic disjunct of the wide one, so A ⊨
+--     A OR B holds whatever B does. Dropping them cannot narrow anything.
+--
+--   tp_manage = pkg_write  trainer_packages · ALL · {public}
+--     Not a subset — identical. Same command, same role, byte-identical qual
+--     AND with_check: `trainer_id = (select auth.uid())`. A duplicate.
+--
+--   tp_read_active ⊂ pkg_read   trainer_packages · SELECT · {public}
+--     `active = true` against `active OR trainer_id = (select auth.uid())`.
+--     trainer_packages.active is NOT NULL, so `active = true` and `active` are
+--     the same test and the three-valued-logic edge case cannot arise; even if
+--     it could, NULL is not TRUE under either form and neither admits the row.
+--
+--   exvid_write = exvid_trainer_rw   exercise_videos · ALL · {public}
+--     Same command, same role, same predicate — the only difference was
+--     `(select auth.uid())` against a bare `auth.uid()`, which is the same
+--     value (auth.uid() is STABLE) computed at a different frequency. 145
+--     rewrites the survivor to the hoisted form, so the cheaper one is what is
+--     left standing.
+--
+--   profiles_self_rw ≈ profiles_self   profiles · ALL · {public}
+--     142 wrote "≈" and it was right to be suspicious, because the two are NOT
+--     textually equal: profiles_self carries an explicit with_check and
+--     profiles_self_rw has none. That is the difference that could have
+--     mattered — a FOR ALL policy also governs INSERT and UPDATE, and a policy
+--     with no WITH CHECK is not a policy that checks nothing. Postgres uses the
+--     USING expression as the check when WITH CHECK is omitted, so its
+--     effective check is `(select auth.uid()) = id`, which is profiles_self's
+--     with_check with the operands swapped. Proven rather than argued: with
+--     profiles_self_rw dropped, all 20 users could still UPDATE exactly their
+--     own row (1 row each) and all 20 were still REFUSED an UPDATE that moves
+--     `id` to somebody else. "≈" resolves to "=". The verdict is redundant.
+--
+-- Roles: every policy here is granted to {public}, which is anon and
+-- authenticated and everything else. The sweep above covers `authenticated`;
+-- `anon` was measured separately and was unchanged on all six tables. The
+-- remaining members of public that can reach these tables — postgres and
+-- service_role — both hold BYPASSRLS, so no policy has ever applied to them.
+--
+-- ── The two narrowings 142 recorded: both stay, and neither is a bug ──────
+--
+-- 142 flagged two places where the live replacements dropped an owner arm that
+-- part 38 had written on purpose, and asked whether either was an accident.
+-- Both were investigated against what the owner app actually reads. Neither is
+-- a live bug, and nothing is changed here.
+--
+--   avail_owner_r on availability_templates — MOOT. Part 38 said "A trainer's
+--   working pattern. Theirs to set; their gym's owner may see it", and the
+--   live replacements do leave an owner holding no `trainers` row covered by
+--   none of them. But the table is vestigial: it holds 0 rows, it is created
+--   by 01-schema.sql and given RLS by 38 and referenced by nothing else, no
+--   function in the database touches it, and no line of app code reads or
+--   writes it. The working pattern the app actually stores is
+--   `trainer_availability`, added later by 24-trainer-availability.sql, and its
+--   only policy `ta_own` is trainer-only and has never had an owner arm at
+--   all. So the narrowing takes nothing from anybody: there is no screen, and
+--   no row, on the other side of it.
+--
+--   waitlist_gym_r on session_waitlist — DELIBERATE, left alone. Part 38 did
+--   write the is_owner_of(s.tenant_id) arm and session_waitlist_trainer_r does
+--   not have it, so this one is a real narrowing of a real table. It is still
+--   not a bug, because nothing asks for it: the only reader of session_waitlist
+--   in the app is useSessionWaitlistCounts in src/ui/sessions.tsx, consumed
+--   only by app/(trainer)/calendar.tsx, and the file says why it goes through
+--   RLS — "session_waitlist_trainer_r scopes the queue to sessions they own".
+--   The client side reads its own rows. No owner screen reads the table, and
+--   the seven SECURITY DEFINER functions over it are all client- or
+--   trainer-scoped. Re-adding the arm would widen who can see which named
+--   members are queueing for a PT slot, on live data, to satisfy a comment in
+--   a superseded file rather than a screen. A narrowing nobody is hitting is
+--   left narrow.
+--
+-- ── What this file is ─────────────────────────────────────────────────────
+--
+-- Drops only. 142 still creates all seven above, and that is deliberate: it is
+-- the record of what the live database was running that night, and this file
+-- is the record of the seven being retired with evidence. Ordered after it, so
+-- a database built from this repo creates them and then drops them, exactly as
+-- production did. Idempotent, and a no-op against live where they are already
+-- gone.
+-- ─────────────────────────────────────────────────────────────────────────
+
+drop policy if exists bc_self on public.billing_customers;
+drop policy if exists ca_self on public.connect_accounts;
+drop policy if exists sub_self on public.subscriptions;
+drop policy if exists tp_manage on public.trainer_packages;
+drop policy if exists tp_read_active on public.trainer_packages;
+drop policy if exists exvid_write on public.exercise_videos;
+drop policy if exists profiles_self_rw on public.profiles;

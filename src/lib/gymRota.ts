@@ -36,6 +36,8 @@
 // wall clock; storage is timestamptz precisely so this conversion happens once,
 // here, rather than in every screen.
 
+import { assertWrote } from './wroteRows';
+
 type Queryable = { from: (table: string) => any };
 
 /** What a trainer is rostered on for. */
@@ -605,12 +607,23 @@ export async function addShift(sb: Queryable, tenantId: string, s: NewShift): Pr
  * from one nobody was ever booked for, and only a kept row can do that.
  */
 export async function setShiftStatus(sb: Queryable, id: string, status: ShiftStatus): Promise<void> {
-  const { error } = await sb.from('gym_shifts').update({ status }).eq('id', id);
-  if (error) throw error;
+  // Counted, because an UPDATE matching zero rows is not an error — see
+  // src/lib/wroteRows.ts. `gym_shifts_owner` is `is_owner_of(tenant_id)` and is
+  // the only policy granting UPDATE (`gym_shifts_staff_r` is SELECT only), so a
+  // trainer pulling their own shift changes nothing and, without this, watches
+  // the rota reload with the shift still standing. The screen's own words are
+  // the reason it matters: a pulled shift is meant to leave a visible hole, and
+  // a pull that silently did not happen leaves an invisible one.
+  const r = await sb.from('gym_shifts').update({ status }, { count: 'exact' }).eq('id', id);
+  if (r.error) throw r.error;
+  assertWrote(status === 'cancelled' ? 'Pulling that shift' : 'Putting that shift back', r);
 }
 
 /** Remove a shift that should never have been written. */
 export async function deleteShift(sb: Queryable, id: string): Promise<void> {
-  const { error } = await sb.from('gym_shifts').delete().eq('id', id);
-  if (error) throw error;
+  // A DELETE matching zero rows is the same silence as an UPDATE matching zero
+  // rows, and reads worse: the caller believes the row is gone.
+  const r = await sb.from('gym_shifts').delete({ count: 'exact' }).eq('id', id);
+  if (r.error) throw r.error;
+  assertWrote('That shift', r);
 }

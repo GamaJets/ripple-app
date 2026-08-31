@@ -20,7 +20,7 @@
 // here is the wording and only the wording. The assertions below hold both
 // halves of that: the reason must read in the member's unit, and the weight
 // must come back in kilograms whatever the member reads.
-import { suggestNextWeight, suggestForExercise, parseRepRange, priorBest1RM } from './progression';
+import { suggestNextWeight, suggestForExercise, suggestProgression, parseRepRange, priorBest1RM } from './progression';
 import type { WorkoutEntry } from './mockData';
 
 const errors: string[] = [];
@@ -80,10 +80,81 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(a === b, `${msg} — got 
   ok(none!.reason.includes('88'), `40 kg reads as 88 lb — got "${none!.reason}"`);
 }
 
-// ── the default is unchanged, so every existing caller keeps working ───────
+// ── omitting the unit no longer means kilograms ────────────────────────────
 {
+  // This block used to assert the opposite: that `suggestNextWeight` defaulted
+  // to 'kg', so "every existing caller keeps working". That default was the
+  // defect — a pure module with no member in scope inventing the unit a member
+  // reads in, which is `money(cents, currency = 'AED')` in a different costume.
+  // `clients.weight_unit` is NULL until somebody taps one, and a caller with no
+  // unit to pass is a caller that does not know.
+  //
+  // So an omitted unit now WITHHOLDS the load rather than stating it in a guess.
+  // The sentence stays useful because, unlike an amount of money, the coaching
+  // advice does not depend on the unit — only the figure does.
   const bare = suggestNextWeight([[8, 60]], { low: 6, high: 8 });
-  ok(bare!.reason.includes('60 kg'), `omitting the unit means kilograms — got "${bare!.reason}"`);
+  ok(!!bare, 'a suggestion still comes back without a unit');
+  ok(!/\bkgs?\b/i.test(bare!.reason), `no kilograms are invented — got "${bare!.reason}"`);
+  ok(!/\blbs?\b/i.test(bare!.reason), `and no pounds either — got "${bare!.reason}"`);
+  ok(!bare!.reason.includes('60'), `nor the raw stored figure, which means nothing on its own — got "${bare!.reason}"`);
+  ok(bare!.reason.includes('8 reps'), `the rep count survives, being unitless — got "${bare!.reason}"`);
+  // The decision is untouched by the missing unit: only the wording is.
+  eq(bare!.weight, 62.5, 'and the suggested load is still kilograms, unchanged');
+  eq(bare!.up, true, 'and still reads the range the same way');
+}
+
+// ── the seven kilograms in the coaching cues ──────────────────────────────
+//
+// `suggestProgression` built `rationale` with "kg" written into seven separate
+// templates. app/(client)/progression.tsx renders that string directly under a
+// KPI reading "Target Load · 132 lb", so a pounds member got both units for one
+// lift on one card. These sweep every branch rather than the one that was
+// reported, because six of the seven were only reachable through a particular
+// rep count or a particular "felt" answer.
+{
+  const at = (t: string) => `2026-08-3${t}T10:00:00.000Z`;
+  const one = (sets: [number, number][], feel?: string[]) =>
+    suggestProgression([{ t: at('0'), exercise: 'Back Squat', sets, feel } as never], 'lb')[0];
+
+  // Each of the four base branches, then the three the "felt" signal rewrites.
+  const branches = [
+    { tip: one([[12, 100], [12, 100]]), what: 'increase' },
+    { tip: one([[9, 100], [9, 100]]), what: 'chase a rep' },
+    { tip: one([[6, 100], [6, 100]]), what: 'hold' },
+    { tip: one([[2, 100], [2, 100]]), what: 'deload' },
+    { tip: one([[12, 100], [12, 100]], ['hard', 'hard']), what: 'cleared but hard' },
+    { tip: one([[9, 100], [9, 100]], ['ok', 'hard']), what: 'in range but hard' },
+    { tip: one([[9, 100], [9, 100]], ['easy', 'easy']), what: 'in range and easy' },
+  ];
+  eq(branches.length, 7, 'one assertion per hardcoded kilogram that was in this function');
+  for (const { tip, what } of branches) {
+    ok(!!tip, `the ${what} branch produces a tip`);
+    ok(!/\bkgs?\b/i.test(tip.rationale), `the ${what} cue never says kilograms to a pounds member — got "${tip.rationale}"`);
+  }
+
+  // The two branches that name a LOAD must name it converted, not relabelled.
+  // 100 kg is 220.5 lb; the old string carried the literal 100.
+  const hold = one([[6, 100], [6, 100]]);
+  ok(hold.rationale.includes('220.5'), `the hold cue reads 100 kg as 220.5 lb — got "${hold.rationale}"`);
+  // And the bump: a 5 kg step on a squat is 11 lb, not 5.
+  const up = one([[12, 100], [12, 100]]);
+  ok(up.rationale.includes('11 lb'), `a 5 kg step reads as 11 lb — got "${up.rationale}"`);
+  ok(!up.rationale.includes('5 lb'), `and never as a relabelled 5 — got "${up.rationale}"`);
+
+  // Metric readers still get the figures they always did.
+  const kg = suggestProgression([{ t: at('0'), exercise: 'Back Squat', sets: [[6, 100], [6, 100]] } as never], 'kg')[0];
+  ok(kg.rationale.includes('100 kg'), `a metric member still reads 100 kg — got "${kg.rationale}"`);
+
+  // And a caller with no member in scope — app/(client)/coach.tsx builds a
+  // one-line summary from the tip and never renders the rationale — gets advice
+  // with the load left out rather than advice in a unit nobody chose.
+  const none = suggestProgression([{ t: at('0'), exercise: 'Back Squat', sets: [[6, 100], [6, 100]] } as never])[0];
+  ok(!/\bkgs?\b|\blbs?\b/i.test(none.rationale), `no unit is invented — got "${none.rationale}"`);
+  ok(!none.rationale.includes('100'), `nor is the bare stored figure printed — got "${none.rationale}"`);
+  ok(none.rationale.length > 20, `and it is still a sentence worth reading — got "${none.rationale}"`);
+  // The decision behind it is identical whichever unit the prose is in.
+  eq(none.action, kg.action, 'the action does not depend on the unit');
+  eq(none.nextWeight, kg.nextWeight, 'and neither does the kilograms it targets');
 }
 
 // ── through the convenience wrapper the Train tab actually calls ───────────

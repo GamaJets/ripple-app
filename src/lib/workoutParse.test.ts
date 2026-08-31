@@ -60,15 +60,21 @@ const near = (a: number, b: number, tol = 0.51) => Math.abs(a - b) <= tol;
   ok(near(s[0]?.[1] ?? -1, 315 * KG_PER_LB), `at 142.9kg, got ${s[0]?.[1]}`);
 }
 
-// ── unchanged behaviour: the default is still kilograms ────────────────────
+// ── asking for kilograms still gives kilograms ─────────────────────────────
+//
+// This block used to be titled "the default is still kilograms". There is no
+// default any more: `unit: WeightUnit = 'kg'` was an invented unit in a pure
+// module that decides what gets STORED, and a caller that forgot to pass one
+// wrote a pounds member's 135 into the log as 135 kg. The unit is required now,
+// so what this pins is that a metric member's parse is untouched.
 {
-  const d = parseWorkoutText('bench 3x8 60kg, squat 100kg 5 5 5');
+  const d = parseWorkoutText('bench 3x8 60kg, squat 100kg 5 5 5', 'kg');
   ok(d.length === 2, `two clauses, got ${d.length}`);
   ok(d[0]?.exercise === 'Bench' && d[1]?.exercise === 'Squat',
     `names survive, got ${d.map((x) => x.exercise).join('/')}`);
   ok(d[0]?.sets.length === 3 && d[0].sets.every(([r, w]) => r === 8 && w === 60), 'three sets of eight at 60kg');
   ok(d[1]?.sets.length === 3 && d[1].sets.every(([r, w]) => r === 5 && w === 100), 'three fives at 100kg');
-  const bodyweight = parseWorkoutText('3x12 pushups');
+  const bodyweight = parseWorkoutText('3x12 pushups', 'kg');
   ok(bodyweight[0]?.sets.length === 3 && bodyweight[0].sets.every(([, w]) => w === 0),
     'bodyweight stays zero rather than picking up a unit');
 }

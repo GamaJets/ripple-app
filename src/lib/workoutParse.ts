@@ -23,7 +23,16 @@ const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
 /** Round to the half-unit a gym can actually load, in the unit it was typed in. */
 const halves = (n: number) => Math.round(n * 2) / 2;
 
-export function parseWorkoutText(text: string, unit: WeightUnit = 'kg'): ParsedLift[] {
+export function parseWorkoutText(
+  text: string,
+  // No `= 'kg'`. A defaulted unit in a pure module is the same defect as
+  // `money(cents, currency = 'AED')` was: `clients.weight_unit` is NULL until
+  // somebody taps one, and a caller with no unit to pass is a caller that does
+  // not know — not a caller who means kilograms. Every call site in the product
+  // already passes the member's own unit; the default only ever stood between a
+  // forgotten one and a compile error.
+  unit: WeightUnit,
+): ParsedLift[] {
   // A bare number is in the member's unit. Storage is always kilograms.
   const toKg = (n: number) => (unit === 'lb' ? halves(n * KG_PER_LB) : n);
 

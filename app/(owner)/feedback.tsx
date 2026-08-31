@@ -18,9 +18,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, PartialRead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { fetchAllFeedback, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
+import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
 import { reportError } from '../../src/lib/reportError';
 
@@ -36,6 +36,21 @@ export default function OwnerFeedback() {
   const [refreshing, setRefreshing] = useState(false);
   /** The inbox could not be read. Distinct from it being empty. */
   const [unread, setUnread] = useState(false);
+  /**
+   * The read stopped at the row cap, so these are the newest N submissions and
+   * not the inbox.
+   *
+   * `fetchAllFeedbackPage` has reported this since it was written, and the note
+   * on it names this screen: "the screens above it count the rows and average
+   * the ratings, which is exactly what a truncated read must not be used for".
+   * This screen was calling the wrapper that throws the flag away, so under a
+   * cap it printed a hero of "4.6 / 5" over "1,000 submissions" — a rating over
+   * a slice of the inbox, in the same type used when it is the whole one, and
+   * the number a release decision gets made on. The rows are still real and
+   * still worth reading, so the list stays; the average and the count are
+   * withheld, which is what src/ui/loadStatus.ts already asks of 'partial'.
+   */
+  const [truncated, setTruncated] = useState(false);
 
   const load = async () => {
     // The awaits are wrapped because a rejection used to skip every line after
@@ -43,10 +58,13 @@ export default function OwnerFeedback() {
     // `refreshing` never cleared, leaving a spinner spinning over stale rows
     // with nothing to say it had stopped trying.
     try {
-      const [data, errs] = await Promise.all([fetchAllFeedback(), fetchAppErrors(20)]);
+      const [page, errs] = await Promise.all([fetchAllFeedbackPage(), fetchAppErrors(20)]);
       // null is "we could not read it" and must not become an empty list.
-      setRows(data ?? []); setErrors(errs ?? []);
-      setUnread(data == null);
+      setRows(page?.rows ?? []); setErrors(errs ?? []);
+      setUnread(page == null);
+      // Under a failed read there is no page to be truthful about, so the flag
+      // is cleared rather than left standing from the previous attempt.
+      setTruncated(page?.truncated ?? false);
     } catch (e) {
       reportError('ownerFeedback.load', e);
       setUnread(true);
@@ -58,7 +76,12 @@ export default function OwnerFeedback() {
   const onRefresh = async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } };
 
   const fmt = (iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } };
-  const avg = rows.filter((r) => r.rating).length ? (rows.reduce((a, r) => a + (r.rating || 0), 0) / rows.filter((r) => r.rating).length) : 0;
+  // Null, not 0, and null under truncation too. An average over the newest
+  // thousand submissions is not a lower figure than the real average — it is a
+  // different one, and nothing on screen would have said so.
+  const rated = rows.filter((r) => r.rating);
+  const avg = truncated || !rated.length ? null
+    : rated.reduce((a, r) => a + (r.rating || 0), 0) / rated.length;
   const G = layout.gutter;
 
   return (
@@ -76,17 +99,25 @@ export default function OwnerFeedback() {
         {/* ── the hero: the one number that summarises the inbox ─────────── */}
         <Hero
           label="Average Rating"
-          figure={avg ? avg.toFixed(1) : '—'}
-          unit={avg ? '/ 5' : undefined}
-          arc={avg ? avg / 5 : undefined}
+          figure={avg == null ? '—' : avg.toFixed(1)}
+          unit={avg == null ? undefined : '/ 5'}
+          arc={avg == null ? undefined : avg / 5}
           arcLabel="of five stars"
-          note={loading ? 'Loading…' : unread ? 'Could not be read' : rows.length === 0 ? 'No submissions yet' : `${rows.length} submission${rows.length === 1 ? '' : 's'}`}
+          note={loading ? 'Loading…'
+            : unread ? 'Could not be read'
+            // The count goes with the average. Saying "1,000 submissions" under
+            // a dash would state as a total the very figure the dash exists to
+            // withhold.
+            : truncated ? `More than ${rows.length.toLocaleString()} submissions — too many to average here`
+            : rows.length === 0 ? 'No submissions yet'
+            : `${rows.length} submission${rows.length === 1 ? '' : 's'}`}
         />
 
         <Rule />
 
         <Section>
-          <SectionHead title="Submissions" note={rows.length ? String(rows.length) : undefined} />
+          <SectionHead title="Submissions" note={!truncated && rows.length ? String(rows.length) : undefined} />
+          {truncated ? <PartialRead what="submissions" shown={rows.length} onPress={onRefresh} /> : null}
           {loading ? (
             <SkeletonList n={4} />
           ) : rows.length === 0 ? (

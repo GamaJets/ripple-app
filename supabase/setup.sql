@@ -20693,3 +20693,509 @@ create policy workout_logs_trainer_r on public.workout_logs
   using ((EXISTS ( SELECT 1
    FROM clients c
   WHERE ((c.id = workout_logs.client_id) AND (c.trainer_id = ( SELECT auth.uid() AS uid))))));
+
+-- ▶ the-next-one-stays-booked.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The next one stays booked — and the arrangements list says when it is short.
+--
+-- Two corrections to part 135, both to functions it defined and neither
+-- changing a table. `create or replace` only, so this part is safe to re-run
+-- and safe to paste over a database that already has 135.
+--
+-- ── 1 · `end_session_series(p_series)` deleted the session it promised to keep
+--
+-- Part 135 states the promise in its own header, and every screen repeats it in
+-- as many words: ending a standing appointment removes the occurrences AFTER
+-- the next one and leaves the next one booked. "We'll stop after next Tuesday"
+-- is what ending a standing appointment means to the two people in it.
+--
+-- The function did not do that when it was called the obvious way. `p_effective`
+-- defaulted to TODAY and the delete is `occurrence_on > v_cut`, so
+-- `end_session_series(id)` removed every occurrence after today — next Tuesday
+-- among them. The one session the screen had just guaranteed would survive was
+-- the first thing deleted.
+--
+-- The coach's calendar worked around it from the app: it computed the next
+-- occurrence's local date in the SERIES' zone and passed it as `p_effective`.
+-- That is correct and it is fragile, for three reasons that are the reason this
+-- fix is in SQL rather than in the hook that calls it:
+--
+--   · the workaround protects exactly one caller. The client app is a second
+--     one, `my_session_series()` is read by both, and either party may end an
+--     arrangement — so the next screen written against this function inherits
+--     the bug by doing the obvious thing.
+--   · a date computed on a phone is computed by an `Intl` that may not know the
+--     zone the series was agreed in, and falls back to the reader's own date.
+--     A coach abroad by one calendar day either deletes the session that was
+--     promised to survive or leaves one extra standing.
+--   · the promise is stated in THIS function's own comment. A function that
+--     documents a guarantee and relies on its callers to supply it is not
+--     keeping the guarantee, it is describing one.
+--
+-- So the DEFAULT is now the next occurrence's own `occurrence_on` rather than
+-- today. An explicit `p_effective` still wins — a caller naming a date is
+-- naming it deliberately — and because the argument is a DATE rather than an
+-- offset, a caller that already computes the same date (the coach's calendar
+-- does) passes the value this function would have chosen anyway. There is
+-- nothing to double-apply.
+--
+-- `greatest(…, today)` is the floor. A cut date in the past would widen the
+-- delete backwards over sessions that have already happened, which is the one
+-- thing part 135's first bullet promises never to do.
+--
+-- Everything else is byte-for-byte part 135: the same auth checks, the same
+-- narrow delete, the same detach of anything that now belongs to somebody else,
+-- and the same `'charged', false` stated as a fact. ENDING A SERIES STILL
+-- CHARGES NOTHING, EVER, and this function still does not go near
+-- `cancel_my_session`.
+create or replace function public.end_session_series(p_series uuid, p_effective date default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid     uuid := auth.uid();
+  v_s       record;
+  v_today   date;
+  v_next    date;
+  v_cut     date;
+  v_removed int := 0;
+  v_kept    int := 0;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  select ss.* into v_s from session_series ss where ss.id = p_series for update;
+  if not found then
+    raise exception 'That standing appointment no longer exists.' using errcode = '42501';
+  end if;
+  if v_s.trainer_id <> v_uid and v_s.client_id <> v_uid then
+    raise exception 'That standing appointment is not yours.' using errcode = '42501';
+  end if;
+
+  -- Today in the SERIES' zone, because `occurrence_on` is a local date written
+  -- in that zone. Comparing it against the server's date, or the caller's,
+  -- moves the boundary by a day for anybody who agreed the arrangement
+  -- somewhere else.
+  v_today := (now() at time zone v_s.tz)::date;
+
+  if p_effective is not null then
+    v_cut := p_effective;
+  else
+    -- The next occurrence, matched exactly as the delete below matches: still
+    -- ours, still booked, never delivered. A future occurrence that now belongs
+    -- to somebody else is not the session anybody was promised would survive.
+    select min(s.occurrence_on) into v_next
+      from sessions s
+     where s.series_id = p_series
+       and s.status = 'booked'
+       and s.client_id = v_s.client_id
+       and s.outcome is null
+       and s.starts_at > now();
+    -- No next occurrence is a real answer — an arrangement whose horizon has
+    -- not been written yet, or one whose every date was cancelled singly. Today
+    -- is then the cut, which is what part 135 always did, and nothing that has
+    -- already happened is touched either way.
+    v_cut := greatest(coalesce(v_next, v_today), v_today);
+  end if;
+
+  -- Removed: still ours, still booked, never delivered. Nothing else.
+  delete from sessions s
+   where s.series_id = p_series
+     and s.occurrence_on > v_cut
+     and s.status = 'booked'
+     and s.client_id = v_s.client_id
+     and s.outcome is null;
+  get diagnostics v_removed = row_count;
+
+  -- Everything else in the future keeps its place on the calendar and simply
+  -- stops belonging to an arrangement that has ended.
+  update sessions s
+     set series_id = null, occurrence_on = null
+   where s.series_id = p_series
+     and s.occurrence_on > v_cut;
+  get diagnostics v_kept = row_count;
+
+  update session_series
+     set status = 'ended', ends_on = v_cut, ended_at = now(), ended_by = v_uid
+   where id = p_series;
+
+  return jsonb_build_object(
+    'ended', true,
+    'effective_on', v_cut,
+    'removed', v_removed,
+    'left_standing', v_kept,
+    -- Stated rather than implied. Every screen that reports this reads it from
+    -- here, so no app can invent a fee this function did not raise.
+    'charged', false);
+end $fn$;
+
+revoke all on function public.end_session_series(uuid, date) from public, anon;
+grant execute on function public.end_session_series(uuid, date) to authenticated;
+
+
+-- ── 2 · `my_session_series()` could truncate and say nothing about it ───────
+--
+-- It was `limit 500`. Five hundred rows and five hundred rows out of six
+-- hundred came back identically, and the app has no way to tell them apart —
+-- which is precisely the silent failure src/lib/rowCap.ts exists for: a read
+-- that succeeds, quietly, with part of the set, and a screen that renders it as
+-- fact because nothing anywhere had cause to doubt it.
+--
+-- The fix is that file's own rule: ASK FOR ONE ROW MORE THAN YOU ARE WILLING TO
+-- ACCEPT. At 501 a full page and a truncated one stop looking the same, the
+-- caller drops the probe row and says 'partial', and the screens that gate
+-- their figures on 'ready' render a dash instead of a subtotal.
+--
+-- Nobody has 500 standing appointments today. That is a fact about this month's
+-- data, not a property of the schema, and it is the assumption every truncation
+-- bug in this codebase was built on.
+--
+-- The body is otherwise unchanged from part 135.
+create or replace function public.my_session_series()
+returns table (
+  id           uuid,
+  trainer_id   uuid,
+  client_id    uuid,
+  client_name  text,
+  dow          smallint,
+  hour         smallint,
+  minute       smallint,
+  duration_min int,
+  tz           text,
+  starts_on    date,
+  ends_on      date,
+  status       text,
+  upcoming     int,
+  next_at      timestamptz
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select ss.id, ss.trainer_id, ss.client_id,
+         -- The coach sees who it is with. The client is looking at their own
+         -- arrangement and does not need to be told their own name.
+         case when ss.trainer_id = auth.uid() then p.full_name else null end as client_name,
+         ss.dow, ss.hour, ss.minute, ss.duration_min, ss.tz,
+         ss.starts_on, ss.ends_on, ss.status,
+         (select count(*)::int from sessions s
+           where s.series_id = ss.id and s.starts_at > now() and s.status = 'booked') as upcoming,
+         (select min(s.starts_at) from sessions s
+           where s.series_id = ss.id and s.starts_at > now() and s.status = 'booked') as next_at
+    from session_series ss
+    left join profiles p on p.id = ss.client_id
+   where ss.trainer_id = auth.uid() or ss.client_id = auth.uid()
+   order by ss.status, ss.dow, ss.hour, ss.minute
+   -- 500 is the cap the caller will show. The 501st is a probe: it is never
+   -- rendered, it exists only so that "this is all of them" and "this is as
+   -- many as you asked for" stop being the same answer.
+   limit 501;
+$fn$;
+
+revoke all on function public.my_session_series() from public, anon;
+grant execute on function public.my_session_series() to authenticated;
+
+-- ▶ seven-policies-that-were-only-overhead.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The seven policies 142 recorded but would not endorse, and the two
+-- narrowings it would not decide.
+--
+-- 142-twenty-six-more-policies-that-only-existed-live.sql wrote every live
+-- policy into the repo so the file would stop lying about what is running. It
+-- named seven of them strictly redundant with a policy this repo already
+-- declares, and then deliberately stopped: "dropping them is a separate change
+-- with its own evidence to gather." This is that change, and this is that
+-- evidence.
+--
+-- They are the reason the performance advisor reported 570
+-- multiple_permissive_policy findings. Postgres evaluates EVERY permissive
+-- policy for a role+command and ORs the results, so a redundant one is a
+-- second predicate executed per row, per query, forever, to reach a verdict the
+-- first one had already reached.
+--
+-- ── How each was proven, and why reading was not enough ───────────────────
+--
+-- Reading two predicates and agreeing they look alike is how you drop the one
+-- policy that was the only thing letting somebody read their own records. So
+-- none of this was done by reading. For each policy the method was:
+--
+--   1 · Both definitions read from pg_policies on the live project — the
+--       actual qual and with_check, not what any file claims.
+--   2 · Commands and roles compared. All seven pairs match on both: every
+--       policy involved is PERMISSIVE and granted to {public}, and no FOR ALL
+--       is asked to hide behind a FOR SELECT.
+--   3 · Fixtures seeded on the live tables (five of the six were empty, so
+--       there was nothing to test against otherwise), then EVERY one of the 20
+--       real users impersonated via request.jwt.claims under the
+--       `authenticated` role, and the exact set of rows each could see
+--       recorded — with the narrow policy present, and again with it dropped.
+--       Then the writes: UPDATE and DELETE row counts, and INSERTs both
+--       permitted and forbidden, for every user against every FOR ALL policy.
+--   4 · The half that actually matters: not "does the wide one admit these
+--       rows" but "is there ANY row the narrow one admits and the wide one
+--       does not". That is a search for a counterexample over the full cross
+--       product of live rows and live users, in both directions.
+--
+-- The whole harness ran inside a transaction that was rolled back, so the
+-- fixtures and the trial drops never existed outside it. Table counts were
+-- re-measured afterwards against their pre-run values and all 25 matched.
+--
+-- Result: 0 rows lost, for every user, on every table, for every command —
+-- dropping each policy alone, and dropping all seven together. 0 errors.
+-- And the test was not vacuous: the narrow predicates admitted 8, 8, 8, 16,
+-- 160, 32 and 20 (user, row) pairs respectively, and the write probes
+-- discriminated properly — trainers permitted, non-trainers refused.
+--
+--   bc_self  ⊂ cust_read   billing_customers · SELECT · {public}
+--   ca_self  ⊂ conn_read   connect_accounts  · SELECT · {public}
+--   sub_self ⊂ sub_read    subscriptions     · SELECT · {public}
+--     All three are the same shape and the strongest case of the seven. The
+--     wide policy's qual is literally `<narrow qual> OR EXISTS(... owner ...)`.
+--     The narrow predicate is a syntactic disjunct of the wide one, so A ⊨
+--     A OR B holds whatever B does. Dropping them cannot narrow anything.
+--
+--   tp_manage = pkg_write  trainer_packages · ALL · {public}
+--     Not a subset — identical. Same command, same role, byte-identical qual
+--     AND with_check: `trainer_id = (select auth.uid())`. A duplicate.
+--
+--   tp_read_active ⊂ pkg_read   trainer_packages · SELECT · {public}
+--     `active = true` against `active OR trainer_id = (select auth.uid())`.
+--     trainer_packages.active is NOT NULL, so `active = true` and `active` are
+--     the same test and the three-valued-logic edge case cannot arise; even if
+--     it could, NULL is not TRUE under either form and neither admits the row.
+--
+--   exvid_write = exvid_trainer_rw   exercise_videos · ALL · {public}
+--     Same command, same role, same predicate — the only difference was
+--     `(select auth.uid())` against a bare `auth.uid()`, which is the same
+--     value (auth.uid() is STABLE) computed at a different frequency. 145
+--     rewrites the survivor to the hoisted form, so the cheaper one is what is
+--     left standing.
+--
+--   profiles_self_rw ≈ profiles_self   profiles · ALL · {public}
+--     142 wrote "≈" and it was right to be suspicious, because the two are NOT
+--     textually equal: profiles_self carries an explicit with_check and
+--     profiles_self_rw has none. That is the difference that could have
+--     mattered — a FOR ALL policy also governs INSERT and UPDATE, and a policy
+--     with no WITH CHECK is not a policy that checks nothing. Postgres uses the
+--     USING expression as the check when WITH CHECK is omitted, so its
+--     effective check is `(select auth.uid()) = id`, which is profiles_self's
+--     with_check with the operands swapped. Proven rather than argued: with
+--     profiles_self_rw dropped, all 20 users could still UPDATE exactly their
+--     own row (1 row each) and all 20 were still REFUSED an UPDATE that moves
+--     `id` to somebody else. "≈" resolves to "=". The verdict is redundant.
+--
+-- Roles: every policy here is granted to {public}, which is anon and
+-- authenticated and everything else. The sweep above covers `authenticated`;
+-- `anon` was measured separately and was unchanged on all six tables. The
+-- remaining members of public that can reach these tables — postgres and
+-- service_role — both hold BYPASSRLS, so no policy has ever applied to them.
+--
+-- ── The two narrowings 142 recorded: both stay, and neither is a bug ──────
+--
+-- 142 flagged two places where the live replacements dropped an owner arm that
+-- part 38 had written on purpose, and asked whether either was an accident.
+-- Both were investigated against what the owner app actually reads. Neither is
+-- a live bug, and nothing is changed here.
+--
+--   avail_owner_r on availability_templates — MOOT. Part 38 said "A trainer's
+--   working pattern. Theirs to set; their gym's owner may see it", and the
+--   live replacements do leave an owner holding no `trainers` row covered by
+--   none of them. But the table is vestigial: it holds 0 rows, it is created
+--   by 01-schema.sql and given RLS by 38 and referenced by nothing else, no
+--   function in the database touches it, and no line of app code reads or
+--   writes it. The working pattern the app actually stores is
+--   `trainer_availability`, added later by 24-trainer-availability.sql, and its
+--   only policy `ta_own` is trainer-only and has never had an owner arm at
+--   all. So the narrowing takes nothing from anybody: there is no screen, and
+--   no row, on the other side of it.
+--
+--   waitlist_gym_r on session_waitlist — DELIBERATE, left alone. Part 38 did
+--   write the is_owner_of(s.tenant_id) arm and session_waitlist_trainer_r does
+--   not have it, so this one is a real narrowing of a real table. It is still
+--   not a bug, because nothing asks for it: the only reader of session_waitlist
+--   in the app is useSessionWaitlistCounts in src/ui/sessions.tsx, consumed
+--   only by app/(trainer)/calendar.tsx, and the file says why it goes through
+--   RLS — "session_waitlist_trainer_r scopes the queue to sessions they own".
+--   The client side reads its own rows. No owner screen reads the table, and
+--   the seven SECURITY DEFINER functions over it are all client- or
+--   trainer-scoped. Re-adding the arm would widen who can see which named
+--   members are queueing for a PT slot, on live data, to satisfy a comment in
+--   a superseded file rather than a screen. A narrowing nobody is hitting is
+--   left narrow.
+--
+-- ── What this file is ─────────────────────────────────────────────────────
+--
+-- Drops only. 142 still creates all seven above, and that is deliberate: it is
+-- the record of what the live database was running that night, and this file
+-- is the record of the seven being retired with evidence. Ordered after it, so
+-- a database built from this repo creates them and then drops them, exactly as
+-- production did. Idempotent, and a no-op against live where they are already
+-- gone.
+-- ─────────────────────────────────────────────────────────────────────────
+
+drop policy if exists bc_self on public.billing_customers;
+drop policy if exists ca_self on public.connect_accounts;
+drop policy if exists sub_self on public.subscriptions;
+drop policy if exists tp_manage on public.trainer_packages;
+drop policy if exists tp_read_active on public.trainer_packages;
+drop policy if exists exvid_write on public.exercise_videos;
+drop policy if exists profiles_self_rw on public.profiles;
+
+-- ▶ an-index-twice-and-fifteen-policies-that-asked-per-row.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The index that existed twice, and fifteen policies that asked who you were
+-- once per row.
+--
+-- Both of these are performance only. Neither changes who can read or write
+-- anything, and the second one is written so that it demonstrably cannot.
+--
+-- ── 1 · idx_exercise_videos_exercise_id ───────────────────────────────────
+--
+-- exercise_videos carried two indexes on the same column. "Reported identical"
+-- is not the same as identical, so they were compared field by field out of
+-- pg_index rather than by name: same table, same access method (btree), same
+-- indkey (2 — exercise_id), same operator class (3126), same indoption (0, so
+-- same sort direction and NULLS ordering), same collation (100), both
+-- non-unique, both non-primary, both valid, neither partial (indpred null),
+-- and neither backing a constraint. They are the same index twice.
+--
+-- Which one to drop was decided by evidence, not by name. 49-exercise-video-
+-- library.sql declares idx_exercise_videos_exercise, and that is the one the
+-- planner has actually been using: 974 scans against 0 for the other. The
+-- orphan is the live-only one that no file ever declared, it has never served
+-- a query, and dropping it puts the database back in agreement with the repo.
+--
+-- ── 2 · fifteen auth_rls_initplan policies ────────────────────────────────
+--
+-- Each of these called auth.uid(), auth.jwt() or auth.role() unwrapped inside
+-- a policy predicate, which makes Postgres re-evaluate it for every row it
+-- tests. Wrapping the call in a scalar subquery turns it into an InitPlan:
+-- computed once per statement, then compared against each row.
+--
+-- This is safe here for a reason worth writing down rather than assuming.
+-- Hoisting an expression out of a per-row loop is only sound if the expression
+-- is row-independent AND constant for the statement. All three auth functions
+-- were checked in pg_proc and all three are STABLE, which is exactly that
+-- guarantee. None of them reads a column, so none of them can vary by row.
+--
+-- The rewrites are otherwise character-for-character faithful, including the
+-- two details that would have been easy to smooth over and would have changed
+-- behaviour if they had been:
+--
+--   · mi_invitee_read uses NULLIF where its two siblings use COALESCE. NULLIF
+--     turns an empty email claim into NULL, so the comparison is NULL and the
+--     row is refused; COALESCE turns it into '' and compares. Preserved as
+--     found — member_invites keeps NULLIF, coach_invites and trainer_invites
+--     keep COALESCE.
+--   · coach_checklist_coach_write and workouts_coach_insert also call
+--     is_my_client(), which takes a COLUMN as its argument and therefore is
+--     row-dependent and cannot be hoisted. Only the auth.uid() half moves.
+--     Same for profiles_trainer_r_clients, where the auth.uid() being hoisted
+--     is the one inside the EXISTS.
+--
+-- Verified, not assumed. The same harness described in 144: fixtures seeded on
+-- all eleven affected tables, all 20 real users impersonated, and for each one
+-- the exact set of visible rows recorded on 13 tables before and after all
+-- fifteen rewrites — then 21 write probes per user covering the INSERT-only
+-- policies (fb_insert, workouts_coach_insert) that a read sweep cannot reach.
+-- Zero users saw a different row set on any table. Zero write outcomes
+-- changed. The probes discriminated: coaches could insert a workout for their
+-- own client and were refused for a stranger, users could insert their own
+-- feedback and were refused somebody else's, and those answers were identical
+-- on both sides of the rewrite. Whole thing inside a rolled-back transaction.
+--
+-- session_waitlist_service_rw is the one case with no rows to test against —
+-- session_waitlist and sessions are both empty. It got a different proof, and
+-- a complete one: its predicate references no column at all, so it is constant
+-- for the whole statement, and both forms were evaluated under anon,
+-- authenticated and service_role and agreed in all three — including the TRUE
+-- case, which is the one that matters. (service_role holds BYPASSRLS anyway,
+-- so this policy has never been what grants it access.)
+--
+-- Idempotent, drop-and-create. A no-op against live, where it has been run.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ═══ 1 · the duplicate index ══════════════════════════════════════════════
+
+drop index if exists public.idx_exercise_videos_exercise_id;
+
+-- ═══ 2 · auth.<fn>() hoisted to an InitPlan, fifteen times ════════════════
+
+-- NULLIF, not COALESCE. See the header.
+drop policy if exists mi_invitee_read on public.member_invites;
+create policy mi_invitee_read on public.member_invites for select
+  using (lower(email) = lower(NULLIF(((select auth.jwt()) ->> 'email'::text), ''::text)));
+
+drop policy if exists ci_invitee_read on public.coach_invites;
+create policy ci_invitee_read on public.coach_invites for select
+  using (lower(email) = lower(COALESCE(((select auth.jwt()) ->> 'email'::text), ''::text)));
+
+drop policy if exists ti_invitee_read on public.trainer_invites;
+create policy ti_invitee_read on public.trainer_invites for select
+  using (lower(email) = lower(COALESCE(((select auth.jwt()) ->> 'email'::text), ''::text)));
+
+drop policy if exists fb_insert on public.feedback;
+create policy fb_insert on public.feedback for insert
+  with check (user_id = (select auth.uid()));
+
+drop policy if exists fb_own on public.feedback;
+create policy fb_own on public.feedback for select
+  using (user_id = (select auth.uid()));
+
+drop policy if exists settlements_trainer_read on public.payroll_settlements;
+create policy settlements_trainer_read on public.payroll_settlements for select
+  using (trainer_id = (select auth.uid()));
+
+-- Only the auth.uid() inside the EXISTS hoists; my_role() stays where it is.
+drop policy if exists profiles_trainer_r_clients on public.profiles;
+create policy profiles_trainer_r_clients on public.profiles for select
+  using ((my_role() = 'trainer'::text) and (exists (select 1 from coach_clients
+    where coach_clients.trainer_id = (select auth.uid()) and coach_clients.id = profiles.id)));
+
+drop policy if exists session_waitlist_service_rw on public.session_waitlist;
+create policy session_waitlist_service_rw on public.session_waitlist for all
+  using ((select auth.role()) = 'service_role'::text);
+
+drop policy if exists coach_checklist_client_read on public.coach_checklist_items;
+create policy coach_checklist_client_read on public.coach_checklist_items for select
+  using (client_id = (select auth.uid()));
+
+-- is_my_client() takes a column and cannot be hoisted. Only the uid half moves.
+drop policy if exists coach_checklist_coach_write on public.coach_checklist_items;
+create policy coach_checklist_coach_write on public.coach_checklist_items for all
+  using ((coach_id = (select auth.uid())) and is_my_client(client_id))
+  with check ((coach_id = (select auth.uid())) and is_my_client(client_id));
+
+drop policy if exists coach_exercises_self on public.coach_exercises;
+create policy coach_exercises_self on public.coach_exercises for all
+  using (coach_id = (select auth.uid()))
+  with check (coach_id = (select auth.uid()));
+
+drop policy if exists workouts_coach_insert on public.workouts;
+create policy workouts_coach_insert on public.workouts for insert
+  with check (is_my_client(user_id) and (logged_by = (select auth.uid())));
+
+drop policy if exists goal_targets_own on public.goal_targets;
+create policy goal_targets_own on public.goal_targets for all
+  using (client_id = (select auth.uid()))
+  with check (client_id = (select auth.uid()));
+
+drop policy if exists planned_days_own on public.planned_days;
+create policy planned_days_own on public.planned_days for all
+  using (client_id = (select auth.uid()))
+  with check (client_id = (select auth.uid()));
+
+-- 38-tenant-isolation.sql created this with a bare auth.uid(). 144 dropped its
+-- duplicate exvid_write, which already had the hoisted form; this brings the
+-- survivor up to it so nothing was lost in the trade.
+drop policy if exists exvid_trainer_rw on public.exercise_videos;
+create policy exvid_trainer_rw on public.exercise_videos for all
+  using (trainer_id = (select auth.uid()))
+  with check (trainer_id = (select auth.uid()));

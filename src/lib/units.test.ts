@@ -197,7 +197,9 @@ ok(typeof convertedNote('in') === 'string', 'so are inches');
   // of asserting the span is the cases where it would not.
   const two = [row('2026-01-04', 81.6, 24.1, 33.2), row('2026-03-04', 79.4, 22.6, 33.9)];
 
-  const kgLines = progressChangeLines(two);
+  // 'kg' stated rather than defaulted: `progressChangeLines` no longer invents
+  // a unit when a caller forgets to pass one.
+  const kgLines = progressChangeLines(two, 'kg');
   ok(kgLines[0] === 'Weight 81.6 kg → 79.4 kg (−2.2 kg)', `metric is untouched, got "${kgLines[0]}"`);
 
   const lbLines = progressChangeLines(two, 'lb');

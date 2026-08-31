@@ -267,15 +267,30 @@ export function occurrenceDetail(v: FeeVerdict, noticeHours: number): string {
   }
 }
 
-/** What ending the arrangement does. Every branch says what it costs, because
- *  the whole point is that it costs nothing. */
-export function seriesDetail(later: number, nextStartsAt: string): string {
-  const keeps = 'The next session stays booked — cancel that one separately if you need to.';
+/**
+ * What ending the arrangement does. Every branch says what it costs, because
+ * the whole point is that it costs nothing.
+ *
+ * `nextStartsAt` is not printed — it is read only for whether there IS a next
+ * occurrence, and that is what it is here for. The sentence used to end with
+ * "The next session stays booked — cancel that one separately" unconditionally,
+ * including on an arrangement with NOTHING on the books at all: no next
+ * Tuesday, nothing to cancel separately, and a member sent looking for a
+ * session that does not exist. An empty string, a null and an unparseable
+ * value all mean the same thing — the caller could not name a next occurrence
+ * — and none of them may be reported as one.
+ */
+export function seriesDetail(later: number, nextStartsAt: string | null | undefined): string {
+  const hasNext = typeof nextStartsAt === 'string' && nextStartsAt.trim().length > 0
+    && Number.isFinite(Date.parse(nextStartsAt));
+  const keeps = ' The next session stays booked — cancel that one separately if you need to.';
   if (later <= 0) {
-    return `Stops it repeating. There are no sessions after this one on the books, so nothing is removed and nothing is charged. ${keeps}`;
+    return hasNext
+      ? `Stops it repeating. There are no sessions after this one on the books, so nothing is removed and nothing is charged.${keeps}`
+      : 'Stops it repeating. There are no sessions on the books at all, so nothing is removed and nothing is charged.';
   }
   const n = later === 1 ? '1 later session' : `${later} later sessions`;
-  return `Stops it repeating and removes ${n} from both calendars. No cancellation fee is charged for any of them, however close they are. ${keeps}`;
+  return `Stops it repeating and removes ${n} from both calendars. No cancellation fee is charged for any of them, however close they are.${hasNext ? keeps : ''}`;
 }
 
 /** The whole of the promise, in one sentence a test can hold the app to. */

@@ -55,14 +55,33 @@ import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
 import { registerForPush, pushAvailable } from './pushNotifications';
 import type { WeightUnit, LengthUnit } from '../lib/units';
+import { resolveUnits, deviceRegion, type UnitSource } from '../lib/unitPreference';
 
 // Re-exported because every client screen has imported the weight unit from
 // here since before there was a units module, and the shape of the union is
 // not this provider's to own — src/lib/units.ts owns it, next to the
 // conversions that depend on it.
 export type { WeightUnit, LengthUnit };
+export type { UnitSource };
 
-interface Settings { notifPush: boolean; weightUnit: WeightUnit; lengthUnit: LengthUnit }
+/**
+ * What is STORED. Both units are nullable, and that is the whole point of this
+ * change: `clients.weight_unit` is NULL until somebody taps a unit, and until
+ * this interface could say so, `useSettings()` had nowhere to put "never
+ * chosen" and resolved it to 'kg' before any screen saw it. A member in the
+ * United States was then shown kilograms on thirty screens, stated with exactly
+ * the confidence of a real answer, and nothing on any of them admitted that
+ * nobody had asked. See src/lib/unitPreference.ts.
+ */
+interface Settings { notifPush: boolean; weightUnit: WeightUnit | null; lengthUnit: LengthUnit | null }
+
+/**
+ * What may be WRITTEN. Narrower than `Settings` on purpose: null is a state the
+ * store arrives in, never one a screen may put it into. A `set({ weightUnit:
+ * null })` would have to mean "un-choose", which no control offers and which
+ * would race the read that is forbidden from overwriting a device's value.
+ */
+type SettingsPatch = { notifPush?: boolean; weightUnit?: WeightUnit; lengthUnit?: LengthUnit };
 
 /** What happened when somebody asked for push to be turned ON.
  *   · 'on'          — a token was obtained and this handset is registered.
@@ -80,8 +99,39 @@ interface Settings { notifPush: boolean; weightUnit: WeightUnit; lengthUnit: Len
  *                     have been warned it might happen. Retried every launch. */
 export type PushResult = 'on' | 'no-build' | 'os-refused' | 'off' | 'off-pending';
 
-interface SettingsValue extends Settings {
-  set: (patch: Partial<Settings>) => void;
+/**
+ * What a screen sees.
+ *
+ * `weightUnit` / `lengthUnit` are NOT nullable here, and that is the trade-off
+ * this change makes deliberately rather than by omission — the reasoning is
+ * written out in full in src/lib/unitPreference.ts. In short: an amount with no
+ * currency has no true value to fall back on, so `money()` withholds it; a
+ * weight has a true value in every unit at once, so withholding it would blank
+ * the dashboard, the goal, the scans and two dozen more screens for anybody who
+ * has not visited Settings. So an unchosen preference falls to the phone's own
+ * region — the best available evidence, and right for almost everybody it is
+ * applied to — and the guess is kept separable from an answer instead of being
+ * laundered into one.
+ *
+ * `weightChosen` / `lengthChosen` are the honest values. They are what Settings
+ * tints its pills from, what decides whether onboarding asks, and the only
+ * thing that is ever written back to the account.
+ */
+interface SettingsValue {
+  notifPush: boolean;
+  /** The unit to render in — chosen if there is a choice, otherwise read off
+   *  the handset's region. Always a real unit. */
+  weightUnit: WeightUnit;
+  lengthUnit: LengthUnit;
+  /** What the member actually picked, or null because nobody has asked them. */
+  weightChosen: WeightUnit | null;
+  lengthChosen: LengthUnit | null;
+  /** 'chosen' or 'device', per unit. A screen that is ABOUT the preference says
+   *  so out loud; a screen that merely prints a weight does not, because a line
+   *  of apology on thirty screens is a nag that gets no question answered. */
+  weightSource: UnitSource;
+  lengthSource: UnitSource;
+  set: (patch: SettingsPatch) => void;
   /** Turn push on or off. Not folded into `set` because this one has to be
    *  awaited and has to be able to answer 'the OS said no' — a switch that
    *  slides across and then silently receives nothing is the bug this replaced. */
@@ -93,16 +143,37 @@ interface SettingsValue extends Settings {
   unitsLoaded: boolean;
 }
 
-// Metric, because Repple is a UAE product and the UAE is metric — as is every
-// country the app is sold into except the United States. The imperial option
-// exists because a large share of the UAE's residents are American and British
-// expats who think in pounds, not because the default is in doubt.
+// ── There is no default unit any more, and that is the fix ────────────────
 //
-// This default is the APP's, and it stays out of the database: clients.weight_unit
-// is NULL for anybody who has not chosen, which is what lets this line change
-// later without overwriting the choice of everybody who deliberately picked kg.
-// See supabase/parts/61-unit-preference.sql.
-const DEFAULTS: Settings = { notifPush: true, weightUnit: 'kg', lengthUnit: 'cm' };
+// This line used to read `weightUnit: 'kg', lengthUnit: 'cm'`, with a paragraph
+// above it explaining that metric is right for every market this product is
+// sold into except the United States. That paragraph was true and the line was
+// still the bug. `clients.weight_unit` is NULL until somebody taps a unit — the
+// store was honest — and this constant resolved that NULL to 'kg' before
+// `useSettings()` handed anything to a screen, so no screen in the app could
+// tell a member who chose kilograms from a member nobody had ever asked. An
+// American member who never opened Settings read kilograms everywhere, said
+// with the confidence of their own choice, with nothing anywhere admitting it
+// was the app's guess. Exactly the shape of the currency bug `money()` was
+// fixed for.
+//
+// So the units start as null and stay null until a person answers. What to
+// RENDER in the meantime is decided by `resolveUnits` from the handset's own
+// region, separately, and carries a source so it can be labelled — see
+// src/lib/unitPreference.ts for why that is the side of the trade-off this
+// takes. The push default is unchanged: a boolean has no third state to lose.
+const DEFAULTS: Settings = { notifPush: true, weightUnit: null, lengthUnit: null };
+
+/**
+ * The handset's region, read once for the life of the process.
+ *
+ * Once, because it cannot change while the app is running and because a value
+ * that is re-derived per render would make the resolved unit a new object every
+ * time. Read at module load rather than in an effect so the FIRST paint is
+ * already in the right unit: resolving on a second pass is precisely the
+ * kg→lb flicker `unitsLoaded` exists to let screens avoid.
+ */
+const DEVICE_REGION = deviceRegion();
 const Ctx = createContext<SettingsValue | null>(null);
 
 const isWeightUnit = (v: unknown): v is WeightUnit => v === 'kg' || v === 'lb';
@@ -321,7 +392,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [rev, cacheLoaded]);
 
-  const set = (patch: Partial<Settings>) => {
+  const set = (patch: SettingsPatch) => {
     const next = { ...latest.current, ...patch };
     latest.current = next;
     setS(next);
@@ -330,9 +401,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // because push permission genuinely is a property of this handset.
     const uid = writable.current;
     if (!uid || (patch.weightUnit === undefined && patch.lengthUnit === undefined)) return;
+    // Read off the PATCH, not off `next`. `next.weightUnit` is null for anybody
+    // who has never chosen, and writing that null back would be this provider
+    // publishing "not chosen" over an answer given on another handset — the
+    // mirror image of the read guard below, and the reason `SettingsPatch`
+    // cannot express a null in the first place. Only a unit somebody just
+    // tapped goes up.
     const row: Record<string, string> = {};
-    if (patch.weightUnit !== undefined) row.weight_unit = next.weightUnit;
-    if (patch.lengthUnit !== undefined) row.length_unit = next.lengthUnit;
+    if (patch.weightUnit !== undefined) row.weight_unit = patch.weightUnit;
+    if (patch.lengthUnit !== undefined) row.length_unit = patch.lengthUnit;
     // Written back to whichever table the read found the account in, so a
     // coach's choice lands somewhere durable and a client's keeps landing
     // where every other screen already reads it from.
@@ -357,6 +434,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return (await registerForPush()) ? 'on' : 'os-refused';
   };
 
-  return <Ctx.Provider value={{ ...s, set, setPushEnabled, unitsLoaded }}>{children}</Ctx.Provider>;
+  // The one place the guess is made, and the one place it is kept apart from
+  // an answer. Screens get a unit they can always render; the `*Chosen` and
+  // `*Source` fields beside it are what stop that unit being mistaken for
+  // something the member said.
+  const units = resolveUnits(s.weightUnit, s.lengthUnit, DEVICE_REGION);
+  return (
+    <Ctx.Provider value={{ notifPush: s.notifPush, ...units, set, setPushEnabled, unitsLoaded }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
 export function useSettings(): SettingsValue { const v = useContext(Ctx); if (!v) throw new Error('useSettings must be used inside <SettingsProvider>'); return v; }

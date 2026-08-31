@@ -48,6 +48,7 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
+import { deviceUnitNote } from '../../src/lib/unitPreference';
 import { useAuth } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
@@ -214,8 +215,28 @@ export default function Settings() {
   // something that looks different. convertedNote returns null for the metric
   // options, so the metric majority is not lectured about a conversion that is
   // not happening.
-  const weightNote = convertedNote(st.weightUnit);
-  const lengthNote = convertedNote(st.lengthUnit);
+  //
+  // ── And the sentence that has to come FIRST ──────────────────────────────
+  //
+  // `clients.weight_unit` is NULL until somebody taps one of these pills, and
+  // for anybody who never has, the tinted pill below is the app's guess off the
+  // phone's region rather than their answer. This is the screen that owns that
+  // preference, so this is where the guess is admitted — `deviceUnitNote`
+  // returns null once a real choice exists, so nobody who has chosen is told
+  // anything.
+  //
+  // It wins over `convertedNote` when both would apply. Telling an American
+  // member that their pounds are converted from the kilograms on their record
+  // is true, and it answers a question they never asked while burying the one
+  // they should be asked: nobody ever checked that they read in pounds at all.
+  //
+  // The guessed unit is still TINTED rather than left unselected. An untinted
+  // row would say "no answer" more purely and read as "the app is showing you
+  // nothing", and a screen reader would announce two unselected radios beside a
+  // Weight column full of pounds. The pill shows what is in use; the line under
+  // it says who decided.
+  const weightNote = deviceUnitNote(st.weightUnit, st.weightSource) ?? convertedNote(st.weightUnit);
+  const lengthNote = deviceUnitNote(st.lengthUnit, st.lengthSource) ?? convertedNote(st.lengthUnit);
   const [legal, setLegal] = useState<'privacy' | 'terms' | null>(null);
   const [dataBusy, setDataBusy] = useState(false);
   // null = not read yet · 'failed' = the read itself failed · otherwise the

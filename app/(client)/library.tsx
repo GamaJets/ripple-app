@@ -53,10 +53,16 @@ import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { catalogueValue as cap, num } from '../../src/lib/format';
 import { Image as ExpoImage } from 'expo-image';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { useSettings } from '../../src/ui/settings';
+import { liftLabel } from '../../src/lib/units';
 import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
 
 export default function Library() {
+ // The unit this member reads a LIFTED load in. Chosen if they have chosen,
+ // otherwise read off the phone's region and said so in Settings — see
+ // src/lib/unitPreference.ts. Never a 'kg' typed after a figure.
+ const wu = useSettings().weightUnit;
  const t = useTheme();
  const router = useRouter();
  const goBack = useBackFromHub('(client)');
@@ -410,11 +416,15 @@ export default function Library() {
        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: sp.md, alignItems: 'center' }}>
         {banked.map((s, i) => (
          <Pressable key={i} onPress={() => setBanked((p) => p.filter((_, k) => k !== i))} hitSlop={6}
-          accessibilityRole="button" accessibilityLabel={`Remove set ${i + 1}, ${s[0]} reps at ${s[1]} kilos`}
+          accessibilityRole="button" accessibilityLabel={`Remove set ${i + 1}, ${s[0]} reps at ${s[1] > 0 ? liftLabel(s[1], wu) : 'bodyweight'}`}
           style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           {/* 0 kg is a bodyweight set, not a missing weight — so it is named
-              rather than printed as "0kg", which reads like a lost figure. */}
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{s[1] > 0 ? `${s[1]}kg` : 'bodyweight'}</Text>
+              rather than printed as "0kg", which reads like a lost figure.
+              The load itself now reads in the member's own unit: it was typed
+              into the box below THROUGH `readLift`, which stores kilograms, and
+              printing those kilograms straight back handed a pounds member a
+              different number from the one they had just typed. */}
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{s[1] > 0 ? liftLabel(s[1], wu) : 'bodyweight'}</Text>
           <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
          </Pressable>
         ))}

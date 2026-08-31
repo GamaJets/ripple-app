@@ -39,6 +39,7 @@ import { currentStreak, weekStats, personalRecords, streakRisk, freezeBudget, cu
 import { severeSummary } from '../../src/lib/injuries';
 import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
+import { NotificationBell } from '../../src/ui/notifications';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -245,12 +246,15 @@ export default function Home() {
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
             <Ghost icon="search" label={undefined} onPress={() => router.push('/(client)/explore')} />
-            <View>
-              <Ghost icon="bell" onPress={() => router.push('/(client)/messages')} />
-              {(coachNotes.length > 0 || !!ann) ? (
-                <View style={{ position: 'absolute', top: 2, right: 2, width: 9, height: 9, borderRadius: 5, backgroundColor: t.brand, borderWidth: 2, borderColor: t.bg }} />
-              ) : null}
-            </View>
+            {/* The bell opens the inbox now. It routed to '/(client)/messages'
+                for as long as it has existed, because `notifications` had a
+                writer and no reader — so "your session was cancelled" opened a
+                chat thread that did not mention it, and the cancellation itself
+                was readable nowhere. Its dot was fed by coach notes and the
+                gym announcement, which are BOTH rendered further down this same
+                screen, so nothing is lost by dropping it: the mark on the bell
+                now counts unread notifications, which is what a bell claims. */}
+            <NotificationBell group="client" />
           </View>
         </View>
 

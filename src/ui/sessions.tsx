@@ -265,7 +265,13 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
       setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'booked', clientId: who, released: false } : x)));
       if (s && s.startsAt) {
         const start = new Date(s.startsAt);
-        scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000));
+        // With a route. Without one this reminder was the only notification in
+        // the app that opened the front door: `addNotificationTapListener`
+        // reads `data.route` and does nothing when there is not one, so an
+        // hour before their session a client tapped "Session in 1 hour" and
+        // landed on the dashboard, with the session they had just been
+        // reminded of one more tap away on the calendar.
+        scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000), { route: '/(client)/calendar' });
       }
     };
     if (!USE_SUPABASE || !uid) { apply(); return false; }

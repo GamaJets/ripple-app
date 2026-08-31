@@ -87,6 +87,11 @@ export async function classSummary(fromISO: string, toISO: string): Promise<Clas
         startsAt: String(r.starts_at || ''), capacity: Number(r.capacity || 0),
           booked: Number(r.booked || 0), attended: Number(r.attended || 0),
       }));
+      // No error and no array. `class_attendance_summary` returns SETOF, so this
+      // should not happen — but the previous version fell through this branch to
+      // the `return []` below, which is the offline path's honest "no classes"
+      // and is a fabricated one here. Unknown is null, as everywhere else.
+      return null;
     } catch { return null; }
   }
   // No rows means no classes in range. Return that honestly rather than

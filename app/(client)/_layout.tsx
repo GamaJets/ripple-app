@@ -94,6 +94,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="intake" options={{ href: null, title: 'Your Intake' }} />
       <Tabs.Screen name="my-coach" options={{ href: null, title: 'Your Coach' }} />
       <Tabs.Screen name="coach-documents" options={{ href: null, title: 'Paperwork' }} />
+      <Tabs.Screen name="standing" options={{ href: null, title: 'Standing Appointments' }} />
       <Tabs.Screen name="compare" options={{ href: null, title: 'Before & After' }} />
       <Tabs.Screen name="attendance" options={{ href: null, title: 'Attendance' }} />
       <Tabs.Screen name="injury-doc" options={{ href: null, title: 'Read a Document' }} />

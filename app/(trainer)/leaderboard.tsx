@@ -14,9 +14,13 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
+import { useSettings } from '../../src/ui/settings';
+import { weightDeltaIn } from '../../src/lib/units';
 import { useRoster } from '../../src/ui/roster';
 
 export default function Leaderboard() {
+  // The COACH's unit, not the client's. This screen is read by the coach.
+  const wu = useSettings().weightUnit;
   const t = useTheme();
   const router = useRouter();
   const { roster, status } = useRoster();
@@ -116,7 +120,13 @@ export default function Leaderboard() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {`${c.adherence}% adherence`} · {scanned ? `${(c.weightDelta as number) > 0 ? '+' : ''}${c.weightDelta} kg` : 'no scans — progress not counted'}</Text>
+                {/* The coach's own unit, not the client's — this row is read by
+                    the coach, and app/(trainer)/client-training.tsx already
+                    draws that distinction. The delta is stored in kilograms and
+                    is converted as a SPAN through `weightDeltaIn`, so a genuine
+                    0.4 kg move does not alternate between "0 lb" and "1 lb"
+                    week to week off the back of nothing the client did. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {`${c.adherence}% adherence`} · {scanned ? `${(c.weightDelta as number) > 0 ? '+' : ''}${weightDeltaIn(c.weightDelta as number, wu)} ${wu}` : 'no scans — progress not counted'}</Text>
                 <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
                   <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.round((score / maxScore) * 100)}%` }} />
                 </View>

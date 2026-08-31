@@ -129,8 +129,15 @@ export default function OwnerEquipment() {
     Alert.alert('Serviced today?', `${e.name} will be recorded as serviced on ${today}.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Record', onPress: async () => {
+        // Said out loud: a service that was not written leaves the machine on
+        // the due list, and an owner told nothing reads the reloaded register
+        // as the record having been kept.
         try { await recordService(supabase, e.id, today); await load(); }
-        catch (err) { reportError('equipment.service', err); }
+        catch (err) {
+          reportError('equipment.service', err);
+          Alert.alert('Could not record that service',
+            (err instanceof Error && err.message) || 'Nothing was written. Check your connection and try again.');
+        }
       } },
     ]);
   };
@@ -141,8 +148,16 @@ export default function OwnerEquipment() {
     Alert.alert(verb + '?', `${e.name}${e.quantity > 1 ? ` (${e.quantity} units)` : ''}`, [
       { text: 'Cancel', style: 'cancel' },
       { text: verb, style: next === 'out_of_service' ? 'destructive' : 'default', onPress: async () => {
+        // Said out loud. This is the register's most physical write — a machine
+        // marked out of service is one nobody is meant to stand on — and a
+        // refusal that only reached the error log left it marked in service
+        // under an owner who believed otherwise.
         try { await setStatus(supabase, e.id, next); await load(); }
-        catch (err) { reportError('equipment.status', err); }
+        catch (err) {
+          reportError('equipment.status', err);
+          Alert.alert(`Could not ${verb.toLowerCase()}`,
+            (err instanceof Error && err.message) || 'The register is unchanged. Check your connection and try again.');
+        }
       } },
     ]);
   };

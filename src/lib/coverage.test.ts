@@ -246,10 +246,17 @@ ok(money(123456, 'GBP') === 'GBP 1,234.56', 'and it formats whatever currency it
 // and says the gym has not set one. It is emphatically NOT a bare number —
 // "1,234.56" beside a Pay button is read in whatever money the reader happens
 // to be thinking in, which is the wrong-amount bug wearing a disguise.
-ok(money(123456) === null, 'no currency means no figure — never a guessed one, never a bare one');
+// `undefined` rather than an omitted argument: the parameter is REQUIRED now
+// (exportShare.ts, the last bare call in the tree, passes the gym's currency),
+// so a forgotten currency fails to compile and cannot be written as a test. The
+// value that used to arrive from forgetting is still asserted on, because it is
+// what a caller reading `tenant?.currency` off an unloaded tenant still hands
+// over — and it must stay a refusal rather than become a guess.
+ok(money(123456, undefined) === null, 'no currency means no figure — never a guessed one, never a bare one');
 ok(money(123456, null) === null, 'an explicitly unknown currency is the same refusal');
 ok(money(123456, '') === null, 'and so is an empty one, which is how an unset tenants.currency arrives after a trim');
-ok(money(null) === null, 'neither amount nor currency is still just one dash');
+ok(money(null, 'GBP') === null, 'no amount is still just one dash, whatever currency it would have been in');
+ok(money(null, undefined) === null, 'neither amount nor currency is still just one dash');
 
 
 // ── timetable and attendance ────────────────────────────────────────────────
@@ -4594,7 +4601,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(progressChange(ragged, 'muscleKg') === null, 'and muscle has never been measured at all');
 
   // direction is read off the sign, so a deliberate gain is not reported as a loss
-  const lines = progressChangeLines([row('2026-01-04', 70, 15, 30), row('2026-03-04', 73, 15, 33)]);
+  const lines = progressChangeLines([row('2026-01-04', 70, 15, 30), row('2026-03-04', 73, 15, 33)], 'kg');
   ok(lines.some((l) => /muscle/i.test(l) && /up|\+|gain/i.test(l)),
     'putting on 3kg of muscle reads as a gain');
   // Measured twice and unchanged is a FACT, and it is reported: "15% → 15%".
@@ -4612,7 +4619,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(!/80\.0*,,/.test('') && csv.includes('80'), 'and a real figure is written plainly');
 
   // one scan: say what it is, do not dress it as progress
-  const single = progressSummary('Tim', [row('2026-01-04', 80, 22, 33)]);
+  const single = progressSummary('Tim', [row('2026-01-04', 80, 22, 33)], 'Repple', 'kg');
   ok(!/0\.0/.test(single), 'a lone scan is never summarised as a change of zero');
   ok(/80/.test(single), 'it states the reading instead');
 

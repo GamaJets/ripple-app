@@ -140,41 +140,6 @@ function TimeGrid({ t, hour, minute, onHour, onMinute }: {
   );
 }
 
-/**
- * The LOCAL date, in the SERIES' own zone, that an occurrence falls on —
- * `sessions.occurrence_on` exactly as supabase/parts/135 writes it.
- *
- * This exists because of the one line in `end_session_series` that decides
- * whether this feature keeps its promise. That function leaves every
- * occurrence ON OR BEFORE the date it is given and removes the ones after it,
- * and its default is TODAY — so calling it with the default removes the NEXT
- * occurrence along with all the rest. The sheet that calls it has just told
- * the coach, in as many words, that the next session stays booked: "we'll stop
- * after next Tuesday" is what ending a standing appointment means to the two
- * people in it. Passing this date is what makes that sentence true.
- *
- * Computed in the series' zone rather than the reader's because that is the
- * zone `occurrence_on` was written in, and a date one day out either deletes
- * the session the sheet promised to keep or leaves one extra standing.
- */
-function occurrenceDateOf(nextAt: string, tz: string): string | null {
-  const at = new Date(nextAt);
-  if (!Number.isFinite(at.getTime())) return null;
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(at);
-    const part = (kind: string) => parts.find((p) => p.type === kind)?.value;
-    const y = part('year'); const m = part('month'); const d = part('day');
-    if (y && m && d) return `${y}-${m}-${d}`;
-  } catch { /* the runtime does not know that zone; the reader's own clock is below */ }
-  // The zone was not one this device's Intl knows. The reader's own date is the
-  // fallback rather than giving up: a standing appointment is created from the
-  // coach's phone and stored against the zone that phone was standing in, so
-  // for the coach reading it these are the same date.
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-}
 
 let SEQ = 5000;
 
@@ -474,13 +439,26 @@ export default function TrainerSchedule() {
    * is the whole of the second half of the promise: called with its default,
    * `end_session_series` removes every occurrence after today, next Tuesday
    * included — the one session the sheet has just told the coach will stay
-   * booked. See `occurrenceDateOf`.
+   * booked. Part 143 moved that default into the function itself.
    */
   const endSeriesNow = async (s: RecurringSeries) => {
     const who = seriesWho(s);
-    const keepUntil = s.nextAt ? occurrenceDateOf(s.nextAt, s.tz) : null;
+    // No date is passed. This screen used to compute the next occurrence's own
+    // date and send it, because `end_session_series` defaulted `p_effective` to
+    // TODAY and deleted everything after it — next Tuesday included, the one
+    // session the sheet has just promised will stay booked.
+    //
+    // Part 143 moved that default into the function, where it belongs: a
+    // function that documents a promise and relies on every caller to supply it
+    // is describing the promise rather than keeping it, and this one is
+    // reachable from the client app, the SQL editor and whatever is written
+    // next. Computing it here as well is now not merely redundant but a
+    // liability: the client-side version fell back to the READER's date when
+    // their device's Intl did not know the series' zone, so a coach abroad by
+    // one calendar day would delete the session that was meant to survive, or
+    // leave one extra standing. The server knows the zone without asking.
     setEndBusy(true);
-    const res = await endSeries(s.id, keepUntil);
+    const res = await endSeries(s.id);
     setEndBusy(false);
     if (!res.ok) {
       Alert.alert(
@@ -509,7 +487,7 @@ export default function TrainerSchedule() {
       + (r.charged
         ? `The server reported a charge against this, which it should never do — check Late-Cancellation Fees below before you settle anything with ${who}.`
         : 'Nothing was charged for any of them, however close they were.')
-      + (s.nextAt && keepUntil
+      + (s.nextAt
         ? `\n\nThe next one — ${dateLabel(s.nextAt)} at ${timeLabel(s.nextAt)} — is still booked, on purpose. If that one has to go as well, cancel it on its own from that day and your notice policy prices that session alone.`
         : ''),
       [{ text: 'Done' }],

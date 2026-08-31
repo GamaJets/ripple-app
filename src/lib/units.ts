@@ -191,6 +191,14 @@ export function lengthDeltaIn(deltaCm: number | null | undefined, unit: LengthUn
 // against a metric rack, so converting a lifted load looked like a judgement
 // call rather than a sweep. It is a judgement call, and this is it.
 //
+// That last clause is now out of date, and deliberately left standing with its
+// correction rather than quietly rewritten: tools.tsx no longer does plate maths
+// against a metric rack. src/lib/plateMath.ts holds a rack per unit — the IWF
+// competition plates in kilograms, the American commercial set in pounds — and
+// the fill is done natively in whichever the client reads. Converting the metric
+// answer was never the fix: 25 lb really is 11.34 kg, and an instruction to load
+// an 11.34 kg plate is a correct number describing hardware that does not exist.
+//
 // ── A lifted weight is not a body weight, and needs a finer grain ──────────
 //
 // Everything above prints whole pounds, because the reading underneath is a
