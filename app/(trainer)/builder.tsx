@@ -123,7 +123,12 @@ export default function Builder() {
   // client, who simply found a different session waiting for them. That is the
   // meal-plan-chip bug in the most expensive place it can happen, which is
   // somebody's training.
-  const { roster, status: rosterStatus } = useRoster();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  // An injury recorded a minute ago should be on this page when the coach opens
+  // it, not after they next restart the app — this screen is where they check
+  // before deciding what to put somebody through.
+  useFocusEffect(useCallback(() => { refreshRoster(); }, [refreshRoster]));
+
   const { getProgram, assignProgram, clearProgram, status: programStatus } = useAssignedPrograms();
   const { templates, saveTemplate, status: tplStatus } = useProgramTemplates();
   const router = useRouter();

@@ -21,7 +21,7 @@
 // loaded — but `status` now says whether the list on screen is the server's
 // answer or the absence of one, so the Clients tab can stop asserting "no
 // clients yet" over a failure.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RosterClient } from '../lib/trainerMock';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
@@ -78,6 +78,10 @@ interface RosterValue {
   /** Resolves true only when the classification was stored server-side. It is
    *  always kept on this device, so false means "this phone only", not "lost". */
   setClientMode: (id: string, mode: CoachedMode) => Promise<boolean>;
+  /** Re-read the roster from the server. Screens call this on focus, so an
+   *  injury a client recorded a minute ago is on the coach's page by the time
+   *  they look at it. */
+  refresh: () => Promise<void>;
 }
 
 const Ctx = createContext<RosterValue | null>(null);
@@ -103,20 +107,23 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   // have none. With no session there is nothing to read and nothing to show —
   // there is no sample roster to fall back to any more, which is why the
   // no-session branch below sets 'ready' rather than filling the list.
-  useEffect(() => {
+  // Pulled out of the mount effect so a screen can ask for it again. The
+  // roster carried a client's injuries and read them once, at launch — so a
+  // coach who asked somebody to record one, watched them do it, and went back
+  // to their page was looking at the answer from before they asked.
+  const hydrate = useCallback(async (cancelled: () => boolean = () => false) => {
     if (!USE_SUPABASE) return;
-    let cancelled = false;
-    (async () => {
+    {
       try {
         // No session is a true answer, not a failed check. getUser() REJECTS
         // when nobody is signed in, and treating that as an error latched this
         // provider into 'error' on the first tick — before anybody had signed
         // in — where it stayed, because the effect never ran a second time.
         const { data: sess } = await supabase.auth.getSession();
-        if (cancelled) return;
+        if (cancelled()) return;
         if (!sess?.session) { setStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
-        if (cancelled) return;
+        if (cancelled()) return;
         if (authErr) { setStatus('error'); return; }
         const uid = auth?.user?.id;
         if (!uid) { setRoster([]); setStatus('ready'); return; }
@@ -155,7 +162,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const { data: cls, error } = await supabase.from('clients')
           .select('id, goal, diet, meals_per_day, avoid, mode, injuries').eq('trainer_id', uid)
           .order('id', { ascending: true }).limit(capLimit());
-        if (cancelled) return;
+        if (cancelled()) return;
         // Split apart what used to be one branch. A refused read is 'error'
         // whatever else we managed to load; an empty table with the manual list
         // intact is a real, complete answer.
@@ -309,11 +316,16 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const withUnread = unread
           ? mergeRoster(real, manual).map((c) => ({ ...c, unread: unread![c.id] ?? c.unread }))
           : mergeRoster(real, manual);
-        if (!cancelled) { setRoster(withUnread); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); }
-      } catch { if (!cancelled) setStatus('error'); }
-    })();
+        if (!cancelled()) { setRoster(withUnread); setStatus(partialFailure ? 'error' : partialRead ? 'partial' : 'ready'); }
+      } catch { if (!cancelled()) setStatus('error'); }
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    hydrate(() => cancelled);
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, hydrate]);
   /** Keep the coach's answer on this device. Persisted, because the server can
    *  only hold the narrowed one until the CHECK constraints are widened. */
   const rememberMode = (id: string, mode: CoachedMode) => {
@@ -468,7 +480,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   // Apply overrides on top of whatever mode the roster came with. What is left
   // here is only ever an answer the server has not taken yet.
   const shown = Object.keys(modeOverrides).length ? roster.map((c) => (modeOverrides[c.id] ? { ...c, mode: modeOverrides[c.id] } : c)) : roster;
-  return <Ctx.Provider value={{ roster: shown, status, addClient, removeClient, setClientMode }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ roster: shown, status, addClient, removeClient, setClientMode, refresh: () => hydrate() }}>{children}</Ctx.Provider>;
 }
 
 export function useRoster(): RosterValue {

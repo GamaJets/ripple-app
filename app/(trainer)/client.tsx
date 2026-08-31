@@ -48,7 +48,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
@@ -117,6 +117,11 @@ export default function ClientScreen() {
   const t = useTheme();
   const router = useRouter();
   const r = useRoster();
+  // An injury recorded a minute ago should be on this page when the coach opens
+  // it, not after they next restart the app — this screen is where they check
+  // before deciding what to put somebody through.
+  useFocusEffect(useCallback(() => { r.refresh(); }, [r]));
+
   const ap = useAssignedPrograms();
   const { tenant } = useTenant();
   // The coach's own unit. Weight is stored in kilograms whatever it was typed
