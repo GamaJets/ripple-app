@@ -95,7 +95,7 @@ export default function CheckIn() {
   const [adherence, setAdherence] = useState(0);
   const [note, setNote] = useState('');
 
-  const submit = () => {
+  const submit = async () => {
     // The range is checked against the number as typed, before any conversion,
     // so that the figure being judged is the figure on screen. Checking a
     // converted number against a metric range would reject 900 lb by quoting
@@ -111,7 +111,20 @@ export default function CheckIn() {
     const kg = weightToKg(weight, wu);
     if (kg == null) return;
     cd.setWeightKg(kg);
-    ci.addCheckIn({ weightKg: kg, energy, sleep, mood, adherence, note: note.trim() });
+    // `addCheckIn` resolves false when the insert never reached the server, and
+    // the result was thrown away — so "your coach can see this week's check-in"
+    // was printed whether or not anybody could. That sentence is the entire
+    // reason a person fills this in, and a client who believes their coach has
+    // their numbers does not send them again.
+    const sent = await ci.addCheckIn({ weightKg: kg, energy, sleep, mood, adherence, note: note.trim() });
+    if (!sent) {
+      Alert.alert(
+        'Not sent',
+        'Your check-in did not save, so your coach has not seen it. Your weight is on this phone and will go up with your profile, but the rest of this week — energy, sleep, mood, adherence and your note — is not saved anywhere. Check your connection and send it again.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
     Alert.alert('Check-in sent', 'Your coach can see this week\'s check-in and your weight has been updated.', [{ text: 'Done', onPress: () => router.back() }]);
   };
 

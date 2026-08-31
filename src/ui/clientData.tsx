@@ -271,7 +271,15 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         const { data: c, error: cErr } = await supabase
           .from('clients')
           .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours, water_goal_glasses')
-          .eq('id', sbUid).single();
+          .eq('id', sbUid).maybeSingle();
+        // maybeSingle, not single. `single()` treats NO ROW as the error
+        // PGRST116, and having no `clients` row is not a failure — it is the
+        // normal, permanent state of every coach and every gym owner, because
+        // provision_profile() gives a trainer signup a `trainers` row and no
+        // client one. So this reported 'error' on every coach launch, for ever,
+        // and being structural it never cleared: the whole coach app ran with a
+        // profile read it believed had failed. A row that is genuinely absent
+        // now comes back as null with no error, which is the true answer.
         if (cErr) { reportError('clientData.hydrate.clients', cErr); failed = true; }
         if (!cancelled && !cErr && c) {
           const r = c as any;
