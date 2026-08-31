@@ -10,6 +10,7 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { joinErrorMessage, normaliseCode } from '../lib/joinCode';
 import { shapeJoinCodes, spentCodeMessage, normaliseLabel, type JoinCodeRow, type RawJoinCode } from '../lib/joinCodes';
+import { shapeCodeReturns, type CodeReturnRow, type RawCodeReturn } from '../lib/codeReturn';
 import type { LoadStatus } from './loadStatus';
 import type { CoachedMode } from '../lib/types';
 
@@ -58,6 +59,67 @@ export async function fetchMyJoinCodes(): Promise<JoinCodesRead> {
   } catch (e) {
     reportError('joinCode.list', e);
     return { status: 'error', rows: [], reason: 'Your codes could not be read, so nothing here is a count.' };
+  }
+}
+
+/**
+ * What each code cost and what it brought back.
+ *
+ * A second read rather than more columns on my_join_codes(), because it is a
+ * strictly more expensive query — it walks purchases and relationships — and
+ * the codes list is opened far more often than the money is looked at. The two
+ * agree about which codes exist and what order they read in because
+ * my_code_returns() is built on the same CTEs; they can disagree about the
+ * headcount, deliberately, and part 98 says why: this one counts PEOPLE, once
+ * each, last touch, because it carries money.
+ *
+ * The status travels with the rows for the same reason it does above. An empty
+ * list under a failed read is not a coach whose channels earned nothing.
+ */
+export type CodeReturnsRead = { status: LoadStatus; rows: CodeReturnRow[]; reason?: string };
+
+export async function fetchMyCodeReturns(): Promise<CodeReturnsRead> {
+  if (!USE_SUPABASE) return { status: 'error', rows: [], reason: 'Sign in to Repple to see what your codes returned.' };
+  try {
+    const { data, error } = await supabase.rpc('my_code_returns');
+    if (error) {
+      reportError('joinCode.returns', error);
+      return { status: 'error', rows: [], reason: 'What your codes cost and returned could not be read, so nothing here is a figure.' };
+    }
+    return { status: 'ready', rows: shapeCodeReturns((data ?? []) as RawCodeReturn[]) };
+  } catch (e) {
+    reportError('joinCode.returns', e);
+    return { status: 'error', rows: [], reason: 'What your codes cost and returned could not be read, so nothing here is a figure.' };
+  }
+}
+
+/**
+ * Record what a code cost — or clear it.
+ *
+ * `cents` null CLEARS the record. That is the one call here where succeeding
+ * quietly matters: a coach who meant to erase a wrong number and was told
+ * nothing would keep comparing channels against it. So a failure is reported
+ * either way, and the caller re-reads rather than patching the row.
+ *
+ * `codeId` null is the coach's default code, which has no row of its own.
+ */
+export async function saveCodeSpend(codeId: string | null, cents: number | null): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple to record what a code cost.' };
+  try {
+    const { error } = await supabase.rpc('set_code_spend', { p_code_id: codeId, p_amount_cents: cents });
+    if (error) {
+      reportError('joinCode.spend', error);
+      return {
+        ok: false,
+        reason: cents == null
+          ? 'That could not be cleared, so the amount already recorded is still what your figures are worked out from.'
+          : 'That could not be saved, so your figures are still worked out from whatever was recorded before.',
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    reportError('joinCode.spend', e);
+    return { ok: false, reason: 'That could not be saved, so your figures are still worked out from whatever was recorded before.' };
   }
 }
 

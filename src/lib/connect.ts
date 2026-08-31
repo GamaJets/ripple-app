@@ -9,7 +9,25 @@ import { supabase } from './supabase';
 import { reportError } from './reportError';
 
 export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean }
-export interface TrainerPackage { id: string; trainer_id: string; name: string; price_cents: number; currency: string; sessions: number | null; active: boolean }
+/**
+ * A thing a trainer sells.
+ *
+ * `sessions` and `billing_interval` are the two axes, and part 97 forbids both
+ * at once: null/null is a one-off membership, N sessions is a pack bought once
+ * and drawn down, and 'month'/'year' is a subscription that charges again.
+ *
+ * `currency` is per package and is the only currency any figure about that
+ * package may be printed in — never a literal, and never the gym's current
+ * setting either, because a package sold last year in one currency was sold in
+ * that one whatever the gym charges in today.
+ *
+ * The column still carries `default 'usd'` from 21-connect, which predates the
+ * product being white-labelled and should inherit the tenant's currency
+ * instead. Nothing in this file relies on it: `createPackage` refuses to insert
+ * without an explicit currency, so the default is never the value that lands.
+ * See `pkgMoney` in src/lib/subscriptions.ts and tenants.currency in part 99.
+ */
+export interface TrainerPackage { id: string; trainer_id: string; name: string; price_cents: number; currency: string; sessions: number | null; billing_interval: string | null; active: boolean }
 export interface Purchase { id: string; trainer_id: string | null; package_id: string | null; amount_cents: number | null; sessions_total: number | null; sessions_used: number; status: string; created_at: string }
 
 const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
@@ -56,11 +74,32 @@ export async function fetchMyPackages(): Promise<TrainerPackage[] | null> {
   } catch { return null; }
 }
 
-export async function createPackage(p: { name: string; price_cents: number; sessions: number | null; currency?: string }): Promise<{ ok: boolean; error?: string }> {
+/**
+ * Put a package on sale.
+ *
+ * `billing_interval` omitted or null keeps the behaviour every existing caller
+ * had: a one-off charge. 'month' or 'year' makes it a subscription, and the
+ * client is then charged again every month or year until somebody stops it —
+ * which is a large enough difference that it is never inferred from anything,
+ * only ever passed in explicitly.
+ */
+export async function createPackage(p: { name: string; price_cents: number; sessions: number | null; currency: string; billing_interval?: 'month' | 'year' | null }): Promise<{ ok: boolean; error?: string }> {
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return { ok: false, error: 'Not signed in.' };
-    const { error } = await supabase.from('trainer_packages').insert({ trainer_id: uid, name: p.name, price_cents: p.price_cents, sessions: p.sessions, currency: p.currency || 'usd', active: true });
+    // No fallback currency, on purpose. This used to be `p.currency || 'usd'`,
+    // which is a literal that silently applies — and Repple is white-labelled,
+    // so there is no currency that is right for both a London gym and a Dubai
+    // one. A package with no currency is not created; the coach is told the gym
+    // has not set one. See tenants.currency (part 99).
+    const currency = (p.currency || '').trim();
+    if (!currency) return { ok: false, error: 'Your gym has not set a currency yet, so there is nothing to price this in. An owner sets it in the gym settings.' };
+    const interval = p.billing_interval ?? null;
+    // Part 97 refuses this combination in the database; refusing it here too
+    // turns a constraint violation into a sentence. A recurring pack would
+    // charge again every month for credits that are granted once.
+    if (interval && p.sessions != null) return { ok: false, error: 'A recurring package cannot also be a session pack — sessions are granted once and nothing renews them.' };
+    const { error } = await supabase.from('trainer_packages').insert({ trainer_id: uid, name: p.name, price_cents: p.price_cents, sessions: p.sessions, billing_interval: interval, currency, active: true });
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -94,6 +133,30 @@ export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPa
     if (error) { reportError('connect.fetchTrainerPackages', error); return null; }
     return (data as TrainerPackage[]) ?? [];
   } catch { return null; }
+}
+
+/**
+ * The currency each of a set of packages is priced in.
+ *
+ * `client_purchases` records `amount_cents` and no currency at all, so the only
+ * place the unit of a past purchase is written down is the package it was
+ * bought from. That makes an amount unlabelled whenever the package is gone or
+ * unreadable — an inactive package is invisible to the client who bought it
+ * under the pkg_read policy — and an unlabelled amount renders as a dash rather
+ * than as a number in a currency we picked.
+ *
+ * Ids absent from the returned map are ids we could not label. A read that
+ * fails returns an empty map, which lands in the same place: dashes, not
+ * dollars.
+ */
+export async function packageCurrencies(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return new Map();
+  try {
+    const { data, error } = await supabase.from('trainer_packages').select('id, currency').in('id', unique);
+    if (error) { reportError('connect.packageCurrencies', error); return new Map(); }
+    return new Map(((data as { id: string; currency: string | null }[]) ?? []).filter((p) => p.currency).map((p) => [p.id, p.currency as string]));
+  } catch (e) { reportError('connect.packageCurrencies', e); return new Map(); }
 }
 
 /** Client buys a package → Stripe Checkout (funds to the trainer, minus fee). */

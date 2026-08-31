@@ -82,8 +82,32 @@ export async function fetchFailedInvoices(): Promise<Invoice[] | null> {
   } catch { return null; }
 }
 
-export const money = (cents: number | null, cur: string | null = 'usd'): string => {
-  const v = (cents ?? 0) / 100;
-  const sym = cur === 'gbp' ? '£' : cur === 'eur' ? '€' : '$';
-  return sym + v.toLocaleString(undefined, { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+/**
+ * A Stripe amount, in the currency Stripe says it is in.
+ *
+ * Two things this used to do, both of which matter more now Repple is to be
+ * white-labelled:
+ *
+ *   · `(cents ?? 0) / 100` rendered an amount nobody had read as "$0". A plan
+ *     price that failed to load looked like a free plan.
+ *   · The symbol was `gbp → £`, `eur → €`, and EVERYTHING ELSE → `$`. So a
+ *     gym billed in dirhams read its own invoices in dollars, and every
+ *     currency Repple has not met yet reads as dollars too. A wrong symbol in
+ *     front of a number is not a cosmetic problem — it is a different amount.
+ *
+ * Unknown is a dash, and an unrecognised currency prints its ISO code rather
+ * than a symbol invented for it. An honest "AED 600.00" beats a confident
+ * "$600.00" every time.
+ */
+export const money = (cents: number | null, cur: string | null = null): string => {
+  if (cents == null || !Number.isFinite(cents)) return '\u2014';
+  const v = cents / 100;
+  const amount = v.toLocaleString(undefined, { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  const c = (cur || '').toLowerCase();
+  if (c === 'gbp') return '£' + amount;
+  if (c === 'eur') return '€' + amount;
+  if (c === 'usd') return '$' + amount;
+  // Including no currency at all: Stripe always sends one, so its absence means
+  // the read did not land, and guessing is what this whole change removes.
+  return c ? `${c.toUpperCase()} ${amount}` : `${amount} (currency not read)`;
 };

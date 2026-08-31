@@ -61,11 +61,18 @@ import { useAnnouncements } from '../../src/ui/announcements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useInvites } from '../../src/ui/invites';
-import { fetchMyJoinCode, rotateJoinCode, fetchMyJoinCodes, createJoinCode, revokeJoinCode, type JoinCodesRead } from '../../src/ui/joinCode';
+import {
+  fetchMyJoinCode, rotateJoinCode, fetchMyJoinCodes, createJoinCode, revokeJoinCode, fetchMyCodeReturns,
+  saveCodeSpend, type JoinCodesRead, type CodeReturnsRead,
+} from '../../src/ui/joinCode';
 import {
   codeCountLine, labelProblem, canCreateCode, DEFAULT_CODE_NOTE, MAX_LABEL, MAX_LIVE_CODES,
   type JoinCodeRow,
 } from '../../src/lib/joinCodes';
+import {
+  LAST_TOUCH_NOTE, codeFigures, enoughToTell, parseSpend, returnLine, spendFieldValue, stayedLine,
+  type CodeReturnRow,
+} from '../../src/lib/codeReturn';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useClientTags } from '../../src/ui/clientTags';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -95,6 +102,23 @@ const field = (t: Theme, tall?: number): TextStyle => ({
 /** A quiet uppercase label inside a sheet (the kit's SectionHead is for screens). */
 function SheetHead({ t, title }: { t: Theme; title: string }) {
   return <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{title}</Text>;
+}
+
+/**
+ * One figure in the per-code money row: a caption and a value.
+ *
+ * A component rather than four inline Texts because the value arrives already
+ * formatted — codeFigures() puts every one of them through money() or num(),
+ * and renders a dash for anything the read did not establish. Passing it as a
+ * prop keeps the formatting in one place instead of four.
+ */
+function CodeFig({ t, label, value }: { t: Theme; label: string; value: string }) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...numeric, color: t.ink, marginTop: 1 }}>{value}</Text>
+    </View>
+  );
 }
 
 /** One selectable option. Every picker on this screen is built from these. */
@@ -368,9 +392,44 @@ export default function TrainerClients() {
   // Re-read rather than patching a row in place after a write: the list is the
   // only thing that says which codes are live, and a local edit would show a
   // code as off whether or not the server agreed.
+  // What each code cost and returned. A separate read from the list above: it
+  // walks purchases and relationships, and the codes list is opened far more
+  // often than the money is looked at. Its own status, because a failure here
+  // must not make the codes themselves look unreadable, and — the point —
+  // because an empty answer under a failure is not a channel that earned
+  // nothing. See src/lib/codeReturn.ts.
+  const [returns, setReturns] = useState<CodeReturnsRead>({ status: 'loading', rows: [] });
+  // What the coach is typing into each code's spend field, keyed by code id
+  // ('' is the default code, which has no id). Held apart from the rows so a
+  // half-typed number is never mistaken for a recorded one.
+  const [spendDraft, setSpendDraft] = useState<Record<string, string>>({});
+  const [spendBusy, setSpendBusy] = useState<string | null>(null);
   const loadCodes = async () => {
     setCodes((c) => ({ ...c, status: 'loading' }));
+    setReturns((r) => ({ ...r, status: 'loading' }));
     setCodes(await fetchMyJoinCodes());
+    const r = await fetchMyCodeReturns();
+    setReturns(r);
+    // Reseed the fields from the server's answer, so a draft left over from a
+    // failed save cannot sit on screen looking like the recorded figure.
+    setSpendDraft(Object.fromEntries(r.rows.map((x) => [x.id ?? '', spendFieldValue(x)])));
+  };
+  // The verdict on ranking, computed once for the sheet. enoughToTell refuses
+  // outright under anything but a completed read, and refuses again when the
+  // two busiest codes cannot be told apart from a coin toss.
+  const codeTell = enoughToTell(returns.status, returns.rows);
+  const saveSpend = async (row: CodeReturnRow) => {
+    const key = row.id ?? '';
+    const parsed = parseSpend(spendDraft[key]);
+    if (parsed.kind === 'bad') { Alert.alert('Not saved', parsed.reason); return; }
+    setSpendBusy(key);
+    // A cleared field sends null, which DELETES the record. Sending 0 would
+    // tell Repple the campaign was free, and a free campaign has a perfect
+    // return and wins every comparison on this screen.
+    const r = await saveCodeSpend(row.id, parsed.kind === 'clear' ? null : parsed.cents);
+    setSpendBusy(null);
+    if (!r.ok) { Alert.alert('Not saved', r.reason); return; }
+    await loadCodes();
   };
   const namedCodes = codes.rows.filter((r) => !r.isDefault);
   // The main code's row, or a zeroed stand-in when the read produced none —
@@ -1616,6 +1675,85 @@ export default function TrainerClients() {
                   )}
                 </View>
               ) : null}
+            </View>
+
+            {/* ── what each code cost, and what it returned ─────────────
+                The counts above answer "which of the things I did brought
+                people in?". They do not answer the question an online coach
+                spends money on: "which of them returned money?". Twenty joins
+                off a code that cost £400 in ads and four off a code that cost
+                nothing are not comparable numbers, and a coach reading only
+                the joins pours next month's budget into the loser.
+
+                Repple can see two of the three figures — who came in on which
+                code, and what they then paid. The third, what the coach spent,
+                exists nowhere in this database; nothing here sees an Instagram
+                invoice. So it is asked for, per code, and an empty field means
+                UNKNOWN rather than free. See src/lib/codeReturn.ts. */}
+            <SheetHead t={t} title="What Each Code Returned" />
+            <View style={{ marginBottom: sp.xl }}>
+              {/* Said once, up front, and not as a footnote. Every figure below
+                  is last touch: somebody who saw an Instagram post and later
+                  joined off a friend's code is the friend's, and Instagram gets
+                  nothing for the work that started it. A coach about to move a
+                  budget on these numbers is owed that sentence first. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{LAST_TOUCH_NOTE}</Text>
+
+              {returns.status === 'error' ? (
+                <Notice
+                  tone={t.warn}
+                  kicker="Not read"
+                  title="What your codes returned could not be read"
+                  note={returns.reason ?? 'Nothing here is a figure. Close this and open it again once you have a connection.'}
+                />
+              ) : returns.status === 'partial' ? (
+                <PartialRead what="clients" shown={returns.rows.length} />
+              ) : returns.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Working out what each code returned…</Text>
+              ) : codeTell.rankable ? (
+                <Notice tone={t.good} kicker="Enough to tell" title={`${codeTell.best.label} is ahead of ${codeTell.runnerUp.label}`} note={codeTell.note} />
+              ) : (
+                // The important one. A coach with twelve clients seeing
+                // "Instagram 4, TikTok 1" has learned nothing — that gap is
+                // what a fair coin does more than a third of the time — and a
+                // screen that ranked them would be spending their money on
+                // noise it had dressed up as a finding. So no comparison is
+                // drawn at all, and the reason is stated instead.
+                <Notice tone={t.s3} kicker="Not enough yet" title="Too early to say which is working" note={codeTell.note} />
+              )}
+
+              {returns.rows.map((c) => {
+                const fgs = codeFigures(returns.status, c);
+                const key = c.id ?? '';
+                return (
+                  <View key={key || c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(returns.status, c)}</Text>
+                    <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+                      <CodeFig t={t} label="Spent" value={fgs.spent} />
+                      <CodeFig t={t} label="Clients" value={fgs.clients} />
+                      <CodeFig t={t} label="They paid" value={fgs.revenue} />
+                      <CodeFig t={t} label="Each cost" value={fgs.perClient} />
+                    </View>
+                    {returnLine(returns.status, c) ? (
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{returnLine(returns.status, c)}</Text>
+                    ) : null}
+                    {returns.status === 'ready' ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                        <TextInput
+                          value={spendDraft[key] ?? ''}
+                          onChangeText={(v) => setSpendDraft((d) => ({ ...d, [key]: v }))}
+                          placeholder="What it cost you — leave empty if you don’t know"
+                          placeholderTextColor={t.ink3}
+                          keyboardType="decimal-pad"
+                          style={{ ...field(t), flex: 1 }}
+                        />
+                        <Ghost label={spendBusy === key ? 'Saving…' : 'Save'} onPress={() => { if (spendBusy) return; saveSpend(c); }} />
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
             </View>
 
             <Rule />
