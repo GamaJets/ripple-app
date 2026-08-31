@@ -328,6 +328,7 @@ export default function TrainerVideos() {
   const [lName, setLName] = useState('');
   const [lGroup, setLGroup] = useState('');
   const [lUrl, setLUrl] = useState('');
+  const [lBusy, setLBusy] = useState(false);
   const [pendUri, setPendUri] = useState<string | null>(null);
   const [upName, setUpName] = useState('');
   const [upGroup, setUpGroup] = useState('');
@@ -423,6 +424,30 @@ export default function TrainerVideos() {
     Alert.alert('Clip added', where === 'remote'
       ? `Uploaded. ${visOf(chosen).note} You can change that any time from the clip's row.`
       : 'Saved to your library on this device only. It did not reach the server, so nobody else can see it yet — try again when you have a connection.');
+  };
+
+  // Adding by link goes through exactly the same `addVideo` as the upload above,
+  // and it used to be the one call site that threw the answer away: the promise
+  // was left floating and "Added — X is in the exercise library" fired on the
+  // same tick, before the insert had even been attempted. A coach standing in a
+  // gym with no signal pasted a link, was told it was in their clients' library,
+  // and it was on that phone alone — or, when the insert never got as far as a
+  // row, nowhere at all. It now waits and says which of the three happened.
+  const saveLink = async () => {
+    if (lBusy) return;
+    const name = lName.trim();
+    if (!name) { Alert.alert('Name needed', 'Give the exercise a name.'); return; }
+    setLBusy(true);
+    const where = await addVideo({ name, group: lGroup, url: lUrl });
+    setLBusy(false);
+    if (where === 'none') {
+      Alert.alert('Not added', `“${name}” was not added to your library. Nothing was saved — check the name and try again.`);
+      return;
+    }
+    setLinkOpen(false);
+    Alert.alert(where === 'remote' ? 'Added' : 'Saved on this phone only', where === 'remote'
+      ? `${name} is in the exercise library. ${visOf('clients').note} You can change that any time from the clip's row.`
+      : `${name} is in your library on this device only. It did not reach the server, so none of your clients can see it yet — remove it and add it again when you have a connection.`);
   };
 
   // Tap a recorded clip to watch it right here; tap a not-yet-recorded exercise
@@ -694,9 +719,9 @@ export default function TrainerVideos() {
       </ScrollView>
 
       {/* ── add by link ──────────────────────────────────────────────────── */}
-      <Modal visible={linkOpen} transparent animationType="slide" onRequestClose={() => setLinkOpen(false)}>
+      <Modal visible={linkOpen} transparent animationType="slide" onRequestClose={() => { if (!lBusy) setLinkOpen(false); }}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLinkOpen(false)}
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => { if (!lBusy) setLinkOpen(false); }}
           accessibilityRole="button" accessibilityLabel="Close, without adding a video" />
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Add a Video by Link</Text>
@@ -704,9 +729,9 @@ export default function TrainerVideos() {
           <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
           <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
           <TextInput value={lUrl} onChangeText={setLUrl} placeholder="https://…" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="url" style={[input, { marginBottom: sp.lg }]} />
-          <Cta label="Add to Library" wide onPress={() => { if (!lName.trim()) { Alert.alert('Name needed', 'Give the exercise a name.'); return; } addVideo({ name: lName, group: lGroup, url: lUrl }); setLinkOpen(false); Alert.alert('Added', lName + ' is in the exercise library.'); }} />
+          <Cta label={lBusy ? 'Adding…' : 'Add to Library'} wide disabled={lBusy} onPress={saveLink} />
           <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setLinkOpen(false)} />
+          <Ghost label="Cancel" onPress={() => { if (!lBusy) setLinkOpen(false); }} />
         </View>
               </KeyboardAvoidingView>
       </Modal>

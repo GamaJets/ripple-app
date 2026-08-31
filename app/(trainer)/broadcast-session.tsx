@@ -5,17 +5,21 @@
 // Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). No hero — a compose screen has no live number to lead
 // with. Five bordered boxes became one card (the clip drop, the only thing you
-// act on) plus hairline-separated sections. Same picker, same publish call,
-// same alerts branch-for-branch.
+// act on) plus hairline-separated sections. Same picker, same publish call.
 //
-// Two claims the code could not back were removed:
+// Three claims the code could not back were removed:
 //   · "Published · Posted to YouTube, Instagram…" — `publishToSocials` has never
 //     uploaded anything (the platform hand-off is still a TODO in
 //     `src/lib/social.ts`), so the success alert announced posts that did not
-//     happen. The branch survives; it now says what actually occurred and
-//     offers the share sheet, which is the one thing that really works.
+//     happen. It now says what actually occurred and offers the share sheet,
+//     which is the one thing that really works.
 //   · The trailing "Connect each account once (Settings → Integrations)" —
 //     there is no Integrations screen anywhere in the app.
+//   · "Connect them in Settings to publish automatically", in the publish alert
+//     itself, which sent the coach to that same screen that does not exist. It
+//     says plainly that auto-posting is not wired up yet. And since every
+//     platform comes back pending, the "posted" branch beside it was
+//     unreachable — one alert now, not a branch that never ran.
 // The right-hand "Connect" label went too: tapping a row toggles selection, it
 // never opened a connect flow. The row now states the platform's status.
 import { useState } from 'react';
@@ -54,21 +58,23 @@ export default function BroadcastSession() {
     setBusy(true);
     const r = await publishToSocials({ uri, caption: caption.trim(), platforms: sel });
     setBusy(false);
-    if (r.pending.length) {
-      const names = r.pending.map((p) => SOCIAL_PLATFORMS.find((x) => x.key === p)?.name || p).join(', ');
-      Alert.alert(
-        'Connect to auto-post',
-        `${names} ${r.pending.length > 1 ? 'are' : 'is'} not linked yet. Connect ${r.pending.length > 1 ? 'them' : 'it'} in Settings to publish automatically. Share now instead?`,
-        [{ text: 'Not now' }, { text: 'Share now', onPress: () => shareSessionNatively(caption.trim() || 'My training session', uri) }],
-      );
-    } else {
-      const names = r.posted.map((p) => SOCIAL_PLATFORMS.find((x) => x.key === p)?.name || p).join(', ');
-      Alert.alert(
-        'Nothing uploaded',
-        `Repple cannot upload to ${names} yet — no platform upload is wired. Share the clip from your phone instead?`,
-        [{ text: 'Not now' }, { text: 'Share now', onPress: () => shareSessionNatively(caption.trim() || 'My training session', uri) }],
-      );
-    }
+    // A third claim the code could not back, and the one that sent the coach
+    // looking for a screen: `publishToSocials` returns every platform as pending
+    // (src/lib/social.ts), so this branch is the only one that ever runs and it
+    // said "Connect them in Settings to publish automatically" — pointing at the
+    // Integrations screen the header above already notes does not exist. A coach
+    // hunting Settings for a connect flow finds nothing and concludes the app is
+    // broken, when the truth is simply that auto-posting has not been built yet.
+    // Say that, and offer the share sheet, which does work. The old `else` was
+    // unreachable for the same reason and is gone.
+    const names = r.pending.map((p) => SOCIAL_PLATFORMS.find((x) => x.key === p)?.name || p).join(', ');
+    const many = r.pending.length > 1;
+    Alert.alert(
+      'Nothing posted yet',
+      `Repple cannot post to ${names} for you — auto-posting is not wired up yet, so there is nothing to connect and nothing has been uploaded. ` +
+        `Open your phone's share sheet and post the clip to ${many ? 'them' : 'it'} yourself?`,
+      [{ text: 'Not now' }, { text: 'Share now', onPress: () => shareSessionNatively(caption.trim() || 'My training session', uri) }],
+    );
   };
 
   const G = layout.gutter;

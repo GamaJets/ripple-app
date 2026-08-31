@@ -26,7 +26,7 @@ import { useAvailability, upcomingDates } from '../../src/ui/availability';
 import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
-import { sendPush, sendPushChecked } from '../../src/ui/pushNotifications';
+import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { markOutcome } from '../../src/lib/gymSessions';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
@@ -307,14 +307,59 @@ export default function TrainerSchedule() {
     ]);
   }
 
+  // Send the re-offer and say what actually went out. This was `sendPush`, which
+  // discards both outcomes, under an alert that read "Slot re-opened · Notified
+  // N clients" — a sentence the code had no way of knowing was true. The coach
+  // then waited on a slot nobody had been asked about.
+  async function doReoffer(s: TrainingSession, ids: string[]) {
+    const when = `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]}`;
+    const push = await sendPushChecked(ids, 'A slot just opened', `${when} is available — first to book it gets it.`, { route: '/(client)/calendar' });
+    if (!push.ok) {
+      Alert.alert(
+        'Nobody was told',
+        `${when} is still open on your calendar, but the notification did not go out${push.error ? ` (${push.error})` : ''} — so none of your clients has been asked about it. Message them yourself, or try again.`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    Alert.alert(
+      'Slot re-offered',
+      `All ${ids.length} of your client${ids.length === 1 ? '' : 's'} ${ids.length === 1 ? 'was' : 'were'} sent a notification that ${when} is free — first to book takes it. Delivery depends on their notification settings.`,
+      [{ text: 'Done' }],
+    );
+  }
+
+  // "Push all N of your clients" is a claim about the whole roster, so it may
+  // only be made when the roster on this screen IS the whole roster. `ids` was
+  // built straight off `roster` with no regard for `rosterStatus`: under 'error'
+  // the confirm offered to push "all 0 of your clients" and the result cheerfully
+  // reported "Notified 0 clients" — telling a coach with a full book that nobody
+  // exists — and under 'partial' it said "all" about however much of the list had
+  // come back, leaving the clients missing from that read never hearing the slot
+  // was free. When we do not know who everyone is, we say so rather than offer
+  // the slot to a fraction of the room.
   function reoffer(s: TrainingSession) {
+    if (rosterStatus !== 'ready') {
+      Alert.alert(
+        'Can’t offer it round yet',
+        (rosterStatus === 'loading'
+          ? 'Your clients are still loading, so Repple does not yet know who to offer this to.'
+          : rosterStatus === 'error'
+            ? 'Your clients could not be read, so Repple does not know who to offer this to. This is a connection problem, not an empty book.'
+            : 'Only part of your roster loaded, so offering it now would skip the clients that are missing from the list.') +
+          '\n\nThe slot stays open on your calendar either way — pull down to refresh and try again.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
     const ids = roster.map((c) => c.id);
+    if (!ids.length) {
+      Alert.alert('Nobody to offer it to', `${timeLabel(s.startsAt)} stays open on your calendar, but you have no clients on your roster to tell about it. Add one from the Clients tab.`, [{ text: 'OK' }]);
+      return;
+    }
     Alert.alert('Re-offer this slot?', `Push all ${ids.length} of your clients that ${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is open to book.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: `Notify ${ids.length}`, onPress: () => {
-        if (ids.length) sendPush(ids, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' });
-        Alert.alert('Slot re-opened', `Notified ${ids.length} client${ids.length === 1 ? '' : 's'} — delivery depends on their notification settings.`);
-      } },
+      { text: `Notify ${ids.length}`, onPress: () => { void doReoffer(s, ids); } },
     ]);
   }
 
