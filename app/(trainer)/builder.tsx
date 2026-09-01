@@ -41,6 +41,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import { liftIn, liftLabel, readLift, type WeightUnit } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
@@ -89,7 +90,23 @@ const GENERATED_NOTE = /latest InBody scan/i;
 let KEY = 1;
 const nextKey = () => 'e' + KEY++;
 
-type BEx = { key: string; name: string; group: string; sets: number; reps: string };
+type BEx = {
+  key: string; name: string; group: string; sets: number; reps: string;
+  /**
+   * The load to put on the machine, IN KILOGRAMS, or null when the coach has
+   * not said. Sets and reps were editable here and the weight was not, so the
+   * one number that changes week to week was the one a coach could not write
+   * down — and the note at the top of this very screen says "progress the
+   * weight when you hit the top of the rep range".
+   *
+   * Kilograms because the record is metric everywhere else in this app;
+   * `readLift` converts from whatever the coach typed and `liftLabel` reads it
+   * back. `loadUnit` remembers which unit they used so the field shows what
+   * they wrote rather than a conversion of it.
+   */
+  loadKg?: number | null;
+  loadUnit?: WeightUnit;
+};
 type BDay = { day: string; focus: string; cardio?: string; exercises: BEx[] };
 
 // ── The goal that generates a programme is now allowed to be unknown ───────
@@ -747,6 +764,31 @@ export default function Builder() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>Reps</Text>
                     <TextInput value={e.reps} onChangeText={(v) => patchEx(di, e.key, { reps: v })} placeholder="8-10" placeholderTextColor={t.ink3}
                       style={[inp, { width: 74, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                  </View>
+                  {/* The third number. Blank is a real answer — bodyweight
+                      work, or a movement the coach wants the client to judge —
+                      so it is never defaulted. The unit sits beside the field
+                      because a gym is plated in whatever it is plated in, and
+                      the figure being typed is the one on the machine. What is
+                      STORED is kilograms either way. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Weight</Text>
+                    <TextInput
+                      value={e.loadKg == null ? '' : String(liftIn(e.loadKg, e.loadUnit ?? 'kg'))}
+                      onChangeText={(v) => {
+                        const u = e.loadUnit ?? 'kg';
+                        if (!v.trim()) { patchEx(di, e.key, { loadKg: null }); return; }
+                        const r = readLift(v, u);
+                        patchEx(di, e.key, { loadKg: r.ok ? r.kg : null, loadUnit: u });
+                      }}
+                      keyboardType="numeric" placeholder="optional" placeholderTextColor={t.ink3}
+                      style={[inp, { width: 84, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                    <Pressable accessibilityRole="button"
+                      accessibilityLabel={`Weight unit: ${(e.loadUnit ?? 'kg') === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${(e.loadUnit ?? 'kg') === 'kg' ? 'pounds' : 'kilograms'}`}
+                      onPress={() => patchEx(di, e.key, { loadUnit: (e.loadUnit ?? 'kg') === 'kg' ? 'lb' : 'kg' })}
+                      style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? 'kg').toUpperCase()}</Text>
+                    </Pressable>
                   </View>
                 </View>
               ))}
