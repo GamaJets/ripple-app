@@ -117,6 +117,44 @@ export interface ProgramExercise {
    * 'normal' into every row would be a value nobody chose.
    */
   method?: string | null;
+  /**
+   * The sets of this movement written out ONE BY ONE, or absent because every
+   * set is the same set.
+   *
+   * Asked for with a screenshot of another app's routine editor, where an
+   * exercise is a table — set 1 at 42.5 for ten, set 2 at 42.5 for ten, set 3
+   * at 45 for eight — rather than a single "3 × 8-10 at 42.5". Everything
+   * above this line describes one set and multiplies it by `sets`, so a coach
+   * could not write a top set heavier than its back-offs, could not ramp, and
+   * could not say that set 1 is a warm-up and set 4 is a drop set. That last
+   * one is what `method` is for and is the one thing a per-exercise field
+   * cannot say twice.
+   *
+   * OPTIONAL, and absent is the ordinary case — the rules for reading it are
+   * in src/lib/setRows.ts and every one of them falls back to `sets`, `reps`,
+   * `loadKg` and `method` when it is not here. That is not politeness about
+   * old data. A programme lives in `program_templates`, on each client's
+   * assignment, and in the coach's on-device draft in AsyncStorage, and no
+   * migration reaches all three — so an exercise without this field must
+   * render and run in a new build exactly as it does in the old one, and
+   * nothing writes it onto an exercise the coach has not edited.
+   *
+   * A row's own fields are optional for the same reason and read by the same
+   * rule: an ABSENT key takes the exercise's value, a PRESENT one is the row's
+   * own answer. So `{}` follows the exercise, `{ loadKg: null }` is a row with
+   * nothing on the bar, and `{ method: null }` is an ordinary set inside an
+   * exercise whose default is not.
+   *
+   * `sets` is kept equal to the number of rows by whoever writes them. Every
+   * reader in the app counts progress against `sets` — "2 of 3 sets" on the
+   * plan card, `done.length >= ex.sets` in the runner — and none of them knows
+   * this field exists, so the two numbers are one fact and are written
+   * together.
+   *
+   * Loads are KILOGRAMS here as they are everywhere else in this file; see
+   * `loadKg` above for why a second convention is not on offer.
+   */
+  setRows?: Array<{ reps?: string | null; loadKg?: number | null; method?: string | null }> | null;
 }
 export interface ProgramDay { day: string; focus: string; cardio?: string; exercises: ProgramExercise[]; }
 export interface Program { title: string; focus: string[]; note: string; days: ProgramDay[]; }
