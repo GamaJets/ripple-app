@@ -695,7 +695,7 @@ export function coachStatement(input: StatementInput): Statement {
   if (feesReady) {
     if (fees.pots.length > 1) feeNotes.push('These are separate amounts of money in different currencies and are deliberately not added together.');
     if (fees.waived > 0) feeNotes.push(`${fees.waived} fee${fees.waived === 1 ? ' was' : 's were'} waived by you and ${fees.waived === 1 ? 'is' : 'are'} left out of the figures above.`);
-    if (!(fees.unlabelled > 0)) feeNotes.push(`${fees.unlabelled} fee${fees.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so ${fees.unlabelled === 1 ? 'it is' : 'they are'} not in any figure above.`);
+    if (fees.unlabelled > 0) feeNotes.push(`${fees.unlabelled} fee${fees.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so ${fees.unlabelled === 1 ? 'it is' : 'they are'} not in any figure above.`);
     if (fees.unpriced > 0) feeNotes.push(`${fees.unpriced} fee${fees.unpriced === 1 ? ' has' : 's have'} no amount recorded at all.`);
     if (feeSplit.undated > 0) feeNotes.push(`${feeSplit.undated} fee${feeSplit.undated === 1 ? '' : 's'} could not be dated and ${feeSplit.undated === 1 ? 'is' : 'are'} in no period at all.`);
   }
