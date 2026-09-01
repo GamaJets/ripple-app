@@ -123,6 +123,168 @@ export function calendarMonth(y: number, m: number): StatementPeriod {
   return { from: iso(y, mi, 1), to: iso(y, mi, lastDay(y, mi)), label: `${MONTHS[mi]} ${y}` };
 }
 
+/* ── a year that does not start in January ────────────────────────────────── */
+
+/**
+ * The day a coach's own year begins.
+ *
+ * ── Why this exists, and why it is not a jurisdiction ─────────────────────
+ *
+ * `calendarYear` and `calendarQuarter` were the whole of what this file could
+ * produce, and the header above says why: "this app does not know which one
+ * applies to the person reading it, and offering '2025/26' would be picking a
+ * jurisdiction on their behalf". That argument is right about the APP choosing
+ * and wrong about the COACH choosing. A UK coach's tax year starts on 6 April
+ * and an Indian one's on 1 April; an Australian's starts on 1 July. For every
+ * one of them the calendar-year statement is unusable and they have to
+ * re-aggregate it by hand, which is the thing this screen exists to save.
+ *
+ * So the start is a MONTH AND A DAY THE COACH PICKS. Nothing here infers it
+ * from a locale, a currency, a timezone or a phone's region — every one of
+ * those would be this app guessing somebody's tax affairs from a proxy, and
+ * being wrong for the coach who has moved country, which is a large fraction of
+ * the people this product sells to.
+ */
+export interface YearStart {
+  /** 1 to 12. */
+  month: number;
+  /** 1 to 31, clamped to the month's own length. */
+  day: number;
+}
+
+/** 1 January, which is what every existing caller meant. */
+export const CALENDAR_YEAR_START: YearStart = { month: 1, day: 1 };
+
+/** True when this start is the calendar one, so a screen can say "your year is
+ *  the calendar year" rather than printing "1 January" as though it were a
+ *  choice somebody had to make. */
+export const isCalendarStart = (s: YearStart): boolean => s.month === 1 && s.day === 1;
+
+/**
+ * A twelve-month year beginning on `start` in year `y`, ending the day before
+ * the same date a year later.
+ *
+ * The end is computed as "the day before the anniversary" rather than as a
+ * hardcoded month-end, because that is the only rule that is right for every
+ * start date AND for a leap year. A year beginning 6 April 2026 ends 5 April
+ * 2027; one beginning 1 March 2027 ends 29 February 2028, which no fixed table
+ * of month lengths gets right.
+ *
+ * The label spans both calendar years — "2026/27" — where the period actually
+ * crosses one, and is a bare year where it does not. A UK coach handed a
+ * document headed "2026" for the year to April 2027 would file it against the
+ * wrong twelve months, and the two are indistinguishable once it is printed.
+ */
+export function fiscalYear(y: number, start: YearStart = CALENDAR_YEAR_START): StatementPeriod {
+  const m = clampMonth(start.month);
+  const d = clampDay(y, m, start.day);
+  // `iso` takes a ZERO-BASED month index, like Date does, and `m` here is the
+  // 1-to-12 number a person types. Mixing the two silently shifts a whole
+  // statement by a month, which is the one error on this screen that produces a
+  // plausible document for the wrong period.
+  const from = iso(y, m - 1, d);
+  // The anniversary, minus one day. Date normalises a day number of 0 to the
+  // last day of the previous month, so no branch is needed for a start on the
+  // 1st — and none is needed for 29 February either, because the anniversary in
+  // a non-leap year normalises to 1 March and stepping back lands on 28
+  // February, which is the last day of that year.
+  const end = new Date(y + 1, m - 1, d - 1);
+  const to = iso(end.getFullYear(), end.getMonth(), end.getDate());
+  const label = isCalendarStart(start)
+    ? String(y)
+    : `${y}/${String((y + 1) % 100).padStart(2, '0')}`;
+  return { from, to, label };
+}
+
+/** A three-month quarter OF a coach's own year, `q` from 1 to 4. Counted from
+ *  their start date, so Q1 of a year beginning 6 April runs 6 April to 5 July —
+ *  never from January, which would put the quarters of a fiscal year and the
+ *  quarters of a calendar year under the same four labels. */
+export function fiscalQuarter(y: number, q: number, start: YearStart = CALENDAR_YEAR_START): StatementPeriod {
+  const qq = Math.min(4, Math.max(1, Math.floor(q)));
+  const m = clampMonth(start.month);
+  const d = clampDay(y, m, start.day);
+  // Month arithmetic through Date rather than modular arithmetic on the index,
+  // so a quarter that crosses into the next calendar year takes its year with
+  // it. `new Date(y, 13, 1)` is February of y + 1, which is exactly wanted.
+  const open = new Date(y, m - 1 + (qq - 1) * 3, d);
+  const close = new Date(y, m - 1 + qq * 3, d - 1);
+  return {
+    from: iso(open.getFullYear(), open.getMonth(), open.getDate()),
+    to: iso(close.getFullYear(), close.getMonth(), close.getDate()),
+    label: `Q${qq} ${isCalendarStart(start) ? y : `${y}/${String((y + 1) % 100).padStart(2, '0')}`}`,
+  };
+}
+
+const clampMonth = (m: number): number => Math.min(12, Math.max(1, Math.floor(m) || 1));
+
+/** A start day past the end of its month is the last day of that month rather
+ *  than a rollover into the next one. A coach who types 31 for a year starting
+ *  in February means the end of February, and `new Date(y, 1, 31)` would
+ *  silently give them 3 March. */
+const clampDay = (y: number, month1: number, day: number): number => {
+  const max = lastDay(y, month1 - 1);
+  return Math.min(max, Math.max(1, Math.floor(day) || 1));
+};
+
+/**
+ * Any two dates the coach typed, or null when they are not a period.
+ *
+ * The last of the three spans, and the one that needs no assumptions at all: an
+ * accountant who works to a period this app has never heard of gets it by
+ * typing both ends. Null rather than a corrected range for a backwards pair —
+ * silently swapping them would produce a document for a period the coach did
+ * not ask for, headed with dates they did not choose, and there is no cue on
+ * the page that would give it away.
+ *
+ * The label is the two dates spelled out rather than a name, because there is
+ * no name for it and inventing one ("Custom") tells a reader of the file
+ * nothing about which twelve weeks it covers.
+ */
+export function customRange(from: string, to: string): StatementPeriod | null {
+  const a = String(from ?? '').slice(0, 10);
+  const b = String(to ?? '').slice(0, 10);
+  const shape = /^\d{4}-\d{2}-\d{2}$/;
+  if (!shape.test(a) || !shape.test(b)) return null;
+  if (b < a) return null;
+  // Both ends have to be days that EXIST. The regex above accepts 2026-02-30,
+  // and `periodRange` would not refuse it: `new Date(2026, 1, 30)` normalises
+  // to 2 March rather than failing, so the statement would silently cover two
+  // days more than the coach typed and its heading would still read "30 Feb".
+  // The round trip is the only check that catches it.
+  if (!isRealDay(a) || !isRealDay(b)) return null;
+  const p: StatementPeriod = { from: a, to: b, label: `${dayLabel(a)} to ${dayLabel(b)}` };
+  // And the pair has to produce a half-open instant range, because a period
+  // with no bounds would read every table with no filter at all.
+  return periodRange(p) ? p : null;
+}
+
+/** Whether `YYYY-MM-DD` names a day that exists, by building it and checking it
+ *  came back as itself. Date normalises an overflowing day rather than
+ *  refusing it, so the round trip is what distinguishes 30 February from 2
+ *  March — and on a statement those are two different periods. */
+function isRealDay(isoDay: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDay);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mi = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  if (mi < 0 || mi > 11 || d < 1) return false;
+  const back = new Date(y, mi, d);
+  return back.getFullYear() === y && back.getMonth() === mi && back.getDate() === d;
+}
+
+/**
+ * That the year's start is the coach's own statement, not this app's finding.
+ *
+ * Printed beside `PERIOD_IS_YOURS` rather than replacing it, because the two
+ * say different things: that one is about the period, this one is about the
+ * fact that a twelve-month period beginning in April is a claim about somebody's
+ * tax affairs and this app has taken their word for it.
+ */
+export const YEAR_START_IS_YOURS =
+  'The day your year starts is one you set on this screen. This app does not know which tax year you file to, has not inferred one from your phone, your currency or where you are, and does not check that the one you chose is right for you.';
+
 /** `YYYY-MM-DD` as a person reads it, without going through `new Date(s)` —
  *  which is UTC midnight, and so the day before for anybody west of Greenwich. */
 export function dayLabel(isoDay: string | null | undefined): string {
@@ -330,6 +492,22 @@ export interface StatementInput {
   sessions: Read<StatementSession>;
   packs: Read<TakenRow>;
   subscriptions: Read<TakenRow>;
+  /**
+   * Payments the coach recorded THEMSELVES — cash, a bank transfer, a card
+   * taken at a gym (part 170).
+   *
+   * Required rather than optional, deliberately. An optional field defaulting
+   * to an empty 'ready' read would put "you recorded nothing outside this app"
+   * on a statement built by a caller that simply forgot to pass it, and for
+   * most self-employed coaches that is the larger half of their income being
+   * confidently reported as zero. A missing argument is a compile error
+   * instead.
+   *
+   * Dated by `received_on`, the day the coach says the money arrived — never by
+   * the day the row was written, or a month of cash written up in one evening
+   * lands entirely in that evening's period.
+   */
+  receipts: Read<TakenRow>;
   invoices: Read<StatementInvoice>;
   lateCancellations: Read<StatementCharge>;
   payouts: PayoutKnowledge;
@@ -362,7 +540,18 @@ export const STATEMENT_IS =
  * and a statement that did not say so would read as a complete year.
  */
 export const STATEMENT_NOT_THE_WHOLE_BOOK =
-  'This covers what went through this app. Anything a client paid you in cash, by bank transfer, or through a gym is not recorded here and is therefore not on this statement. If you were paid outside this app in this period, this is short by that amount and only you know by how much.';
+  'Money taken outside this app — cash, a bank transfer, a card taken at a gym — reaches this statement only where you wrote it down yourself, in the section that says so. Anything you were paid and did not record is not here, so this is short by that amount and only you know by how much.';
+
+/**
+ * That a recorded payment is the coach's own word and nothing more.
+ *
+ * The same hedge `kindLine` puts on an invoice, and it belongs on this section
+ * more than on any other: there is no Stripe record behind these at all, so an
+ * accountant reading the statement has to be able to tell which figures have
+ * something to be reconciled against and which have only the coach's memory.
+ */
+export const RECEIPTS_ARE_YOUR_WORD =
+  'These are payments you told this app about after the fact. Nothing behind them has been checked against a bank or a card processor, this app was not involved in any of them, and there is no second record anywhere to reconcile them against. They may also describe the same money as a sale above, if a payment was recorded twice — nothing here can tell.';
 
 /** That Stripe, not this app, is the authority on money that moved. */
 export const STATEMENT_STRIPE_IS_THE_RECORD =
@@ -394,23 +583,33 @@ export const LATE_FEES_NOT_TAKINGS =
   'These are fees recorded in this app against your clients. This app does not charge them, is not told whether they were paid, and does not add them to anything above.';
 
 /**
- * The one hole in this statement that is a permission rather than a gap.
+ * The hole this statement used to have, and the smaller one it still has.
  *
- * `charges` is readable by a coach through `charges_trainer_rw`, which is
- * `exists (select 1 from clients c where c.id = charges.client_id and
+ * `charges` was readable by a coach through `charges_trainer_rw` alone, which
+ * was `exists (select 1 from clients c where c.id = charges.client_id and
  * c.trainer_id = auth.uid())` — the LIVE relationship, not a coach id stored on
  * the row. Ending coaching sets `clients.trainer_id` to null (see
- * src/lib/endCoaching.ts), so from that moment the fee is invisible to the
- * person who recorded it, in this period and in every past one. Nine of the ten
- * client rows in the live database already have a null trainer.
+ * src/lib/endCoaching.ts), so from that moment the fee became invisible to the
+ * person who recorded it, in this period AND IN EVERY PAST ONE. That is not a
+ * short section, it is a retroactive edit: last year's statement, already
+ * printed and already handed to an accountant, could not be reproduced, and the
+ * second copy differed from the first with nothing on either to say which was
+ * which.
  *
- * That cannot be fixed from here — it is somebody's row-level security policy,
- * not a query — so it is stated. A year-end figure that is quietly short by
- * every client who has since moved on is exactly the kind of number this app
- * refuses to print without saying so.
+ * Part 169 snapshots `charges.coach_id` when the fee is raised and reads
+ * through that as well as through the live relationship, so a fee recorded from
+ * now on stays on every statement that covers its date whatever happens to the
+ * coaching afterwards. The same discipline part 126 already applied to the
+ * CURRENCY on the same row, and for the same reason.
+ *
+ * What is NOT recovered is every fee raised BEFORE part 169 against somebody
+ * who had already moved on: the pair is recorded nowhere, so the backfill could
+ * not reach it and a guess would put one coach's fee on another's statement.
+ * That residue is what this sentence is now about, and it is narrower and
+ * dated rather than open-ended.
  */
 export const LATE_FEES_ONLY_CURRENT_CLIENTS =
-  'Only fees recorded against clients you are still coaching are on here. A fee recorded against somebody whose coaching has since ended is no longer readable by this app under your account, so it is missing from this section — in this period and in every earlier one.';
+  'A fee recorded from September 2026 onward stays on this statement whatever happens to the coaching afterwards, because who recorded it is written on the fee itself. Older fees are read through the coaching relationship instead, so one recorded against somebody who had already left before that change is not readable by this app under your account and is missing from this section.';
 
 /* ── late-cancellation fees, in whole units ───────────────────────────────── */
 
@@ -455,7 +654,7 @@ export function sumCharges(rows: readonly StatementCharge[]): ChargeTotals {
 
 /* ── the sections ─────────────────────────────────────────────────────────── */
 
-export type SectionKey = 'sessions' | 'packs' | 'subscriptions' | 'invoices' | 'lateCancellations';
+export type SectionKey = 'sessions' | 'packs' | 'subscriptions' | 'receipts' | 'invoices' | 'lateCancellations';
 
 /** One line of money, ready to print. */
 export interface MoneyLine { label: string; amount: string }
@@ -564,6 +763,7 @@ export function statementCaveats(input: StatementInput): string[] {
   say(input.sessions.status, 'Sessions', 'the number of sessions you delivered');
   say(input.packs.status, 'Packs and memberships sold', 'what clients paid you for packs and memberships');
   say(input.subscriptions.status, 'Subscription renewals', 'what clients paid you in renewals');
+  say(input.receipts.status, 'Payments you recorded yourself', 'the cash and transfers you have written down');
   say(input.invoices.status, 'Invoices issued', 'the documents you issued');
   say(input.lateCancellations.status, 'Late-cancellation fees', 'the fees recorded against your clients');
   if (input.payouts.status !== 'ready') {
@@ -593,9 +793,19 @@ export function payoutFacts(k: PayoutKnowledge): { title: string; lines: string[
   } else {
     lines.push('Your payout account is connected and clients can check out.');
   }
-  // The part that never changes, and the reason this section exists.
-  lines.push('This app is never told about a payout. It does not receive the schedule, the amount, the fee that came off it, or whether it arrived — none of that is sent here and none of it is stored here. There is no payout timetable on this screen because there is no data behind one, and an invented one would be a promise about when your money lands.');
-  lines.push('Your payouts live with Stripe. Stripe emails the address you signed up with each time one is sent, and the Express dashboard set up for you when you onboarded is where the schedule and the arrival dates are. This app cannot open it for you — it holds no link to your account, and inventing one would send you somewhere that is not it.');
+  // What changed, and what did not. Part 194 mirrors `payout.paid` and
+  // `payout.failed`, so this app IS now told when a payout happened and for how
+  // much — but it is still told nothing about the schedule, nothing about the
+  // fee that came off it, and nothing about the balance behind it. The old
+  // version of this paragraph said "never told about a payout", which is no
+  // longer true and would have read as this app hiding something it has.
+  //
+  // Deliberately still no timetable. Knowing that four payouts happened says
+  // nothing about when the fifth will, and a rendered schedule would be a
+  // promise about when somebody's rent money lands.
+  lines.push('Payouts that have already happened are recorded on the Money screen, mirrored from Stripe as each one is made. What is NOT here is a schedule: this app is not told when the next payout will be sent, what fee came off any of them, or what your Stripe balance is, so there is no timetable on this statement because there is no data behind one.');
+  lines.push('A payout is a balance reaching your bank rather than the proceeds of a sale — many charges at once, less what Stripe and Repple took and anything refunded — so it does not correspond to any figure above and nothing here subtracts one from the other.');
+  lines.push('Your payouts live with Stripe. Stripe emails the address you signed up with each time one is sent, and the dashboard set up for you when you onboarded is where the schedule and the arrival dates are. This app cannot open it for you — it holds no link to your account, and inventing one would send you somewhere that is not it.');
   return { title: 'Payouts', lines };
 }
 
@@ -671,6 +881,37 @@ export function coachStatement(input: StatementInput): Statement {
     lines: subsReady ? takenLines(subTaken) : [],
     withheld: withheldReason(input.subscriptions.status, 'renewals'),
     notes: subNotes,
+  };
+
+  /* ── what the coach recorded themselves ────────────────────────────────── */
+  //
+  // The half of a working coach's book that never went near Stripe. Its own
+  // section rather than being folded into the sales above, because the two are
+  // different KINDS of fact and a statement handed to an accountant has to keep
+  // them apart: one is what a payment processor told this app it had charged,
+  // the other is what the coach typed. Neither is checked against a bank, but
+  // only one of them has a Stripe record sitting behind it to be checked
+  // against, and the accountant is the person who needs to know which is which.
+  const recSplit = splitByPeriod(input.receipts.rows, (r) => r.created_at, range);
+  const recTaken = sumTaken(recSplit.inside);
+  const recReady = input.receipts.status === 'ready';
+  const recNotes = [RECEIPTS_ARE_YOUR_WORD];
+  if (recReady) {
+    for (const n of takenNotes(recTaken, 'payment')) recNotes.push(n);
+    if (recSplit.undated > 0) {
+      recNotes.push(`${recSplit.undated} recorded payment${recSplit.undated === 1 ? '' : 's'} could not be dated and ${recSplit.undated === 1 ? 'is' : 'are'} in no period at all.`);
+    }
+  }
+  const receiptsSection: StatementSection = {
+    key: 'receipts',
+    title: 'Payments You Recorded Yourself',
+    source: 'Written down by you, in this app, for money taken outside it — cash, a bank transfer, or a card taken somewhere this app was not involved.',
+    status: input.receipts.status,
+    count: recReady ? recSplit.inside.length : null,
+    countLabel: recSplit.inside.length === 1 ? 'payment' : 'payments',
+    lines: recReady ? takenLines(recTaken) : [],
+    withheld: withheldReason(input.receipts.status, 'recorded payments'),
+    notes: recNotes,
   };
 
   /* ── invoices issued ───────────────────────────────────────────────────── */
@@ -763,7 +1004,7 @@ export function coachStatement(input: StatementInput): Statement {
     issuerStatus: input.issuer.status,
     brand: (input.issuer.brand || '').trim() || null,
     generatedAt: input.generatedAt,
-    sections: [sessionsSection, packsSection, subsSection, invoicesSection, feesSection],
+    sections: [sessionsSection, packsSection, subsSection, receiptsSection, invoicesSection, feesSection],
     salesTotal,
     salesWithheld,
     payouts: payoutFacts(input.payouts),

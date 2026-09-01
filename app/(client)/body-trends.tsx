@@ -59,6 +59,8 @@ import {
   bodyReadings, measuredNote, stalenessNote, mixedSourceNote, readingsLabel,
   dayLabel, todayISO, type BodyReading,
 } from '../../src/lib/bodyFigures';
+import { useGoalTracker } from '../../src/ui/goalTracker';
+import { goalOfKind, goalOnBody } from '../../src/lib/goalOnBody';
 import { Rule, Section, SectionHead, Ghost, Notice, Spark } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
@@ -77,12 +79,24 @@ interface MetricDef {
    * Progress disagree.
    */
   from: 'weight' | 'bodyFat' | 'muscle' | 'score';
+  /**
+   * The `goal_targets.kind` this metric can be aimed at, or null when it cannot
+   * be aimed at at all.
+   *
+   * Declared on the metric for the same reason `from` is: the InBody score has
+   * no goal kind and never will, and a metric added later has to say which it
+   * is rather than falling through to a guess made from its key name.
+   */
+  goalKind: 'weight' | 'bodyfat' | 'muscle' | null;
 }
 const METRICS: MetricDef[] = [
-  { key: 'weightKg', label: 'Weight', unit: 'kg', better: 'down', weight: true, from: 'weight' },
-  { key: 'bodyFatPct', label: 'Body Fat', unit: '%', better: 'down', from: 'bodyFat' },
-  { key: 'skeletalMuscleKg', label: 'Skeletal Muscle', unit: 'kg', better: 'up', weight: true, from: 'muscle' },
-  { key: 'inbodyScore', label: 'InBody Score', unit: 'pts', better: 'up', from: 'score' },
+  { key: 'weightKg', label: 'Weight', unit: 'kg', better: 'down', weight: true, from: 'weight', goalKind: 'weight' },
+  { key: 'bodyFatPct', label: 'Body Fat', unit: '%', better: 'down', from: 'bodyFat', goalKind: 'bodyfat' },
+  { key: 'skeletalMuscleKg', label: 'Skeletal Muscle', unit: 'kg', better: 'up', weight: true, from: 'muscle', goalKind: 'muscle' },
+  // No goal kind. `goal_targets` has no 'score' and there is no series a
+  // bathroom scale could move it with, so this metric is charted and never
+  // aimed at.
+  { key: 'inbodyScore', label: 'InBody Score', unit: 'pts', better: 'up', from: 'score', goalKind: null },
 ];
 
 export default function BodyTrends() {
@@ -90,6 +104,11 @@ export default function BodyTrends() {
   const router = useRouter();
   const cd = useClientData();
   const wu = useSettings().weightUnit;
+  // The targets the member set on the Goals screen, which this screen — whose
+  // whole subject is those figures moving — had never read. `useGoalTracker`
+  // was imported by exactly two screens in the app and neither of them was a
+  // body screen.
+  const { goals, status: goalStatus } = useGoalTracker();
   const scans = useMemo(() => [...(cd.scans || [])].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [cd.scans]);
   const today = todayISO();
   const G = layout.gutter;
@@ -243,6 +262,15 @@ export default function BodyTrends() {
             //
             // Zero is undefined too, on both paths: an unchanged reading is
             // neither moving the right way nor the wrong one.
+            // The goal line, computed from the SAME readings the chart plots
+            // rather than from `cd.weightSeries` a second time — a target
+            // measured against a different series from the figure above it is
+            // exactly the "two screens, one body, two answers" this file's
+            // header was written about, reproduced inside one screen.
+            const gk = m.goalKind;
+            const target = gk && isWhole(goalStatus)
+              ? goalOnBody(goalOfKind(goals, gk), readings.map((r) => ({ t: r.at, v: r.value })), { weight: !!m.weight, unit: m.unit, wu })
+              : null;
             const improving: boolean | undefined = m.from === 'score'
               ? (rawDelta > 0 ? true : rawDelta < 0 ? false : undefined)
               : movementIsProgress(rawDelta, cd.goal, m.from);
@@ -268,6 +296,22 @@ export default function BodyTrends() {
                       <Text style={{ ...ty.caption, color: t.ink3 }}>No change since {dayLabel(readings[0].at)}</Text>
                     )}
                   </View>
+                  {/* What this metric is aiming at, and how far there is left.
+                      Under a failed goal read this is simply absent — an empty
+                      `goals` list under 'error' means the targets could not be
+                      read, not that none were set, and "no target" printed off
+                      a dropped connection would tell somebody their goal had
+                      been lost. Absence claims nothing either way. */}
+                  {target ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      {/* A mark, not ink. t.brand carries the "reached" state
+                          and the neutral ring carries "still going", because
+                          the sentence beside it already says which. */}
+                      <View accessibilityElementsHidden importantForAccessibility="no"
+                        style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: target.reached ? t.brand : t.ink3 }} />
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{target.note}</Text>
+                    </View>
+                  ) : null}
                   {/* The date and instrument behind the big number above it.
                       "Need to see the dates the weight was measured as well" —
                       this is that line, on every metric on the screen. */}

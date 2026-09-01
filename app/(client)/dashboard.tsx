@@ -185,7 +185,12 @@ export default function Home() {
   const remindTonight = async () => {
     const when = new Date(); when.setHours(19, 0, 0, 0);
     if (when.getTime() <= Date.now()) when.setTime(Date.now() + 60 * 60 * 1000);
-    try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + risk.streak + '-day streak going.', when, { route: '/(client)/workouts' }); } catch { /* ignore */ }
+    // Category 'motivation', so it honours the member's switch and their
+    // quiet hours. The same nudge is now also armed automatically at launch
+    // (src/ui/motivationNudges.tsx) — this button stays because it is the one
+    // that lets somebody arm it on a day the automatic rule would not, and
+    // because a control that vanishes is a control somebody reports missing.
+    try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + risk.streak + '-day streak going.', when, { route: '/(client)/workouts' }, 'motivation'); } catch { /* ignore */ }
   };
   // Priced with the member's own weight over time, so a pull-up counts. See
   // src/lib/bodyweightSets.ts — an unweighed member's bodyweight sets are

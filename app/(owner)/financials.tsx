@@ -111,6 +111,23 @@ export default function Financials() {
   const [derivedMrr, setDerivedMrr] = useState<number | null>(null);
   const [derivedMembers, setDerivedMembers] = useState<number | null>(null);
   /**
+   * Two more of the eight the register already holds.
+   *
+   * `revenue` is what `gym_payments` says was banked in the last 30 days —
+   * whatever it was for — and `newMembers` is memberships whose `started_on`
+   * falls in the same window. Both were being typed by hand beside a database
+   * that already knew them, which is two sources for one number and nothing
+   * comparing them.
+   *
+   * CHURN is deliberately not derived, and the reason is worth stating: nothing
+   * in `memberships` records WHEN a membership was cancelled. `status` moves to
+   * 'cancelled' in place and `ends_on` is only set on a fixed term, so any
+   * derived churn would be a guess dressed as a check — and a check that is
+   * wrong is worse than no check, because this screen exists to be believed.
+   */
+  const [derivedRevenue, setDerivedRevenue] = useState<number | null>(null);
+  const [derivedNew, setDerivedNew] = useState<number | null>(null);
+  /**
    * The register could not be read.
    *
    * `fetchPlans`/`fetchMemberships`/`fetchPayments` all throw on a PostgREST
@@ -141,13 +158,28 @@ export default function Financials() {
         // that makes an owner doubt a figure they are right about.
         setDerivedMrr(sum.mrrCents == null ? null : Math.round(sum.mrrCents / 100));
         setDerivedMembers(memberships.length ? sum.activeMembers : null);
+
+        // Thirty days back, in whole days, so the window does not slide by the
+        // hour of day the screen happened to be opened.
+        const since = new Date(Date.now() - 30 * 86400000).toISOString();
+        const recent = payments.filter((p) => p.takenAt >= since);
+        // The currency has to AGREE before there is a total: a gym that changed
+        // its currency has two in its ledger and adding them is not a sum. Null
+        // withholds the check rather than comparing a typed figure against a
+        // number made of two moneys.
+        const oneMoney = recent.length > 0 && new Set(recent.map((p) => p.currency)).size === 1;
+        setDerivedRevenue(oneMoney ? Math.round(recent.reduce((a, p) => a + p.amountCents, 0) / 100) : null);
+
+        const sinceDay = since.slice(0, 10);
+        setDerivedNew(memberships.length ? memberships.filter((m) => m.startedOn >= sinceDay).length : null);
         setDerivedFailed(false);
       } catch (e) {
         reportError('financials.derived', e);
         // The figures already on screen are from a read that no longer holds,
         // so they are cleared rather than left standing beside the failure.
         if (!live) return;
-        setDerivedMrr(null); setDerivedMembers(null); setDerivedFailed(true);
+        setDerivedMrr(null); setDerivedMembers(null);
+        setDerivedRevenue(null); setDerivedNew(null); setDerivedFailed(true);
       }
     })();
     return () => { live = false; };
@@ -158,6 +190,8 @@ export default function Financials() {
   // register is empty" from "we could not read your register".
   const mrrCheck = derivedFailed ? unreadable(fin.mrr) : reconcile(fin.mrr, derivedMrr);
   const memberCheck = derivedFailed ? unreadable(fin.members) : reconcile(fin.members, derivedMembers);
+  const revenueCheck = derivedFailed ? unreadable(fin.revenue) : reconcile(fin.revenue, derivedRevenue);
+  const newCheck = derivedFailed ? unreadable(fin.newMembers) : reconcile(fin.newMembers, derivedNew);
 
   useEffect(() => {
     (async () => {
@@ -289,12 +323,22 @@ export default function Financials() {
                   placeholderTextColor={t.ink3}
                   style={input}
                 />
-                {/* What the records say, for the two fields Repple can work out
-                    for itself. Offered, never imposed — see finReconcile.ts. */}
-                {f.key === 'mrr' || f.key === 'members' ? (() => {
-                  const chk = f.key === 'mrr' ? mrrCheck : memberCheck;
-                  const val = f.key === 'mrr' ? derivedMrr : derivedMembers;
-                  const fmtv = (n: number) => (f.key === 'mrr' ? money(n) : n.toLocaleString());
+                {/* What the records say, for the four fields Repple can work
+                    out for itself. Offered, never imposed — see finReconcile.ts.
+                    Churn is not among them and cannot be: nothing in
+                    `memberships` records WHEN one was cancelled, so a derived
+                    churn would be a guess dressed as a check. */}
+                {f.key === 'mrr' || f.key === 'members' || f.key === 'revenue' || f.key === 'newMembers' ? (() => {
+                  const chk = f.key === 'mrr' ? mrrCheck
+                    : f.key === 'members' ? memberCheck
+                    : f.key === 'revenue' ? revenueCheck
+                    : newCheck;
+                  const val = f.key === 'mrr' ? derivedMrr
+                    : f.key === 'members' ? derivedMembers
+                    : f.key === 'revenue' ? derivedRevenue
+                    : derivedNew;
+                  const asMoney = f.key === 'mrr' || f.key === 'revenue';
+                  const fmtv = (n: number) => (asMoney ? money(n) : n.toLocaleString());
                   const note = reconcileNote(chk, f.label.toLowerCase(), fmtv);
                   if (!note) return null;
                   return (
@@ -359,7 +403,7 @@ export default function Financials() {
             {/* The score is built on what was typed. If the register disagrees,
                 say so here rather than only inside the edit form — this is the
                 screen somebody acts on. */}
-            {mrrCheck.state === 'differs' || memberCheck.state === 'differs' ? (
+            {[mrrCheck, memberCheck, revenueCheck, newCheck].some((c) => c.state === 'differs') ? (
               <Notice
                 tone={t.s3}
                 kicker="Worth a look"
@@ -367,6 +411,8 @@ export default function Financials() {
                 note={[
                   mrrCheck.state === 'differs' ? reconcileNote(mrrCheck, 'MRR', money) : null,
                   memberCheck.state === 'differs' ? reconcileNote(memberCheck, 'member count', (n) => n.toLocaleString()) : null,
+                  revenueCheck.state === 'differs' ? reconcileNote(revenueCheck, 'monthly revenue', money) : null,
+                  newCheck.state === 'differs' ? reconcileNote(newCheck, 'members joined this month', (n) => n.toLocaleString()) : null,
                 ].filter(Boolean).join(' ') + ' This score is worked out from what you entered, not from the register.'}
               />
             ) : null}

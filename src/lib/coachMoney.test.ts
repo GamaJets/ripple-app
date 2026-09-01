@@ -10,11 +10,14 @@
 //    nothing. This is the whole reason `sumTaken` returns a list.
 //
 // 2. A purchase whose currency is unknown is neither summed nor dropped.
-//    `client_purchases` has no currency column, so the unit of a past purchase
-//    lives only in the package it was bought from, and a deleted package leaves
-//    an amount with no unit forever. Summed, it corrupts the total with a
-//    number in the wrong denomination; dropped, it makes the total quietly
-//    short. It is counted separately so the screen can say so.
+//    `client_purchases` carries its own `currency` since part 132 — the
+//    stripe-webhook writes the Checkout Session's own unit onto every sale —
+//    so an unlabelled amount is now a narrow case rather than the common one
+//    this comment used to describe. What is left is a sale made BEFORE that
+//    column existed whose package had already been deleted: the unit lived only
+//    on that package, and it is gone forever. Summed, it corrupts the total
+//    with a number in the wrong denomination; dropped, it makes the total
+//    quietly short. It is counted separately so the screen can say so.
 //
 // 3. A membership has no credits, so it has no balance — `null`, not `0`.
 //    "0 sessions left" beside a membership reads as a client who has used up

@@ -175,3 +175,154 @@ h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
 /* a figure that has no value is a dash, never a zero — the rule the app
  * already enforces, carried over so the web cannot quietly invent one */
 .dash { color: var(--ink3); }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Print.
+ *
+ * There was no `@media` rule of any kind in this console, and the two screens
+ * that most need one are Accounting and Close — the two written for month-end,
+ * whose whole purpose is to leave the building. Before this, every figure on
+ * them lived only in the owner's browser: no export, no print, no PDF, no
+ * email. An accountant asking "send me the month" got a screenshot.
+ *
+ * Printing is not a second design. It is the same page with the parts that are
+ * not the record removed: the navigation rail, every button, every form, and
+ * the month picker — all of which are either inert on paper or, worse, printed
+ * as an empty box that reads as missing data.
+ *
+ * `.no-print` is opt-in and applied by the screens themselves rather than by a
+ * blanket `button { display: none }`, because a button is sometimes the only
+ * thing rendering a value (a plan picker showing which plan somebody is on) and
+ * hiding those would silently drop a column.
+ *
+ * The palette is forced light. A dark-theme page printed as it appears is a
+ * page of black toner with white letters knocked out of it, and on a duplex
+ * office printer it is unreadable on the second side.
+ * ───────────────────────────────────────────────────────────────────────── */
+@media print {
+  :root {
+    --bg: #ffffff; --surface: #ffffff; --surface2: #ffffff; --rail: #ffffff;
+    --ink: #111111; --ink2: #333333; --ink3: #555555;
+    --ring: #bbbbbb; --ring2: #dddddd; --brand: #111111; --brand-ink: #ffffff;
+  }
+  body { background: #fff; color: #111; }
+  /* The rail carries navigation and a sign-out button and nothing that is part
+   * of the record. It is the first thing a reader would cross out by hand. */
+  aside { display: none !important; }
+  main { padding: 0 !important; }
+  .no-print { display: none !important; }
+  /* Tables must not be cut across a row, and a section must not start three
+   * lines above a page break. Neither is universally honoured, and both are
+   * free where they are. */
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  section { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+  /* An `overflow-x: auto` box prints only what is inside the viewport, so a
+   * wide table would lose its right-hand columns — silently, which is the worst
+   * way for an accountant to lose a column of money. */
+  div[style*="overflow-x"], div[style*="overflowX"] { overflow: visible !important; }
+  a { text-decoration: none; color: inherit; }
+  /* The URL of every link, once, so a printed page can be traced back. Only on
+   * the ones that leave this console — an internal /accounting link printed as
+   * "(/accounting)" beside its own text is noise. */
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 9px; color: #555; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Small screens.
+ *
+ * Before the print block above there was no `@media` rule of any kind in this
+ * console, and the layout it produces is fixed-width by construction: the rail
+ * is 184px `flex: none`, the gutter is a constant, every table header is 8px
+ * and every cell is `white-space: nowrap` inside an `overflow-x` box. On a
+ * phone the rail eats half the viewport, the main column is what is left, and
+ * the tables scroll sideways inside it. An owner standing on the gym floor —
+ * which is where /door, /timetable and /equipment are actually used — could not
+ * use the console at all.
+ *
+ * ── Why these rules carry `!important` ───────────────────────────────────
+ *
+ * Not for specificity: because the values they are overriding are INLINE. The
+ * rail's width lives in a style object in `components/Shell.tsx` and the cell
+ * padding in `components/DataTable.tsx`, both of which belong to another
+ * editor, and an inline style beats any selector that is not `!important`.
+ * That is a real cost — it makes these rules unoverridable in turn — and it is
+ * the smaller one against a console that does not work away from a desk.
+ *
+ * The honest fix is for those two components to read a CSS custom property for
+ * their width and their type scale, at which point every `!important` here can
+ * go. Until then this is the whole of the mobile layout, in one place, with the
+ * reason attached.
+ *
+ * 900px, not 768: the breakpoint is not about phones. Two of these tables are
+ * eight columns wide and a landscape tablet is already too narrow for them.
+ * ───────────────────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  :root {
+    /* The gutter is a custom property and is the one value that needs no
+     * override. Halved rather than removed: content flush against a screen edge
+     * reads as broken rather than as dense. */
+    --gutter: 10px;
+  }
+
+  /* The frame stacks. `flex-direction` is on the Shell's outer div, which is
+   * the only two-child flex row that is a direct child of body. */
+  body > div {
+    flex-direction: column !important;
+  }
+
+  /* The rail becomes a strip across the top: full width, no longer a column,
+   * and short enough that the page below it is still the page. Its nav lays
+   * itself out in a row and wraps. */
+  aside {
+    width: 100% !important;
+    flex: none !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--ring);
+    padding-bottom: 8px !important;
+  }
+  aside nav {
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    gap: 4px 14px !important;
+    padding: 0 12px;
+  }
+  aside nav > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+  }
+  /* The sign-out block is pushed to the bottom by `margin-top: auto` in a
+   * column; in a stacked layout that would strand it. */
+  aside > div:last-child {
+    margin-top: 0 !important;
+  }
+
+  /* Tables. The 8px header is a considered size at a desk and unreadable in a
+   * hand; the `nowrap` on every cell is what forces the sideways scroll, and
+   * long text columns — a drift reason, a cancellation note — are exactly the
+   * ones that should wrap instead. Figures keep their `nowrap` by staying in
+   * the mono class, which these rules do not touch. */
+  table th {
+    font-size: 9.5px !important;
+    letter-spacing: 0.1em !important;
+    padding: 6px 8px !important;
+  }
+  table td {
+    padding: 8px 8px !important;
+    white-space: normal !important;
+  }
+
+  /* Forms are laid out as `flex-wrap: wrap` rows of fixed-width inputs, which
+   * wraps to one input per line at this width and then overflows because the
+   * widths are in pixels. */
+  input, select, textarea, button {
+    max-width: 100%;
+  }
+
+  /* The page title is 27px of serif, which is a headline on a desk and a
+   * paragraph-and-a-half on a phone. */
+  h1 { font-size: 22px; }
+}

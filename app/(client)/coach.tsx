@@ -13,16 +13,24 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule } from '../../src/ui/kit';
+import { Rule, Notice, Flag, Cta, Ghost } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
-import { injurySummary } from '../../src/lib/injuries';
+// `sharedInjuries`, NOT `injurySummary`. The difference is the note, and the
+// note is seeded from the line off a physiotherapy report — see the header of
+// src/lib/coachShare.ts.
+import { sharedInjuries } from '../../src/lib/coachShare';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { buildProgram } from '../../src/lib/programs';
-import { askCoach, coachAvailable, type ChatMsg } from '../../src/lib/coach';
+import { askCoachForMember, coachAvailable, type ChatMsg } from '../../src/lib/coach';
+import { useCoachShare } from '../../src/ui/coachShare';
+import {
+  ALWAYS_SENT, SENT_WITH_PERMISSION, NEVER_SENT, WHERE_IT_GOES,
+  CONSENT_TITLE, CONSENT_BODY, WITHHELD_NOTE, NOT_MEDICAL_ADVICE,
+} from '../../src/lib/coachShare';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { readinessMadeOf } from '../../src/lib/readiness';
@@ -96,9 +104,19 @@ export default function Coach() {
     : cd.coachingMode === 'hybrid' ? 'coached in person for booked sessions and remotely in between — some weeks they train alone'
     : 'coached remotely — their coach writes the plan but is never in the room';
 
+  // Everything below is a candidate for sending. What actually goes is decided
+  // by the allowlist in src/lib/coachShare.ts and applied inside
+  // `askCoachForMember` — a field added here and not added there is not
+  // transmitted, which is deliberately the safe direction.
+  //
+  // `name` used to be the first field and it is gone. The model was told "Name:
+  // Sarah Whitfield" and then handed her weight, her body fat, her sleep and
+  // her injuries, which makes the payload a named medical record rather than a
+  // set of figures. It was never needed: the greeting below is built on this
+  // phone from `cd.name` and always was, so nothing the member sees changes.
   const context = {
     coaching,
-    name: cd.name, goal: cd.goal, diet: cd.diet, weightKg: cd.weightKg != null ? Math.round(cd.weightKg * 10) / 10 : 'not recorded',
+    goal: cd.goal, diet: cd.diet, weightKg: cd.weightKg != null ? Math.round(cd.weightKg * 10) / 10 : 'not recorded',
     bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,
     kcal: macros?.kcal ?? 'not set', protein: macros?.protein ?? 'not set', carbs: macros?.carbs ?? 'not set', fat: macros?.fat ?? 'not set',
     programTitle: program.title, programFocus: program.focus.join(', '),
@@ -136,7 +154,12 @@ export default function Coach() {
     // ladder is plate-pair metric — so the conversion belongs here, at the
     // edge, exactly as it does on every screen that prints it.
     nextLift: _prog ? `${_prog.exercise}: ${liftLabel(_prog.nextWeight, wu)} x ${_prog.nextReps} (${_prog.action})` : undefined,
-    injuries: injurySummary(cd.injuries) || 'none disclosed',
+    // Area and severity. NOT `injurySummary`, which appends the note — and the
+    // note is what `candidateNote` in src/lib/injuryExtract.ts seeds with the
+    // matched line off an uploaded physiotherapy report. The member wrote that,
+    // or accepted it, for their coach. It is not a thing to post to a model,
+    // and there is no toggle that makes it one.
+    injuries: sharedInjuries(cd.injuries) || 'none disclosed',
     focusAreas: cd.focusAreas.length ? cd.focusAreas.join(', ') : 'none set',
   };
 
@@ -145,6 +168,12 @@ export default function Coach() {
   // when they failed. The model is told the same thing in `context`, so the two
   // now agree: what it has, it has; what it could not read, it says it could
   // not read rather than treating as a zero.
+  //
+  // It answers to the CONSENT as well, for the same reason. A coach that was
+  // sent no body composition, no sleep and no injuries opening with "I know
+  // your latest numbers" is the identical false promise arriving by the other
+  // route — and it is the one the member themselves just chose, so it would
+  // read as the app having ignored them.
   const knowsAll = logWhole && foodWhole && isWhole(cd.status);
   const [msgs, setMsgs] = useState<ChatMsg[]>([
     { role: 'assistant', content: `Hi ${cd.name.split(' ')[0]} I'm your ${BRAND.label} coach. ${knowsAll ? 'I know your plan, targets, and latest numbers' : 'I have your plan and whatever of your numbers loaded'} — ask me anything about training or nutrition.` },
@@ -153,30 +182,101 @@ export default function Coach() {
   const [busy, setBusy] = useState(false);
   const scroller = useRef<ScrollView>(null);
 
+  // The member's answer about their health details, read from the device once.
+  // 'unknown' while that read is in flight and 'unasked' when it came back
+  // empty; nothing is sent on either, and the composer is not offered on
+  // either. See src/ui/coachShare.tsx.
+  const { consent, answer } = useCoachShare();
+  const answered = consent === 'yes' || consent === 'no';
+  // Whether the "what leaves your phone" list is expanded. Collapsed after the
+  // answer is given so the chat is the screen; one tap away forever, because a
+  // disclosure somebody can only read once is a disclosure they cannot check.
+  const [showsDetail, setShowsDetail] = useState(false);
+
+  // The greeting is derived rather than frozen at mount, because at mount the
+  // consent is still 'unknown' — the AsyncStorage read has not landed. It is
+  // written back into the opening message only while the conversation IS the
+  // opening message, so nothing a member has already read changes under them
+  // and no reply is ever rewritten.
+  const greeting = `Hi ${cd.name.split(' ')[0]} I'm your ${BRAND.label} coach. ${
+    consent === 'no'
+      ? 'I have your plan and your targets, and not your body, sleep or injuries, because you asked me not to'
+      : knowsAll ? 'I know your plan, targets, and latest numbers'
+        : 'I have your plan and whatever of your numbers loaded'
+  } — ask me anything about training or nutrition.`;
+  useEffect(() => {
+    setMsgs((m) => (m.length === 1 && m[0].role === 'assistant' ? [{ role: 'assistant', content: greeting }] : m));
+  }, [greeting]);
+
   const params = useLocalSearchParams<{ ask?: string }>();
   const seeded = useRef(false);
   const send = async (text: string) => {
     const q = text.trim();
-    if (!q || busy) return;
+    if (!q || busy || !answered) return;
     const history: ChatMsg[] = [...msgs, { role: 'user', content: q }];
     setMsgs(history); setInput(''); setBusy(true);
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 50);
-    const reply = await askCoach(history.filter((m) => m.role === 'user' || m.role === 'assistant'), context);
+    const res = await askCoachForMember(
+      history.filter((m) => m.role === 'user' || m.role === 'assistant'),
+      context,
+      consent,
+    );
     setBusy(false);
-    setMsgs((m) => [...m, { role: 'assistant', content: reply ?? (coachAvailable() ? "I hit a snag reaching the coach service — try again in a moment." : "The AI coach turns on once your team deploys the coach-chat function and enables AI features. Until then, here's a tip: hit your protein target first — it protects muscle and keeps you full.") }]);
+    // Three failures, three sentences. The old code had one null for all of
+    // them and told everybody the service had hiccuped — including, once this
+    // gate existed, somebody whose answer simply had not been read yet.
+    const said = res.ok ? res.reply
+      : res.reason === 'no-consent'
+        ? 'I have not sent anything yet — your answer about your health details had not loaded when you asked. Try that again in a moment.'
+        : res.reason === 'unavailable'
+          ? "The AI coach turns on once your team deploys the coach-chat function and enables AI features. Until then, here's a tip: hit your protein target first — it protects muscle and keeps you full."
+          : 'I hit a snag reaching the coach service — try again in a moment.';
+    setMsgs((m) => [...m, { role: 'assistant', content: said }]);
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 50);
   };
 
   useEffect(() => {
-    if (!seeded.current && params.ask === 'injury') {
+    // Waits for the answer. This deep link comes from the Injuries screen and
+    // its whole question is about an injury, so firing it before the member has
+    // said whether their injuries may be sent is the exact thing the gate
+    // exists to prevent — and it would have fired on mount, before the screen
+    // had even drawn the question.
+    if (!seeded.current && params.ask === 'injury' && answered) {
       seeded.current = true;
       send('I have an injury logged that limits some exercises. Build me a safe workout plan for today that trains around it, and tell me what to avoid.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.ask]);
+  }, [params.ask, answered]);
 
   const G = layout.gutter;
   const { ref: barRef, lift } = useKeyboardLift();
+
+  /* ── the list of exactly what goes, and what does not ─────────────────────
+     Rendered from the arrays in src/lib/coachShare.ts rather than typed here,
+     so it cannot drift from the allowlist that decides what is actually sent.
+     A list somebody has read and agreed to, that no longer describes the code,
+     is worse than no list — they have been told something false and have now
+     consented to it. */
+  const Bullets = ({ head, items, tone }: { head: string; items: string[]; tone: string }) => (
+    <View style={{ marginTop: sp.md }}>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>{head}</Text>
+      {items.map((s) => (
+        <View key={s} style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.xs }}>
+          <Text style={{ ...ty.label, color: tone }}>•</Text>
+          <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{s}</Text>
+        </View>
+      ))}
+    </View>
+  );
+
+  const Disclosure = () => (
+    <View>
+      <Bullets head="Always sent when you ask something" items={ALWAYS_SENT} tone={t.ink3} />
+      <Bullets head="Only sent if you say yes" items={SENT_WITH_PERMISSION} tone={t.brand} />
+      <Bullets head="Never sent" items={NEVER_SENT} tone={t.ink3} />
+      <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{WHERE_IT_GOES}</Text>
+    </View>
+  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -195,27 +295,75 @@ export default function Coach() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.head, color: t.ink }}>AI Coach</Text>
-            <Text style={{ ...ty.caption, color: t.ink3 }}>{knowsAll ? 'Knows your plan & numbers' : 'Working from what loaded'}</Text>
+            {/* The subtitle is a claim about what the model has, so it has to
+                answer to the consent as well as to the reads. "Knows your plan
+                & numbers" above a coach that was never sent a single one of
+                those numbers is the same false promise the `knowsAll` gate was
+                added to remove, arriving by the other route. */}
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {consent === 'no' ? 'Working without your numbers'
+                : knowsAll ? 'Knows your plan & numbers'
+                  : 'Working from what loaded'}
+            </Text>
           </View>
         </View>
         <Rule />
 
         {/* ── the conversation ───────────────────────────────────────────── */}
         <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled">
-          {msgs.map((m, i) => (
+
+          {/* ── the question, before anything is sent ─────────────────────
+              This screen used to post the member's weight, body fat, muscle
+              mass, sleep, readiness and injuries to a language model the first
+              time they tapped a suggestion, with nothing on screen saying so.
+              Now nothing leaves the phone until this has an answer — including
+              the injury deep link from the Injuries screen, which used to fire
+              on mount. */}
+          {consent === 'unknown' ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              <ActivityIndicator color={t.brand} size="small" />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Checking what you asked us to share…</Text>
+            </View>
+          ) : consent === 'unasked' ? (
+            <View>
+              <Notice tone={t.brand} kicker="Your data" title={CONSENT_TITLE} note={CONSENT_BODY}>
+                <Disclosure />
+              </Notice>
+              {/* The same disclaimer the Injuries screen and the Injury
+                  Document screen carry, in the same words, finally on the
+                  screen that actually transmits the injuries. */}
+              <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice" note={NOT_MEDICAL_ADVICE} />
+              <View style={{ marginTop: sp.lg, gap: sp.sm }}>
+                <Cta label="Yes, Use My Numbers" onPress={() => answer('yes')} wide />
+                {/* A Cta and not a Ghost. Both answers are real answers and
+                    the coach works either way, so rendering the decline as a
+                    whisper next to a solid Yes would be pressure dressed as
+                    hierarchy. `t.surface2` is the neutral button fill three
+                    other screens already use for the second of a pair. */}
+                <Cta label="No, Keep Them Private" onPress={() => answer('no')} tone={t.surface2} wide />
+              </View>
+              {/* Said before they choose, not after. Somebody deciding needs to
+                  know the cost of the safer answer, and the cost here is not
+                  "less personalised" — it is a coach that cannot see an
+                  injury. */}
+              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{WITHHELD_NOTE}</Flag>
+            </View>
+          ) : null}
+
+          {answered ? msgs.map((m, i) => (
             <View key={i} style={{ flexDirection: 'row', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: sp.md }}>
               <View style={{ maxWidth: '82%', backgroundColor: m.role === 'user' ? t.brand : t.surface2, borderRadius: radius.md, paddingHorizontal: sp.md, paddingVertical: sp.sm + 2 }}>
                 <Text style={{ ...ty.body, color: m.role === 'user' ? t.brandInk : t.ink }}>{m.content}</Text>
               </View>
             </View>
-          ))}
+          )) : null}
           {busy ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2 }}>
               <ActivityIndicator color={t.brand} size="small" />
               <Text style={{ ...ty.caption, color: t.ink3 }}>Coach is thinking…</Text>
             </View>
           ) : null}
-          {msgs.length <= 1 ? (
+          {answered && msgs.length <= 1 ? (
             <View style={{ marginTop: sp.md, gap: sp.sm }}>
               {SUGGESTIONS.map((s) => (
                 <Pressable key={s} onPress={() => send(s)} accessibilityRole="button" accessibilityLabel={s}
@@ -225,19 +373,56 @@ export default function Coach() {
               ))}
             </View>
           ) : null}
+
+          {/* ── the answer, still visible and still changeable ─────────────
+              An answer given once and then buried is how a consent stops being
+              one. This row states which of the two is in force, in the same
+              breath as the way to change it, and the full list is one tap away
+              for as long as the screen exists. */}
+          {answered ? (
+            <View style={{ marginTop: sp.xl, borderTopWidth: hairline, borderTopColor: t.ring, paddingTop: sp.md }}>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                {consent === 'yes'
+                  ? 'Your coach can use your body, sleep and injuries. Your name and the words of any injury note never leave your phone.'
+                  : 'Your coach is working without your body, sleep or injuries. Your name never leaves your phone either.'}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
+                <Ghost label={showsDetail ? 'Hide the Detail' : 'What Gets Sent'} onPress={() => setShowsDetail((v) => !v)} />
+                <Ghost label={consent === 'yes' ? 'Turn It Off' : 'Turn It On'}
+                  onPress={() => answer(consent === 'yes' ? 'no' : 'yes')} />
+              </View>
+              {showsDetail ? (
+                <View style={{ marginTop: sp.sm }}>
+                  <Disclosure />
+                  {consent === 'no' ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.md }}>{WITHHELD_NOTE}</Flag>
+                  ) : null}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{NOT_MEDICAL_ADVICE}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </ScrollView>
 
-        {/* ── composer ───────────────────────────────────────────────────── */}
-        <Rule />
-        <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
-          <TextInput value={input} onChangeText={setInput} placeholder="Ask your coach…" placeholderTextColor={t.ink3} multiline
-            style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
-          <Pressable onPress={() => send(input)} disabled={!input.trim() || busy}
-            accessibilityRole="button" accessibilityLabel="Send message"
-            style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: input.trim() && !busy ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ ...ty.head, color: t.brandInk }}>↑</Text>
-          </Pressable>
-        </View>
+        {/* ── composer ─────────────────────────────────────────────────────
+            Not rendered until the question above has an answer. A composer a
+            member can type into is a promise that pressing send will do
+            something, and until they have answered the only honest thing
+            pressing send could do is refuse. */}
+        {answered ? (
+          <View>
+            <Rule />
+            <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
+              <TextInput value={input} onChangeText={setInput} placeholder="Ask your coach…" placeholderTextColor={t.ink3} multiline
+                style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
+              <Pressable onPress={() => send(input)} disabled={!input.trim() || busy}
+                accessibilityRole="button" accessibilityLabel="Send message"
+                style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: input.trim() && !busy ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ ...ty.head, color: t.brandInk }}>↑</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
   );

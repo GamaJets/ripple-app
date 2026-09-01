@@ -32,6 +32,21 @@ import { searchCommonFoods } from '../../src/lib/foods';
 import { searchDishes } from '../../src/lib/restaurant';
 import { mergeFoodResults } from '../../src/lib/foodSearch';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
+// One sheet asks how much of it you ate, for every way in. Until now a search
+// row logged straight through and the barcode sheet logged whatever basis Open
+// Food Facts returned, so half a packet and two packets were both recorded as
+// one. See src/ui/LogFoodSheet.tsx.
+import { LogFoodSheet } from '../../src/ui/LogFoodSheet';
+import type { FoodFacts } from '../../src/lib/foodPortion';
+// The yogurt somebody eats every morning. Recents come from the log itself;
+// favourites are pinned on purpose and kept on this phone. See
+// src/lib/foodMemory.ts.
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  recentFoods, frequentFoods, favouritesKey, readFavourites, writeFavourites,
+  toggleFavourite, isFavourite, type RememberedFood,
+} from '../../src/lib/foodMemory';
+import { supabase } from '../../src/lib/supabase';
 import { notifySuccess } from '../../src/ui/haptics';
 import { useFoodLog, useFoodHistory, type FoodEntry } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -134,13 +149,30 @@ export default function FoodLog() {
    [q, localCommon, localDishes, remote],
  );
 
- // photo estimate modal state
- const [photoUri, setPhotoUri] = useState<string | null>(null);
+ // ── the one review sheet ────────────────────────────────────────────────
+ //
+ // Everything that is about to become a row in the food log goes through it:
+ // a searched food, a scanned product, a photo the reader answered, a photo it
+ // did not, and a described food that came back missing a macro. Five paths,
+ // one sheet, one place that asks how much — and one place that refuses to
+ // invent a figure nobody measured. See src/ui/LogFoodSheet.tsx.
+ const [pending, setPending] = useState<FoodFacts | null>(null);
+ const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+ const [pendingNote, setPendingNote] = useState<string | null>(null);
+ const [pendingTitle, setPendingTitle] = useState<string | undefined>(undefined);
+ // Which way in this food arrived, so `food_logs.via` is what actually
+ // happened. The column carries a CHECK constraint listing search / barcode /
+ // photo / manual, and a row sent under anything else is refused outright.
+ const [pendingVia, setPendingVia] = useState<'search' | 'barcode' | 'photo' | 'manual'>('search');
+ // More described foods waiting their turn behind the one on screen. A
+ // description can be four foods and the sheet holds one; they queue rather
+ // than being logged behind the member's back or dropped.
+ const [queue, setQueue] = useState<FoodFacts[]>([]);
+ // The photo is being read. Its own flag, because the sheet does not open until
+ // there is something to put in it and two seconds of nothing happening after
+ // the shutter reads as a button that did not work.
  const [reading, setReading] = useState(false);
- // True when a photo was taken but no real nutrition read was possible.
- const [readFailed, setReadFailed] = useState(false);
- const [estN, setEstN] = useState(''); const [estK, setEstK] = useState(''); const [estP, setEstP] = useState(''); const [estC, setEstC] = useState(''); const [estF, setEstF] = useState('');
- const [serv, setServ] = useState(1);
+ const [photoUri, setPhotoUri] = useState<string | null>(null);
 
  // Every write in this provider resolves true only once the row is on the
  // server, and this screen used to throw all of them away. A refused insert and
@@ -172,8 +204,18 @@ export default function FoodLog() {
  const logNL = async () => {
    const text = nl.trim(); if (!text) return;
    setNlBusy(true);
-   const items = await parseFoodText(text);
-   if (items && items.length) {
+   const parsed = await parseFoodText(text);
+   // A read that came back missing a macro is NOT logged with a zero in the
+   // gap. `parseFoodText` used to coerce an absent protein to 0 and this loop
+   // wrote it, so a described meal the model only knew the calories of counted
+   // as a zero-protein meal against the day's remaining macros. Those go to the
+   // sheet instead, one at a time, where a person fills the gap in.
+   const items = parsed ? parsed.filter((it) => it.protein != null && it.carbs != null && it.fat != null) : null;
+   const gaps: FoodFacts[] = parsed
+     ? parsed.filter((it) => it.protein == null || it.carbs == null || it.fat == null)
+       .map((it) => ({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, basis: null }))
+     : [];
+   if (parsed && parsed.length) {
     // Awaited in sequence and counted, rather than fired off in a forEach: a
     // description can be four foods, and four separate "not saved" alerts
     // stacked on top of each other tells somebody nothing they can act on.
@@ -186,18 +228,30 @@ export default function FoodLog() {
     // manual is what it is; the reader in rowToEntry already coerces to that.
     let queued = 0;
     let refused = 0;
-    for (const it of items) {
-     const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' });
+    for (const it of items ?? []) {
+     const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein ?? 0, carbs: it.carbs ?? 0, fat: it.fat ?? 0, via: 'manual' });
      if (out === 'unsent') queued++;
      else if (out === 'refused') refused++;
     }
     setNlBusy(false);
     setNl('');
+    // The incomplete ones go to the sheet rather than into the log. The first
+    // is on screen and the rest wait behind it — a description can be four
+    // foods, and the sheet holds one.
+    if (gaps.length) {
+     setPendingTitle('Check This One');
+     setPendingVia('manual');
+     setPendingNote(`Read from what you typed. Some of the macros did not come back, so they are blank rather than nought — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
+     setPendingPhoto(null);
+     setPending(gaps[0]);
+     setQueue(gaps.slice(1));
+    }
     // Refusal is reported ahead of the queue, because it is the one the client
     // has to do something about: those foods are not logged anywhere.
-    if (refused) warnUnsaved(refused === items.length ? 'What you described' : `${refused} of the ${items.length} foods`, 'refused');
-    else if (queued) warnUnsaved(queued === items.length ? 'What you described' : `${queued} of the ${items.length} foods`, 'unsent');
-    else notifySuccess();
+    const n = (items ?? []).length;
+    if (refused) warnUnsaved(refused === n ? 'What you described' : `${refused} of the ${n} foods`, 'refused');
+    else if (queued) warnUnsaved(queued === n ? 'What you described' : `${queued} of the ${n} foods`, 'unsent');
+    else if (n) notifySuccess();
     return;
    }
    setNlBusy(false);
@@ -288,34 +342,39 @@ export default function FoodLog() {
  // caption.
  const remK = target ? caloriesLeft(target.kcal, tot.k, burned, burn?.budgeted ?? 0, burn?.kind).net : null;
 
- const fillEst = (n: string, k: number, p: number, c: number, f: number) => { setEstN(n); setEstK(String(k)); setEstP(String(p)); setEstC(String(c)); setEstF(String(f)); setReadFailed(false); setReading(false); };
  const takeMealPhoto = async (fromCamera: boolean) => {
  if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'log a meal by photo'))) return;
  const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
  if (res.canceled || !res.assets?.[0]) return;
  const asset = res.assets[0];
  setPhotoUri(asset.uri);
- setReading(true); setReadFailed(false); setServ(1);
- // Real vision read when the backend is live; otherwise an editable estimate.
+ setReading(true);
+ // Real vision read when the backend is live; otherwise an empty sheet the
+ // member fills in. Nothing is estimated by this screen either way.
+ let read: { name: string; kcal: number; protein: number | null; carbs: number | null; fat: number | null } | null = null;
  if (visionAvailable() && asset.base64) {
- let mb = asset.base64;
- try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) mb = mm.base64; } catch {}
- const r = await analyzeMeal(mb, 'image/jpeg');
- if (r) { fillEst(r.name, r.kcal, r.protein, r.carbs, r.fat); return; }
+  let mb = asset.base64;
+  try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) mb = mm.base64; } catch {}
+  read = await analyzeMeal(mb, 'image/jpeg');
  }
- // No real read available — do not invent one. Blank the fields and switch the
- // sheet's copy to "enter it yourself" rather than claiming an AI estimate.
- setEstN(''); setEstK(''); setEstP(''); setEstC(''); setEstF('');
- setReadFailed(true); setReading(false);
- };
-
- const logPhoto = async () => {
- const k = round((parseFloat(estK) || 0) * serv), p = round((parseFloat(estP) || 0) * serv), c = round((parseFloat(estC) || 0) * serv), f = round((parseFloat(estF) || 0) * serv);
- if (!k) { Alert.alert('Add calories', 'Enter at least a calorie estimate.'); return; }
- // The sheet closes only once the meal is stored. `add` has already said if it
- // was not, and closing over that would throw away the figures somebody just
- // read off their own plate — the one thing they cannot get back by retrying.
- if (await add({ n: estN || 'Meal (photo)', k, p, c, f }, 'photo')) setPhotoUri(null);
+ setReading(false);
+ setPendingPhoto(asset.uri);
+ setPendingVia('photo');
+ setPendingTitle(read ? 'Check And Log' : 'Enter This Meal');
+ // The copy no longer promises to keep the picture. `food_logs` has no image
+ // column and `logFood` has never been handed one, so "they'll be logged
+ // against this photo" described something the app has never done: the photo
+ // is read from, shown while the figures are typed, and gone when the sheet
+ // closes. Saying so is the fix — the alternative is a promise the product
+ // does not keep about the one thing a member cannot re-take.
+ setPendingNote(read
+  ? 'Read from your photo — check every figure before logging it. The picture itself is not kept: it is here to read the meal from and to check against, and the numbers are what go into your log.'
+  : 'Nothing could be read from your picture, so nothing has been estimated from it. Enter the calories and macros and they go into your log. The picture itself is not kept — it is here to check against while you type.');
+ // A blank sheet rather than a zeroed one. Every box the reader did not fill
+ // is empty, and src/ui/LogFoodSheet.tsx will not log until a person has.
+ setPending(read
+  ? { name: read.name, kcal: read.kcal, protein: read.protein, carbs: read.carbs, fat: read.fat, basis: null }
+  : { name: '', kcal: NaN, protein: null, carbs: null, fat: null, basis: null });
  };
 
  // Nothing is scanned and nothing is logged — say so instead of inventing a hit.
@@ -478,8 +537,11 @@ export default function FoodLog() {
  {results.map((r, i) => (
  <View key={r.key}>
  {i > 0 ? <Rule /> : null}
- <Pressable onPress={() => { add({ n: r.name, k: r.kcal, p: r.protein, c: r.carbs, f: r.fat }, 'search'); setQ(''); }}
- accessibilityRole="button" accessibilityLabel={`Log ${r.name} — ${r.label}`}
+ {/* The sheet, not a straight write. A row logged on one tap recorded one
+     portion of whatever basis the source used, so half a packet and two
+     packets were the same entry — see src/ui/LogFoodSheet.tsx. */}
+ <Pressable onPress={() => { setPendingTitle(undefined); setPendingNote(null); setPendingPhoto(null); setPendingVia('search'); setPending({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, basis: r.basis }); }}
+ accessibilityRole="button" accessibilityLabel={`Log ${r.name} — ${r.label}`} accessibilityHint="Opens a sheet to say how much of it you had"
  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.body, color: t.ink }} numberOfLines={2}>{r.name}</Text>
@@ -611,61 +673,20 @@ export default function FoodLog() {
 
  </ScrollView>
 
- {/* ── photo → estimate sheet ───────────────────────────────────────── */}
- <Modal visible={photoUri != null} transparent animationType="slide" onRequestClose={() => setPhotoUri(null)}>
-   <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
- <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPhotoUri(null)} />
- <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
- <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
- <Text style={{ ...ty.title, color: t.ink }}>{reading ? 'Reading Your Meal…' : readFailed ? 'Enter This Meal' : 'Confirm & Log'}</Text>
- <Pressable onPress={() => setPhotoUri(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel">
- <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
- </Pressable>
- </View>
- {photoUri ? <Image source={{ uri: photoUri }} accessible accessibilityLabel="The meal you photographed" style={{ width: '100%', height: 150, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.md }} resizeMode="cover" /> : null}
- {reading ? (
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
- <ActivityIndicator color={t.brand} />
- <Text style={{ ...ty.label, color: t.ink3 }}>Estimating calories and macros…</Text>
- </View>
- ) : (
- <>
- <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{readFailed ? "Photo reading isn't available yet, so nothing was estimated from your picture — enter the calories and macros and they'll be logged against this photo." : 'AI estimate from your photo — adjust anything before logging.'}</Text>
- <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Meal name</Text>
- <TextInput value={estN} onChangeText={setEstN} placeholder="What was it?" placeholderTextColor={t.ink3} style={{ ...field, marginBottom: sp.md }} />
- {/* "P C F" over three boxes, and no unit on any of them. Grams is the only
-     thing a macro can be, but the reader has to know that already — and the
-     box next to them is calories, which is not grams, so the row taught that
-     the numbers here are whatever each column happens to mean. Named in full
-     with the unit, the same way app/(trainer)/my-nutrition.tsx does it. */}
- <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
- {[['Calories', 'kcal', estK, setEstK], ['Protein', 'g', estP, setEstP], ['Carbs', 'g', estC, setEstC], ['Fat', 'g', estF, setEstF]].map(([lbl, hint, val, set]: any) => (
- <Field key={lbl} label={lbl} hint={hint} a11y={`${lbl} in ${hint === 'g' ? 'grams' : 'calories'}`}>
- <TextInput value={val} onChangeText={set} keyboardType="numeric" style={{ ...field, ...numeric, paddingHorizontal: 10 }} />
- </Field>
- ))}
- </View>
- <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Portion</Text>
- <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
- {[0.5, 1, 1.5, 2].map((s) => {
- const on = serv === s;
- return (
- <Pressable key={s} onPress={() => setServ(s)} accessibilityRole="button" accessibilityState={{ selected: on }}
- style={{ flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
- <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{s === 1 ? '1×' : s + '×'}</Text>
- </Pressable>
- );
- })}
- </View>
- <Pressable onPress={logPhoto} accessibilityRole="button"
- style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
- <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>Log {round((parseFloat(estK) || 0) * serv)} kcal</Text>
- </Pressable>
- </>
- )}
- </View>
-    </KeyboardAvoidingView>
+ {/* ── the meal is being read ──────────────────────────────────────── */}
+ {/* Its own small modal rather than a state inside the sheet: the sheet does
+     not open until there is something to put in it, and two seconds of
+     nothing happening after the shutter reads as a button that did not work. */}
+ <Modal visible={reading} transparent animationType="fade" onRequestClose={() => setReading(false)}>
+  <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: G }}>
+   <View style={{ backgroundColor: t.surface, borderRadius: radius.md, padding: 20, alignItems: 'center', gap: sp.md, ...elevation.e2 }}>
+    {photoUri ? <Image source={{ uri: photoUri }} accessible accessibilityLabel="The meal you photographed" style={{ width: 180, height: 120, borderRadius: radius.sm, backgroundColor: t.surface2 }} resizeMode="cover" /> : null}
+    <ActivityIndicator color={t.brand} />
+    <Text style={{ ...ty.label, color: t.ink3 }}>Reading your meal&hellip;</Text>
+   </View>
+  </View>
  </Modal>
+
  {/* ── correct a logged meal ────────────────────────────────────────── */}
  <Modal visible={editing != null} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
@@ -714,8 +735,37 @@ export default function FoodLog() {
  </View>
    </KeyboardAvoidingView>
  </Modal>
+ {/* A scanned product carries the basis its figures are for — "100 g", "1
+     serving" — and that is exactly the question this sheet asks. It used to
+     log one of whatever that was, so a member who ate a whole 500 g pot
+     recorded 100 g of it. */}
  <BarcodeSheet visible={bcOpen} onClose={() => setBcOpen(false)}
-   onLogged={async (f) => { const out = await fl.logFood({ ...f, via: 'barcode' }); if (out !== 'stored') warnUnsaved(f.name, out); }} />
+   onLogged={(f) => {
+     setPendingTitle(undefined); setPendingNote(null); setPendingPhoto(null); setPendingVia('barcode');
+     setPending({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, basis: f.basis });
+   }} />
+
+ {/* ── the one review sheet ─────────────────────────────────────────── */}
+ <LogFoodSheet
+   food={pending}
+   photoUri={pendingPhoto}
+   title={pendingTitle}
+   note={pendingNote}
+   onClose={() => {
+     // The next described food that could not be read whole, if there is
+     // one. Closing the sheet on a queue would silently drop the rest of
+     // what somebody typed.
+     const [next, ...rest] = queue;
+     setPending(next ?? null);
+     setQueue(rest);
+     if (!next) { setPendingPhoto(null); setPendingNote(null); setPendingTitle(undefined); }
+   }}
+   onLog={async (f) => {
+     const out = await fl.logFood({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, via: pendingVia });
+     if (out === 'refused') { warnUnsaved(f.name, out); return false; }
+     if (out === 'unsent') warnUnsaved(f.name, out); else notifySuccess();
+     return true;
+   }} />
  </SafeAreaView>
  );
 }

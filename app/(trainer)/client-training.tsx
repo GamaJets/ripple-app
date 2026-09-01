@@ -77,6 +77,29 @@ import {
   type LoggedSession, type TrainingDay, type Attribution,
 } from '../../src/lib/clientTraining';
 import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHistory';
+// ── the four things this screen could not say before ───────────────────────
+//
+// It had the RECORD and nothing to compare it against. The assignment was on a
+// different screen, the programme checks ran once in the builder and never
+// again, the block's start date did not exist, and what somebody had been on
+// before was destroyed by the next assign. All four of those are readable from
+// here, and every one of them is a claim about a person, so each arrives with
+// its own read status and its own refusal.
+import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+import { useInjuryAcks } from '../../src/ui/injuryAcks';
+import { useProgramHistory } from '../../src/ui/programHistory';
+import { goalToEnum } from '../../src/lib/rosterMerge';
+import { type Injury } from '../../src/lib/injuries';
+import { programWeeks, weekCount, weekLabel } from '../../src/lib/programBlock';
+import {
+  CLIENT_STARTS_NOW, blockPosition, blockPositionLine,
+} from '../../src/lib/programStart';
+import { isoToday } from '../../src/lib/dayPlan';
+import {
+  WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
+} from '../../src/lib/planVsActual';
+import { historyBoard, historyLine, blockSpanLine } from '../../src/lib/programHistory';
+import { reviewProgram, checksLine, type Finding } from '../../src/lib/programReview';
 
 // Written out here, on one line, rather than imported from the library beside
 // the logic that consumes them. scripts/check-schema.mjs resolves a select list
@@ -237,6 +260,140 @@ export default function ClientTraining() {
     [clientUnit, coachUnit, unitStatus, who],
   );
   const unit = pick.unit;
+
+  /* ── the plan, beside the record ────────────────────────────────────────
+     Everything below this line is the OTHER half of the conversation, and it
+     was on three different screens. `assigned_programs` says what was
+     prescribed; the days above say what was done. Reconciling them was
+     performed by a coach with a thumb.
+
+     Each read is separate and fails separately, and none of them is allowed to
+     borrow another's confidence: an unread assignment must never render as a
+     client on nothing, and an unread log must never render as a client who did
+     none of it. */
+  const assigned = useAssignedPrograms();
+  const program = picked ? assigned.getProgram(picked) : null;
+  const startsOn = picked ? (assigned.startsOn[picked] ?? null) : null;
+
+  /**
+   * Where in the block they are standing, and the week to compare against.
+   *
+   * `isoToday` reads the COACH's device, which is where they are standing.
+   * There is no client timezone column anywhere in this schema — the header of
+   * app/(trainer)/client-week.tsx argues that at length — so a start date is a
+   * bare date and the week number is counted in the reader's own days. Nothing
+   * else on this screen is computed across that boundary.
+   */
+  const position = useMemo(
+    () => blockPosition(startsOn, isoToday(new Date()), weekCount(program)),
+    [startsOn, program],
+  );
+  /**
+   * The week of the block the comparison runs against.
+   *
+   * The week they are IN when the date says so, and week one otherwise —
+   * because week one is what the client's Train tab is rendering. That is not a
+   * fallback, it is the truth: `app/(client)/workouts.tsx` picks a day out of
+   * `program.days` and has never heard of a week index, so a coach comparing
+   * against week four would be comparing the record against a week nobody has
+   * been shown.
+   */
+  const compareWeek = useMemo(() => {
+    const weeks = programWeeks(program);
+    if (!weeks.length) return null;
+    const n = position.phase === 'during' && position.week ? position.week : 1;
+    return weeks[Math.min(n, weeks.length) - 1] ?? weeks[0];
+  }, [program, position]);
+
+  /**
+   * The oldest day the log read reached.
+   *
+   * This is what lets a TRUNCATED read still say a movement was not logged.
+   * `capped()` hands back the newest rows, so a client with four thousand
+   * workouts has their last month read in full and only their 2023 missing —
+   * refusing to answer at all for them would withhold a true answer from every
+   * client with a long history. `planVsActual` compares this against the start
+   * of its window and downgrades to 'unknown' only when the read stops inside it.
+   */
+  const oldestDay = useMemo(() => {
+    const days = board.days;
+    return days.length ? days[days.length - 1].day : null;
+  }, [board]);
+
+  const pva = useMemo(() => planVsActual({
+    days: compareWeek?.days ?? null,
+    programStatus: assigned.status,
+    // Null under 'error', which is the only way the comparison can answer
+    // 'unknown' rather than 'not-logged'. The same null `trainingBoard` is
+    // handed above, for the same reason.
+    log: status === 'error' ? null : log,
+    logStatus: status,
+    todayISO: isoToday(new Date()),
+    oldestDay,
+  }), [compareWeek, assigned.status, status, log, oldestDay]);
+
+  /* ── the programme checks, re-run against what they are ACTUALLY on ─────
+     `reviewProgram` ran once, in the builder, against a draft. Its seven rules
+     include `volume-jump`, which reads THIS CLIENT'S OWN training history — and
+     that history keeps moving after the programme is assigned. A block that was
+     safe in July against a client training four times a week is a different
+     proposition in September against one who has trained twice this month.
+
+     Nothing new is read for it. The log is the one this screen already has, the
+     disclosures ride on the roster row, and the goal is on it too. */
+  const acks = useInjuryAcks();
+  const clientInjuries: Injury[] = useMemo(() => (client?.injuries ?? []).map((i, n) => ({
+    id: `${picked}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
+    status: 'active', note: i.note, at: '',
+  })), [client, picked]);
+  /**
+   * How the read of the DISCLOSURES went — a different question from how the
+   * roster read went, and the one nobody asks.
+   *
+   * `client?.injuries ?? []` is an empty list under a failed roster exactly as
+   * it is under a client with nothing wrong with them. The same discipline
+   * app/(trainer)/builder.tsx applies before it lets a programme be assigned;
+   * here the consequence is milder — a finding withheld rather than a write
+   * permitted — but a check that silently did not run reads exactly like a
+   * check that passed.
+   */
+  const disclosureStatus: LoadStatus =
+    !picked ? 'ready'
+    : r.status === 'error' ? 'error'
+    : client ? 'ready'
+    : r.status === 'loading' ? 'loading'
+    : 'error';
+  const review = useMemo(() => reviewProgram({
+    program,
+    injuries: picked ? clientInjuries : null,
+    injuryStatus: disclosureStatus,
+    log: status === 'error' ? null : (log as WorkoutEntry[] | null),
+    logStatus: status,
+    goal: goalToEnum(client?.goal),
+  }), [program, picked, clientInjuries, disclosureStatus, log, status, client]);
+  // Only worth drawing when there is a programme to check. A client on nothing
+  // has no findings, and an empty "Programme Checks" heading over them reads as
+  // seven rules that ran and passed.
+  const showChecks = !!program && assigned.status !== 'loading';
+
+  /* ── what they were on before ──────────────────────────────────────────── */
+  const history = useProgramHistory(picked);
+  const hist = useMemo(
+    () => historyBoard(history.rows, history.status, program, startsOn, assigned.status),
+    [history.rows, history.status, program, startsOn, assigned.status],
+  );
+
+  /** A finding's figures in the coach's own unit. The rules module deals in
+   *  kilograms and formats nothing — the same render boundary the builder
+   *  uses, so the two screens cannot disagree about a number by a rounding. */
+  const findingLoads = (f: Finding): string | null => {
+    const v = f.volume;
+    if (!v) return null;
+    const planned = volumeIn(v.plannedKg, unit);
+    const best = volumeIn(v.bestKg, unit);
+    if (planned == null || best == null) return null;
+    return `Planned ${num(planned)} ${unit} against a best of ${num(best)} ${unit} over ${v.compared} sessions.`;
+  };
 
   const G = layout.gutter;
   const chip = (on: boolean) => ({
@@ -444,6 +601,141 @@ export default function ClientTraining() {
               <View>
                 <Rule />
 
+                {/* ── what they were asked to do ──────────────────────────
+                    Above the record rather than below it, because the reason a
+                    coach opens this screen is to reconcile the two — and the
+                    plan is the shorter half. Every read behind it is separate
+                    and each says so for itself. */}
+                {assigned.status === 'loading' ? (
+                  <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading the programme they are on&hellip;</Text></Section>
+                ) : assigned.status === 'error' ? (
+                  <Section>
+                    <Notice tone={t.warn} kicker="Unreadable" title="What they are on could not be read"
+                      note={`Nothing below compares their training against a plan, because the plan did not come back. That is not the same as ${who} being on no programme.`} />
+                  </Section>
+                ) : !program ? (
+                  <Section>
+                    <SectionHead title="Their Programme" note="none assigned" />
+                    <Text style={{ ...ty.body, color: t.ink2 }}>
+                      The read came back and {who} is on no coach-assigned programme, so there is nothing
+                      to compare the sessions below against. Writing one in the Program Builder puts it on
+                      their Train tab.
+                    </Text>
+                  </Section>
+                ) : (
+                  <Section>
+                    <SectionHead
+                      title="Programme Versus Record"
+                      note={pva.state === 'ready' && position.phase === 'during' && position.week
+                        ? `week ${position.week} of ${position.weeks}`
+                        : undefined}
+                    />
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{program.title || 'An untitled programme'}</Text>
+
+                    {/* The block, and the honesty about what a start date does.
+                        A coach who believes the date is enforced and assigns a
+                        block "starting Monday" on a Thursday has replaced this
+                        week's sessions believing they did not. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                      {blockPositionLine(position, startsOn, who)}
+                    </Text>
+                    {startsOn ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{CLIENT_STARTS_NOW}</Text>
+                    ) : null}
+                    {weekCount(program) > 1 && compareWeek ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                        Compared against {weekLabel(compareWeek, position.week ?? 1).toLowerCase()}, which is the week
+                        their Train tab is showing them.
+                      </Text>
+                    ) : null}
+
+                    <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
+                      {coverageLine(pva, WINDOW_DAYS, who)}
+                    </Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{WINDOW_IS_NOT_A_WEEKDAY}</Text>
+
+                    {/* Per prescribed day, with the movements listed rather
+                        than a figure standing in for them — a coach who
+                        disagrees has to be able to point at the row. */}
+                    {pva.state === 'ready' ? pva.days.map((d, di) => (
+                      <View key={`${d.day}-${di}`} style={{ marginTop: sp.md, paddingTop: di ? sp.md : 0, borderTopWidth: di ? hairline : 0, borderTopColor: t.ring }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>{d.day}{d.focus ? ` · ${d.focus}` : ''}</Text>
+                        {d.movements.map((m) => (
+                          <View key={m.slug || m.name} style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm, marginTop: 4 }}>
+                            {/* Three states, three marks, and the word is on the
+                                line as well as the mark: colour and glyph are
+                                never the only channel carrying meaning. */}
+                            <Text style={{ ...ty.label, width: 14, color: m.coverage === 'logged' ? t.good : m.coverage === 'not-logged' ? t.warn : t.ink3 }}>
+                              {m.coverage === 'logged' ? '\u2713' : m.coverage === 'not-logged' ? '\u00b7' : '?'}
+                            </Text>
+                            <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{m.name}</Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              {m.coverage === 'logged'
+                                ? `logged ${m.daysLogged} day${m.daysLogged === 1 ? '' : 's'}`
+                                : m.coverage === 'not-logged' ? 'not logged' : 'could not be answered'}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )) : null}
+
+                    {/* The other half of the conversation, and the half nothing
+                        in this app could see. A client quietly swapping the
+                        prescribed row for a machine they prefer is the most
+                        common reason a block does not do what it was meant to. */}
+                    {pva.offPlan.length ? (
+                      <View style={{ marginTop: sp.lg }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but not prescribed</Text>
+                        <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{pva.offPlan.join(' · ')}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                          Spelled as {who} typed {pva.offPlan.length === 1 ? 'it' : 'them'}. Work outside the programme is
+                          not a fault; it is the part of their training the plan does not describe.
+                        </Text>
+                      </View>
+                    ) : null}
+                  </Section>
+                )}
+
+                {/* ── the checks, run again ────────────────────────────────
+                    Seven rules that ran once against a draft in the builder and
+                    never again — including `volume-jump`, which reads this
+                    client's own history, and that history has been moving ever
+                    since. No new read: the log is the one this screen already
+                    has. */}
+                {showChecks ? (
+                  <Section>
+                    <SectionHead title="Programme Checks" note={review.findings.length ? `${review.findings.length}` : undefined} />
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>{checksLine()}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                      Run again here against what {who} is on now and what they have logged since — the same seven
+                      rules the builder runs before a programme is assigned, over a history that has moved since.
+                    </Text>
+                    {review.findings.length === 0 ? (
+                      <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
+                        {review.status === 'ready'
+                          ? 'Nothing matched. Every rule ran.'
+                          : 'Nothing matched among the rules that could run. The ones that could not are listed below, and a rule that did not run is not a rule that passed.'}
+                      </Text>
+                    ) : review.findings.map((f, i) => (
+                      <View key={`${f.id}-${i}`} style={{ marginTop: sp.md, paddingTop: i ? sp.md : 0, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                        <Text style={{ ...ty.label, color: t.ink }}>{f.day ? `${f.day} · ` : ''}{f.exercises.join(', ')}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{f.detail}</Text>
+                        {findingLoads(f) ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{findingLoads(f)}</Text>
+                        ) : null}
+                      </View>
+                    ))}
+                    {review.skipped.length ? (
+                      <View style={{ marginTop: sp.md }}>
+                        {review.skipped.map((sk) => (
+                          <Text key={sk.id} style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sk.why}</Text>
+                        ))}
+                      </View>
+                    ) : null}
+                  </Section>
+                ) : null}
+
+
                 {/* The three states, kept apart. Each is a different fact about
                     this person and each starts a different conversation. */}
                 {status === 'loading' ? (
@@ -549,6 +841,44 @@ export default function ClientTraining() {
                     <ExerciseHistoryPanel log={log} status={status} unit={unit} voice={voice} />
                   </>
                 )}
+
+                {/* ── what they were on before ────────────────────────────
+                    Until supabase/parts/176 there was no copy of it anywhere:
+                    `assigned_programs` is one row per client and an assign is an
+                    upsert over it, so the spring block ceased to exist the
+                    moment the summer block landed. A coach could not answer
+                    "what did we do in the spring", and neither could anybody
+                    else. The record starts from that migration and the line
+                    below says so rather than letting "none" read as "nothing
+                    was ever worth keeping". */}
+                <Rule />
+                <Section>
+                  <SectionHead title="Programme History" note={hist.earlierCount == null ? undefined : `${hist.earlierCount}`} />
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{historyLine(history.status, hist, who)}</Text>
+                  {hist.entries.map((e, i) => (
+                    <View key={e.key} style={{ marginTop: sp.md, paddingTop: i ? sp.md : 0, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+                        <Text style={{ ...ty.body, fontWeight: e.current ? '600' : '400', color: e.current ? t.ink : t.ink2, flex: 1 }}>
+                          {e.title}
+                        </Text>
+                        <Text style={{ ...ty.micro, color: e.current ? t.brand : t.ink3 }}>
+                          {e.current ? 'Now' : `${e.weeks} wk`}
+                        </Text>
+                      </View>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{blockSpanLine(e, dayLabel)}</Text>
+                    </View>
+                  ))}
+                  {history.status === 'partial' ? (
+                    <View style={{ marginTop: sp.md }}>
+                      <PartialRead what="earlier programmes" shown={hist.entries.filter((e) => !e.current).length}
+                        onPress={history.reload} />
+                    </View>
+                  ) : null}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    Read-only. Putting an old block back is an assign — it writes over what {who} is training
+                    this evening — so it goes through the builder, behind the same refusals every other assign does.
+                  </Text>
+                </Section>
 
                 {/* The unit note belongs on the page even when there is nothing
                     to print it against — a coach who reads pounds should not

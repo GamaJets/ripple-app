@@ -7,6 +7,8 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { inboxDecision, safeRoute } from '../lib/notifyInbox';
 import { pushConsent } from '../lib/pushConsent';
+import { allows, hourToDeliver, whenToDeliver, type NotifyCategory } from '../lib/notifyPrefs';
+import { notifyPrefs } from '../lib/notifyPrefsLatch';
 import { VARIANT, type AppVariant } from '../lib/variant';
 
 let Notifications: any = null;
@@ -254,29 +256,122 @@ export async function registerForPush(): Promise<string | null> {
   } catch { return null; }
 }
 
-/** Schedule a local reminder (e.g. a booked session) at a future date. */
-export async function scheduleLocal(title: string, body: string, date: Date, data?: Record<string, unknown>): Promise<void> {
-  if (!Notifications) return;
+/**
+ * Schedule a local reminder (e.g. a booked session) at a future date.
+ *
+ * ── Why the category gate is HERE ──────────────────────────────────────────
+ *
+ * Every local notification this app sends goes through this function or
+ * `scheduleDailyReminder` below — session reminders, class reminders, the
+ * streak nudge, badge unlocks, hydration, supplements. The member's
+ * per-category switches and quiet hours are therefore applied in these two
+ * places rather than at the six call sites, for the reason `registerForPush`
+ * gives one screen up: a gate a caller cannot skip cannot be forgotten, and the
+ * next call site added would have been the seventh chance to forget it.
+ *
+ * `category` is optional and an omitted one is always delivered. Existing
+ * callers that predate the categories keep working unchanged, and a
+ * notification nobody has categorised is sent rather than silently dropped —
+ * the safe direction, because the failure of a missed gate is a banner somebody
+ * did not want, and the failure of a default-deny is a session reminder that
+ * never arrives.
+ *
+ * Quiet hours SHIFT rather than suppress: see `whenToDeliver`. A reminder that
+ * never arrives is indistinguishable from a broken one.
+ */
+export async function scheduleLocal(title: string, body: string, date: Date, data?: Record<string, unknown>, category?: NotifyCategory): Promise<string | null> {
+  if (!Notifications) return null;
   try {
-    if (date.getTime() <= Date.now()) return;
-    await Notifications.scheduleNotificationAsync({ content: { title, body, data: data || {} }, trigger: { type: 'date', date } });
-  } catch { /* ignore */ }
+    const prefs = notifyPrefs();
+    if (category && !allows(category, prefs)) return null;
+    const at = category ? whenToDeliver(date, category, prefs) : date;
+    if (at.getTime() <= Date.now()) return null;
+    // The id, returned rather than discarded. It used to resolve to void, so
+    // nothing that scheduled a one-off could ever take it back — which is fine
+    // for a booking's warning (it is armed once) and wrong for anything armed
+    // repeatedly, because a member who opens the app four times on a Tuesday
+    // would collect four identical banners for 7pm. Every existing caller
+    // ignores the return and is unaffected.
+    return (await Notifications.scheduleNotificationAsync({ content: { title, body, data: data || {} }, trigger: { type: 'date', date: at } })) ?? null;
+  } catch { return null; }
 }
 
 /** Schedule a reminder that repeats every day at hour:minute. Returns the
  *  notification id so it can be cancelled individually (leaving other
  *  scheduled notifications, e.g. booked sessions, untouched). No-ops until the
  *  notifications-enabled build. */
-export async function scheduleDailyReminder(title: string, body: string, hour: number, minute: number, data?: Record<string, unknown>): Promise<string | null> {
+export async function scheduleDailyReminder(title: string, body: string, hour: number, minute: number, data?: Record<string, unknown>, category?: NotifyCategory): Promise<string | null> {
   if (!Notifications) return null;
   try {
+    const prefs = notifyPrefs();
+    if (category && !allows(category, prefs)) return null;
+    // A repeating trigger has an hour and no date, so quiet hours move the HOUR
+    // rather than pushing an instant forward. Same rule, stated separately in
+    // notifyPrefs.ts so that a daily trigger cannot be accidentally pinned to
+    // today's calendar on the way through.
+    const h = category ? hourToDeliver(hour, category, prefs) : hour;
     if (Notifications.getPermissionsAsync) {
       let status = (await Notifications.getPermissionsAsync())?.status;
       if (status !== 'granted') status = (await Notifications.requestPermissionsAsync())?.status;
       if (status !== 'granted') return null;
     }
-    return await Notifications.scheduleNotificationAsync({ content: { title, body, data: data || {} }, trigger: { type: 'daily', hour, minute } });
+    return await Notifications.scheduleNotificationAsync({ content: { title, body, data: data || {} }, trigger: { type: 'daily', hour: h, minute } });
   } catch { return null; }
+}
+
+/**
+ * The same daily reminder, but on chosen weekdays only.
+ *
+ * ── Why this could not be done at the call site ───────────────────────────
+ *
+ * `scheduleDailyReminder` takes no weekday and expo-notifications has no
+ * "these days" trigger — it has `weekly`, which fires on ONE weekday. So a
+ * reminder for Monday, Wednesday and Friday is three scheduled notifications,
+ * not one, and this returns the list of ids they were given so
+ * `cancelReminders` can take them all back together. A caller assembling that
+ * by hand would eventually cancel two of three and leave one firing forever
+ * with nothing on any screen to explain it.
+ *
+ * `weekdays` are 1–7 with 1 = Sunday, which is expo-notifications' own
+ * convention and NOT JavaScript's 0–6. The two differ by one and nothing warns
+ * about it, so the conversion is done once, here, by the only function that
+ * takes weekdays at all.
+ *
+ * An empty list schedules nothing and returns nothing — a reminder on no days
+ * is a reminder that does not exist, and inventing "every day" from it would be
+ * answering a question the member did not answer.
+ */
+export async function scheduleWeeklyReminders(
+  title: string, body: string, weekdays: readonly number[], hour: number, minute: number,
+  data?: Record<string, unknown>, category?: NotifyCategory,
+): Promise<string[]> {
+  if (!Notifications || !weekdays.length) return [];
+  const prefs = notifyPrefs();
+  if (category && !allows(category, prefs)) return [];
+  const h = category ? hourToDeliver(hour, category, prefs) : hour;
+  try {
+    if (Notifications.getPermissionsAsync) {
+      let status = (await Notifications.getPermissionsAsync())?.status;
+      if (status !== 'granted') status = (await Notifications.requestPermissionsAsync())?.status;
+      if (status !== 'granted') return [];
+    }
+  } catch { return []; }
+  const ids: string[] = [];
+  for (const w of weekdays) {
+    if (!Number.isInteger(w) || w < 1 || w > 7) continue;
+    try {
+      const id = await Notifications.scheduleNotificationAsync({
+        content: { title, body, data: data || {} },
+        trigger: { type: 'weekly', weekday: w, hour: h, minute },
+      });
+      if (id) ids.push(id);
+    } catch {
+      // One weekday failing does not cancel the others. The caller counts what
+      // came back and says how many were actually set, which is the only honest
+      // figure — see the "Reminders set" alert on the reminders screen.
+    }
+  }
+  return ids;
 }
 
 /**

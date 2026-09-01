@@ -37,7 +37,7 @@ const eq = (a: unknown, b: unknown, msg: string) =>
   ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
 /** A fully-known input, so each case below can vary exactly one thing. */
-const known: ReadinessInput = { avgSleepHours: 8, hydrationPct: 1, workoutsLast2Days: 0 };
+const known: ReadinessInput = { avgSleepHours: 8, hydrationPct: 1, recoveryPct: 100, workoutsLast2Days: 0 };
 const score = (over: Partial<ReadinessInput>) => readinessScore({ ...known, ...over });
 
 // ── sleep is the premise, and its absence is not a bad night ──────────────
@@ -50,8 +50,8 @@ eq(score({ avgSleepHours: 0 }), null,
   'zero hours is the absence of a night, not a catastrophic one');
 eq(score({ avgSleepHours: NaN }), null,
   'and an unparseable figure is an absence too — NaN must never reach the arithmetic');
-eq(readinessScore({ avgSleepHours: null, hydrationPct: 0.9, workoutsLast2Days: 0 }), null,
-  'the other two signals cannot carry a score between them');
+eq(readinessScore({ avgSleepHours: null, hydrationPct: 0.9, recoveryPct: 90, workoutsLast2Days: 0 }), null,
+  'the other three signals cannot carry a score between them');
 
 // ── an unread training log withholds the score ────────────────────────────
 //
@@ -101,15 +101,51 @@ eq(score({ workoutsLast2Days: NaN }), null,
   ok(untracked!.score > drankNothing!.score,
     'THE UNTRACKED CASE MUST OUTSCORE THE TRACKED-ZERO CASE — collapsing them is how a missing input becomes a bad one');
   eq(untracked!.confidence, 'partial', 'and the rescaled score says it is partial rather than presenting itself as the whole picture');
-  eq(drankNothing!.confidence, 'full', 'while a score with all three signals in the scale is full');
+  eq(drankNothing!.confidence, 'full', 'while a score with all four signals in the scale is full');
 }
+
+// ── the device's recovery score, which is the fourth signal ───────────────
+//
+// Everything asserted about hydration above has to hold for recovery too, and
+// for the same reason: it is the second signal that can be legitimately absent
+// for a member who is doing nothing wrong. What separates the two cases is that
+// a member with no strap is the MAJORITY, so getting this wrong would withhold
+// or deflate readiness for most of the app rather than for a minority.
+{
+  const noDevice = score({ recoveryPct: null });
+  const wrecked = score({ recoveryPct: 0 });
+  ok(noDevice != null && noDevice.score === 100,
+    'NO CONNECTED DEVICE IS NOT A BAD RECOVERY — the remaining signals are rescaled, not docked 40');
+  ok(wrecked != null && wrecked.score < 100,
+    'but a device reporting zero recovery genuinely counts against the score');
+  ok(noDevice!.score > wrecked!.score,
+    'the two must never converge — collapsing them turns "no strap" into "wrecked"');
+  ok(!noDevice!.from.includes('recovery'),
+    'and a signal nobody supplied is never listed as though it had been');
+  eq(score({ recoveryPct: 140 })!.score, score({ recoveryPct: 100 })!.score,
+    'a vendor figure above 100 is clamped rather than extrapolated — the field is theirs, not ours');
+  eq(score({ recoveryPct: -5 })!.score, score({ recoveryPct: 0 })!.score,
+    'and one below zero is clamped the same way rather than subtracting from the other signals');
+  const nan = score({ recoveryPct: NaN });
+  eq(nan!.score, noDevice!.score,
+    'NaN is an absence, exactly as it is for sleep — it must never reach the arithmetic');
+  ok(!nan!.from.includes('recovery'), 'and an unparseable figure is not listed as a scored signal');
+}
+
+// A member with no device and no water goal still gets a score, and it is the
+// score they would have had before recovery existed. This is the regression
+// that matters most: the fourth signal must be invisible to everybody who
+// cannot supply it.
+eq(readinessScore({ avgSleepHours: 7, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 1 })!.score,
+  Math.round(((7 / 8) * 50 + 20) / 70 * 100),
+  'a member with neither water goal nor strap scores over sleep and load alone, exactly as before');
 
 // ── the score says what it is made of ─────────────────────────────────────
 {
   const all = score({});
-  eq(all!.from.join(','), 'sleep,hydration,load', 'a full score names all three signals');
-  const twoOf = score({ hydrationPct: null });
-  eq(twoOf!.from.join(','), 'sleep,load', 'and one built without hydration names only what was in the scale');
+  eq(all!.from.join(','), 'sleep,recovery,hydration,load', 'a full score names all four signals, heaviest first');
+  const twoOf = score({ hydrationPct: null, recoveryPct: null });
+  eq(twoOf!.from.join(','), 'sleep,load', 'and one built without either optional signal names only what was in the scale');
   ok(!twoOf!.from.includes('hydration'),
     'a signal that was not scored is never listed as though it had been');
 
@@ -128,13 +164,15 @@ eq(score({ workoutsLast2Days: NaN }), null,
 for (const h of [0.5, 1, 4, 6, 7, 8, 9, 12, 24]) {
   for (const w of [null, 0, 0.5, 1, 3]) {
     for (const l of [0, 1, 2, 5]) {
-      const r = readinessScore({ avgSleepHours: h, hydrationPct: w, workoutsLast2Days: l });
-      ok(r != null, `${h}h / ${w} / ${l} produces a score`);
-      ok(r != null && r.score >= 0 && r.score <= 100, `${h}h / ${w} / ${l} stays within 0-100`);
-      ok(r != null && Number.isInteger(r.score), `${h}h / ${w} / ${l} is a whole number, not 83.33333`);
-      ok(r != null && r.label.length > 0 && r.tip.length > 0, `${h}h / ${w} / ${l} carries a label and a tip`);
+      for (const rec of [null, 0, 55, 100]) {
+      const r = readinessScore({ avgSleepHours: h, hydrationPct: w, recoveryPct: rec, workoutsLast2Days: l });
+      ok(r != null, `${h}h / ${w} / ${rec} / ${l} produces a score`);
+      ok(r != null && r.score >= 0 && r.score <= 100, `${h}h / ${w} / ${rec} / ${l} stays within 0-100`);
+      ok(r != null && Number.isInteger(r.score), `${h}h / ${w} / ${rec} / ${l} is a whole number, not 83.33333`);
+      ok(r != null && r.label.length > 0 && r.tip.length > 0, `${h}h / ${w} / ${rec} / ${l} carries a label and a tip`);
       ok(r != null && r.from.includes('sleep') && r.from.includes('load'),
-        `${h}h / ${w} / ${l} always names sleep and load, which are never optional`);
+        `${h}h / ${w} / ${rec} / ${l} always names sleep and load, which are never optional`);
+      }
     }
   }
 }
@@ -144,9 +182,9 @@ eq(score({ hydrationPct: 3 })!.score, score({ hydrationPct: 1 })!.score,
 
 // ── the tone thresholds, which are what the screen colours and words on ───
 {
-  const great = readinessScore({ avgSleepHours: 8, hydrationPct: 1, workoutsLast2Days: 0 });
-  const middling = readinessScore({ avgSleepHours: 5.5, hydrationPct: 0.5, workoutsLast2Days: 1 });
-  const bad = readinessScore({ avgSleepHours: 4, hydrationPct: 0.2, workoutsLast2Days: 3 });
+  const great = readinessScore({ avgSleepHours: 8, hydrationPct: 1, recoveryPct: null, workoutsLast2Days: 0 });
+  const middling = readinessScore({ avgSleepHours: 5.5, hydrationPct: 0.5, recoveryPct: null, workoutsLast2Days: 1 });
+  const bad = readinessScore({ avgSleepHours: 4, hydrationPct: 0.2, recoveryPct: null, workoutsLast2Days: 3 });
   eq(great!.tone, 'good', 'eight hours, hydrated and fresh reads as well recovered');
   eq(middling!.tone, 'moderate', 'five and a half hours, half hydrated, one session reads as moderate');
   eq(bad!.tone, 'low', 'four hours, dehydrated, three sessions is genuinely under-recovered');
@@ -282,7 +320,7 @@ const night = (over: Partial<MergedNight> = {}): MergedNight => ({
     'without the kept nights a total read failure leaves readiness nothing to score — which is correct, and is why it used to disappear');
   const backed = readinessSleep(withStored(allFailed, stored), [], 3);
   eq(backed.avgHours, 8, 'WITH THEM, THE SCORE SURVIVES AN OFFLINE MORNING — from real nights real devices really measured');
-  const r = readinessScore({ avgSleepHours: backed.avgHours, hydrationPct: null, workoutsLast2Days: 0 });
+  const r = readinessScore({ avgSleepHours: backed.avgHours, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 0 });
   ok(r != null && r.score === 100, 'and readiness is a number again rather than a dash that nothing on screen explains');
 }
 

@@ -49,6 +49,7 @@ const pay = (cents: number, currency: string): GymPayment => ({
   id: `p${cents}${currency}`, memberId: null, memberName: null,
   amountCents: cents, currency, method: 'card',
   takenAt: '2026-08-01T00:00:00Z', note: null,
+  kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null,
 });
 
 const plan = (id: string, priceCents: number, currency: string,

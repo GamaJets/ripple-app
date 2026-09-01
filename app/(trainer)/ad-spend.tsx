@@ -42,7 +42,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Card, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, type as ty } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
 import { money } from '../../src/lib/gymRecord';
 import { UNMATCHED_NOTE, unmatchedReasonNote } from '../../src/lib/adMatch';
@@ -50,8 +50,11 @@ import {
   APP_REVIEW_NOTE, chooseAdAccount, connectAdAccount, disconnectAdAccount, fetchAdSpend,
   runAdSync, useSyncedSpend, type AdAccountChoice, type AdSpendRead,
 } from '../../src/ui/adSpend';
-import { fetchMyCodeReturns, type CodeReturnsRead } from '../../src/ui/joinCode';
+import {
+  fetchMyCodeReturns, fetchOrganicCodes, setCodeOrganic, type CodeReturnsRead,
+} from '../../src/ui/joinCode';
 import { worstStatus } from '../../src/ui/loadStatus';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 
 const DASH = '—';
 
@@ -137,6 +140,33 @@ export default function TrainerAdSpend() {
   const connected = !!account;
   const chosen = !!account?.externalAccountId;
 
+  // ── A code that costs nothing, and was reported as costing an unknown amount
+  //
+  // Every code with no spend against it is reported as "cost unknown", on the
+  // reasonable premise that an unpriced channel is a gap in the record. For a
+  // paid channel it is. For a code read out at the end of a class, put in a
+  // caption, or printed on a card the coach had anyway, it is not — the cost is
+  // nothing, and that is a real answer.
+  //
+  // Today the two are indistinguishable, so a coach with four organic codes and
+  // one unpriced ad reads a list of five gaps, decides the section is noise, and
+  // stops looking at it. Which is where the one that mattered was.
+  //
+  // NULL is unknown and is never an empty Set. A failed read must leave every
+  // code reading exactly as it did before this existed, rather than silently
+  // reporting all of them as costing money.
+  const [organic, setOrganic] = useState<Set<string> | null>(null);
+  const [organicMsg, setOrganicMsg] = useState<string | null>(null);
+  const loadOrganic = useCallback(async () => { setOrganic(await fetchOrganicCodes()); }, []);
+  useEffect(() => { void loadOrganic(); }, [loadOrganic]);
+
+  const toggleOrganic = async (id: string, next: boolean) => {
+    const r = await setCodeOrganic(id, next);
+    if (!r.ok) { setOrganicMsg(r.reason); return; }
+    setOrganicMsg(null);
+    await loadOrganic();
+  };
+
   /** The figure currently in use for a code, and where it came from. */
   const sourceFor = (codeId: string | null) => read.sources.find((s) => (s.codeId ?? null) === (codeId ?? null)) ?? null;
   /** What the clients off that code have paid, so the currencies can be checked. */
@@ -163,6 +193,11 @@ export default function TrainerAdSpend() {
         <View style={{ marginTop: sp.xl }}>
           <Notice tone={t.warn} kicker="Not approved yet" title="Meta has to approve this first" note={APP_REVIEW_NOTE} />
         </View>
+
+        {/* The three words on this screen a coach reads as the same thing and
+            which are not: matched, unmatched, and cost unknown. One dismissible
+            row; src/lib/screenHelp.ts holds the sentences. */}
+        <ScreenHelp screen="coach-adspend" />
 
         {/* ── The connection ─────────────────────────────────────────────── */}
         <Section>
@@ -412,6 +447,66 @@ export default function TrainerAdSpend() {
             in an ad account, and its absence here says nothing about what it cost — no ad spend is unknown, not free.
           </Text>
         </Section>
+
+        {/* ── Codes that cost nothing ──────────────────────────────────────
+            The other half of the sentence above. "No ad spend is unknown, not
+            free" is exactly right and it leaves the coach with no way to say
+            which of their codes IS free — so every organic channel sits in the
+            unpriced pile forever, making it long enough that nobody reads it.
+
+            Marking one free is a statement about the CHANNEL, not a spend of
+            zero for a period: a zero would have to be re-entered every month to
+            keep meaning the same thing. See supabase/parts/211.
+
+            Only drawn on a settled codes read. Under 'error' `returns.rows` is
+            empty and a section headed "Codes that cost nothing" over it would
+            read as a coach with no codes. */}
+        {returns.status === 'ready' && returns.rows.length > 0 ? (
+          <Section>
+            <SectionHead title="Codes that cost you nothing" />
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              A code you read out in a class, put in a caption or printed on a card you had anyway is free, and that is a
+              real answer rather than a gap. Marked codes stop being reported as unpriced, so what is left in that list is
+              the paid spend you have genuinely not entered.
+            </Text>
+            {organic === null ? (
+              <View style={{ marginTop: sp.md }}>
+                <Flag tone={t.warn}>
+                  Which of your codes are marked free could not be read, so none of them is shown as marked here. That is
+                  this screen not knowing, and nothing has been changed.
+                </Flag>
+              </View>
+            ) : (
+              <View style={{ marginTop: sp.md }}>
+                {organicMsg ? <Flag tone={t.crit}>{organicMsg}</Flag> : null}
+                {returns.rows.map((row, i) => {
+                  // The default code has no row in `coach_join_codes` — it lives
+                  // on `trainers.join_code` — so there is nothing to mark and no
+                  // switch is offered. Part 81 makes the same distinction.
+                  if (!row.id || row.isDefault) return null;
+                  const on = organic.has(row.id);
+                  const id = row.id;
+                  return (
+                    <View key={id} style={{
+                      flexDirection: 'row', alignItems: 'center', gap: sp.md,
+                      paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring,
+                    }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{row.label}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                          {row.code}{on ? ' · marked free' : row.spend ? ' · you have entered a cost' : ' · cost unknown'}
+                        </Text>
+                      </View>
+                      {on
+                        ? <Ghost label="Not Free" a11yLabel={`Stop treating ${row.label} as free`} onPress={() => { void toggleOrganic(id, false); }} />
+                        : <Ghost label="Mark Free" a11yLabel={`Mark ${row.label} as costing nothing`} onPress={() => { void toggleOrganic(id, true); }} />}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </Section>
+        ) : null}
 
         {/* The other half of the same question. Everything above divides money
             by the people who FINISHED — installed the app, made an account and

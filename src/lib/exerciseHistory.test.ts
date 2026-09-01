@@ -29,6 +29,7 @@ import {
   exerciseOutings, exerciseIndex, matchExercises, exerciseTrend,
   type ExerciseOuting,
 } from './exerciseHistory';
+import type { BodyweightHistory } from './bodyweightSets';
 import { est1RM } from './streaks';
 import { deltaLabel, deltaSign, deltaMoved } from './deltaLabel';
 import { liftDeltaIn, est1RMIn } from './units';
@@ -313,4 +314,37 @@ ok(listed.every((o, i) => i === 0 || (listed[i - 1].day ?? '') >= (o.day ?? ''))
 
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'EXERCISE HISTORY FAILURES:\n' + errors.join('\n') : 'ALL EXERCISE HISTORY TESTS PASSED');
+/* ── 6 · a bodyweight day IS priced, once there is a body to price it with ──
+ *
+ * This module was left unconverted when `bw` landed, and the result was one
+ * movement reading two ways off the same rows: the Records board priced a
+ * pull-up at the member's weight on the day, and this trail showed the same
+ * set with no load, no volume and no estimate. A coach and a client standing
+ * next to each other, looking at the same lift on two screens.
+ */
+{
+  const HIST: BodyweightHistory = [
+    { t: at('2026-01-10'), v: 96 },
+    { t: at('2026-05-04'), v: 88 },
+  ];
+  const chin: WorkoutEntry = { t: at('2026-05-10'), exercise: 'Pull-up', sets: [[10, 0], [8, 20]], bw: [true, true] };
+
+  const unweighed = exerciseOutings([chin], 'Pull-up')[0];
+  eq(unweighed.volumeKg, null, 'with no weight on record a bodyweight day still has no tonnage');
+  eq(unweighed.unpricedSets, 2, 'and says how many sets are not in the figure rather than counting them as nought');
+
+  const priced = exerciseOutings([chin], 'Pull-up', HIST)[0];
+  eq(priced.volumeKg, 10 * 88 + 8 * 108, 'the sets are priced at the body that did them, plus the belt');
+  eq(priced.topLoadKg, 108, 'the belted set is the heaviest thing lifted, not the 20 kg on it');
+  eq(priced.unpricedSets, 0, 'nothing is missing from the total');
+  eq(priced.bodyweightSets, 2, 'and both are still named as the bodyweight sets they were');
+  ok(priced.best1RMKg != null, 'a calisthenics day now carries an estimated max, as the Records board already did');
+
+  // The weight ON OR BEFORE the day, never after. A January set is not priced
+  // at May's body, or every chart of the past would move whenever somebody
+  // steps on a scale.
+  const january = exerciseOutings([{ t: at('2026-02-01'), exercise: 'Pull-up', sets: [[10, 0]], bw: [true] }], 'Pull-up', HIST)[0];
+  eq(january.volumeKg, 960, 'a February set is priced at January\'s weigh-in, which is the last one before it');
+}
+
 if (errors.length) process.exit(1);

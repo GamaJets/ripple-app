@@ -104,7 +104,7 @@ export const SET_METHODS: readonly SetMethod[] = [
   },
   {
     id: 'isometric', label: 'Isometric hold', short: 'I',
-    blurb: 'Held still under load. The reps column is seconds.',
+    blurb: 'Held still under load. Log it with Timed ticked, and the first box is seconds.',
     countsToVolume: true, restsAfter: true,
   },
   {

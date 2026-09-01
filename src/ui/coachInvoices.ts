@@ -8,8 +8,14 @@
 // DELETE, and no policy for any of them. The number has to be allocated under
 // a lock to stay gapless per coach, and an issued document cannot be edited
 // once somebody is holding a copy of it — neither of which a client-side write
-// could promise. So there are exactly two writes in this file and both are
-// `rpc`, and the read below is the only place the table is touched directly.
+// could promise. So every write in this file is an `rpc` — issue, void, and
+// since part 168 the chase — and the read below is the only place the table is
+// touched directly. The chase moves two columns that are NOT on the document
+// (when the coach last chased, and how many times), and it still goes through a
+// function rather than an UPDATE grant: a grant on this table is a grant on the
+// row, RLS narrows a grant rather than creating one, and the immutable trigger
+// would then be the only thing between an issued amount and anybody who wanted
+// to edit it.
 //
 // ── supabase-js RESOLVES ON AN ERROR ───────────────────────────────────────
 //
@@ -31,12 +37,12 @@ import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 import { draftMinorUnits, type CoachInvoice, type InvoiceDraft, type InvoiceKind } from '../lib/coachInvoice';
-import { invoiceNotification } from '../lib/notifyCopy';
+import { invoiceNotification, invoiceReminderNotification } from '../lib/notifyCopy';
 import { recordInbox } from './pushNotifications';
 
 /** Every column the document needs and nothing else. */
 const INVOICE_COLS =
-  'id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, note, voided_at, void_reason, created_at';
+  'id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, reminded_at, reminder_count, note, voided_at, void_reason, created_at';
 
 interface InvoiceRow {
   id: string;
@@ -48,6 +54,9 @@ interface InvoiceRow {
   currency: string | null;
   kind: string;
   issued_on: string;
+  due_on: string | null;
+  reminded_at: string | null;
+  reminder_count: number | string | null;
   note: string | null;
   voided_at: string | null;
   void_reason: string | null;
@@ -80,6 +89,17 @@ function toInvoice(r: InvoiceRow): CoachInvoice {
     // reading is the one that does not tell a client they have already paid.
     kind: (r.kind === 'received' ? 'received' : 'requested') as InvoiceKind,
     issuedOn: String(r.issued_on ?? '').slice(0, 10),
+    // A `date` column comes back as a bare `YYYY-MM-DD` and is kept as one. It
+    // means a DAY, not an instant, and turning it into a Date here would put a
+    // due date of the 1st on the 31st for every coach west of Greenwich — the
+    // same trap `splitByDay` in coachStatement.ts exists to document.
+    dueOn: (r.due_on || '').slice(0, 10) || null,
+    remindedAt: r.reminded_at ?? null,
+    // `integer` arrives as a number, but the same PostgREST bigint-as-string
+    // rule that bit `amount_cents` is one migration away from applying here.
+    // A value that will not convert reads as "not yet chased", which is the
+    // reading that does not claim an act the coach may not have performed.
+    reminderCount: Number.isFinite(Number(r.reminder_count)) ? Number(r.reminder_count) : 0,
     note: r.note ?? null,
     voidedAt: r.voided_at ?? null,
     voidReason: r.void_reason ?? null,
@@ -340,6 +360,10 @@ export async function issueInvoice(draft: InvoiceDraft, clientId?: string | null
       p_client_id: clientId ?? null,
       p_currency: currency,
       p_note: (draft.note || '').trim() || null,
+      // Null rather than a computed default. Part 168's whole argument is that
+      // a payment term this app invented would be printed on a document under
+      // somebody else's name, so an empty field stays empty all the way down.
+      p_due_on: (draft.dueOn || '').trim() || null,
     });
     if (error) {
       reportError('coachInvoices.issue', error);
@@ -354,6 +378,77 @@ export async function issueInvoice(draft: InvoiceDraft, clientId?: string | null
   } catch (e) {
     reportError('coachInvoices.issue', e);
     return { ok: false, error: 'That invoice was not issued.' };
+  }
+}
+
+/**
+ * Chase one, and tell the person it is about.
+ *
+ * ── Two writes, and the second one is allowed to fail ─────────────────────
+ *
+ * `remind_coach_invoice` records the chase against the coach's own row. Then,
+ * separately, an inbox row is written for the client. They are not one
+ * transaction and they must not be reported as one: the coach's count of "I
+ * have chased this four times" is a fact about what THEY did, and it stands
+ * whether or not the notification landed. `notified` carries the second answer
+ * in the same three states `issueInvoice` uses, so the screen can say both
+ * halves rather than implying one from the other.
+ *
+ * The order matters. The record is written FIRST, so a chase the client was
+ * told about is never one the coach's own list has forgotten. The reverse order
+ * would let a failed record leave the client holding a reminder about an
+ * invoice the coach believes they have never chased.
+ *
+ * ── Inbox only, no push ──────────────────────────────────────────────────
+ *
+ * The same reasoning as the issue notification: paperwork is not urgent, a push
+ * is gone when it is dismissed, and on the current binary expo-notifications is
+ * not in the build at all. Nothing is lost by not ringing somebody's phone
+ * about money they may have already sent.
+ *
+ * ── What this does NOT do ────────────────────────────────────────────────
+ *
+ * It does not send the document. `coach_invoices` is readable by the issuing
+ * coach alone (part 138), so the copy the client holds came from the share
+ * sheet and a second copy comes the same way. The inbox row is a heads-up that
+ * names the number, so the client can match it to the document they already
+ * have — it is deliberately not a second invoice.
+ */
+export async function remindInvoice(id: string): Promise<IssueResult> {
+  if (!USE_SUPABASE) return { ok: false, error: 'This build is not connected to a server.' };
+  try {
+    const { data, error } = await supabase.rpc('remind_coach_invoice', { p_id: id });
+    if (error) {
+      reportError('coachInvoices.remind', error);
+      return { ok: false, error: error.message || 'That reminder was not recorded.' };
+    }
+    // The function returns the row it updated. Nothing back means nothing was
+    // written, whatever the absence of an error suggests — and a chase the
+    // coach is told went out, that did not, is a client who hears nothing and a
+    // coach who stops asking.
+    const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
+    if (!row?.id) return { ok: false, error: 'That reminder was not recorded — nothing came back from the server.' };
+    const invoice = toInvoice(row);
+    return { ok: true, invoice, notified: await tellTheClientAgain(invoice) };
+  } catch (e) {
+    reportError('coachInvoices.remind', e);
+    return { ok: false, error: 'That reminder was not recorded.' };
+  }
+}
+
+/** The reminder's own inbox row. A separate function from `tellTheClient` and a
+ *  separate copy function, because re-sending the issue notification would read
+ *  as a SECOND invoice — which is exactly what the number on it exists to stop
+ *  somebody believing. See `invoiceReminderNotification` in notifyCopy.ts. */
+async function tellTheClientAgain(invoice: CoachInvoice): Promise<boolean | null> {
+  if (!invoice.clientId) return null;
+  const note = invoiceReminderNotification(invoice);
+  try {
+    const wrote = await recordInbox([invoice.clientId], note.title, note.body);
+    return wrote > 0;
+  } catch (e) {
+    reportError('coachInvoices.remind.notify', e);
+    return false;
   }
 }
 

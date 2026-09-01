@@ -12,6 +12,7 @@ import { writeFailure } from './wroteRows';
 import { packBalance, readDraw, drew, drawReason, type PackPurchase, type PackBalance } from './packDraw';
 import { PACKAGE_NOT_SAVED, packageEditBlocker, packageUpdateRow, type PackagePatch } from './packageEdit';
 import { subState } from './subscriptionScope';
+import type { PromoCode } from './packagePromo';
 import type { LoadStatus } from '../ui/loadStatus';
 
 /**
@@ -56,9 +57,11 @@ export interface TrainerPackage { id: string; trainer_id: string; name: string; 
  *  as every function reading the table filtered on it — the client-side reads
  *  never needed to look at a column they were already scoped by. The coach-side
  *  read below is scoped by `trainer_id`, so who bought it is the thing it has to
- *  say. Note what is NOT here: there is no currency column on this table at
- *  all, which is why an amount from it is only printable alongside the package
- *  it was sold from. */
+ *  say. The `currency` field below is part 132's column and it is the unit the
+ *  money actually moved in; the note under it says what happens to the small
+ *  set of rows that predate it. This comment used to end "there is no currency
+ *  column on this table at all", which the column immediately underneath it
+ *  contradicted. */
 export interface Purchase { id: string; client_id: string | null; trainer_id: string | null; package_id: string | null; amount_cents: number | null; sessions_total: number | null; sessions_used: number; status: string; created_at: string;
   /** The unit this sale's money actually moved in, written at checkout from
    *  the Stripe session (part 132). Null on rows written before that column
@@ -66,7 +69,22 @@ export interface Purchase { id: string; client_id: string | null; trainer_id: st
    *  and reported as an amount missing from a total rather than summed into
    *  one. Not to be confused with the package's currency, which is a lookup
    *  that can change underneath a sale that already happened. */
-  currency?: string | null }
+  currency?: string | null;
+  /** Minor units already given back (part 192). ZERO, never null, on a sale
+   *  nobody has refunded — the column has a default and this app writes it only
+   *  from Stripe's own answer. A screen reads it to say what still stands, and
+   *  `sumTaken` is deliberately NOT given the net figure: gross is what the
+   *  client was charged and it is what every takings line in this app has always
+   *  meant, so a refund is shown BESIDE the sale rather than silently inside it. */
+  refunded_cents?: number | null;
+  /** When the LAST refund on this sale was made, or null because there has been
+   *  none. Not the only one: Stripe holds the full list of refund objects and
+   *  this app deliberately does not duplicate them. */
+  refunded_at?: string | null;
+  /** The Checkout Session, which is what a refund is traced back to. Selected
+   *  by the coach-side read so the screen can tell a sale that CAN be refunded
+   *  from one recorded by other means. */
+  stripe_session_id?: string | null }
 
 const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
 
@@ -298,9 +316,14 @@ export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPa
 /**
  * The currency each of a set of packages is priced in.
  *
- * `client_purchases` records `amount_cents` and no currency at all, so the only
- * place the unit of a past purchase is written down is the package it was
- * bought from. That makes an amount unlabelled whenever the package row is
+ * `client_purchases` DOES carry its own `currency` (part 132, written at
+ * checkout from the Stripe session), and this comment said the opposite for
+ * long enough to be worth correcting rather than deleting: it read "records
+ * `amount_cents` and no currency at all", which stopped being true the day the
+ * webhook started writing the column and was still here afterwards. The
+ * fallback below is what remains of it — the only rows that still need a
+ * package to name their unit are the ones written BEFORE part 132 whose
+ * package the backfill could not reach. That makes an amount unlabelled whenever the package row is
  * actually GONE — deleted, not merely withdrawn — and an unlabelled amount
  * renders as a dash rather than as a number in a currency we picked. A
  * withdrawn package used to land here too, because pkg_read was `active or
@@ -464,11 +487,22 @@ export interface CoachPurchase extends Purchase {
   /** null when the package has been deleted since the sale. */
   package_name: string | null;
   /**
-   * From the PACKAGE. `client_purchases` has no currency column — checked
-   * against the live schema — so this is null whenever the package row is gone,
-   * and an amount with a null currency is printed as a dash rather than as a
-   * number in a unit we picked. See `sumTaken` in coachMoney.ts, which counts
-   * those separately instead of quietly leaving them out of the total.
+   * The SALE's own currency, and the package's only where the sale has none.
+   *
+   * This said "`client_purchases` has no currency column — checked against the
+   * live schema", thirty lines above the code that reads that very column. It
+   * was true when it was written and part 132 made it false: the column exists,
+   * the stripe-webhook writes `sess.currency` onto every sale at checkout, and
+   * existing rows were backfilled from their package wherever one survived. A
+   * comment that contradicts the line below it is worse than no comment,
+   * because the next person trusts it and re-derives the fallback as the rule.
+   *
+   * Still null for one case, and it is unrecoverable rather than unread: a sale
+   * made before part 132 whose package had already been deleted, so the unit
+   * lived nowhere. An amount with a null currency is printed as a dash rather
+   * than as a number in a unit we picked — see `sumTaken` in coachMoney.ts,
+   * which counts those separately instead of quietly leaving them out of a
+   * total.
    */
   currency: string | null;
 }
@@ -648,5 +682,174 @@ export async function refundSession(trainerId: string): Promise<{ ok: boolean; r
   } catch (e) {
     reportError('connect.refundSession', e);
     return { ok: false, reason: 'the server did not confirm it' };
+  }
+}
+
+/* ── giving money back ────────────────────────────────────────────────────── */
+
+/**
+ * Refund a one-off sale, in whole or in part.
+ *
+ * `amountCents` omitted means the whole of WHAT IS LEFT — never the whole of
+ * the original price, so a second partial refund cannot try to give back an
+ * amount that has already gone.
+ *
+ * Everything that decides whether this is allowed lives in src/lib/refunds.ts
+ * and runs on BOTH sides: the screen's copy is a convenience so a coach is not
+ * sent to the server to be told no, and the server's copy is the rule. The
+ * Stripe call itself is supabase/functions/connect-refund, which runs as the
+ * service role, checks that this sale is the caller's own, calls Stripe FIRST
+ * and writes the row only from Stripe's answer.
+ *
+ * `ok: false` means no money moved. That is the case where a screen must not
+ * say "refunded", because the coach's next act is to tell their client it is on
+ * the way.
+ *
+ * `mirrored: false` is the narrow, loud middle state: Stripe DID make the
+ * refund and this app failed to write it down. The money has gone back and the
+ * figure on the screen is stale, and the screen has to say both — a coach told
+ * it failed would refund it a second time.
+ */
+export interface RefundResult {
+  ok: boolean;
+  /** Minor units Stripe actually returned. Stripe's figure, not the one asked
+   *  for; they are the same today and a Stripe-side adjustment that made them
+   *  differ would otherwise leave this app permanently out by it. */
+  refundedCents?: number;
+  /** The running total on the row after this refund. */
+  totalRefundedCents?: number;
+  currency?: string | null;
+  /** False when the money went back and this app could not record it. */
+  mirrored?: boolean;
+  error?: string;
+}
+
+async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?: number): Promise<RefundResult> {
+  try {
+    const { data, error } = await supabase.functions.invoke('connect-refund', {
+      body: { kind, id, amount_cents: amountCents ?? null },
+    });
+    if (error) { reportError('connect.refund', error); return { ok: false, error: error.message }; }
+    if (data?.ok) {
+      return {
+        ok: true,
+        refundedCents: Number(data.refunded_cents) || 0,
+        totalRefundedCents: Number(data.refunded_total_cents) || 0,
+        currency: data.currency ?? null,
+        mirrored: data.mirrored !== false,
+      };
+    }
+    return { ok: false, error: data?.error || 'No refund was made, so nothing has been given back.' };
+  } catch (e) {
+    reportError('connect.refund', e);
+    // A thrown call is NOT a refund that failed cleanly — the request may have
+    // reached Stripe and the answer may have been lost on the way back. The
+    // sentence says so rather than telling a coach to try again, because trying
+    // again is how somebody gets refunded twice.
+    return { ok: false, error: 'The refund was not confirmed. Check your Stripe dashboard before trying it again — a second attempt could give the money back twice.' };
+  }
+}
+
+/** Refund a pack or membership sale. See `callRefund` for what the three
+ *  answers mean. */
+export const refundPurchase = (purchaseId: string, amountCents?: number): Promise<RefundResult> =>
+  callRefund('purchase', purchaseId, amountCents);
+
+/** Refund one paid renewal invoice. A DIFFERENT act from cancelling the
+ *  subscription: this returns money and stops nothing, and
+ *  `endSubscriptionNow` stops the next charge and returns nothing. */
+export const refundRenewal = (paymentId: string, amountCents?: number): Promise<RefundResult> =>
+  callRefund('renewal', paymentId, amountCents);
+
+/* ── discount codes, which live at Stripe ─────────────────────────────────── */
+
+/**
+ * The coach's own discount codes, read live from their Stripe account.
+ *
+ * There is no local table and no cache. Stripe holds the code, the percentage,
+ * the expiry, the limit AND the redemption count, and it is the thing that
+ * applies the discount at checkout — a mirror here would be a second copy of a
+ * system this app does not control, and the first time they disagreed the coach
+ * would be shown an offer that is not the one their clients are getting.
+ * src/lib/packagePromo.ts carries the argument.
+ *
+ * `status` is what stops an empty list being read two ways. Under 'error' the
+ * list is UNKNOWN — very possibly because Stripe was unreachable — and the
+ * screen must not tell a coach they are running no offers when they are.
+ */
+export async function fetchMyPromoCodes(): Promise<{ codes: PromoCode[]; status: LoadStatus; reason: string | null }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('connect-promo', { body: { action: 'list' } });
+    if (error) {
+      reportError('connect.promoList', error);
+      return { codes: [], status: 'error', reason: error.message };
+    }
+    if (data?.ok && Array.isArray(data.codes)) return { codes: data.codes as PromoCode[], status: 'ready', reason: null };
+    // A refusal with a reason — no connected account, or an account on the
+    // wrong charge model — is 'error' with the sentence, never an empty list.
+    // "You have no codes" and "codes are not available to you" send a coach to
+    // two different places.
+    return { codes: [], status: 'error', reason: data?.error || 'Your discount codes could not be read.' };
+  } catch (e) {
+    reportError('connect.promoList', e);
+    return { codes: [], status: 'error', reason: 'Your discount codes could not be read.' };
+  }
+}
+
+/**
+ * Create one, on the coach's own Stripe account.
+ *
+ * Everything that decides whether it is allowed lives in
+ * src/lib/packagePromo.ts and runs on BOTH sides: the screen's copy so a coach
+ * is not sent to the server to be told no, and connect-promo's copy because
+ * that is the rule.
+ */
+export async function createPromoCode(p: {
+  code: string;
+  percentOff: number;
+  packageId: string;
+  expiresOn?: string | null;
+  maxRedemptions?: number | null;
+}): Promise<{ ok: boolean; promo?: PromoCode; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('connect-promo', {
+      body: {
+        action: 'create',
+        code: p.code,
+        percent_off: p.percentOff,
+        package_id: p.packageId,
+        expires_on: p.expiresOn ?? null,
+        max_redemptions: p.maxRedemptions ?? null,
+      },
+    });
+    if (error) { reportError('connect.promoCreate', error); return { ok: false, error: error.message }; }
+    if (data?.ok) return { ok: true, promo: data as PromoCode };
+    return { ok: false, error: data?.error || 'That code was not created.' };
+  } catch (e) {
+    reportError('connect.promoCreate', e);
+    return { ok: false, error: 'That code was not created.' };
+  }
+}
+
+/**
+ * Withdraw one. Archived at Stripe rather than deleted.
+ *
+ * Stripe will not delete a promotion code that has been used, and it should
+ * not: somebody already subscribed on it keeps the price they signed up at, and
+ * a subscription discounted by a code that no longer exists anywhere would be
+ * unexplainable a year later. `PROMO_WITHDRAW_IS_FORWARD_ONLY` is the sentence
+ * the screen shows before the tap.
+ */
+export async function archivePromoCode(promotionCodeId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('connect-promo', {
+      body: { action: 'archive', promotion_code_id: promotionCodeId },
+    });
+    if (error) { reportError('connect.promoArchive', error); return { ok: false, error: error.message }; }
+    if (data?.ok) return { ok: true };
+    return { ok: false, error: data?.error || 'That code was not withdrawn, so it is still live.' };
+  } catch (e) {
+    reportError('connect.promoArchive', e);
+    return { ok: false, error: 'That code was not withdrawn, so it is still live.' };
   }
 }

@@ -23,12 +23,16 @@ import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchEquipment, addEquipment, setStatus, recordService,
+  fetchLog, addLogEntry, logBlocker, LOG_KINDS, LOG_LABEL,
+  type LogEntry, type LogKind,
   nextServiceDue, serviceState, usableUnits, outOfServiceUnits,
   capacityFor, summariseRegister, needsAttention,
   type Equipment, type EquipmentStatus, type ServiceState, type CapacityCheck,
 } from '@lib/gymEquipment';
 import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
+import { money } from '@lib/gymRecord';
+import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 
 const DAY = 86400000;
 
@@ -79,6 +83,11 @@ export default function EquipmentPage() {
   const [gymNameUnread, setGymNameUnread] = useState(false);
   const [kit, setKit] = useState<Equipment[] | null>(null);
   const [classes, setClasses] = useState<GymClass[] | null>(null);
+  /** The maintenance and incident log. Null is unread, never an empty history. */
+  const [log, setLog] = useState<LogEntry[] | null>(null);
+  /** The gym's own currency, for the cost on a service entry. There is no
+   *  fallback: what an engineer charged is a permanent record. */
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
@@ -86,23 +95,26 @@ export default function EquipmentPage() {
     // Under Promise.all a refused gym_classes query also emptied the register,
     // so a gym with four machines out of action read as a gym with none — and
     // the banner blamed the timetable, which nobody had asked about.
-    const [kRes, cRes] = await Promise.allSettled([
+    const [kRes, cRes, lRes] = await Promise.allSettled([
       fetchEquipment(supabase, tenantId),
       fetchClasses(
         supabase, tenantId,
         new Date().toISOString(),
         new Date(Date.now() + 7 * DAY).toISOString(),
       ),
+      fetchLog(supabase, tenantId),
     ]);
 
     // A read that failed is null, never []. [] is the gym saying it owns none;
     // null is nobody knowing. Staff act differently on the two.
     setKit(kRes.status === 'fulfilled' ? kRes.value : null);
     setClasses(cRes.status === 'fulfilled' ? cRes.value : null);
+    setLog(lRes.status === 'fulfilled' ? lRes.value : null);
 
     const trouble = [
       failure(kRes, 'the equipment register'),
       failure(cRes, "the coming week's classes"),
+      failure(lRes, 'the maintenance and incident log'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
   }, []);
@@ -113,12 +125,14 @@ export default function EquipmentPage() {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
-      if (!who?.tenantId) { setKit([]); setClasses([]); return; }
-      // The error is now read off the result. Not because the name matters — it is
+      if (!who?.tenantId) { setKit([]); setClasses([]); setLog([]); return; }
+      // The error is read off the result. Not because the name matters — it is
       // a label — but because "we could not ask" and "there is no gym" must not
       // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
-      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
+      // The currency comes with it now: a service entry can carry a cost, and
+      // what an engineer charged is a permanent record that has to say in what.
+      const t = await readTenant(supabase, who.tenantId);
+      if (live) { setGymName(t.name); setCcy(t.currency); setGymNameUnread(!!t.error); }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -211,10 +225,15 @@ export default function EquipmentPage() {
         />
       </div>
 
-      <OutOfAction rows={down} unread={unread(kit)} onChange={refresh} />
-      <DueForService rows={attention} unread={unread(kit)} today={today} onChange={refresh} />
+      <OutOfAction rows={down} unread={unread(kit)} today={today} onChange={refresh} />
+      <DueForService rows={attention} unread={unread(kit)} today={today} tenantId={tenantId} me={me} onChange={refresh} />
       <CapacityAtRisk kit={kit} classes={classes} kitUnread={unread(kit)} classesUnread={unread(classes)} />
       <Register rows={kit} unread={unread(kit)} today={today} onChange={refresh} />
+
+      <History
+        rows={log} kit={kit} unread={unread(log)} today={today}
+        ccy={ccy} tenantId={tenantId} me={me} onChange={refresh}
+      />
       <AddKit tenantId={tenantId} onChange={refresh} />
     </Shell>
   );
@@ -222,8 +241,8 @@ export default function EquipmentPage() {
 
 /* ── out of action ─────────────────────────────────────────────────────────── */
 
-function OutOfAction({ rows, unread, onChange }: {
-  rows: Equipment[] | null; unread: Unread; onChange: () => void;
+function OutOfAction({ rows, unread, today, onChange }: {
+  rows: Equipment[] | null; unread: Unread; today: string; onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -248,8 +267,19 @@ function OutOfAction({ rows, unread, onChange }: {
     { key: 'id', header: 'Asset', value: (e) => e.identifier ?? '',
       render: (e) => e.identifier ? <span className="mono">{e.identifier}</span> : <span className="dash">—</span> },
     { key: 'qty', header: 'Units', value: (e) => e.quantity, numeric: true },
-    { key: 'why', header: 'Note', value: (e) => e.note ?? '',
-      render: (e) => e.note ?? <span className="dash">no reason recorded</span> },
+    { key: 'why', header: 'Why', value: (e) => e.outOfServiceReason ?? '',
+      // `outOfServiceReason`, not `note`. They were the same column, and
+      // `recordService` CLEARS the note — so a reason stored there vanished the
+      // first time anybody serviced the machine, taking its standing
+      // description with it. Neither surface ever passed one anyway, so this
+      // cell read "no reason recorded" about a column nothing could write.
+      render: (e) => e.outOfServiceReason ?? <span className="dash">no reason recorded</span> },
+    { key: 'since', header: 'Out since', value: (e) => e.outOfServiceSince ?? '',
+      // The question an owner actually asks about a broken machine, which a
+      // status column alone could never answer.
+      render: (e) => e.outOfServiceSince
+        ? <span>{e.outOfServiceSince}{daysSince(e.outOfServiceSince, today) != null ? ` · ${daysSince(e.outOfServiceSince, today)} days` : ''}</span>
+        : <span className="dash">not recorded</span> },
     { key: 'back', header: '', value: () => 0, align: 'right',
       render: (e) => <button style={linkBtn} onClick={() => back(e)}>Back in service</button> },
   ];
@@ -270,18 +300,161 @@ function OutOfAction({ rows, unread, onChange }: {
   );
 }
 
+/* ── what has happened to the kit ──────────────────────────────────────────── */
+
+/**
+ * The maintenance history and the accident book.
+ *
+ * `recordService` used to be the whole of a gym's maintenance record: it
+ * overwrote one date and DELETED the note, "since whatever it said is presumably
+ * done". Six services in three years left one date and nothing else — no
+ * engineer, no cost, no findings, and none of the five before it. So "when was
+ * this last looked at, and how often has it needed looking at" was
+ * unanswerable, which is exactly the question that tells a broken machine from
+ * a machine that keeps breaking.
+ *
+ * Incidents are in the same table and the same list. An accident book is a
+ * statutory requirement in most jurisdictions this product is sold into, the
+ * place a gym looks for one is the machine it happened on, and an incident with
+ * no machine — somebody slipping on a wet floor — is recorded against no
+ * equipment at all rather than not recorded.
+ */
+function History({ rows, kit, unread, today, ccy, tenantId, me, onChange }: {
+  rows: LogEntry[] | null; kit: Equipment[] | null; unread: Unread; today: string;
+  ccy: TenantCurrency; tenantId: string; me: Me; onChange: () => void;
+}) {
+  const [kind, setKind] = useState<LogKind>('service');
+  const [equipmentId, setEquipmentId] = useState('');
+  const [on, setOn] = useState(today);
+  const [by, setBy] = useState('');
+  const [findings, setFindings] = useState('');
+  const [cost, setCost] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const blocker = logBlocker(kind, equipmentId || null, findings, cost, ccy);
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (blocker) { setMsg(blocker); return; }
+    const clean = cost.trim().replace(/[,\s]/g, '');
+    setBusy(true); setMsg(null);
+    try {
+      await addLogEntry(supabase, tenantId, {
+        equipmentId: equipmentId || null,
+        // Snapshotted, because the reference is `on delete set null`: retiring
+        // a machine must not turn its accident record into "somebody was hurt
+        // by something".
+        equipmentLabel: (kit ?? []).find((k) => k.id === equipmentId)?.name ?? null,
+        kind,
+        happenedOn: on,
+        performedBy: by,
+        findings,
+        costCents: clean ? Math.round(Number(clean) * 100) : null,
+        currency: clean ? ccy : null,
+        recordedBy: me.id,
+      });
+      setFindings(''); setBy(''); setCost('');
+      onChange();
+    } catch (x: any) {
+      setMsg(`That entry was NOT recorded: ${x?.message ?? 'the write was refused'}. Nothing is in the log.`);
+    } finally { setBusy(false); }
+  };
+
+  const cols: Column<LogEntry>[] = [
+    { key: 'on', header: 'When', value: (r) => r.happenedOn },
+    { key: 'kind', header: 'What', value: (r) => LOG_LABEL[r.kind],
+      render: (r) => (
+        <span style={{ color: r.kind === 'incident' ? 'var(--crit)' : undefined }}>{LOG_LABEL[r.kind]}</span>
+      ) },
+    { key: 'item', header: 'Item', value: (r) => r.equipmentLabel ?? '',
+      // The snapshot first. A retired machine's rows keep pointing at nothing,
+      // and "somebody serviced something" is not a maintenance history.
+      render: (r) => r.equipmentLabel
+        ?? (r.equipmentId ? <span className="dash">a machine no longer on the register</span>
+                          : <span className="dash">no machine</span>) },
+    { key: 'by', header: 'By', value: (r) => r.performedBy ?? '',
+      render: (r) => r.performedBy ?? <span className="dash">not recorded</span> },
+    { key: 'findings', header: 'What was found', value: (r) => r.findings ?? '',
+      render: (r) => <span style={{ whiteSpace: 'normal' }}>{r.findings ?? <span className="dash">—</span>}</span> },
+    { key: 'cost', header: 'Cost', value: (r) => r.costCents, numeric: true,
+      render: (r) => r.costCents == null
+        ? <span className="dash">none recorded</span>
+        : (money(r.costCents, r.currency) ?? <span className="dash">no currency on this entry</span>) },
+  ];
+
+  return (
+    <Section
+      title="Maintenance and incidents"
+      sub="Every service, repair, inspection, clean and incident, oldest kept. Recording a service here is what makes the date on the register mean something — before this, servicing a machine deleted the note saying what was wrong with it."
+    >
+      <form onSubmit={add} style={formRow}>
+        <select value={kind} onChange={(e) => setKind(e.target.value as LogKind)}
+                style={{ ...field, minWidth: 170 }} aria-label="What kind of entry this is">
+          {LOG_KINDS.map((k) => <option key={k} value={k}>{LOG_LABEL[k]}</option>)}
+        </select>
+        <select value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)}
+                style={{ ...field, minWidth: 190 }} aria-label="Which machine">
+          <option value="">{kit === null ? 'The register could not be read' : 'No machine — a floor incident'}</option>
+          {(kit ?? []).map((k) => <option key={k.id} value={k.id}>{k.name}{k.identifier ? ` · ${k.identifier}` : ''}</option>)}
+        </select>
+        <input type="date" value={on} onChange={(e) => setOn(e.target.value)}
+               style={{ ...field, width: 148 }} aria-label="The day it happened" />
+        <input value={by} onChange={(e) => setBy(e.target.value)} placeholder="Who did it"
+               style={{ ...field, width: 170 }} aria-label="Who performed it" />
+        <input value={findings} onChange={(e) => setFindings(e.target.value)}
+               placeholder="What was found or what happened"
+               style={{ ...field, flex: 2, minWidth: 220 }} aria-label="What was found" />
+        <input value={cost} onChange={(e) => setCost(e.target.value)} inputMode="decimal"
+               placeholder={ccy ? `Cost (${ccy})` : 'Cost'} style={{ ...field, width: 130 }}
+               aria-label="What it cost" />
+        <button type="submit" disabled={busy || !!blocker} style={primaryBtn}>Record</button>
+      </form>
+      <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)', maxWidth: '80ch' }}>
+        &ldquo;Who did it&rdquo; is free text because the answer is usually a company &mdash; a
+        foreign key would force every external engineer to have a Repple account. Leave the machine
+        blank for an incident that involved none: a gym with no accident book is not helped by one
+        that only accepts accidents involving equipment.
+        {ccy ? null : ` A cost cannot be recorded until this gym sets its currency — ${NO_CURRENCY_NOTE}.`}
+      </p>
+      {blocker && (findings || cost) ? (
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>{blocker}</p>
+      ) : null}
+      {msg ? <Banner tone="crit">{msg}</Banner> : null}
+      {unread ? <Unresolved state={unread} what="the maintenance log" /> : (
+        <DataTable
+          rows={rows ?? []} columns={cols} rowKey={(r) => r.id}
+          empty="Nothing has been recorded. Until this wave the product kept one date per machine and deleted the note, so an empty log here is the state everything was in rather than a gym that has never serviced anything."
+        />
+      )}
+    </Section>
+  );
+}
+
 /* ── service ───────────────────────────────────────────────────────────────── */
 
-function DueForService({ rows, unread, today, onChange }: {
+function DueForService({ rows, unread, today, tenantId, me, onChange }: {
   rows: { item: Equipment; state: ServiceState }[] | null;
-  unread: Unread; today: string; onChange: () => void;
+  unread: Unread; today: string; tenantId: string; me: Me; onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
 
   const serviced = async (e: Equipment) => {
     setMsg(null);
     try {
-      await recordService(supabase, e.id, today);
+      // The log entry goes with it. Ticking a machine off the due list used to
+      // move one date and DELETE the note, so the only trace a service had ever
+      // happened was that the machine stopped being due — and the description
+      // of what was wrong with it went with the note. Carrying the note into
+      // the entry's findings is what keeps that sentence: it is about to be
+      // cleared, and it is the only account of the fault anybody wrote down.
+      await recordService(supabase, e.id, today, {
+        tenantId,
+        equipmentLabel: e.name,
+        kind: 'service',
+        findings: e.note,
+        recordedBy: me.id,
+      });
       onChange();
     } catch (x: any) {
       setMsg(x?.message ?? 'Could not record that service.');
@@ -493,10 +666,15 @@ function Register({ rows, unread, today, onChange }: {
 }) {
   const [msg, setMsg] = useState<string | null>(null);
 
-  const move = async (e: Equipment, status: EquipmentStatus) => {
+  /** Which machine is being taken out, waiting for a reason. */
+  const [pulling, setPulling] = useState<Equipment | null>(null);
+  const [why, setWhy] = useState('');
+
+  const move = async (e: Equipment, status: EquipmentStatus, reason?: string) => {
     setMsg(null);
     try {
-      await setStatus(supabase, e.id, status);
+      await setStatus(supabase, e.id, status, undefined, reason ?? null);
+      setPulling(null); setWhy('');
       onChange();
     } catch (x: any) {
       setMsg(x?.message ?? 'Could not change that item.');
@@ -537,8 +715,23 @@ function Register({ rows, unread, today, onChange }: {
     { key: 'act', header: '', value: () => 0, align: 'right',
       render: (e) => (
         <span style={{ display: 'inline-flex', gap: 12 }}>
+          {/* A reason, asked for at the moment somebody knows it. `setStatus`
+              has accepted one since it was written and neither surface ever
+              passed it, so every out-of-action machine in the product read
+              "no reason recorded" — about a field nothing could fill in. */}
           {e.status === 'in_service'
-            ? <button style={linkBtn} onClick={() => move(e, 'out_of_service')}>Take out</button>
+            ? (pulling?.id === e.id
+                ? (
+                  <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'normal' }}>
+                    <input value={why} onChange={(ev) => setWhy(ev.target.value)}
+                           placeholder="What is wrong with it"
+                           style={{ ...field, padding: '3px 5px', fontSize: 12, width: 210 }}
+                           aria-label={`Why ${e.name} is coming out of service`} />
+                    <button style={linkBtn} disabled={!why.trim()} onClick={() => move(e, 'out_of_service', why)}>Take out</button>
+                    <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={() => { setPulling(null); setWhy(''); }}>Cancel</button>
+                  </span>
+                )
+                : <button style={linkBtn} onClick={() => { setMsg(null); setPulling(e); setWhy(''); }}>Take out</button>)
             : <button style={linkBtn} onClick={() => move(e, 'in_service')}>Put back</button>}
           {e.status !== 'retired'
             ? <button style={linkBtn} onClick={() => move(e, 'retired')}>Retire</button>
@@ -646,6 +839,11 @@ const btn = {
   fontWeight: 600, cursor: 'pointer', border: '1px solid transparent',
 } as const;
 
+const primaryBtn = {
+  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
+  padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+} as const;
+
 const linkBtn = {
   background: 'none', border: 'none', padding: 0, cursor: 'pointer',
   color: 'var(--brand)', fontSize: 13, fontFamily: 'var(--sans)',
@@ -655,6 +853,16 @@ const formRow = {
   display: 'flex', gap: 9, padding: 14, borderBottom: '1px solid var(--ring)',
   flexWrap: 'wrap' as const, alignItems: 'center',
 };
+
+/** Whole days between two YYYY-MM-DD dates, both read as UTC midnight so no
+ *  daylight-saving hour can shift the answer by one. Null when either is not a
+ *  date — which renders as nothing rather than as "NaN days". */
+function daysSince(day: string, today: string): number | null {
+  const a = Date.parse(`${day}T00:00:00Z`);
+  const b = Date.parse(`${today}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (

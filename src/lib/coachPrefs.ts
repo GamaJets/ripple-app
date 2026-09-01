@@ -151,3 +151,84 @@ export function rateFieldNote(status: LoadStatus): string | null {
   }
   return null;
 }
+
+
+/* ── how often the app may raise the same client ───────────────────────────── */
+
+/**
+ * The shortest gap a coach will accept between two approaches to one person.
+ *
+ * ── Why this is a setting at all ──────────────────────────────────────────
+ *
+ * `MIN_COOLDOWN_DAYS = 7`, `MAX_COOLDOWN_DAYS = 28` and `DISMISS_FLOOR_DAYS =
+ * 30` in src/lib/interventions.ts and src/lib/nudge.ts are one set of numbers
+ * for every coach, and there is no one set. A coach whose clients come to a room
+ * every Tuesday knows within a week that somebody has stopped. A coach with an
+ * online-only book, where a client can be entirely fine and entirely invisible
+ * for a fortnight, needs longer. Given the same seven-day floor, the first calls
+ * the list slow and the second calls it nagging — the same complaint about the
+ * same number from opposite ends.
+ *
+ * ── Why one number and not three ──────────────────────────────────────────
+ *
+ * Because the per-client pacing is the part that works and must survive: paced
+ * off a client's own rhythm, a fortnightly client is not chased mid-gap and a
+ * daily one is not left for a month. What a coach is actually asking for is
+ * "never inside N days", which is a FLOOR, and a floor composes with the pacing
+ * rather than replacing it. `cooldownFloor` in interventions.ts is where it is
+ * applied.
+ *
+ * ── And why it is bounded ─────────────────────────────────────────────────
+ *
+ * A stored 0 would prompt daily, which is the behaviour this whole feature
+ * exists to prevent, and a stored 100000 would silence somebody for three
+ * centuries. Both are refused here rather than clamped: clamping invents a
+ * number the coach did not choose and then acts on it.
+ */
+export const MIN_NUDGE_COOLDOWN = 1;
+export const MAX_NUDGE_COOLDOWN = 365;
+
+/** The same three-way answer `parseRate` gives, and for the same reason: an
+ *  empty box is an instruction (use the app's own pacing) and a half-typed one
+ *  is not. Collapsing them would let a keystroke silence a coach's whole list
+ *  for a year. */
+export type CooldownInput =
+  | { kind: 'empty' }
+  | { kind: 'invalid' }
+  | { kind: 'value'; value: number };
+
+export function parseCooldown(text: string): CooldownInput {
+  const raw = String(text ?? '').trim();
+  if (!raw) return { kind: 'empty' };
+  // Whole days only. There is no such thing as 2.5 days between two phone
+  // calls, and a decimal here would be stored, rounded somewhere downstream,
+  // and disagree with the number the coach can see in the box.
+  if (!/^\d+$/.test(raw)) return { kind: 'invalid' };
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n)) return { kind: 'invalid' };
+  if (n < MIN_NUDGE_COOLDOWN || n > MAX_NUDGE_COOLDOWN) return { kind: 'invalid' };
+  return { kind: 'value', value: n };
+}
+
+/** A stored window back into its box. Null is an empty box and never "0" — a
+ *  coach with no preference has not chosen zero days. */
+export function cooldownText(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '';
+  return String(Math.round(value));
+}
+
+/**
+ * What the box is doing, in the coach's words.
+ *
+ * Two different sentences, because "not set" and "set to seven" are genuinely
+ * different states even though the app behaves the same way in both: the first
+ * is the app's judgement and the second is the coach's, and a coach who cannot
+ * tell which one is in force cannot decide whether to change it.
+ */
+export function cooldownNote(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) {
+    return 'Not set, so the app paces each client off how often they used to train — never closer than a week, never further than four.';
+  }
+  const n = Math.round(value);
+  return `Never inside ${n} day${n === 1 ? '' : 's'}. Each client is still paced off their own rhythm above that, so somebody who trained fortnightly is left longer than somebody who trained daily.`;
+}

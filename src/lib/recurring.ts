@@ -299,10 +299,27 @@ export const RECURRING_END_RULE =
   + 'however much notice is left. The next session stays booked; cancel that one on its own if you need to, '
   + 'and your coach’s notice policy applies to that session alone.';
 
-/** Why eight weeks of Tuesdays do not empty a ten-session pack. */
+/**
+ * Why eight weeks of Tuesdays do not empty a ten-session pack, and when they do
+ * come off it.
+ *
+ * This used to end "your coach settles what's owed with you", which was true
+ * and was the app admitting it had lost track: a client on a ten-pack with a
+ * standing Tuesday consumed no credits at all, ever, so the balance on the
+ * coach's Payments screen was wrong and the run-out alert never fired.
+ *
+ * Part 193 draws one credit AT DELIVERY — when the session is marked completed
+ * — rather than when it is booked. The distinction is the whole sentence: the
+ * materialiser creates occurrences eight weeks ahead, so drawing at booking
+ * would empty a ten-pack in the first fortnight for sessions nobody has had
+ * yet, and ending the series would then have to hand every one of them back.
+ * Drawing at delivery needs no forecast and no unwind, because a session that
+ * never happened was never marked.
+ */
 export const RECURRING_CREDIT_NOTE =
-  'A standing appointment books the time, not the sessions. It doesn’t draw credits from a session pack in '
-  + 'advance — your coach settles what’s owed with you, the same as any other session.';
+  'A standing appointment books the time, not the sessions. Nothing comes off a session pack when the dates '
+  + 'are put in the diary — a credit is drawn as each session is marked done, one at a time, so weeks that '
+  + 'have not happened yet are not paid for in advance.';
 
 /** What happens to a date the coach was already busy on. */
 export const RECURRING_CLASH_NOTE =

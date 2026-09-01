@@ -35,6 +35,7 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { zip } from '@/lib/zip';
+import { save } from '@/lib/save';
 import { fetchPlans, fetchMemberships, fetchPayments } from '@lib/gymRecord';
 import { fetchClasses } from '@lib/gymSchedule';
 import { fetchSessions } from '@lib/gymSessions';
@@ -48,6 +49,9 @@ import {
   EXPORT_PARTS, EXPORT_LABEL, EXPORT_COST,
   type ExportPart, type ExportFile, type GymExportInput,
   type Slice, type MemberBooking, type GymClass,
+  memberSlices, memberRowCount, MEMBER_PARTS,
+  type ExportInvoice, type ExportSettlement, type ExportEquipment, type ExportShift,
+  type ExportIntervention, type ExportPromo, type ExportEvent, type ExportPurchase,
 } from '@lib/gymExport';
 
 /**
@@ -79,6 +83,14 @@ const PENDING: Reads = {
   passes: sliceLoading(),
   visits: sliceLoading(),
   invites: sliceLoading(),
+  invoices: sliceLoading(),
+  settlements: sliceLoading(),
+  equipment: sliceLoading(),
+  shifts: sliceLoading(),
+  interventions: sliceLoading(),
+  promos: sliceLoading(),
+  events: sliceLoading(),
+  purchases: sliceLoading(),
 };
 
 const EMPTY: Reads = {
@@ -92,6 +104,14 @@ const EMPTY: Reads = {
   passes: sliceReady([]),
   visits: sliceReady([]),
   invites: sliceReady([]),
+  invoices: sliceReady([]),
+  settlements: sliceReady([]),
+  equipment: sliceReady([]),
+  shifts: sliceReady([]),
+  interventions: sliceReady([]),
+  promos: sliceReady([]),
+  events: sliceReady([]),
+  purchases: sliceReady([]),
 };
 
 export default function ExportPage() {
@@ -130,6 +150,7 @@ export default function ExportPage() {
     const [
       plans, memberships, payments, [classes, attendance],
       sessions, passTypes, passes, visits, invites,
+      invoices, settlements, equipment, shifts, interventions, promos, events, purchases,
     ] = await Promise.all([
       slice(() => fetchPlans(supabase, tenantId)),
       slice(() => fetchMemberships(supabase, tenantId)),
@@ -140,9 +161,24 @@ export default function ExportPage() {
       slice(() => fetchPasses(supabase, tenantId)),
       slice(() => fetchVisits(supabase, tenantId)),
       slice(() => fetchInvites(supabase, tenantId)),
+      // The eight this bundle used to leave behind. Each is its own read with
+      // its own three states, for the reason at the top of this file: an empty
+      // invoices.csv beside a refused query would tell a gym it had never
+      // billed anybody.
+      slice(() => readInvoices(tenantId)),
+      slice(() => readSettlements(tenantId)),
+      slice(() => readEquipment(tenantId)),
+      slice(() => readShifts(tenantId)),
+      slice(() => readInterventions(tenantId)),
+      slice(() => readPromos(tenantId)),
+      slice(() => readEvents(tenantId)),
+      slice(() => readPurchases(tenantId)),
     ]);
 
-    setReads({ plans, memberships, payments, classes, attendance, sessions, passTypes, passes, visits, invites });
+    setReads({
+      plans, memberships, payments, classes, attendance, sessions, passTypes, passes, visits, invites,
+      invoices, settlements, equipment, shifts, interventions, promos, events, purchases,
+    });
     setReadAt(new Date().toISOString());
   }, []);
 
@@ -215,9 +251,12 @@ export default function ExportPage() {
       <h1>Export</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13, maxWidth: 640 }}>
         The whole operating record as CSV in one zip, in the shapes another
-        system can read: the price book, members, memberships, payments, the
-        timetable, class attendance, one-to-ones, passes, the door log and
-        invites. It is the gym’s record, and leaving with it has to be possible.
+        system can read: the price book, members, memberships, payments, invoices,
+        the timetable, class attendance, one-to-ones, passes, the door log, invites,
+        payroll settlements, the equipment register, the rota, member contact, promo
+        codes, the activity log and PT packs. It is the gym’s record, and leaving with
+        it has to be possible. One member’s own file can be taken from the bottom of
+        this page.
       </p>
 
       {bundle && !bundle.complete ? (
@@ -257,7 +296,8 @@ export default function ExportPage() {
       ) : null}
 
       <Parts input={input} />
-      <Files bundle={bundle} blocker={blocker} />
+      <Files bundle={bundle} blocker={blocker} me={me} />
+      <MemberRecord input={input} blocker={blocker} readAt={readAt} me={me} />
       <Notes />
     </Shell>
   );
@@ -330,9 +370,10 @@ function Parts({ input }: { input: GymExportInput | null }) {
 
 /* ── the files ─────────────────────────────────────────────────────────────── */
 
-function Files({ bundle, blocker }: {
+function Files({ bundle, blocker, me }: {
   bundle: ReturnType<typeof buildGymExport> | null;
   blocker: string | null;
+  me: Me;
 }) {
   const [busy, setBusy] = useState(false);
   const [zipError, setZipError] = useState<string | null>(null);
@@ -360,6 +401,11 @@ function Files({ bundle, blocker }: {
     try {
       const blob = await zip(bundle.files.map((f) => ({ name: f.name, text: f.text })));
       save(blob, `${bundle.prefix}.zip`);
+      // Recorded AFTER the file exists, never before. An export log entry for a
+      // download that failed to build is a false statement about data having
+      // left the platform, and it is the kind of false statement a data
+      // protection officer reads as evidence.
+      await logExport(me, 'gym', null, bundle.files.reduce((a, f) => a + (f.rows ?? 0), 0), bundle.manifest.parts.map((p) => p.part).filter((p): p is ExportPart => !!p));
     } catch (e) {
       // Said out loud rather than swallowed: a button that appears to do
       // nothing reads as "the export is empty". The per-file buttons below
@@ -429,19 +475,6 @@ function download(f: ExportFile) {
   save(new Blob([f.text], { type: f.mime }), f.name);
 }
 
-function save(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Revoked late: Safari has been known to cancel a download whose blob URL is
-  // released in the same tick as the click.
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}
-
 /* ── the small print, said out loud ────────────────────────────────────────── */
 
 function Notes() {
@@ -509,6 +542,380 @@ function reason(e: unknown): string {
  * whose entire purpose is that leaving with the record must be possible. So the
  * read is simply finished.
  */
+/* ── one member's own file ─────────────────────────────────────────────────── */
+
+/**
+ * A subject-access response, or an archive before an erasure.
+ *
+ * `/export` was whole-gym only, and `src/lib/gdpr.ts` exports the caller's OWN
+ * account — so the gym-side record of one member was reachable from nowhere.
+ * `web/delete-account.html` says so to members outright: it tells them the
+ * gym-side records are out of reach and to "ask us". An owner honouring that
+ * request had no tool, and an owner archiving a member before honouring an
+ * erasure had none either.
+ *
+ * It is built by FILTERING reads this screen has already made, which is the
+ * whole reason it is cheap and the whole reason it cannot drift: two
+ * implementations of "what does this gym hold about this person" would
+ * eventually disagree, and the day they did is the day a legal response went
+ * out short.
+ *
+ * The picker is the memberships roster and not `profiles`. A person this gym
+ * has never sold anything to is not a member of it, and offering the console's
+ * whole profile visibility as a download menu would be a different feature with
+ * a different risk attached.
+ */
+function MemberRecord({ input, blocker, readAt, me }: {
+  input: GymExportInput | null; blocker: string | null; readAt: string | null; me: Me;
+}) {
+  const [memberId, setMemberId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const roster = useMemo(() => {
+    if (!input || input.memberships.state !== 'ready') return null;
+    return [...new Map(input.memberships.rows
+      .filter((m) => m.memberId)
+      .map((m) => [m.memberId, m.memberName ?? m.memberId] as const)).entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]));
+  }, [input]);
+
+  const chosenName = roster?.find(([id]) => id === memberId)?.[1] ?? null;
+  const rows = input && memberId ? memberRowCount(input, memberId) : null;
+
+  const download = async () => {
+    if (!input || !memberId || !readAt) return;
+    setBusy(true); setErr(null);
+    try {
+      const scoped = memberSlices(input, memberId);
+      const bundle = buildGymExport({
+        ...scoped,
+        subject: { memberId, memberName: chosenName },
+      });
+      const blob = await zip(bundle.files.map((f) => ({ name: f.name, text: f.text })));
+      save(blob, `${bundle.prefix}.zip`);
+      await logExport(me, 'member', memberId, rows, MEMBER_PARTS);
+    } catch (e) {
+      setErr(reason(e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Section
+      title="One member’s record"
+      sub="What this gym holds about one person — memberships, payments, invoices, bookings, one-to-ones, passes, door entries, contact and the activity log. Not the price book, the timetable or the rota: those are the gym’s and belong to nobody."
+    >
+      <div style={{ display: 'flex', gap: 8, padding: '12px 14px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={memberId} onChange={(e) => { setMemberId(e.target.value); setErr(null); }}
+                style={{ ...field, minWidth: 240 }} aria-label="Whose record to export">
+          <option value="">
+            {roster === null ? 'The roster has not been read' : 'Choose a member'}
+          </option>
+          {(roster ?? []).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <button onClick={download} disabled={busy || !memberId || !!blocker} style={primaryBtn}>
+          {busy ? 'Building…' : 'Download their record'}
+        </button>
+        {memberId ? (
+          <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
+            {/* Null is one or more parts unread, and it is NOT zero. An owner
+                answering a legal request has to know the difference before they
+                send a bundle of empty files with a covering note. */}
+            {rows == null
+              ? 'How much is on file cannot be counted while any part of the record is unread.'
+              : rows === 0
+                ? 'This gym holds no rows at all about them — the bundle will say so in every file rather than being empty and unexplained.'
+                : `${rows} row${rows === 1 ? '' : 's'} across the record.`}
+          </span>
+        ) : null}
+      </div>
+      {blocker ? (
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>
+          {blocker} The same refusal applies here: a member export built over a read that has not
+          finished is missing rows that exist, and nothing in the file would know.
+        </p>
+      ) : null}
+      {err ? <Banner tone="crit">Their record could not be built: {err}. Nothing was downloaded.</Banner> : null}
+      <p style={{ margin: 0, padding: '0 14px 14px', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '78ch' }}>
+        This is the GYM&rsquo;S side of the record. Their workouts, photos, messages and
+        measurements are theirs and are exported from their own account &mdash; this bundle does not
+        contain them and does not claim to. Taking it is logged, with who took it and when: an
+        export leaving the platform is the one action here that nothing else in the product could
+        observe.
+      </p>
+    </Section>
+  );
+}
+
+/**
+ * Record that an export left the platform.
+ *
+ * The one action on this screen that writes no row anywhere else — a file is
+ * produced in the browser and the database never hears about it — so the client
+ * has to state it. That is the opposite of how every other event in
+ * `gym_events` is written (triggers, unforgeable, see supabase/parts/105) and
+ * it is unavoidable: nothing server-side can observe a download.
+ *
+ * The failure is SWALLOWED rather than surfaced, and that is a deliberate
+ * ordering. The file has already been handed to the owner by the time this
+ * runs; telling them the export failed would be false, and refusing the
+ * download over a logging table would be a worse product for a worse reason.
+ * A gap in the log is visible as a gap; a refused export is a gym that cannot
+ * leave.
+ */
+async function logExport(
+  me: Me, scope: 'gym' | 'member', memberId: string | null,
+  rows: number | null, parts: ExportPart[],
+): Promise<void> {
+  if (!me.tenantId) return;
+  // eslint-disable-next-line -- no-error-ok: the file is already in the owner's hands; a logging failure must not be reported as an export failure
+  await supabase.from('gym_export_runs').insert({
+    tenant_id: me.tenantId,
+    scope,
+    member_id: memberId,
+    parts,
+    rows_exported: rows,
+    taken_by: me.id,
+  });
+}
+
+/* ── the eight parts the bundle used to leave behind ───────────────────────── */
+
+/**
+ * Every one of these is paged with `readAll`, never capped-and-refused.
+ *
+ * The distinction is the one src/lib/rowCap.ts draws: `assertWhole` is right
+ * for a figure, because a figure over an unknown fraction of a set is a wrong
+ * figure. This screen is not computing a figure — it is taking the gym's whole
+ * record out — so refusing at a thousand rows would hand a gym with three
+ * years of activity a bundle that is missing everything before last spring,
+ * and it would be the LARGEST gyms that could not leave. Every read below
+ * orders by `id` as its final key, because `readAll`'s contract requires a
+ * TOTAL order and a page boundary that lands in a run of ties silently loses
+ * rows.
+ */
+async function readInvoices(tenantId: string): Promise<ExportInvoice[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_invoices')
+      .select('id, number, member_id, amount_cents, currency, issued_on, due_on, status, note, billed_name')
+      .eq('tenant_id', tenantId)
+      .order('issued_on', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's invoice register",
+  );
+  const names = await namesFor(rows.map((r) => r.member_id));
+  return rows.map((r) => ({
+    id: r.id,
+    number: Number.isFinite(r.number) ? r.number : null,
+    memberId: r.member_id ?? null,
+    // The retained name from supabase/parts/184 where the account has been
+    // erased. Without it a retained invoice exports naming nobody, which is the
+    // one thing a retention obligation exists to prevent.
+    memberName: (r.member_id ? names.get(r.member_id) : undefined) ?? r.billed_name ?? null,
+    amountCents: r.amount_cents ?? null,
+    currency: r.currency ?? null,
+    issuedOn: r.issued_on,
+    dueOn: r.due_on ?? null,
+    status: r.status ?? null,
+    note: r.note ?? null,
+  }));
+}
+
+async function readSettlements(tenantId: string): Promise<ExportSettlement[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('payroll_settlements')
+      .select('id, trainer_id, period_from, period_to, amount_cents, currency, sessions_count, method, settled_at, reversed_at, reverse_reason')
+      .eq('tenant_id', tenantId)
+      .order('settled_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's payroll settlements",
+  );
+  const names = await namesFor(rows.map((r) => r.trainer_id));
+  return rows.map((r) => ({
+    id: r.id,
+    trainerId: r.trainer_id ?? null,
+    trainerName: r.trainer_id ? names.get(r.trainer_id) ?? null : null,
+    periodFrom: r.period_from ?? null,
+    periodTo: r.period_to ?? null,
+    amountCents: r.amount_cents ?? null,
+    currency: r.currency ?? null,
+    sessionsCount: r.sessions_count ?? null,
+    method: r.method ?? null,
+    settledAt: r.settled_at,
+    reversedAt: r.reversed_at ?? null,
+    reverseReason: r.reverse_reason ?? null,
+  }));
+}
+
+async function readEquipment(tenantId: string): Promise<ExportEquipment[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_equipment')
+      .select('id, name, category, identifier, quantity, status, purchased_on, service_interval_days, last_serviced_on, note')
+      .eq('tenant_id', tenantId)
+      .order('name', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's equipment register",
+  );
+  return rows.map((r) => ({
+    id: r.id, name: r.name, category: r.category ?? null, identifier: r.identifier ?? null,
+    quantity: r.quantity ?? null, status: r.status ?? null, purchasedOn: r.purchased_on ?? null,
+    serviceIntervalDays: r.service_interval_days ?? null,
+    lastServicedOn: r.last_serviced_on ?? null, note: r.note ?? null,
+  }));
+}
+
+async function readShifts(tenantId: string): Promise<ExportShift[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_shifts')
+      .select('id, trainer_id, starts_at, ends_at, role, status, note')
+      .eq('tenant_id', tenantId)
+      .order('starts_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's rota",
+  );
+  const names = await namesFor(rows.map((r) => r.trainer_id));
+  return rows.map((r) => ({
+    id: r.id,
+    trainerId: r.trainer_id ?? null,
+    trainerName: r.trainer_id ? names.get(r.trainer_id) ?? null : null,
+    startsAt: r.starts_at ?? null, endsAt: r.ends_at ?? null,
+    role: r.role ?? null, status: r.status ?? null, note: r.note ?? null,
+  }));
+}
+
+async function readInterventions(tenantId: string): Promise<ExportIntervention[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('member_interventions')
+      .select('id, member_id, channel, outcome, by_id, by_name, note, at')
+      .eq('tenant_id', tenantId)
+      .order('at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's record of member contact",
+  );
+  const names = await namesFor(rows.map((r) => r.member_id));
+  return rows.map((r) => ({
+    id: r.id,
+    memberId: r.member_id ?? null,
+    memberName: r.member_id ? names.get(r.member_id) ?? null : null,
+    channel: r.channel ?? null, outcome: r.outcome ?? null,
+    byId: r.by_id ?? null, byName: r.by_name ?? null,
+    note: r.note ?? null, at: r.at ?? null,
+  }));
+}
+
+async function readPromos(tenantId: string): Promise<ExportPromo[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('promos')
+      .select('id, code, discount, active, redemptions, created_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's promo codes",
+  );
+  return rows.map((r) => ({
+    id: r.id, code: r.code ?? null,
+    discount: Number.isFinite(r.discount) ? r.discount : null,
+    active: typeof r.active === 'boolean' ? r.active : null,
+    redemptions: Number.isFinite(r.redemptions) ? r.redemptions : null,
+    createdAt: r.created_at ?? null,
+  }));
+}
+
+async function readEvents(tenantId: string): Promise<ExportEvent[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_events')
+      .select('id, kind, summary, subject_id, actor_id, created_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's activity log",
+  );
+  return rows.map((r) => ({
+    id: r.id, kind: r.kind ?? null, summary: r.summary ?? null,
+    subjectId: r.subject_id ?? null, actorId: r.actor_id ?? null, at: r.created_at,
+  }));
+}
+
+/**
+ * PT packs, scoped by the roster.
+ *
+ * `client_purchases` has no tenant column — it hangs off a trainer profile — so
+ * the scope is applied by hand. The roster read THROWS rather than defaulting
+ * to an empty list: an empty `in()` and a refused roster both produce "no
+ * packs", and one of those is a gym whose coaches sold nothing while the other
+ * is a query nobody may draw a conclusion from. In an export the second one
+ * would be a missing file the bundle claimed was complete.
+ */
+async function readPurchases(tenantId: string): Promise<ExportPurchase[]> {
+  const { data: trs, error } = await supabase
+    .from('trainers').select('id').eq('tenant_id', tenantId).limit(1001);
+  if (error) throw error;
+  const ids: string[] = (trs ?? []).map((r: any) => r.id);
+  if (!ids.length) return [];
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('client_purchases')
+      .select('id, trainer_id, client_id, amount_cents, currency, sessions_total, sessions_used, status, created_at')
+      .in('trainer_id', ids)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "the PT packs sold by this gym's coaches",
+  );
+  const names = await namesFor(rows.map((r) => r.trainer_id));
+  return rows.map((r) => ({
+    id: r.id,
+    trainerId: r.trainer_id ?? null,
+    trainerName: r.trainer_id ? names.get(r.trainer_id) ?? null : null,
+    clientId: r.client_id ?? null,
+    amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
+    currency: r.currency ?? null,
+    sessionsTotal: Number.isFinite(r.sessions_total) ? r.sessions_total : null,
+    sessionsUsed: Number.isFinite(r.sessions_used) ? r.sessions_used : null,
+    status: r.status ?? null,
+    createdAt: r.created_at ?? null,
+  }));
+}
+
+/**
+ * Names for a set of profile ids.
+ *
+ * Deliberately NOT throwing. A name is a label on a row whose figures are all
+ * read from elsewhere, and an export that refused to produce invoices.csv
+ * because the name lookup failed would withhold the money to protect the
+ * spelling. Every table here writes the id beside the name for exactly this
+ * reason: the row is still identifiable.
+ */
+async function namesFor(ids: Array<string | null | undefined>): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((x): x is string => !!x))];
+  if (!unique.length) return new Map();
+  const out = new Map<string, string>();
+  for (let i = 0; i < unique.length; i += ID_CHUNK) {
+    // eslint-disable-next-line -- no-error-ok: a missing name renders as a blank beside the id that is always written; the row is still identifiable
+    const { data } = await supabase
+      .from('profiles').select('id, full_name').in('id', unique.slice(i, i + ID_CHUNK));
+    for (const p of (data ?? []) as any[]) {
+      const n = (p.full_name || '').trim();
+      if (n) out.set(p.id, n);
+    }
+  }
+  return out;
+}
+
 async function bookingsFor(classes: GymClass[]): Promise<MemberBooking[]> {
   if (!classes.length) return [];
   const byId = new Map(classes.map((c) => [c.id, c]));
@@ -547,6 +954,11 @@ async function bookingsFor(classes: GymClass[]): Promise<MemberBooking[]> {
 }
 
 /* ── bits, matching /money ─────────────────────────────────────────────────── */
+
+const field = {
+  background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
+  borderRadius: 0, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+} as const;
 
 const primaryBtn = {
   background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,

@@ -2,7 +2,11 @@
 // The cancellation-fee logic, the coach's policy, the waitlist order and the
 // slot re-offer, as pure functions.
 import type { TrainingSession, CancellationResult } from './types';
-import { money } from './gymRecord';
+// `wholeMoney`, not `money` from gymRecord.ts. See the note on `feeAmountLine`:
+// a coach's fee is typed in whole units, gymRecord's formatter takes minor
+// units, and the `* 100` that bridged them was a hundred-times error waiting
+// for the first gym that charges in yen.
+import { wholeMoney } from './coachMoney';
 
 export const CANCEL_WINDOW_HOURS = 24;
 
@@ -158,10 +162,26 @@ export function lateCancelFee(
  * which is the exact failure `money()` withholds an amount to avoid — the
  * figure looks stated, so nobody goes and sets the currency. `unstatedCurrency`
  * below is the missing half, and every prose site now appends it.
+ *
+ * ── WHY IT NO LONGER GOES THROUGH gymRecord's money() ─────────────────────
+ *
+ * `fee` is a whole-unit figure a coach typed: 25 means twenty-five of whatever
+ * they charge in. `money()` takes MINOR units, so this used to convert with
+ * `Math.round(amount * 100)` and let `money()` divide it straight back. That
+ * round trip cancels out in a currency with hundredths and is a hundred-times
+ * error in one without: a ¥5,000 late fee became 500,000 minor units, and a
+ * formatter that knew about zero-decimal currencies would print "JPY 500,000"
+ * for a fee of five thousand yen. Even the formatter that does not know printed
+ * "JPY 5,000.00", inventing a subdivision the yen has never had.
+ *
+ * `wholeMoney` in src/lib/coachMoney.ts is the function for exactly this — a
+ * whole-unit amount somebody typed, rendered in the currency they typed it in,
+ * with the decimal places that currency actually has. No multiply, no divide,
+ * and nothing here has to know which currencies are which.
  */
 export function feeAmountLine(amount: number, currency: string | null | undefined): string {
   if (!currency) return String(amount);
-  return money(Math.round(amount * 100), currency) ?? String(amount);
+  return wholeMoney(amount, currency) ?? String(amount);
 }
 
 /**

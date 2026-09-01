@@ -36,8 +36,9 @@
 //
 // Nothing here decides what the statement says: src/lib/coachStatement.ts is
 // pure and tested, and the reads are in src/ui/coachStatement.ts.
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -47,15 +48,31 @@ import { useBrand } from '../../src/ui/brand';
 import { shareDoc, shareTextFile, pdfExportAvailable, fileShareBlocker } from '../../src/lib/exportShare';
 import {
   coachStatement, statementDoc, statementCsv, statementItemsCsv, statementFileStem,
-  statementShareBlurb, periodSentence, calendarYear, calendarQuarter,
+  statementShareBlurb, periodSentence, fiscalYear, fiscalQuarter, customRange,
+  isCalendarStart, CALENDAR_YEAR_START, YEAR_START_IS_YOURS,
   STATEMENT_NOT, STATEMENT_NOT_THE_WHOLE_BOOK, STATEMENT_STRIPE_IS_THE_RECORD, PERIOD_IS_YOURS,
-  type Statement, type StatementInput, type StatementPeriod,
+  type Statement, type StatementInput, type StatementPeriod, type YearStart,
 } from '../../src/lib/coachStatement';
 import { fetchStatementInput } from '../../src/ui/coachStatement';
 
-/** Whole year, or one calendar quarter of it. Deliberately no fiscal or split
- *  year: this app does not know which one applies to the person reading it. */
-type Span = 'year' | 1 | 2 | 3 | 4;
+/**
+ * A whole year, one quarter of it, or two dates the coach types.
+ *
+ * This was 'year' | 1 | 2 | 3 | 4 over CALENDAR years only, with the comment
+ * "deliberately no fiscal or split year: this app does not know which one
+ * applies to the person reading it". That reasoning was right about the APP
+ * choosing and wrong about the COACH choosing. A UK coach's tax year starts on
+ * 6 April, an Australian's on 1 July; for both of them a January-to-December
+ * statement is unusable and they re-aggregate it by hand, which is the whole
+ * job this screen exists to do.
+ *
+ * So the year still starts where the coach says it starts and NOWHERE ELSE.
+ * Nothing here reads a locale, a region, a currency or a timezone to guess it —
+ * every one of those is a proxy, and being wrong about somebody's tax year on a
+ * document they hand to an accountant is the kind of wrong that is not noticed
+ * until it matters. `YEAR_START_IS_YOURS` says so on the page.
+ */
+type Span = 'year' | 1 | 2 | 3 | 4 | 'custom';
 
 const SPANS: { key: Span; label: string }[] = [
   { key: 'year', label: 'Whole Year' },
@@ -63,7 +80,27 @@ const SPANS: { key: Span; label: string }[] = [
   { key: 2, label: 'Q2' },
   { key: 3, label: 'Q3' },
   { key: 4, label: 'Q4' },
+  { key: 'custom', label: 'Any Dates' },
 ];
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Where the coach's own year start is kept.
+ *
+ * On the DEVICE, and that is a deliberate limit rather than an oversight. It is
+ * a display preference: nothing on any artefact this screen produces depends on
+ * it being the same on a second phone, because every document, every CSV and
+ * every filename spells the period out in full at the top. A coach who picks 6
+ * April on one phone and reads the same statement on another gets a
+ * January-to-December period there, clearly labelled as one, rather than a
+ * document that quietly disagrees with the first.
+ *
+ * The alternative was a column, and a column would make it a fact about the
+ * coach's tax affairs that this app stores and could be read as having
+ * verified. It has not verified it and cannot.
+ */
+const YEAR_START_KEY = 'repple.coach.statementYearStart';
 
 export default function StatementOfRecord() {
   const t = useTheme();
@@ -77,13 +114,56 @@ export default function StatementOfRecord() {
 
   const [year, setYear] = useState(thisYear);
   const [span, setSpan] = useState<Span>('year');
+  const [start, setStart] = useState<YearStart>(CALENDAR_YEAR_START);
+  const [fromText, setFromText] = useState('');
+  const [toText, setToText] = useState('');
   const [input, setInput] = useState<StatementInput | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const period: StatementPeriod = useMemo(
-    () => (span === 'year' ? calendarYear(year) : calendarQuarter(year, span)),
-    [year, span],
-  );
+  // Read once on mount, and a value that will not parse is ignored rather than
+  // half-applied: a stored `{ month: 4 }` with no day would otherwise produce a
+  // year starting on the first of April for a coach whose starts on the sixth,
+  // which is a whole statement for the wrong five days at each end.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(YEAR_START_KEY);
+        if (!raw || !live) return;
+        const v = JSON.parse(raw) as Partial<YearStart>;
+        if (Number.isFinite(v?.month) && Number.isFinite(v?.day)) {
+          setStart({ month: Number(v.month), day: Number(v.day) });
+        }
+      } catch { /* a preference that cannot be read is the calendar year, which is stated on the page either way */ }
+    })();
+    return () => { live = false; };
+  }, []);
+
+  const chooseStart = useCallback((next: YearStart) => {
+    setStart(next);
+    // Failing to persist a display preference changes nothing about the
+    // document, so it is swallowed rather than reported: the period is printed
+    // in full on everything this screen produces.
+    void AsyncStorage.setItem(YEAR_START_KEY, JSON.stringify(next)).catch(() => {});
+  }, []);
+
+  /**
+   * The period, or the fallback when the coach has typed half a custom range.
+   *
+   * `customRange` returns null for anything that is not two readable dates in
+   * order, and this falls back to the coach's own year rather than to an
+   * invented range — a statement built over a period nobody asked for, headed
+   * with dates nobody chose, has no cue on the page that would give it away.
+   * `rangeProblem` below is what says so out loud.
+   */
+  const period: StatementPeriod = useMemo(() => {
+    if (span === 'custom') return customRange(fromText.trim(), toText.trim()) ?? fiscalYear(year, start);
+    return span === 'year' ? fiscalYear(year, start) : fiscalQuarter(year, span, start);
+  }, [year, span, start, fromText, toText]);
+
+  const rangeProblem = span === 'custom' && !customRange(fromText.trim(), toText.trim())
+    ? 'Type both dates as YYYY-MM-DD, with the earlier one first. Until they read as a period, the figures below are for your own year and the heading says which.'
+    : null;
 
   /* The period whose figures are allowed to land.
    *
@@ -105,7 +185,12 @@ export default function StatementOfRecord() {
   const load = useCallback(async () => {
     // Keyed on what the coach actually chose rather than on the period's label,
     // which is a display string and not the screen's identity for the period.
-    const key = `${year}:${String(span)}`;
+    // Everything that identifies the period, not just the two pills. This was
+    // `${year}:${span}`, which was the whole identity when a year could only be
+    // a calendar year — a coach who changed their year start, or typed a second
+    // custom range while the first was still reading, would have had the older
+    // answer land under the newer heading at full confidence.
+    const key = `${year}:${String(span)}:${start.month}-${start.day}:${period.from}:${period.to}`;
     wanted.current = key;
     setInput(null);
     const next = await fetchStatementInput(period, appName || null);
@@ -113,7 +198,7 @@ export default function StatementOfRecord() {
     // it: the read for the period now selected is the one that may set state.
     if (wanted.current !== key) return;
     setInput(next);
-  }, [period, appName, year, span]);
+  }, [period, appName, year, span, start]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -213,6 +298,77 @@ export default function StatementOfRecord() {
               ))}
             </View>
           </ScrollView>
+
+          {/* ── where the coach's year starts ─────────────────────────────
+              Two controls and no inference. Nothing here reads the phone's
+              region, the gym's currency or the device timezone to guess a tax
+              year: every one of those is a proxy, and the coach who has moved
+              country is exactly the person it would be wrong about. */}
+          {span !== 'custom' ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
+                {isCalendarStart(start)
+                  ? 'Your year starts on 1 January. Change it if you file to a different one.'
+                  : `Your year starts on ${start.day} ${MONTH_NAMES[Math.min(11, Math.max(0, start.month - 1))]}.`}
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                  {MONTH_NAMES.map((m, i) => (
+                    <Pressable key={m} onPress={() => chooseStart({ month: i + 1, day: start.day })}
+                      accessibilityRole="button" accessibilityLabel={`Start the year in ${m}`}
+                      accessibilityState={{ selected: start.month === i + 1 }}
+                      style={pill(start.month === i + 1)}>
+                      <Text style={{ ...ty.label, color: start.month === i + 1 ? '#fff' : t.ink2 }}>{m}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </ScrollView>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Starting on day</Text>
+                <TextInput
+                  value={String(start.day)}
+                  onChangeText={(v) => {
+                    // A whole day of a month. `keyboardType` is the number pad
+                    // and not the decimal one because there is no such thing as
+                    // the 6.5th of April — see scripts/check-decimals.mjs for
+                    // the rule and why it runs at all.
+                    const n = parseInt(v.replace(/[^0-9]/g, ''), 10);
+                    chooseStart({ month: start.month, day: Number.isFinite(n) ? Math.min(31, Math.max(1, n)) : 1 });
+                  }}
+                  keyboardType="number-pad" maxLength={2}
+                  accessibilityLabel="Day of the month your year starts on"
+                  style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 8, minWidth: 62, textAlign: 'center' }}
+                />
+                {!isCalendarStart(start) ? (
+                  <Pressable onPress={() => chooseStart(CALENDAR_YEAR_START)} hitSlop={8}
+                    accessibilityRole="button" accessibilityLabel="Use the calendar year">
+                    <Text style={{ ...ty.label, color: t.brand }}>Use the calendar year</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{YEAR_START_IS_YOURS}</Text>
+            </View>
+          ) : (
+            <View style={{ marginTop: sp.lg }}>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
+                Any two dates, for a period neither a calendar year nor your own year covers.
+              </Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                <TextInput value={fromText} onChangeText={setFromText} autoCapitalize="none" autoCorrect={false}
+                  placeholder="From YYYY-MM-DD" placeholderTextColor={t.ink3} accessibilityLabel="Period start"
+                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, flex: 1 }} />
+                <TextInput value={toText} onChangeText={setToText} autoCapitalize="none" autoCorrect={false}
+                  placeholder="To YYYY-MM-DD" placeholderTextColor={t.ink3} accessibilityLabel="Period end"
+                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, flex: 1 }} />
+              </View>
+              {/* Never a silently corrected range. A statement built over a
+                  period the coach did not ask for looks exactly like one they
+                  did, and it is already in an accountant's inbox by the time
+                  anybody notices. */}
+              {rangeProblem ? <Flag style={{ marginTop: sp.sm }}>{rangeProblem}</Flag> : null}
+            </View>
+          )}
+
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PERIOD_IS_YOURS}</Text>
         </Section>
 

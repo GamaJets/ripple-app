@@ -26442,3 +26442,5847 @@ create unique index if not exists gym_payments_import_key_uq
 create index if not exists idx_gym_payments_import_run
   on public.gym_payments (import_run_id)
   where import_run_id is not null;
+
+-- ▶ a-block-that-starts-on-a-day-the-coach-chose.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- "This one starts Monday" — a sentence the app made a coach set an alarm for.
+--
+-- `assigned_programs` is `(client_id, coach_id, program, updated_at)`. There is
+-- no date in it and there never has been, so an assignment IS a start: the
+-- write lands, the client's Train tab reads the row on its next render, and
+-- whatever they were going to do on Friday is gone.
+--
+-- A coach writing next week's block on a Thursday afternoon therefore has two
+-- options. Replace this week as well, or wait — on their phone, on Sunday
+-- night — and tap Assign at the right moment. They wait. That is this app
+-- making a self-employed person schedule a database write around their evening.
+--
+-- ── What this part adds, and the much larger thing it does NOT ────────────
+--
+-- One nullable column. `starts_on` is the day the COACH said the block begins.
+--
+-- It does not hold the programme back, and nothing in this part pretends
+-- otherwise. What a client trains today is decided in the CLIENT app —
+-- `app/(client)/workouts.tsx` picks the day by a modulo over `program.days`,
+-- `app/(client)/week.tsx` matches the exact weekday — and neither reads this
+-- column, because neither has been taught to and that app is already on
+-- people's phones. A trigger here that refused to serve a future assignment
+-- would not fix that; it would empty a client's Train tab, because the client
+-- app has no branch for "your programme exists and is not due yet" and would
+-- fall through to the generic auto plan, silently, mid-block.
+--
+-- So the column is a RECORD, the coach's screens do the arithmetic
+-- (src/lib/programStart.ts), and every screen that shows a start date carries
+-- `CLIENT_STARTS_NOW` — one string, so that the day the client app honours it
+-- there is one thing to delete and one grep that finds every promise made.
+--
+-- Saying so plainly is the whole safety argument. A coach who believes the date
+-- is enforced, and assigns a block "starting Monday" on a Thursday, has just
+-- replaced their client's Friday session while believing they did not. That is
+-- strictly worse than the Sunday night alarm this part is trying to end.
+--
+-- ── Why a DATE and not a timestamptz ──────────────────────────────────────
+--
+-- Because there is no client timezone anywhere in this schema. The coach's
+-- screens say so at length — `app/(trainer)/client-week.tsx` and
+-- src/lib/coachWeek.ts both refuse to state whether a past day was trained for
+-- exactly this reason — and a `timestamptz` here would invite a future writer
+-- to stamp the coach's midnight onto a client's calendar in another zone and
+-- call it a start. A bare date is what the coach wrote on the plan and what
+-- both of them read. The cost is bounded and visible: for a few hours a day two
+-- people in different zones disagree about which day today is, so a block can
+-- read as week 2 for one and week 1 for the other, and the week number is never
+-- shown without the date beside it.
+--
+-- ── Why nullable, with no default ─────────────────────────────────────────
+--
+-- NULL is "the coach did not say", and it is the state every assignment ever
+-- made is in. It is NOT "starts today": a default of `current_date` would
+-- back-date every existing row to the morning this migration ran and put every
+-- client in the app into week one of a block they are four weeks into.
+-- `blockPosition` reports NULL as its own phase — 'no-date' — with its own
+-- sentence, exactly as `coach_invoices.due_on` in part 168 reports an invoice
+-- with no stated term rather than folding it in with the ones inside terms.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role, so current_user is the same
+-- string for everybody on the platform.
+-- ─────────────────────────────────────────────────────────────────────────
+
+alter table public.assigned_programs add column if not exists starts_on date;
+
+comment on column public.assigned_programs.starts_on is
+  'The day the COACH said this block begins. Nullable and undefaulted: null means they did not say, never "today". It does NOT gate what the client sees — the client app renders whatever is on this row from the moment it is written — and every screen showing it says so.';
+
+-- No index. This column is only ever read alongside the row it sits on, one
+-- client at a time, off a primary key lookup — there is no query anywhere that
+-- selects assignments BY start date, and an index that no plan uses is a write
+-- cost on the hottest table in the coach app.
+
+-- ── How long the block is, so the week number has a denominator ───────────
+--
+-- Deliberately NOT a column. A programme's length is a fact about the
+-- `program` jsonb — `weeks` on it, resolved by `weekCount` in
+-- src/lib/programBlock.ts — and duplicating it here would create two answers to
+-- "how many weeks is this", one of which would be stale the moment a coach
+-- added a week. The same reasoning `setRows` gives about `sets` applies with
+-- the opposite conclusion: there the two numbers are written together by one
+-- function in one file, and here the second one would be written by the
+-- database and never updated by the edit that changed it.
+
+-- ▶ the-programme-that-was-there-before.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Reassigning a programme destroyed the one before it, and nothing anywhere
+-- remembered.
+--
+-- `assigned_programs` has ONE row per client — `client_id` is the primary key —
+-- and `assignProgramTo` in src/ui/assignedPrograms.tsx writes it with
+-- `upsert(..., { onConflict: 'client_id' })`. So the spring block is not
+-- archived when the summer block lands. It is overwritten, in place, and the
+-- only copy of it that existed is gone.
+--
+-- Grepped `supabase/parts/` before writing this: there is no history table, no
+-- version column, no audit trigger and no soft delete on that table. There
+-- never was one.
+--
+-- ── Four things this costs, none of them hypothetical ─────────────────────
+--
+--   · A coach cannot answer "what did we do in the spring block". Their client
+--     asks that question every time they plateau, and the answer is in nobody's
+--     hands — the coach's own memory, or a screenshot.
+--
+--   · The client report (src/lib/coachClientReport.ts) can show what somebody
+--     LOGGED against a plan nobody can produce any more. The training record
+--     survives — `workouts` is keyed by user and exercise and carries no
+--     reference to a plan, which src/ui/assignedPrograms.tsx documents at
+--     length — so the evidence outlives the prescription it was evidence
+--     against.
+--
+--   · Every progression decision wants the last block as its input, and the
+--     app throws it away at the exact moment the coach opens the builder to
+--     make one.
+--
+--   · An accidental overwrite is unrecoverable. `guardOverwrite` withholds the
+--     Assign control until the current programme has been READ, which stops the
+--     coach writing over something they never saw — it cannot undo the write
+--     they did see and meant differently.
+--
+-- ── Why a trigger, and not a write from the app ───────────────────────────
+--
+-- Because the app is not the only writer and must not be the only one that
+-- remembers. `assigned_programs` is written from the builder, from the template
+-- library's bulk assign, from the group fan-out, from the roster's quick
+-- actions and by hand in the SQL editor when something has gone wrong. A
+-- history that depended on five call sites each remembering to snapshot first
+-- is a history with holes in it exactly where somebody was in a hurry — and a
+-- history with holes is worse than none, because a screen reading it says "no
+-- earlier programme" about a client who had six.
+--
+-- A BEFORE trigger on UPDATE and DELETE catches every one of them, including
+-- the SQL editor, and cannot be forgotten by a screen written next year.
+--
+-- ── Why it is SECURITY DEFINER and the table takes no INSERT grant ────────
+--
+-- The history is the record of what was replaced. If the coach's role could
+-- INSERT into it, the record would be something a screen could write — and a
+-- screen that can write a history can write a history that did not happen.
+-- Nothing needs that: the only legitimate writer is the replacement itself. So
+-- `authenticated` gets SELECT and nothing else, `anon` gets nothing at all, and
+-- the trigger function runs as its owner.
+--
+-- The definer burden is taken seriously here because part 105 opened a real
+-- hole with it: `set search_path = public` is pinned on the function, and the
+-- EXECUTE privilege is revoked from public, anon AND authenticated — a trigger
+-- function is invoked by the trigger, not by a caller, so nobody needs to be
+-- able to call it and everybody being able to is how one gets called with
+-- forged arguments.
+--
+-- ── Why the snapshot is conditional ───────────────────────────────────────
+--
+-- Only when the PROGRAMME or the START DATE actually changed. Every assign
+-- writes the whole row, and a bulk re-assign of an unchanged template would
+-- otherwise write a history row per client per tap — a timeline full of
+-- identical entries an hour apart, which a coach reading it would take as their
+-- client having been moved between six programmes.
+--
+-- `is distinct from` rather than `<>`: a jsonb `<>` null is null, which is not
+-- true, so a programme going from NULL to something would not be recorded. That
+-- cannot happen today (`program` is NOT NULL) and the operator is written for
+-- when it can.
+--
+-- ── And the stale updated_at, fixed here because it is the same bug ───────
+--
+-- `updated_at` is `default now()` and the upsert never sends it, so a DEFAULT
+-- only applies on INSERT: every overwrite left the timestamp at the moment the
+-- client's FIRST programme was assigned. Every screen that has printed "updated
+-- 3 March" over an assignment rewritten in August was reading that. The history
+-- rows below are stamped from it, so a lie there would become a lie in the
+-- timeline; a trigger sets it, which is where a server-side truth belongs
+-- rather than in a timestamp the client sends and could get wrong.
+--
+-- auth.uid(), never current_user.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.assigned_program_history (
+  id          uuid        primary key default gen_random_uuid(),
+  -- The person whose programme this WAS. Cascades with them: a deleted profile
+  -- takes their own training history with it, exactly as `assigned_programs`
+  -- and `workouts` already do.
+  client_id   uuid        not null references public.profiles(id) on delete cascade,
+  -- The coach whose row it was. `set null` rather than cascade, matching
+  -- `assigned_programs.coach_id`: a coach leaving the platform must not delete
+  -- the record of what their former clients were training.
+  coach_id    uuid        references public.profiles(id) on delete set null,
+  -- The programme, in full, exactly as it was. Not a diff and not a summary —
+  -- the whole point is that a coach can look at what they actually wrote, and a
+  -- diff is only readable against a version that itself has to exist.
+  program     jsonb       not null,
+  -- Part 175's column, carried across so a past block keeps the date the coach
+  -- gave it. Null for every row snapshotted from an assignment made before that
+  -- column existed, which is what null there has always meant.
+  starts_on   date,
+  -- When the row being replaced was last written. Taken from the OLD row, so it
+  -- is when this programme was ASSIGNED rather than when it was replaced.
+  assigned_at timestamptz,
+  -- When it stopped being what they were on.
+  replaced_at timestamptz not null default now(),
+  -- Who performed the replacement. auth.uid(), which may be null for a write
+  -- made from the SQL editor or a service key — recorded as null rather than
+  -- attributed to the coach on the row, because "your coach changed this" about
+  -- an admin's repair is a false statement about a person.
+  replaced_by uuid,
+  -- 'replaced' or 'removed'. A DELETE is a coach taking somebody OFF a
+  -- programme (builder's Revert, the roster's unassign) and it is a different
+  -- event from swapping one block for another — a timeline that could not tell
+  -- them apart would show a gap as a programme change.
+  reason      text        not null check (reason in ('replaced', 'removed'))
+);
+
+-- The only read there is: one client's blocks, newest first.
+create index if not exists assigned_program_history_client_idx
+  on public.assigned_program_history (client_id, replaced_at desc);
+
+comment on table public.assigned_program_history is
+  'What a client was training before the row on assigned_programs was overwritten or deleted. Append-only, written by a trigger, never by a screen.';
+
+alter table public.assigned_program_history enable row level security;
+
+-- ── Who may read it ───────────────────────────────────────────────────────
+--
+-- The coach whose client it is, and the client themselves. The same pair part
+-- 69 gives `assigned_programs`, and the same reasoning: this is not the coach's
+-- private filing (that is what `program_groups` is, and part 134 explains why
+-- THAT has no client policy) — it is a record of what a specific person was
+-- told to train, and they were entitled to read it while it was current.
+--
+-- `is_my_client(client_id)` on the coach side rather than `coach_id =
+-- auth.uid()`. A client who has changed coach carries their old coach's id on
+-- every historical row, and a policy keyed on it would show the NEW coach
+-- nothing about what their client has been doing — which is the single most
+-- useful thing in this table for the person now responsible for them. The old
+-- coach loses access when the client leaves their book, which is the behaviour
+-- part 69 already established for the live assignment.
+drop policy if exists assigned_program_history_coach_read on public.assigned_program_history;
+create policy assigned_program_history_coach_read on public.assigned_program_history
+  for select
+  to authenticated
+  using (public.is_my_client(client_id));
+
+drop policy if exists assigned_program_history_client_read on public.assigned_program_history;
+create policy assigned_program_history_client_read on public.assigned_program_history
+  for select
+  to authenticated
+  using (client_id = (select auth.uid()));
+
+-- RLS narrows a GRANT; it does not confer one, and a GRANT nobody wrote is not
+-- an absence of one. Supabase's stock default privileges hand `anon` the full
+-- DML set on every table created in this schema (part 119), so this arrived
+-- reachable by the publishable key. SELECT only, to `authenticated` only:
+-- INSERT, UPDATE and DELETE are not granted to anybody, which is what makes
+-- "append-only, written by a trigger" a property of the database rather than a
+-- convention screens are trusted to follow.
+revoke all on public.assigned_program_history from anon, authenticated;
+grant select on public.assigned_program_history to authenticated;
+
+-- ── The trigger ───────────────────────────────────────────────────────────
+--
+-- Dropped before it is recreated with a body that could differ. `create or
+-- replace function` keeps the same signature so the trigger itself survives,
+-- but the trigger is dropped and recreated too, so re-running this file is a
+-- no-op rather than a second trigger firing twice on every assign — which
+-- would write two history rows per overwrite and make every timeline read as
+-- double the programmes.
+create or replace function public.snapshot_assigned_program()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    -- Unchanged content writes no history. See the header: a bulk re-assign of
+    -- the same template would otherwise fill a client's timeline with identical
+    -- entries minutes apart.
+    if new.program is not distinct from old.program
+       and new.starts_on is not distinct from old.starts_on then
+      -- The timestamp is still refreshed. This branch is reached by a write
+      -- that touched something else on the row, and "when was this last
+      -- written" is a true answer to give even when nothing meaningful moved.
+      new.updated_at := now();
+      return new;
+    end if;
+  end if;
+
+  insert into public.assigned_program_history
+    (client_id, coach_id, program, starts_on, assigned_at, replaced_by, reason)
+  values
+    (old.client_id, old.coach_id, old.program, old.starts_on, old.updated_at,
+     auth.uid(),
+     case when tg_op = 'DELETE' then 'removed' else 'replaced' end);
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+
+  -- The stale-timestamp fix, stated in the header. `default now()` fires on
+  -- INSERT only, and no writer in this app sends the column, so before this
+  -- line every overwritten assignment still carried the date of the client's
+  -- FIRST programme.
+  new.updated_at := now();
+  return new;
+end $$;
+
+revoke all on function public.snapshot_assigned_program() from public, anon, authenticated;
+
+drop trigger if exists snapshot_assigned_program_trg on public.assigned_programs;
+create trigger snapshot_assigned_program_trg
+  before update or delete on public.assigned_programs
+  for each row execute function public.snapshot_assigned_program();
+
+-- ── What is deliberately NOT here ─────────────────────────────────────────
+--
+-- No "restore this block" function. Putting an old programme back is an ASSIGN
+-- — it writes over what somebody is training this evening — and every refusal
+-- that guards an assign belongs in front of it: the overwrite guard, the
+-- per-client injury gate (a client's shoulder in September is not the shoulder
+-- they had in March, and a programme written before a disclosure must not go
+-- back out without it being read), and the acknowledgement record. All three
+-- are coach-facing decisions made against what the coach has read, so restoring
+-- goes through the same `assignProgramTo` path as any other assign, from a
+-- screen, with the programme loaded into the builder first. A `restore(id)` RPC
+-- would be a way around all of them and it would look like the convenient
+-- option.
+--
+-- No retention limit and no pruning. A programme is a few kilobytes of jsonb
+-- and a coach with a five-year client accumulates a few dozen rows; a cap would
+-- delete the oldest block, which is the one somebody is asking about when they
+-- ask what they did two years ago.
+
+-- ▶ which-version-of-the-bootcamp-they-are-on.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A coach fixes week three of the bootcamp and cannot tell who has the fix.
+--
+-- `program_groups.program` holds ONE programme and no memory of the ones before
+-- it. Assigning to a group is a fan-out into each member's own
+-- `assigned_programs` row — part 134 argues that at length and none of it has
+-- changed — and `memberState` in src/lib/groupProgram.ts tells the coach who is
+-- on the group's programme by comparing fingerprints.
+--
+-- With one stored programme that comparison has exactly two answers: on it, or
+-- not on it. So a member still training last month's version of the bootcamp
+-- and a member whose Thursday was rewritten around their shoulder both read
+-- 'diverged'. That is true and it is useless, because those two need OPPOSITE
+-- actions: the first needs one tap, and the second must not be touched at all.
+--
+-- ── What this part does NOT do, and why ───────────────────────────────────
+--
+-- It does not make the group own the plan. Part 134 gives three reasons and
+-- every one of them still holds:
+--
+--   · everything downstream of a programme is keyed per client already — the
+--     Train tab, logged sets, adherence, the injury acknowledgement of a
+--     specific movement for a specific person — so a group-owned plan must be
+--     reconciled on every read, in a CLIENT APP THAT IS ALREADY ON PHONES and
+--     has never heard of a group;
+--   · divergence is the job, not the exception, and under a group-owned plan
+--     the per-client edit becomes an override table, which is a second source
+--     of truth for one question;
+--   · silently rewriting the session somebody is doing this evening is the
+--     exact failure `guardOverwrite` exists to prevent.
+--
+-- It also does not stamp a version number onto the member row when the fan-out
+-- writes. That is the tempting version and it is bookkeeping about a write: the
+-- builder lets a coach edit ONE client's copy afterwards, and the stamp would go
+-- on claiming version 3 for somebody now on something bespoke. Part 134 chose
+-- derivation over bookkeeping for precisely this reason — "who has it" is
+-- answered by comparing each member's actual row against the group's programme
+-- rather than by a record that can drift away from the truth it describes.
+--
+-- ── What it does ──────────────────────────────────────────────────────────
+--
+-- Keeps the group's PAST programmes, so there is something to compare against.
+-- One table, append-only, written when the coach changes the group's programme.
+-- `versionOf` then reports which stored version a member's actual assignment
+-- fingerprints as, recomputed from the truth every time, and a member who is on
+-- none of them is bespoke rather than out of date.
+--
+-- ── Why the version number is assigned in the database ────────────────────
+--
+-- Two coaches do not share a group, so the contended case is one coach with the
+-- screen open on two devices — rare, and the failure is not rare enough to
+-- ignore: two clients of `max(version) + 1` computed in JavaScript produce two
+-- rows numbered 3, and the group then has two version 3s that fingerprint
+-- differently. `snapshot_group_program` takes an advisory lock on the group and
+-- allocates inside it, the same shape `issue_coach_invoice` in part 138 uses
+-- for invoice numbers and for the same reason: a number a person will read back
+-- to somebody has to be unique.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.program_group_versions (
+  id         uuid        primary key default gen_random_uuid(),
+  group_id   uuid        not null references public.program_groups(id) on delete cascade,
+  -- 1-based and allocated under a lock. Unique per group, which is what makes
+  -- "they are on version 2" a sentence with one meaning.
+  version    integer     not null check (version >= 1),
+  -- The programme AS IT WAS at that version, in full. Not a diff: a diff is
+  -- only readable against a version that itself exists, and the whole reason
+  -- this table is here is that the previous version did not.
+  program    jsonb       not null,
+  created_at timestamptz not null default now(),
+  unique (group_id, version)
+);
+
+-- The only read: one group's versions, newest first.
+create index if not exists program_group_versions_group_idx
+  on public.program_group_versions (group_id, version desc);
+
+comment on table public.program_group_versions is
+  'Every programme a group has been given, kept so "which version is this member on" can be DERIVED from their actual assignment rather than stamped on them at fan-out time and left to go stale.';
+
+alter table public.program_group_versions enable row level security;
+
+-- ── Access ────────────────────────────────────────────────────────────────
+--
+-- The owning coach and nobody else, matching `program_groups` exactly. A group
+-- is the coach's own filing — part 134 says why there is no client-read policy
+-- on it — and the history of what that filing said is no more the client's
+-- business than the filing itself. What the client is entitled to see is what
+-- THEY were assigned, and that is `assigned_programs` and, since part 176,
+-- `assigned_program_history`, both of which carry a client-read policy.
+--
+-- USING is group ownership alone, with no `is_my_client()` anywhere: this table
+-- names no client. The asymmetry part 134 needed on the membership table has no
+-- analogue here.
+drop policy if exists program_group_versions_coach_rw on public.program_group_versions;
+create policy program_group_versions_coach_rw on public.program_group_versions
+  for select
+  to authenticated
+  using (
+    exists (select 1 from public.program_groups g
+             where g.id = group_id and g.coach_id = (select auth.uid()))
+  );
+
+-- RLS narrows a GRANT and does not confer one; Supabase's stock default
+-- privileges hand `anon` the full DML set on every table created in this schema
+-- (part 119), so this arrived reachable by the publishable key. SELECT only,
+-- to `authenticated` only — the writes go through the function below, which is
+-- what makes "append-only" a property of the database rather than a habit.
+revoke all on public.program_group_versions from anon, authenticated;
+grant select on public.program_group_versions to authenticated;
+
+-- ── Recording a version ───────────────────────────────────────────────────
+--
+-- Dropped before it is recreated. `create or replace` with a different argument
+-- list makes an OVERLOAD, and PostgREST resolving one name against two
+-- candidates is a 300 at the moment a coach taps Change Programme.
+drop function if exists public.snapshot_group_program(uuid, jsonb);
+
+create or replace function public.snapshot_group_program(p_group_id uuid, p_program jsonb)
+returns public.program_group_versions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  n   integer;
+  last_program jsonb;
+  out_row public.program_group_versions;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  if p_program is null then
+    raise exception 'a version has to carry a programme';
+  end if;
+
+  -- Ownership checked HERE rather than left to RLS, because this function is
+  -- SECURITY DEFINER and therefore runs with the policies of its owner. Part
+  -- 105 opened a real hole exactly this way. A definer function that takes an
+  -- id from the caller must re-ask the question the policy would have asked.
+  if not exists (
+    select 1 from public.program_groups g
+     where g.id = p_group_id and g.coach_id = uid
+  ) then
+    raise exception 'that group is not one of yours';
+  end if;
+
+  -- One coach, two devices. Two clients computing max(version) + 1 in
+  -- JavaScript both write 3, and the group then has two version 3s that
+  -- fingerprint differently — after which "they are on version 3" means two
+  -- things. The lock is on the GROUP so it never contends across groups.
+  perform pg_advisory_xact_lock(hashtextextended(p_group_id::text, 177));
+
+  select v.program into last_program
+  from public.program_group_versions v
+  where v.group_id = p_group_id
+  order by v.version desc
+  limit 1;
+
+  -- An unchanged programme writes no version. A coach who opens the picker and
+  -- chooses the same template again would otherwise mint version 4 identical to
+  -- version 3, and every member reading as "behind" until it was re-fanned to
+  -- them — a screenful of people needing an action that would change nothing.
+  --
+  -- `is not distinct from` rather than `=`: jsonb `=` null is null, so a group
+  -- whose first programme this is would fall through the comparison and be
+  -- silently skipped.
+  if last_program is not distinct from p_program then
+    select * into out_row
+    from public.program_group_versions v
+    where v.group_id = p_group_id
+    order by v.version desc
+    limit 1;
+    return out_row;
+  end if;
+
+  select coalesce(max(v.version), 0) + 1 into n
+  from public.program_group_versions v
+  where v.group_id = p_group_id;
+
+  insert into public.program_group_versions (group_id, version, program)
+  values (p_group_id, n, p_program)
+  returning * into out_row;
+
+  -- The group's live programme and its newest version are one fact, so they are
+  -- written together. Doing it here rather than in a second round trip from the
+  -- app is what stops a version existing that the group is not on — which would
+  -- make every member read as behind a version nobody was ever sent.
+  update public.program_groups g
+     set program = p_program, updated_at = now()
+   where g.id = p_group_id and g.coach_id = uid;
+
+  return out_row;
+end $$;
+
+revoke all on function public.snapshot_group_program(uuid, jsonb) from public, anon;
+grant execute on function public.snapshot_group_program(uuid, jsonb) to authenticated;
+
+-- ── Backfilling the version a group is already on ─────────────────────────
+--
+-- Every group that already has a programme becomes version 1 of itself, so the
+-- screens have something to compare against from the moment this runs rather
+-- than reporting every member of every existing group as bespoke until the
+-- coach next edits the plan.
+--
+-- Guarded on there being no version yet, so re-running this file cannot mint a
+-- second version 1 — which the unique constraint would refuse anyway, but a
+-- migration that ERRORS on its second run is a migration nobody dares re-run.
+insert into public.program_group_versions (group_id, version, program)
+select g.id, 1, g.program
+from public.program_groups g
+where g.program is not null
+  and not exists (select 1 from public.program_group_versions v where v.group_id = g.id);
+
+-- ▶ who-across-the-book-is-stalled-on-this-lift.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- "Who is stalled on bench across my roster" — the one coaching insight that
+-- gets BETTER as a coach gets busier, and the only one the app could not answer
+-- at all.
+--
+-- src/lib/exerciseHistory.ts can read one client's history of one movement, and
+-- app/(trainer)/exercise.tsx draws it. To ask it of a book of forty people a
+-- coach opens forty screens.
+--
+-- ── The two things that made a roster-wide read impossible ────────────────
+--
+-- 1. THE ROW CAP. `capLimit()` is a flat ceiling of 1000 rows on every read in
+--    this app, and src/lib/rowCap.ts explains why: a page of a client's
+--    workouts is bounded and a subtotal wearing a total's label is worse than
+--    no total. A roster-wide read of `workouts` is not bounded by anything —
+--    forty clients times several years of sets is hundreds of thousands of
+--    rows — so it would come back truncated EVERY time, and every figure over
+--    it would be null. The screen would exist and say nothing.
+--
+--    Aggregating in the database fixes that completely: the answer is one row
+--    per client, so the result is bounded by the size of the roster and is
+--    never truncated. That is the whole reason this is a function and not a
+--    select.
+--
+-- 2. `exercise` IS FREE TEXT. It is whatever the client typed into their own
+--    phone, and the app matches movements by SLUG — lowercase, every run of
+--    non-alphanumerics collapsed to a single hyphen — in src/lib/exerciseId.ts.
+--    Nothing in the database knew that rule, so 'Bench Press', 'bench press'
+--    and 'Bench  Press' are three different strings to Postgres and a WHERE on
+--    the raw column would answer for one of them.
+--
+-- ── Why the slug is a GENERATED column and not a trigger ──────────────────
+--
+-- A trigger has to be right on INSERT and on UPDATE, and a row written by a
+-- path that disables triggers, or by a restore, carries whatever it carries. A
+-- generated column cannot drift: Postgres computes it, there is no writer to
+-- forget, and a row inserted by anything at all has a correct slug.
+--
+-- The expression is `exerciseSlug` transcribed exactly, and the two MUST agree
+-- or a coach's roster search silently misses the movement they searched for.
+-- That risk is real and is the same one supabase/parts/49-exercise-video-library.sql
+-- carries for its seed — which is why both are asserted from the JavaScript
+-- side, in src/lib/rosterExercise.test.ts, against the same worked examples.
+--
+--   lower()                        'Bent-Over Row' → 'bent-over row'
+--   regexp_replace non-alnum → ' ' → 'bent over row'
+--   btrim()                        → 'bent over row'
+--   replace(' ', '-')              → 'bent-over-row'
+--
+-- Every function in it is IMMUTABLE, which a generated column requires.
+--
+-- ── Why the aggregate is SECURITY INVOKER ─────────────────────────────────
+--
+-- Deliberately NOT a definer function. `workouts_coach_read` is already
+-- `for select using (is_my_client(user_id))` — part 53 shipped the read half of
+-- that policy and nothing ever called it — so a coach reading their own
+-- clients' workouts is ALREADY permitted, one row at a time, by a policy that
+-- has been reviewed. An invoker function inherits exactly that and adds no new
+-- privilege to audit. A definer function here would have to re-implement the
+-- policy in its body and would be a standing grant to read any row in
+-- `workouts` if it were ever got wrong, which is the hole part 105 opened.
+--
+-- The `clients` join is not access control — RLS is — it is what keeps the
+-- COACH'S OWN logged training out of a list of their clients. A coach who
+-- trains at their own gym has `workouts` rows of their own, readable under the
+-- owner-row policy, and they would otherwise appear on this screen as a client
+-- with no name.
+--
+-- auth.uid(), never current_user: under PostgREST every signed-in request runs
+-- as the shared `authenticated` role.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ── The slug ──────────────────────────────────────────────────────────────
+
+alter table public.workouts
+  add column if not exists exercise_slug text
+  generated always as (
+    replace(btrim(regexp_replace(lower(exercise), '[^a-z0-9]+', ' ', 'g')), ' ', '-')
+  ) stored;
+
+comment on column public.workouts.exercise_slug is
+  'exerciseSlug(exercise), computed by Postgres. The join key for every movement comparison; `exercise` remains the spelling the person typed and is what screens print. Must stay identical to src/lib/exerciseId.ts.';
+
+-- The roster query is "this movement, these people, newest first". Slug leads
+-- because it is the equality, and `performed_at desc` is inside the index so
+-- the max and the ordering come off it without a sort.
+create index if not exists workouts_slug_idx
+  on public.workouts (exercise_slug, user_id, performed_at desc);
+
+-- ── The aggregate ─────────────────────────────────────────────────────────
+--
+-- Dropped before it is recreated: `create or replace` with a different argument
+-- list makes an OVERLOAD, and PostgREST resolving one name against two
+-- candidates with compatible defaults is a 300 at the moment a coach searches.
+drop function if exists public.coach_exercise_roster(text, timestamptz, timestamptz);
+
+create or replace function public.coach_exercise_roster(
+  p_slug  text,
+  p_from  timestamptz,
+  p_split timestamptz
+)
+returns table (
+  client_id       uuid,
+  last_at         timestamptz,
+  -- Logging EVENTS, not days. A day boundary needs the client's timezone and
+  -- this schema stores none — src/lib/coachWeek.ts and
+  -- app/(trainer)/client-week.tsx both refuse to state a day for exactly this
+  -- reason, and that refusal is not weakened here. `count(distinct performed_at)`
+  -- is what src/lib/clientTraining.ts calls `entryCount` and it is honest: a
+  -- client who logs one movement at a time makes several, and the screen says so.
+  recent_outings  integer,
+  prior_outings   integer,
+  -- Heaviest single set in each window, in KILOGRAMS. Null when nothing in the
+  -- window carried a load — a bodyweight movement has no tonnage to report, and
+  -- that is an absent measurement rather than a measurement of zero.
+  recent_top_kg   numeric,
+  prior_top_kg    numeric,
+  -- Best estimated one-rep max in each window, Epley, in kilograms. An
+  -- ESTIMATE, named as one everywhere it is shown: nobody in this app has
+  -- tested a maximum, and src/lib/progression.ts's `priorBest1RM` computes the
+  -- same figure the same way for one client so the two cannot disagree.
+  recent_e1rm_kg  numeric,
+  prior_e1rm_kg   numeric
+)
+language sql
+stable
+as $$
+  with sets as (
+    select
+      w.user_id,
+      w.performed_at,
+      case when jsonb_typeof(s->0) = 'number' then (s->>0)::numeric end as reps,
+      case when jsonb_typeof(s->1) = 'number' then (s->>1)::numeric end as load_kg
+    from public.workouts w
+    -- The coach's own clients, and nobody else. RLS is what makes this legal;
+    -- this join is what keeps the coach's OWN training out of a list of their
+    -- clients' — see the header.
+    join public.clients c on c.id = w.user_id and c.trainer_id = auth.uid()
+    -- `left join lateral` rather than a comma join: a workout row with a null
+    -- or empty `sets` — a cardio entry, or a movement logged with nothing
+    -- recorded against it — is still an outing, and an inner join would drop
+    -- the client out of the answer entirely rather than showing them with no
+    -- load. "They have done it and logged no weight" is a different sentence
+    -- from "they have not done it" and this screen must not merge them.
+    left join lateral jsonb_array_elements(
+      case when jsonb_typeof(w.sets) = 'array' then w.sets else '[]'::jsonb end
+    ) s on true
+    where w.exercise_slug = p_slug
+      and w.performed_at >= p_from
+  )
+  select
+    sets.user_id as client_id,
+    max(sets.performed_at) as last_at,
+    count(distinct sets.performed_at) filter (where sets.performed_at >= p_split)::integer as recent_outings,
+    count(distinct sets.performed_at) filter (where sets.performed_at <  p_split)::integer as prior_outings,
+    -- A set counts toward a load only when it has BOTH a rep count and a load.
+    -- The same test src/lib/clientTraining.ts applies: a row somebody tabbed
+    -- past is not a set of no reps, and a load with no reps behind it is not a
+    -- lift that happened.
+    max(sets.load_kg) filter (where sets.performed_at >= p_split and sets.reps > 0 and sets.load_kg > 0) as recent_top_kg,
+    max(sets.load_kg) filter (where sets.performed_at <  p_split and sets.reps > 0 and sets.load_kg > 0) as prior_top_kg,
+    -- Epley: load × (1 + reps ÷ 30). Capped at twelve reps because the formula
+    -- is fitted to low-rep work and a set of thirty press-ups would otherwise
+    -- estimate a maximum twice anybody's actual one — which is exactly the
+    -- shape of made-up number this codebase spends its budget refusing.
+    round(max(sets.load_kg * (1 + sets.reps / 30.0))
+      filter (where sets.performed_at >= p_split and sets.reps between 1 and 12 and sets.load_kg > 0), 1) as recent_e1rm_kg,
+    round(max(sets.load_kg * (1 + sets.reps / 30.0))
+      filter (where sets.performed_at <  p_split and sets.reps between 1 and 12 and sets.load_kg > 0), 1) as prior_e1rm_kg
+  from sets
+  group by sets.user_id;
+$$;
+
+-- One row per client, so the result is bounded by the roster and can never come
+-- back at a row cap. That is the property the whole screen depends on: a
+-- truncated read would make every figure on it a dash.
+
+revoke all on function public.coach_exercise_roster(text, timestamptz, timestamptz) from public, anon;
+grant execute on function public.coach_exercise_roster(text, timestamptz, timestamptz) to authenticated;
+
+-- ── What is deliberately NOT here ─────────────────────────────────────────
+--
+-- No "stalled" flag computed in SQL. Whether a client is stalled is a judgement
+-- with a threshold in it, and every threshold in this app lives in TypeScript
+-- next to the sentence that explains it and the assertions that pin it —
+-- `VOLUME_JUMP` and `HEAVY_REPS` in src/lib/programReview.ts, `AT_RISK_DROP` in
+-- src/lib/clientDrift.ts. A number buried in a migration is a number nobody can
+-- find, nobody can test, and nobody can change without a deploy of the
+-- database. This function returns the two windows; src/lib/rosterExercise.ts
+-- decides, and says why on screen.
+--
+-- No text search over exercise names. The caller passes a SLUG it computed with
+-- the same rule the column uses, so there is one matching rule in the system.
+-- A `like` or a trigram search here would be a second, fuzzier one — and the
+-- whole of src/lib/exerciseId.ts exists because the old bidirectional substring
+-- match resolved 'Squat' to whichever of Back Squat, Front Squat and Goblet
+-- Squat sorted first.
+
+-- ▶ money-you-can-correct.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A mis-keyed payment was permanent, and an invoice had no writer at all.
+--
+-- Three things are missing from the gym's money record and all three are one
+-- piece of work, because each of them is the same sentence: the console can
+-- WRITE the fact but cannot write the correction, the link or the bill.
+--
+-- ── 1. There is no way to correct money ───────────────────────────────────
+--
+-- `gym_payments` has no refund, no void, no credit note and no edit anywhere
+-- in the product. An owner who types 5000 instead of 500 has created a
+-- permanent row that /money lists, /revenue totals, /accounting reconciles
+-- against and /close carries into a month somebody files. There is no screen,
+-- no function and no column that can say otherwise.
+--
+-- The fix is NOT a status column, and that is a decision rather than an
+-- omission. supabase/parts/167 makes the argument in the other direction and
+-- it holds here: "a voided payment still in the table is a row every future
+-- SUM has to remember to exclude, and one that forgets restates the mistake."
+-- There are eleven places in this console that add `gym_payments.amount_cents`
+-- up. A `status <> 'void'` predicate has to be added to all eleven, correctly,
+-- today and in every query written after today, and the one that forgets is
+-- silently wrong in the direction of MORE money — which is the direction
+-- nobody checks.
+--
+-- So a correction is a ROW, not a flag. `reverses_payment_id` points at what
+-- is being undone and the amount is negative, so:
+--
+--   · every existing SUM nets to the right number with no change at all;
+--   · the correction is dated when it was MADE, which is what a cash-basis
+--     month wants — a refund handed over in September belongs in September,
+--     not backdated into an August somebody has already filed;
+--   · the original stays exactly as it was recorded, because it is what
+--     happened, and the correction stays beside it saying so.
+--
+-- `amount_cents` was already `integer not null` with no non-negative check, so
+-- a negative row is accepted today. The constraints below are what stop a
+-- negative appearing anywhere it was not meant to.
+--
+-- ── 2. Nothing links a payment to the invoice it paid ─────────────────────
+--
+-- /accounting says it out loud, in copy the accountant reads: "Nothing in the
+-- database links a payment to an invoice — there is no invoice id on a payment
+-- row. So the match is made on member, exact amount, currency and a payment
+-- within 45 days of the invoice date." That is a stated guess, and a stated
+-- guess is honest, but it re-asks the same questions every month forever and
+-- it cannot be answered — a part payment, one payment settling two invoices
+-- and a partner paying under their own name all appear as exceptions and all
+-- are fine.
+--
+-- `invoice_id` makes the match a FACT the owner can record once. The fuzzy rule
+-- stays exactly as it is for everything nobody has matched by hand; a row that
+-- carries an invoice_id simply stops being a question.
+--
+-- ── 3. Nothing writes an invoice ──────────────────────────────────────────
+--
+-- `gym_invoices` has existed since part 29 and has no writer anywhere in this
+-- repository — two reads and nothing else. Four sections of two screens report
+-- on it in copy that reads as a factual claim about the gym. The table needed
+-- no new column for that; what it needed was a screen, and that is
+-- studio-web/app/accounting. What it DOES need is here: a number a member can
+-- be asked to quote, and the two columns above so an invoice can be joined to
+-- the money that settled it.
+--
+-- The number is per gym and per year and it is assigned by the DATABASE, not
+-- by the client. A client computing `max(number) + 1` from what it can read
+-- produces duplicates the moment two invoices are raised in two tabs, and an
+-- invoice number is the thing an accountant uses to tell two bills apart.
+--
+-- Additive and idempotent. Nothing here alters an existing row.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── the correction ──────────────────────────────────────────────────────────
+
+alter table public.gym_payments
+  add column if not exists reverses_payment_id uuid
+    references public.gym_payments(id) on delete restrict;
+
+-- `on delete restrict`, deliberately, and it is the only restrict in this
+-- schema. Every other reference here goes null or cascades. A correction whose
+-- original has been deleted is a negative amount in the ledger with nothing
+-- explaining it, which is worse than either row alone — so the database refuses
+-- to lose the original while the correction stands.
+
+alter table public.gym_payments
+  add column if not exists kind text not null default 'payment';
+
+-- The default is 'payment' and that is not a guess: every row already in this
+-- table is money somebody took at the desk. This is not the currency case —
+-- there is no gym for which the answer differs, and no screen renders a
+-- default here as though the owner had chosen it.
+alter table public.gym_payments drop constraint if exists gym_payments_kind_known;
+alter table public.gym_payments add constraint gym_payments_kind_known
+  check (kind in ('payment', 'refund', 'correction'));
+
+-- The two halves of a correction have to agree with each other, or the netting
+-- above is arithmetic on rows that do not mean what they say.
+--
+--   · a plain payment reverses nothing and is not negative
+--   · a refund or a correction reverses something and IS negative
+--
+-- Zero is allowed on the payment side and refused on the correction side, which
+-- is not symmetry for its own sake. A zero payment is a real thing — a fully
+-- discounted joining fee, recorded so the record shows the transaction happened
+-- — and part 132 takes the same view of a fully discounted renewal. A zero
+-- correction corrects nothing and is a form submitted with an empty box.
+--
+-- NOT VALID, and that is deliberate rather than lazy. This runs against
+-- databases that already hold payments, and nothing has ever stopped somebody
+-- entering a refund as a bare negative amount with no `reverses_payment_id` —
+-- there was no other way to record one. Validating would fail the whole
+-- migration on exactly the gyms that most need this part, and the fix for those
+-- rows is a person deciding what each one was, not an ALTER TABLE guessing. New
+-- and updated rows are checked from here on, which is the whole of what this
+-- constraint is for.
+alter table public.gym_payments drop constraint if exists gym_payments_correction_shape;
+alter table public.gym_payments add constraint gym_payments_correction_shape
+  check (
+    (kind = 'payment'  and reverses_payment_id is null and amount_cents >= 0)
+    or
+    (kind in ('refund', 'correction') and reverses_payment_id is not null and amount_cents < 0)
+  ) not valid;
+
+create index if not exists idx_gym_payments_reverses
+  on public.gym_payments (reverses_payment_id)
+  where reverses_payment_id is not null;
+
+comment on column public.gym_payments.reverses_payment_id is
+  'The payment this row undoes, wholly or in part. NULL on an ordinary payment. A correction is a row rather than a flag so that every existing SUM nets to the right figure without learning a new predicate — see the header of supabase/parts/180.';
+comment on column public.gym_payments.kind is
+  'payment | refund | correction. A refund is money handed back; a correction is a mis-keyed row being undone. Both are negative and both name what they reverse. Kept apart because an accountant reads them differently and the ledger cannot tell them apart from the amount alone.';
+
+-- ── the link the reconciliation could not record ────────────────────────────
+
+alter table public.gym_payments
+  add column if not exists invoice_id uuid
+    references public.gym_invoices(id) on delete set null;
+
+-- `set null` and not cascade: a payment survives its invoice being voided. The
+-- money still arrived.
+
+create index if not exists idx_gym_payments_invoice
+  on public.gym_payments (invoice_id)
+  where invoice_id is not null;
+
+comment on column public.gym_payments.invoice_id is
+  'The invoice this payment settles, where somebody has said so. NULL means unmatched, which is the ordinary case and is what /accounting''s 45-day heuristic is for — a hand-matched row simply stops being asked about.';
+
+-- ── an invoice somebody can quote ───────────────────────────────────────────
+
+alter table public.gym_invoices
+  add column if not exists number integer;
+
+-- Unique WITHIN a gym and within a year. Two gyms both having an invoice 41 is
+-- correct and expected; one gym having two is the failure this index exists to
+-- make impossible, and it has to be impossible rather than unlikely because the
+-- number is what a member quotes on a bank transfer.
+create unique index if not exists gym_invoices_number_uq
+  on public.gym_invoices (tenant_id, (extract(year from issued_on)), number)
+  where number is not null;
+
+comment on column public.gym_invoices.number is
+  'The invoice number this gym gave this bill, unique per gym per year and assigned by next_gym_invoice_number() rather than by any client. NULL on rows raised before this column existed — they were never numbered and inventing numbers for them now would put a sequence into the record that nobody ever quoted.';
+
+/**
+ * The next invoice number for a gym in a year.
+ *
+ * SECURITY DEFINER and it takes a LOCK, because the obvious client-side version
+ * of this — read the highest number, add one, insert — is a race that produces
+ * duplicates the first time an owner raises two invoices in two browser tabs,
+ * and the unique index above would then reject the second one with 23505 after
+ * the form had closed.
+ *
+ * `pg_advisory_xact_lock` over the gym and the year serialises exactly the
+ * gyms raising an invoice at the same instant and nothing else. It is released
+ * when the transaction ends, whether it commits or not.
+ *
+ * The caller must be the gym's owner. This function runs as its definer, which
+ * means it can see every tenant's invoices, so the check is not a courtesy —
+ * without it any signed-in account could read off how many bills any gym on the
+ * platform has raised this year, one call at a time.
+ */
+create or replace function public.next_gym_invoice_number(p_tenant uuid, p_year integer)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n integer;
+begin
+  if not is_owner_of(p_tenant) then
+    raise exception 'not the owner of this gym' using errcode = '42501';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('gym_invoice_number'), hashtext(p_tenant::text || ':' || p_year::text));
+  select coalesce(max(number), 0) + 1 into n
+    from public.gym_invoices
+   where tenant_id = p_tenant
+     and extract(year from issued_on) = p_year;
+  return n;
+end $$;
+
+revoke all on function public.next_gym_invoice_number(uuid, integer) from public, anon;
+grant execute on function public.next_gym_invoice_number(uuid, integer) to authenticated;
+
+comment on function public.next_gym_invoice_number(uuid, integer) is
+  'The next unused invoice number for one gym in one year, under an advisory lock so two tabs cannot both take it. Owner-only, checked inside the function because it runs as definer and can otherwise see every gym.';
+
+-- ▶ a-question-with-somewhere-to-put-the-answer.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The reconciliation asked the same question every month and had nowhere to
+-- keep the answer.
+--
+-- /accounting renders three exception tables — invoices marked paid with no
+-- payment behind them, payments banked with no invoice in front of them, and
+-- money banked against nobody. The page's own header calls each row "a question
+-- with a name on it". It is right, and until now that is all it was: there is
+-- no match, no accept, no dismiss and no note, and nothing persists. Every
+-- exception the owner walked through in August is on the screen again in
+-- September, identical, forever.
+--
+-- The consequence is not that the list is annoying. It is that the list stops
+-- being read. An exception report that never shrinks is one an owner learns to
+-- scroll past, and the month it contains something real is the month nobody
+-- looks — which is the entire failure mode this product spends its design
+-- budget avoiding on every other screen.
+--
+-- ── What an answer actually is, and why there are only two of them ────────
+--
+-- There are three things an owner can truthfully say about an exception:
+--
+--   1. "This payment settles that invoice." That is a FACT and it belongs in
+--      the ledger, not in a notes table — it is `gym_payments.invoice_id`,
+--      added in supabase/parts/180. A matched row stops being an exception
+--      because it stops being unmatched, and no state here is involved.
+--
+--   2. "I know why this is here and it is fine." Cash banked in a lump at the
+--      desk, a partner paying under their own name, a part payment. Nothing is
+--      wrong and nothing can be linked. This is `accepted`.
+--
+--   3. "This is wrong and I am dealing with it elsewhere." A duplicate to be
+--      corrected, an invoice raised in error. This is `flagged`, and it stays
+--      on the list on purpose — it is not an answer, it is a bookmark, and a
+--      state that hides a row somebody called wrong would be the worst outcome
+--      this table could produce.
+--
+-- There is deliberately no `dismissed`. "Dismiss" and "accept" would be two
+-- words for one action with different implications about whether anybody looked,
+-- and the difference would be invisible a month later.
+--
+-- ── Why the note is on the row rather than on the month ───────────────────
+--
+-- Because the row is what recurs. An invoice raised in June is still an
+-- exception in July, August and September, and an answer written against
+-- "June" would have to be found again each time. Keyed on the subject, the
+-- answer follows the row for as long as the row keeps appearing.
+--
+-- ── What this deliberately cannot do ──────────────────────────────────────
+--
+-- An accepted exception is accepted by whoever pressed the button, and that is
+-- all this records. It is not an approval, not a sign-off and not evidence that
+-- anybody senior agreed — the console has one role above trainer and it is
+-- "owner". The accountant reading the close needs to know that, so the screen
+-- says who and when beside every accepted row rather than simply removing it.
+--
+-- Additive and idempotent.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.gym_reconcile_marks (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+
+  -- Which register the row lives in. Not a foreign key to either table, and
+  -- that is on purpose: one column cannot reference two tables, and splitting
+  -- this into `invoice_id` plus `payment_id` would make "exactly one of these
+  -- is set" a constraint somebody has to remember rather than a shape.
+  subject_kind text not null check (subject_kind in ('invoice', 'payment')),
+  subject_id uuid not null,
+
+  state text not null check (state in ('accepted', 'flagged')),
+
+  -- Required on `accepted`, and the constraint below enforces it. An exception
+  -- silently taken off a reconciliation with no reason recorded is exactly the
+  -- row an auditor asks about, and "somebody clicked Accept" is not an answer
+  -- to that question.
+  note text,
+
+  marked_by uuid references public.profiles(id) on delete set null,
+  marked_at timestamptz not null default now()
+);
+
+-- One live answer per row. Changing your mind UPDATEs; it does not accumulate
+-- a stack of contradictory marks that a screen would then have to pick between.
+create unique index if not exists gym_reconcile_marks_subject_uq
+  on public.gym_reconcile_marks (tenant_id, subject_kind, subject_id);
+
+create index if not exists idx_gym_reconcile_marks_tenant
+  on public.gym_reconcile_marks (tenant_id, marked_at desc);
+
+alter table public.gym_reconcile_marks drop constraint if exists gym_reconcile_marks_accepted_has_why;
+alter table public.gym_reconcile_marks add constraint gym_reconcile_marks_accepted_has_why
+  check (state <> 'accepted' or (note is not null and btrim(note) <> ''));
+
+comment on table public.gym_reconcile_marks is
+  'The owner''s answer to one reconciliation exception, so /accounting stops asking it every month. `accepted` means explained and requires the explanation; `flagged` means wrong and being dealt with, and deliberately does NOT hide the row. A genuine match is not recorded here at all — it is gym_payments.invoice_id.';
+
+alter table public.gym_reconcile_marks enable row level security;
+
+-- The same shape as `gym_payments_owner`: the gym's own owner, for everything.
+-- A trainer has no business reading what an owner said about the gym's books.
+drop policy if exists gym_reconcile_marks_owner on public.gym_reconcile_marks;
+create policy gym_reconcile_marks_owner on public.gym_reconcile_marks
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Supabase hands `anon` and `authenticated` the full DML set on every table
+-- created in this project by default — part 119 found that on 80 of 89 tables,
+-- and part 132 confirmed it again on a table created minutes earlier. RLS
+-- narrows a GRANT; it does not confer one, and it does not apply to TRUNCATE at
+-- all. So both roles are named and revoked rather than left to `revoke ... from
+-- public`, which does not touch a grantee holding a privilege in its own right.
+revoke all on public.gym_reconcile_marks from anon, authenticated, public;
+grant select, insert, update, delete on public.gym_reconcile_marks to authenticated;
+grant all on public.gym_reconcile_marks to service_role;
+
+-- ▶ a-month-that-stays-closed.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- /close could declare a month closed and nothing anywhere remembered it.
+--
+-- The screen has no `closed_at`, no lock, no sign-off and no write of any kind.
+-- `buildClose` recomputes the verdict from live rows on every load, so:
+--
+--   · A month closed on Monday is open again on Tuesday if anybody records a
+--     late payment, and there is nothing on screen to say it ever was closed.
+--   · /accounting re-reports the same month with different numbers, and the
+--     figure the owner handed their accountant last week is unrecoverable —
+--     not disputed, GONE, because it was never a stored thing.
+--   · "Have we closed August?" has no answer in this database. The only
+--     evidence is whatever the owner remembers.
+--
+-- Two things fix that and they are different things, so both are here.
+--
+-- ── 1. A close is a row, and it carries the figures ───────────────────────
+--
+-- Not a boolean. The point of closing a month is that the numbers stop moving,
+-- so the numbers are SNAPSHOTTED onto the close — taken, invoiced, still owed,
+-- payroll — exactly as `payroll_settlements` snapshots what was handed over
+-- rather than recomputing it from today's session fee. A close that stored only
+-- a date would tell you the month was signed off and not what was signed off,
+-- which is the half that matters when somebody asks in March.
+--
+-- Every figure is nullable and the currency is nullable, because every one of
+-- them is nullable ON SCREEN. A month whose invoice read failed, or a gym that
+-- has not set a currency, produces a close with holes in it — and a close that
+-- turned those into zeros to satisfy a NOT NULL would be storing the exact lie
+-- the whole screen is built to refuse. `blockers_at_close` records what was in
+-- the way if it was closed anyway, so a close over a known problem is a close
+-- that says so.
+--
+-- ── 2. A closed month refuses to move ─────────────────────────────────────
+--
+-- A stored close that any later write can invalidate is a note, not a close. So
+-- the trigger below refuses to write a payment or an invoice INTO a month this
+-- gym has closed, and names the month and the way out in the error.
+--
+-- This is a real restriction and it will be hit, which is the point. The three
+-- ways it fires are all things that should stop and ask:
+--
+--   · Saturday's cash entered a fortnight late, into a filed month.
+--   · An import of last year's spreadsheet run after this year was closed.
+--   · A refund dated back into a closed month rather than recorded today —
+--     which is the mistake supabase/parts/180's whole argument is about.
+--
+-- Reopening is a deliberate act with a reason attached, recorded beside the
+-- close it lifted. That is the difference between a month that reopened and a
+-- month that quietly never closed.
+--
+-- Only `gym_payments` and `gym_invoices` are locked, and only those two. They
+-- are the registers the close's headline figures come from and the ones a bulk
+-- import writes. Sessions are deliberately NOT locked: a coach marking an
+-- outcome late is fixing the record rather than moving money, the payroll
+-- figure for a closed month is already snapshotted above, and a lock there
+-- would leave a session permanently unmarkable and therefore permanently
+-- unpayable.
+--
+-- Additive and idempotent.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.gym_month_closes (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+
+  -- 'YYYY-MM', the same key monthKeyOf() in src/lib/monthEnd.ts produces, so a
+  -- close can be looked up from the month picker without a date conversion that
+  -- could land in a neighbouring month in a gym eleven hours away.
+  month_key text not null check (month_key ~ '^\d{4}-(0[1-9]|1[0-2])$'),
+
+  closed_at timestamptz not null default now(),
+  closed_by uuid references public.profiles(id) on delete set null,
+  note text,
+
+  -- The figures as they stood. Nullable throughout, because each of them is
+  -- nullable on screen and a zero here would be a fabricated fact in a record
+  -- somebody files against.
+  taken_cents integer,
+  invoiced_cents integer,
+  outstanding_cents integer,
+  payroll_cents integer,
+  -- What all four are denominated in, or NULL because the gym had not said and
+  -- the screen was showing dashes. A close labelled with a currency nobody
+  -- chose is the exact failure supabase/parts/150 removed the defaults for.
+  currency text,
+  -- Sessions still without an outcome when this was closed. Not merged into
+  -- payroll_cents: a payroll figure with unmarked sessions behind it is a floor
+  -- rather than a total, and this is the number that says so.
+  unmarked_sessions integer,
+  -- What the screen was refusing about, verbatim, if it was closed anyway. A
+  -- close over a stated blocker is a decision somebody made and it has to be
+  -- readable as one.
+  blockers_at_close text,
+
+  reopened_at timestamptz,
+  reopened_by uuid references public.profiles(id) on delete set null,
+  reopen_reason text
+);
+
+alter table public.gym_month_closes drop constraint if exists gym_month_closes_reopen_has_why;
+alter table public.gym_month_closes add constraint gym_month_closes_reopen_has_why
+  check (reopened_at is null or (reopen_reason is not null and btrim(reopen_reason) <> ''));
+
+alter table public.gym_month_closes drop constraint if exists gym_month_closes_currency_is_iso;
+alter table public.gym_month_closes add constraint gym_month_closes_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- At most ONE live close per gym per month, and every superseded one kept.
+-- Partial rather than plain: a month closed, reopened and closed again is three
+-- rows and a true history, and a plain unique index would have forced the
+-- reopen to destroy the record of the first close — which is the one thing an
+-- auditor would want to see.
+create unique index if not exists gym_month_closes_live_uq
+  on public.gym_month_closes (tenant_id, month_key)
+  where reopened_at is null;
+
+create index if not exists idx_gym_month_closes_tenant
+  on public.gym_month_closes (tenant_id, month_key desc, closed_at desc);
+
+comment on table public.gym_month_closes is
+  'One row per act of closing a month, with the figures as they stood at the time. A reopen sets reopened_at and a reason rather than deleting the row, so a month that was closed and then moved is visible as exactly that. The live close for a month is the row with reopened_at null; the partial unique index guarantees there is at most one.';
+
+alter table public.gym_month_closes enable row level security;
+
+drop policy if exists gym_month_closes_owner on public.gym_month_closes;
+create policy gym_month_closes_owner on public.gym_month_closes
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+revoke all on public.gym_month_closes from anon, authenticated, public;
+grant select, insert, update on public.gym_month_closes to authenticated;
+grant all on public.gym_month_closes to service_role;
+
+-- DELETE is deliberately not granted. A close is a statement somebody made
+-- about a month, and the way to withdraw it is a reopen with a reason — which
+-- leaves the statement and the withdrawal both readable. Deleting it would
+-- leave neither.
+
+-- ── the lock ────────────────────────────────────────────────────────────────
+
+/**
+ * Refuse a write whose date falls inside a month this gym has closed.
+ *
+ * The date column is named in the trigger's argument rather than hardcoded,
+ * because this guards two tables that carry it under two names — `taken_at` on
+ * a payment, `issued_on` on an invoice — and two near-identical trigger
+ * functions is how one of them eventually stops matching the other.
+ *
+ * `to_char(..., 'YYYY-MM')` is evaluated in the DATABASE's timezone, which for
+ * this project is UTC. That is a real limitation and it is stated rather than
+ * papered over: a payment taken at 1am on the 1st of September in a UTC+4 gym
+ * is an August row to this trigger. The window is a few hours a month, the
+ * error names the month it thinks the row is in, and the alternative — a
+ * per-tenant timezone column that nothing in this product sets — would be a
+ * second wrong answer with more machinery behind it.
+ *
+ * SECURITY DEFINER so that the lookup sees closes regardless of who is writing;
+ * an import running as the owner and a payment recorded by the desk must both
+ * be refused by the same rule.
+ *
+ * DELETE is deliberately not guarded, and the reason is that the only deleter
+ * in the product is the import undo added in supabase/parts/167 — which exists
+ * to take back a bulk write the owner has just made and would be useless if a
+ * close could strand it. A close protects the record against a month quietly
+ * GROWING after it was signed off; an undo of a run whose receipt is on screen
+ * is the owner correcting themselves, deliberately, with the run in front of
+ * them. Guarding it would also mean writing this function twice — once over NEW
+ * and once over OLD — which is the divergence the argv above avoids.
+ */
+create or replace function public.gym_refuse_write_into_closed_month()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  d timestamptz;
+  k text;
+begin
+  execute format('select ($1).%I::timestamptz', tg_argv[0]) into d using new;
+  if d is null then return new; end if;
+  k := to_char(d, 'YYYY-MM');
+  if exists (
+    select 1 from public.gym_month_closes c
+     where c.tenant_id = new.tenant_id
+       and c.month_key = k
+       and c.reopened_at is null
+  ) then
+    raise exception
+      'Nothing can be written into % — this gym has closed that month. Reopen it on the Close screen, with a reason, and then record this again.', k
+      using errcode = 'P0001';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.gym_refuse_write_into_closed_month() from public, anon, authenticated;
+
+drop trigger if exists trg_gym_payments_closed_month on public.gym_payments;
+create trigger trg_gym_payments_closed_month
+  before insert or update of taken_at, amount_cents on public.gym_payments
+  for each row execute function public.gym_refuse_write_into_closed_month('taken_at');
+
+drop trigger if exists trg_gym_invoices_closed_month on public.gym_invoices;
+create trigger trg_gym_invoices_closed_month
+  before insert or update of issued_on, amount_cents, status on public.gym_invoices
+  for each row execute function public.gym_refuse_write_into_closed_month('issued_on');
+
+-- ▶ what-the-gym-pays-its-own-coaches.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Four things about a coach's pay that this product could not hold.
+--
+-- ── 1. Every coach is paid the same ───────────────────────────────────────
+--
+-- `payroll30For` in src/lib/gymTrainers.ts multiplies delivered sessions by a
+-- single `tenants.session_fee`. There is one fee for the gym, so a coach of
+-- fifteen years and a trainee in their first month are worth an identical
+-- amount to the payroll screen, and /payroll offers no override anywhere.
+--
+-- `trainers.session_fee` is NOT the missing column. It was added in
+-- supabase/parts/23 as part of the public directory — tagline, offers,
+-- specialties, session_fee, listed — and it is what a coach CHARGES a client
+-- for private work booked through the app. Reading it as what the gym pays them
+-- would take a coach's own price list and hand it to their employer's payroll
+-- run, which is a different number, usually a bigger one, and belongs to the
+-- coach rather than to the gym.
+--
+-- ── 2. Teaching a class is unpaid by the system ───────────────────────────
+--
+-- `payroll_settlements` links to `sessions` and to nothing else, so a trainer
+-- who taught twelve classes and covered twenty floor hours is owed nothing this
+-- product can compute. app/(owner)/class-analytics.tsx holds the per-attendee
+-- rate in `useState` and says at line 263 that "nothing is paid from this
+-- screen" — which is honest and is the whole problem.
+--
+-- ── 3. A payroll run cannot be undone or adjusted ─────────────────────────
+--
+-- `recordSettlement` is insert-only, all-or-nothing per trainer, with no
+-- reverse, no partial settlement and no adjustment line. Pressing "Mark as
+-- paid" before the money actually moves stamps every session in the run
+-- permanently and drops them out of "Owed now" — and the only way back is
+-- editing rows in the Supabase dashboard.
+--
+-- ── Why a separate table instead of a column on `trainers` ────────────────
+--
+-- Because the owner cannot write to `trainers` and must not be given the
+-- ability. Part 23 is a dump of the live database and its five policies are
+-- `trainers_self_rw` (the coach's own row, for everything) plus four SELECTs —
+-- one of which, `trainers_owner_r`, is the owner's read. There is no owner
+-- UPDATE, deliberately: `trainers` holds the coach's public profile, their
+-- tagline, their specialties and their own price list, and none of that is the
+-- gym's to edit. Adding an owner UPDATE policy to reach one pay column would
+-- hand the employer edit rights over the employee's public listing.
+--
+-- So what the gym pays lives in the gym's own table, owned by the gym, readable
+-- by the coach it is about. Which is also the correct relationship: this is a
+-- fact about the employment, not about the trainer.
+--
+-- Additive and idempotent. Nothing here alters an existing table's rows.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── what this gym pays this coach ───────────────────────────────────────────
+
+create table if not exists public.gym_trainer_pay (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  trainer_id uuid not null references public.profiles(id) on delete cascade,
+
+  -- What the gym pays for one payable one-to-one, in MINOR units.
+  --
+  -- Minor units, unlike `tenants.session_fee`, which is a numeric in whole
+  -- currency and has caused exactly one incident about it already — the payroll
+  -- screen printing AED 63.00 where the gym owed AED 6,300, because a whole-unit
+  -- figure went through a formatter that divides by 100. Everything downstream
+  -- of this column is minor units: `sessions.rate_cents`,
+  -- `payroll_settlements.amount_cents`, every figure `money()` renders. A new
+  -- column had no reason to inherit the older one's boundary.
+  --
+  -- NULL means this gym has not set a rate for this coach, which is a real and
+  -- common state and is NOT the same as zero. A null falls back to the gym's
+  -- own session fee, exactly as it does today; a zero says the gym pays this
+  -- coach nothing per session, which is a claim somebody has to make on purpose.
+  session_rate_cents integer check (session_rate_cents is null or session_rate_cents >= 0),
+
+  -- What the gym pays this coach to TEACH, and how it is counted.
+  --
+  -- Two columns rather than one, because "80 per class" and "8 per head" are
+  -- the same number of digits and completely different money, and a single
+  -- amount column with the interpretation living in a screen is how a gym pays
+  -- a coach twelve times what it meant to. Both are NULL together or set
+  -- together; the constraint below is what makes that true rather than hoped.
+  class_pay_kind text check (class_pay_kind is null or class_pay_kind in ('per_class', 'per_attendee')),
+  class_rate_cents integer check (class_rate_cents is null or class_rate_cents >= 0),
+
+  -- What both rates are denominated in. NOT inherited silently from
+  -- `tenants.currency` at read time: a gym that changes its currency must not
+  -- retroactively re-denominate what it agreed to pay somebody. NULL means
+  -- nobody has said, which withholds the figure — the same rule as every other
+  -- money column since supabase/parts/150.
+  currency text,
+
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles(id) on delete set null
+);
+
+alter table public.gym_trainer_pay drop constraint if exists gym_trainer_pay_class_pair;
+alter table public.gym_trainer_pay add constraint gym_trainer_pay_class_pair
+  check ((class_pay_kind is null) = (class_rate_cents is null));
+
+alter table public.gym_trainer_pay drop constraint if exists gym_trainer_pay_currency_is_iso;
+alter table public.gym_trainer_pay add constraint gym_trainer_pay_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- A rate that names no currency is not a rate. Either of the two amounts being
+-- set requires one, and the whole row being empty is allowed — that is simply a
+-- coach the gym has not priced yet.
+alter table public.gym_trainer_pay drop constraint if exists gym_trainer_pay_amount_has_currency;
+alter table public.gym_trainer_pay add constraint gym_trainer_pay_amount_has_currency
+  check (currency is not null or (session_rate_cents is null and class_rate_cents is null));
+
+create unique index if not exists gym_trainer_pay_uq
+  on public.gym_trainer_pay (tenant_id, trainer_id);
+
+comment on table public.gym_trainer_pay is
+  'What one gym pays one coach — per payable one-to-one, and per class taught. Distinct from trainers.session_fee, which is what the coach charges their own clients and is theirs, not the gym''s. Amounts are minor units. NULL is "not set" and falls back to tenants.session_fee; zero is a decision.';
+
+alter table public.gym_trainer_pay enable row level security;
+
+drop policy if exists gym_trainer_pay_owner on public.gym_trainer_pay;
+create policy gym_trainer_pay_owner on public.gym_trainer_pay
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- The coach reads what they are paid, and only reads it. A coach must never
+-- record their own pay — /coach/earnings is deliberately read-only and this is
+-- the database saying the same thing independently, so the two do not have to
+-- trust each other.
+drop policy if exists gym_trainer_pay_self_r on public.gym_trainer_pay;
+create policy gym_trainer_pay_self_r on public.gym_trainer_pay
+  for select using (trainer_id = (select auth.uid()));
+
+revoke all on public.gym_trainer_pay from anon, authenticated, public;
+grant select, insert, update, delete on public.gym_trainer_pay to authenticated;
+grant all on public.gym_trainer_pay to service_role;
+
+-- ── a class somebody taught, and was paid for ───────────────────────────────
+
+create table if not exists public.gym_class_pay (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+
+  -- The class this line pays for. Cascade rather than set null: a pay line with
+  -- no class is a payment for nothing, and part 34's argument about a service
+  -- record with no machine applies unchanged. A class that has been settled is
+  -- protected from deletion by the screen, not by the schema — B5 on the
+  -- roadmap is the item that makes cancelling a class stop deleting it.
+  class_id uuid not null references public.gym_classes(id) on delete cascade,
+  trainer_id uuid not null references public.profiles(id) on delete cascade,
+
+  -- Snapshotted, all three, and never recomputed. A rate changed in March must
+  -- not rewrite what a coach was paid in January — the same reasoning as
+  -- `sessions.rate_cents` and `payroll_settlements.amount_cents`.
+  pay_kind text not null check (pay_kind in ('per_class', 'per_attendee')),
+  rate_cents integer not null check (rate_cents >= 0),
+  -- How many people the register said were there, for a per-attendee line. NULL
+  -- on a per-class line because it did not enter into the amount, and a zero
+  -- there would read as an empty class.
+  attendees integer check (attendees is null or attendees >= 0),
+  amount_cents integer not null check (amount_cents >= 0),
+  currency text not null check (currency ~ '^[A-Z]{3}$'),
+
+  -- The run that paid it, if one has. Exactly the mechanism part 36 chose for
+  -- sessions and for the same reason: settlement is per LINE, not per period,
+  -- so a class registered late simply joins the next run and is paid once.
+  settlement_id uuid references public.payroll_settlements(id) on delete set null,
+
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles(id) on delete set null
+);
+
+alter table public.gym_class_pay drop constraint if exists gym_class_pay_attendees_shape;
+alter table public.gym_class_pay add constraint gym_class_pay_attendees_shape
+  check ((pay_kind = 'per_attendee') = (attendees is not null));
+
+-- One pay line per class per coach. A class taught by two coaches is two rows;
+-- a class accidentally submitted twice is refused by the database rather than
+-- paid twice by the payroll run that reads this table.
+create unique index if not exists gym_class_pay_uq
+  on public.gym_class_pay (class_id, trainer_id);
+
+create index if not exists idx_gym_class_pay_unsettled
+  on public.gym_class_pay (tenant_id, trainer_id)
+  where settlement_id is null;
+
+comment on table public.gym_class_pay is
+  'One line of class-teaching pay: the class, the coach, the rate as it stood, and the run that paid it. Settlement is per line so a class registered after its period was settled joins the next run instead of being lost or paid twice.';
+
+alter table public.gym_class_pay enable row level security;
+
+drop policy if exists gym_class_pay_owner on public.gym_class_pay;
+create policy gym_class_pay_owner on public.gym_class_pay
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+drop policy if exists gym_class_pay_self_r on public.gym_class_pay;
+create policy gym_class_pay_self_r on public.gym_class_pay
+  for select using (trainer_id = (select auth.uid()));
+
+revoke all on public.gym_class_pay from anon, authenticated, public;
+grant select, insert, update, delete on public.gym_class_pay to authenticated;
+grant all on public.gym_class_pay to service_role;
+
+-- ── undoing and adjusting a run ─────────────────────────────────────────────
+
+alter table public.payroll_settlements
+  add column if not exists reversed_at timestamptz;
+alter table public.payroll_settlements
+  add column if not exists reversed_by uuid references public.profiles(id) on delete set null;
+alter table public.payroll_settlements
+  add column if not exists reverse_reason text;
+
+alter table public.payroll_settlements drop constraint if exists payroll_settlements_reverse_has_why;
+alter table public.payroll_settlements add constraint payroll_settlements_reverse_has_why
+  check (reversed_at is null or (reverse_reason is not null and btrim(reverse_reason) <> ''));
+
+comment on column public.payroll_settlements.reversed_at is
+  'When this run was taken back. The row is NEVER deleted — a settlement that was recorded and then withdrawn is two facts, and deleting it leaves neither. Reversing also clears settlement_id from the sessions and class lines it covered, which is what puts them back into "Owed now".';
+
+-- A reversed run must not be counted as money that went out. Every reader of
+-- this table filters on it, and the comment above is the instruction; the index
+-- is what keeps that filter cheap on the query /accounting runs monthly.
+create index if not exists idx_settlements_live
+  on public.payroll_settlements (tenant_id, settled_at desc)
+  where reversed_at is null;
+
+create table if not exists public.payroll_adjustments (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  trainer_id uuid not null references public.profiles(id) on delete cascade,
+
+  -- Four kinds, and they are not interchangeable even where the arithmetic
+  -- agrees. A reimbursement is the gym paying back money the coach spent; a
+  -- bonus is pay. Both add, and a payslip that called one the other would be
+  -- wrong in a way that matters to whoever files it.
+  kind text not null check (kind in ('bonus', 'deduction', 'reimbursement', 'advance')),
+
+  -- SIGNED, and the sign is decided by the kind rather than typed. A deduction
+  -- and an advance are negative; a bonus and a reimbursement are positive. The
+  -- constraint below is what makes a screen unable to record a negative bonus,
+  -- which would read on a payslip as the gym awarding somebody minus fifty.
+  amount_cents integer not null check (amount_cents <> 0),
+  currency text not null check (currency ~ '^[A-Z]{3}$'),
+
+  -- Required. An adjustment with no reason on it is the line a coach queries
+  -- and nobody can answer.
+  note text not null check (btrim(note) <> ''),
+
+  -- The date it belongs to, for the run that picks it up. Not `created_at`: an
+  -- adjustment for last month entered this month belongs to last month.
+  applies_on date not null default current_date,
+
+  settlement_id uuid references public.payroll_settlements(id) on delete set null,
+
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles(id) on delete set null
+);
+
+alter table public.payroll_adjustments drop constraint if exists payroll_adjustments_sign_matches_kind;
+alter table public.payroll_adjustments add constraint payroll_adjustments_sign_matches_kind
+  check (
+    (kind in ('bonus', 'reimbursement') and amount_cents > 0)
+    or
+    (kind in ('deduction', 'advance') and amount_cents < 0)
+  );
+
+create index if not exists idx_payroll_adjustments_unsettled
+  on public.payroll_adjustments (tenant_id, trainer_id)
+  where settlement_id is null;
+
+comment on table public.payroll_adjustments is
+  'A line on a payroll run that is not a session and not a class: a bonus, a deduction, a reimbursement or an advance. Signed by kind rather than by the person typing it, so a bonus cannot be recorded as a negative. Picked up by the next run for that coach and stamped with its settlement_id, exactly like a session.';
+
+alter table public.payroll_adjustments enable row level security;
+
+drop policy if exists payroll_adjustments_owner on public.payroll_adjustments;
+create policy payroll_adjustments_owner on public.payroll_adjustments
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- The coach reads what was added to and taken off their pay, and writes none of
+-- it. Same rule as gym_trainer_pay above: nobody records their own pay.
+drop policy if exists payroll_adjustments_self_r on public.payroll_adjustments;
+create policy payroll_adjustments_self_r on public.payroll_adjustments
+  for select using (trainer_id = (select auth.uid()));
+
+revoke all on public.payroll_adjustments from anon, authenticated, public;
+grant select, insert, update, delete on public.payroll_adjustments to authenticated;
+grant all on public.payroll_adjustments to service_role;
+
+-- ▶ an-erasure-that-does-not-unbalance-the-books.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Honouring a deletion request destroys the receivable and keeps the cash.
+--
+-- ── The conflict, exactly ─────────────────────────────────────────────────
+--
+-- In supabase/parts/29-gym-operating-record.sql:
+--
+--   gym_payments.member_id   on delete SET NULL   (line 49)
+--   memberships.member_id    on delete CASCADE    (line 29)
+--   gym_invoices.member_id   on delete CASCADE    (line 67)
+--
+-- Three references to the same profile, two of which destroy their row and one
+-- of which keeps it. So deleting a member:
+--
+--   · KEEPS every payment they ever made, anonymised. The cash stays in the
+--     books, which is correct — the money moved and no erasure un-moves it.
+--   · DESTROYS every invoice raised against them. The other side of that same
+--     cash disappears.
+--
+-- The result is not "some data is gone". It is that `/accounting` and `/close`
+-- are permanently and silently wrong from that moment on, in one direction:
+-- money in with nothing that explains it. The "Banked, no invoice in front of
+-- it" exception list — the one the screen describes as "exactly where unbilled
+-- income hides" — fills up with rows that are not unbilled income at all and
+-- can never be explained, because the explanation was deleted. Every month-end
+-- from then on reconciles worse than the last, and nothing on any screen says
+-- why. app/(owner)/deletions.tsx states the behaviour honestly; nothing in the
+-- product resolves it.
+--
+-- And the destruction is the wrong half on its own terms. A gym has a statutory
+-- obligation to retain what it invoiced — six years in the UK, five in most of
+-- the EU, five in the UAE under the VAT law, seven in several US states — and
+-- an invoice is precisely the document those obligations name. Cascading it
+-- away is not privacy compliance. It is a records offence performed in the name
+-- of one.
+--
+-- ── The answer, and why it is this one ────────────────────────────────────
+--
+-- GDPR Article 17(3)(b) is the whole of the resolution: the right to erasure
+-- does not apply to processing "necessary for compliance with a legal
+-- obligation". Tax and company law impose exactly such an obligation on the
+-- financial record, and on nothing else the gym holds about that person. So the
+-- two halves separate cleanly, and the schema should say so:
+--
+--   ERASED   the account, the profile, the health data, the messages, the
+--            photos, the injuries, the check-ins, the coaching relationship.
+--            Everything the person is. Already handled elsewhere and not
+--            touched here.
+--
+--   RETAINED the financial record: what was invoiced, what was paid, and the
+--            membership those two hang off — with the minimum identity the
+--            obligation requires and NOTHING else. An invoice with no name on
+--            it does not satisfy any of the statutes above; an invoice with a
+--            name, an amount and a date satisfies all of them.
+--
+-- So all three references become `on delete set null`, which stops the erasure
+-- destroying anything — and a BEFORE DELETE trigger on `profiles` copies the
+-- billed name onto the financial rows first, so what survives is a legible
+-- record rather than three anonymous amounts nobody can reconcile.
+--
+-- ── Why a snapshot rather than keeping the profile row ────────────────────
+--
+-- The alternative is to refuse the deletion and soft-delete the profile. That
+-- is worse and it is worse in a way that is easy to miss: a profile row that
+-- survives an erasure request is still the person's account — it carries their
+-- name, their email through auth, their role, their tenant, and it is joined to
+-- by thirty tables. "We kept your account but stopped showing it" is not
+-- erasure and a regulator has said so repeatedly. The snapshot inverts that: the
+-- person is gone from every table that is about a person, and four columns of
+-- accounting evidence remain in the ledger, which is exactly the scope the
+-- exemption covers.
+--
+-- ── Why the retention period has no default ───────────────────────────────
+--
+-- `tenants.record_retention_years` is nullable with NO DEFAULT, for the reason
+-- part 99 gives about currency and part 150 gives about every money column: a
+-- default that renders cleanly looks considered. Repple is white-label. Six is
+-- right in London, five in Dubai, seven in parts of the United States, and any
+-- number this file picked would be presented on a compliance screen as the
+-- gym's own answer to a legal question it had never been asked. NULL means the
+-- gym has not stated a retention period, `retain_until` stays NULL, the record
+-- is kept indefinitely, and the screen says so — which is the honest state and
+-- the safe one, because over-retaining a financial record is a policy failure
+-- and under-retaining it is an offence.
+--
+-- ── What this part does NOT do ────────────────────────────────────────────
+--
+-- It does not purge anything when `retain_until` passes. There is no scheduled
+-- job here and there must not be one added casually: a job that deletes
+-- financial records on a date is a job that will one day delete them on the
+-- wrong date, and the only safe version of it is a screen that lists what is now
+-- purgeable and asks. `retain_until` is a fact recorded so that screen can be
+-- built; it is not a timer.
+--
+-- Idempotent. It changes three foreign keys and adds five columns; it deletes
+-- nothing and rewrites no existing value.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. the retention period the gym has stated, or has not ──────────────────
+
+alter table public.tenants
+  add column if not exists record_retention_years integer;
+
+alter table public.tenants drop constraint if exists tenants_retention_sane;
+alter table public.tenants add constraint tenants_retention_sane
+  check (record_retention_years is null or (record_retention_years between 1 and 30));
+
+comment on column public.tenants.record_retention_years is
+  'How long this gym must keep a financial record after it was raised, per its own jurisdiction. NULL means the gym has not said — records are then kept indefinitely and the compliance screen states that, because no number this product invented would be the law anywhere in particular.';
+
+-- ── 2. the identity the record keeps when the person is erased ──────────────
+
+alter table public.gym_invoices add column if not exists billed_name text;
+alter table public.gym_invoices add column if not exists retain_until date;
+alter table public.gym_payments add column if not exists payer_name text;
+alter table public.gym_payments add column if not exists retain_until date;
+alter table public.memberships  add column if not exists member_label text;
+
+comment on column public.gym_invoices.billed_name is
+  'Who this invoice was billed to, snapshotted at the moment their account was erased. NULL on every ordinary row — the name is read live from profiles while the member exists, and this column is the ONLY personal data that survives the erasure. Written by trg_profiles_retain_financial_record and by nothing else.';
+comment on column public.gym_payments.payer_name is
+  'The same, for a payment. gym_payments.member_id was already ON DELETE SET NULL, so before this the surviving row named nobody at all and the cash could never be reconciled to the invoice it settled.';
+comment on column public.memberships.member_label is
+  'The same, for a membership — which survives an erasure from this part on, because it is the contract the invoices hang off and a gym''s retention obligation covers it.';
+comment on column public.gym_invoices.retain_until is
+  'The date this record stops being required by law, computed at erasure from tenants.record_retention_years. NULL means the gym has stated no retention period and the record is kept indefinitely. Nothing deletes on this date — see the header.';
+
+-- ── 3. the three foreign keys, made to agree ────────────────────────────────
+--
+-- The constraint names are Postgres's own defaults from part 29
+-- (`<table>_<column>_fkey`), which is what those references were created with.
+-- Dropped if present and recreated pointing the same way with a different
+-- action; no data moves.
+
+alter table public.memberships alter column member_id drop not null;
+alter table public.memberships drop constraint if exists memberships_member_id_fkey;
+alter table public.memberships
+  add constraint memberships_member_id_fkey
+  foreign key (member_id) references public.profiles(id) on delete set null;
+
+alter table public.gym_invoices alter column member_id drop not null;
+alter table public.gym_invoices drop constraint if exists gym_invoices_member_id_fkey;
+alter table public.gym_invoices
+  add constraint gym_invoices_member_id_fkey
+  foreign key (member_id) references public.profiles(id) on delete set null;
+
+-- gym_payments.member_id was already SET NULL and is restated so a reader of
+-- this file finds all three references in one place rather than believing the
+-- odd one out is still a cascade.
+alter table public.gym_payments drop constraint if exists gym_payments_member_id_fkey;
+alter table public.gym_payments
+  add constraint gym_payments_member_id_fkey
+  foreign key (member_id) references public.profiles(id) on delete set null;
+
+-- ── 4. the snapshot, taken before the row goes ──────────────────────────────
+
+/**
+ * Copy the billed name onto the financial record, then let the erasure proceed.
+ *
+ * BEFORE DELETE, which is the only moment this can happen: the profile row is
+ * still readable, and the foreign keys above have not yet nulled the links that
+ * say which rows are this person's. AFTER DELETE would find no rows to update,
+ * silently, and the failure would look exactly like a member with no invoices.
+ *
+ * `coalesce(billed_name, ...)` so a second run — a restored backup, a replayed
+ * migration — cannot overwrite a name already retained with a null.
+ *
+ * `retain_until` is only computed where the gym has stated a period. A gym that
+ * has not gets NULL, which the compliance screen reads as "kept indefinitely,
+ * because this gym has not said for how long" rather than as "purgeable today".
+ *
+ * SECURITY DEFINER because the deletion may be performed by the member
+ * themselves through the account-deletion flow, and a member has no rights over
+ * `gym_invoices`. Without the definer rights the updates would match zero rows,
+ * return no error, and the erasure would complete having retained nothing —
+ * which is the current behaviour with extra machinery.
+ */
+create or replace function public.profiles_retain_financial_record()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  update public.memberships m
+     set member_label = coalesce(m.member_label, old.full_name)
+   where m.member_id = old.id;
+
+  -- The retention years are read per ROW rather than once, through a correlated
+  -- subquery on the row's own tenant. A person can hold a membership at two
+  -- gyms in two jurisdictions, and a single lookup would apply one gym's law to
+  -- the other gym's invoices.
+  update public.gym_invoices i
+     set billed_name = coalesce(i.billed_name, old.full_name),
+         retain_until = coalesce(
+           i.retain_until,
+           (select (i.issued_on + make_interval(years => t.record_retention_years))::date
+              from public.tenants t
+             where t.id = i.tenant_id and t.record_retention_years is not null))
+   where i.member_id = old.id;
+
+  update public.gym_payments p
+     set payer_name = coalesce(p.payer_name, old.full_name),
+         retain_until = coalesce(
+           p.retain_until,
+           (select ((p.taken_at at time zone 'UTC')::date + make_interval(years => t.record_retention_years))::date
+              from public.tenants t
+             where t.id = p.tenant_id and t.record_retention_years is not null))
+   where p.member_id = old.id;
+
+  return old;
+end $$;
+
+revoke all on function public.profiles_retain_financial_record() from public, anon, authenticated;
+
+drop trigger if exists trg_profiles_retain_financial_record on public.profiles;
+create trigger trg_profiles_retain_financial_record
+  before delete on public.profiles
+  for each row execute function public.profiles_retain_financial_record();
+
+comment on function public.profiles_retain_financial_record() is
+  'Snapshots the billed name onto invoices, payments and memberships immediately before the profile is deleted, so an erasure leaves a legible financial record instead of destroying one side of the books. The only personal data any erasure leaves behind, and it is retained under GDPR Article 17(3)(b) rather than in spite of it.';
+
+-- ▶ the-paperwork-a-gym-has-to-keep.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A gym signs people up on paper and this product had nowhere to put any of it.
+--
+-- Grepping app/(owner) for waiver, contract, consent, signature or PAR-Q
+-- returns nothing at all. What exists is not the gym's:
+--
+--   src/lib/waiver.ts    the REPPLE platform release, gated in
+--                        app/(client)/_layout.tsx. It is the client agreeing
+--                        with Repple, not with the gym they train at.
+--   src/lib/coachDocs.ts coach-issued and client-scoped, under the `coach-docs`
+--                        bucket, and deliberately private to one coach and one
+--                        client (see supabase/parts/156).
+--
+-- So an owner cannot see who has signed what, and there is no health
+-- questionnaire, guardian consent, photo consent or terms version anywhere in
+-- the record. Two consequences, and the second is the expensive one:
+--
+--   · An injury claim arrives and the gym cannot produce the signed waiver, the
+--     PAR-Q that would have flagged the condition, or the version of the terms
+--     that was in force on the day.
+--   · A sixteen-year-old is signed up and nothing records that a guardian ever
+--     agreed. That is not a records gap, it is the gym operating without
+--     consent it is legally required to hold.
+--
+-- And the six storage buckets in this project are `photos`, `exercise-videos`,
+-- `exercise-demos`, `message-media`, `coach-docs` and `injury-docs`. Not one of
+-- them is the gym's, so a signed contract, an insurance certificate, a service
+-- report or a photograph of a broken machine has no home in this product at
+-- all.
+--
+-- ── Why a version and not just a document ─────────────────────────────────
+--
+-- The question a gym is asked in a dispute is never "do you have terms". It is
+-- "what did this person agree to, on this date". A single mutable `terms` field
+-- answers the first and actively destroys the answer to the second — an owner
+-- editing the waiver in 2027 would silently rewrite what everybody signed in
+-- 2025.
+--
+-- So `gym_agreements` is versioned and its body is IMMUTABLE once anybody has
+-- signed it. Editing produces a NEW version; the old one stays, still pointed
+-- at by every signature it collected. The trigger below is what enforces that,
+-- because a rule this important cannot live in a screen.
+--
+-- ── Why the signature is typed rather than drawn ──────────────────────────
+--
+-- `signed_name` is what the person typed, plus the time and the agreement
+-- version. That is a simple electronic signature and it is what eIDAS Article
+-- 25 and the UK Electronic Communications Act make admissible; a drawn squiggle
+-- on a phone is not more binding and is considerably more storage. A gym that
+-- needs a qualified signature needs a signing provider, and that is an XL item
+-- with a contract behind it, not a canvas element.
+--
+-- Additive and idempotent.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. what the gym asks people to agree to ─────────────────────────────────
+
+create table if not exists public.gym_agreements (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+
+  -- Six kinds, and they are separate because they are separately required. A
+  -- gym may lawfully train somebody who refused photo consent; it may not train
+  -- somebody who refused the waiver, and it may not train a minor at all
+  -- without the guardian one. A single 'terms' bucket would flatten that.
+  kind text not null check (kind in (
+    'waiver',            -- liability release
+    'terms',             -- membership terms and conditions
+    'par_q',             -- the pre-exercise health questionnaire
+    'photo_consent',     -- may we photograph you in the building
+    'guardian_consent',  -- an adult agreeing on behalf of a minor
+    'contract'           -- a signed membership agreement
+  )),
+
+  title text not null check (btrim(title) <> ''),
+  -- The words themselves, as they stood. Immutable once signed — see the
+  -- trigger at the foot of this section.
+  body text not null check (btrim(body) <> ''),
+  version integer not null check (version >= 1),
+
+  -- Whether this is the version being handed out now. At most one live version
+  -- per kind per gym, which the partial index below guarantees; retiring one
+  -- without publishing a replacement is allowed, and means the gym has stopped
+  -- asking for that agreement.
+  active boolean not null default true,
+  -- Required of a NEW member, as opposed to offered. Photo consent is the one
+  -- that is usually not; the waiver always is. Nullable would make "we have not
+  -- decided whether this is required" a state, and it is not one — an agreement
+  -- either gates joining or it does not.
+  required boolean not null default true,
+
+  created_at timestamptz not null default now(),
+  created_by uuid references public.profiles(id) on delete set null
+);
+
+create unique index if not exists gym_agreements_version_uq
+  on public.gym_agreements (tenant_id, kind, version);
+
+create unique index if not exists gym_agreements_one_live
+  on public.gym_agreements (tenant_id, kind)
+  where active;
+
+create index if not exists idx_gym_agreements_tenant
+  on public.gym_agreements (tenant_id, kind, version desc);
+
+comment on table public.gym_agreements is
+  'One version of one thing this gym asks people to agree to. The body is immutable once anybody has signed it — editing publishes a new version and the old one stays, still pointed at by the signatures it collected, because the question in a dispute is what THIS person agreed to on THAT date.';
+
+-- ── 2. who signed which version, and when ───────────────────────────────────
+
+create table if not exists public.gym_agreement_signatures (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+
+  -- No cascade to the agreement, and no cascade from the member either. This is
+  -- evidence: a signature that vanishes when somebody tidies up the agreement
+  -- list, or when a member is erased, is evidence the gym is required to hold
+  -- and has destroyed. `restrict` on the agreement means the version cannot be
+  -- deleted while a signature points at it — retire it instead.
+  agreement_id uuid not null references public.gym_agreements(id) on delete restrict,
+  member_id uuid references public.profiles(id) on delete set null,
+
+  -- What they typed, kept independently of `profiles.full_name` because that is
+  -- the point: a signature is what the person wrote at the time, and it must
+  -- survive them changing their display name or their account being erased.
+  -- The name on a waiver IS the waiver.
+  signed_name text not null check (btrim(signed_name) <> ''),
+  signed_at timestamptz not null default now(),
+
+  -- The version as it stood, denormalised on purpose. Reading it through the
+  -- join would give the same answer today and a different one if anybody ever
+  -- renumbers; a signature has to be legible from its own row.
+  version_signed integer not null check (version_signed >= 1),
+
+  -- Who countersigned at the desk, where somebody did. NULL for a signature
+  -- taken in the app by the member themselves.
+  witnessed_by uuid references public.profiles(id) on delete set null,
+  note text,
+
+  -- For a guardian consent: who the adult was. NULL on every other kind.
+  guardian_name text,
+  guardian_relationship text
+);
+
+-- One live signature per person per agreement version. Signing again after a
+-- new version is published is a NEW row against the NEW version, which is
+-- exactly what a re-consent is.
+create unique index if not exists gym_agreement_signatures_uq
+  on public.gym_agreement_signatures (agreement_id, member_id)
+  where member_id is not null;
+
+create index if not exists idx_gym_agreement_sig_member
+  on public.gym_agreement_signatures (tenant_id, member_id, signed_at desc);
+
+comment on table public.gym_agreement_signatures is
+  'Evidence that one person agreed to one version of one document at one moment. Nothing cascades into this table: a signature must survive the agreement being retired and the member being erased, because it is precisely what a gym is required to be able to produce afterwards.';
+
+-- ── 3. the immutability rule ────────────────────────────────────────────────
+
+/**
+ * Refuse to change the words of an agreement anybody has signed.
+ *
+ * The whole value of a versioned agreement is that a signature from March
+ * points at what the document said in March. One UPDATE undoes that for every
+ * signature at once, silently, and nothing on any screen would show it — the
+ * signature row still says version 2, and version 2 now says something else.
+ *
+ * `title` and `body` are frozen; `active` and `required` are not, because
+ * retiring a version and changing whether it gates joining are decisions about
+ * the FUTURE and do not touch what anybody agreed to.
+ */
+create or replace function public.gym_agreements_freeze_signed()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if (new.body is distinct from old.body or new.title is distinct from old.title)
+     and exists (select 1 from public.gym_agreement_signatures s where s.agreement_id = old.id)
+  then
+    raise exception
+      'This version has already been signed, so its wording cannot be changed. Publish a new version instead — the signatures on this one point at what it said when they were given.'
+      using errcode = 'P0001';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.gym_agreements_freeze_signed() from public, anon, authenticated;
+
+drop trigger if exists trg_gym_agreements_freeze on public.gym_agreements;
+create trigger trg_gym_agreements_freeze
+  before update on public.gym_agreements
+  for each row execute function public.gym_agreements_freeze_signed();
+
+-- ── 4. access ───────────────────────────────────────────────────────────────
+
+alter table public.gym_agreements enable row level security;
+alter table public.gym_agreement_signatures enable row level security;
+
+drop policy if exists gym_agreements_owner on public.gym_agreements;
+create policy gym_agreements_owner on public.gym_agreements
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Anybody in the gym may READ what they are being asked to agree to. A document
+-- somebody has to sign and cannot read before signing is not consent.
+drop policy if exists gym_agreements_tenant_r on public.gym_agreements;
+create policy gym_agreements_tenant_r on public.gym_agreements
+  for select using (tenant_id = my_tenant());
+
+drop policy if exists gym_agreement_sig_owner on public.gym_agreement_signatures;
+create policy gym_agreement_sig_owner on public.gym_agreement_signatures
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- The member reads their own signatures and may add one. They may NOT change or
+-- withdraw one: there is no update and no delete policy for them, so RLS denies
+-- both. Withdrawing consent is a real right and it is a NEW record of the
+-- withdrawal, not the quiet disappearance of the record that consent was ever
+-- given — which would leave the gym unable to show what it was operating on
+-- last week.
+drop policy if exists gym_agreement_sig_own_r on public.gym_agreement_signatures;
+create policy gym_agreement_sig_own_r on public.gym_agreement_signatures
+  for select using (member_id = (select auth.uid()));
+
+drop policy if exists gym_agreement_sig_own_i on public.gym_agreement_signatures;
+create policy gym_agreement_sig_own_i on public.gym_agreement_signatures
+  for insert with check (
+    member_id = (select auth.uid())
+    and tenant_id = my_tenant()
+    and exists (select 1 from public.gym_agreements a
+                 where a.id = agreement_id and a.tenant_id = gym_agreement_signatures.tenant_id));
+
+revoke all on public.gym_agreements from anon, authenticated, public;
+grant select, insert, update, delete on public.gym_agreements to authenticated;
+grant all on public.gym_agreements to service_role;
+
+revoke all on public.gym_agreement_signatures from anon, authenticated, public;
+grant select, insert, update, delete on public.gym_agreement_signatures to authenticated;
+grant all on public.gym_agreement_signatures to service_role;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 5 · Somewhere to put a document
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- The bucket is PRIVATE and re-asserted private on every run, the same way part
+-- 91 does it: `public = false` sits in the DO UPDATE rather than only in the
+-- insert, so a bucket somebody flipped public in the dashboard is flipped back
+-- by re-running setup.sql instead of quietly staying that way.
+--
+-- The first path segment is the TENANT id, not a user id — which is the whole
+-- difference between this bucket and the other five. `injury-docs` and
+-- `coach-docs` are scoped to a person; a gym's insurance certificate belongs to
+-- the building and has to outlive whichever member of staff uploaded it.
+--
+-- 25 MB, and PDFs allowed, because the things that go in here are scans: a
+-- signed contract, an engineer's service report, an insurance schedule. Images
+-- are allowed for the photograph of the broken machine, which is the other half
+-- of the equipment record.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('gym-docs', 'gym-docs', false, 26214400,
+        array['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+-- RLS on storage.objects is enabled by Supabase itself. Asserted rather than
+-- assumed, because a policy on a table with RLS off is inert and would look
+-- exactly like a working restriction.
+do $$
+begin
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'storage' and c.relname = 'objects' and c.relrowsecurity
+  ) then
+    raise exception 'storage.objects does not have RLS enabled — the policies below would be inert.';
+  end if;
+end $$;
+
+-- Owner writes, staff read. A trainer photographing a broken rower needs to
+-- upload it, so INSERT is staff-wide; deleting a gym's insurance certificate is
+-- not, so DELETE is the owner's alone.
+drop policy if exists gymdoc_obj_insert on storage.objects;
+create policy gymdoc_obj_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'gym-docs'
+    and (storage.foldername(name))[1] = my_tenant()::text
+    and my_role() in ('trainer', 'owner')
+  );
+
+drop policy if exists gymdoc_obj_read on storage.objects;
+create policy gymdoc_obj_read on storage.objects for select to authenticated
+  using (
+    bucket_id = 'gym-docs'
+    and (storage.foldername(name))[1] = my_tenant()::text
+    and my_role() in ('trainer', 'owner')
+  );
+
+drop policy if exists gymdoc_obj_delete on storage.objects;
+create policy gymdoc_obj_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'gym-docs'
+    and is_owner_of((storage.foldername(name))[1]::uuid)
+  );
+
+-- ── 6. the index of what is in that bucket ──────────────────────────────────
+--
+-- A bucket with no table in front of it is a folder: it cannot be searched, it
+-- cannot say what a file IS, and it cannot say which machine or which member it
+-- belongs to. The rows are what make it a record.
+
+create table if not exists public.gym_documents (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+
+  -- What it is about, where it is about something. Both nullable and both
+  -- allowed at once is deliberate — an incident report can name the member and
+  -- the machine.
+  member_id uuid references public.profiles(id) on delete set null,
+  equipment_id uuid references public.gym_equipment(id) on delete set null,
+
+  kind text not null check (kind in (
+    'contract', 'insurance', 'service_report', 'certificate',
+    'incident', 'photo', 'other'
+  )),
+  title text not null check (btrim(title) <> ''),
+
+  -- The object key inside the `gym-docs` bucket, tenant-prefixed. Unique, so
+  -- two rows cannot claim one file and a delete cannot orphan the other.
+  storage_path text not null,
+  mime text,
+  size_bytes integer check (size_bytes is null or size_bytes >= 0),
+
+  -- When the thing the document is EVIDENCE of expires — an insurance schedule,
+  -- a first-aid certificate, a gas safety check. NULL means it does not expire
+  -- or nobody has said, and the screen distinguishes those by asking; it does
+  -- not invent a date.
+  expires_on date,
+  note text,
+
+  uploaded_by uuid references public.profiles(id) on delete set null,
+  uploaded_at timestamptz not null default now()
+);
+
+create unique index if not exists gym_documents_path_uq
+  on public.gym_documents (storage_path);
+create index if not exists idx_gym_documents_tenant
+  on public.gym_documents (tenant_id, uploaded_at desc);
+create index if not exists idx_gym_documents_expiry
+  on public.gym_documents (tenant_id, expires_on)
+  where expires_on is not null;
+
+comment on table public.gym_documents is
+  'The index in front of the gym-docs bucket: what each file is, what it is about, and when the thing it evidences expires. Without it the bucket is a folder — unsearchable, and unable to say which machine a service report belongs to.';
+
+alter table public.gym_documents enable row level security;
+
+drop policy if exists gym_documents_owner on public.gym_documents;
+create policy gym_documents_owner on public.gym_documents
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Staff read the index and may add to it, matching the storage policies above
+-- so that a trainer who can upload the file can also record what it is. A row
+-- with no file, or a file with no row, is the failure of letting those two
+-- rights disagree.
+drop policy if exists gym_documents_staff_r on public.gym_documents;
+create policy gym_documents_staff_r on public.gym_documents
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'));
+
+drop policy if exists gym_documents_staff_i on public.gym_documents;
+create policy gym_documents_staff_i on public.gym_documents
+  for insert with check (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'));
+
+revoke all on public.gym_documents from anon, authenticated, public;
+grant select, insert, update, delete on public.gym_documents to authenticated;
+grant all on public.gym_documents to service_role;
+
+-- ▶ a-machine-has-a-history.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The equipment register is a register. It is not a maintenance system.
+--
+-- `recordService` in src/lib/gymEquipment.ts overwrites the single
+-- `last_serviced_on` and CLEARS the note — "since whatever it said is presumably
+-- done". That one line is the whole of a gym's maintenance record, and what it
+-- means is:
+--
+--   · There is no service history. Six services in three years leave one date,
+--     and the five before it are gone. "When was this last looked at, and how
+--     often has it needed looking at" is unanswerable, which is precisely the
+--     question that tells a broken machine from a machine that keeps breaking.
+--   · There is no engineer, no cost and no findings. An insurer or an HSE
+--     inspector asking who serviced the leg press and what they found gets
+--     nothing — from a product that had the date and threw the rest away.
+--   · The one note the machine did carry — usually the description of the
+--     fault — is DELETED by the act of fixing it. So the register cannot say
+--     what was wrong with anything, ever, retrospectively.
+--
+-- And nothing anywhere records an incident, an accident, a cleaning round or an
+-- inspection. Those are not equipment-adjacent nice-to-haves in a gym: an
+-- accident book is a statutory requirement in most jurisdictions this product
+-- is sold into, and the place a gym would look for one is the machine.
+--
+-- ── One table, five kinds, and why not five tables ────────────────────────
+--
+-- A service, a repair, an inspection, a clean and an incident are the same
+-- shape — a machine, a date, a person, what they found, what it cost — and they
+-- are always read together, because the answer to "what has happened to this
+-- rower" is all five interleaved. Five tables would be five queries and one
+-- UNION on every screen that asks, and the first screen to forget one of them
+-- would show a maintenance history with the incidents missing.
+--
+-- `equipment_id` is NULLABLE, and that is what makes an incident recordable at
+-- all: somebody slipping on a wet floor is an incident with no machine in it.
+-- A gym with no accident book is not helped by one that only accepts accidents
+-- involving equipment.
+--
+-- ── The date on the machine stays ─────────────────────────────────────────
+--
+-- `gym_equipment.last_serviced_on` is not dropped and not deprecated. It is
+-- what `serviceState` computes the due date from and it is read on two screens;
+-- turning it into a derived value would mean every one of those reads becoming
+-- a join against the newest row of this table, on a screen that lists two
+-- hundred machines. It stays as the cached answer, and the log below is the
+-- evidence behind it — the same relationship `payroll_settlements` has with the
+-- sessions it stamped.
+--
+-- Additive and idempotent.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.gym_equipment_log (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+
+  -- Nullable so an incident that involved no machine can still be recorded, and
+  -- `set null` rather than cascade so retiring a machine does not delete the
+  -- record of the accident that happened on it — which is the record most
+  -- likely to be wanted after it has been taken away.
+  equipment_id uuid references public.gym_equipment(id) on delete set null,
+  -- What the machine was called at the time. Kept because of the set null
+  -- above: a maintenance history that says "somebody serviced something" is not
+  -- a maintenance history.
+  equipment_label text,
+
+  kind text not null check (kind in ('service', 'repair', 'inspection', 'clean', 'incident')),
+
+  -- The day it happened, not the day it was typed. A service recorded on
+  -- Monday for work done on Friday belongs to Friday.
+  happened_on date not null default current_date,
+
+  -- Who did it. Free text rather than a profile reference, because the answer
+  -- is usually a company — "Precor UK", "Dave at Southside Fitness" — and a
+  -- foreign key would force every external engineer to have a Repple account.
+  performed_by text,
+
+  -- What they found and what they did. This is the column `recordService`
+  -- deleted, given somewhere permanent to live.
+  findings text,
+
+  -- What it cost, in minor units, with the currency it was billed in. Both
+  -- nullable together: a service under warranty costs nothing to record and an
+  -- amount with no currency is not an amount. The constraint below is what
+  -- stops one arriving without the other.
+  cost_cents integer check (cost_cents is null or cost_cents >= 0),
+  currency text,
+
+  -- Where the paperwork is, if there is any. References the index in front of
+  -- the gym-docs bucket added in supabase/parts/185.
+  document_id uuid references public.gym_documents(id) on delete set null,
+
+  -- For an incident: whether it was reported onward, and to whom. Nullable
+  -- because most entries are not incidents; the screen asks only on that kind.
+  reported_to text,
+
+  recorded_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.gym_equipment_log drop constraint if exists gym_equipment_log_cost_has_currency;
+alter table public.gym_equipment_log add constraint gym_equipment_log_cost_has_currency
+  check ((cost_cents is null) = (currency is null));
+
+alter table public.gym_equipment_log drop constraint if exists gym_equipment_log_currency_is_iso;
+alter table public.gym_equipment_log add constraint gym_equipment_log_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+-- An entry has to be about SOMETHING. A row with no machine and no words is a
+-- form submitted empty, and it would sit in the accident book looking like a
+-- recorded incident.
+alter table public.gym_equipment_log drop constraint if exists gym_equipment_log_says_something;
+alter table public.gym_equipment_log add constraint gym_equipment_log_says_something
+  check (equipment_id is not null or (findings is not null and btrim(findings) <> ''));
+
+create index if not exists idx_gym_equipment_log_machine
+  on public.gym_equipment_log (equipment_id, happened_on desc);
+create index if not exists idx_gym_equipment_log_tenant
+  on public.gym_equipment_log (tenant_id, happened_on desc);
+
+comment on table public.gym_equipment_log is
+  'Everything that has happened to a machine, and the gym''s accident book. One table for five kinds because the answer to "what has happened to this rower" is all of them interleaved, and five tables would be one UNION that a screen eventually forgets a branch of.';
+
+alter table public.gym_equipment_log enable row level security;
+
+drop policy if exists gym_equipment_log_owner on public.gym_equipment_log;
+create policy gym_equipment_log_owner on public.gym_equipment_log
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- Staff read the history and may add to it, for the same reason part 34 lets a
+-- trainer take a machine out of service: they are the ones standing next to it
+-- when it breaks, and a log only the owner can write is a log written days
+-- later from memory or not at all.
+--
+-- No update and no delete for a trainer. An incident record somebody can edit
+-- afterwards is not an incident record.
+drop policy if exists gym_equipment_log_staff_r on public.gym_equipment_log;
+create policy gym_equipment_log_staff_r on public.gym_equipment_log
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'));
+
+drop policy if exists gym_equipment_log_staff_i on public.gym_equipment_log;
+create policy gym_equipment_log_staff_i on public.gym_equipment_log
+  for insert with check (tenant_id = my_tenant() and my_role() in ('trainer', 'owner'));
+
+revoke all on public.gym_equipment_log from anon, authenticated, public;
+grant select, insert, update, delete on public.gym_equipment_log to authenticated;
+grant all on public.gym_equipment_log to service_role;
+
+-- ── the reason a machine is out of action ───────────────────────────────────
+--
+-- `gym_equipment.note` already exists and `setStatus(..., note)` already accepts
+-- one; neither surface passes it, and both then render "no reason recorded".
+-- That is a screen fix rather than a schema one and it is made in this wave.
+--
+-- What the schema owed it is this: the note has been doubling as both the
+-- standing description of the machine AND the reason it is out of action, and
+-- `recordService` clears it on the way past. So a machine whose note says
+-- "bought second hand, serial plate missing" loses that permanently the first
+-- time anybody services it.
+alter table public.gym_equipment
+  add column if not exists out_of_service_reason text;
+alter table public.gym_equipment
+  add column if not exists out_of_service_since date;
+
+comment on column public.gym_equipment.out_of_service_reason is
+  'Why this machine is not in use, in the words of whoever took it out. Separate from `note`, which is the standing description of the machine and which recordService() clears — a reason stored there disappears the first time anybody records a service.';
+comment on column public.gym_equipment.out_of_service_since is
+  'When it went out of action. NULL on a machine in service. "How long has that rower been broken" is the question an owner actually asks, and a status column alone cannot answer it.';
+
+-- ▶ who-did-what.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Nothing records that a price changed, a payment was entered, or the whole
+-- gym was exported.
+--
+-- `gym_events` (supabase/parts/105) is the right mechanism and it carries five
+-- kinds — member-joined, trainer-joined, session-delivered, session-missed,
+-- promo-redeemed. All five are things that HAPPENED TO the gym. Not one of them
+-- is a thing somebody DID to the record.
+--
+-- So there is no answer to any of these:
+--
+--   · Who entered that payment, and when?
+--   · Who changed the Gold plan from 60 to 90, and on what date? Nothing keeps
+--     the old price. `membership_plans.price_cents` is updated in place, so a
+--     member disputing a charge and an owner reading the price book are looking
+--     at different months and cannot tell.
+--   · Who cancelled that membership? The row says `cancelled`; nothing says by
+--     whom, and the member is claiming they did not ask.
+--   · Who took a full export of every member's record off the platform?
+--     Nothing. That one is a data-protection question with a legal answer and
+--     the product cannot even say it happened.
+--   · Who reversed the payroll run?
+--
+-- And `studio-web` has no activity feed at all — the five existing kinds are
+-- read on exactly one screen, app/(owner)/ops.tsx, capped at 100 rows with no
+-- filter, date range or export.
+--
+-- ── Why this extends gym_events instead of adding an audit table ──────────
+--
+-- Part 105 makes the argument and it is the reason this part exists at all:
+-- "events are derived from the rows that already record the facts, by triggers,
+-- and NOTHING has insert rights. The log cannot drift from the data because it
+-- is written by the data."
+--
+-- An audit table the console INSERTS into has the opposite properties. It
+-- records what the client remembered to say it did, in the client's words,
+-- through the anon key — so it misses every write made from the phone, every
+-- write made in the SQL editor, and every write from a code path added next
+-- month by somebody who did not know the table existed. Worse, it is forgeable:
+-- a signed-in account with insert rights on an audit log can write whatever it
+-- likes into the record of what it did. An audit log that the audited party can
+-- write is not an audit log.
+--
+-- Triggers have none of those problems and they are already the pattern here.
+--
+-- ── The one column this needed ────────────────────────────────────────────
+--
+-- `actor_id`. `subject_id` is who an event is ABOUT — the member who joined —
+-- and for the five original kinds that is the whole story. For an action it is
+-- not: "the Gold plan was repriced" needs the plan and the person, and they are
+-- different. `auth.uid()` inside a SECURITY DEFINER trigger still returns the
+-- CALLING user, so the actor is recorded correctly without the caller being
+-- able to state it.
+--
+-- NULL where nobody was signed in — a webhook, a scheduled job, the SQL editor
+-- under the service role. Null means "not a signed-in person", which is a
+-- different and more useful sentence than naming whoever happened to own the
+-- gym.
+--
+-- ── What this still cannot do ─────────────────────────────────────────────
+--
+-- It records THAT the price changed and what it changed to. It is not a
+-- temporal table and it does not reconstruct the price book as at a date — the
+-- summary carries the before and after in words, which answers the dispute and
+-- does not answer a query. And there is no MFA and no re-auth in front of the
+-- money screens anywhere in this repo; a log says who was signed in, not who
+-- was sitting at the keyboard.
+--
+-- Additive and idempotent.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.gym_events
+  add column if not exists actor_id uuid references public.profiles(id) on delete set null;
+
+comment on column public.gym_events.actor_id is
+  'The signed-in account that DID this, as distinct from subject_id, which is who it is about. NULL where no person was signed in — a webhook, a job, the service role — which is a more useful statement than naming the owner by default.';
+
+create index if not exists gym_events_actor_idx
+  on public.gym_events (tenant_id, actor_id, created_at desc)
+  where actor_id is not null;
+
+-- The closed set, widened. Still closed, and still for the reason part 105
+-- gives: "an owner scanning a feed needs to recognise the shapes, and an open
+-- string becomes forty spellings of the same thing."
+alter table public.gym_events drop constraint if exists gym_events_kind_check;
+alter table public.gym_events add constraint gym_events_kind_check
+  check (kind in (
+    -- the five from part 105, unchanged
+    'member-joined', 'trainer-joined', 'session-delivered',
+    'session-missed', 'promo-redeemed',
+    -- money
+    'payment-recorded', 'payment-corrected', 'invoice-raised',
+    'price-changed', 'plan-retired',
+    -- the membership itself
+    'membership-cancelled', 'membership-frozen',
+    -- pay
+    'payroll-settled', 'payroll-reversed',
+    -- the building
+    'equipment-retired', 'equipment-out-of-service',
+    -- the record
+    'month-closed', 'month-reopened', 'record-exported'
+  ));
+
+-- ── one writer, now carrying the actor ──────────────────────────────────────
+--
+-- The four-argument form from part 105 is kept and delegates here, so every
+-- existing trigger keeps working unchanged and there is still exactly one place
+-- a row is inserted.
+
+create or replace function public.log_gym_event(
+  p_tenant uuid, p_kind text, p_subject uuid, p_summary text, p_actor uuid
+) returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+begin
+  -- A tenant we cannot place is not an event. Same rule as part 105: the
+  -- alternative is a row visible to nobody that still counts toward every
+  -- figure computed over the table.
+  if p_tenant is null then return; end if;
+  insert into public.gym_events (tenant_id, kind, subject_id, summary, actor_id)
+  values (p_tenant, p_kind, p_subject, p_summary, p_actor);
+exception when others then
+  -- A log that can fail a payment is worse than a gap in the log. Every caller
+  -- below is a trigger on a table whose write matters more than this one, and
+  -- that ordering is the whole reason this swallows.
+  return;
+end $fn$;
+
+revoke all on function public.log_gym_event(uuid, text, uuid, text, uuid) from public, anon, authenticated;
+
+create or replace function public.log_gym_event(
+  p_tenant uuid, p_kind text, p_subject uuid, p_summary text
+) returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+begin
+  perform public.log_gym_event(p_tenant, p_kind, p_subject, p_summary, (select auth.uid()));
+end $fn$;
+
+revoke all on function public.log_gym_event(uuid, text, uuid, text) from public, anon, authenticated;
+
+-- ── a name for a person, without a join in every trigger ────────────────────
+
+create or replace function public.gym_event_name_of(p_id uuid)
+returns text language sql stable security definer set search_path to 'public' as $fn$
+  select coalesce(nullif(btrim(full_name), ''), 'someone') from public.profiles where id = p_id;
+$fn$;
+
+revoke all on function public.gym_event_name_of(uuid) from public, anon, authenticated;
+
+-- ── money ───────────────────────────────────────────────────────────────────
+
+create or replace function public.gym_event_payment()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+declare v_who text;
+begin
+  v_who := case when new.member_id is null then 'nobody named'
+                else public.gym_event_name_of(new.member_id) end;
+  if new.reverses_payment_id is not null then
+    perform public.log_gym_event(
+      new.tenant_id, 'payment-corrected', new.member_id,
+      -- The amount is written into the sentence WITH its currency, because a
+      -- log line reading "a correction of 5000" is read in whatever money the
+      -- reader is thinking in. Same rule as every screen in this product.
+      format('%s of %s %s against %s', initcap(new.kind), new.currency,
+             to_char(abs(new.amount_cents) / 100.0, 'FM999G999G990D00'), v_who));
+  else
+    perform public.log_gym_event(
+      new.tenant_id, 'payment-recorded', new.member_id,
+      format('%s %s taken from %s by %s', new.currency,
+             to_char(new.amount_cents / 100.0, 'FM999G999G990D00'), v_who,
+             replace(new.method, '_', ' ')));
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_payment on public.gym_payments;
+create trigger trg_gym_event_payment
+  after insert on public.gym_payments
+  for each row execute function public.gym_event_payment();
+
+create or replace function public.gym_event_invoice()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  perform public.log_gym_event(
+    new.tenant_id, 'invoice-raised', new.member_id,
+    format('Invoice %s for %s %s to %s',
+           coalesce(new.number::text, '(unnumbered)'), new.currency,
+           to_char(new.amount_cents / 100.0, 'FM999G999G990D00'),
+           public.gym_event_name_of(new.member_id)));
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_invoice on public.gym_invoices;
+create trigger trg_gym_event_invoice
+  after insert on public.gym_invoices
+  for each row execute function public.gym_event_invoice();
+
+-- The price book. This is the one the product actively cannot answer today:
+-- `price_cents` is updated in place and the old value is gone, so a member
+-- disputing a charge and the owner reading the price book are looking at
+-- different months with no way to tell.
+create or replace function public.gym_event_plan_changed()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  if new.price_cents is distinct from old.price_cents then
+    perform public.log_gym_event(
+      new.tenant_id, 'price-changed', null,
+      format('%s repriced from %s %s to %s %s', new.name,
+             old.currency, to_char(old.price_cents / 100.0, 'FM999G999G990D00'),
+             new.currency, to_char(new.price_cents / 100.0, 'FM999G999G990D00')));
+  end if;
+  if old.active and not new.active then
+    perform public.log_gym_event(new.tenant_id, 'plan-retired', null,
+      format('%s taken off the price book', new.name));
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_plan_changed on public.membership_plans;
+create trigger trg_gym_event_plan_changed
+  after update on public.membership_plans
+  for each row execute function public.gym_event_plan_changed();
+
+-- ── the membership ──────────────────────────────────────────────────────────
+
+create or replace function public.gym_event_membership_status()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  if new.status is not distinct from old.status then return new; end if;
+  if new.status = 'cancelled' then
+    perform public.log_gym_event(new.tenant_id, 'membership-cancelled', new.member_id,
+      format('%s''s membership cancelled', public.gym_event_name_of(new.member_id)));
+  elsif new.status = 'frozen' then
+    perform public.log_gym_event(new.tenant_id, 'membership-frozen', new.member_id,
+      format('%s''s membership frozen', public.gym_event_name_of(new.member_id)));
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_membership_status on public.memberships;
+create trigger trg_gym_event_membership_status
+  after update on public.memberships
+  for each row execute function public.gym_event_membership_status();
+
+-- ── pay ─────────────────────────────────────────────────────────────────────
+
+create or replace function public.gym_event_settlement()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  if tg_op = 'INSERT' then
+    perform public.log_gym_event(new.tenant_id, 'payroll-settled', new.trainer_id,
+      format('%s %s settled to %s for %s session(s)', new.currency,
+             to_char(new.amount_cents / 100.0, 'FM999G999G990D00'),
+             public.gym_event_name_of(new.trainer_id), new.sessions_count));
+    return new;
+  end if;
+  if new.reversed_at is not null and old.reversed_at is null then
+    perform public.log_gym_event(new.tenant_id, 'payroll-reversed', new.trainer_id,
+      format('Settlement of %s %s to %s reversed — %s', new.currency,
+             to_char(new.amount_cents / 100.0, 'FM999G999G990D00'),
+             public.gym_event_name_of(new.trainer_id), new.reverse_reason));
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_settlement on public.payroll_settlements;
+create trigger trg_gym_event_settlement
+  after insert or update on public.payroll_settlements
+  for each row execute function public.gym_event_settlement();
+
+-- ── the building ────────────────────────────────────────────────────────────
+
+create or replace function public.gym_event_equipment_status()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  if new.status is not distinct from old.status then return new; end if;
+  if new.status = 'retired' then
+    perform public.log_gym_event(new.tenant_id, 'equipment-retired', null,
+      format('%s retired from the register', new.name));
+  elsif new.status = 'out_of_service' then
+    perform public.log_gym_event(new.tenant_id, 'equipment-out-of-service', null,
+      format('%s taken out of service%s', new.name,
+             case when btrim(coalesce(new.out_of_service_reason, '')) = '' then ''
+                  else ' — ' || new.out_of_service_reason end));
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_equipment_status on public.gym_equipment;
+create trigger trg_gym_event_equipment_status
+  after update on public.gym_equipment
+  for each row execute function public.gym_event_equipment_status();
+
+-- ── the record ──────────────────────────────────────────────────────────────
+
+create or replace function public.gym_event_month_close()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  if tg_op = 'INSERT' then
+    perform public.log_gym_event(new.tenant_id, 'month-closed', null,
+      format('%s closed', new.month_key));
+    return new;
+  end if;
+  if new.reopened_at is not null and old.reopened_at is null then
+    perform public.log_gym_event(new.tenant_id, 'month-reopened', null,
+      format('%s reopened — %s', new.month_key, new.reopen_reason));
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_month_close on public.gym_month_closes;
+create trigger trg_gym_event_month_close
+  after insert or update on public.gym_month_closes
+  for each row execute function public.gym_event_month_close();
+
+-- ── an export leaving the building ──────────────────────────────────────────
+--
+-- The one action in this list that writes no row anywhere, so there is nothing
+-- for a trigger to hang off. `/export` produces a file in the browser and the
+-- database never hears about it — which means the product cannot say that every
+-- member's record was taken off it, by whom, or when. That is not an operational
+-- gap; it is the question a data-protection officer asks first.
+--
+-- So the export screen records the run, and the trigger logs it. This is the
+-- one place the client states what it did rather than being observed doing it,
+-- and that is unavoidable: nothing else can see a download. The row is
+-- deliberately narrow — what was exported, how many rows, and who — so there is
+-- nothing in it worth forging.
+
+create table if not exists public.gym_export_runs (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  -- 'gym' for the whole-record bundle, 'member' for one person's file. Kept
+  -- apart because they answer different questions: the first is a backup, the
+  -- second is usually a subject-access request and has a deadline attached.
+  scope text not null check (scope in ('gym', 'member')),
+  -- Who the export was ABOUT, on a member export. NULL on a whole-gym one.
+  member_id uuid references public.profiles(id) on delete set null,
+  -- The entity names that went into the file, so a later reader knows what the
+  -- bundle contained without having to still have the bundle.
+  parts text[],
+  rows_exported integer check (rows_exported is null or rows_exported >= 0),
+  taken_at timestamptz not null default now(),
+  taken_by uuid references public.profiles(id) on delete set null,
+  note text
+);
+
+create index if not exists idx_gym_export_runs_tenant
+  on public.gym_export_runs (tenant_id, taken_at desc);
+
+comment on table public.gym_export_runs is
+  'One row per export taken off the platform: the whole gym, or one member''s record. Written by the export screen because nothing else can observe a download, and deliberately narrow enough that there is nothing in it worth forging.';
+
+alter table public.gym_export_runs enable row level security;
+
+drop policy if exists gym_export_runs_owner on public.gym_export_runs;
+create policy gym_export_runs_owner on public.gym_export_runs
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+revoke all on public.gym_export_runs from anon, authenticated, public;
+grant select, insert on public.gym_export_runs to authenticated;
+grant all on public.gym_export_runs to service_role;
+
+-- No UPDATE and no DELETE for anybody. A record of an export that the exporter
+-- can then remove is worth less than no record at all, because its absence
+-- would be read as "no export was taken".
+
+create or replace function public.gym_event_export()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  perform public.log_gym_event(new.tenant_id, 'record-exported', new.member_id,
+    case when new.scope = 'member'
+      then format('%s''s record exported', public.gym_event_name_of(new.member_id))
+      else format('The gym''s record exported — %s row(s)', coalesce(new.rows_exported::text, 'an unstated number of')) end);
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_export on public.gym_export_runs;
+create trigger trg_gym_event_export
+  after insert on public.gym_export_runs
+  for each row execute function public.gym_event_export();
+
+-- ▶ a-date-the-coach-typed-and-the-chase-after-it.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- "Who owes me money" was the most common unanswered question in this app.
+--
+-- src/lib/coachInvoice.ts said so in its own type: `InvoiceKind` is
+-- 'received' | 'requested' and the header explained that there was no third
+-- value because 'overdue' "would require a due date this app does not collect
+-- and a clock it does not run".
+--
+-- Half of that was a real refusal and half of it was a missing column.
+--
+-- ── What this app must still never do ─────────────────────────────────────
+--
+-- Invent a payment term. Thirty days is a convention in one trade in one
+-- country; a personal trainer in Dubai settling weekly in cash has no such
+-- term and never agreed to one. A default of any number of days would print a
+-- deadline on a document under somebody's name that they did not choose.
+--
+-- Calculate interest, a statutory late fee, or anything else that turns
+-- lateness into money. Those turn on jurisdiction, on registration status and
+-- on what the parties actually agreed, none of which this app knows — the same
+-- argument part 138 makes about tax, and it holds here unchanged.
+--
+-- Claim a client has failed to pay. Nothing tells this app when a bank
+-- transfer lands or when cash changes hands. An invoice is outstanding here
+-- because the COACH has not said otherwise, and `AGEING_IS_YOUR_OWN_RECORD` in
+-- src/lib/coachInvoice.ts says exactly that on the screen.
+--
+-- ── What it may do, because the coach did it ──────────────────────────────
+--
+-- A due date the coach TYPES is not this app inventing a term: it is the coach
+-- recording one they already have with that client. Collecting it is not
+-- inventing it. And once it is collected, "past the date you typed" is
+-- arithmetic against the device's own clock rather than a judgement.
+--
+-- So this part adds three columns and one function:
+--
+--   due_on          the date the coach typed, or null because they did not
+--   reminded_at     when they last chased it
+--   reminder_count  how many times they have
+--
+--   remind_coach_invoice(p_id)  records one chase and returns the row
+--
+-- ── Why due_on is immutable and reminder_count is not ─────────────────────
+--
+-- `due_on` is PRINTED ON THE DOCUMENT. Part 138's whole design is that an
+-- issued invoice cannot be edited once somebody is holding a copy of it, and a
+-- due date that could be moved afterwards would let a coach change the terms of
+-- a document already in a client's inbox — which is worse than editing an
+-- amount, because nobody re-reads a date they have already noted. It joins the
+-- list in the immutable guard.
+--
+-- `reminded_at` and `reminder_count` are NOT on the document. They are the
+-- coach's own record of an act they performed, they change after issue by
+-- definition, and they are the two fields the guard has to let through. It lets
+-- them through NARROWLY: the count may only ever go up by exactly one, so a
+-- future writer cannot reset a coach's chasing history to zero.
+--
+-- ── Why chasing is a function and not an UPDATE grant ─────────────────────
+--
+-- `coach_invoices` grants SELECT and nothing else, and part 138 says why: a
+-- write grant on this table is a write grant on a financial document. Adding
+-- one for two harmless columns would open UPDATE on the row, and RLS narrows a
+-- grant rather than creating one — the guard would then be the only thing
+-- standing between an issued amount and anybody who wanted to edit it. So the
+-- grant stays revoked and the chase goes through a SECURITY DEFINER function
+-- that touches exactly two columns.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ── The three columns ─────────────────────────────────────────────────────
+
+alter table public.coach_invoices add column if not exists due_on date;
+alter table public.coach_invoices add column if not exists reminded_at timestamptz;
+alter table public.coach_invoices add column if not exists reminder_count integer not null default 0;
+
+-- Nullable, with NO default. Null is not "not due" and it is not thirty days:
+-- it is the coach not having stated one, and `invoiceAge()` reports it as its
+-- own state rather than folding it in with the invoices that are inside their
+-- terms. Every invoice issued before this part carries null, and every one of
+-- them must read as "nobody said when", not as "comfortably within terms".
+alter table public.coach_invoices drop constraint if exists coach_invoices_due_after_issue;
+alter table public.coach_invoices add constraint coach_invoices_due_after_issue
+  check (due_on is null or due_on >= issued_on);
+
+alter table public.coach_invoices drop constraint if exists coach_invoices_reminders_nonneg;
+alter table public.coach_invoices add constraint coach_invoices_reminders_nonneg
+  check (reminder_count >= 0 and (reminder_count = 0) = (reminded_at is null));
+
+comment on column public.coach_invoices.due_on is
+  'The day the ISSUER said they expect to be paid by, typed by them. Nullable and undefaulted: null means they did not state one, never thirty days and never "not due". No interest and no late fee is calculated anywhere from it.';
+comment on column public.coach_invoices.reminded_at is
+  'When the coach last chased this one. Not printed on the document — it is their own record of an act they performed.';
+comment on column public.coach_invoices.reminder_count is
+  'How many times the coach has chased. Only ever increases, one at a time, through remind_coach_invoice().';
+
+-- The chasing list is read "oldest due first, still outstanding". Partial on
+-- due_on because an invoice with no due date is on no ageing list at all, so
+-- indexing the nulls would be indexing the rows this query never wants.
+create index if not exists coach_invoices_due_idx
+  on public.coach_invoices (coach_id, due_on)
+  where due_on is not null and voided_at is null;
+
+-- ── The guard, widened by exactly two columns ─────────────────────────────
+--
+-- Replaced rather than extended in place: part 138 lists every immutable column
+-- by name, and a guard that omitted `due_on` would let the one new
+-- document-bearing field through. `create or replace` on the same signature, so
+-- the trigger created in 138 keeps pointing at it.
+create or replace function public.coach_invoices_immutable_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.id is distinct from old.id
+     or new.coach_id is distinct from old.coach_id
+     or new.seq is distinct from old.seq
+     or new.client_id is distinct from old.client_id
+     or new.bill_to is distinct from old.bill_to
+     or new.description is distinct from old.description
+     or new.amount_cents is distinct from old.amount_cents
+     or new.currency is distinct from old.currency
+     or new.kind is distinct from old.kind
+     or new.issued_on is distinct from old.issued_on
+     -- On the list because it is on the DOCUMENT. A due date that could move
+     -- after issue is a term changed under somebody who has already read it.
+     or new.due_on is distinct from old.due_on
+     or new.note is distinct from old.note
+     or new.created_at is distinct from old.created_at then
+    raise exception 'an issued invoice cannot be edited — void it and issue another';
+  end if;
+
+  -- The chase columns are the only two an update may move, and they may only
+  -- move forward. `+ 1` rather than `>=` so nothing can jump the count to a
+  -- number no sequence of taps produced, and nothing can reset it to zero.
+  if new.reminder_count is distinct from old.reminder_count
+     and new.reminder_count is distinct from old.reminder_count + 1 then
+    raise exception 'a reminder count moves up by one at a time';
+  end if;
+  if new.reminder_count = old.reminder_count
+     and new.reminded_at is distinct from old.reminded_at then
+    raise exception 'the last-chased time only changes when a chase is recorded';
+  end if;
+
+  -- One way only. Un-voiding would put a number back into circulation that the
+  -- coach has already told somebody was cancelled.
+  if old.voided_at is not null then
+    raise exception 'that invoice is already voided';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.coach_invoices_immutable_guard() from public, anon, authenticated;
+
+-- ── Issuing, now with the date on it ──────────────────────────────────────
+--
+-- The old eight-argument signature is DROPPED rather than left beside the new
+-- one. `create or replace` with a different argument list creates an OVERLOAD,
+-- and PostgREST resolving `issue_coach_invoice` against two candidates with
+-- compatible defaults is an ambiguity that surfaces as a 300 at the moment a
+-- coach taps Issue. Dropping first is what makes exactly one function exist.
+drop function if exists public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text);
+
+create or replace function public.issue_coach_invoice(
+  p_bill_to      text,
+  p_description  text,
+  p_amount_cents bigint,
+  p_issued_on    date,
+  p_kind         text,
+  p_client_id    uuid default null,
+  p_currency     text default null,
+  p_note         text default null,
+  p_due_on       date default null
+)
+returns public.coach_invoices
+language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  ccy text;
+  n   integer;
+  out_row public.coach_invoices;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  if not exists (select 1 from public.trainers t where t.id = uid) then
+    raise exception 'no trainer profile for this account';
+  end if;
+
+  if p_bill_to is null or btrim(p_bill_to) = '' then
+    raise exception 'an invoice has to say who it is for';
+  end if;
+  if p_description is null or btrim(p_description) = '' then
+    raise exception 'an invoice has to say what it is for';
+  end if;
+  if p_amount_cents is null or p_amount_cents <= 0 then
+    raise exception 'an invoice for nothing is not an invoice';
+  end if;
+  if p_amount_cents >= 100000000000 then
+    raise exception 'that amount is too large';
+  end if;
+  if p_kind is null or p_kind not in ('received', 'requested') then
+    raise exception 'say whether this records money received or money requested';
+  end if;
+  if p_issued_on is null then
+    raise exception 'an invoice has to carry the date it was issued';
+  end if;
+  if p_issued_on > current_date + 1 then
+    raise exception 'an invoice cannot be dated in the future';
+  end if;
+
+  -- Refused, not corrected. A document that says it fell due before it was
+  -- written is not one anybody can act on, and silently swapping the two dates
+  -- would print terms the coach did not type. There is deliberately no upper
+  -- bound: a coach settling annually with a corporate client is ordinary.
+  if p_due_on is not null and p_due_on < p_issued_on then
+    raise exception 'an invoice cannot fall due before it is issued';
+  end if;
+
+  if p_client_id is not null and not exists (
+    select 1 from public.clients c where c.id = p_client_id and c.trainer_id = uid
+  ) then
+    raise exception 'that client is not one of yours';
+  end if;
+
+  ccy := nullif(btrim(upper(coalesce(p_currency, ''))), '');
+  if ccy is null then
+    select case when count(distinct upper(k.currency)) = 1 then max(upper(k.currency)) end
+      into ccy
+    from public.trainer_packages k
+    where k.trainer_id = uid and k.currency is not null and btrim(k.currency) <> '';
+  end if;
+  if ccy is null then
+    select upper(btrim(t.currency)) into ccy
+    from public.trainers tr
+    join public.tenants t on t.id = tr.tenant_id
+    where tr.id = uid and t.currency is not null and btrim(t.currency) <> '';
+  end if;
+  if ccy is null then
+    raise exception 'no currency has been set, so there is nothing to price this in';
+  end if;
+  if ccy !~ '^[A-Z]{3,4}$' then
+    raise exception 'currency must be a three-letter code';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 138));
+
+  select coalesce(max(i.seq), 0) + 1 into n
+  from public.coach_invoices i
+  where i.coach_id = uid;
+
+  insert into public.coach_invoices
+    (coach_id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, note)
+  values
+    (uid, n, p_client_id, btrim(p_bill_to), btrim(p_description), p_amount_cents, ccy, p_kind,
+     p_issued_on, p_due_on, nullif(btrim(coalesce(p_note, '')), ''))
+  returning * into out_row;
+
+  return out_row;
+end $$;
+
+-- ── Chasing ──────────────────────────────────────────────────────────────
+--
+-- Records that the coach chased. It does NOT send anything: the notification to
+-- the client is written by src/ui/coachInvoices.ts through notify_users(), the
+-- same path the original issue notification takes, and the document itself
+-- still leaves the phone through the share sheet because `coach_invoices` is
+-- readable by the issuing coach alone.
+--
+-- Refuses a voided invoice and refuses one the coach stated was received. Both
+-- would be a reminder about money that is not outstanding, sent to a person who
+-- has already paid it — which is the single worst message this feature can
+-- produce and the reason it is refused in the database as well as on screen.
+--
+-- There is no cooldown. How often a self-employed person chases their own
+-- customer is their decision; what the app owes them is the COUNT, so they can
+-- see they have already sent four. src/lib/nudge.ts's thirty-day floor is about
+-- the app nagging a client on the coach's behalf and is a different thing.
+create or replace function public.remind_coach_invoice(p_id uuid)
+returns public.coach_invoices
+language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  out_row public.coach_invoices;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+
+  update public.coach_invoices i
+     set reminded_at = now(), reminder_count = i.reminder_count + 1
+   where i.id = p_id
+     and i.coach_id = uid
+     and i.voided_at is null
+     and i.kind = 'requested'
+  returning * into out_row;
+
+  -- Zero rows updated is not success. PostgREST reports no error for a WHERE
+  -- that matched nothing, so the four reasons this can match nothing — not
+  -- yours, no such id, voided, or already stated received — have to be turned
+  -- into a message here rather than read as a chase that went out.
+  if out_row.id is null then
+    raise exception 'nothing of yours to chase with that id — it may be voided, or you may have stated it was already received';
+  end if;
+
+  return out_row;
+end $$;
+
+revoke all on function public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text, date) from public, anon;
+revoke all on function public.remind_coach_invoice(uuid) from public, anon;
+grant execute on function public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text, date) to authenticated;
+grant execute on function public.remind_coach_invoice(uuid) to authenticated;
+
+-- ▶ a-fee-that-outlives-the-coaching.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A statement that changes after the fact is worse than no statement.
+--
+-- `LATE_FEES_ONLY_CURRENT_CLIENTS` in src/lib/coachStatement.ts describes this
+-- and calls it a permission rather than a gap:
+--
+--     Only fees recorded against clients you are still coaching are on here. A
+--     fee recorded against somebody whose coaching has since ended is no longer
+--     readable by this app under your account, so it is missing from this
+--     section — in this period and in every earlier one.
+--
+-- It was right about the mechanism and too generous about the consequence.
+-- `charges_trainer_rw` (part 142) is
+--
+--     exists (select 1 from clients c
+--              where c.id = charges.client_id and c.trainer_id = auth.uid())
+--
+-- — the LIVE coaching relationship, not a coach recorded on the row. Ending
+-- coaching sets `clients.trainer_id` to null (src/lib/endCoaching.ts), so from
+-- that moment the fee is invisible to the person who recorded it. Nine of the
+-- ten client rows in the live database already have a null trainer.
+--
+-- That is not a section that is short. It is a RETROACTIVE EDIT of every past
+-- period: last year's statement, already printed and already handed to an
+-- accountant, cannot be reproduced from this app, and the second copy differs
+-- from the first with nothing on either to say which is which. A financial
+-- summary that quietly changes when an unrelated relationship ends is a
+-- correctness bug wearing an RLS costume.
+--
+-- ── What fixes it, and what does not ─────────────────────────────────────
+--
+-- Not a wider policy on its own. Widening `charges_trainer_rw` to "any client
+-- who was ever mine" is not expressible — nothing records that they were — and
+-- widening it to the tenant would show a coach their colleagues' fees.
+--
+-- The fix is a SNAPSHOT: who the fee was recorded by, written onto the row at
+-- the moment it is raised, exactly as part 126 already snapshots the CURRENCY
+-- onto the same row and for the same reason. "A fee raised last March was
+-- raised in last March's money" is the same argument as "a fee raised last
+-- March was raised by last March's coach".
+--
+-- ── Why a trigger and not an edit to cancel_my_session ───────────────────
+--
+-- `cancel_my_session` (part 126) is the only writer of `charges` today, and
+-- copying its hundred lines here to add one column would leave two versions of
+-- a billing function in this repository, differing by a line, for the next
+-- person to pick the wrong one out of. A BEFORE INSERT trigger fills the column
+-- for that writer and for every writer added later — including the ones added
+-- by somebody who has not read this file, which is the case that matters.
+--
+-- It fills from the SESSION's trainer where there is a session, and falls back
+-- to the client's current coach where there is not. The session is the better
+-- source: it is what the fee is actually about, and it is already a snapshot of
+-- who was going to deliver it.
+--
+-- ── Why the columns are then frozen ──────────────────────────────────────
+--
+-- The read policy below is widened to `coach_id = auth.uid()`. Without a guard,
+-- a coach holding a row by that arm could UPDATE its `client_id` to a stranger
+-- — and `charges_client_r` publishes a charge to the person named on it, so
+-- that stranger would be shown a debt that had been invented for them. The two
+-- identity columns are therefore immutable, which they were always meant to be:
+-- a fee is a record of something that happened, and who it happened to is not
+-- an editable field.
+--
+-- ── What this cannot recover ─────────────────────────────────────────────
+--
+-- The backfill can only reach fees whose client is STILL with the coach who
+-- recorded them, because that relationship is the only record that the pair
+-- ever existed. A fee recorded against somebody who has already moved on is
+-- unrecoverable, and it stays unreadable. `LATE_FEES_ONLY_CURRENT_CLIENTS` is
+-- rewritten to say exactly that rather than the wider claim it made before —
+-- the honest sentence is narrower, and it now has a date on it.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ── 1. The column ────────────────────────────────────────────────────────
+
+alter table public.charges
+  add column if not exists coach_id uuid references public.profiles(id) on delete set null;
+
+comment on column public.charges.coach_id is
+  'Who recorded this fee, snapshotted when it was raised. NOT a join to the live coaching relationship — that is exactly what made a past period''s statement change when coaching ended. NULL on rows raised before part 169 whose client had already moved on, which is unrecoverable.';
+
+create index if not exists charges_coach_created_idx
+  on public.charges (coach_id, created_at desc)
+  where coach_id is not null;
+
+-- Backfill as far as the evidence goes, and no further.
+--
+-- The session's trainer first, because that is what the fee is about and it
+-- survives the client leaving. `clients.trainer_id` second, which only reaches
+-- pairs still coaching together. A fee whose session is gone AND whose client
+-- has moved on stays null: there is nowhere left that records who raised it,
+-- and a guess would put somebody else's fee on a coach's statement.
+update public.charges c
+   set coach_id = s.trainer_id
+  from public.sessions s
+ where s.id = c.session_id
+   and c.coach_id is null
+   and s.trainer_id is not null;
+
+update public.charges c
+   set coach_id = cl.trainer_id
+  from public.clients cl
+ where cl.id = c.client_id
+   and c.coach_id is null
+   and cl.trainer_id is not null;
+
+-- ── 2. The stamp ─────────────────────────────────────────────────────────
+
+create or replace function public.charges_stamp_coach()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  -- Only ever fills a hole. A caller that states a coach is taken at its word;
+  -- the INSERT policy below is what stops that being somebody else's id.
+  if new.coach_id is null then
+    if new.session_id is not null then
+      select s.trainer_id into new.coach_id from public.sessions s where s.id = new.session_id;
+    end if;
+    if new.coach_id is null and new.client_id is not null then
+      select cl.trainer_id into new.coach_id from public.clients cl where cl.id = new.client_id;
+    end if;
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.charges_stamp_coach() from public, anon, authenticated;
+
+drop trigger if exists charges_stamp_coach_ins on public.charges;
+create trigger charges_stamp_coach_ins
+  before insert on public.charges
+  for each row execute function public.charges_stamp_coach();
+
+-- ── 3. The two columns that say who this is about ────────────────────────
+
+create or replace function public.charges_identity_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.client_id is distinct from old.client_id then
+    raise exception 'a charge cannot be moved to another person';
+  end if;
+  -- Null to a value is the backfill and the stamp; anything else is a fee
+  -- changing hands after it was raised, which is a past period being rewritten.
+  if old.coach_id is not null and new.coach_id is distinct from old.coach_id then
+    raise exception 'a charge cannot be moved to another coach';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.charges_identity_guard() from public, anon, authenticated;
+
+drop trigger if exists charges_identity on public.charges;
+create trigger charges_identity
+  before update on public.charges
+  for each row execute function public.charges_identity_guard();
+
+-- ── 4. The policies, split so a wider READ is not a wider INSERT ─────────
+--
+-- `charges_trainer_rw` was one `for all` policy, so widening its USING clause
+-- would have widened its WITH CHECK with it — and a WITH CHECK that accepts
+-- `coach_id = auth.uid()` accepts an INSERT naming any client_id at all, which
+-- `charges_client_r` would then publish to that person as a debt. Four narrow
+-- policies say four different things instead of one clause trying to.
+drop policy if exists charges_trainer_rw on public.charges;
+
+-- READ: the fees I recorded, whether or not I still coach that person. This is
+-- the whole point of the part.
+drop policy if exists charges_trainer_read on public.charges;
+create policy charges_trainer_read on public.charges
+  for select
+  to authenticated
+  using (
+    coach_id = (select auth.uid())
+    or exists (select 1 from public.clients c
+                where c.id = charges.client_id and c.trainer_id = (select auth.uid()))
+  );
+
+-- WRITE (waive, and reinstate): the same set. A coach who let somebody off
+-- before that person moved on must still be able to see that they did, and a
+-- coach settling a former client's account must still be able to forgive it.
+drop policy if exists charges_trainer_update on public.charges;
+create policy charges_trainer_update on public.charges
+  for update
+  to authenticated
+  using (
+    coach_id = (select auth.uid())
+    or exists (select 1 from public.clients c
+                where c.id = charges.client_id and c.trainer_id = (select auth.uid()))
+  )
+  with check (
+    coach_id = (select auth.uid())
+    or exists (select 1 from public.clients c
+                where c.id = charges.client_id and c.trainer_id = (select auth.uid()))
+  );
+
+-- INSERT: narrow, and deliberately narrower than the read. A fee may only be
+-- raised against somebody this coach is coaching NOW. The stamp above fills
+-- `coach_id` when it is left out; a stated one has to be the caller's own.
+drop policy if exists charges_trainer_insert on public.charges;
+create policy charges_trainer_insert on public.charges
+  for insert
+  to authenticated
+  with check (
+    exists (select 1 from public.clients c
+             where c.id = charges.client_id and c.trainer_id = (select auth.uid()))
+    and (coach_id is null or coach_id = (select auth.uid()))
+  );
+
+-- DELETE: narrow for the same reason, and rarely wanted at all — a fee that was
+-- not owed is WAIVED, which leaves the fact that it happened on the record.
+drop policy if exists charges_trainer_delete on public.charges;
+create policy charges_trainer_delete on public.charges
+  for delete
+  to authenticated
+  using (
+    exists (select 1 from public.clients c
+             where c.id = charges.client_id and c.trainer_id = (select auth.uid()))
+  );
+
+revoke all on public.charges from anon;
+
+-- ▶ the-half-of-the-book-stripe-never-saw.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Cash, a bank transfer, and the front desk.
+--
+-- Money in was read from two tables and only two: `client_purchases` and
+-- `client_subscription_payments`, both written by the stripe-webhook. So every
+-- figure on the Money screen and every section of the statement covered card
+-- payments taken through Repple, and nothing else.
+--
+-- For most self-employed coaches card is the MINORITY of income. The screen was
+-- not slightly short; it understated the business by a large fraction, said so
+-- honestly in four separate places, and a coach who reads a figure a third of
+-- what they know they earned stops opening the screen. Every one of those four
+-- caveats was about a hole that could simply be filled.
+--
+-- ── THE LINE THIS TABLE MUST NOT CROSS ───────────────────────────────────
+--
+-- This is a coach recording WHAT A CLIENT PAID THEM. It is not, and must never
+-- become, a coach recording THEIR OWN PAY.
+--
+-- The next person to read this will assume the rule behind the read-only
+-- earnings screen on the gym side applies here, because it is the same word
+-- about the same person. It does not. That rule is about A GYM PAYING AN
+-- EMPLOYED TRAINER: a payroll figure the trainer must not be able to author,
+-- because the party that owes it is the gym, and a self-authored figure there
+-- is a self-authored invoice to an employer. `settle_trainer_sessions` and
+-- everything around it stay exactly as they are.
+--
+-- A row here is the opposite direction. The money has already moved, from a
+-- client to this coach, outside this app entirely; a self-employed person is
+-- writing down a payment they have already been handed. Nobody owes anything
+-- as a result, no payroll run reads this table, no gym is invoiced by it, and
+-- nobody but the coach who wrote it can read it.
+--
+-- Three things keep it there:
+--
+--   · `coach_id` is `auth.uid()` in the INSERT policy, so a row can only ever
+--     be about the person writing it.
+--   · `client_id`, where given, must be one of that coach's own clients. A
+--     coach cannot attach a payment to a stranger's account.
+--   · A CHECK refuses `client_id = coach_id` outright. "I paid me" is the shape
+--     a payroll claim would have to take, and it is refused in the database as
+--     well as on screen (`receiptBlockers` in src/lib/coachReceipts.ts).
+--
+-- ── Why there is no client read policy ───────────────────────────────────
+--
+-- Deliberately none, and this is not an oversight to be corrected later. A
+-- receipt is the coach's own ledger line: no number was allocated, no document
+-- was produced, and nothing left the phone. The artefact for telling somebody
+-- "I have your money" already exists and is `coach_invoices` with
+-- `kind = 'received'` — numbered, printable, and carrying on its own face the
+-- statement that it is the coach's claim rather than a verified fact. Giving a
+-- client a read of this table instead would hand them an unnumbered assertion
+-- with no document behind it, and would make a private bookkeeping note into a
+-- claim about them that they cannot get a copy of.
+--
+-- ── Why DELETE is granted here and refused on coach_invoices ─────────────
+--
+-- Part 138 refuses to let an invoice be deleted or edited, and the reason is
+-- that somebody else is holding a copy of it: a hole in a sequence is a
+-- question the coach has to answer later, and a reused number is worse. None of
+-- that is true here. There is no sequence, no document, and no second copy — a
+-- receipt exists solely to make the coach's own Money screen true, and a
+-- mistyped line in a private ledger should be removable by the person who
+-- typed it. UPDATE is refused anyway: correcting a payment is deleting the
+-- wrong line and writing the right one, which leaves no half-edited row whose
+-- amount and whose date came from two different intentions.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.coach_receipts (
+  id          uuid        primary key default gen_random_uuid(),
+  coach_id    uuid        not null references public.trainers(id) on delete cascade,
+  -- The client's account where they have one. Nullable on purpose and null is
+  -- the ORDINARY case here: the people who pay a coach in cash are mostly the
+  -- ones who were never given an account. ON DELETE SET NULL, because somebody
+  -- closing their account does not erase the coach's record of being paid.
+  client_id   uuid        references public.clients(id) on delete set null,
+  -- The name the coach typed, snapshotted rather than joined — the same
+  -- argument part 138 makes about `bill_to`. A person who changes their name
+  -- later has not changed who handed over this money.
+  paid_by     text        not null check (btrim(paid_by) <> '' and length(paid_by) <= 200),
+  -- Minor units, matching client_purchases.amount_cents, coach_invoices and
+  -- trainer_packages, so nothing between this table and the rest of the app's
+  -- money ever has to be converted. bigint for the same reason they are: a
+  -- minor-unit amount in a large-denomination currency passes 2^31 sooner than
+  -- anyone expects.
+  amount_cents bigint     not null check (amount_cents > 0 and amount_cents < 100000000000),
+  -- NOT NULL and no default. tenants.currency is nullable on purpose (part 99)
+  -- and null there means "this gym has not told us", so a payment simply cannot
+  -- be recorded until somebody states the currency. A figure with the wrong
+  -- three letters on it is a different amount of money.
+  currency    text        not null check (currency = upper(btrim(currency)) and length(currency) between 3 and 4),
+  -- How the money arrived. Deliberately no plain 'card': a card payment taken
+  -- through Repple is already in `client_purchases` and recording it here would
+  -- count it twice, while one taken on a terminal or at a front desk did not
+  -- come through this app at all and is 'card_at_gym'. The value names WHERE
+  -- the card was taken so the two cannot be confused.
+  method      text        not null check (method in ('cash', 'transfer', 'card_at_gym', 'other')),
+  -- A DATE, not a timestamp. Cash was handed over on a day, in the place both
+  -- people were standing; storing an instant would put a Monday payment on
+  -- Sunday for every coach west of Greenwich, which is the trap `splitByDay` in
+  -- src/lib/coachStatement.ts exists to document.
+  received_on date        not null,
+  note        text        check (note is null or length(note) <= 500),
+  created_at  timestamptz not null default now(),
+  -- The payroll guard, in the database as well as on the screen. A coach is not
+  -- their own client and cannot pay themselves; a row saying so is the shape a
+  -- claim about what a gym owes them would have to take.
+  constraint coach_receipts_not_self check (client_id is null or client_id <> coach_id)
+);
+
+comment on table public.coach_receipts is
+  'Payments a coach says they received OUTSIDE this app — cash, bank transfer, a card taken at a gym. The coach''s own record, readable by nobody else, never reconciled against a bank. NOT a payroll claim: a gym paying an employed trainer is a different thing and stays read-only to the trainer.';
+comment on column public.coach_receipts.method is
+  'cash | transfer | card_at_gym | other. There is no plain ''card'': a card taken through Repple is already in client_purchases and recording it here would count it twice.';
+comment on column public.coach_receipts.received_on is
+  'The day the coach says the money arrived, not the day the row was written. A coach catching up on three weeks of cash must not have all of it land in one month.';
+comment on column public.coach_receipts.currency is
+  'ISO 4217, uppercase, required. There is no default and no fallback — see tenants.currency in part 99.';
+
+-- The read is always "mine, newest first", and the statement reads a date
+-- range of it. `id` is in the index because every paged read in this app orders
+-- on a total order — two payments recorded on the same day would otherwise tie
+-- and a page boundary could drop or repeat one.
+create index if not exists coach_receipts_coach_idx
+  on public.coach_receipts (coach_id, received_on desc, id desc);
+
+-- ── Row-level security ───────────────────────────────────────────────────
+
+alter table public.coach_receipts enable row level security;
+
+drop policy if exists coach_receipts_owner_read on public.coach_receipts;
+create policy coach_receipts_owner_read on public.coach_receipts
+  for select
+  to authenticated
+  using (coach_id = (select auth.uid()));
+
+drop policy if exists coach_receipts_owner_insert on public.coach_receipts;
+create policy coach_receipts_owner_insert on public.coach_receipts
+  for insert
+  to authenticated
+  with check (
+    coach_id = (select auth.uid())
+    -- A stated client must be one of this coach's own. Without this a coach
+    -- could attach a payment to any account id they could guess, and although
+    -- nobody else can read the row, the FK would tie a stranger's account to a
+    -- financial record they never agreed to.
+    and (
+      client_id is null
+      or exists (select 1 from public.clients c
+                  where c.id = coach_receipts.client_id and c.trainer_id = (select auth.uid()))
+    )
+  );
+
+drop policy if exists coach_receipts_owner_delete on public.coach_receipts;
+create policy coach_receipts_owner_delete on public.coach_receipts
+  for delete
+  to authenticated
+  using (coach_id = (select auth.uid()));
+
+-- Named and dropped rather than merely never written, so a policy added by
+-- somebody who wanted an "edit" button cannot survive a rebuild of this file.
+-- Correcting a payment is deleting the wrong line and writing the right one;
+-- an UPDATE would leave a row whose amount and whose date came from two
+-- different intentions, and nothing on it would say so.
+drop policy if exists coach_receipts_owner_update on public.coach_receipts;
+drop policy if exists coach_receipts_client_read on public.coach_receipts;
+drop policy if exists coach_receipts_owner_of_gym_read on public.coach_receipts;
+
+-- RLS narrows a GRANT; it does not create one.
+grant select, insert, delete on public.coach_receipts to authenticated;
+revoke update on public.coach_receipts from authenticated;
+revoke all on public.coach_receipts from anon;
+
+-- ▶ a-trial-that-survives-clearing-app-data.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The trial lived in AsyncStorage, so clearing app data reset it.
+--
+-- `src/lib/trial.ts` is fourteen days from first launch, kept under one key on
+-- the device. Delete the app and reinstall it, clear its storage, or sign in on
+-- a second phone, and the trial starts again from zero. There is no
+-- account-level expiry anywhere in this product.
+--
+-- Nothing is being lost by it today, because nothing is gated: the file's own
+-- header says "non-blocking… real gating switches on once Stripe price ids
+-- exist", and no EXPO_PUBLIC_STRIPE_PRICE_* is set in any eas.json profile. It
+-- is a straightforward revenue leak on the day billing is switched on, and the
+-- fix has to be in place BEFORE that day rather than after it — a gate added
+-- later cannot tell a coach who has had six months of free trial from one who
+-- installed yesterday, because the device is the only thing that ever knew.
+--
+-- ── One column, and why it is not a "trial ends" column ──────────────────
+--
+-- `trial_started_at`, not `trial_ends_at`. The length of the trial is a
+-- PRODUCT DECISION that lives in one constant in the app (`TRIAL_DAYS`), and
+-- storing an end date would freeze whatever that constant said on the day each
+-- coach signed up — so changing fourteen days to twenty-one would apply to
+-- nobody already on one, and the two would be indistinguishable afterwards. A
+-- start date plus a constant is one fact and one rule; an end date is the
+-- answer with the rule baked in and lost.
+--
+-- ── Why it is immutable, and why that needs a trigger ────────────────────
+--
+-- `trainers_self_rw` (part 23) is `for all using (auth.uid() = id)`, so a coach
+-- can UPDATE their own row — which is right for their bio, their rate and their
+-- late-cancellation policy, and would be exactly wrong for this. A coach who
+-- can write `trial_started_at` has the same reset they had in AsyncStorage,
+-- through a different door and with fewer steps.
+--
+-- Narrowing the policy is not the fix: it would take the coach's own profile
+-- writes down with it. A BEFORE UPDATE trigger that refuses to move this one
+-- column leaves everything else exactly as it was, and refuses the write with a
+-- message rather than silently dropping it — a silent no-op is how somebody
+-- spends an afternoon wondering why a value will not save.
+--
+-- The backfill is `created_at` where the row has one and `now()` where it does
+-- not. Generous by construction: an existing coach whose row predates any
+-- created_at gets a fresh fourteen days rather than an expired trial they never
+-- knew they were on. Expiring somebody retroactively, on a trial they were
+-- never told about, is the version of this that loses a customer.
+--
+-- ── What this part does NOT do ───────────────────────────────────────────
+--
+-- It does not gate anything. No policy consults it, no function refuses because
+-- of it, and no read anywhere is narrowed by it. It records the one fact that
+-- cannot be recovered later, which is when the trial began; what to do about an
+-- expired one is a product decision that belongs with the pricing it enforces,
+-- and building the enforcement before the prices exist would mean shipping a
+-- lock with nothing behind it for a coach to buy.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role.
+-- ─────────────────────────────────────────────────────────────────────────
+
+alter table public.trainers add column if not exists trial_started_at timestamptz;
+
+comment on column public.trainers.trial_started_at is
+  'When this coach''s free trial began, on the ACCOUNT rather than on a device. Set once and immutable — see the trigger below. The trial''s LENGTH is a product constant in the app (TRIAL_DAYS), deliberately not stored here, so changing it applies to everybody rather than to nobody already on one.';
+
+do $$
+begin
+  -- `created_at` is not guaranteed to exist on every deployment of this table,
+  -- and a migration that assumes a column it did not create is a migration that
+  -- fails on the one environment nobody tested it on.
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'trainers' and column_name = 'created_at'
+  ) then
+    execute 'update public.trainers set trial_started_at = coalesce(created_at, now()) where trial_started_at is null';
+  else
+    execute 'update public.trainers set trial_started_at = now() where trial_started_at is null';
+  end if;
+end $$;
+
+-- Every trainer row created from here on starts a trial the moment the row
+-- exists, so there is no window in which an account has no start date and the
+-- app has to invent one.
+alter table public.trainers alter column trial_started_at set default now();
+
+-- ── Immutable once set ───────────────────────────────────────────────────
+--
+-- Refuses the write with a message rather than silently dropping it. A silent
+-- no-op is how somebody spends an afternoon wondering why a value will not
+-- save; a raise is how they find this comment.
+create or replace function public.trainers_trial_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if old.trial_started_at is not null
+     and new.trial_started_at is distinct from old.trial_started_at then
+    raise exception 'a trial start date cannot be changed';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.trainers_trial_guard() from public, anon, authenticated;
+
+drop trigger if exists trainers_trial_immutable on public.trainers;
+create trigger trainers_trial_immutable
+  before update on public.trainers
+  for each row execute function public.trainers_trial_guard();
+
+-- ▶ money-that-goes-back.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A refund, and a subscription that can stop today.
+--
+-- Both were refused on purpose and the refusal was written down in four places.
+-- The argument was that "a half-working refund button is worse than no refund
+-- button", and it was right about half-working: Stripe refunds are a separate
+-- API with consequences nothing in this repo modelled — partial amounts,
+-- reversing the platform's application fee, pulling money back out of a
+-- connected account that may already have paid out.
+--
+-- What the refusal cost was the coach's worst customer moment. Somebody asks
+-- for their money back and the app that took the money tells the coach to find
+-- a laptop and log into a dashboard belonging to a company their client has
+-- never heard of.
+--
+-- ── What this part adds, and what it deliberately does not ───────────────
+--
+-- Four columns and nothing else. NO function, NO policy change, and no way for
+-- an app to write any of them: the refund itself is made by
+-- supabase/functions/connect-refund, which runs as the service role, calls
+-- Stripe first, and writes these columns ONLY from Stripe's own answer.
+--
+-- That ordering is the whole design. A refund the app believes in and Stripe
+-- never made is the worst kind of wrong, because both the coach and the client
+-- are looking at it — the coach's takings drop, the client's card is not
+-- credited, and neither of them can tell which side is lying. The columns are
+-- therefore a MIRROR of Stripe, in the same sense `client_subscriptions.status`
+-- is, and the write policies below stay exactly as they were so nothing on a
+-- phone can move them.
+--
+-- ── Why a column and not a refunds table ─────────────────────────────────
+--
+-- A running total rather than a log, and this is a real trade rather than a
+-- shortcut. What every screen in this app asks is "how much of this sale still
+-- stands", which is one subtraction from one row; what a log would additionally
+-- answer is "when, and in how many goes", which nothing asks and which Stripe
+-- already holds in full. Duplicating Stripe's refund objects into a table this
+-- app would then have to keep in step is the reconciliation problem
+-- `STRIPE_AUTHORITY_NOTE` spends a paragraph refusing to take on.
+--
+-- The consequence is stated rather than hidden: `refunded_at` is the LAST
+-- refund, not the only one, and the column comment says so.
+--
+-- ── The constraint that matters ──────────────────────────────────────────
+--
+-- `refunded_cents <= amount_cents`. Stripe refuses to refund more than was
+-- charged, so this should be unreachable — and it is here because "should be
+-- unreachable" is how a takings figure goes negative and a coach reads that
+-- they earned minus four hundred pounds this month. `sumTaken` has no notion of
+-- a negative pot and no screen in this app renders one.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ── One-off sales ────────────────────────────────────────────────────────
+
+alter table public.client_purchases
+  add column if not exists refunded_cents bigint not null default 0,
+  add column if not exists refunded_at timestamptz;
+
+alter table public.client_purchases drop constraint if exists client_purchases_refund_within_charge;
+alter table public.client_purchases add constraint client_purchases_refund_within_charge
+  check (
+    refunded_cents >= 0
+    and (amount_cents is null or refunded_cents <= amount_cents)
+    -- Nought refunded and a refund time are contradictory facts about the same
+    -- row. Either the money went back or it did not.
+    and (refunded_cents = 0) = (refunded_at is null)
+  );
+
+comment on column public.client_purchases.refunded_cents is
+  'Minor units given back, as a RUNNING TOTAL across every refund on this sale. Written only by supabase/functions/connect-refund, from Stripe''s own answer, never optimistically. Zero means none, never unknown.';
+comment on column public.client_purchases.refunded_at is
+  'When the LAST refund on this sale was made — not the only one. Stripe holds the full list of refund objects; this app deliberately does not duplicate them.';
+
+-- ── Subscription renewals ────────────────────────────────────────────────
+--
+-- The same pair, because a renewal is a charge like any other and a coach
+-- refunding "last month" is refunding one of these rather than the sale that
+-- started the subscription. Ending a subscription does NOT refund anything and
+-- the two acts are kept separate everywhere — see `END_NOW_TAKES_THE_REST` in
+-- src/lib/refunds.ts, which is printed in front of the coach before they end
+-- one.
+
+alter table public.client_subscription_payments
+  add column if not exists refunded_cents bigint not null default 0,
+  add column if not exists refunded_at timestamptz;
+
+alter table public.client_subscription_payments drop constraint if exists csp_refund_within_charge;
+alter table public.client_subscription_payments add constraint csp_refund_within_charge
+  check (
+    refunded_cents >= 0
+    and (amount_cents is null or refunded_cents <= amount_cents)
+    and (refunded_cents = 0) = (refunded_at is null)
+  );
+
+comment on column public.client_subscription_payments.refunded_cents is
+  'Minor units given back on this renewal, as a running total. Written only by supabase/functions/connect-refund from Stripe''s own answer.';
+comment on column public.client_subscription_payments.refunded_at is
+  'When the last refund on this renewal was made. Stripe holds the full list.';
+
+-- No index. Both columns are read as part of the row they are on, never
+-- filtered or ordered by — a refunded sale is still listed beside every other
+-- sale, marked, because a row that disappeared when it was refunded is a coach
+-- looking for money they gave back and finding nothing at all.
+
+-- ▶ a-standing-appointment-costs-a-credit.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The coach's most valuable client is the one whose money the app refused to
+-- track.
+--
+-- A one-off booking draws a credit off a session pack. A STANDING appointment
+-- does not, and `RECURRING_CREDIT_NOTE` in src/lib/recurring.ts says so on both
+-- screens that render it: "It doesn't draw credits from a session pack in
+-- advance — your coach settles what's owed with you."
+--
+-- So a client on a ten-pack with a standing Tuesday 6:30 consumes zero credits,
+-- forever. The pack balance on the coach's Payments screen is wrong, the
+-- run-out alert never fires, and the renewal conversation — the single most
+-- valuable moment in a coaching relationship — never arrives.
+--
+-- ── Where the divergence actually is ─────────────────────────────────────
+--
+-- A one-off is booked by the CLIENT, on their phone, and
+-- app/(client)/calendar.tsx calls `redeemSession` immediately afterwards. A
+-- recurring occurrence is created by `_materialise_session_series` (part 135)
+-- on a cron, eight weeks ahead, with no device involved at all — so the
+-- client-side redeem simply never runs, and there was nowhere for it to run.
+--
+-- ── Why this does NOT draw at materialisation ────────────────────────────
+--
+-- Part 135's own header refuses that, and it is right. The materialiser runs 56
+-- days ahead, so drawing there would take eight weeks of credits off a pack for
+-- sessions nobody has had yet — a client would open the app and find their
+-- ten-pack empty in the first fortnight — and ending the series would then have
+-- to hand every one of them back, which is a refund path this product does not
+-- have.
+--
+-- It draws AT DELIVERY instead: one credit when the session is marked
+-- completed. That is the moment the thing the credit pays for has actually
+-- happened, it needs no forecast, and it needs no unwind when a series ends,
+-- because a session that never happened was never marked.
+--
+-- ── Why it is a trigger and not a line in a screen ───────────────────────
+--
+-- An outcome is written from at least three places — app/(trainer)/sessions.tsx,
+-- class-checkin.tsx, and the client's own cancellation path — and a rule about
+-- money that lives in one of three writers is a rule that is wrong in the other
+-- two the day somebody adds a fourth. The trigger covers every writer, present
+-- and future, including the ones added by somebody who has not read this file.
+--
+-- ── Why it cannot draw twice, and why it gives back ──────────────────────
+--
+-- `sessions.pack_drawn_at` is the marker. The draw happens only on a transition
+-- INTO 'completed' from something else, and only when the marker is null; the
+-- marker is set in the same statement. So re-marking a session completed, or a
+-- screen that writes the same outcome twice, draws once.
+--
+-- Marking it back OFF 'completed' RETURNS the credit. A coach who ticks the
+-- wrong client and corrects it must not leave that person a session short — and
+-- the client cannot see the correction happen, so an app that quietly kept the
+-- credit would be taking a session off somebody who never had one.
+--
+-- ── Why only recurring occurrences ───────────────────────────────────────
+--
+-- `series_id is not null` is the discriminator, and it is exact rather than
+-- convenient. A one-off booking ALREADY drew its credit at booking time, on the
+-- client's phone; drawing again at delivery would take two credits for one
+-- session, which is the same class of error as the lost update part 123 exists
+-- to prevent and is worse, because it is silent and systematic rather than a
+-- race. A session carrying a series_id was created by the materialiser and has
+-- never been through `redeem_pack_session`.
+--
+-- ── What it deliberately does not do ─────────────────────────────────────
+--
+-- It does not charge anybody, does not create a pack, and does not fail the
+-- session write when there is no pack to draw from. A client with no credits is
+-- an ordinary and common state — they may be on a membership, or paying the
+-- coach in cash — and refusing to record that a session happened because
+-- nothing was there to deduct would break attendance for everybody who is not
+-- on a pack. It draws where there is something to draw from, records that it
+-- did, and is silent otherwise.
+--
+-- auth.uid() is NOT used anywhere below. This runs inside a trigger on behalf
+-- of whoever marked the session, and the client whose pack it draws is named on
+-- the session row.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ── The marker ───────────────────────────────────────────────────────────
+
+alter table public.sessions add column if not exists pack_drawn_at timestamptz;
+alter table public.sessions add column if not exists pack_drawn_purchase_id uuid
+  references public.client_purchases(id) on delete set null;
+
+comment on column public.sessions.pack_drawn_at is
+  'When a session-pack credit was drawn for this session. NULL means none was — which includes a client on a membership, a client paying cash, and a one-off booking that drew its credit at booking time instead.';
+comment on column public.sessions.pack_drawn_purchase_id is
+  'WHICH pack the credit came off, so returning it puts it back on the same one rather than on whichever pack happens to be oldest today. ON DELETE SET NULL: a deleted purchase leaves the credit unreturnable, which is honest — there is nothing left to return it to.';
+
+create index if not exists sessions_pack_drawn_idx
+  on public.sessions (pack_drawn_purchase_id)
+  where pack_drawn_purchase_id is not null;
+
+-- ── Draw, and give back ──────────────────────────────────────────────────
+
+create or replace function public.sessions_pack_draw()
+returns trigger language plpgsql security definer set search_path = public as $fn$
+declare
+  v_id uuid;
+  v_used int;
+  n int;
+begin
+  -- Only a standing appointment. A one-off already drew its credit at booking
+  -- time and drawing again here would take two for one session.
+  if new.series_id is null then
+    return new;
+  end if;
+
+  -- ── giving it back ─────────────────────────────────────────────────────
+  --
+  -- Checked FIRST, because a correction is the case where getting it wrong
+  -- costs a client a session they never had. Off 'completed', with a credit
+  -- recorded against this session: put it back on the SAME pack it came off.
+  if old.outcome = 'completed'
+     and new.outcome is distinct from 'completed'
+     and new.pack_drawn_purchase_id is not null then
+    update public.client_purchases cp
+       set sessions_used = greatest(0, cp.sessions_used - 1)
+     where cp.id = new.pack_drawn_purchase_id;
+    get diagnostics n = row_count;
+    -- The pack row is gone (the FK set the column to null on delete, so this is
+    -- only reachable in the same transaction as a delete). Nothing to give back
+    -- to, and clearing the marker anyway would let the next completion draw a
+    -- second credit for the same session.
+    if n = 1 then
+      new.pack_drawn_at := null;
+      new.pack_drawn_purchase_id := null;
+    end if;
+    return new;
+  end if;
+
+  -- ── drawing it ─────────────────────────────────────────────────────────
+  --
+  -- Only on the transition INTO 'completed', and only when nothing has been
+  -- drawn for this session yet. Both conditions, not either: the transition
+  -- alone would draw again on a session corrected twice, and the marker alone
+  -- would draw on any update at all to an already-completed session.
+  if new.outcome = 'completed'
+     and old.outcome is distinct from 'completed'
+     and new.pack_drawn_at is null
+     and new.client_id is not null
+     and new.trainer_id is not null then
+
+    -- The oldest pack with room, held for update — the same rule and the same
+    -- lock `redeem_pack_session` uses (part 123). Oldest first so a client who
+    -- has bought two packs finishes the first one, which is what they expect
+    -- and what the expiry conversation depends on.
+    select cp.id, cp.sessions_used
+      into v_id, v_used
+      from public.client_purchases cp
+     where cp.client_id = new.client_id
+       and cp.trainer_id = new.trainer_id
+       and cp.status = 'paid'
+       and cp.sessions_total is not null
+       and cp.sessions_used < cp.sessions_total
+     order by cp.created_at asc, cp.id asc
+     limit 1
+       for update;
+
+    -- No pack, or none with anything left. NOT an error: the client may be on a
+    -- membership or paying in cash, and refusing to record that a session
+    -- happened because nothing was there to deduct would break attendance for
+    -- everybody who is not on a pack.
+    if v_id is null then
+      return new;
+    end if;
+
+    update public.client_purchases cp
+       set sessions_used = cp.sessions_used + 1
+     where cp.id = v_id
+       and cp.sessions_used = v_used;
+    get diagnostics n = row_count;
+
+    -- Zero rows means the row moved between the lock and the write. Marking the
+    -- session as drawn anyway would record a credit that was never taken, and
+    -- the client would be a session short on paper and not in fact — so the
+    -- marker is set ONLY when the database confirms the write.
+    if n = 1 then
+      new.pack_drawn_at := now();
+      new.pack_drawn_purchase_id := v_id;
+    end if;
+  end if;
+
+  return new;
+end $fn$;
+
+revoke all on function public.sessions_pack_draw() from public, anon, authenticated;
+
+-- BEFORE, not AFTER, so the marker columns are written as part of the same row
+-- update rather than as a second statement that could fail on its own and leave
+-- a credit drawn with nothing recording it.
+drop trigger if exists sessions_pack_draw_on_outcome on public.sessions;
+create trigger sessions_pack_draw_on_outcome
+  before update of outcome on public.sessions
+  for each row execute function public.sessions_pack_draw();
+
+-- ▶ what-actually-landed-in-the-bank.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- "Taken through Stripe" is gross, and it is the figure coaches argue with.
+--
+-- Every takings number in this app is what a client was CHARGED. Stripe's
+-- processing fee, the platform's application fee and whether the money has
+-- cleared into the coach's bank are facts that live at Stripe, and no webhook
+-- in this repo has ever been told any of them. `STRIPE_AUTHORITY_NOTE` in
+-- src/lib/coachLedger.ts says so, and `payoutFacts` in src/lib/coachStatement.ts
+-- spends a paragraph saying there is no payout timetable because there is no
+-- data behind one.
+--
+-- That was true and it was expensive. The gap between "AED 4,800 taken" and
+-- "AED 4,281 in my account" is the gap a coach fills with a suspicion about the
+-- platform, and there was nothing anywhere in the product that could answer it.
+--
+-- ── One event, and it needs no new Stripe permission ─────────────────────
+--
+-- `payout.paid` and `payout.failed` fire on the account the money is leaving.
+-- For a coach that is their CONNECTED account under both charge models — a
+-- destination-charge coach still has an Express account that pays out to their
+-- bank — so both arrive at the Connect webhook destination the product already
+-- has, with `event.account` set. Nothing about the platform's own arrangement
+-- with Stripe changes.
+--
+-- ── What a payout IS, and the one thing it is not ────────────────────────
+--
+-- It is a transfer of a BALANCE to a bank account, and a balance is the residue
+-- of many charges minus many fees minus any refunds. It is NOT the net of a
+-- particular sale, and no row here can be traced back to one: a payout of
+-- AED 4,281 does not correspond to the AED 4,800 pack sold on Tuesday, and the
+-- app must never draw a line between them. What it answers is a different and
+-- more useful question — how much money has actually reached the coach — and
+-- `PAYOUT_IS_NOT_A_SALE` in src/lib/coachPayouts.ts is that sentence on the
+-- screen.
+--
+-- ── Why the platform's own payouts are refused ───────────────────────────
+--
+-- Repple has a Stripe balance too, and it pays out. Those events arrive on the
+-- PLATFORM destination with no `event.account`, and recording one would put the
+-- platform's own banking on a coach's money screen. The webhook branch writes
+-- nothing at all unless the event carried a connected account.
+--
+-- ── Why a coach can only ever read ───────────────────────────────────────
+--
+-- These rows are Stripe's word, mirrored. A coach who could write one could
+-- state that money had reached their bank when it had not, which is the exact
+-- shape of a claim this product refuses everywhere else. INSERT, UPDATE and
+-- DELETE are revoked outright; the stripe-webhook writes as the service role,
+-- which RLS does not apply to.
+--
+-- auth.uid() throughout, never current_user.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.coach_payouts (
+  -- Stripe's own payout id IS the primary key. A surrogate would need a unique
+  -- index on this column anyway, and the id is what makes the webhook's upsert
+  -- idempotent under Stripe's at-least-once delivery.
+  id            text        primary key,
+  -- Who it belongs to, resolved from the connected account. NULLABLE, because
+  -- an account this database cannot resolve to a coach is a payout that still
+  -- happened — dropping it would lose money from the record to protect a join.
+  -- Such a row is readable by nobody, which is the honest outcome.
+  coach_id      uuid        references public.trainers(id) on delete set null,
+  stripe_account_id text    not null,
+  -- Minor units, matching every other money column in this app.
+  amount_cents  bigint      not null,
+  -- Stripe's own, lower case as Stripe sends it. Compared case-insensitively
+  -- everywhere it is read, exactly as part 132 does for client_purchases.
+  currency      text        not null check (currency ~ '^[A-Za-z]{3}$'),
+  -- Stripe's word, verbatim: 'paid', 'failed', 'pending', 'in_transit',
+  -- 'canceled'. NOT a union this app invented — a status Stripe adds later must
+  -- land here unchanged rather than be coerced into the nearest one we know,
+  -- and `payoutStateLabel` in src/lib/coachPayouts.ts resolves an unknown one
+  -- to "not stated" rather than to "paid".
+  status        text        not null,
+  -- The day Stripe expects it to reach the bank. A DATE, because that is what
+  -- a bank works in and what the coach is waiting for.
+  arrival_on    date,
+  -- Why a failed payout failed, in Stripe's words. The single most useful
+  -- string on this table: a payout that bounced because the bank details are
+  -- wrong is a coach who is not being paid and does not know it.
+  failure_message text,
+  -- When Stripe says it happened. Webhooks are retried and are NOT ordered, so
+  -- the write is filtered on this rather than on arrival order — the same guard
+  -- every other mirrored table in this schema uses.
+  stripe_event_at timestamptz,
+  created_at    timestamptz not null default now()
+);
+
+comment on table public.coach_payouts is
+  'Payouts Stripe made to a coach''s bank, mirrored from payout.* webhooks. A payout is a BALANCE reaching a bank — the residue of many charges minus fees minus refunds — and it can NEVER be traced back to a particular sale. Read-only to the coach; written only by the stripe-webhook as the service role.';
+comment on column public.coach_payouts.status is
+  'Stripe''s own word, verbatim and not coerced. A status this app does not recognise reads as "not stated" rather than as "paid".';
+comment on column public.coach_payouts.arrival_on is
+  'The day Stripe expects the money at the bank. A date, because that is what a bank works in.';
+comment on column public.coach_payouts.failure_message is
+  'Why a failed payout failed, in Stripe''s words. A payout that bounced on wrong bank details is a coach who is not being paid and does not know it.';
+
+create index if not exists coach_payouts_coach_idx
+  on public.coach_payouts (coach_id, arrival_on desc, id desc)
+  where coach_id is not null;
+
+alter table public.coach_payouts enable row level security;
+
+drop policy if exists coach_payouts_owner_read on public.coach_payouts;
+create policy coach_payouts_owner_read on public.coach_payouts
+  for select
+  to authenticated
+  using (coach_id = (select auth.uid()));
+
+-- Named and dropped rather than merely never written, so a policy added by
+-- somebody who wanted to "correct" a payout cannot survive a rebuild. A coach
+-- who could write one could state that money had reached their bank when it had
+-- not, which is the exact claim this product refuses everywhere else.
+drop policy if exists coach_payouts_owner_insert on public.coach_payouts;
+drop policy if exists coach_payouts_owner_update on public.coach_payouts;
+drop policy if exists coach_payouts_owner_delete on public.coach_payouts;
+drop policy if exists coach_payouts_owner_of_gym_read on public.coach_payouts;
+
+grant select on public.coach_payouts to authenticated;
+revoke insert, update, delete on public.coach_payouts from authenticated;
+revoke all on public.coach_payouts from anon;
+
+-- ── DEPLOYMENT: what this part cannot do for itself ──────────────────────
+--
+-- The CONNECT webhook destination — the one whose signing secret is
+-- STRIPE_WEBHOOK_SECRET_CONNECT — must be subscribed to `payout.paid` and
+-- `payout.failed` in addition to everything it already listens for. Until it
+-- is, the branch in supabase/functions/stripe-webhook is correct and never
+-- runs, this table stays empty, and every screen that reads it says "nothing
+-- recorded" rather than "nothing was paid out" — which is why those two
+-- sentences are kept apart in src/lib/coachPayouts.ts.
+
+-- ▶ a-cancelled-class-was-a-deleted-one.sql
+
+-- ── Cancelling a class, and the thing a weekly class is ─────────────────────
+--
+-- Two columns on `gym_classes`, for two defects that share a table and a cause:
+-- the schema has no way to say a class is a member of anything, and no way to
+-- say a class did not happen.
+--
+-- ── 1 · `status` — cancelling is not deleting ───────────────────────────────
+--
+-- `deleteClass` in src/lib/gymSchedule.ts is a hard DELETE behind a confirm(),
+-- and it is the only way /timetable can take a class off the board. There is no
+-- status column, so "Remove" is the only verb the screen has.
+--
+-- `class_bookings.class_id` is `on delete cascade`. So cancelling a snowed-off
+-- Tuesday destroys, permanently and silently:
+--
+--   · every booking against it — the twelve people who wanted that hour, which
+--     is the evidence that the slot is worth putting back on;
+--   · every `attended_at` on those bookings — the attendance record, which is
+--     what fill rate, show rate, the retention signal and class pay are all
+--     computed from;
+--   · the waiting list, which part B4 of the roadmap exists to surface.
+--
+-- And it improves the numbers. A class that ran at 3 of 20 and was then deleted
+-- leaves a month whose fill rate is the average of the classes that went well.
+-- The gym's own record of a bad Tuesday is the first thing destroyed by the
+-- action an owner takes about a bad Tuesday.
+--
+-- So a cancelled class is KEPT, marked, and left in the record with its
+-- bookings intact. `deleteClass` stays for the other case — a class typed in
+-- wrong five minutes ago, which never happened and has nothing attached — and
+-- the console now offers the two as different verbs with different words.
+--
+-- 'scheduled' is the default, so every one of the rows already in this table is
+-- exactly what it was before this file ran.
+--
+-- ── 2 · `series_id` — "the Tuesday 6am Spin" is a thing ─────────────────────
+--
+-- `createSeries` materialises one row per week and hands back a count. That is
+-- the right storage decision and the comment on `weeklyOccurrences` argues it
+-- well: a gym moves one week, re-rooms another and drops the week of a public
+-- holiday, and a recurrence rule cannot carry any of that without growing an
+-- exceptions table that is these rows under another name.
+--
+-- What was missing is the other half: the rows knew nothing about each other.
+-- "The Tuesday 6am Spin" could not be re-priced, re-staffed, moved or cancelled
+-- as a thing — only one row at a time, by hand, for as many weeks as were
+-- created. A gym that put twelve weeks up and then lost its Tuesday coach had
+-- twelve edits to make and no list of which twelve rows they were.
+--
+-- Nullable, and null is a real answer: a one-off class belongs to no series and
+-- must not be given a private series of one, because the console offers "this
+-- class" and "this and every later one in the series" as different buttons and
+-- a series of one makes those two verbs indistinguishable.
+--
+-- Additive only. Nothing here alters a policy, and both columns are covered by
+-- the existing `gym_classes_owner_rw` / `gym_classes_write` policies because
+-- those choose ROWS; a new column on a row somebody may already update needs no
+-- new grant. (Part 151 is the file to re-read before assuming otherwise — the
+-- table-wide UPDATE grant `authenticated` holds is what makes that so.)
+
+alter table public.gym_classes
+  add column if not exists status text not null default 'scheduled';
+
+-- Added as a separate statement rather than inline, so re-running this file on
+-- a database that already has the column does not fail on a duplicate
+-- constraint — `add column if not exists` skips its inline check, but a bare
+-- `add constraint` would not.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'gym_classes_status_check'
+  ) then
+    alter table public.gym_classes
+      add constraint gym_classes_status_check
+      check (status in ('scheduled', 'cancelled'));
+  end if;
+end $$;
+
+-- When, and why. Both nullable and both meaningless on a scheduled class.
+--
+-- The reason is free text and it is the point of the whole feature: "instructor
+-- off sick" and "nobody booked it" are the two answers an owner wants back in
+-- three months, and a cancelled class with no reason is the record saying the
+-- class was cancelled by nobody for nothing.
+alter table public.gym_classes
+  add column if not exists cancelled_at timestamptz;
+alter table public.gym_classes
+  add column if not exists cancel_reason text;
+
+alter table public.gym_classes
+  add column if not exists series_id uuid;
+
+-- The two reads this enables. Both are narrow on purpose: `series_id` is only
+-- ever looked up within one gym, and the timetable is already indexed on
+-- (tenant_id, starts_at) by part 30.
+create index if not exists idx_gym_classes_series
+  on public.gym_classes(series_id, starts_at)
+  where series_id is not null;
+
+comment on column public.gym_classes.status is
+  'scheduled | cancelled. A cancelled class is KEPT with its bookings and its attendance — class_bookings cascades on delete, so deleting one destroys the evidence that the slot was wanted and quietly improves the month''s fill rate.';
+comment on column public.gym_classes.series_id is
+  'The weekly series this occurrence belongs to, or null for a one-off. Null is a real answer and is not backfilled: a series of one makes "this class" and "this and every later one" the same button.';
+
+-- ▶ a-rota-that-cannot-be-costed.sql
+
+-- ── What the floor costs to staff ───────────────────────────────────────────
+--
+-- `gym_shifts` (part 43) records who is rostered and for how long, and nothing
+-- about what that hour is worth. So neither surface can answer the question an
+-- owner asks before they add a Saturday: what does it cost to have somebody
+-- there.
+--
+-- The figures that exist today are all one-to-one figures. `payroll30For` in
+-- src/lib/gymTrainers.ts multiplies DELIVERED sessions by `tenants.session_fee`
+-- — a per-session price for PT. Floor cover is not sessions: a trainer on the
+-- desk from six until ten delivers nothing and is owed four hours. There is no
+-- column anywhere in this schema for the hour they were owed for.
+--
+-- ── Why a rate per shift and not a rate per trainer ────────────────────────
+--
+-- Both are true and this is the one that can be filed. A trainer's standard
+-- rate is a fact about the person and belongs on a person; what a SHIFT was
+-- worth is a fact about that Saturday, and it is the one that must survive a
+-- rate change. A gym that raises everybody 8% in March must not have February's
+-- rota silently re-priced at the new rate — the rota is what was worked and
+-- what was owed, and a figure that moves when a setting moves is not a record.
+--
+-- This is the same reasoning `sessions.rate_cents` already follows: a
+-- snapshotted rate on the row, so the ledger cannot be rewritten by a later
+-- edit. A per-trainer standing rate is roadmap D2 and belongs on `trainers`;
+-- when it lands it will be what the console PREFILLS this column from, not what
+-- replaces it.
+--
+-- ── The currency ───────────────────────────────────────────────────────────
+--
+-- Nullable, with no default, and read together with the amount or not at all.
+--
+-- Part 150 removed the default from all seven money columns in this schema and
+-- says why at length: this product is white-label, six of those columns invented
+-- dirhams and the seventh invented lower-case US dollars, and a London gym
+-- filing a fifty-pound wage would have been shown "AED 50.00" by code written
+-- specifically not to do that. Nothing here re-introduces a default.
+--
+-- It is NULLABLE rather than NOT NULL — the opposite of part 150's decision for
+-- filed money — because the two columns arrive together and both are optional.
+-- A rota is useful without any costing at all, and every row already in this
+-- table has neither. A NOT NULL currency would mean either a default (refused,
+-- see above) or a backfill of a value nobody stated (worse). The pairing is
+-- enforced below instead, which is the thing that actually matters: an amount
+-- with no currency is not an amount.
+
+alter table public.gym_shifts
+  add column if not exists rate_cents integer;
+alter table public.gym_shifts
+  add column if not exists currency text;
+
+do $$
+begin
+  -- Non-negative. A negative shift rate is always a typo and it would subtract
+  -- from the week's cost, which is the direction nobody checks.
+  if not exists (select 1 from pg_constraint where conname = 'gym_shifts_rate_nonneg') then
+    alter table public.gym_shifts
+      add constraint gym_shifts_rate_nonneg check (rate_cents is null or rate_cents >= 0);
+  end if;
+
+  -- Both, or neither. This is the constraint that carries the whole point of
+  -- the file: a rate with no currency is a number a reader supplies a currency
+  -- for out of their own head, and a currency with no rate is a setting
+  -- pretending to be a cost.
+  if not exists (select 1 from pg_constraint where conname = 'gym_shifts_priced_or_not') then
+    alter table public.gym_shifts
+      add constraint gym_shifts_priced_or_not
+      check ((rate_cents is null) = (currency is null));
+  end if;
+end $$;
+
+comment on column public.gym_shifts.rate_cents is
+  'What this shift was worth, in minor units, for its WHOLE span — not per hour. A shift is a block of committed cover and the gym agrees a figure for the block; deriving one from an hourly rate and a span would re-price a shift every time somebody edits its end time.';
+comment on column public.gym_shifts.currency is
+  'The currency of rate_cents. No default: this product is white-label — see part 150. Null exactly when rate_cents is null, enforced by gym_shifts_priced_or_not.';
+
+-- ▶ a-member-the-gym-knows-nothing-about.sql
+
+-- ── The gym's own record of a person ────────────────────────────────────────
+--
+-- Grep this schema for a member's phone number, their next of kin, a note the
+-- desk wrote about them, or the fact that they use an inhaler, and there is
+-- nothing. `profiles` carries id, role, tenant, full_name and avatar.
+-- `memberships` carries a plan, two dates, a status and a `note` that is
+-- attached to the CONTRACT rather than the person — so it is lost the moment a
+-- member upgrades and the old membership is closed.
+--
+-- Every gym in the world keeps this record. They keep it on paper at the desk,
+-- or in the spreadsheet this console is meant to replace, and the reason they
+-- keep it is not administrative:
+--
+--   · somebody collapses on the floor and the desk has four minutes to find a
+--     phone number for a person nobody at work that evening knows;
+--   · a member has a condition the floor needs to know about before they are
+--     pushed through a benchmark session;
+--   · the owner rings twenty lapsed pass holders and has no way to write down
+--     which four said "call me in March" (roadmap E4 — that list is currently a
+--     dead end with no contact, no logging and no note).
+--
+-- ── One row per person per gym, not per membership ─────────────────────────
+--
+-- The primary key is (tenant_id, member_id). A person who lets a membership
+-- lapse and rejoins in June is one person the gym knows things about, and the
+-- emergency contact taken in January is still the right number in June. Keying
+-- this on `memberships` would throw it away at exactly the moment the record
+-- becomes hardest to recollect.
+--
+-- It also means this row exists for people who are NOT members: the pass holder
+-- with an account who never joined, who is the entire subject of /passes.
+--
+-- ── What this is not ───────────────────────────────────────────────────────
+--
+-- Not the client's own health record. `injuries` and `injury_documents` (parts
+-- 90, 91, 96) are the CLIENT's, written by the client, and part 91's rule
+-- stands untouched: a coach sees the extracted injury, never the file. Nothing
+-- here reads, writes or widens any of that.
+--
+-- `medical_note` is the opposite direction: it is what the GYM wrote down at
+-- the desk, from what the member told the desk, for the people standing on the
+-- floor. It is operational, and it is why staff can read this table.
+--
+-- ── Who can read it, and the choice that was actually hard ─────────────────
+--
+-- Staff read; the owner writes.
+--
+-- The tempting shape is owner-only — this row holds a phone number and a health
+-- note, /members is owner-only, and narrower is usually righter. It is wrong
+-- here, and the reason is the first bullet above. The trainer alone at the desk
+-- at nine on a Sunday is precisely the person who needs the next-of-kin number,
+-- and a record only the owner can read is a record that is not there when it is
+-- needed. PostgreSQL policies choose ROWS, not columns, so "staff may read the
+-- emergency contact but not the note" is not expressible here without splitting
+-- the row across two tables — which would put the emergency contact one join
+-- away from the desk to protect a sentence the desk wrote down itself.
+--
+-- Writing stays with the owner. A note about a member is a thing the gym is
+-- accountable for having written, and `updated_by` records who.
+
+create table if not exists public.gym_member_records (
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  -- on delete cascade, and deliberately so — unlike gym_payments.member_id,
+  -- which is `set null` because the cash is the gym's statutory record. None of
+  -- this is: it is personal data the gym holds ABOUT a person, and an erasure
+  -- request should take every column below with it. (Roadmap G1 is the unresolved
+  -- half of that same question for the money tables. This one is not in doubt.)
+  member_id uuid not null references public.profiles(id) on delete cascade,
+
+  -- What the gym can reach them on. `profiles` has neither, and auth.users.email
+  -- is not readable from the client under any policy in this schema — so today
+  -- an owner looking at a member has no way to contact them at all.
+  phone text,
+  email text,
+
+  emergency_name text,
+  emergency_phone text,
+
+  -- Free text on purpose. A closed list of conditions would be a medical
+  -- taxonomy written by a gym CRM, and every gym would immediately need the
+  -- entry it does not have.
+  medical_note text,
+
+  -- The desk's own note about this person. Not the membership's note: this one
+  -- survives a plan change, which is when it is most likely to be needed.
+  note text,
+
+  -- Short labels the gym sorts by — 'student', 'corporate', 'do not call'.
+  -- An array rather than a join table because nothing here needs a tag to be an
+  -- object with its own name, colour and history; the day one does, this becomes
+  -- a foreign key and the array is the migration.
+  tags text[] not null default '{}',
+
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles(id) on delete set null,
+
+  primary key (tenant_id, member_id)
+);
+
+-- The roster read is "every record in this gym", which the primary key's
+-- leading column already serves. The other direction — one person across gyms —
+-- is not a query this product makes.
+create index if not exists idx_gym_member_records_member
+  on public.gym_member_records(member_id);
+
+-- ── row-level security ──────────────────────────────────────────────────────
+-- Enabled before any policy, because a policy on a table without RLS is inert
+-- and Supabase's default grants to anon and authenticated apply in full — the
+-- exact hole 38-tenant-isolation.sql was written to close on four other tables.
+alter table public.gym_member_records enable row level security;
+
+-- The owner of THIS gym, not merely an owner. `is_owner_of` is SECURITY
+-- DEFINER, so a policy calling it does not re-enter the table it protects
+-- (28-fix-profiles-recursion.sql).
+drop policy if exists gmr_owner on public.gym_member_records;
+create policy gmr_owner on public.gym_member_records
+  for all using (public.is_owner_of(tenant_id))
+  with check (public.is_owner_of(tenant_id));
+
+-- Staff read, for the reason argued above. Scoped through my_tenant() rather
+-- than left unscoped, so a row whose tenant is somehow null is invisible to
+-- this rather than visible to everyone: unscoped fails closed.
+drop policy if exists gmr_staff_r on public.gym_member_records;
+create policy gmr_staff_r on public.gym_member_records
+  for select using (tenant_id = public.my_tenant() and public.my_role() in ('trainer', 'owner'));
+
+-- The member reads their own. They are entitled to it under any subject-access
+-- regime worth the name, and a gym-held record a member cannot see is the thing
+-- a subject-access request is for. SELECT only — a member correcting their own
+-- emergency contact is a good idea and a different feature, with a different
+-- screen and a write path that does not also let them edit the desk's note
+-- about them.
+drop policy if exists gmr_self_r on public.gym_member_records;
+create policy gmr_self_r on public.gym_member_records
+  for select using (member_id = (select auth.uid()));
+
+comment on table public.gym_member_records is
+  'What the GYM knows about a person: contact, next of kin, an operational medical note and the desk''s own note. One row per person per gym, keyed on the person rather than on a membership so it survives a lapse and a rejoin. Staff read (the desk needs the next-of-kin number at nine on a Sunday); the owner writes. Not the client''s own health record — injuries / injury_documents are the client''s and are untouched by this.';
+
+-- ▶ nothing-was-recorded-about-why-anybody-left.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- Nothing was recorded about why anybody left.
+--
+-- ── What was measured ───────────────────────────────────────────────────
+--
+-- `end_coaching(p_other)` (part 68) takes ONE argument. It writes
+-- `coaching_relationships.status = 'ended'`, `ended_at`, `ended_by` and
+-- `clients.trainer_id = null`, and that is the whole of the record. Part 159
+-- then sends the coach the notification "A client has ended their coaching",
+-- with no route and nothing in it but the fact.
+--
+-- Churn is the single cheapest thing a coach can learn about their own
+-- business, the ending is the only moment the answer exists, and this product
+-- was discarding it at exactly that moment — every time, for every coach.
+--
+-- ── THE RULE THIS PART EXISTS TO HOLD ───────────────────────────────────
+--
+-- A REASON IS ATTRIBUTED TO WHOEVER SAID IT.
+--
+-- Two very different facts land in one column. A client who ends the coaching
+-- and picks "the cost" has TOLD their coach something. A coach who ends it, or
+-- who fills the reason in afterwards about a client who said nothing, has
+-- recorded a BELIEF. Both are worth keeping and they are not the same
+-- evidence — and six months later, on a churn list, they are indistinguishable
+-- unless something keeps them apart.
+--
+-- So `end_reason_by` is written by the SERVER from auth.uid() and never from a
+-- parameter. A client cannot record a reason as their coach and a coach cannot
+-- record one as their client, because neither of them is passing the field.
+-- src/lib/endCoaching.ts renders `reasonAttribution` off it and says which of
+-- the two the reader is looking at, in words, every time.
+--
+-- ── Why 'unsaid' is a value and NULL is not ─────────────────────────────
+--
+-- NULL is "nobody recorded one". `'unsaid'` is "they were asked and would
+-- rather not say". Collapsing those would make every hurried removal read as a
+-- client who refused to explain themselves, and the difference decides whether
+-- the coach's next move is to ask better questions or to stop asking. The
+-- column is nullable for that reason and for no other.
+--
+-- ── Why two functions and not one ───────────────────────────────────────
+--
+-- `end_coaching_with_reason()` is the ending and the reason in ONE
+-- transaction. Two calls have a state between them — ended, unexplained — that
+-- every dropped connection reaches, and the ending is the only moment the
+-- question makes sense to ask.
+--
+-- `record_end_reason()` is the other half, and it is the one that catches the
+-- case the coach cares about most: the client left on their own, the coach
+-- learned about it from a notification, and the answer exists only in the
+-- coach's head. It writes onto an already-ended row.
+--
+-- The one-argument `end_coaching(uuid)` is UNTOUCHED and stays. Every existing
+-- caller — including app/(client)/my-coach.tsx, which this part does not reach
+-- into — keeps working and records nothing, which is exactly what it did
+-- yesterday. A part that changed the meaning of an existing signature would be
+-- a schema change disguised as a feature.
+--
+-- ── What this does NOT do ───────────────────────────────────────────────
+--
+-- It does not notify anybody. The ending already notifies (part 159) and a
+-- second row saying "and here is why" would be a push about a push. It does not
+-- expose the reason to anybody `cr_self` does not already admit — both parties
+-- can read their own relationship row and always could, and that is the policy
+-- being relied on rather than a new one.
+--
+-- Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- ── 1 · the columns ─────────────────────────────────────────────────────
+
+alter table public.coaching_relationships
+  add column if not exists end_reason    text,
+  add column if not exists end_note      text,
+  add column if not exists end_reason_by uuid references public.profiles(id) on delete set null;
+
+-- The closed set, mirroring `EndReason` in src/lib/endCoaching.ts. A CHECK
+-- rather than an enum: adding a tenth reason to an enum needs a type change and
+-- a lock, and this list will be tuned by somebody reading a churn report.
+--
+-- NULL is admitted and means "nobody recorded one" — see the header. It is NOT
+-- the same as 'unsaid' and no query in this repository may treat it as such.
+alter table public.coaching_relationships drop constraint if exists coaching_relationships_end_reason_chk;
+alter table public.coaching_relationships add constraint coaching_relationships_end_reason_chk
+  check (end_reason is null or end_reason in (
+    'cost', 'schedule', 'moved', 'results', 'goal-reached',
+    'health', 'coach-ended', 'unsaid', 'other'
+  ));
+
+-- Bounded, and blank-is-null. A note of 400kB is a paste accident and a note of
+-- three spaces renders as an empty paragraph under a heading promising one.
+alter table public.coaching_relationships drop constraint if exists coaching_relationships_end_note_chk;
+alter table public.coaching_relationships add constraint coaching_relationships_end_note_chk
+  check (end_note is null or (btrim(end_note) <> '' and length(end_note) <= 500));
+
+-- A reason with nobody behind it is exactly the ambiguity this part exists to
+-- remove: it would render as "we cannot tell who said this", which the app
+-- then has to treat as the weaker of the two readings forever. Structural, so
+-- it cannot be reached by any write path.
+alter table public.coaching_relationships drop constraint if exists coaching_relationships_end_reason_attributed;
+alter table public.coaching_relationships add constraint coaching_relationships_end_reason_attributed
+  check (end_reason is null or end_reason_by is not null);
+
+-- A note without a reason is a sentence filed under nothing. The picker always
+-- sets a reason first, so this only refuses a write nobody makes on purpose.
+alter table public.coaching_relationships drop constraint if exists coaching_relationships_end_note_needs_reason;
+alter table public.coaching_relationships add constraint coaching_relationships_end_note_needs_reason
+  check (end_note is null or end_reason is not null);
+
+comment on column public.coaching_relationships.end_reason is
+  'Why the coaching ended, from the closed set in src/lib/endCoaching.ts. NULL means nobody recorded one, which is NOT the same as ''unsaid'' — that is somebody who was asked and declined to say.';
+comment on column public.coaching_relationships.end_note is
+  'What was actually said, in the recorder''s words. Bounded at 500 characters.';
+comment on column public.coaching_relationships.end_reason_by is
+  'Who recorded the reason. Written by the server from auth.uid(), never from a parameter: a reason the client gave and a reason the coach believes are different evidence, and this column is the only thing that tells them apart.';
+
+-- The coach's "why did they leave" card reads ended rows with no reason on
+-- them, newest first. Partial on `end_reason is null` because the card is only
+-- ever interested in that half and the index then stays small as a coach's
+-- history of explained endings grows.
+create index if not exists coaching_relationships_unexplained_idx
+  on public.coaching_relationships (coach_id, ended_at desc)
+  where status = 'ended' and end_reason is null;
+
+-- ── 2 · ending it and saying why, in one transaction ────────────────────
+
+create or replace function public.end_coaching_with_reason(
+  p_other  uuid,
+  p_reason text,
+  p_note   text
+)
+returns boolean
+language plpgsql
+security definer
+-- Pinned, for part 68's own reason: a SECURITY DEFINER function without this
+-- resolves `clients` and `coaching_relationships` against the CALLER's
+-- search_path, and a caller who can create a schema of their own then chooses
+-- which tables the authorisation check reads.
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_me     uuid := auth.uid();
+  v_ended  boolean;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_note   text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  if v_me is null then
+    raise exception 'not signed in';
+  end if;
+
+  -- The ending is delegated, deliberately. Part 68 holds a careful piece of
+  -- reasoning — read-before-write so "we ended it just now" and "there was
+  -- never anything here" stay apart, `status <> 'ended'` so a re-run does not
+  -- restamp `ended_at` and re-fire the photo-revocation trigger, and matching
+  -- on `trainer_id = <the other party>` so nobody else's link is disturbed. A
+  -- second copy of that here is the copy that drifts, and the thing it would
+  -- drift into is somebody's progress photos being un-shared twice.
+  v_ended := public.end_coaching(p_other);
+
+  -- Nothing was ended, so there is nothing to attach a reason to. Returning
+  -- false rather than raising: "the two were never linked" is part 68's own
+  -- true answer and this function must not turn it into an error.
+  if not v_ended then
+    return false;
+  end if;
+
+  if v_reason is null then
+    return true;
+  end if;
+
+  -- The CHECK will refuse a reason outside the set, and that is the right place
+  -- for it: a caller sending a reason this build does not know is a bug in the
+  -- caller, and silently dropping it would leave a coach believing they had
+  -- recorded something.
+  --
+  -- `end_reason is null` in the predicate is not redundant. Two coaches cannot
+  -- reach one relationship, but a re-run of this call can, and the second run
+  -- must not overwrite the first answer — which, on the row this fires against,
+  -- is the answer the coach gave a moment ago.
+  update public.coaching_relationships
+     set end_reason    = v_reason,
+         end_note      = left(v_note, 500),
+         -- From auth.uid() and never from a parameter. See the header: this is
+         -- the whole of the attribution.
+         end_reason_by = v_me
+   where status = 'ended'
+     and end_reason is null
+     and ((coach_id = v_me    and client_id = p_other)
+       or (coach_id = p_other and client_id = v_me));
+
+  return true;
+end
+$function$;
+
+revoke execute on function public.end_coaching_with_reason(uuid, text, text) from public, anon;
+grant  execute on function public.end_coaching_with_reason(uuid, text, text) to authenticated;
+
+comment on function public.end_coaching_with_reason(uuid, text, text) is
+  'Ends the coaching relationship between the caller and p_other AND records why, in one transaction. Delegates the ending itself to end_coaching(uuid) rather than copying its logic. end_reason_by is taken from auth.uid(). Returns false, having written nothing, when the two were never linked.';
+
+-- ── 3 · saying why, afterwards ──────────────────────────────────────────
+
+create or replace function public.record_end_reason(
+  p_other  uuid,
+  p_reason text,
+  p_note   text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_me     uuid := auth.uid();
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_note   text := nullif(btrim(coalesce(p_note, '')), '');
+  v_n      integer;
+begin
+  if v_me is null then
+    raise exception 'not signed in';
+  end if;
+  if p_other is null then
+    raise exception 'no one to end coaching with';
+  end if;
+  if v_reason is null then
+    raise exception 'a reason is required';
+  end if;
+
+  -- Only an ALREADY-ENDED relationship, and only one the caller is in. The
+  -- symmetric predicate is part 68's and is repeated here rather than shared,
+  -- because it is three lines of literal column equality with no reasoning in
+  -- it — unlike the write ordering above, which is where the danger was.
+  --
+  -- `end_reason is null` OR `end_reason_by = v_me` is the whole authorisation
+  -- of an overwrite: a coach may correct their own account of why somebody
+  -- left, and neither party may overwrite the other's. That second clause is
+  -- what stops a coach filing their guess over a reason the client gave.
+  update public.coaching_relationships
+     set end_reason    = v_reason,
+         end_note      = left(v_note, 500),
+         end_reason_by = v_me
+   where status = 'ended'
+     and (end_reason is null or end_reason_by = v_me)
+     and ((coach_id = v_me    and client_id = p_other)
+       or (coach_id = p_other and client_id = v_me));
+
+  get diagnostics v_n = row_count;
+
+  -- False, not an exception. Three different things land here — no ended
+  -- relationship, no relationship at all, and the other party got there first —
+  -- and every one of them is "your note was not kept", which is a sentence the
+  -- app can say. An exception would be reported as a failure the coach should
+  -- retry, and retrying will not change any of the three.
+  return v_n > 0;
+end
+$function$;
+
+revoke execute on function public.record_end_reason(uuid, text, text) from public, anon;
+grant  execute on function public.record_end_reason(uuid, text, text) to authenticated;
+
+comment on function public.record_end_reason(uuid, text, text) is
+  'Records why an already-ended coaching relationship ended. Either party may, but neither may overwrite the other''s answer — end_reason_by is auth.uid() and the update requires end_reason to be null or already theirs. Returns false when there was nothing to write onto.';
+
+-- ▶ one-coachs-pacing-is-not-anothers.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- One coach's pacing is not another's.
+--
+-- ── What was measured ───────────────────────────────────────────────────
+--
+-- `MIN_COOLDOWN_DAYS = 7` and `MAX_COOLDOWN_DAYS = 28` in
+-- src/lib/interventions.ts, and `DISMISS_FLOOR_DAYS = 30` in src/lib/nudge.ts,
+-- are module constants. Every coach on this platform gets the same three
+-- numbers, and there is no set of three that is right for all of them.
+--
+-- A coach whose clients come to a room every Tuesday knows within a week that
+-- somebody has stopped, and a seven-day floor makes the Quiet Clients screen
+-- slow enough to be useless to them. A coach with an online-only book, where a
+-- client can be entirely fine and entirely invisible for a fortnight, finds the
+-- same seven days nagging. Those are the same complaint about the same number
+-- from opposite ends, and neither coach can do anything about it.
+--
+-- ── One column, and why it is a FLOOR ───────────────────────────────────
+--
+-- The obvious shape is three settings, one per constant. It is the wrong shape.
+-- The per-client pacing is the part of this feature that works — paced off a
+-- client's own rhythm, a fortnightly client is not chased mid-gap and a daily
+-- one is not left for a month — and a coach who replaced it with a flat number
+-- would be throwing that away.
+--
+-- What a coach is actually asking for is "never inside N days". That is a
+-- FLOOR, and a floor composes with the pacing rather than deleting it:
+-- `cooldownFloor` in src/lib/interventions.ts raises the bottom of the clamp
+-- and leaves the per-client derivation intact above it. One number, one column.
+--
+-- ── The bounds, and why they refuse rather than clamp ───────────────────
+--
+-- A stored 0 would prompt a coach about the same person every morning, which is
+-- the behaviour the whole nudge module is written to prevent; a stored 100000
+-- would silence somebody for three centuries. Both are refused HERE by the
+-- CHECK and again in the app by `cooldownFloor`, which falls back to the
+-- module's own number rather than clamping — clamping invents a figure the
+-- coach never chose and then paces their whole book off it.
+--
+-- NULL means "use the app's own pacing", and is not zero. Same reasoning as
+-- `class_rate` on this table (part 129): a coach who cleared the box has asked
+-- for the default back and a coach who typed a number has asked for theirs, and
+-- those are different requests.
+--
+-- ── What this does NOT change ───────────────────────────────────────────
+--
+-- Nothing already stored. `client_nudges.muted_days` is written at the moment a
+-- coach acts and read back from the ROW rather than recomputed — src/lib/
+-- nudge.ts explains why at length — so changing this setting does not
+-- retroactively expire or extend a mute a coach was already promised. That
+-- property is what makes this setting safe to tune, and it was already there.
+--
+-- Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+alter table public.coach_prefs
+  add column if not exists nudge_cooldown_days integer;
+
+alter table public.coach_prefs drop constraint if exists coach_prefs_nudge_cooldown_sane;
+alter table public.coach_prefs add constraint coach_prefs_nudge_cooldown_sane
+  check (nudge_cooldown_days is null or (nudge_cooldown_days >= 1 and nudge_cooldown_days <= 365));
+
+comment on column public.coach_prefs.nudge_cooldown_days is
+  'Shortest gap, in days, this coach will accept between two approaches to the same client. A FLOOR under the per-client pacing in src/lib/interventions.ts, never a replacement for it. NULL means use the app''s own floor, and is not zero.';
+
+-- No policy change. `coach_prefs_self` (part 129) is `for all using (user_id =
+-- auth.uid()) with check (user_id = auth.uid())` and already covers every
+-- column on this table, present and future. A second policy naming this column
+-- would be one more row for the planner to evaluate and would grant nothing.
+
+-- ▶ three-more-things-a-coach-was-never-told.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- Three more things a coach was never told.
+--
+-- Parts 158, 159, 160 and 163 each closed a silence found by the same sweep:
+-- grep `notifications`, `notify_users`, `sendPush`, `sendPushChecked` and
+-- `recordInbox` across app/, src/ and supabase/, and read every writer that can
+-- touch the fact in question. These are three the sweep found and nobody has
+-- taken yet, and all three share a shape the earlier parts did not: they are
+-- about things the app ALREADY COMPUTES and shows only to somebody who happens
+-- to open the right screen.
+--
+--   1 · A CLIENT IS PAST THEIR OWN USUAL GAP between visits.
+--       src/lib/cadence.ts works this out and app/(trainer)/nudges.tsx renders
+--       it. That screen is opened when a coach is already worrying about
+--       retention, which is a fortnight after the moment this matters.
+--
+--   2 · A CLIENT HAS HIT A GOAL THEY SET THEMSELVES.
+--       `goal_targets.achieved_at` is written by the client, read by
+--       app/(trainer)/client-goals.tsx, and announced to nobody.
+--       Congratulating somebody inside the hour is the cheapest retention act
+--       in this business and it currently depends on the coach happening to
+--       look.
+--
+--   3 · A CREDENTIAL OR AN INSURANCE POLICY IS ABOUT TO EXPIRE.
+--       `credentialState()` in src/lib/coachCredentials.ts returns 'expiring'
+--       and 'expired', `EXPIRING_SOON_DAYS` is 60, and the only consumer is
+--       app/(trainer)/credentials.tsx. Lapsed public liability means a coach is
+--       working uninsured. The app knows the date and says nothing.
+--
+-- ── Why a scheduled job for 1 and 3, and a trigger for 2 ────────────────
+--
+-- A trigger fires on a write. Two of these are about the ABSENCE of one:
+-- nobody inserts a row saying "this client did not come in" and nobody inserts
+-- one saying "your insurance ran out today". There is no write to hang a
+-- trigger on, so they are a nightly pass — the same shape parts 48 and 135
+-- already use, on the same pg_cron.
+--
+-- A goal being reached IS a write (`achieved_at` moving from null to a
+-- timestamp), so that one is a trigger, and it fires inside the transaction of
+-- the client tapping the button — which is what "inside the hour" means.
+--
+-- ── What is NOT here, and why ───────────────────────────────────────────
+--
+-- A PERSONAL BEST. It was in scope and it is deliberately left out. A PR is
+-- defined in `personalRecords` (src/lib/exerciseHistory.ts) over
+-- `workouts.sets`, which is untyped jsonb, and that definition CHANGED in the
+-- wave that landed an hour before this part was written — a bodyweight set now
+-- carries an explicit `bw` flag and is priced at the member's weight as
+-- recorded on or before that day, with sets that cannot be priced excluded
+-- rather than counted as zero. Re-stating any of that in plpgsql produces a
+-- second definition of a personal record, free to disagree with the first, and
+-- the disagreement would surface as a coach being told about a PR the client's
+-- own Records screen does not show. Part 163 made the same call about money and
+-- for the same reason: one definition, in one place, and the notification says
+-- the thing the definition cannot get wrong. This is recorded here so it is a
+-- decision rather than an oversight.
+--
+-- ── The rule every message below keeps ──────────────────────────────────
+--
+-- NO FIGURE THE APP WOULD RESTATE DIFFERENTLY. Part 163's argument: the second
+-- copy of a formatter is the copy that drifts, and a drifted copy tells a coach
+-- a number that is not the number. So the overdue message states days and their
+-- own usual gap — both computed by the query that sends it, both about the
+-- record — and never a drift percentage, which src/lib/clientDrift.ts owns. The
+-- goal message names the goal and no measurement. Neither carries money and
+-- neither carries a currency; there is no default currency in this product
+-- (part 150).
+--
+-- Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · A client past their own usual gap
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- ── Why this rule and not the drift verdict ─────────────────────────────
+--
+-- `assessDrift` compares two RATES over a fourteen-day near window against a
+-- six-week baseline. It is the right instrument for "is this person doing less
+-- than they used to" and it is retrospective by construction: a client has to
+-- have already missed a fortnight. Re-implementing it here would be a large
+-- piece of plpgsql whose only job is to agree with a tuned TypeScript module it
+-- has no way to stay in step with.
+--
+-- The interval rule is different and much smaller: their median gap between
+-- active days, and how long it has been. It is the rule src/lib/cadence.ts
+-- holds, it speaks on day four rather than day fourteen, and it is arithmetic
+-- rather than judgement. The constants below are that file's, named after it,
+-- and the app's Quiet Clients screen remains the authority on the verdict — the
+-- message says what was observed and sends the coach there.
+--
+-- ── Local days versus UTC ───────────────────────────────────────────────
+--
+-- The app files activity under the reader's LOCAL day (`localDayKey`, matching
+-- `streaks.activeDays`); this job has no reader and files under UTC. The
+-- difference can move one visit across one boundary and therefore change a
+-- median gap by at most a day. That is inside the tolerance the rule already
+-- carries — three days, or half the gap again — and the alternative is storing
+-- a time zone per client that nothing else in this schema needs. Stated so the
+-- next reader does not treat it as a bug.
+
+-- The dedupe record, and it is the whole reason this can run nightly.
+--
+-- Without it a coach is told about the same silence every night for a
+-- fortnight, which is precisely the nagging src/lib/nudge.ts is written to
+-- prevent — and a nightly duplicate is worse than the nudge screen's own
+-- repeats because it wakes a phone.
+--
+-- Keyed on the client's LAST ACTIVE DAY rather than on a timestamp. That is
+-- what makes "a new silence" mean something: a client who comes back and then
+-- goes quiet again has a different `last_active_on`, so they are notified again
+-- — correctly, it is a different spell — while the same unbroken silence
+-- notifies once however many nights it lasts.
+create table if not exists public.coach_overdue_notices (
+  coach_id       uuid not null references public.profiles(id) on delete cascade,
+  client_id      uuid not null references public.profiles(id) on delete cascade,
+  -- The last day the client did anything, as this job saw it. NOT NULL: a row
+  -- here always describes a client with a record, because a client with no
+  -- record has no usual gap and never reaches this table.
+  last_active_on date not null,
+  notified_at    timestamptz not null default now(),
+  primary key (coach_id, client_id)
+);
+
+comment on table public.coach_overdue_notices is
+  'One row per coach and client, recording the silence a coach has already been told about. Keyed on the client''s last active day so a NEW silence notifies again and an unbroken one notifies once.';
+
+alter table public.coach_overdue_notices enable row level security;
+
+-- No policy at all, and that is the intent rather than an omission. RLS with no
+-- policy denies every row to every non-superuser role, which is exactly right:
+-- this table is bookkeeping for a job that runs as the table owner and nothing
+-- in any of the three apps reads or writes it. A coach-readable policy would be
+-- a second, differently-shaped answer to "who is quiet" sitting beside the one
+-- the Quiet Clients screen computes.
+
+create or replace function public.run_overdue_client_notices()
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  -- src/lib/cadence.ts. Named here so a reader can check the two against each
+  -- other, and so changing one is visibly not changing the other.
+  c_window_days   constant int  := 56;   -- DEFAULT_WINDOWS.historyDays
+  c_min_active    constant int  := 4;    -- MIN_ACTIVE_DAYS
+  c_min_span      constant int  := 14;   -- MIN_SPAN_DAYS
+  c_max_gap       constant numeric := 21;   -- MAX_USUAL_GAP_DAYS
+  c_late_fraction constant numeric := 0.5;  -- LATE_FRACTION
+  c_min_late      constant int  := 3;    -- MIN_LATE_DAYS
+  v_sent integer := 0;
+  r      record;
+begin
+  for r in
+    with book as (
+      -- Only clients with a live coaching link. `clients.trainer_id` is the
+      -- column `is_my_client()` reads and the one `end_coaching()` clears, so a
+      -- client who has left produces nothing here from the night they leave.
+      select c.id as client_id, c.trainer_id as coach_id
+        from public.clients c
+       where c.trainer_id is not null
+    ),
+    acts as (
+      -- The same four sources `readClientActivity` reads, and the same
+      -- restriction on the third: only a session somebody CONFIRMED took place.
+      -- A booked slot whose clock has passed is not evidence the client turned
+      -- up — the inference part 33 was written to end — and counting it would
+      -- read as a client still attending when they had stopped.
+      select b.coach_id, b.client_id, (ci.at at time zone 'UTC')::date as d
+        from book b join public.check_ins ci on ci.user_id = b.client_id
+       where ci.at >= now() - make_interval(days => c_window_days)
+      union
+      select b.coach_id, b.client_id, (w.performed_at at time zone 'UTC')::date
+        from book b join public.workouts w on w.user_id = b.client_id
+       where w.performed_at >= now() - make_interval(days => c_window_days)
+      union
+      select b.coach_id, b.client_id, (s.starts_at at time zone 'UTC')::date
+        from book b join public.sessions s on s.client_id = b.client_id
+       where s.starts_at >= now() - make_interval(days => c_window_days)
+         and s.outcome = 'completed'
+      union
+      select b.coach_id, b.client_id, (v.entered_at at time zone 'UTC')::date
+        from book b join public.gym_visits v on v.member_id = b.client_id
+       where v.entered_at >= now() - make_interval(days => c_window_days)
+    ),
+    -- UNION above rather than UNION ALL: five exercises logged on one evening
+    -- is ONE active day. Counting it as five would give the client a usual gap
+    -- of nothing and make them permanently overdue — the same collapse
+    -- `activeDayLog` performs in the app.
+    days as (
+      select coach_id, client_id, d,
+             lag(d) over (partition by coach_id, client_id order by d) as prev
+        from acts
+    ),
+    gaps as (
+      select coach_id, client_id, (d - prev)::numeric as gap
+        from days
+       where prev is not null
+    ),
+    stats as (
+      select a.coach_id, a.client_id,
+             count(*)                                as active_days,
+             min(a.d)                                as first_day,
+             max(a.d)                                as last_day,
+             (current_date - max(a.d))               as since_last,
+             (select percentile_cont(0.5) within group (order by g.gap)
+                from gaps g
+               where g.coach_id = a.coach_id and g.client_id = a.client_id) as usual_gap
+        from acts a
+       group by a.coach_id, a.client_id
+    )
+    select s.*,
+           -- MEDIAN and not mean, and this is the most important line in the
+           -- query. A client who trains every three days and takes one
+           -- three-week holiday has a mean gap of six and a median of three;
+           -- paced off the mean the job waits twelve days before saying
+           -- anything, having been taught by one holiday to expect another.
+           greatest(c_min_late::numeric, s.usual_gap * c_late_fraction) as tolerance
+      from stats s
+     where s.active_days >= c_min_active
+       and (s.last_day - s.first_day) >= c_min_span
+       and s.usual_gap is not null
+       and s.usual_gap > 0
+       and s.usual_gap <= c_max_gap
+       -- Past their own gap by more than the tolerance. Everybody is "due"
+       -- every week by construction, and a message at "due" is the nagging
+       -- this whole family of features refuses.
+       and (s.since_last::numeric - s.usual_gap)
+             > greatest(c_min_late::numeric, s.usual_gap * c_late_fraction)
+  loop
+    -- One silence, one message. `is distinct from` rather than `<>` because the
+    -- left side is absent on the first sighting, and `null <> date` is null,
+    -- which would fail the guard and send nothing at all the first time — the
+    -- one time it matters most.
+    if exists (
+      select 1 from public.coach_overdue_notices n
+       where n.coach_id = r.coach_id
+         and n.client_id = r.client_id
+         and n.last_active_on = r.last_day
+    ) then
+      continue;
+    end if;
+
+    -- Written BEFORE the notification, and the ordering is deliberate. If the
+    -- insert into `notifications` fails the whole iteration rolls back and the
+    -- coach is told tomorrow; if it succeeded and the bookkeeping then failed,
+    -- the coach would be told again every night forever.
+    insert into public.coach_overdue_notices (coach_id, client_id, last_active_on, notified_at)
+    values (r.coach_id, r.client_id, r.last_day, now())
+    on conflict (coach_id, client_id)
+      do update set last_active_on = excluded.last_active_on, notified_at = now();
+
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      'A client is past their usual gap',
+      -- The name is theirs to give: the coach can already read it through
+      -- `profiles_trainer_r_clients`, so this states nothing they could not see.
+      -- A blank or missing name falls back to "A client" and never to an empty
+      -- string, which would render a sentence starting with a space.
+      left(
+        coalesce(
+          (select nullif(btrim(coalesce(p.full_name, '')), '') from public.profiles p where p.id = r.client_id),
+          'A client'
+        )
+        || ' has not been in for ' || r.since_last || ' day' || case when r.since_last = 1 then '' else 's' end
+        || ', and they usually come about every ' || round(r.usual_gap, 1) || ' day'
+        || case when round(r.usual_gap, 1) = 1 then '' else 's' end || '.'
+        || ' That is what the app was told, not what they did — an injury, a fortnight away or simply not opening'
+        || ' the app all look exactly like this. Quiet Clients has the dates.',
+        500),
+      'bell',
+      '/(trainer)/nudges'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+
+  -- Bookkeeping for clients who have come back. Without this the table grows
+  -- one row per client forever and, worse, a client who returns and goes quiet
+  -- again at the SAME last-active date as a year ago would be silently skipped.
+  delete from public.coach_overdue_notices n
+   where n.notified_at < now() - interval '400 days';
+
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+revoke all on function public.run_overdue_client_notices() from public, anon, authenticated;
+
+comment on function public.run_overdue_client_notices() is
+  'Nightly. Tells a coach when a client is past their OWN median gap between active days by more than the tolerance in src/lib/cadence.ts. One message per silence, keyed on the client''s last active day. States days and their usual gap, never a drift percentage — clientDrift.ts owns that figure.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A client has hit a goal
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `goal_targets.achieved_at` is the client's own claim that they got there —
+-- the column's comment in part 02 says so, and for a custom goal it is the only
+-- signal there will ever be. A trigger on it firing inside the client's own
+-- transaction is what makes "congratulate them inside the hour" true.
+--
+-- ── The guards, each of which is a way this could fail a tap ────────────
+--
+-- This fires inside the transaction of somebody marking a goal reached. An
+-- exception here rolls that back, and a client would tap the button and watch
+-- nothing happen. `notifications.user_id` is `not null references profiles(id)`,
+-- so the recipient is the only realistic way that happens:
+--
+--   `clients.trainer_id`  NULLABLE (on delete set null) — GUARDED, and it is
+--                         the recipient, so a client with no coach costs this
+--                         message entirely rather than costing them the tap.
+--
+-- Deliberately NOT wrapped in `exception when others then null`, for part 158's
+-- reason: that swallows a real defect silently and forever.
+
+create or replace function public.goal_achieved_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_coach uuid;
+  v_name  text;
+  v_what  text;
+begin
+  -- Only the crossing, and only upward. A client who un-marks a goal and marks
+  -- it again produces one message and not three, and an ordinary edit to the
+  -- target date produces none.
+  if new.achieved_at is null or old.achieved_at is not null then
+    return new;
+  end if;
+
+  select c.trainer_id into v_coach from public.clients c where c.id = new.client_id;
+  if v_coach is null then
+    return new;
+  end if;
+
+  select nullif(btrim(coalesce(p.full_name, '')), '')
+    into v_name from public.profiles p where p.id = new.client_id;
+
+  -- The goal in the client's own words for a custom one, and the metric's name
+  -- for a measured one. NO FIGURE: `target_value` is in kg for weight and
+  -- muscle and per cent for body fat, the reader's unit preference lives in
+  -- `profiles.weight_unit` (part 82), and a coach who reads in pounds would be
+  -- shown a number in kilograms with no unit on it. src/lib/units.ts is the one
+  -- place that conversion happens and it is not reachable from here.
+  v_what := case new.kind
+    when 'custom'  then nullif(btrim(coalesce(new.title, '')), '')
+    when 'weight'  then 'their weight goal'
+    when 'bodyfat' then 'their body fat goal'
+    when 'muscle'  then 'their muscle goal'
+    else 'a goal'
+  end;
+
+  insert into public.notifications (user_id, title, body, icon, route)
+  values (
+    v_coach,
+    'A client has hit a goal',
+    left(
+      coalesce(v_name, 'A client') || ' has just marked '
+      || coalesce(v_what, 'a goal') || ' as reached.'
+      || ' They said so themselves — this is their claim, not a measurement the app checked.'
+      || ' A word today is worth more than one next week.',
+      500),
+    'trophy',
+    -- client-goals.tsx reads `clientId` if it is given one and falls back to
+    -- its own roster picker if it is not, which src/lib/features.ts records. The
+    -- parameter is still passed: without it this opens a picker rather than the
+    -- person the message is about.
+    '/(trainer)/client-goals?clientId=' || new.client_id::text
+  );
+
+  return new;
+end;
+$function$;
+
+comment on function public.goal_achieved_notify() is
+  'Tells the COACH when a client marks one of their own goals reached. Fires on the upward crossing of achieved_at only. Carries no figure — the target is stored in kg or per cent and the reader''s unit preference is not reachable from here.';
+
+drop trigger if exists goal_targets_notify_achieved on public.goal_targets;
+create trigger goal_targets_notify_achieved
+  after update of achieved_at on public.goal_targets
+  for each row execute function public.goal_achieved_notify();
+
+-- Revoked from public, anon AND authenticated. Postgres checks EXECUTE when a
+-- trigger is CREATED and not when it fires, so a trigger function needs no
+-- grant to anybody (parts 51, 141, 158); Postgres grants EXECUTE to PUBLIC on
+-- every new function and `anon` resolves through that grant, so both are named.
+revoke all on function public.goal_achieved_notify() from public;
+revoke all on function public.goal_achieved_notify() from anon;
+revoke all on function public.goal_achieved_notify() from authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · A credential or an insurance policy running out
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The one message on this list that is about the coach rather than about a
+-- client, and the one with a consequence outside the app: a coach whose public
+-- liability has lapsed is working uninsured, and a coach whose certification
+-- has lapsed is listed in the directory making a claim that is no longer true.
+--
+-- Two crossings and not one, on the same argument part 163 makes about a
+-- session pack: a notification at expiry is late. Sixty days is
+-- `EXPIRING_SOON_DAYS` in src/lib/coachCredentials.ts, which is enough time to
+-- book a course or renew a policy; the second message on the day it lapses is
+-- the fact.
+
+create table if not exists public.coach_credential_notices (
+  credential_id uuid not null references public.coach_credentials(id) on delete cascade,
+  -- Which of the two messages this row records. A credential gets one of each
+  -- and never two of either.
+  stage         text not null check (stage in ('expiring', 'expired')),
+  notified_at   timestamptz not null default now(),
+  primary key (credential_id, stage)
+);
+
+comment on table public.coach_credential_notices is
+  'One row per credential per stage, so a nightly pass tells a coach once at sixty days and once on the day it lapses rather than every night in between.';
+
+alter table public.coach_credential_notices enable row level security;
+-- No policy, deliberately, for the same reason as coach_overdue_notices above:
+-- RLS with no policy denies every row to every non-superuser role, and this is
+-- bookkeeping for a job running as the table owner that no app reads.
+
+create or replace function public.run_credential_expiry_notices()
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  -- EXPIRING_SOON_DAYS in src/lib/coachCredentials.ts.
+  c_soon_days constant int := 60;
+  v_sent integer := 0;
+  r      record;
+begin
+  for r in
+    select cr.id, cr.coach_id, cr.kind, cr.title, cr.expires_on,
+           (cr.expires_on - current_date) as days_left,
+           case when cr.expires_on < current_date then 'expired' else 'expiring' end as stage
+      from public.coach_credentials cr
+     where cr.expires_on is not null
+       -- A row with no expiry is 'no-expiry' and never 'current' — the coach
+       -- has told us nothing about when it runs out, and that absence is the
+       -- credentials screen's business rather than this job's.
+       and cr.expires_on <= current_date + c_soon_days
+       -- Nothing about a policy that lapsed before this feature existed. A
+       -- coach opening the app to eleven notifications about certificates from
+       -- 2019 learns to clear the inbox without reading it.
+       and cr.expires_on >= current_date - 30
+  loop
+    if exists (
+      select 1 from public.coach_credential_notices n
+       where n.credential_id = r.id and n.stage = r.stage
+    ) then
+      continue;
+    end if;
+
+    insert into public.coach_credential_notices (credential_id, stage, notified_at)
+    values (r.id, r.stage, now())
+    on conflict (credential_id, stage) do nothing;
+
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      case when r.stage = 'expired'
+        then (case when r.kind = 'insurance' then 'Your insurance has expired' else 'A qualification has expired' end)
+        else (case when r.kind = 'insurance' then 'Your insurance runs out soon' else 'A qualification runs out soon' end)
+      end,
+      left(
+        r.title || case when r.stage = 'expired'
+          then ' expired on ' || to_char(r.expires_on, 'DD Mon YYYY') || '.'
+               || case when r.kind = 'insurance'
+                    then ' If that is your public liability cover, you are working without it until you renew.'
+                    else ' It is still shown on your profile as your own statement, and it is no longer true.' end
+          else ' runs out on ' || to_char(r.expires_on, 'DD Mon YYYY') || ' — ' || r.days_left
+               || ' day' || case when r.days_left = 1 then '' else 's' end || ' from today.'
+               || ' Renewing takes longer than you think.'
+        end
+        || ' Update the date on Credentials once it is renewed.',
+        500),
+      'trophy',
+      '/(trainer)/credentials'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+revoke all on function public.run_credential_expiry_notices() from public, anon, authenticated;
+
+comment on function public.run_credential_expiry_notices() is
+  'Nightly. Tells a coach once at sixty days (EXPIRING_SOON_DAYS) and once on the day a credential or insurance policy lapses. Ignores anything that expired more than thirty days ago, so switching this on does not produce an inbox of history.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · The schedule
+-- ═════════════════════════════════════════════════════════════════════════
+
+create extension if not exists pg_cron;
+
+-- Unschedule first so re-running this file does not accumulate duplicate jobs
+-- each firing the same run, exactly as parts 48 and 135 do.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'overdue-client-notices') then
+    perform cron.unschedule('overdue-client-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'credential-expiry-notices') then
+    perform cron.unschedule('credential-expiry-notices');
+  end if;
+end $$;
+
+-- 07:12 and 07:19 UTC. Morning rather than the small hours on purpose: both of
+-- these wake a phone, and a coach whose insurance notification arrives at 03:17
+-- is a coach who turns notifications off. Seven minutes apart so the two passes
+-- do not contend, and off the top of the hour where everything else in a
+-- Postgres runs. Both jobs run as the table owner, so neither widens what a
+-- signed-in person can reach.
+select cron.schedule(
+  'overdue-client-notices',
+  '12 7 * * *',
+  $cron$ select public.run_overdue_client_notices(); $cron$
+);
+
+select cron.schedule(
+  'credential-expiry-notices',
+  '19 7 * * *',
+  $cron$ select public.run_credential_expiry_notices(); $cron$
+);
+
+-- ▶ a-photo-with-no-pose-and-a-tape-with-no-target.sql
+
+-- Two things a member records about their body that the schema cannot hold.
+--
+-- ── 1. A progress photo has no pose ────────────────────────────────────────
+--
+-- `progress_photos` holds taken_at, image_path, weight_kg and body_fat_pct, and
+-- nothing about WHICH SHOT it is. So Compare — src/lib/photoCompare.ts, which
+-- pairs the oldest and newest photo in a window — will happily put a front shot
+-- beside a side shot and present the difference between them as progress. It is
+-- the one comparison on the screen and it can be a comparison of two different
+-- views of the same unchanged body.
+--
+-- A member cannot fix that from inside the app either, because there is nowhere
+-- to say what a photo is. The column is what makes "front, side, back" a
+-- question the app can ask and Compare a pairing it can get right.
+--
+-- Nullable, and every existing row stays null. There is no honest way to infer
+-- the pose of a photo already taken — a guess would silently re-pair somebody's
+-- whole history — so an untagged photo stays untagged and pairs the way it does
+-- today, which is the behaviour that is already there.
+--
+-- The check constraint is deliberately a short closed list rather than free
+-- text. Compare has to GROUP by this value, and free text produces 'front',
+-- 'Front', 'front view' and 'frontal' as four incomparable poses inside one
+-- member's own history.
+--
+-- ── 2. A tape measurement cannot be a goal ─────────────────────────────────
+--
+-- `goal_targets.kind` is checked against ('weight','bodyfat','muscle','custom')
+-- — see part 59 — so the only measured goals are the three that come off a
+-- scan. A member working toward a waist measurement, which is the single most
+-- commonly set body goal there is, has to record it as a `custom` goal: a
+-- sentence, with no target value, no progress ring and no projection, because
+-- part 59's own constraint requires custom goals to carry a title and no number.
+--
+-- The measurement sites are the ones src/ui/measurements.tsx lists, and they
+-- are added as their own kinds rather than as a generic 'measurement' kind with
+-- a site column, for one reason: the partial unique index below is
+-- `(client_id, kind) where kind <> 'custom'`, which gives one target per metric.
+-- A generic kind would allow only one tape goal in total, so a member could aim
+-- at a waist OR an arm and never both.
+--
+-- ⚠ NOT APPLIED. This is written as a numbered part and nothing has been run
+-- against the database. The client code for both features is deliberately NOT
+-- in this release: a build that writes `pose` against a table without the
+-- column fails the INSERT, which would take out progress photos entirely, and a
+-- build that writes kind = 'waist' against the old constraint fails the same
+-- way for goals. Apply this first, then the screens.
+
+-- ── the pose ───────────────────────────────────────────────────────────────
+
+alter table public.progress_photos
+  add column if not exists pose text;
+
+-- Dropped and recreated rather than added blind, so re-running this part is
+-- safe — an `add constraint` against an existing name is an error, and a part
+-- that cannot be re-run is a part somebody is afraid to apply.
+alter table public.progress_photos
+  drop constraint if exists progress_photos_pose_check;
+alter table public.progress_photos
+  add constraint progress_photos_pose_check
+  check (pose is null or pose in ('front', 'side', 'back'));
+
+-- Compare pairs within a pose, so the read is (client, pose, date). Named,
+-- because `create index if not exists on ...` with no name is a syntax error
+-- that this repository has already shipped once — see the note beside the scans
+-- indexes in part 01.
+create index if not exists progress_photos_client_pose_taken_idx
+  on public.progress_photos (client_id, pose, taken_at desc);
+
+-- ── the tape-measurement goals ─────────────────────────────────────────────
+--
+-- The constraint is REPLACED, not added to, because a check constraint cannot
+-- be extended in place. The new list is the old four plus the twelve sites, and
+-- the old four come first so a diff of this file against part 59 reads as an
+-- addition rather than as a rewrite.
+--
+-- No existing row can violate it: every current row holds one of the original
+-- four, all of which are still permitted.
+alter table public.goal_targets
+  drop constraint if exists goal_targets_kind_check;
+alter table public.goal_targets
+  add constraint goal_targets_kind_check
+  check (kind in (
+    'weight', 'bodyfat', 'muscle', 'custom',
+    -- The sites, spelled exactly as src/ui/measurements.tsx spells them and in
+    -- the same order. `measurements.kind` is a bare text column with no
+    -- constraint of its own, so THIS list is the only place the two halves can
+    -- be checked against each other, and a site added there without a line here
+    -- is a goal the member can describe and not set.
+    'waist', 'chest', 'shoulders', 'neck', 'hips',
+    'arm', 'armL', 'armR',
+    'thigh', 'thighL', 'thighR',
+    'calf'
+  ));
+
+-- The value/title rule from part 59 is unchanged and still correct for the new
+-- kinds: a waist goal is a number and carries no title, exactly as a weight
+-- goal does. It is restated here only because it names `kind <> 'custom'`, and
+-- a reader arriving at this file needs to see that the predicate still covers
+-- the twelve kinds added above without being edited.
+-- `goal_targets_shape` is its name in part 59 (an inline named constraint),
+-- while the kind check above is unnamed there and so carries Postgres's
+-- generated `goal_targets_kind_check`. Dropping the wrong name is a no-op with
+-- `if exists`, which would leave the OLD four-kind constraint in place and this
+-- part silently doing nothing — so both names are taken from part 59 itself.
+alter table public.goal_targets
+  drop constraint if exists goal_targets_shape;
+alter table public.goal_targets
+  add constraint goal_targets_shape
+  check (
+    (kind =  'custom' and target_value is null and title is not null and btrim(title) <> '')
+    or
+    (kind <> 'custom' and target_value is not null and title is null)
+  );
+
+-- ▶ a-hold-and-a-plan-the-member-rewrote.sql
+
+-- ── Two things the app could not record, and one it recorded nowhere ────────
+--
+-- 1. `workouts.timed`   which sets were HELD rather than repeated
+-- 2. `client_plan_edits` the changes a member makes to their own programme
+--
+-- Additive only. No existing column, constraint or policy is altered.
+--
+--
+-- ═══ 1 · workouts.timed ═══════════════════════════════════════════════════
+--
+-- ── What was wrong ─────────────────────────────────────────────────────────
+--
+-- `buildProgram` in src/lib/programs.ts hands every fat-loss and tone client a
+-- plank written as '45 sec' and a side plank written as '30 sec/side'. The set
+-- method catalogue carries an `isometric` entry whose blurb says, in as many
+-- words, "The reps column is seconds". And both logging paths in the client app
+-- refused anything that was not a positive whole number of REPS.
+--
+-- So the app prescribed a hold, told the member the reps column was seconds,
+-- and then would not accept a hold. What people typed instead was 45 into a
+-- reps box — a claim that they performed forty-five plank repetitions, counted
+-- into the rep totals on History and eligible to be read as a rep record. The
+-- alternative was not logging the movement at all, which is what most people
+-- did: the one exercise in a beginner's programme they could reliably complete
+-- was the one their log never mentioned.
+--
+-- ── Why a column and not a third number in the pair ────────────────────────
+--
+-- `sets` is jsonb holding `[reps, kg]` pairs and three apps read it. Widening
+-- the pair to a triple changes what every existing row means to every existing
+-- reader, and there is no migration that reaches the on-device drafts in
+-- AsyncStorage that hold the same shape.
+--
+-- `timed` is the same alignment `bw` (part 162) and `feel` already use, and it
+-- changes what the FIRST number means: reps on an ordinary set, SECONDS on a
+-- held one. The second number goes on meaning what it meant — the load, or with
+-- `bw` the load added to the body — so a 45-second plank with a 10 kg plate is
+-- `[45, 10]` with both flags true, and every part of that is recoverable.
+--
+-- ── Why nullable, with no default ──────────────────────────────────────────
+--
+-- NULL is the honest state for every row written before today. It does not mean
+-- "none of these sets were held" — it means nobody was ever asked. The app
+-- reads a missing flag as not-timed, which is exactly the answer it gave before
+-- this column existed, so no historical row changes meaning.
+--
+-- And a DEFAULT would be worse here than anywhere. A 45 sitting in the reps
+-- slot of a row logged last month is a figure nobody can now interpret;
+-- back-filling it as a hold would invent a plank that may never have happened,
+-- and back-filling it as reps asserts the forty-five repetitions this column
+-- exists to stop being asserted.
+--
+-- ── What a held set is worth, so nothing downstream has to guess ───────────
+--
+-- No tonnage and no estimated 1RM. Tonnage is Σ reps × load, and seconds ×
+-- kilograms is not a mass moved — a member holding 10 kg for 45 seconds has not
+-- lifted 450 kg and no total in this product may say so. Epley over seconds
+-- returns a strength figure computed from a stopwatch. The hold is worth the
+-- hold, and src/lib/timedSets.ts keeps the board it belongs on.
+
+alter table workouts add column if not exists timed jsonb;
+
+comment on column workouts.timed is
+  'Per-set timed flags, aligned to sets: timed[i] true means set i was HELD '
+  'rather than repeated, and sets[i][0] is then SECONDS rather than reps. '
+  'NULL = nobody was asked; it is not a claim that no set was held. A held set '
+  'contributes no tonnage and no estimated 1RM — see src/lib/timedSets.ts.';
+
+
+-- ═══ 2 · client_plan_edits ════════════════════════════════════════════════
+--
+-- ── What was wrong ─────────────────────────────────────────────────────────
+--
+-- Four pieces of React state on app/(client)/workouts.tsx held every change a
+-- member can make to the programme they were given: a movement swapped for one
+-- their gym actually has, a load corrected at the rack, an exercise taken off
+-- because a shoulder will not do it, an exercise added because they did it
+-- anyway. All four were plain `useState`. The screen persisted exactly two
+-- things and neither was any of them.
+--
+-- So a swap made on Tuesday was gone on Wednesday, and none of it ever reached
+-- the coach. A coach writing Bench Press for somebody whose gym has no bench
+-- sees a programme being followed; the member sees a lift they substitute every
+-- session. The one fact that would settle it — "they have swapped this four
+-- weeks running" — was being typed into a React state and thrown away.
+--
+-- ── One row per member, not one per change ─────────────────────────────────
+--
+-- The four are ONE answer to one question: what does this member's plan
+-- actually look like when they train. They are read together, written together
+-- and shown together, and a schema that spread them over four tables would
+-- invite three of them to arrive and one not to, which is the partial state
+-- this table exists to remove. The client upserts the whole set; there is
+-- nothing to merge and therefore nothing to merge wrongly.
+--
+-- `edits` is TEXT, not jsonb, and that is deliberate: the app writes it through
+-- one serialiser (`writePlanEdits`) and reads it through one parser
+-- (`readPlanEdits`) which distinguishes "no edits" from "bytes nobody could
+-- read". Storing it as jsonb would put a second parser — Postgres's — in front
+-- of the first, and a shape it rejected would fail the whole upsert rather than
+-- reaching the reader that knows what to do with it.
+--
+-- ── Who may read it ────────────────────────────────────────────────────────
+--
+-- The member, and the coach who trains them. `is_my_client` is the same test
+-- every other coach read in this database uses, so a coach who is dropped
+-- stops seeing this the moment `clients.trainer_id` changes, with nothing to
+-- clean up.
+--
+-- The coach may READ and may not WRITE. This table is the member's account of
+-- their own plan; the coach already owns the programme itself, in
+-- `program_templates` and on the assignment, and a coach who could edit this
+-- could silently withdraw a change their client made and told them about.
+
+create table if not exists client_plan_edits (
+  client_id  uuid primary key references profiles(id) on delete cascade,
+  edits      text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table client_plan_edits enable row level security;
+
+drop policy if exists client_plan_edits_own on client_plan_edits;
+create policy client_plan_edits_own on client_plan_edits
+  for all
+  using (client_id = (select auth.uid()))
+  with check (client_id = (select auth.uid()));
+
+drop policy if exists client_plan_edits_coach_r on client_plan_edits;
+create policy client_plan_edits_coach_r on client_plan_edits
+  for select
+  using (is_my_client(client_id));
+
+comment on table client_plan_edits is
+  'What a member has changed about the programme they were given: swapped '
+  'movements, corrected sets/reps/loads, removals, and movements they added. '
+  'One row per member holding all four together, because they are one answer '
+  'to one question. The member writes it; their coach may read it and may not '
+  'write it.';
+
+-- ▶ a-full-class-with-six-people-waiting.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- A full class with six people waiting, and nobody could see the six.
+--
+-- ── What was measured ───────────────────────────────────────────────────
+--
+-- `class_counts()` (part 02, re-scoped by part 38) is the only way any of the
+-- three apps learns how full a class is:
+--
+--     select cb.class_id, count(*)::bigint
+--       from class_bookings cb
+--       join gym_classes gc on gc.id = cb.class_id
+--      where gc.tenant_id = my_tenant()
+--      group by cb.class_id;
+--
+-- `class_bookings.status` is `check (status in ('booked','waitlist'))`. There
+-- is no filter on it, so a WAITLISTER is counted as a booking. Two separate
+-- consequences, both live:
+--
+--   1 · A class of 12 with 5 waiting reports `booked = 17`. The coach's screen
+--       (app/(trainer)/classes.tsx) draws "17/12"; the member's computes
+--       `capacity - booked` and gets minus five. Every screen in this product
+--       that shows how full a class is has been showing a number that is not
+--       how full it is.
+--
+--   2 · The waitlist is INVISIBLE, and it is the more valuable of the two
+--       numbers. A full class is a full class; a full class with six people
+--       waiting is a second session on Thursday, and the coach cannot see it.
+--
+-- The same conflation was found and fixed on the OWNER's read path in the wave
+-- before this one — `tallyBookings` in src/lib/gymSchedule.ts had a guard
+-- against a status of 'cancelled' that the CHECK constraint has never admitted,
+-- so it matched nothing and every waitlister counted as booked, which is what
+-- made fill rate read 142%. That fix could not reach this function, because
+-- this is a different read: the owner console tallies rows it fetched, and the
+-- two member-facing apps ask the database to count for them.
+--
+-- ── Why the return type changes rather than a second function ───────────
+--
+-- The two figures are read together on every screen that shows either, and a
+-- second RPC would be a second round trip that can fail independently — leaving
+-- a caller holding a booked count and an unknown waitlist, with no honest way
+-- to draw the row. One answer, two columns.
+--
+-- `create or replace function` cannot change a return type, so this DROPs and
+-- recreates. Nothing depends on it in SQL — it is called over /rest/v1/rpc by
+-- the apps and by nothing inside the database — so the drop takes nothing with
+-- it. The `booked` column keeps its name and its position, so a caller that has
+-- not been updated reads the same field it always did and simply gets a
+-- CORRECTED number.
+--
+-- ── What a caller must do with an absent `waiting` ──────────────────────
+--
+-- An older build talking to this function gets a column it ignores, which is
+-- fine. A NEWER build talking to an older database gets `undefined`, and
+-- src/ui/classes.tsx must read that as UNKNOWN rather than as zero — "nobody is
+-- waiting" is exactly the claim that would stop a coach adding the second
+-- session. The provider's `countsKnown` already draws that distinction for the
+-- booked figure and this rides on it.
+--
+-- Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+drop function if exists public.class_counts();
+
+create or replace function public.class_counts()
+returns table(class_id uuid, booked bigint, waiting bigint)
+language sql
+security definer
+-- Pinned, as part 38 pinned it: a SECURITY DEFINER function resolving
+-- `class_bookings`, `gym_classes` and `my_tenant()` against the CALLER's
+-- search_path lets a caller who can create a schema choose which tables the
+-- tenant check reads.
+set search_path to 'public', 'pg_temp'
+as $$
+  select
+    cb.class_id,
+    -- `filter` rather than a `where`, so a class whose bookings are ALL
+    -- waitlisters still appears in the answer with booked = 0. A `where
+    -- cb.status = 'booked'` would drop the row entirely, and a class missing
+    -- from this answer falls to `?? 0` in the caller — which is the same zero,
+    -- reached by a path where nothing knows it was ever a guess.
+    count(*) filter (where cb.status = 'booked')::bigint   as booked,
+    count(*) filter (where cb.status = 'waitlist')::bigint as waiting
+  from class_bookings cb
+  join gym_classes gc on gc.id = cb.class_id
+  where gc.tenant_id = my_tenant()
+  group by cb.class_id;
+$$;
+
+revoke execute on function public.class_counts() from public, anon;
+grant  execute on function public.class_counts() to authenticated;
+
+comment on function public.class_counts() is
+  'How full each class in the caller''s tenant is. `booked` counts confirmed seats ONLY — it counted waitlisters too until part 210, so a class of 12 with 5 waiting reported 17. `waiting` is the queue, and it is the figure that tells a coach to put on a second session.';
+
+-- ▶ an-enquiry-that-later-joined-and-a-code-that-cost-nothing.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- An enquiry that later joined, and a code that cost nothing.
+--
+-- Two small additions to two tables, and they are in one part because they are
+-- one sentence: a coach cannot tell which of their channels produces CLIENTS
+-- rather than clicks.
+--
+-- ── And the one that is deliberately NOT here ───────────────────────────
+--
+-- A `trainers.brand_logo` column was written and then removed from this part.
+-- app/(trainer)/brand.tsx refuses a logo today and gives the reason: "no logo
+-- upload… A second image column with no uploader behind it is precisely the
+-- promise that had to be walked back" — which is what happened to the owner's
+-- brand screen an hour before that one was written.
+--
+-- A coach's own mark on their own invoice IS theirs and the refusal is wrong
+-- about that. But shipping it needs a storage bucket, its policies, an
+-- uploader, and a read path that reaches a CLIENT's app through
+-- `my_coach_brand()` — four things, none of which is the column. Adding the
+-- column alone would re-create the exact defect that screen's header describes
+-- finding. It is left for the wave that can do all four.
+--
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The enquiry that became a client, and nobody could say so
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- ── What part 157 decided, and why it is being revisited ────────────────
+--
+-- `coach_leads.state` is `new | contacted | closed` and the column's own
+-- comment says: "There is deliberately no 'joined' — this database cannot know
+-- that. An enquiry carries no account, so nothing can ever link it to the
+-- `coach_requests` row that person may later create, and a state the app would
+-- have to guess at is a number a coach would divide by."
+--
+-- That reasoning is right about a STATE and wrong about an EVIDENCED MATCH,
+-- and the difference is the whole of this section. A fourth state would be the
+-- app deciding; a match on the email address the person typed, against the
+-- account that later joined through the SAME CODE, is a fact — and where the
+-- match is absent nothing is claimed, which is exactly what "cannot know that"
+-- should mean.
+--
+-- So `state` is untouched. It stays three values, it stays the coach's own
+-- workflow, and nothing here writes to it. What is added is a separate,
+-- nullable, evidence-carrying pair of columns, and a screen that reads them has
+-- to say WHY it believes the match — which is why `joined_via` exists rather
+-- than a bare boolean.
+--
+-- ── The match, and the two things it will not do ────────────────────────
+--
+--   IT WILL NOT MATCH ON A NAME. Two people called Sarah Ahmed is not an
+--   unlikely coincidence on a coach's book, it is a Tuesday. A name match would
+--   mark the wrong enquiry as converted and the coach would stop advertising
+--   wherever the real one came from.
+--
+--   IT WILL NOT MATCH ACROSS CODES. An enquiry that arrived on FLYER7 and an
+--   account that joined on INSTA2 is not evidence that the flyer worked; it is
+--   evidence that somebody saw both, and attributing it to the first would be
+--   the double-counting `attributeLeads` in src/lib/leads.ts exists to prevent.
+--   Same code, same coach, or nothing.
+--
+-- The email itself is compared in `auth.users`, which no app can read — that is
+-- why this is a trigger and not a query the coach's phone could run. The coach
+-- never receives the email address of the account; they receive the fact that
+-- THEIR OWN enquiry, whose contact details they already hold, matched.
+--
+-- ── Why a trigger on coach_requests and not a nightly pass ──────────────
+--
+-- The write that creates the link is `join_by_code()`, and it is the only
+-- writer that sets `coach_requests.via_code`. A trigger on it fires exactly
+-- once per join, inside the transaction, with the code in hand. A nightly pass
+-- would have to re-derive the same thing from a growing table forever.
+--
+-- ── The guards, each of which is a way this could fail a join ───────────
+--
+-- This fires inside `join_by_code()`. An exception here rolls the join back and
+-- somebody who typed a valid code would be told it did not work. So:
+--
+--   · the whole body is a single UPDATE that matches zero rows when there is no
+--     enquiry to mark, which is the common case and is not an error;
+--   · `via_code` is nullable on `coach_requests` (a directory request has none)
+--     and is guarded;
+--   · the email lookup is a subquery that yields null when the account has no
+--     email, and a null never equals anything, so the UPDATE matches nothing.
+--
+-- Deliberately NOT wrapped in `exception when others then null`, for part 158's
+-- reason: that swallows a real defect silently and forever.
+-- ═════════════════════════════════════════════════════════════════════════
+
+alter table public.coach_leads
+  add column if not exists joined_at   timestamptz,
+  -- Which account it matched. Nullable and `on delete set null`: an account
+  -- that is later deleted leaves the FACT that this enquiry converted intact,
+  -- because the conversion happened and a coach's channel figures must not
+  -- change retroactively when somebody closes their account. Part 189 makes the
+  -- same argument about a late fee outliving the coaching.
+  add column if not exists joined_user uuid references public.profiles(id) on delete set null,
+  -- HOW it was matched. A bare boolean would leave every screen unable to say
+  -- why it believes this, and "she joined" is a claim a coach will act on. One
+  -- value today; the column exists so that adding a second kind of evidence is
+  -- a new value rather than a silent widening of what the first one meant.
+  add column if not exists joined_via  text;
+
+alter table public.coach_leads drop constraint if exists coach_leads_joined_via_chk;
+alter table public.coach_leads add constraint coach_leads_joined_via_chk
+  check (joined_via is null or joined_via in ('email-and-code'));
+
+-- The three move together or not at all. A `joined_at` with no evidence behind
+-- it is precisely the guess part 157 refused, reachable by a hand-written
+-- UPDATE, and structural is the only place to stop that.
+alter table public.coach_leads drop constraint if exists coach_leads_joined_together;
+alter table public.coach_leads add constraint coach_leads_joined_together
+  check (
+    (joined_at is null and joined_via is null)
+    or (joined_at is not null and joined_via is not null)
+  );
+
+comment on column public.coach_leads.joined_at is
+  'When an account matching this enquiry joined through the SAME code. NULL means no match was found, which is not the same as "they did not join" — see part 211.';
+comment on column public.coach_leads.joined_user is
+  'The account that matched. Nullable and survives that account being deleted: the conversion happened, and a coach''s channel figures must not change retroactively.';
+comment on column public.coach_leads.joined_via is
+  'What the match was made on. Never a bare boolean, because a screen has to be able to say WHY it believes an enquiry converted.';
+
+-- The coach's Enquiries screen filters on this. Partial, so it stays small: an
+-- unmatched enquiry is the common row and is not in the index at all.
+create index if not exists coach_leads_joined_idx
+  on public.coach_leads (trainer_id, joined_at desc)
+  where joined_at is not null;
+
+create or replace function public.lead_joined_notice()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_email text;
+begin
+  -- A directory request carries no code, and there is nothing to attribute.
+  if new.via_code is null or btrim(new.via_code) = '' then
+    return new;
+  end if;
+
+  -- Read from auth.users, which no app may. The address never leaves this
+  -- function: it is compared and discarded, and what the coach learns is that
+  -- an enquiry THEY ALREADY HOLD matched.
+  select lower(btrim(u.email)) into v_email
+    from auth.users u where u.id = new.client_id;
+  if v_email is null or v_email = '' then
+    return new;
+  end if;
+
+  update public.coach_leads l
+     set joined_at   = now(),
+         joined_user = new.client_id,
+         joined_via  = 'email-and-code'
+   where l.trainer_id = new.trainer_id
+     -- Same code, uppercased on both sides, exactly as `attributeLeads` and
+     -- `matchAds` compare it. A second, looser rule for the same six characters
+     -- would let one screen say a flyer produced a client and another say it
+     -- produced nothing.
+     and upper(l.via_code) = upper(btrim(new.via_code))
+     and lower(btrim(l.contact)) = v_email
+     -- Only an enquiry that predates the join. An enquiry left AFTER somebody
+     -- joined is a different act — usually a client asking a question through
+     -- the same form — and marking it converted would attribute a client to a
+     -- channel twice.
+     and l.at <= now()
+     -- Idempotent: a re-join after a declined request must not restamp the
+     -- date, which is the date a coach reads as "how long the flyer took".
+     and l.joined_at is null;
+
+  return new;
+end;
+$function$;
+
+comment on function public.lead_joined_notice() is
+  'Marks a coach_leads row as converted when an account with the SAME email joins through the SAME code. Never matches on a name and never across codes. Reads auth.users, which no app can — the address is compared and discarded.';
+
+drop trigger if exists coach_requests_mark_lead_joined on public.coach_requests;
+create trigger coach_requests_mark_lead_joined
+  after insert on public.coach_requests
+  for each row execute function public.lead_joined_notice();
+
+-- Postgres checks EXECUTE when a trigger is CREATED and not when it fires, so a
+-- trigger function needs no grant to anybody (parts 51, 141, 158). Postgres
+-- grants EXECUTE to PUBLIC on every new function and `anon` resolves through
+-- that grant, so both are named — and `authenticated` with them, because this
+-- one reads auth.users.
+revoke all on function public.lead_joined_notice() from public;
+revoke all on function public.lead_joined_notice() from anon;
+revoke all on function public.lead_joined_notice() from authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A code that cost nothing, and was reported as costing an unknown amount
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `coach_code_spend` records what a coach says a code cost. A code with no row
+-- there is reported as "cost unknown" — and app/(trainer)/ad-spend.tsx builds a
+-- whole section out of those, on the reasonable premise that an unpriced code is
+-- a gap in the record.
+--
+-- For a paid channel it is. For a code a coach read out at the end of a class,
+-- put in an Instagram caption, or printed on a business card they had anyway,
+-- it is not a gap — the cost is nothing, and that is a real answer. Today those
+-- two are indistinguishable, so a coach with four organic codes and one
+-- unpriced ad reads a list of five gaps and stops looking at it, which is where
+-- the one that matters was.
+--
+-- ── Why a flag and not a spend of zero ──────────────────────────────────
+--
+-- A row in `coach_code_spend` with `cents = 0` says "I have measured this
+-- channel and it cost nothing this period", which is a claim about a period.
+-- `is_organic` says "this channel has no cost, ever", which is a claim about
+-- the channel. They behave the same in an arithmetic sum and differently in
+-- every sentence: only the second can honestly be left out of "codes you have
+-- not priced yet", and a zero would have to be re-entered every month to keep
+-- saying so.
+-- ═════════════════════════════════════════════════════════════════════════
+
+alter table public.coach_join_codes
+  add column if not exists is_organic boolean not null default false;
+
+comment on column public.coach_join_codes.is_organic is
+  'The coach has said this channel costs nothing — read out in a class, in a caption, on a card. Not the same as a spend of zero: that is a measurement of a period, this is a statement about the channel, and only this one may be left out of "codes you have not priced yet".';
+
+-- ── And a function to set it, because the table is NOT writable ─────────
+--
+-- The first draft of this part said "no policy change — `coach_join_codes` is
+-- already writable by its owning coach". That is wrong, and it is wrong in the
+-- direction that would have shipped a button doing nothing: part 152 ends with
+--
+--     grant select on public.coach_join_codes to authenticated;
+--     revoke insert, update, delete on public.coach_join_codes from authenticated;
+--
+-- Every write to this table goes through a SECURITY DEFINER function, and a
+-- PostgREST update matching zero rows is not an error (src/lib/wroteRows.ts) —
+-- so an app writing this column directly would have reported success and
+-- changed nothing, forever. That is exactly the failure part 153 describes
+-- finding on the owner's brand screen.
+--
+-- So: one more definer function, on the same pattern as `create_join_code` and
+-- `revoke_join_code`, and it returns a boolean rather than void for the reason
+-- those do — a caller has to be able to tell "not yours" from "done".
+
+create or replace function public.set_code_organic(p_id uuid, p_organic boolean)
+returns boolean
+language plpgsql
+security definer
+-- Pinned, as every definer in this schema is: without it `coach_join_codes`
+-- resolves against the CALLER's search_path, and a caller who can create a
+-- schema of their own chooses which table the ownership check reads.
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_me uuid := auth.uid();
+  v_n  integer;
+begin
+  if v_me is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  -- `trainer_id = v_me` is the whole of the authorisation and it is in the
+  -- WHERE rather than in a prior existence check: one statement, so there is no
+  -- window between deciding and writing, and a code belonging to somebody else
+  -- matches zero rows rather than raising — which tells a caller nothing about
+  -- whether that id exists. The same shape `revoke_join_code` uses.
+  update public.coach_join_codes
+     set is_organic = coalesce(p_organic, false)
+   where id = p_id and trainer_id = v_me;
+
+  get diagnostics v_n = row_count;
+  -- False rather than an exception. "That is not your code" and "that code is
+  -- gone" are both answers a screen can say, and neither is worth retrying.
+  return v_n > 0;
+end
+$function$;
+
+revoke all on function public.set_code_organic(uuid, boolean) from public, anon;
+grant  execute on function public.set_code_organic(uuid, boolean) to authenticated;
+
+comment on function public.set_code_organic(uuid, boolean) is
+  'Marks one of the caller''s own join codes as costing nothing. A function rather than a policy because part 152 revokes UPDATE on this table from authenticated outright — a direct write would have matched zero rows and reported success.';

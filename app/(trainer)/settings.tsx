@@ -51,7 +51,7 @@
 // them this file's to edit, any one of which a call-site check would have been
 // forgotten at. src/ui/settings.tsx carries the long note.
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Alert, Pressable } from 'react-native';
+import { View, Text, ScrollView, Alert, Pressable, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -69,6 +69,9 @@ import { CURRENCY_CHOICES, setCurrencyLine, WHY_NOT_A_REPRICE, type SetCurrencyO
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
+import { parseCooldown, cooldownText, cooldownNote, MIN_NUDGE_COOLDOWN, MAX_NUDGE_COOLDOWN } from '../../src/lib/coachPrefs';
+import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
+import { rateFieldNote } from '../../src/lib/coachPrefs';
 
 /** A label and its value. `value` is already a string — see `fig`. */
 function Line({ t, label, value, first }: { t: Theme; label: string; value: string; first?: boolean }) {
@@ -129,6 +132,68 @@ export default function TrainerSettings() {
     if (!ok && want) {
       Alert.alert('Not turned on', `${lock.label} was not confirmed, so the lock is still off.`);
     }
+  };
+
+  // ── How often the app may raise the same client ────────────────────────
+  //
+  // `MIN_COOLDOWN_DAYS = 7` and `DISMISS_FLOOR_DAYS = 30` were module constants
+  // and one set of numbers for every coach. There is no one set: a coach whose
+  // clients come to a room every Tuesday knows within a week that somebody has
+  // stopped, and a coach with an online-only book needs a fortnight before
+  // silence means anything. Both were given seven days, and both complained
+  // about it from opposite directions.
+  //
+  // It is a FLOOR and not an override. The per-client pacing — off each
+  // client's own rhythm — survives it, which is the part that works. See
+  // `cooldownFloor` in src/lib/interventions.ts.
+  //
+  // Three states in the box, exactly as the class-rate box has: empty is an
+  // instruction (give me the app's own pacing back) and is saved as NULL;
+  // half-typed is not an instruction and is never saved; a number is a number.
+  // `parseCooldown` is what keeps them apart, and a `parseInt` here would take
+  // the 1 out of a "14" being typed and silence nothing for a day.
+  const [cooldownBox, setCooldownBox] = useState('');
+  const [cooldownStored, setCooldownStored] = useState<number | null>(null);
+  const [cooldownStatus, setCooldownStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [cooldownMsg, setCooldownMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { prefs, status } = await fetchCoachPrefs();
+      if (!live) return;
+      setCooldownStatus(status === 'ready' ? 'ready' : 'error');
+      // Only fill the box from a read that ANSWERED. An empty box after a
+      // refused read is empty for that reason and not because the coach has no
+      // preference, and typing into it would save over what is there — the
+      // failure `goalsEmptyLine` was written about, on a different field.
+      if (status === 'ready') {
+        setCooldownStored(prefs.nudgeCooldownDays);
+        setCooldownBox(cooldownText(prefs.nudgeCooldownDays));
+      }
+    })();
+    return () => { live = false; };
+  }, [auth.user?.id]);
+
+  const saveCooldown = async () => {
+    const parsed = parseCooldown(cooldownBox);
+    if (parsed.kind === 'invalid') {
+      setCooldownMsg(`That is not a number of days this can use. Give it a whole number between ${MIN_NUDGE_COOLDOWN} and ${MAX_NUDGE_COOLDOWN}, or clear the box to go back to the app's own pacing.`);
+      return;
+    }
+    const value = parsed.kind === 'empty' ? null : parsed.value;
+    const ok = await saveCoachPrefs({ nudgeCooldownDays: value });
+    if (!ok) {
+      // Not "saved". The write is checked for a row count rather than for the
+      // absence of an error, because a refused upsert comes back clean.
+      setCooldownMsg('That did not save, so the window is unchanged. Nothing on your Quiet Clients screen has moved.');
+      return;
+    }
+    setCooldownStored(value);
+    setCooldownBox(cooldownText(value));
+    setCooldownMsg(value == null
+      ? 'Cleared. Each client is paced off their own rhythm again.'
+      : `Saved. Nobody will be suggested twice inside ${value} day${value === 1 ? '' : 's'}.`);
   };
 
   // The push switch. Identical handling to app/(client)/settings.tsx, and
@@ -350,6 +415,21 @@ export default function TrainerSettings() {
 
         <Rule />
 
+        {/* The permanent way back to the first-run list. The row on the Clients
+            screen removes itself once every step is done, and a screen reachable
+            only from a row that removes itself is a screen that becomes
+            unreachable by being used — so this one and the Explore entry never
+            go away. The currency control further down this screen is the first
+            item on that list, which is the other reason it belongs here. */}
+        <Section>
+          <SectionHead title="Getting Started" />
+          <ListRow icon="sparkle" title="Getting Started"
+            note="What is set up, and what is still worth doing"
+            onPress={() => router.push('/(trainer)/getting-started')} />
+        </Section>
+
+        <Rule />
+
         <Section>
           <SectionHead title="Signed in as" />
           <Line t={t} first label="Name" value={auth.loading ? 'Checking…' : fig(auth.user?.name)} />
@@ -386,6 +466,47 @@ export default function TrainerSettings() {
             on={st.notifPush} onPress={() => { void togglePush(); }} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             Turning this off takes this phone off the list entirely. Your clients can still message you and book with you — you will see it next time you open the app rather than as it happens, and your other devices are unaffected.
+          </Text>
+        </Section>
+
+        <Rule />
+
+        {/* How often Quiet Clients may raise the same person. See the long note
+            on `saveCooldown` above for why this is a floor rather than an
+            override, and why the box has three states rather than two. */}
+        <Section>
+          <SectionHead title="Quiet Clients" />
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
+            <View style={{ flex: 1, paddingRight: sp.md }}>
+              <Text style={{ ...ty.body, color: t.ink }}>Shortest gap between approaches</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                {cooldownStatus === 'ready'
+                  ? cooldownNote(cooldownStored)
+                  : (rateFieldNote(cooldownStatus === 'loading' ? 'loading' : 'error') ?? '')}
+              </Text>
+            </View>
+            <TextInput
+              value={cooldownBox}
+              onChangeText={(v) => { setCooldownBox(v); setCooldownMsg(null); }}
+              onBlur={() => { void saveCooldown(); }}
+              keyboardType="number-pad"
+              maxLength={3}
+              accessibilityLabel="Shortest number of days between two approaches to the same client"
+              placeholder="days"
+              placeholderTextColor={t.ink3}
+              style={{
+                ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
+                paddingHorizontal: sp.md, paddingVertical: 10, minWidth: 84, textAlign: 'right',
+              }}
+            />
+          </View>
+          {cooldownMsg ? (
+            <Flag tone={/did not save|not a number/.test(cooldownMsg) ? t.crit : t.good}>{cooldownMsg}</Flag>
+          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            This is a floor and not a schedule. Each client is still paced off how often they used to train, so
+            somebody who came fortnightly is left longer than somebody who came daily. Nothing here sends anything
+            to anybody.
           </Text>
         </Section>
 

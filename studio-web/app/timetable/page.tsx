@@ -21,9 +21,10 @@ import { DataTable, type Column } from '@/components/DataTable';
 import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
 import {
   fetchClasses, createClass, createSeries, deleteClass,
-  fetchRoster, setAttendance,
-  summariseAttendance, pct,
-  type GymClass, type RosterEntry,
+  cancelClass, restoreClass, cancelSeriesFrom, updateClass, updateSeriesFrom,
+  fetchRoster, setAttendance, promoteFromWaitlist, returnToWaitlist,
+  summariseAttendance, pct, isCancelled, classesThatRan, splitRoster, placesLeft,
+  type GymClass, type RosterEntry, type ClassPatch,
 } from '@lib/gymSchedule';
 import {
   fetchPtSlots, fetchTrainerOptions, createPtSlot, removePtSlot, updatePtSlot,
@@ -51,6 +52,10 @@ export default function Timetable() {
   const [gymNameErr, setGymNameErr] = useState<string | null>(null);
   const [raw, setRaw] = useState<Board | null>(null);
   const [openClass, setOpenClass] = useState<GymClass | null>(null);
+  // The class being corrected. There was no edit-a-class path in the product at
+  // all: a class typed in with the wrong capacity or the wrong coach could only
+  // be deleted and retyped, which took its bookings with it.
+  const [editing, setEditing] = useState<GymClass | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loadFail, setLoadFail] = useState<string | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -74,7 +79,14 @@ export default function Timetable() {
     setRaw(null); setLoadFail(null);
     // allSettled, not all: which half failed is the useful part of the message.
     const [c, p] = await Promise.allSettled([
-      fetchClasses(supabase, tenantId, from, to),
+      // `includeCancelled` because this is the board: a class the gym called
+      // off is a thing that happened to this week and the owner has to be able
+      // to see it, put it back on, and know why it is not running. Every other
+      // caller of `fetchClasses` gets the default — cancelled rows excluded —
+      // so a called-off Tuesday cannot put twenty unsold places into anybody's
+      // fill rate. The merged board below drops them again before any figure is
+      // computed; only the "Called off" list and the register keep them.
+      fetchClasses(supabase, tenantId, from, to, { includeCancelled: true }),
       fetchPtSlots(supabase, tenantId, from, to),
     ]);
     const missing: string[] = [];
@@ -114,10 +126,17 @@ export default function Timetable() {
     return () => { live = false; };
   }, [load]);
 
+  // Cancelled classes are OFF the merged board, and everything computed from
+  // the board — floor cover, clashes, "on the floor at six" — is therefore
+  // computed over what is actually happening. A called-off class left in would
+  // report a trainer as covering an hour they are not working, and would raise
+  // a room clash against a class that is not in the room. They are listed
+  // separately below, which is the only place they belong.
   const board = useMemo(
-    () => (raw ? mergeTimetable(raw.classes, raw.slots) : null),
+    () => (raw ? mergeTimetable(classesThatRan(raw.classes), raw.slots) : null),
     [raw],
   );
+  const calledOff = useMemo(() => (raw ? raw.classes.filter(isCancelled) : null), [raw]);
   const sum = useMemo(() => (board ? summariseBoard(board) : null), [board]);
   const conflicts = useMemo(() => (board ? clashes(board) : []), [board]);
   // Fill and show rate stay class-only. A one-to-one has no fill rate worth the
@@ -184,14 +203,62 @@ export default function Timetable() {
   const { monday } = range();
   const weekLabel = `${monday.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${new Date(monday.getTime() + 6 * DAY).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
 
+  const classFor = (id: string) => raw?.classes.find((x) => x.id === id) ?? null;
+
+  /**
+   * ── Two verbs, because they are two different acts ────────────────────────
+   *
+   * "Remove" was the only one the board had, and it is a hard DELETE.
+   * `class_bookings.class_id` is `on delete cascade`, so calling off a
+   * snowed-off Tuesday destroyed its twelve bookings, every `attended_at` on
+   * them, and its waiting list — and quietly improved the month's fill rate,
+   * because the class that went badly stopped being in the average the moment
+   * the owner acted on it.
+   *
+   * So: a class with anybody attached to it can only be CALLED OFF, which keeps
+   * the row, the bookings and the register, and records a reason. Delete stays
+   * for the class typed in wrong five minutes ago that nobody has booked — and
+   * is not rendered at all otherwise, rather than rendered and refused.
+   */
+  const callOff = (c: GymClass) => {
+    const why = prompt(
+      `Why is "${c.title}" not running?\n\nThe class, its ${c.booked} booking${c.booked === 1 ? '' : 's'} and its register are all kept — this records that it did not happen.`,
+      '',
+    );
+    // Cancel on the prompt is null and must do nothing. An empty string is
+    // somebody who cleared the box, and `cancelClass` refuses that with its own
+    // sentence rather than filing a cancellation nobody explained.
+    if (why === null) return;
+    cancelClass(supabase, c.id, why)
+      .then(() => { setErr(null); refresh(); })
+      .catch((x: any) => setErr(x?.message ?? 'That class was not called off, so it is still on the timetable.'));
+  };
+
+  const putBack = (c: GymClass) => {
+    restoreClass(supabase, c.id)
+      .then(() => { setErr(null); refresh(); })
+      .catch((x: any) => setErr(x?.message ?? 'That class was not put back on.'));
+  };
+
   const remove = (e: TimetableEntry) => {
-    const what = e.kind === 'class' ? `"${e.title}"` : 'that one-to-one';
-    if (!confirm(`Remove ${what} from the timetable?`)) return;
-    const job = e.kind === 'class'
-      ? deleteClass(supabase, e.sourceId)
-      : removePtSlot(supabase, e.sourceId);
-    job.then(() => { setErr(null); refresh(); })
-       .catch((x: any) => setErr(x?.message ?? 'Could not remove that.'));
+    if (e.kind === 'class') {
+      const c = classFor(e.sourceId);
+      // Belt and braces: the button is only rendered on an empty class, and
+      // this refuses anyway. Between render and click somebody can book.
+      if (c && (c.booked > 0 || c.waitlisted > 0)) {
+        setErr('That class has people on it, so it can only be called off — deleting it would take their bookings and the register with it.');
+        return;
+      }
+      if (!confirm(`Delete "${e.title}"? Nobody has booked it, so nothing is lost. Use “Call off” instead if it was meant to run.`)) return;
+      deleteClass(supabase, e.sourceId)
+        .then(() => { setErr(null); refresh(); })
+        .catch((x: any) => setErr(x?.message ?? 'Could not remove that.'));
+      return;
+    }
+    if (!confirm('Remove that one-to-one from the timetable?')) return;
+    removePtSlot(supabase, e.sourceId)
+      .then(() => { setErr(null); refresh(); })
+      .catch((x: any) => setErr(x?.message ?? 'Could not remove that.'));
   };
 
   const cols: Column<TimetableEntry>[] = [
@@ -223,16 +290,24 @@ export default function Timetable() {
         return s ? <span style={{ color: 'var(--ink2)' }}>{s}</span> : <span className="dash">—</span>;
       } },
     { key: 'act', header: '', value: () => '', align: 'right',
-      render: (e) => (
+      render: (e) => {
+        const c = e.kind === 'class' ? classFor(e.sourceId) : null;
+        // Nobody attached means nothing is lost by deleting; anybody attached
+        // means the only honest verb is "call off".
+        const empty = !!c && c.booked === 0 && c.waitlisted === 0;
+        return (
         <span style={{ display: 'inline-flex', gap: 12, alignItems: 'center' }}>
           {e.kind === 'class' ? (
             <button
-              onClick={() => {
-                const c = raw?.classes.find((x) => x.id === e.sourceId);
-                if (c) setOpenClass(c);
-              }}
+              onClick={() => { if (c) setOpenClass(c); }}
               style={linkBtn}
             >Check in</button>
+          ) : null}
+          {owner && c ? (
+            <button onClick={() => setEditing(c)} style={linkBtn}>Edit</button>
+          ) : null}
+          {owner && c ? (
+            <button onClick={() => callOff(c)} style={{ ...linkBtn, color: 'var(--warn)' }}>Call off</button>
           ) : null}
           {/* Booking somebody onto an hour and taking an hour off the board are
               the owner's, and the two policies behind them say so. Not rendered
@@ -246,11 +321,18 @@ export default function Timetable() {
               onDone={(m) => { setErr(m); if (!m) refresh(); }}
             />
           ) : null}
-          {owner ? (
-            <button onClick={() => remove(e)} style={{ ...linkBtn, color: 'var(--crit)' }}>Remove</button>
+          {/* Rendered only where deleting destroys nothing. A class with
+              bookings has no Remove at all rather than one that refuses — the
+              refusal above is the guard, this is the answer to "why is it not
+              offered". */}
+          {owner && (e.kind !== 'class' || empty) ? (
+            <button onClick={() => remove(e)} style={{ ...linkBtn, color: 'var(--crit)' }}>
+              {e.kind === 'class' ? 'Delete' : 'Remove'}
+            </button>
           ) : null}
         </span>
-      ) },
+        );
+      } },
   ];
 
   return (
@@ -361,10 +443,235 @@ export default function Timetable() {
         )}
       </section>
 
+      {owner ? <CalledOff classes={calledOff} onPutBack={putBack} /> : null}
+
       {openClass ? (
-        <Roster gymClass={openClass} onClose={() => { setOpenClass(null); refresh(); }} />
+        <Roster gymClass={openClass} canEdit={staff} onClose={() => { setOpenClass(null); refresh(); }} />
+      ) : null}
+      {editing ? (
+        <EditClass
+          gymClass={editing} tenantId={tenantId}
+          onClose={(changed) => { setEditing(null); if (changed) refresh(); }}
+        />
       ) : null}
     </Shell>
+  );
+}
+
+/* ── the classes that are not running ──────────────────────────────────────── */
+
+/**
+ * Classes the gym called off this week.
+ *
+ * They are off the board above — nothing that computes floor cover or clashes
+ * may count a class that is not happening — so without this section a cancelled
+ * class would simply vanish, which is the behaviour a hard DELETE had and the
+ * whole reason cancelling was worth building. The reason is shown because it is
+ * the point: "instructor off sick" and "nobody booked it" are two very different
+ * facts about the same empty slot, and both are gone in three months without a
+ * column to keep them in.
+ */
+function CalledOff({ classes, onPutBack }: {
+  classes: GymClass[] | null; onPutBack: (c: GymClass) => void;
+}) {
+  if (!classes || classes.length === 0) return null;
+  return (
+    <section style={{ border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)', background: 'var(--surface)', marginTop: 22 }}>
+      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
+        <h2>Called off this week</h2>
+        <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
+          Kept, with their bookings and their registers. They are out of the fill and show rates —
+          a class that did not open its room did not fail to sell it — and out of the floor cover
+          above, because nobody is standing in that room.
+        </p>
+      </div>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {classes.map((c, i) => (
+          <li key={c.id} style={{
+            padding: '10px 14px', borderTop: i ? '1px solid var(--ring)' : 'none',
+            display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 13,
+          }}>
+            <span className="mono" style={{ color: 'var(--ink3)', fontSize: 11.5 }}>
+              {new Date(c.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <span style={{ color: 'var(--ink)' }}>{c.title}</span>
+            <span style={{ color: 'var(--ink2)' }}>
+              {c.cancelReason ?? <span className="dash">no reason recorded</span>}
+            </span>
+            {c.booked > 0 || c.waitlisted > 0 ? (
+              <span style={{ color: 'var(--ink3)', fontSize: 12 }}>
+                {c.booked} booked{c.waitlisted > 0 ? `, ${c.waitlisted} waiting` : ''} — still on the record
+              </span>
+            ) : null}
+            <button onClick={() => onPutBack(c)} style={{ ...linkBtn, marginLeft: 'auto' }}>Put it back on</button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/* ── correcting a class that is already up ─────────────────────────────────── */
+
+/** Local-time value for an `<input type="datetime-local">`, which takes wall
+ *  clock and no zone. `toISOString()` here would show a UK owner their 6am
+ *  class as 05:00 in summer and save it an hour early. */
+function localInputValue(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * Edit one class, or the whole series from this one onward.
+ *
+ * ── Why "this and every later one" and never "the whole series" ───────────
+ *
+ * The occurrences already past are the gym's attendance record. Applying a coach
+ * change backwards would re-attribute last month's classes to somebody who did
+ * not teach them, move their class hours on /staff, and change who /classes
+ * reports a fill rate against. What an owner is actually changing when they say
+ * "the Tuesday 6am Spin has a new coach" is the arrangement going forward, and
+ * that is the only thing this offers.
+ *
+ * Time is deliberately per-occurrence only. Moving a series means moving each
+ * occurrence by the same offset; setting `starts_at` across a series would put
+ * twelve classes on one Tuesday evening, and `updateSeriesFrom` refuses the
+ * field outright rather than trusting this form not to send it.
+ */
+function EditClass({ gymClass, tenantId, onClose }: {
+  gymClass: GymClass; tenantId: string; onClose: (changed: boolean) => void;
+}) {
+  const [title, setTitle] = useState(gymClass.title);
+  const [when, setWhen] = useState(localInputValue(gymClass.startsAt));
+  const [duration, setDuration] = useState(String(gymClass.durationMin));
+  const [capacity, setCapacity] = useState(String(gymClass.capacity));
+  const [room, setRoom] = useState(gymClass.room ?? '');
+  const [trainerId, setTrainerId] = useState(gymClass.trainerId ?? '');
+  const [instructor, setInstructor] = useState(gymClass.instructor ?? '');
+  const [scope, setScope] = useState<'one' | 'series'>('one');
+  const [trainers, setTrainers] = useState<{ id: string; name: string | null }[] | null>(null);
+  const [trainersErr, setTrainersErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchTrainerOptions(supabase, tenantId)
+      .then((rows) => { if (live) { setTrainers(rows); setTrainersErr(null); } })
+      .catch((e: any) => { if (live) { setTrainers(null); setTrainersErr(e?.message ?? 'Could not read your coaches.'); } });
+    return () => { live = false; };
+  }, [tenantId]);
+
+  const inSeries = !!gymClass.seriesId;
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setMsg(null);
+    // The picked coach's name wins over anything typed, so the label and the
+    // join can never name two different people — the same rule AddClass keeps.
+    const named = trainerId ? (trainers?.find((t) => t.id === trainerId)?.name ?? null) : (instructor.trim() || null);
+    const patch: ClassPatch = {
+      title: title.trim(),
+      room: room.trim() || null,
+      instructor: named,
+      trainerId: trainerId || null,
+      durationMin: parseInt(duration, 10) || gymClass.durationMin,
+      capacity: parseInt(capacity, 10) || 0,
+    };
+    try {
+      if (scope === 'series' && gymClass.seriesId) {
+        const n = await updateSeriesFrom(supabase, gymClass.seriesId, gymClass.startsAt, patch);
+        setMsg(`${n} ${n === 1 ? 'class' : 'classes'} changed, from this one onward. The ones already past are untouched — they are the attendance record.`);
+      } else {
+        // Time only ever moves one occurrence. See the note above.
+        await updateClass(supabase, gymClass.id, {
+          ...patch,
+          ...(when ? { startsAt: new Date(when).toISOString() } : {}),
+        });
+        setMsg('Saved.');
+      }
+      onClose(true);
+    } catch (x: any) {
+      setMsg(x?.message ?? 'That change was refused, so the class is unchanged.');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div role="dialog" aria-label={`Edit ${gymClass.title}`}
+         style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', padding: 24, zIndex: 10 }}
+         onClick={() => onClose(false)}>
+      <div onClick={(e) => e.stopPropagation()}
+           style={{ width: 560, maxWidth: '100%', maxHeight: '85vh', overflow: 'auto', background: 'var(--surface)', border: '1px solid var(--ring)' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ring)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <h2>Edit this class</h2>
+            <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
+              {new Date(gymClass.startsAt).toLocaleString()} · {gymClass.booked} booked
+              {inSeries ? ' · part of a weekly series' : ' · a one-off'}
+            </p>
+          </div>
+          <button onClick={() => onClose(false)} style={ghostBtn}>Close</button>
+        </div>
+
+        <form onSubmit={save} style={{ display: 'grid', gap: 9, padding: 14 }}>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Class name" style={field} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)}
+                   disabled={scope === 'series'}
+                   style={{ ...field, flex: 2, minWidth: 190, opacity: scope === 'series' ? 0.5 : 1 }} />
+            <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
+            <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
+            <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 120 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <select value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, minWidth: 160 }}
+                    aria-label="Which coach is teaching this class">
+              <option value="">
+                {trainersErr ? 'Coaches unread — name beside' : trainers === null ? 'Reading coaches…' : 'Visiting — name beside'}
+              </option>
+              {(trainers ?? []).map((t) => (
+                <option key={t.id} value={t.id}>{t.name ?? 'Unnamed trainer'}</option>
+              ))}
+            </select>
+            <input value={instructor} onChange={(e) => setInstructor(e.target.value)}
+                   disabled={!!trainerId}
+                   placeholder={trainerId ? 'On their record' : 'Instructor'}
+                   style={{ ...field, width: 150, opacity: trainerId ? 0.5 : 1 }} />
+          </div>
+
+          {inSeries ? (
+            <div style={{ display: 'grid', gap: 5, fontSize: 12.5, color: 'var(--ink2)' }}>
+              <label style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+                <input type="radio" checked={scope === 'one'} onChange={() => setScope('one')} />
+                This class only
+              </label>
+              <label style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+                <input type="radio" checked={scope === 'series'} onChange={() => setScope('series')} />
+                This class and every later one in the series
+              </label>
+              <span style={{ color: 'var(--ink3)' }}>
+                The occurrences already past are never touched — they are what the gym’s attendance
+                record says happened. The time can only be moved on a single class: setting one
+                instant across a series would stack twelve classes on one evening.
+              </span>
+            </div>
+          ) : (
+            <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
+              This class belongs to no series, so there is nothing else to change with it. Classes
+              added as a repeat from now on carry a series id and can be changed together.
+            </span>
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="submit" disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
+            <button type="button" onClick={() => onClose(false)} style={ghostBtn}>Cancel</button>
+          </div>
+          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -984,7 +1291,25 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
 
 /* ── the check-in roster ───────────────────────────────────────────────────── */
 
-function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void }) {
+/**
+ * The register, and the queue behind it.
+ *
+ * ── Why the waiting list is here ─────────────────────────────────────────
+ *
+ * `book_class` and `cancel_class` implement a capacity-safe queue with
+ * automatic FIFO promotion, and have done since part 02. Neither RPC is called
+ * anywhere in `studio-web`, and `status === 'waitlist'` was rendered nowhere in
+ * the console at all — so the gym could not see its own waiting list. Members
+ * could: `web/client.html` sells the feature to them.
+ *
+ * Automatic promotion only fires when the MEMBER cancels from their own app,
+ * because `cancel_class` deletes `where user_id = auth.uid()`. Every case the
+ * desk handles — the member who rings up, the no-show at 06:05 whose bike is
+ * free, the coach who says one more can squeeze in — had no path at all.
+ */
+function Roster({ gymClass, canEdit, onClose }: {
+  gymClass: GymClass; canEdit: boolean; onClose: () => void;
+}) {
   const [rows, setRows] = useState<RosterEntry[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // A failed read used to land in `setRows([])`, and rows.length === 0 is the
@@ -1014,6 +1339,77 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
     }
   };
 
+  const promote = async (r: RosterEntry) => {
+    try {
+      await promoteFromWaitlist(supabase, r.bookingId);
+      setErr(null);
+      load();
+    } catch (e: any) {
+      setErr(e?.message ?? 'That place was not given, so they are still waiting.');
+    }
+  };
+
+  const demote = async (r: RosterEntry) => {
+    try {
+      await returnToWaitlist(supabase, r.bookingId);
+      setErr(null);
+      load();
+    } catch (e: any) {
+      setErr(e?.message ?? 'That booking was not moved back.');
+    }
+  };
+
+  const split = rows ? splitRoster(rows) : null;
+  // Computed off the roster in hand rather than off `gymClass.booked`, which is
+  // whatever the board read a minute ago. A place that came free while this
+  // dialog was open is a place the desk can give away now.
+  const left = split ? placesLeft({ capacity: gymClass.capacity, booked: split.booked.length }) : null;
+
+  const line = (r: RosterEntry, waiting: boolean) => (
+    <li key={r.bookingId} style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 12, padding: '11px 16px', borderBottom: '1px solid var(--ring)',
+    }}>
+      <span style={{ color: r.name ? 'var(--ink)' : 'var(--ink3)' }}>
+        {r.name ?? 'Member'}
+        {/* A waitlister who was let in and ticked present is a real person who
+            really trained, and is counted separately from `attended` so a show
+            rate cannot exceed its own denominator. Said here so the coach can
+            see what they did. */}
+        {waiting && r.attendedAt
+          ? <span style={{ color: 'var(--warn)', marginLeft: 8, fontSize: 11.5 }}>let in and marked present</span>
+          : null}
+      </span>
+      <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+        {waiting && canEdit ? (
+          <button onClick={() => promote(r)} style={linkBtn}>
+            {/* The words change with the fact, because they are different
+                decisions: handing over a free place, and deliberately going
+                over capacity. The database refuses neither — over-sell is a
+                thing a coach is allowed to do and /classes reports it as real
+                — so the button says which one is being taken. */}
+            {left != null && left <= 0 ? 'Squeeze them in (over capacity)' : 'Give them the place'}
+          </button>
+        ) : null}
+        {!waiting && canEdit && split && split.waiting.length > 0 ? (
+          <button onClick={() => demote(r)} style={{ ...linkBtn, color: 'var(--ink3)' }}>Back to the list</button>
+        ) : null}
+        <button
+          onClick={() => toggle(r)}
+          aria-pressed={!!r.attendedAt}
+          style={{
+            border: '1px solid var(--ring)', borderRadius: 0, padding: '5px 12px',
+            fontSize: 12.5, cursor: 'pointer', fontFamily: 'var(--sans)',
+            background: r.attendedAt ? 'var(--brand)' : 'var(--surface2)',
+            color: r.attendedAt ? 'var(--brand-ink)' : 'var(--ink2)',
+          }}
+        >
+          {r.attendedAt ? 'Here' : 'Mark here'}
+        </button>
+      </span>
+    </li>
+  );
+
   return (
     <div
       role="dialog"
@@ -1035,13 +1431,27 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
           <div>
             <h2>{gymClass.title}</h2>
             <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-              {new Date(gymClass.startsAt).toLocaleString()} · {gymClass.booked} booked of {gymClass.capacity}
+              {new Date(gymClass.startsAt).toLocaleString()}
+              {/* Counted off the roster in hand, not off the board's snapshot.
+                  Capacity of 0 is a class nobody sized, and "of 0" would read
+                  as a class with no room in it. */}
+              {split ? ` · ${split.booked.length} booked` : ''}
+              {gymClass.capacity > 0 ? ` of ${gymClass.capacity}` : ' · capacity not set'}
+              {split && split.waiting.length > 0 ? ` · ${split.waiting.length} waiting` : ''}
+              {isCancelled(gymClass) ? ' · called off' : ''}
             </p>
           </div>
           <button onClick={onClose} style={ghostBtn}>Done</button>
         </div>
 
         {err ? <Banner tone="crit">{err}</Banner> : null}
+        {isCancelled(gymClass) ? (
+          <p style={{ margin: 0, padding: '11px 16px', borderBottom: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink2)' }}>
+            This class was called off{gymClass.cancelReason ? `: ${gymClass.cancelReason}` : ''}. Its
+            bookings and its register are kept exactly as they were — the class is out of the fill
+            and show rates rather than counted as a class nobody came to.
+          </p>
+        ) : null}
 
         {rows === null && readErr ? (
           <div style={{ padding: '26px 18px', color: 'var(--ink3)', fontSize: 13.5 }}>
@@ -1049,36 +1459,41 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
             whose bookings did not arrive: {readErr}.{' '}
             <button onClick={load} style={{ ...linkBtn, color: 'var(--brand)' }}>Try again</button>
           </div>
-        ) : rows === null ? <Loading /> : rows.length === 0 ? (
+        ) : rows === null || split === null ? <Loading /> : rows.length === 0 ? (
           <div style={{ padding: '26px 18px', color: 'var(--ink3)', fontSize: 13.5 }}>
             Nobody has booked this class. Members book from the Repple app; a walk-in can be added
             once member sign-up is wired to the desk.
           </div>
         ) : (
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-            {rows.map((r) => (
-              <li key={r.bookingId} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                gap: 12, padding: '11px 16px', borderBottom: '1px solid var(--ring)',
-              }}>
-                <span style={{ color: r.name ? 'var(--ink)' : 'var(--ink3)' }}>
-                  {r.name ?? 'Member'}
-                </span>
-                <button
-                  onClick={() => toggle(r)}
-                  aria-pressed={!!r.attendedAt}
-                  style={{
-                    border: '1px solid var(--ring)', borderRadius: 0, padding: '5px 12px',
-                    fontSize: 12.5, cursor: 'pointer', fontFamily: 'var(--sans)',
-                    background: r.attendedAt ? 'var(--brand)' : 'var(--surface2)',
-                    color: r.attendedAt ? 'var(--brand-ink)' : 'var(--ink2)',
-                  }}
-                >
-                  {r.attendedAt ? 'Here' : 'Mark here'}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {split.booked.map((r) => line(r, false))}
+            </ul>
+            {split.waiting.length > 0 ? (
+              <>
+                <div style={{ padding: '11px 16px', borderBottom: '1px solid var(--ring)', background: 'var(--surface2)' }}>
+                  <h3 style={{ fontSize: 12.5, color: 'var(--ink2)' }}>
+                    Waiting — {split.waiting.length}
+                  </h3>
+                  <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
+                    {/* Three sentences for three states, because the desk acts
+                        differently on each and "waiting" alone answers none of
+                        them. */}
+                    {left == null
+                      ? 'This class records no capacity, so nothing here can say whether a place is free. Set one on the board and this line becomes an answer.'
+                      : left > 0
+                        ? `${left} ${left === 1 ? 'place is' : 'places are'} free right now — the app only promotes somebody when a member cancels from their own phone, so a place freed at the desk is given away here.`
+                        : 'The class is full. Giving a place away from here puts it over capacity, which is a decision a coach is allowed to make and which /classes will report as a real over-sell.'}
+                    {' '}They are not counted in the fill rate: a place the gym could not sell is not
+                    a place it sold.
+                  </p>
+                </div>
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                  {split.waiting.map((r) => line(r, true))}
+                </ul>
+              </>
+            ) : null}
+          </>
         )}
       </div>
     </div>

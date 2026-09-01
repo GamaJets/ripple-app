@@ -468,9 +468,20 @@ function Awaiting({ sessions, unread, onMark }: {
     { key: 'mins', header: 'Mins', value: (s) => s.durationMin, numeric: true },
     { key: 'mark', header: 'What happened?', value: () => 0, align: 'right',
       render: (s) => (
+        // Four outcomes, because `SessionOutcome` has four and this screen
+        // offered three. `late_cancelled` is in OUTCOME_LABEL at the top of
+        // this file, it is what the gym's own pay policy toggle is ABOUT — the
+        // policy on /settings reads "Delivered sessions and late cancellations"
+        // — and app/coach/page.tsx has offered all four to the coach for
+        // months. So the owner had a policy control for an outcome the only
+        // owner-facing screen that records outcomes could not produce: a gym
+        // that pays for late cancellations had no way to record one, and every
+        // late cancellation went in as an ordinary cancellation and was paid
+        // nothing.
         <span style={{ display: 'inline-flex', gap: 10, whiteSpace: 'nowrap' }}>
           <button style={linkBtn} onClick={() => onMark(s, 'completed')}>Delivered</button>
           <button style={linkBtn} onClick={() => onMark(s, 'no_show')}>No-show</button>
+          <button style={linkBtn} onClick={() => onMark(s, 'late_cancelled')}>Late cancel</button>
           <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={() => onMark(s, 'cancelled')}>Cancelled</button>
         </span>
       ) },
@@ -478,7 +489,7 @@ function Awaiting({ sessions, unread, onMark }: {
   return (
     <Section
       title="Awaiting an outcome"
-      sub="Booked, finished, and nobody has said what happened. Payroll will not price these."
+      sub="Booked, finished, and nobody has said what happened. Payroll will not price these. A late cancellation is its own outcome, not a cancellation — whether the gym pays for one is the policy set on Gym, and it cannot apply to a session nobody could mark that way."
     >
       {sessions === null ? (
         // "Nothing waiting" is an all-clear, and this is the one table on the

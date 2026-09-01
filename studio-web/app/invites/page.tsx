@@ -28,8 +28,11 @@ import {
   fetchInvites, createInvite, createInvites, extendInvite, revokeInvite,
   inviteState, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites,
   normaliseEmail, DEFAULT_VALID_DAYS,
+  inviteMessage, inviteMailto, bulkInviteMailto,
   type MemberInvite, type MemberInviteState, type NewMemberInvite,
 } from '@lib/memberInvites';
+import { searchRows, searchNote } from '@lib/consoleSearch';
+import { BRAND } from '@lib/brands';
 
 /** How each state reads, and in what colour. Nothing here says "failed": an
  *  invitation nobody answered has not failed, it has not been answered. */
@@ -149,12 +152,19 @@ export default function Invites() {
         is where the person is asked.
       </p>
 
+      {/* This said "Nothing here sends an email", which was true and was the
+          whole gap: an invite is a row addressed to somebody who has not been
+          told. The console composes the message and hands it to the owner's own
+          mail client now — see `inviteMessage` in src/lib/memberInvites.ts for
+          why that, and not a magic link. */}
       <Banner>
-        Nothing here sends an email. An invitation is a record against an
-        address — this gym&rsquo;s intention to enrol somebody, held until they
-        have a Repple account for it to attach to. Tell them which address to
-        sign up with: an invitation to an address they never use is one nobody
-        can claim.
+        An invitation is a record against an address — this gym&rsquo;s intention to enrol
+        somebody, held until they have a Repple account for it to attach to. There is no
+        transactional sender behind this console, so <strong style={{ color: 'var(--ink)' }}>Send
+        opens your own mail</strong> with the message written and the address filled in; what goes
+        out is in your sent folder, where you can see it. The one thing the message must carry is
+        the exact address to sign up with — an account made with a different one never sees the
+        invitation.
       </Banner>
 
       {invitesErr ? (
@@ -198,7 +208,7 @@ export default function Invites() {
         tenantId={tenantId} me={me} plans={plans} plansErr={plansErr}
         openTo={openTo} listRead={!unread} onChange={refresh}
       />
-      <TheList invites={invites} readErr={invitesErr} onChange={refresh} />
+      <TheList invites={invites} readErr={invitesErr} gymName={gymName} onChange={refresh} />
     </Shell>
   );
 }
@@ -441,11 +451,41 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
 
 /* ── the list ──────────────────────────────────────────────────────────────── */
 
-function TheList({ invites, readErr, onChange }: {
-  invites: MemberInvite[] | null; readErr: string | null; onChange: () => void;
+function TheList({ invites, readErr, gymName, onChange }: {
+  invites: MemberInvite[] | null; readErr: string | null;
+  gymName: string | null; onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [q, setQ] = useState('');
+  const [showing, setShowing] = useState<MemberInvite | null>(null);
+
+  /**
+   * The brand's own site, never a hardcoded repplefitness.com.
+   *
+   * `src/lib/brands.ts` is the single table both app.config.ts and the app
+   * bundle read, and it exists precisely so a chain buying Repple does not hand
+   * their own members a link to their supplier. It was imported nowhere in this
+   * console.
+   */
+  const site = BRAND.webOrigin ?? null;
+  const opts = { gymName, siteUrl: site };
+
+  /** Put the composed message on the clipboard, for the owner whose mail client
+   *  mangles a long `mailto:` — and for WhatsApp, which is how a lot of gyms
+   *  actually talk to their members. */
+  const copy = async (i: MemberInvite) => {
+    setErr(null);
+    try {
+      await navigator.clipboard.writeText(inviteMessage(i, opts));
+      setMsg('The invitation is on your clipboard. Paste it wherever you talk to this member.');
+    } catch {
+      // A refused clipboard is a browser permission, not a failure of the
+      // record — and the message is on screen below either way.
+      setShowing(i);
+      setMsg('Your browser would not let this page use the clipboard, so the message is shown below to copy by hand.');
+    }
+  };
 
   const extend = async (i: MemberInvite) => {
     setErr(null); setMsg(null);
@@ -472,6 +512,13 @@ function TheList({ invites, readErr, onChange }: {
       setErr(`The invitation to ${i.email} was not withdrawn: ${x?.message ?? 'the change was refused'}. It is still open.`);
     }
   };
+
+  const shown = searchRows(invites ?? [], q, (i) => [i.email, i.fullName, i.planName, inviteState(i)]);
+  const note = searchNote(q, shown.length, invites?.length ?? 0);
+  // Only the ones still open. A batch mail to everybody would include people
+  // who joined last month and people the gym withdrew.
+  const waiting = (invites ?? []).filter((i) => inviteState(i) === 'pending');
+  const waitingLink = waiting.length ? bulkInviteMailto(waiting, opts) : null;
 
   const cols: Column<MemberInvite>[] = [
     { key: 'email', header: 'Sent to', value: (i) => i.email },
@@ -506,6 +553,14 @@ function TheList({ invites, readErr, onChange }: {
         if (s === 'accepted' || s === 'revoked') return <span className="dash">—</span>;
         return (
           <span style={{ display: 'inline-flex', gap: 12 }}>
+            {/* An anchor rather than a button: `mailto:` is a navigation, and
+                window.location.href on a click is the version that gets blocked
+                by a popup rule. */}
+            <a href={inviteMailto(i, opts)} style={{ color: 'var(--brand)' }}>Send</a>
+            <button style={linkBtn} onClick={() => copy(i)}>Copy</button>
+            <button style={linkBtn} onClick={() => setShowing(showing?.id === i.id ? null : i)}>
+              {showing?.id === i.id ? 'Hide' : 'Read'}
+            </button>
             <button style={linkBtn} onClick={() => extend(i)}>
               {s === 'expired' ? 'Reopen for 30 days' : 'Extend'}
             </button>
@@ -522,6 +577,40 @@ function TheList({ invites, readErr, onChange }: {
     >
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {msg ? <p style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+
+      <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '12px 14px 0', flexWrap: 'wrap' }}>
+        <input
+          value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Search an address, a name or a plan"
+          aria-label="Search the invitations"
+          style={{ ...field, flex: 1, minWidth: 220 }}
+        />
+        {q ? <button onClick={() => setQ('')} style={linkBtn}>clear</button> : null}
+        {/* One message to everybody still waiting, over BCC. A gym that has just
+            imported two hundred addresses does not send two hundred mailtos by
+            hand — and BCC rather than To is the difference between a mail-out
+            and disclosing the whole membership list to all of it. */}
+        {waitingLink ? (
+          <a href={waitingLink} style={{ ...ghostBtn, textDecoration: 'none', display: 'inline-block' }}>
+            Mail all {waiting.length} still waiting
+          </a>
+        ) : null}
+      </div>
+      {/* Above the table, because a filtered list that comes back empty reads
+          exactly like a gym that has invited nobody — and an owner who believes
+          that sends the whole batch again. */}
+      {note ? <p style={{ margin: 0, padding: '8px 14px 0', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p> : null}
+
+      {showing ? (
+        <div style={{ margin: '12px 14px', border: '1px solid var(--ring)', background: 'var(--surface2)', padding: '11px 13px' }}>
+          <div className="micro" style={{ marginBottom: 6 }}>What {showing.email} will read</div>
+          <pre style={{
+            margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'var(--sans)',
+            fontSize: 12.5, color: 'var(--ink2)', lineHeight: 1.5,
+          }}>{inviteMessage(showing, opts)}</pre>
+        </div>
+      ) : null}
+
       {invites === null ? (
         readErr ? (
           <div style={{ padding: '26px 20px', color: 'var(--ink3)', fontSize: 13.5 }}>
@@ -531,7 +620,7 @@ function TheList({ invites, readErr, onChange }: {
         ) : <Loading />
       ) : (
         <DataTable
-          rows={invites} columns={cols} rowKey={(i) => i.id}
+          rows={shown} columns={cols} rowKey={(i) => i.id}
           empty="Nobody has been invited yet. Everyone on the roster arrives through one of these."
         />
       )}
@@ -567,6 +656,11 @@ function PlanPicker({ plans, plansErr, value, onChange }: {
 const field = {
   background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
   borderRadius: 0, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+} as const;
+
+const ghostBtn = {
+  ...field, background: 'var(--surface2)', color: 'var(--ink2)',
+  cursor: 'pointer', flex: 'none',
 } as const;
 
 const primaryBtn = {

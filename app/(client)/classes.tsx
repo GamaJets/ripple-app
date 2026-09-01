@@ -62,7 +62,12 @@ export default function Classes() {
     else {
       if (notifPush) {
         const when = new Date(Date.parse(c.startsAt) - 60 * 60 * 1000);
-        scheduleLocal(`${c.title} in 1 hour`, `${timeLabel(c.startsAt)} at ${c.branch}${c.room ? ' · ' + c.room : ''} with ${c.instructor}.`, when, { route: '/(client)/bookings' });
+        // Category 'classes' — its own switch, separate from session reminders
+        // and separate from anything the coach sends. "A member's only way to
+        // stop 6am class reminders was to stop hearing from their coach" is the
+        // report this closes. Quiet hours do not apply: the class is at 6am
+        // because they booked it at 6am.
+        scheduleLocal(`${c.title} in 1 hour`, `${timeLabel(c.startsAt)} at ${c.branch}${c.room ? ' · ' + c.room : ''} with ${c.instructor}.`, when, { route: '/(client)/bookings' }, 'classes');
       }
       // The reminder sentence is only printed when a reminder was actually
       // scheduled. The alternative is not silence: a member who has switched

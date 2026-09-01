@@ -1,7 +1,26 @@
-// Client · Reminders (#11). Hydration nudges through the day + custom supplement
-// reminders, backed by daily repeating local notifications. Persisted; re-scheduled
-// on save. Uses the notifications layer already built — it lights up on the
-// notifications-enabled build and no-ops safely before then.
+// Client · Reminders. The nudges a member sets for themselves: hydration
+// through the day, training, weigh-in, progress photo, and anything else they
+// name — each on the days they choose.
+//
+// ── What this screen used to be, and the three gaps ────────────────────────
+//
+// Hydration and supplements, daily only, scheduled once at the moment Save was
+// pressed:
+//
+//   · NO TRAINING, WEIGH-IN OR PHOTO REMINDER. The three things the product
+//     actually has an opinion about, and a member had to type them in as
+//     "supplements" to get any of them.
+//   · DAILY ONLY. Somebody training Monday, Wednesday and Friday was nudged on
+//     the four days they were not, or not at all.
+//   · SCHEDULED ONLY ON SAVE. The screen said so about itself, and the
+//     consequence was that reminders saved before the notifications build
+//     existed were never scheduled by the build that could — see the header of
+//     src/ui/reminderSync.tsx, which now reschedules them at every launch.
+//
+// What each setting SCHEDULES is decided in src/lib/reminderPlan.ts, which is
+// pure and tested, and the save handler and the launch-time resync both read
+// it — so the count this screen reports and the reminders that exist cannot
+// drift apart.
 //
 // Re-skinned onto the kit (`src/ui/kit`) + scale (`src/theme/scale`): two
 // bordered boxes became hairline-separated sections, the "not on this build
@@ -16,11 +35,13 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { pushAvailable, scheduleDailyReminder, cancelReminders } from '../../src/ui/pushNotifications';
-
-const KEY = 'repple.reminders';
-type Supp = { id: string; name: string; hour: number; minute: number };
-type Saved = { hydration: boolean; every: number; startH: number; endH: number; supps: Supp[]; ids: string[] };
+import { pushAvailable } from '../../src/ui/pushNotifications';
+import { REMINDERS_KEY as KEY, rescheduleReminders } from '../../src/ui/reminderSync';
+import {
+  DAY_LABEL, EVERY_DAY, FIXED_LABEL, daysLabel, plannedNotificationCount,
+  plannedReminders, savedFromStored,
+  type CustomReminder, type FixedKind, type FixedReminder, type SavedReminders, type Weekday,
+} from '../../src/lib/reminderPlan';
 
 const two = (n: number) => String(n).padStart(2, '0');
 const fmt = (h: number, m: number) => `${two(((h + 11) % 12) + 1)}:${two(m)} ${h < 12 ? 'AM' : 'PM'}`;
@@ -33,76 +54,129 @@ export default function Reminders() {
   const [every, setEvery] = useState(3);      // hours between hydration nudges
   const [startH, setStartH] = useState(9);
   const [endH, setEndH] = useState(21);
-  const [supps, setSupps] = useState<Supp[]>([]);
+  const [hydrationDays, setHydrationDays] = useState<Weekday[]>([...EVERY_DAY]);
+  const [supps, setSupps] = useState<CustomReminder[]>([]);
+  const [fixed, setFixed] = useState<Partial<Record<FixedKind, FixedReminder>>>({});
   const [ids, setIds] = useState<string[]>([]);
   const [name, setName] = useState('');
   const [sh, setSh] = useState('08');
   const [sm, setSm] = useState('00');
 
-  useEffect(() => { AsyncStorage.getItem(KEY).then((r) => { if (r) { try { const p: Saved = JSON.parse(r); setHydration(p.hydration); setEvery(p.every); setStartH(p.startH); setEndH(p.endH); setSupps(p.supps || []); setIds(p.ids || []); } catch { /* ignore */ } } }); }, []);
+  // Through `savedFromStored`, not a bare JSON.parse. That function migrates
+  // the older shape — which had no day lists at all — by reading an ABSENT list
+  // as every day. Parsing the blob here by hand would read it as no days and
+  // silently switch off every reminder every existing member has set.
+  useEffect(() => {
+    AsyncStorage.getItem(KEY).then((r) => {
+      const p = savedFromStored(r);
+      setHydration(p.hydration); setEvery(p.every); setStartH(p.startH); setEndH(p.endH);
+      setHydrationDays(p.hydrationDays); setSupps(p.supps); setFixed(p.fixed); setIds(p.ids);
+    }).catch(() => { /* the defaults stand, and nothing is scheduled from them */ });
+  }, []);
+
+  /** The settings as they stand, in the shape the plan and the store both take. */
+  const current = (): SavedReminders => ({ hydration, every, startH, endH, hydrationDays, supps, fixed, ids });
 
   const addSupp = () => {
     const nm = name.trim(); const h = parseInt(sh, 10); const m = parseInt(sm, 10);
     if (!nm) { Alert.alert('Name it', 'Give the supplement or reminder a name.'); return; }
     if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the time', 'Use 24-hour time — 08:00 is eight in the morning, 20:00 is eight in the evening.'); return; }
-    setSupps((p) => [...p, { id: newId(), name: nm, hour: h, minute: m }]);
+    // Every day unless they say otherwise, because that is what this control
+    // did before day pickers existed and changing the default silently would
+    // change what "Add Reminder" means for everybody who already knows it.
+    setSupps((p) => [...p, { id: newId(), name: nm, hour: h, minute: m, days: [...EVERY_DAY] }]);
     setName(''); setSh('08'); setSm('00');
   };
   const removeSupp = (id: string) => setSupps((p) => p.filter((x) => x.id !== id));
 
+  /** Toggle one day on one reminder. Shared by every day picker on the screen. */
+  const toggleDay = (days: readonly Weekday[], d: Weekday): Weekday[] =>
+    (days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort((a, b) => a - b));
+
+  const setFixedFor = (k: FixedKind, patch: Partial<FixedReminder>) =>
+    setFixed((p) => {
+      // 18:00 every day is the shape a new one starts in, and it is a starting
+      // point rather than a claim: the row is OFF until the member switches it
+      // on, so no reminder is ever scheduled at an hour nobody chose.
+      const cur = p[k] ?? { on: false, hour: k === 'weighin' ? 7 : 18, minute: 0, days: [...EVERY_DAY] };
+      return { ...p, [k]: { ...cur, ...patch } };
+    });
+
+  /** The day picker, used by hydration, all three fixed kinds and every custom
+   *  reminder — one control, so seven abbreviations cannot come to mean seven
+   *  different things in four places. */
+  const DayPicker = ({ days, onToggle, label }: { days: readonly Weekday[]; onToggle: (d: Weekday) => void; label: string }) => (
+    <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
+      {/* Monday first. The underlying numbering starts at Sunday because that
+          is what expo-notifications wants, and that is not the member's
+          problem — see reminderPlan.ts. */}
+      {([2, 3, 4, 5, 6, 7, 1] as Weekday[]).map((d) => {
+        const on = days.includes(d);
+        return (
+          <Pressable key={d} onPress={() => onToggle(d)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: on }}
+            accessibilityLabel={`${label}, ${DAY_LABEL[d]}`}
+            hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
+            style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+            <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink3 }}>{DAY_LABEL[d].slice(0, 1)}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
   const saveAndSchedule = async () => {
-    await cancelReminders(ids);       // clear our previous reminders only
-    const newIds: string[] = [];
-    if (hydration) {
-      for (let h = startH; h <= endH; h += every) {
-        const id = await scheduleDailyReminder('Time to hydrate', 'Sip some water — small and often keeps you on target.', h, 0, { route: '/(client)/recovery' });
-        if (id) newIds.push(id);
-      }
-    }
-    for (const s of supps) {
-      const id = await scheduleDailyReminder(s.name, `Reminder: ${s.name}`, s.hour, s.minute, { route: '/(client)/reminders' });
-      if (id) newIds.push(id);
-    }
-    const payload: Saved = { hydration, every, startH, endH, supps, ids: newIds };
-    setIds(newIds);
-    await AsyncStorage.setItem(KEY, JSON.stringify(payload));
-    // `pushAvailable()` answers whether the notifications MODULE is in this
-    // build. It says nothing about whether the member granted permission — and
-    // `scheduleDailyReminder` returns null for every reminder when they did
-    // not. So somebody who had declined notifications was shown the title
-    // "Reminders set" above the body "You'll get 0 daily reminders (hydration
-    // every 3h from 09:00 AM–09:00 PM)": a title, a count and a schedule that
-    // contradict each other, over nothing being scheduled at all.
+    // Stored FIRST, then scheduled from what was stored.
     //
-    // `newIds.length` is the only thing here that knows what actually happened,
-    // so it is what the title is chosen on. The settings are still saved either
-    // way — the member's answer is theirs — and the sentence says which of the
-    // two states they are in.
-    const wanted = (hydration ? Math.max(0, Math.floor((endH - startH) / every) + 1) : 0) + supps.length;
+    // The order is the whole point. `rescheduleReminders` reads the saved blob,
+    // cancels the ids it names, schedules the plan and writes the new ids back
+    // — which is exactly what runs at every launch, so the two paths cannot
+    // schedule different things. The previous version scheduled from local
+    // state and then wrote the result, which is how the screen came to be the
+    // only thing in the app that could ever arm a reminder.
+    const saved = current();
+    try {
+      await AsyncStorage.setItem(KEY, JSON.stringify(saved));
+    } catch {
+      Alert.alert('Not saved', 'Your reminder settings could not be stored on this phone, so nothing was scheduled and nothing was changed. Try again in a moment.');
+      return;
+    }
+
+    const plan = plannedReminders(saved);
+    const wanted = plannedNotificationCount(plan);
+    const { scheduled } = await rescheduleReminders();
+    // Re-read so the ids this screen holds are the ones now scheduled;
+    // otherwise the next Save cancels a stale set and leaves the live one
+    // firing forever with nothing on any screen to explain it.
+    try {
+      const raw = await AsyncStorage.getItem(KEY);
+      setIds(savedFromStored(raw).ids);
+    } catch { /* the next launch's resync will correct it */ }
+
+    // `scheduled` is the only thing here that knows what actually happened.
+    // `pushAvailable()` answers whether the notifications MODULE is in this
+    // build and says nothing about whether the member granted permission — so
+    // somebody who had declined was previously shown the title "Reminders set"
+    // above the body "You'll get 0 daily reminders", a title and a count that
+    // contradict each other over nothing being scheduled at all.
     if (!pushAvailable()) {
-      // Two things wrong with what this used to say. The body opened by
-      // repeating the title word for word ("Saved" / "Saved."), and the
-      // sentence promised an outcome nothing in this file delivers: reminders
-      // are scheduled HERE, at the moment Save is pressed, and nothing anywhere
-      // re-schedules them from the saved payload later. `useEffect` on mount
-      // reads the settings into state and stops. So a member who saved before
-      // the notifications build would have got nothing after it either, for as
-      // long as they never came back to this screen — while being told the
-      // opposite in the one sentence they were given about it.
       Alert.alert('Settings saved, nothing scheduled yet',
-        'This build cannot schedule notifications, so no reminder has been set. Your settings are kept — open this screen and save again once notifications are working and they will be scheduled then.');
-    } else if (newIds.length === 0) {
+        'This build cannot schedule notifications, so no reminder has been set. Your settings are kept and will be scheduled on their own once notifications are working — you do not have to come back to this screen.');
+      return;
+    }
+    if (scheduled === 0) {
       Alert.alert(
         wanted === 0 ? 'Saved' : 'Saved, but nothing will be sent',
         wanted === 0
-          ? 'No reminders are set. Turn hydration on or add a supplement, and they will be scheduled.'
-          : 'Your settings are saved, but this phone is not allowing notifications from us, so nothing was scheduled. Turn them on for this app in your phone’s Settings and save again.',
+          ? 'No reminders are set. Turn one on, or add your own, and it will be scheduled.'
+          : 'Your settings are saved, but this phone is not allowing notifications from us, so nothing was scheduled. Turn them on for this app in your phone’s Settings — they will be scheduled the next time you open the app, without coming back here.',
       );
-    } else {
-      Alert.alert('Reminders set',
-        `You'll get ${newIds.length} daily reminder${newIds.length === 1 ? '' : 's'}${hydration ? ` (hydration every ${every}h from ${fmt(startH, 0)}–${fmt(endH, 0)})` : ''}.`
-        + (newIds.length < wanted ? ` ${wanted - newIds.length} could not be scheduled.` : ''));
+      return;
     }
+    Alert.alert('Reminders set',
+      `${plan.length} reminder${plan.length === 1 ? '' : 's'}, ${scheduled} notification${scheduled === 1 ? '' : 's'} a week.`
+      + (scheduled < wanted ? ` ${wanted - scheduled} could not be scheduled.` : ''));
   };
 
   // Which of the three is chosen is drawn as a fill and a half-step of weight.
@@ -151,7 +225,7 @@ export default function Reminders() {
 
         {!pushAvailable() ? (
           <Notice kicker="Not sending yet" title="Nothing can be scheduled on this build"
-            note="You can set your reminders up here and they are kept. They are only scheduled at the moment you save, so come back and save again once notifications are working — otherwise nothing will be sent." />
+            note="You can set your reminders up here and they are kept. They will be scheduled on their own once notifications are working — you do not have to come back to this screen." />
         ) : null}
 
         <Rule />
@@ -207,20 +281,97 @@ export default function Reminders() {
                   <Text style={{ ...ty.caption, color: t.ink2 }}>No nudges yet — the last hour is earlier in the day than the first.</Text>
                 </View>
               ) : null}
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>On these days · {daysLabel(hydrationDays)}</Text>
+              <DayPicker days={hydrationDays} label="Hydration nudges" onToggle={(d) => setHydrationDays((p) => toggleDay(p, d))} />
+              {hydrationDays.length === 0 ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>No days chosen, so nothing will be sent.</Text>
+                </View>
+              ) : null}
             </View>
           ) : null}
         </Section>
 
         <Rule />
 
+        {/* ── Training, weigh-in, progress photo ────────────────────────────
+            The three the product has an opinion about, and the three a member
+            previously had to type in as "supplements" to get at all. Each is
+            OFF until switched on, so no reminder is ever scheduled at an hour
+            nobody chose — the same rule that keeps the app from inventing a
+            step goal or a water target. */}
+        <Section>
+          <SectionHead title="Training And Body" />
+          {(['training', 'weighin', 'photo'] as FixedKind[]).map((k, i) => {
+            const f = fixed[k] ?? { on: false, hour: k === 'weighin' ? 7 : 18, minute: 0, days: [...EVERY_DAY] };
+            const label = k === 'training' ? 'Train Today' : k === 'weighin' ? 'Weigh In' : 'Progress Photo';
+            const why = k === 'training'
+              ? 'A nudge on the days you plan to train.'
+              : k === 'weighin'
+                ? 'One reading a week is enough to see a trend.'
+                : 'Same spot, same light, same time of day.';
+            return (
+              <View key={k} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{label}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {f.on ? `${fmt(f.hour, f.minute)} · ${daysLabel(f.days)}` : why}
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => setFixedFor(k, { on: !f.on })}
+                    accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: f.on }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
+                    style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: f.on ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
+                    <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: f.on ? 'flex-end' : 'flex-start' }} />
+                  </Pressable>
+                </View>
+                {f.on ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.sm }}>
+                      <Field label="Hour" hint="24h" style={{ flex: 0 }} a11y={`${label}, hour on a 24-hour clock`}>
+                        <TextInput value={String(f.hour)} onChangeText={(x) => setFixedFor(k, { hour: Math.min(23, Math.max(0, parseInt(x, 10) || 0)) })} keyboardType="number-pad" style={num} />
+                      </Field>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, paddingBottom: 13 }}>:</Text>
+                      <Field label="Min" style={{ flex: 0 }} a11y={`${label}, minutes past the hour`}>
+                        <TextInput value={two(f.minute)} onChangeText={(x) => setFixedFor(k, { minute: Math.min(59, Math.max(0, parseInt(x, 10) || 0)) })} keyboardType="number-pad" style={num} />
+                      </Field>
+                      {/* The same echo the hydration hours have, for the same
+                          reason: somebody who wants a reminder at eight in the
+                          evening types 8 and is woken by it otherwise. */}
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flex: 1, paddingBottom: 13 }}>{fmt(f.hour, f.minute)}</Text>
+                    </View>
+                    <DayPicker days={f.days} label={label} onToggle={(d) => setFixedFor(k, { days: toggleDay(f.days, d) })} />
+                    {f.days.length === 0 ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>No days chosen, so nothing will be sent.</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+        </Section>
+
+        <Rule />
+
         {/* Supplements */}
         <Section>
-          <SectionHead title="Supplement Reminders" note={supps.length ? String(supps.length) : undefined} />
+          <SectionHead title="Your Own Reminders" note={supps.length ? String(supps.length) : undefined} />
           {supps.map((s, i) => (
-            <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-              <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{s.name}</Text>
-              <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginRight: sp.md }}>{fmt(s.hour, s.minute)}</Text>
-              <Pressable accessibilityLabel="Remove reminder" accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={6}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
+            <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{s.name}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{daysLabel(s.days)}</Text>
+                </View>
+                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginRight: sp.md }}>{fmt(s.hour, s.minute)}</Text>
+                <Pressable accessibilityLabel={`Remove ${s.name}`} accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={6}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
+              </View>
+              <DayPicker days={s.days} label={s.name} onToggle={(d) => setSupps((p) => p.map((x) => (x.id === s.id ? { ...x, days: toggleDay(x.days, d) } : x)))} />
             </View>
           ))}
           {/* [08]:[00] beside a name, with nothing saying which clock. This is
@@ -250,6 +401,25 @@ export default function Reminders() {
         </Section>
 
         <Rule />
+
+        <Rule />
+
+        {/* The other half of the same subject. This screen decides WHAT gets
+            sent and when; that one decides which kinds reach you at all, and
+            holds the quiet hours these reminders are moved out of. It is also
+            the only route to that screen, so a member who wants a 3am nudge to
+            stop has somewhere to go from the screen they set it on. */}
+        <Section>
+          <Pressable onPress={() => router.push('/(client)/notification-prefs')}
+            accessibilityRole="button" accessibilityLabel="Notification settings and quiet hours"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Notification Settings</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Which kinds of notification reach you, and the hours to hold them until.</Text>
+            </View>
+            <Icon name="chevron" size={14} color={t.ink3} />
+          </Pressable>
+        </Section>
 
         <View style={{ marginTop: layout.section }}>
           <Cta label="Save & Schedule" onPress={saveAndSchedule} wide />

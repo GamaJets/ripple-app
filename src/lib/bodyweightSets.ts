@@ -60,6 +60,11 @@
 // is understating the work, and the honest thing is to say which sets are not
 // in the figure rather than to pick a body and pretend.
 import type { WorkoutEntry } from './mockData';
+// A hold is the other set whose first number is not reps. Consulted here rather
+// than duplicated, because tonnage is the one figure both flags have to change
+// and two files deciding separately what a set is worth is how a plank came to
+// be counted as forty-five repetitions in the first place.
+import { isTimedSet } from './timedSets';
 
 /** A weight reading and when it was taken. Matches `weightSeries` on
  *  `useClientData()` so a screen can pass it straight through. */
@@ -160,6 +165,14 @@ export function entryTonnage(e: WorkoutEntry, history: BodyweightHistory): Tonna
   if (!e.sets?.length) return NO_TONNAGE;
   let kg = 0, unknown = 0;
   for (let i = 0; i < e.sets.length; i++) {
+    // A hold is not reps, so reps × load is not a mass moved. Skipped
+    // entirely rather than counted as zero or as `secs × kg`: 45 seconds
+    // under a 10 kg plate is not 450 kg, and it is not nothing either — it is
+    // in the hold board (src/lib/timedSets.ts) where it can be stated in its
+    // own units. It is deliberately NOT counted in `unknownSets`, which means
+    // "work this total could have priced and could not"; a hold is work this
+    // total is not about.
+    if (isTimedSet(e, i)) continue;
     const reps = e.sets[i][0] || 0;
     const load = setLoadKg(e, i, e.sets[i], history, e.t);
     if (load == null) { if (isBodyweightSet(e, i) && reps > 0) unknown++; continue; }
@@ -225,6 +238,11 @@ export function repRecords(log: readonly WorkoutEntry[]): RepRecord[] {
     if (!e.sets?.length) continue;
     for (let i = 0; i < e.sets.length; i++) {
       if (!isBodyweightSet(e, i)) continue;
+      // A bodyweight HOLD belongs on the hold board, not here. Without this a
+      // 45-second plank outranks every pull-up anybody has ever done, because
+      // 45 is a bigger number than 12 and this board reads the first number as
+      // repetitions.
+      if (isTimedSet(e, i)) continue;
       const reps = e.sets[i][0] || 0;
       if (reps <= 0) continue;
       const addedKg = Math.max(0, Number.isFinite(e.sets[i][1]) ? e.sets[i][1] : 0);

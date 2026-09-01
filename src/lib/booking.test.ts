@@ -169,6 +169,18 @@ ok(!/GBP|AED|\$|£|€/.test(bareWarn), 'no money is invented to fill the gap');
 ok(bareWarn.endsWith(unstatedCurrency(null)), 'and it is the module’s own clause, verbatim, not a paraphrase that can drift from it');
 ok(!/currency/i.test(feeWarn), 'while a fee in a stated currency carries no such clause — the explanation appears only where it is true');
 
+// ── a coach in Tokyo, and the hundred-times error that was waiting there ───
+// `feeAmountLine` used to multiply the typed fee by a hundred and hand it to a
+// formatter that divided it straight back. The round trip is invisible in a
+// currency with hundredths and wrong in one without: a ¥5,000 fee is 5,000 yen,
+// not 500,000 of anything, and the yen has no subdivision to print two places
+// of. Both halves are asserted, because either one alone would have passed
+// while the pair was broken.
+eq(feeAmountLine(5000, 'JPY'), 'JPY 5,000', 'a fee in a zero-decimal currency is neither scaled nor given decimals it has no unit for');
+eq(feeAmountLine(25, 'GBP'), 'GBP 25.00', 'and a currency with hundredths is unchanged by that');
+ok(/JPY 5,000/.test(warn(policy({ fee: 5000, currency: 'JPY' }), 2)),
+  'and the sentence the member actually reads before confirming carries the same figure');
+
 // Not one branch of the warning may claim Repple charges anything.
 for (const [label, line] of [
   ['in time', warn(policy({}), 48)],

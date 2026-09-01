@@ -127,6 +127,13 @@ export const NAV: NavItem[] = [
   // not price a plan, record a payment, import a price book or settle payroll,
   // and the console said where to go and had nowhere to send them.
   { href: '/settings', label: 'Gym', roles: ['owner'], context: 'gym' , group: 'System' },
+  // Beside Gym rather than beside Members, because it is not about any one
+  // member: it is what the gym can PRODUCE when somebody asks — an insurer, a
+  // regulator, or the member themselves. Owner-only, and the strongest case for
+  // it of anything in this group: the screen carries every signature the gym
+  // holds, every document it has filed, and the log of who did what to its
+  // record.
+  { href: '/compliance', label: 'Compliance', roles: ['owner'], context: 'gym' , group: 'System' },
   { href: '/import', label: 'Import', roles: ['owner'], context: 'gym' , group: 'System' },
   // Beside Import deliberately: a gym that can be imported into and not
   // exported out of is a gym that cannot leave.

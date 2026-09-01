@@ -43,6 +43,8 @@
 import {
   contactKind, shapeLeads, shapeFollowUps, leadCountLine, leadProblem, followUpProblem,
   LEAD_STATES, LEAD_STATE_LABEL, FOLLOW_UP_IS_MANUAL, MISTYPED_CODE_NOTE,
+  FOLLOW_UP_LABEL, FOLLOW_UP_WHEN, followUpDraft, followUpLink, followUpRecord,
+  senderName, type FollowUpKind,
   MAX_LEAD_NAME, MAX_LEAD_CONTACT, MAX_LEAD_NOTE, MAX_FOLLOW_UP,
   type RawLead, type RawFollowUp, type LeadRow,
 } from './leads';
@@ -331,6 +333,107 @@ ok(!/(sequence|automat|schedul|drip)/i.test(FOLLOW_UP_IS_MANUAL),
   'and it does not use a word that implies one');
 ok(/no coach to give them to/i.test(MISTYPED_CODE_NOTE),
   'the cost of dropping an unresolvable code is stated rather than hidden');
+
+
+/* ── following one up, from the coach's own phone ───────────────────────── */
+
+// The rule that decides this whole feature: NOTHING in a draft may name this
+// software. A prospect reading their first message from a coach must not meet
+// the coach's supplier in it, and a chain's member must not meet a competitor.
+// That is the same violation the join page was fixed for, on the one message
+// somebody reads before they are anybody's customer.
+const KINDS: FollowUpKind[] = ['first', 'second', 'last'];
+const lead = { name: 'Sarah Ahmed', note: 'I want to get back into lifting.', contact: 'sarah@example.com', contactKind: 'email' as const };
+
+for (const k of KINDS) {
+  const d = followUpDraft(k, lead, 'Tim Rodgers', 'Northside Strength');
+  ok(!/repple/i.test(d.body + d.subject), `the ${k} draft never names the software`);
+  ok(d.body.includes('Sarah'), `the ${k} draft greets them by name`);
+  ok(d.body.includes('Tim'), `and signs off as the coach`);
+  ok(d.subject.length > 0 && d.subject.length < 60, `the ${k} subject is a subject`);
+  ok(!d.body.includes('!'), `the ${k} draft does not shout`);
+  // The same refusals `NEVER_SAYS` makes mechanical for a nudge, applied by
+  // hand here: a stranger who left a number must not be sent a promise.
+  ok(!/guarantee|transform|results in \d|lose \d|\bfree trial\b/i.test(d.body),
+    `the ${k} draft promises nothing`);
+  ok(!/[£$€]|\bAED\b|\bper (month|session)\b/i.test(d.body),
+    `and states no price — this product has no default currency and a draft is the wrong place to invent one`);
+}
+
+// The business name is the COACH's trading name, never the app's, and it is
+// simply absent when they have not set one.
+ok(followUpDraft('first', lead, 'Tim', 'Northside Strength').body.includes('Northside Strength'),
+  'a coach with a trading name writes from it');
+ok(!/ at \b/.test(followUpDraft('first', lead, 'Tim', null).body.split('\n')[2] ?? ''),
+  'and a coach without one simply does not name a business');
+ok(!/undefined|null/.test(followUpDraft('first', { name: '', note: null }, null, null).body),
+  'a nameless lead and a nameless coach still produce a readable message');
+
+// Their own words are quoted only when they left some. "Thanks for your
+// message" said to somebody who left a name and a number is the app inventing
+// a message they did not write.
+ok(followUpDraft('first', lead, 'Tim', null).body.includes('back into lifting'),
+  'a note they left is quoted back');
+ok(!/You mentioned/.test(followUpDraft('first', { name: 'Sarah', note: null }, 'Tim', null).body),
+  'and nothing is quoted when they left nothing');
+
+// The sender's name, on the same rule `greetingName` keeps.
+eq(senderName('Tim Rodgers'), 'Tim', 'first word only');
+eq(senderName('  '), null, 'whitespace is nobody');
+eq(senderName('tim@example.com'), null, 'an email address is not a name');
+eq(senderName('7f3a9c21-0000'), null, 'and neither is a uuid');
+
+/* ── the link that opens their own mail app ─────────────────────────────── */
+
+const draft = followUpDraft('first', lead, 'Tim', null);
+const mail = followUpLink(lead, draft);
+ok(mail !== null && mail.startsWith('mailto:sarah%40example.com?'), 'an email opens a mailto');
+ok((mail ?? '').includes('subject='), 'with a subject');
+ok((mail ?? '').includes('body='), 'and a body');
+// A raw newline or ampersand in the query truncates the body in some mail apps,
+// and the coach sends half a message without noticing.
+ok(!/\n/.test(mail ?? ''), 'nothing in the link is a raw newline');
+ok(((mail ?? '').match(/&/g) || []).length === 1, 'and the only ampersand is the one separating the two fields');
+
+const phoneLead = { ...lead, contact: '+44 (0)7700 900-123', contactKind: 'phone' as const };
+const sms = followUpLink(phoneLead, draft);
+// `+44 (0)7700 900-123` is the ordinary British way of writing a number that
+// is dialled as +447700900123 from abroad. Keeping the bracketed trunk zero
+// gives +4407700900123, which is not a number anywhere, and the message
+// silently fails to send.
+ok((sms ?? '').startsWith('sms:+447700900123?'), 'an international number drops its bracketed trunk prefix');
+ok(!/[()\s-]/.test((sms ?? '').split('?')[0]), 'because brackets and spaces silently fail to open on some builds');
+// And a domestic number keeps every digit: (0161) is an area code, not a trunk
+// prefix, and dropping it would dial a number in another city.
+ok((followUpLink({ contact: '(0161) 496 0000', contactKind: 'phone' }, draft) ?? '')
+  .startsWith('sms:01614960000?'), 'a domestic number keeps its area code');
+eq(followUpLink({ contact: '+++', contactKind: 'phone' }, draft), null, 'and a number with no digits opens nothing');
+ok(!(sms ?? '').includes('subject='), 'and a text has no subject — inventing one puts the word Subject in an SMS');
+
+// THE refusal. `contactKind` returns 'unknown' rather than guessing, and this
+// is where that pays: a button that dials an Instagram handle does nothing, and
+// the coach finds out after they have tapped it.
+eq(followUpLink({ contact: '@sarahlifts', contactKind: 'unknown' }, draft), null,
+  'there is nothing to open an Instagram handle with, and nothing is offered');
+eq(followUpLink({ contact: '', contactKind: 'email' }, draft), null, 'and nothing for an empty contact');
+
+/* ── the record afterwards ──────────────────────────────────────────────── */
+
+// It says "opened", which is the only thing this app actually observed — the
+// coach may have edited the draft to nothing or closed the mail app.
+ok(/^Opened the first reply/.test(followUpRecord('first', 'email')), 'the note names which draft');
+ok(followUpRecord('second', 'text').includes('a text'), 'and which channel');
+ok(!/sent/i.test(followUpRecord('last', 'email')),
+  'and never says "sent" — nothing here observed a send');
+
+// The buttons and their captions.
+for (const k of KINDS) {
+  ok(/^[A-Z]/.test(FOLLOW_UP_LABEL[k]), `${k}'s label is Title Case — it is a button`);
+  ok(FOLLOW_UP_WHEN[k][0] === FOLLOW_UP_WHEN[k][0].toLowerCase(), `${k}'s caption is sentence case`);
+  ok(FOLLOW_UP_WHEN[k].endsWith('.'), `${k}'s caption is a sentence`);
+}
+eq(new Set(Object.values(FOLLOW_UP_LABEL)).size, KINDS.length, 'no two buttons read the same');
+
 
 if (errors.length) {
   console.error(`leads.test.ts — ${errors.length} failure(s):`);

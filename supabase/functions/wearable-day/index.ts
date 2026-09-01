@@ -81,7 +81,7 @@ async function fitbitDay(token: string) {
 async function ouraDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
   const d = today();
-  const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null };
+  const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, hrv: null, recoveryPct: null, strain: null };
   try {
     const a = await (await fetch(`https://api.ouraring.com/v2/usercollection/daily_activity?start_date=${d}&end_date=${d}`, { headers: h })).json();
     const row = a?.data?.[0];
@@ -89,12 +89,46 @@ async function ouraDay(token: string) {
     out.totalKcal = numOr(row?.total_calories);
     out.steps = numOr(row?.steps);
   } catch { /* leave nulls */ }
+  // Readiness — Oura's own 0–100 verdict, which registry.ts advertises as the
+  // FIRST thing an Oura ring gives Repple and which nothing has ever read.
+  //
+  // Its own endpoint rather than a field on daily_activity: the two documents
+  // are scored separately and daily_activity carries an activity score, not a
+  // readiness one. Reading the wrong `score` here would put a figure on the
+  // Recovery screen under the word Readiness that Oura's own app disagrees
+  // with, which is worse than the blank it replaces.
+  try {
+    const r = await (await fetch(`https://api.ouraring.com/v2/usercollection/daily_readiness?start_date=${d}&end_date=${d}`, { headers: h })).json();
+    out.recoveryPct = numOr(r?.data?.[0]?.score);
+  } catch { /* leave null */ }
+  // HRV, from the night rather than the day. Oura publishes `average_hrv` on
+  // the SLEEP document in milliseconds already — no conversion, unlike WHOOP
+  // below, and the difference between the two is exactly why DailyMetrics.hrv
+  // names its unit.
+  //
+  // The window opens a day early because a night belongs to the day the person
+  // woke up on and Oura files it by bedtime; asking only for today would miss
+  // last night for anybody who went to bed before midnight. The newest document
+  // wins, which is the most recent night either way.
+  try {
+    const start = new Date(Date.parse(d + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+    const sl = await (await fetch(`https://api.ouraring.com/v2/usercollection/sleep?start_date=${start}&end_date=${d}`, { headers: h })).json();
+    const docs = Array.isArray(sl?.data) ? sl.data : [];
+    let newest: any = null;
+    for (const doc of docs) {
+      if (numOr(doc?.average_hrv) == null) continue;
+      if (!newest || String(doc?.bedtime_end || '') > String(newest?.bedtime_end || '')) newest = doc;
+    }
+    out.hrv = numOr(newest?.average_hrv);
+  } catch { /* leave null */ }
+  // No strain. Oura publishes no equivalent of WHOOP's 0–21 scale, and
+  // substituting its activity score would print a 78 where a 14.2 belongs.
   return out;
 }
 
 async function whoopDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
-  const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, heartRateMax: null, zoneSeconds: null };
+  const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, heartRateMax: null, zoneSeconds: null, hrv: null, recoveryPct: null, strain: null };
   // WHOOP v2. Cycle = a physiological day: energy (kilojoule) + average HR.
   try {
     const c = await (await fetch('https://api.prod.whoop.com/developer/v2/cycle?limit=1', { headers: h })).json();
@@ -109,12 +143,28 @@ async function whoopDay(token: string) {
       // the app says what it actually has.
       if (Number.isFinite(Number(s.kilojoule))) out.totalKcal = Math.round(Number(s.kilojoule) / 4.184);
       out.heartRateAvg = numOr(s.average_heart_rate);
+      // DAY strain, from the cycle — not the sum of the workout strains below.
+      // WHOOP's scale is logarithmic, so adding two workouts' strains produces
+      // a number that is not on the scale at all and can exceed its 21 ceiling.
+      // The cycle is the only place a day's strain legitimately comes from.
+      out.strain = numOr(s.strain);
     }
   } catch { /* leave nulls */ }
-  // Recovery carries resting heart rate.
+  // Recovery carries resting heart rate — and two more figures WHOOP's own app
+  // leads with, which this call was fetching and then throwing away.
   try {
     const r = await (await fetch('https://api.prod.whoop.com/developer/v2/recovery?limit=1', { headers: h })).json();
-    out.heartRateResting = numOr(r?.records?.[0]?.score?.resting_heart_rate);
+    const rs = r?.records?.[0]?.score;
+    out.heartRateResting = numOr(rs?.resting_heart_rate);
+    out.recoveryPct = numOr(rs?.recovery_score);
+    // `hrv_rmssd_milli` is WHOOP's own field name and it is a LIE about the
+    // unit: the published example is 0.0621 for a 62 ms RMSSD, i.e. seconds.
+    // Storing it verbatim would put "0.1 ms" on the Recovery screen, which
+    // reads as a catastrophic reading rather than as a unit mistake. The
+    // conversion lives here, next to the field, and DailyMetrics.hrv states the
+    // unit it arrives in so nobody converts it a second time.
+    const rmssd = numOr(rs?.hrv_rmssd_milli);
+    out.hrv = rmssd == null ? null : Math.round(rmssd * 1000);
   } catch { /* leave nulls */ }
   // Sum today's workout durations, and roll up time-in-zone.
   //

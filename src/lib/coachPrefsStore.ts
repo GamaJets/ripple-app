@@ -35,9 +35,22 @@ export interface CoachPrefs {
   classRate: number | null;
   goalRevenue: number | null;
   goalClients: number | null;
+  /**
+   * The shortest gap the coach will accept between two approaches to the same
+   * client, in days. Null means "use the app's own floor" — see `cooldownFloor`
+   * in src/lib/interventions.ts, which refuses anything outside 1..365 rather
+   * than clamping it, because honouring a stored 0 would prompt daily.
+   *
+   * Not zero-as-unset, for the same reason `class_rate` is not: a coach who
+   * cleared the box has asked for the app's own pacing back, and a coach who
+   * typed a number has asked for theirs. Those are different requests.
+   */
+  nudgeCooldownDays: number | null;
 }
 
-export const EMPTY_PREFS: CoachPrefs = { classRate: null, goalRevenue: null, goalClients: null };
+export const EMPTY_PREFS: CoachPrefs = {
+  classRate: null, goalRevenue: null, goalClients: null, nudgeCooldownDays: null,
+};
 
 /** `numeric` arrives from PostgREST as a string often enough to matter. A
  *  silent NaN here becomes a rate box showing "NaN" or a bar drawn at zero. */
@@ -63,7 +76,7 @@ export async function fetchCoachPrefs(): Promise<{ prefs: CoachPrefs; status: Lo
     if (!uid) return { prefs: EMPTY_PREFS, status: 'ready' };
     const { data, error } = await supabase
       .from('coach_prefs')
-      .select('class_rate, goal_revenue, goal_clients')
+      .select('class_rate, goal_revenue, goal_clients, nudge_cooldown_days')
       .eq('user_id', uid)
       .maybeSingle();
     if (error) {
@@ -72,12 +85,15 @@ export async function fetchCoachPrefs(): Promise<{ prefs: CoachPrefs; status: Lo
     }
     // maybeSingle: no row is an absence, not a fault. A coach who has never set
     // anything has no row, and that is 'ready' with three nulls.
-    const row = (data ?? null) as { class_rate?: unknown; goal_revenue?: unknown; goal_clients?: unknown } | null;
+    const row = (data ?? null) as {
+      class_rate?: unknown; goal_revenue?: unknown; goal_clients?: unknown; nudge_cooldown_days?: unknown;
+    } | null;
     return {
       prefs: {
         classRate: num(row?.class_rate),
         goalRevenue: num(row?.goal_revenue),
         goalClients: num(row?.goal_clients),
+        nudgeCooldownDays: num(row?.nudge_cooldown_days),
       },
       status: 'ready',
     };
@@ -107,6 +123,7 @@ export async function saveCoachPrefs(patch: Partial<{
   classRate: number | null;
   goalRevenue: number | null;
   goalClients: number | null;
+  nudgeCooldownDays: number | null;
 }>): Promise<boolean> {
   if (!USE_SUPABASE) return false;
   try {
@@ -117,6 +134,7 @@ export async function saveCoachPrefs(patch: Partial<{
     if ('classRate' in patch) row.class_rate = patch.classRate;
     if ('goalRevenue' in patch) row.goal_revenue = patch.goalRevenue;
     if ('goalClients' in patch) row.goal_clients = patch.goalClients;
+    if ('nudgeCooldownDays' in patch) row.nudge_cooldown_days = patch.nudgeCooldownDays;
     // Nothing to say. Not a failure, but not a write either, and reporting it
     // as success would let a caller claim it saved something it never sent.
     if (Object.keys(row).length <= 2) return false;

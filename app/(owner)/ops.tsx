@@ -87,12 +87,39 @@ import type { LoadStatus } from '../../src/ui/loadStatus';
 interface GymEvent { id: string; kind: string; summary: string; at: string }
 
 /** The mark beside an event — the kinds are a closed set in the CHECK. */
+/**
+ * The dot beside a feed entry.
+ *
+ * A kind that is not in here falls to `ink3`, which is the right default and is
+ * why this map does not have to be complete — the SUMMARY says what happened,
+ * and the colour is a second channel, never the only one.
+ *
+ * supabase/parts/187 widens `gym_events` from five kinds to nineteen: money
+ * recorded and corrected, a price changed, a membership cancelled or frozen,
+ * payroll settled and reversed, equipment retired, a month closed and reopened,
+ * and the whole record exported. The ones that carry weight are marked; the
+ * rest arrive in ink and read perfectly well.
+ */
 const EVENT_DOT: Record<string, 'brand' | 'good' | 'warn' | 'ink3'> = {
   'member-joined': 'good',
   'trainer-joined': 'brand',
   'session-delivered': 'good',
   'session-missed': 'warn',
   'promo-redeemed': 'brand',
+  'payment-recorded': 'good',
+  // The four an owner scanning a week would want to stop on: money taken back,
+  // a membership ending, a payroll run withdrawn, and every member's record
+  // leaving the platform.
+  'payment-corrected': 'warn',
+  'membership-cancelled': 'warn',
+  'payroll-reversed': 'warn',
+  'record-exported': 'warn',
+  'invoice-raised': 'brand',
+  'price-changed': 'brand',
+  'payroll-settled': 'good',
+  'month-closed': 'brand',
+  'month-reopened': 'warn',
+  'equipment-out-of-service': 'warn',
 };
 
 function ago(iso: string) {
@@ -347,50 +374,54 @@ export default function OwnerOps() {
                     accessibilityLabel={`Session fee in ${cur ?? GYM_CURRENCY}`}
                     style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
                 </View>
-                {cur ? null : (<>
-                  {/* The gym has not set `tenants.currency`, and until tonight
-                      NOTHING IN THE PRODUCT COULD. `updateTenant` was the only
-                      write to `tenants` anywhere and its type excluded the
-                      column, while half a dozen screens told the owner "an
-                      owner sets it in the gym settings" over a control that did
-                      not exist. A coach at such a gym cannot price a package at
-                      all. So the ask is here, next to the fee it denominates. */}
-                  {/* This sentence used to tell the owner that {GYM_CURRENCY}
-                      "is what the rest of its operating record is recorded in".
-                      That was true when every money column carried `not null
-                      default 'AED'`; supabase/parts/150 dropped all seven of
-                      those defaults precisely because the tables were empty,
-                      and they still are. So the claim named a body of dirham
-                      rows that does not exist — telling an owner a fact about
-                      their own money that we cannot support is worse than
-                      telling them nothing, because it is the one thing here
-                      they have no way to check. It now says only what is true:
-                      the label is a placeholder standing in for an answer we
-                      have not been given. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    Your gym has not told us what it charges in, so the field above is only labelled
-                    {' '}{GYM_CURRENCY} as a placeholder. Set your currency once and every screen follows.
-                  </Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-                    {CURRENCIES.map((c) => (
+                {/* ── the currency, ALWAYS offered ────────────────────────
+                    This whole block was `{cur ? null : (…)}` — the picker
+                    appeared only while the gym had no currency, and disappeared
+                    the instant one was chosen. So a gym that picked the wrong
+                    one on day one had no path back from ANY surface in the
+                    product: the console's /settings did not exist yet, and this
+                    was the only control. The write itself was never the problem
+                    — `updateTenant` has always admitted `currency` — the gate
+                    was.
+
+                    supabase/parts/150 removed every money column's default
+                    precisely so a wrong currency could not hide. A control that
+                    hides itself once a wrong answer is stored undoes that. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {cur
+                    ? `This gym is priced in ${cur}. Everything written from here on is denominated in it.`
+                    : `Your gym has not told us what it charges in, so the field above is only labelled ${GYM_CURRENCY} as a placeholder. Set your currency once and every screen follows.`}
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                  {CURRENCIES.map((c) => {
+                    const on = c === cur;
+                    return (
                       <Pressable key={c} onPress={async () => {
+                        if (on) return;
                         const saved = await updateTenant({ currency: c });
-                        // No claim about what came before. The old wording said
-                        // "existing figures were already recorded in AED",
-                        // which rested on the money columns defaulting to it —
-                        // a default supabase/parts/150 has since dropped. This
-                        // screen cannot see the gym's rows, so it states only
-                        // the thing the write it just made actually settles.
+                        // No claim about what came before, and no claim that
+                        // anything already recorded has moved. The rows keep
+                        // the currency they were written in — a payment is a
+                        // historical fact — so a gym that changes this has two
+                        // currencies in its ledger and every total that mixes
+                        // them is withheld rather than added up.
                         setFeeMsg(saved
-                          ? { bad: false, text: `Your gym is priced in ${c}. That is what every figure written from here on is denominated in.` }
-                          : { bad: true, text: 'Not saved. Your gym still has no currency set.' });
-                      }} accessibilityRole="button" accessibilityLabel={`Price this gym in ${c}`}
-                        style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
-                        <Text style={{ ...ty.label, ...numeric, color: t.ink2 }}>{c}</Text>
+                          ? {
+                              bad: false,
+                              text: cur
+                                ? `Your gym is now priced in ${c}. Nothing already recorded has been re-denominated: payments, plans and passes keep the currency they were written in, and any total that mixes the two is withheld rather than added up.`
+                                : `Your gym is priced in ${c}. That is what every figure written from here on is denominated in.`,
+                            }
+                          : { bad: true, text: cur ? `Not saved. Your gym is still priced in ${cur}.` : 'Not saved. Your gym still has no currency set.' });
+                      }} accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={on ? `This gym is priced in ${c}` : `Price this gym in ${c}`}
+                        style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                        <Text style={{ ...ty.label, ...numeric, color: on ? t.brandInk : t.ink2 }}>{c}</Text>
                       </Pressable>
-                    ))}
-                  </View>
-                </>)}
+                    );
+                  })}
+                </View>
                 {feeMsg ? (
                   feeMsg.bad
                     ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{feeMsg.text}</Flag>
@@ -410,21 +441,6 @@ export default function OwnerOps() {
             </Section>
 
             <Rule />
-
-            <Section>
-          <ListRow icon="calendar" title="Trainer Rota" note="Who is on the floor when, against what is booked"
-            onPress={() => router.push('/(owner)/rota')} />
-          <ListRow icon="wrench" title="Equipment Register" note="What the gym owns, and what is due a service"
-            onPress={() => router.push('/(owner)/equipment')} />
-          <ListRow icon="dumbbell" title="Exercise Library" note="Every movement the app can teach, and the kit each one needs"
-            onPress={() => router.push('/(owner)/library')} />
-          <ListRow icon="clock" title="Deletion Requests" note="Members who asked to be erased, and the 30-day clock"
-            onPress={() => router.push('/(owner)/deletions')} />
-          <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
-            onPress={() => router.push('/(owner)/settings')} />
-          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
-            onPress={() => router.push('/guide')} />
-        </Section>
 
         {/* ── a notice to the gym's members ─────────────────────────────────
                 This section used to write to a `useState` in src/ui/ownerOps.tsx
@@ -578,8 +594,9 @@ export default function OwnerOps() {
                 <Empty tone={t.ink3}>Loading.</Empty>
               ) : events.length === 0 ? (
                 <Empty tone={t.ink3}>
-                  Nothing yet. Members joining, coaches joining, sessions marked delivered or missed, and
-                  promo codes being used all land here as they happen.
+                  Nothing yet. Members and coaches joining, sessions marked delivered or missed,
+                  promo codes being used, money recorded and corrected, prices changed, payroll
+                  settled, months closed and the record exported all land here as they happen.
                 </Empty>
               ) : events.map((e, i) => {
                 const tone = EVENT_DOT[e.kind] === 'good' ? t.good
@@ -613,6 +630,38 @@ export default function OwnerOps() {
             </Section>
           </View>
         )}
+        {/* ── everywhere else in this gym ────────────────────────────────
+            OUTSIDE the tab switch, and that is the whole of the fix.
+
+            These six rows are the ONLY route in the app to the Rota, the
+            Equipment Register, the Exercise Library, Deletion Requests and
+            Settings — five screens with no tab, no hub row anywhere else and no
+            other link. They were rendered inside the `tab === 'announce'`
+            branch, so switching to Support or Activity made all five vanish
+            from the product. An owner who left this screen on Activity and came
+            back to it had no way to reach any of them again short of switching
+            tabs for no reason they could have guessed.
+
+            `scripts/check-reachable.mjs` could not see it: the routes ARE named
+            in this file, which is all that check asks. A route named inside a
+            branch that is false is reachable to a grep and unreachable to a
+            person. */}
+        <Rule />
+        <Section>
+          <SectionHead title="Everywhere Else" />
+          <ListRow icon="calendar" title="Trainer Rota" note="Who is on the floor when, against what is booked"
+            onPress={() => router.push('/(owner)/rota')} />
+          <ListRow icon="wrench" title="Equipment Register" note="What the gym owns, and what is due a service"
+            onPress={() => router.push('/(owner)/equipment')} />
+          <ListRow icon="dumbbell" title="Exercise Library" note="Every movement the app can teach, and the kit each one needs"
+            onPress={() => router.push('/(owner)/library')} />
+          <ListRow icon="clock" title="Deletion Requests" note="Members who asked to be erased, and the 30-day clock"
+            onPress={() => router.push('/(owner)/deletions')} />
+          <ListRow icon="settings" title="Settings" note="Who you are signed in as, your data, and deleting your account"
+            onPress={() => router.push('/(owner)/settings')} />
+          <ListRow icon="search" title="User Guide" note="What each tab does, any time"
+            onPress={() => router.push('/guide')} />
+        </Section>
       </ScrollView>
     </SafeAreaView>
   );

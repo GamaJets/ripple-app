@@ -18,7 +18,7 @@ import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
 import { USE_SUPABASE } from '../src/lib/config';
 import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
-import { recordReferral, stashPendingReferral, flushPendingReferral } from '../src/lib/referrals';
+import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH } from '../src/ui/emailOtp';
 import { Card, Cta } from '../src/ui/kit';
@@ -57,6 +57,27 @@ export default function Welcome() {
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
   const [refCode, setRefCode] = useState('');
+  // A code a referral link left behind, put into the field rather than only
+  // into storage.
+  //
+  // `app/join.tsx` stashes it so it survives an App Store install and a
+  // confirm-by-email round trip, and `flushPendingReferral` spends it at the
+  // first sign-in — but until now the form itself could not see it, so the box
+  // sat empty and read as "no code" to somebody who had just tapped a friend's
+  // invitation. Prefilling is also what makes the DIRECT signup path work: that
+  // branch calls `recordReferral(refCode)` with whatever is in this field and
+  // never flushes the stash.
+  //
+  // Only ever fills an EMPTY field. Somebody who has started typing their own
+  // code has answered this question, and overwriting it a tick later would
+  // replace their answer with ours.
+  useEffect(() => {
+    let cancelled = false;
+    peekPendingReferral().then((c) => {
+      if (!cancelled && c) setRefCode((cur) => (cur.trim() ? cur : c));
+    }).catch(() => { /* the field simply stays empty; the stash still flushes */ });
+    return () => { cancelled = true; };
+  }, []);
   const [notice, setNotice] = useState<string | null>(null);
   /**
    * The address a confirmation code has just been sent to, or null.

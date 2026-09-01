@@ -84,19 +84,35 @@ const allLiterals = [...src.matchAll(/exercises:\s*d\.exercises\.map\(\((?:[^)]*
 // The spread must be at the TOP level of the literal to count. `loadFrom`
 // contains `setRows.map((r) => ({ ...r }))` nested inside it, and a naive
 // search for "..." anywhere excused the very mapper this check exists for.
-const mappers = allLiterals.filter((lit) => !/^\s*\.\.\.[a-zA-Z_]/.test(lit));
+const spread = (lit) => /^\s*\.\.\.[a-zA-Z_]/.test(lit);
+const mappers = allLiterals.filter((lit) => !spread(lit));
 
-if (mappers.length !== 2) {
-  fail(`${FILE}: expected exactly 2 exercise mappers (loadFrom and composeProgram), found ${mappers.length}. `
-     + `Either one was removed, or a third was added — in both cases this check is no longer looking at what it claims to.`);
+// `loadFrom` became a spread when the builder learned multi-week blocks, and
+// that is the SAFER shape, not a regression: `{ ...e, key: nextKey() }` carries
+// every field on BEx including ones added after it was written, which is the
+// whole reason the spread mappers in this file have never lost anything. So it
+// is no longer enumerated and cannot be read field-by-field — what this check
+// verifies about it now is that it is STILL a spread, because the day somebody
+// expands it back into a list of names is the day it starts dropping fields.
+const intoEditorSpread = allLiterals.find((lit) => spread(lit) && /\bkey:\s*nextKey\(\)/.test(lit));
+
+if (!intoEditorSpread) {
+  fail(`${FILE}: could not find loadFrom — the mapper that mints \`key: nextKey()\` when a saved `
+     + `programme is opened. It must stay a top-level spread (\`{ ...e, key: nextKey(), … }\`) so that `
+     + `every field on BEx survives being opened, including ones added after it was written. `
+     + `If it has been expanded into a list of named fields, this check can no longer tell whether it drops any.`);
 }
-const [intoEditor, outToStorage] = mappers;
+
+if (mappers.length !== 1) {
+  fail(`${FILE}: expected exactly 1 enumerating exercise mapper (composeProgram), found ${mappers.length}. `
+     + `Either it was removed, or another was added — in both cases this check is no longer looking at what it claims to.`);
+}
+const [outToStorage] = mappers;
 
 const keysOf = (literal) =>
   new Set([...literal.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
     .matchAll(/(?:^|[\s{,])([a-zA-Z_][a-zA-Z0-9_]*)\s*:/gm)].map((m) => m[1]));
 
-const inEditor = keysOf(intoEditor);
 const inStorage = keysOf(outToStorage);
 
 const problems = [];
@@ -105,13 +121,10 @@ for (const f of unique) {
     if (inStorage.has(f)) problems.push(`  ${f}  is listed as edit-only but composeProgram writes it. ${EDIT_ONLY[f]}`);
     continue;
   }
-  const missing = [];
-  // A derived field is still checked for PRESENCE in both — one that stopped
-  // being written would break list identity or leave stored rows unnamed.
-  if (!inEditor.has(f)) missing.push('loadFrom (opening a saved programme)');
-  if (!inStorage.has(f)) missing.push('composeProgram (saving or assigning one)');
-  if (missing.length) {
-    problems.push(`  ${f}  is on BEx but not carried by ${missing.join(' or ')}`);
+  // Only composeProgram is enumerated now. loadFrom spreads, so it carries
+  // every field by construction and there is nothing per-field to check there.
+  if (!inStorage.has(f)) {
+    problems.push(`  ${f}  is on BEx but not carried by composeProgram (saving or assigning one)`);
   }
 }
 
@@ -123,7 +136,7 @@ A field on BEx that either mapper does not name is edited on screen, looks
 correct, and disappears the moment the programme is saved and opened again.
 Nothing else catches it: every field is optional, so TypeScript is satisfied.
 
-Add it to BOTH mappers in ${FILE}, or — if it genuinely must not be stored —
+Add it to composeProgram in ${FILE}, or — if it genuinely must not be stored —
 to EDIT_ONLY in this script with the reason it is one.`);
   process.exit(1);
 }

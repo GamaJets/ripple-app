@@ -18,7 +18,11 @@ import { planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryData, DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal } from '../../src/lib/meals';
+import {
+  buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryData, slotsFor,
+  planGaps, mealAllergens, allergenGapNote, allergenLabel,
+  DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal,
+} from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
@@ -36,10 +40,17 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
 import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
+// The same review sheet the Food Log tab uses. This tab's photo path COMMITTED
+// — with an alert — while the other offered an editable sheet for the same read
+// of the same photo, and its barcode path logged one of whatever basis Open
+// Food Facts returned. One feature, two behaviours, and the committing one was
+// where the read is least certain. See src/ui/LogFoodSheet.tsx.
+import { LogFoodSheet } from '../../src/ui/LogFoodSheet';
+import type { FoodFacts } from '../../src/lib/foodPortion';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Meter, QuickRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Flag, Meter, QuickRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -192,8 +203,14 @@ export default function Nutrition() {
   const [ovHydrated, setOvHydrated] = useState(false);
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
 
-  /** Put a snack idea in today's log. Nothing else counts it — the section is
-   *  a menu, and reading a menu is not eating.
+  /** Put a planned meal or a snack idea in today's log. Nothing else counts it
+   *  — the plan is a menu, and reading a menu is not eating.
+   *
+   *  It was `logPlanned` and it was offered for snack ideas only (`pos < 0`). A
+   *  planned breakfast, lunch or dinner got "Swap This Meal" and nothing else,
+   *  so the day's plan and the day's log were two unconnected things on one
+   *  tab: a member who ate exactly what their coach had written still had to go
+   *  and describe it to the food log by hand.
    *
    *  `void fl.addFood(...)` threw the answer away. `logFood` distinguishes three
    *  outcomes for exactly this reason and the photo path forty lines down
@@ -202,7 +219,7 @@ export default function Nutrition() {
    *  Both looked identical here — the row's + faded and nothing else happened —
    *  so somebody tapping it, seeing no complaint, and eating the snack was
    *  eating to a day's total that was missing it. */
-  const logSnack = async (m: PlannedMeal, servings = 1) => {
+  const logPlanned = async (m: PlannedMeal, servings = 1) => {
     const food = {
       name: m.n,
       kcal: Math.round(m.K * servings),
@@ -239,43 +256,63 @@ export default function Nutrition() {
   const [nl, setNl] = useState('');
   const [logBusy, setLogBusy] = useState(false);
   const [bcOpen, setBcOpen] = useState(false);
+  // Everything that is about to become a row in the food log goes through one
+  // sheet, on this tab as on the other. See src/ui/LogFoodSheet.tsx.
+  const [pending, setPending] = useState<FoodFacts | null>(null);
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [pendingNote, setPendingNote] = useState<string | null>(null);
+  const [pendingTitle, setPendingTitle] = useState<string | undefined>(undefined);
+  const [pendingVia, setPendingVia] = useState<'search' | 'barcode' | 'photo' | 'manual'>('manual');
   const photoLog = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera to log a meal by photo.'); return; }
     const res = await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true });
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];
-    setLogBusy(true); let done = false;
+    setLogBusy(true);
     let nb = asset.base64; try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) nb = mm.base64; } catch {}
     if (visionAvailable() && nb) {
       const r = await analyzeMeal(nb, 'image/jpeg');
       if (r) {
-        // `logFood` distinguishes three outcomes and this said "added to today"
-        // over all of them. A meal the server REFUSED is not on the record, and
-        // a meal that could not be sent is waiting rather than counted — both
-        // were being reported as logged, which is how somebody eats to a
-        // calorie figure that is missing a meal.
-        const out = await fl.logFood({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, via: 'photo' });
-        if (out === 'refused') {
-          Alert.alert('Not logged', `${r.name} could not be saved, so it is not on today's record.`);
-        } else {
-          notifySuccess();
-          Alert.alert(out === 'unsent' ? 'Logged — waiting to send' : 'Logged',
-            `${r.name} · ${num(r.kcal)} kcal${out === 'unsent' ? '. It is kept on this phone and goes up when you have signal.' : ' added to today.'}`);
-        }
-        done = true;
+        // Through the sheet, like everything else that becomes a row. This
+        // committed on the spot with an alert — on the tab where the read is
+        // least certain, while the Food Log tab offered an editable sheet for
+        // the same read of the same photo.
+        setLogBusy(false);
+        setPendingVia('photo');
+        setPendingPhoto(asset.uri);
+        setPendingTitle('Check And Log');
+        setPendingNote('Read from your photo — check every figure before logging it. The picture itself is not kept: it is here to read the meal from and to check against, and the numbers are what go into your log.');
+        setPending({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, basis: null });
+        return;
       }
     }
     setLogBusy(false);
-    // Nothing is logged when the photo cannot be read. Guessing macros here is
-    // worse than logging nothing — the client would be planning around a number
-    // the app invented.
-    if (!done) { Alert.alert('Could not read that photo', visionAvailable() ? 'Nothing was logged. Describe it below, or add it from the Food Log.' : 'Photo logging turns on with the AI backend. Describe it below, or add it from the Food Log.'); }
+    // Nothing is read, so nothing is offered. Guessing macros here would be
+    // worse than logging nothing — the member would be planning around a
+    // number the app invented. The Food Log's photo path opens an empty sheet
+    // in this case; this tab points at it rather than growing a second one.
+    Alert.alert('Could not read that photo', visionAvailable() ? 'Nothing was logged. Describe it below, or enter it yourself from the Food Log.' : 'Photo logging turns on with the AI backend. Describe it below, or enter it yourself from the Food Log.');
   };
   const barcodeLog = () => setBcOpen(true);
   const describeLog = async () => {
     const text = nl.trim(); if (!text) return;
-    setLogBusy(true); const items = await parseFoodText(text); setLogBusy(false);
+    setLogBusy(true); const parsed = await parseFoodText(text); setLogBusy(false);
+    // A macro the reader did not give us is blank, not nought — see
+    // src/lib/foodAI.ts. Those foods go to the sheet to be completed rather
+    // than into the log with a zero standing in for a measurement.
+    const gaps: FoodFacts[] = parsed
+      ? parsed.filter((it) => it.protein == null || it.carbs == null || it.fat == null)
+        .map((it) => ({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, basis: null }))
+      : [];
+    if (gaps.length) {
+      setPendingVia('manual');
+      setPendingPhoto(null);
+      setPendingTitle('Check This One');
+      setPendingNote('Read from what you typed. Some of the macros did not come back, so they are blank rather than nought — fill them in and this can be logged.');
+      setPending(gaps[0]);
+    }
+    const items = parsed ? parsed.filter((it) => it.protein != null && it.carbs != null && it.fat != null) : null;
     if (items && items.length) {
       // `items.forEach` over an async write started every one of them and
       // waited for none, then fired the success haptic and cleared the box the
@@ -284,7 +321,7 @@ export default function Nutrition() {
       // — and the text they would have needed to try again was gone. The field
       // is cleared only for what actually landed.
       const outs = await Promise.all(items.map((it) =>
-        fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' })));
+        fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein ?? 0, carbs: it.carbs ?? 0, fat: it.fat ?? 0, via: 'manual' })));
       const refused = outs.filter((o) => o === 'refused').length;
       const unsent = outs.filter((o) => o === 'unsent').length;
       if (refused === outs.length) {
@@ -298,7 +335,7 @@ export default function Nutrition() {
         Alert.alert('Logged — waiting to send', `${unsent === outs.length ? 'They are' : `${unsent} of them are`} counted toward today and kept on this phone until you have signal.`);
       }
     }
-    else { Alert.alert('Could not read that', foodAIAvailable() ? 'Try e.g. \"2 eggs, toast and a coffee\".' : 'AI logging turns on with the AI backend.'); }
+    else if (!gaps.length) { Alert.alert('Could not read that', foodAIAvailable() ? 'Try e.g. \"2 eggs, toast and a coffee\".' : 'AI logging turns on with the AI backend.'); }
   };
 
   // Taken by day rather than read off `dayType`, so the info sheet can ask what
@@ -743,6 +780,17 @@ export default function Nutrition() {
 
           {view === 'today' ? (
             <>
+              {/* An exclusion the engine could not honour, said before the
+                  plan rather than buried in it. `poolFilter` fell back to the
+                  UNFILTERED pool whenever an allergen emptied a required
+                  component list, and nothing on screen told anybody — so
+                  somebody who ticked Dairy got a plan with dairy in it, drawn
+                  and priced and shopped for. See src/lib/meals.ts. */}
+              {allergenGapNote(planGaps(diet, slotsFor(c.mealsPerDay), c.avoid)) ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Flag tone={t.crit}>{allergenGapNote(planGaps(diet, slotsFor(c.mealsPerDay), c.avoid))}</Flag>
+                </View>
+              ) : null}
               <SectionHead title={`Today's plan · ${plan.length} meals`} note={`${tot.K.toLocaleString()} kcal`} />
               {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
                   4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
@@ -773,6 +821,22 @@ export default function Nutrition() {
                       <Text style={{ ...ty.micro, color: t.ink3 }}>{m.slot}{coachPick(m.pos) ? " · Coach's pick" : ''}</Text>
                       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 4 }} numberOfLines={2}>{m.n}</Text>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
+                      {/* On the row somebody is about to cook, not only at the
+                          top of the screen. A warning about the plan does not
+                          tell you which dish. */}
+                      {/* The kit's ListRow idiom: crit in the MARK, which only
+                          has to clear the 3:1 of a dot, and the words in ink.
+                          crit as text is 3.03–4.05:1 on the ten palettes, and
+                          colour is never the only channel — the sentence says
+                          it. */}
+                      {mealAllergens(m, c.avoid).length ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>
+                            Contains {mealAllergens(m, c.avoid).map(allergenLabel).join(' and ')}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={{ ...value(20), color: t.ink }}>{m.K}</Text>
@@ -833,7 +897,7 @@ export default function Nutrition() {
                       <Text style={{ ...value(20), color: t.ink }}>{num(m.K)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
                     </View>
-                    <Pressable onPress={() => { void logSnack(m); }} hitSlop={10} accessibilityRole="button"
+                    <Pressable onPress={() => { void logPlanned(m); }} hitSlop={10} accessibilityRole="button"
                       accessibilityLabel={`Log ${m.n}`}
                       style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="plus" size={16} color={t.ink2} />
@@ -916,9 +980,25 @@ export default function Nutrition() {
               <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
               {/* A snack idea has no slot in the plan, so there is nothing for a
                   swap to write to — logging it is the action it has. */}
-              {recipe.pos < 0
-                ? <Ghost label="Log This Snack" icon="plus" onPress={() => { void logSnack(recipe, batch); setRecipe(null); }} />
-                : <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />}
+              {/* Both, for a planned meal. "Log This Meal" existed for snack
+                  ideas only, so the one thing a member does most — eat what
+                  the plan says and record it — was the one thing this sheet
+                  could not do, and the day's plan and the day's log sat
+                  unconnected on the same tab. Servings above multiply it. */}
+              {recipe.pos < 0 ? (
+                <Ghost label="Log This Snack" icon="plus" onPress={() => { void logPlanned(recipe, batch); setRecipe(null); }} />
+              ) : (<>
+                <Ghost label="Log This Meal" icon="plus" onPress={() => { void logPlanned(recipe, batch); setRecipe(null); }} />
+                <Ghost label="Swap This Meal" icon="swap" onPress={() => { swap(recipe.pos, recipe.slot, recipe.idx); setRecipe(null); }} />
+              </>)}
+              {mealAllergens(recipe, c.avoid).length ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Flag tone={t.crit}>
+                    This contains {mealAllergens(recipe, c.avoid).map(allergenLabel).join(' and ')}, which you asked to
+                    avoid. There are not enough suitable components in this diet to build every meal without it.
+                  </Flag>
+                </View>
+              ) : null}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg, marginBottom: sp.lg }}>
                 <Text style={{ ...ty.label, color: t.ink2 }}>Servings</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 4 }}>
@@ -1028,14 +1108,32 @@ export default function Nutrition() {
       {/* The sheet itself lives in src/ui/BarcodeSheet — the Food Log needs the
           same one, and a second copy is how the two calorie sums on these very
           screens came to disagree. */}
+      {/* A scanned product carries the basis its figures are for — "100 g",
+          "1 serving" — and the sheet is where that question is asked. This
+          logged one of whatever the basis was, so a member who ate a whole
+          500 g pot recorded 100 g of it. */}
       <BarcodeSheet visible={bcOpen} onClose={() => setBcOpen(false)}
-        // Same three outcomes, same rule. A scanned barcode the server refuses
-        // is not on the record, and the sheet closing is not an answer.
-        onLogged={async (f) => {
-          const out = await fl.logFood({ ...f, via: 'barcode' });
-          if (out === 'refused') { Alert.alert('Not logged', `${f.name} could not be saved, so it is not on today's record.`); return; }
+        onLogged={(f) => {
+          setPendingVia('barcode'); setPendingPhoto(null); setPendingTitle(undefined); setPendingNote(null);
+          setPending({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, basis: f.basis });
+        }} />
+
+      {/* ── the one review sheet ───────────────────────────────────────── */}
+      <LogFoodSheet
+        food={pending}
+        photoUri={pendingPhoto}
+        title={pendingTitle}
+        note={pendingNote}
+        onClose={() => { setPending(null); setPendingPhoto(null); setPendingNote(null); setPendingTitle(undefined); }}
+        onLog={async (f) => {
+          // The same three outcomes, said the same way. A row the server
+          // refuses is not on the record, and the sheet closing is not an
+          // answer.
+          const out = await fl.logFood({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, via: pendingVia });
+          if (out === 'refused') { Alert.alert('Not logged', `${f.name} could not be saved, so it is not on today's record.`); return false; }
           notifySuccess();
           if (out === 'unsent') Alert.alert('Logged — waiting to send', `${f.name} is counted toward today and kept on this phone until you have signal.`);
+          return true;
         }} />
     </SafeAreaView>
   );

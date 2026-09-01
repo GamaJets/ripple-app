@@ -38,6 +38,19 @@ import {
 } from '@lib/monthEnd';
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit } from '@lib/rowCap';
+import { fetchMemberships, matchPayment, type Membership } from '@lib/gymRecord';
+import {
+  createInvoice, setInvoiceStatus, settleInvoice, invoiceBlocker, parseAmount,
+  dueAfter, isoDay, SETTABLE_INVOICE_STATUSES, INVOICE_STATUS_LABEL,
+  type InvoiceDraft,
+} from '@lib/gymInvoices';
+import {
+  fetchMarks, markException, clearMark, markBlocker, partitionByMark, markKey,
+  type MarkIndex, type MarkState, type ReconcileMark,
+} from '@lib/gymReconcile';
+import { toCsv } from '@lib/gymExport';
+import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import { saveText } from '@/lib/save';
 
 /** How far back the picker offers. Thirteen so last year's same month is there. */
 const MONTHS_OFFERED = 13;
@@ -86,6 +99,11 @@ function failure(res: PromiseSettledResult<unknown>, what: string): string | nul
  */
 interface Invoice {
   id: string;
+  /** The number the gym gave this bill, from supabase/parts/180. Null on rows
+   *  raised before that part existed — they were never numbered, and inventing
+   *  numbers for them now would put a sequence into the record that nobody ever
+   *  quoted on a bank transfer. */
+  number: number | null;
   memberId: string | null;
   memberName: string | null;
   membershipId: string | null;
@@ -134,9 +152,20 @@ interface Books {
   invoices: Read<Invoice>;
   payments: Read<GymPayment>;
   settled: Read<Settled>;
+  /** The answers already given on this gym's reconciliation. Not scoped to the
+   *  month: an exception raised in June is still an exception in September, and
+   *  an answer keyed to a month would have to be given again each time. */
+  marks: MarkIndex;
+  /** Whether the marks read succeeded. A failed one shows every exception as
+   *  unanswered, which re-asks questions somebody has already answered — bad,
+   *  but not as bad as hiding a real one, so the page says so and carries on. */
+  marksErr: string | null;
 }
 
-const EMPTY: Books = { invoices: reading(), payments: reading(), settled: reading() };
+const EMPTY: Books = {
+  invoices: reading(), payments: reading(), settled: reading(),
+  marks: new Map(), marksErr: null,
+};
 
 /* ── totals that refuse ────────────────────────────────────────────────────── */
 
@@ -200,6 +229,13 @@ export default function Accounting() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymNameErr, setGymNameErr] = useState<string | null>(null);
+  // `tenants.currency`. An invoice raised from this screen is denominated in
+  // it, and there is no fallback: an invoice is what somebody is asked to pay.
+  const [ccy, setCcy] = useState<TenantCurrency>(null);
+  // The roster, for the invoice form. Null is a read that failed or has not
+  // returned; the form says which rather than offering an empty picker that
+  // reads as a gym with no members.
+  const [members, setMembers] = useState<Membership[] | null>(null);
 
   const months = useMemo(() => recentMonths(MONTHS_OFFERED), []);
 
@@ -224,15 +260,24 @@ export default function Accounting() {
     // match rule that could not see across the month boundary would report
     // that as a paid invoice nobody paid.
     const since = new Date(Date.parse(mw.fromIso) - MATCH_DAYS * DAY).toISOString();
+    // And an UPPER bound, which this read did not have. It computed a start
+    // date and no end, so opening a month from a year ago read every payment
+    // from that month up to TODAY — a set that grows without bound, that the
+    // month's own figures then filter back down, and that trips `assertWhole`
+    // on any gym busy enough to have crossed a thousand payments since. The
+    // shoulder is symmetrical for the same reason it exists on the near side:
+    // an invoice issued on the 30th is often paid on the 3rd.
+    const until = new Date(Date.parse(mw.toIso) + MATCH_DAYS * DAY).toISOString();
 
     // allSettled, never all. Under a single catch a refused invoice query also
     // empties the payments — and this screen would then report a month in which
     // the gym both billed nothing and took nothing, two wrong facts that agree
     // with each other and so look like a quiet month rather than a broken read.
-    const [iRes, pRes, sRes] = await Promise.allSettled([
+    const [iRes, pRes, sRes, mRes] = await Promise.allSettled([
       fetchInvoices(tenantId, mw.lastDay),
-      fetchPayments(supabase, tenantId, since),
+      fetchPayments(supabase, tenantId, since, until),
       fetchSettled(tenantId, mw.fromIso, mw.toIso),
+      fetchMarks(supabase, tenantId),
     ]);
 
     setLoaded({
@@ -241,6 +286,12 @@ export default function Accounting() {
         invoices: landed(iRes, 'the invoice register'),
         payments: landed(pRes, 'the payments taken'),
         settled: landed(sRes, 'the payroll settlements'),
+        // A failed marks read is NOT allowed to hide anything. It falls back to
+        // an empty index, which shows every exception as unanswered — noisy,
+        // and the only direction that is safe. The opposite failure would take
+        // a real exception off an accountant's page because a lookup 500'd.
+        marks: mRes.status === 'fulfilled' ? mRes.value : new Map(),
+        marksErr: mRes.status === 'fulfilled' ? null : failure(mRes, 'the answers already given on this reconciliation'),
       },
     });
   }, []);
@@ -258,17 +309,26 @@ export default function Accounting() {
             invoices: { rows: [], state: null, why: null },
             payments: { rows: [], state: null, why: null },
             settled: { rows: [], state: null, why: null },
+            marks: new Map(),
+            marksErr: null,
           },
         });
         return;
       }
-      // supabase-js resolves with { data, error } on a database error rather
-      // than rejecting, so the error is read off the result, not caught.
-      const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+      // The currency is read here as well as the name, because this screen now
+      // WRITES invoices and an invoice with no currency on it is not a bill.
+      // `readTenant` keeps the error apart from the values, so a refused read
+      // is "we could not ask" rather than "the gym has not set one".
+      const tRes = await readTenant(supabase, who.tenantId);
       if (!live) return;
-      setGymName(tErr ? null : (t as any)?.name ?? null);
-      setGymNameErr(tErr ? (tErr.message || 'Could not read the gym name.') : null);
+      setGymName(tRes.name);
+      setCcy(tRes.currency);
+      setGymNameErr(tRes.error);
+      // The roster, for the invoice form. Its own read and its own failure: an
+      // invoice register that will not load must not also empty the picker that
+      // would let somebody raise the invoice they came here to raise.
+      // eslint-disable-next-line -- no-error-ok: fetchMemberships throws on a refusal; null is the failed state the form renders
+      fetchMemberships(supabase, who.tenantId).then((r) => { if (live) setMembers(r); }).catch(() => { if (live) setMembers(null); });
       if (w) await load(who.tenantId, w);
     })();
     return () => { live = false; };
@@ -332,14 +392,19 @@ export default function Accounting() {
 
       {!w
         ? <Banner tone="crit">{key} is not a month this console can open.</Banner>
-        : <Month w={w} books={books} />}
+        : <Month w={w} books={books} gymName={gymName} ccy={ccy} members={members}
+                 tenantId={me.tenantId!} me={me}
+                 onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }} />}
     </Shell>
   );
 }
 
 /* ── one month, worked out ─────────────────────────────────────────────────── */
 
-function Month({ w, books }: { w: MonthWindow; books: Books }) {
+function Month({ w, books, gymName, ccy, members, tenantId, me, onChange }: {
+  w: MonthWindow; books: Books; gymName: string | null; ccy: TenantCurrency;
+  members: Membership[] | null; tenantId: string; me: Me; onChange: () => void;
+}) {
   const ended = monthEnded(w);
 
   // Ageing has to be as at a date, and the honest one differs by month. For a
@@ -427,12 +492,24 @@ function Month({ w, books }: { w: MonthWindow; books: Books }) {
         />
       </div>
 
+      <Handoff
+        w={w} gymName={gymName} asAt={asAt}
+        payments={inMonthPayments} settled={settledRows}
+        raised={raised} outstanding={outstanding} books={books}
+      />
       <MoneyIn read={books.payments} rows={inMonthPayments} w={w} total={cashIn} />
       <MoneyOut read={books.settled} rows={settledRows} total={cashOut} />
       <NetCash net={net} w={w} />
+      <Register
+        read={books.invoices} raised={raised} w={w} ccy={ccy}
+        members={members} tenantId={tenantId} onChange={onChange}
+      />
       <Invoiced read={books.invoices} raised={raised} w={w} />
       <Ageing read={books.invoices} rows={outstanding} asAt={asAt} total={owedSum} />
-      <Reconcile books={books} w={w} inMonthPayments={inMonthPayments} />
+      <Reconcile
+        books={books} w={w} inMonthPayments={inMonthPayments}
+        tenantId={tenantId} me={me} onChange={onChange}
+      />
     </>
   );
 }
@@ -764,6 +841,312 @@ function Invoiced({ read, raised, w }: { read: Read<Invoice>; raised: Invoice[];
   );
 }
 
+/* ── the invoice register, and the writer it never had ─────────────────────── */
+
+/**
+ * Raise an invoice, and change the status of one already raised.
+ *
+ * `gym_invoices` has existed since supabase/parts/29 and had NO WRITER anywhere
+ * in this repository — two reads and nothing else. So the four sections above
+ * and below this one report on a lifecycle the product could not produce, in
+ * copy that reads as a factual claim about the gym: a Repple gym's invoice
+ * register is empty because it is unreachable, its ageing table is empty for
+ * the same reason, and its month-end says it is owed nothing.
+ *
+ * It sits on THIS screen rather than on /money for one reason. /money is the
+ * capture screen — what was sold, what was taken — and everything on it is a
+ * fact that has already happened. An invoice is a claim about the future, and
+ * the questions it raises (is it overdue, was it collected, does it reconcile)
+ * are the questions this page is built out of. Splitting them would mean
+ * raising a bill on one screen and finding out what happened to it on another.
+ */
+function Register({ read, raised, w, ccy, members, tenantId, onChange }: {
+  read: Read<Invoice>; raised: Invoice[]; w: MonthWindow; ccy: TenantCurrency;
+  members: Membership[] | null; tenantId: string; onChange: () => void;
+}) {
+  const today = isoDate(new Date());
+  const [memberId, setMemberId] = useState('');
+  const [membershipId, setMembershipId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [issuedOn, setIssuedOn] = useState(today);
+  // Thirty days after the issue date, which is the commonest term and is a
+  // SUGGESTION rather than a stored default — an owner who clears it gets an
+  // invoice with no due date, which is never overdue and is correct for a
+  // receipt. `dueAfter` computes in UTC so it cannot land a day out.
+  const [dueOn, setDueOn] = useState(() => dueAfter(today, 30));
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [writeErr, setWriteErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const draft: InvoiceDraft = { memberId, membershipId: membershipId || null, amount, issuedOn, dueOn, note };
+  const blocker = invoiceBlocker(draft, ccy);
+
+  const raise = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaved(null);
+    if (blocker) { setWriteErr(blocker); return; }
+    const amt = parseAmount(amount);
+    if (amt.kind !== 'amount' || !ccy) return;
+    setBusy(true); setWriteErr(null);
+    try {
+      const { number } = await createInvoice(supabase, tenantId, {
+        memberId,
+        membershipId: membershipId || null,
+        amountCents: amt.cents,
+        currency: ccy,
+        issuedOn,
+        dueOn: dueOn || null,
+        note: note.trim() || null,
+        status: 'open',
+      });
+      // The number is reported rather than assumed. It comes from the database
+      // under an advisory lock, and a gym whose database has not had
+      // supabase/parts/180 applied gets a null — the invoice is still raised,
+      // because refusing to bill anybody over an outstanding migration is the
+      // worse of the two failures, and the owner is told it is unnumbered.
+      setSaved(number == null
+        ? 'Raised, with no invoice number — this gym’s database has not had the numbering migration applied, so nothing could allocate one.'
+        : `Raised as invoice ${number}.`);
+      setAmount(''); setNote('');
+      onChange();
+    } catch (e: any) {
+      setWriteErr(`That invoice was NOT raised: ${e?.message ?? 'the write was refused'}. Nothing has been billed and nobody has been asked for anything.`);
+    } finally { setBusy(false); }
+  };
+
+  const setStatus = (inv: Invoice, next: string) => {
+    setInvoiceStatus(supabase, inv.id, next as any)
+      .then(() => { setWriteErr(null); setSaved(null); onChange(); })
+      .catch((err: any) => setWriteErr(
+        `Could not change that invoice: ${err?.message ?? 'the change was refused'}. It is still ${inv.status ?? 'in whatever state it was'}.`));
+  };
+
+  const cols: Column<Invoice>[] = [
+    { key: 'number', header: 'No.', value: (i) => i.number, numeric: true,
+      render: (i) => i.number == null ? <span className="dash">unnumbered</span> : String(i.number) },
+    { key: 'member', header: 'Billed to', value: (i) => i.memberName },
+    { key: 'issued', header: 'Issued', value: (i) => i.issuedOn },
+    { key: 'due', header: 'Due', value: (i) => i.dueOn,
+      render: (i) => i.dueOn ?? <span className="dash">no due date</span> },
+    { key: 'amount', header: 'Amount', value: (i) => i.amountCents, numeric: true,
+      render: (i) => i.amountCents == null
+        ? <span className="dash">no amount recorded</span>
+        : <>{money(i.amountCents, i.currency)}</> },
+    { key: 'note', header: 'Note', value: (i) => i.note },
+    { key: 'status', header: 'Status', value: (i) => i.status, align: 'right',
+      render: (i) => (
+        <select
+          className="no-print"
+          value={SETTABLE_INVOICE_STATUSES.includes(i.status as any) ? (i.status as string) : ''}
+          onChange={(e) => setStatus(i, e.target.value)}
+          style={{ ...field, padding: '4px 6px', fontSize: 12 }}
+          aria-label={`The status of invoice ${i.number ?? ''}`}
+        >
+          {/* An unrecognised stored status is offered as its own option rather
+              than silently rewritten by the first change of anything else. A
+              register holding 'overdue' — which the CHECK permits and this
+              screen computes rather than stores — must not have it quietly
+              replaced by whatever sorted first in the list. */}
+          {SETTABLE_INVOICE_STATUSES.includes(i.status as any) ? null : (
+            <option value="">{i.status ?? 'no status recorded'}</option>
+          )}
+          {SETTABLE_INVOICE_STATUSES.map((st) => (
+            <option key={st} value={st}>{INVOICE_STATUS_LABEL[st]}</option>
+          ))}
+        </select>
+      ) },
+  ];
+
+  const roster = [...new Map((members ?? []).filter((m) => m.memberName).map((m) => [m.memberId, m.memberName!])).entries()];
+  const theirMemberships = (members ?? []).filter((m) => m.memberId === memberId);
+
+  return (
+    <Section
+      title="The invoice register"
+      sub={`Every invoice dated in ${w.label}, and the form that raises one. Nothing else in this product can write to this table — which is why the three sections below it have always been empty.`}
+    >
+      <form onSubmit={raise} style={formRow} className="no-print">
+        <select value={memberId} onChange={(e) => { setMemberId(e.target.value); setMembershipId(''); }}
+                style={{ ...field, flex: 2, minWidth: 190 }} aria-label="Who this invoice is to">
+          <option value="">
+            {members === null ? 'The roster could not be read' : 'Who is this to?'}
+          </option>
+          {roster.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <select value={membershipId} onChange={(e) => setMembershipId(e.target.value)}
+                style={{ ...field, flex: 2, minWidth: 170 }} aria-label="The membership this invoice bills for"
+                disabled={!memberId}>
+          <option value="">Not against a membership</option>
+          {theirMemberships.map((m) => (
+            <option key={m.id} value={m.id}>{m.planName ?? 'no plan'} (from {m.startedOn})</option>
+          ))}
+        </select>
+        <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal"
+               placeholder={ccy ? `Amount (${ccy})` : 'Amount'} style={{ ...field, width: 140 }}
+               aria-label="What is being billed" />
+        <label style={dateLabel}>
+          issued
+          <input type="date" value={issuedOn} onChange={(e) => setIssuedOn(e.target.value)}
+                 style={{ ...field, width: 148 }} aria-label="The day this invoice is dated" />
+        </label>
+        <label style={dateLabel}>
+          due
+          <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)}
+                 style={{ ...field, width: 148 }} aria-label="The day it falls due, if it does" />
+        </label>
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What it is for"
+               style={{ ...field, flex: 2, minWidth: 160 }} aria-label="What this invoice is for" />
+        <button type="submit" disabled={busy || !!blocker} style={primaryBtn}>Raise</button>
+      </form>
+      <p className="no-print" style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>
+        Clearing the due date raises an invoice that is never overdue &mdash; correct for a receipt,
+        and the reason the ageing table below has an &ldquo;undated&rdquo; band. The invoice number
+        is allocated by the database rather than by this page, so two invoices raised in two tabs
+        cannot take the same one.
+      </p>
+      {!ccy ? (
+        <Banner>
+          Invoices cannot be raised until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. A
+          bill is what somebody is asked to pay, and there is no default here that would be right
+          for half the gyms running Repple. Set it on{' '}
+          <a href="/settings" style={{ color: 'var(--brand)' }}>Gym</a>.
+        </Banner>
+      ) : null}
+      {blocker && !writeErr && (memberId || amount) ? (
+        <p className="no-print" style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '72ch' }}>{blocker}</p>
+      ) : null}
+      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {saved ? <Banner>{saved}</Banner> : null}
+      <Part read={read} what="the invoice register" cost="what the gym billed this month is unknown">
+        <DataTable
+          rows={raised} columns={cols} rowKey={(i) => i.id}
+          empty={`No invoice is dated in ${w.label}. Raise one above — until this wave there was no way to, from any screen in this product.`}
+        />
+      </Part>
+    </Section>
+  );
+}
+
+/* ── getting the month out of the browser ──────────────────────────────────── */
+
+/**
+ * The month, as a file and as a printed page.
+ *
+ * /accounting and /close are the two screens written for month-end and neither
+ * had an export, a print, a PDF or an email. There was no `@media print` rule
+ * anywhere in this console. So every figure on the page an accountant is meant
+ * to work from lived only in the owner's browser, and the way it left was a
+ * screenshot or a retyped column.
+ *
+ * ONE file, not five. A month is a document — takings, payroll, invoices,
+ * ageing and the exceptions are read together and separating them into five
+ * downloads is how the exception list ends up in Downloads on its own with
+ * nothing saying which month it belongs to. Section headers inside one CSV are
+ * not tidy, and they are what makes the file readable by the person who opens
+ * it in a spreadsheet with no other context.
+ *
+ * The file states what could NOT be read, by name. A month whose invoice query
+ * failed exports with the invoice section replaced by that sentence rather than
+ * with an empty section — which would be indistinguishable from a gym that
+ * billed nothing, permanently, in a file somebody keeps.
+ */
+function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, books }: {
+  w: MonthWindow; gymName: string | null; asAt: string;
+  payments: GymPayment[]; settled: Settled[];
+  raised: Invoice[]; outstanding: Invoice[]; books: Books;
+}) {
+  const download = () => {
+    const parts: string[] = [];
+    const head = (title: string) => `\n${title}\n`;
+
+    parts.push(toCsv(
+      ['Report', 'Gym', 'Month', 'From', 'To', 'Receivables as at', 'Basis', 'Generated'],
+      [[
+        'Month-end accounting', gymName ?? '(gym name unread)', w.label, w.firstDay, w.lastDay,
+        asAt, 'Cash basis for money in and out; invoices are accrual and shown separately',
+        new Date().toISOString(),
+      ]],
+    ));
+
+    parts.push(head('MONEY IN — payments recorded in the month'));
+    parts.push(books.payments.state === 'failed'
+      ? unreadable('the payments taken', books.payments.why)
+      : toCsv(
+          ['Taken at', 'Member', 'Amount (minor units)', 'Currency', 'Method', 'Kind', 'Note'],
+          payments.map((p) => [
+            p.takenAt, p.memberName, p.amountCents, p.currency,
+            (p.method ?? '').replace('_', ' '), p.kind, p.note,
+          ]),
+          false));
+
+    parts.push(head('MONEY OUT — payroll settled in the month'));
+    parts.push(books.settled.state === 'failed'
+      ? unreadable('the payroll settlements', books.settled.why)
+      : toCsv(
+          ['Settled at', 'Trainer', 'Period from', 'Period to', 'Amount (minor units)', 'Currency', 'Sessions', 'Method'],
+          settled.map((r) => [
+            r.settledAt, r.trainerName, r.periodFrom, r.periodTo,
+            r.amountCents, r.currency, r.sessionsCount, r.method,
+          ]),
+          false));
+
+    parts.push(head(`INVOICES RAISED IN ${w.label.toUpperCase()}`));
+    parts.push(books.invoices.state === 'failed'
+      ? unreadable('the invoice register', books.invoices.why)
+      : toCsv(
+          ['Number', 'Issued', 'Due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status', 'Note'],
+          raised.map((i) => [
+            i.number, i.issuedOn, i.dueOn, i.memberName,
+            i.amountCents, i.currency, i.status, i.note,
+          ]),
+          false));
+
+    parts.push(head(`OUTSTANDING AS AT ${asAt}`));
+    parts.push(books.invoices.state === 'failed'
+      ? unreadable('the invoice register', books.invoices.why)
+      : toCsv(
+          ['Number', 'Issued', 'Due', 'Days past due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status'],
+          outstanding.map((i) => [
+            i.number, i.issuedOn, i.dueOn,
+            i.dueOn ? daysPast(i.dueOn, asAt) : null,
+            i.memberName, i.amountCents, i.currency, i.status,
+          ]),
+          false));
+
+    // The reason the whole file carries a BOM: `toCsv` writes one on the first
+    // section and the rest are appended, so Excel reads the whole document as
+    // UTF-8 and a member called Müller survives the trip.
+    saveText(parts.join(''), `${slugOf(gymName)}-${w.key}-accounting.csv`);
+  };
+
+  return (
+    <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 20px' }}>
+      <button onClick={download} style={primaryBtn}>Export this month (CSV)</button>
+      <button onClick={() => window.print()} style={{ ...primaryBtn, background: 'transparent', color: 'var(--ink2)', border: '1px solid var(--ring)' }}>
+        Print / save as PDF
+      </button>
+      <span style={{ fontSize: 12, color: 'var(--ink3)', maxWidth: '58ch' }}>
+        Both take what is on this page. A section whose read failed is exported as the sentence
+        saying so, never as an empty section &mdash; an empty one in a file somebody keeps is
+        indistinguishable, forever, from a month in which nothing happened.
+      </span>
+    </div>
+  );
+}
+
+/** The line a failed read exports as. Not an empty section. */
+function unreadable(what: string, why: string | null): string {
+  return `NOT EXPORTED — ${what} could not be read${why ? `: ${why}` : ''}. This is unknown, not nil.\n`;
+}
+
+/** A filename fragment from the gym's name. Falls back rather than producing a
+ *  file called "-2026-08-accounting.csv" that sorts before everything. */
+function slugOf(name: string | null): string {
+  const s = (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return s || 'gym';
+}
+
 /* ── receivables ageing ────────────────────────────────────────────────────── */
 
 type Band = 'current' | 'd1' | 'd31' | 'd61' | 'undated';
@@ -920,10 +1303,17 @@ interface Recon {
 }
 
 /**
- * Match payments to invoices, knowing full well that nothing in the database
- * links them.
+ * Match payments to invoices — using the link where somebody has recorded one,
+ * and the old stated guess everywhere else.
  *
- * `gym_payments` has no invoice_id. So the rule is stated and crude on purpose:
+ * `gym_payments.invoice_id` exists as of supabase/parts/180 and is written when
+ * the payment is matched by hand or recorded against a membership. A payment
+ * that names its invoice is a FACT and consumes that invoice outright, whatever
+ * the amount and whatever the date — a part payment recorded against the right
+ * bill is still the right bill, and the heuristic below would have rejected it
+ * for being the wrong amount.
+ *
+ * For everything unlinked the rule is unchanged, stated and crude on purpose:
  * same member, same currency, exactly the same amount in cents, within
  * MATCH_DAYS of the invoice date, and each payment may satisfy at most one
  * invoice. Every paid invoice the register holds gets a chance to consume a
@@ -943,6 +1333,10 @@ function reconcile(invoices: Invoice[], payments: GymPayment[], w: MonthWindow):
   const invoicesWithoutPayment: Invoice[] = [];
 
   for (const inv of paid) {
+    // The hard link first. A payment naming this invoice settles it; nothing
+    // about amount, currency or date gets to overrule what somebody recorded.
+    const stated = payments.find((p) => p.invoiceId === inv.id && !used.has(p.id));
+    if (stated) { used.add(stated.id); continue; }
     const hit = inv.memberId != null && Number.isFinite(inv.amountCents as number)
       ? payments.find((p) =>
           !used.has(p.id)
@@ -976,14 +1370,55 @@ function withinDays(iso: string, day: string, n: number): boolean {
   return Math.abs(t - d) <= n * DAY;
 }
 
-function Reconcile({ books, w, inMonthPayments }: {
+function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
   books: Books; w: MonthWindow; inMonthPayments: GymPayment[];
+  tenantId: string; me: Me; onChange: () => void;
 }) {
   const bothRead = books.invoices.state === null && books.payments.state === null;
   const r = useMemo(
     () => (bothRead ? reconcile(books.invoices.rows ?? [], books.payments.rows ?? [], w) : null),
     [bothRead, books.invoices.rows, books.payments.rows, w],
   );
+
+  // Which exception has its answer box open, as `kind:id`. One at a time: an
+  // input on every row of a two-hundred-row exception list is two hundred
+  // uncommitted notes, and the first reload throws all of them away.
+  const [answering, setAnswering] = useState<string | null>(null);
+  const [markErr, setMarkErr] = useState<string | null>(null);
+
+  const marks = books.marks;
+  // Every list is split the same way. A flagged row stays in `open` — flagging
+  // is a bookmark, not an answer — and an explained one moves to its own
+  // section rather than disappearing, because a reconciliation that silently
+  // shrank would be a reconciliation nobody could check.
+  const invSplit = r ? partitionByMark(r.invoicesWithoutPayment, 'invoice', marks) : null;
+  const paySplit = r ? partitionByMark(r.paymentsWithoutInvoice, 'payment', marks) : null;
+  const unattSplit = r ? partitionByMark(r.unattributed, 'payment', marks) : null;
+
+  /** The Answer / Explained pair a row carries in its last column. */
+  const answerCell = (kind: 'invoice' | 'payment', id: string, label: string) => {
+    const k = markKey(kind, id);
+    const mark = marks.get(k);
+    if (answering === k) {
+      return (
+        <Answer
+          kind={kind} subjectId={id} tenantId={tenantId} me={me} existing={mark ?? null}
+          onDone={() => { setAnswering(null); setMarkErr(null); onChange(); }}
+          onCancel={() => setAnswering(null)}
+          onErr={setMarkErr}
+        />
+      );
+    }
+    if (mark) {
+      return (
+        <span style={{ fontSize: 12, color: mark.state === 'accepted' ? 'var(--good)' : 'var(--warn)' }}>
+          {mark.state === 'accepted' ? 'explained' : 'flagged'}
+          <button className="no-print" style={{ ...linkBtn, marginLeft: 8 }} onClick={() => setAnswering(k)}>change</button>
+        </span>
+      );
+    }
+    return <button className="no-print" style={linkBtn} onClick={() => setAnswering(k)}>{label}</button>;
+  };
 
   const invCols: Column<Invoice>[] = [
     { key: 'member', header: 'Member', value: (i) => i.memberName },
@@ -1003,6 +1438,8 @@ function Reconcile({ books, w, inMonthPayments }: {
         </span>
       ) },
     { key: 'note', header: 'Note', value: (i) => i.note },
+    { key: 'answer', header: 'Answer', value: (i) => marks.get(markKey('invoice', i.id))?.state ?? '', align: 'right',
+      render: (i) => answerCell('invoice', i.id, 'Explain or flag') },
   ];
 
   const payCols: Column<GymPayment>[] = [
@@ -1013,7 +1450,48 @@ function Reconcile({ books, w, inMonthPayments }: {
       render: (p) => money(p.amountCents, p.currency) },
     { key: 'method', header: 'Method', value: (p) => (p.method ?? '').replace('_', ' ') },
     { key: 'note', header: 'Note', value: (p) => p.note },
+    { key: 'answer', header: 'Answer', value: (p) => marks.get(markKey('payment', p.id))?.state ?? '', align: 'right',
+      render: (p) => answerCell('payment', p.id, 'Explain or flag') },
   ];
+
+  /** The explained rows of one list, under their own heading with the reason
+   *  and who gave it. Never hidden — an accountant has to be able to see what
+   *  was taken off the list and why. */
+  const explained = <T extends { id: string }>(
+    rows: Array<{ row: T; mark: ReconcileMark }>,
+    label: (row: T) => React.ReactNode,
+    kind: 'invoice' | 'payment',
+  ) => (rows.length ? (
+    <div style={{ borderTop: '1px solid var(--ring)', padding: '11px 14px' }}>
+      <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>
+        Explained &mdash; {rows.length}
+      </h3>
+      <p style={{ margin: '4px 0 8px', color: 'var(--ink3)', fontSize: 12 }}>
+        Answered once and taken off the list above, with the answer beside it. This is not an
+        approval and this console has no second role to give one &mdash; it says who pressed the
+        button and when.
+      </p>
+      <ul style={{ margin: 0, padding: '0 0 0 18px', color: 'var(--ink2)', fontSize: 12.5, lineHeight: 1.6 }}>
+        {rows.map(({ row, mark }) => (
+          <li key={row.id} style={{ marginBottom: 4 }}>
+            {label(row)} &mdash; &ldquo;{mark.note}&rdquo;{' '}
+            <span style={{ color: 'var(--ink3)' }}>
+              ({mark.markedByName ?? 'somebody'}, {new Date(mark.markedAt).toLocaleDateString()})
+            </span>
+            <button
+              className="no-print"
+              style={{ ...linkBtn, marginLeft: 8, color: 'var(--ink3)' }}
+              onClick={() => clearMark(supabase, tenantId, kind, row.id)
+                .then(() => { setMarkErr(null); onChange(); })
+                .catch((e: any) => setMarkErr(`That answer was not withdrawn: ${e?.message ?? 'the write was refused'}. It is still explained.`))}
+            >
+              put it back
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  ) : null);
 
   return (
     <Section
@@ -1029,18 +1507,33 @@ function Reconcile({ books, w, inMonthPayments }: {
       ) : r ? (
         <>
           <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5 }}>
-            Nothing in the database links a payment to an invoice — there is no
-            invoice id on a payment row. So the match is made on member, exact
-            amount, currency and a payment within {MATCH_DAYS} days of the invoice
-            date, one payment per invoice. Part payments, one payment settling two
-            invoices, a partner paying under their own name and cash banked in a
-            lump will all appear below and all be fine. That is expected: the list
-            is short enough to walk through, which is the point of it.
+            A payment can now SAY which invoice it settles &mdash;{' '}
+            <span className="mono">gym_payments.invoice_id</span>, written when somebody records
+            the payment against a membership or matches it here. Anything that has not been said is
+            matched the old way: member, exact amount, currency and a payment within {MATCH_DAYS}{' '}
+            days of the invoice date, one payment per invoice. Part payments, one payment settling
+            two invoices, a partner paying under their own name and cash banked in a lump will all
+            appear below and all be fine. Say so once, in the Answer column, and the row stops being
+            asked about &mdash; it moves to &ldquo;Explained&rdquo; with your reason on it rather
+            than reappearing every month for ever.
           </p>
+          {books.marksErr ? (
+            <div style={{ padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--warn)', fontSize: 12.5 }}>
+              The answers already given could not be read: {books.marksErr}. Every exception below is
+              therefore shown as unanswered. That is the safe direction &mdash; the other one would
+              take a real exception off this page because a lookup failed &mdash; but do not read the
+              length of these lists as work outstanding until it loads.
+            </div>
+          ) : null}
+          {markErr ? (
+            <div style={{ padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--crit)', fontSize: 12.5 }}>
+              {markErr}
+            </div>
+          ) : null}
 
           <div style={{ padding: '11px 14px' }}>
-            <h3 style={{ fontSize: 13, margin: 0, color: r.invoicesWithoutPayment.length ? 'var(--crit)' : 'var(--ink2)' }}>
-              Marked paid, no payment behind it — {r.invoicesWithoutPayment.length}
+            <h3 style={{ fontSize: 13, margin: 0, color: (invSplit?.open.length ?? 0) ? 'var(--crit)' : 'var(--ink2)' }}>
+              Marked paid, no payment behind it — {invSplit?.open.length ?? 0}
             </h3>
             <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
               The register says this money arrived in {w.label}. The payments record
@@ -1049,13 +1542,14 @@ function Reconcile({ books, w, inMonthPayments }: {
             </p>
           </div>
           <DataTable
-            rows={r.invoicesWithoutPayment} columns={invCols} rowKey={(i) => i.id}
+            rows={invSplit?.open ?? []} columns={invCols} rowKey={(i) => i.id}
             empty={`Every invoice raised in ${w.label} and marked paid has a payment of the same amount from the same member behind it.`}
           />
+          {explained(invSplit?.explained ?? [], (i) => <>{i.memberName ?? 'nobody named'}, {i.issuedOn}</>, 'invoice')}
 
           <div style={{ padding: '11px 14px', borderTop: '1px solid var(--ring)' }}>
-            <h3 style={{ fontSize: 13, margin: 0, color: r.paymentsWithoutInvoice.length ? 'var(--warn)' : 'var(--ink2)' }}>
-              Banked, no invoice in front of it — {r.paymentsWithoutInvoice.length}
+            <h3 style={{ fontSize: 13, margin: 0, color: (paySplit?.open.length ?? 0) ? 'var(--warn)' : 'var(--ink2)' }}>
+              Banked, no invoice in front of it — {paySplit?.open.length ?? 0}
             </h3>
             <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
               Real money, recorded, with nothing in the invoice register that explains
@@ -1064,9 +1558,10 @@ function Reconcile({ books, w, inMonthPayments }: {
             </p>
           </div>
           <DataTable
-            rows={r.paymentsWithoutInvoice} columns={payCols} rowKey={(p) => p.id}
+            rows={paySplit?.open ?? []} columns={payCols} rowKey={(p) => p.id}
             empty={`Every attributed payment banked in ${w.label} lines up with an invoice.`}
           />
+          {explained(paySplit?.explained ?? [], (p) => <>{p.memberName ?? 'nobody named'}, {new Date(p.takenAt).toLocaleDateString()}</>, 'payment')}
 
           {r.unattributed.length ? (
             <div style={{ borderTop: '1px solid var(--ring)' }}>
@@ -1080,7 +1575,8 @@ function Reconcile({ books, w, inMonthPayments }: {
                   money in, and they cannot be chased, refunded or explained later.
                 </p>
               </div>
-              <DataTable rows={r.unattributed} columns={payCols} rowKey={(p) => p.id} empty="—" />
+              <DataTable rows={unattSplit?.open ?? []} columns={payCols} rowKey={(p) => p.id} empty="—" />
+              {explained(unattSplit?.explained ?? [], (p) => <>{money(p.amountCents, p.currency) ?? 'an unreadable amount'}, {new Date(p.takenAt).toLocaleDateString()}</>, 'payment')}
             </div>
           ) : null}
 
@@ -1122,7 +1618,7 @@ function Reconcile({ books, w, inMonthPayments }: {
 async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice[]> {
   const { data, error } = await supabase
     .from('gym_invoices')
-    .select('id, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note')
+    .select('id, number, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note, billed_name')
     .eq('tenant_id', tenantId)
     .lte('issued_on', upToDay)
     .order('issued_on', { ascending: false })
@@ -1135,8 +1631,13 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice
   const names = await namesFor(rows.map((r: any) => r.member_id));
   return rows.map((r: any) => ({
     id: r.id,
+    number: Number.isFinite(r.number) ? r.number : null,
     memberId: r.member_id ?? null,
-    memberName: r.member_id ? names.get(r.member_id) ?? null : null,
+    // `billed_name` is the snapshot supabase/parts/184 leaves behind when an
+    // account is erased, and it is the only thing that keeps a RETAINED invoice
+    // legible. The live name wins while there is one, because a member who has
+    // changed their name should read as their current one on an open bill.
+    memberName: (r.member_id ? names.get(r.member_id) : undefined) ?? r.billed_name ?? null,
     membershipId: r.membership_id ?? null,
     // Not `?? 0`. An invoice with no amount is money of unknown size, and every
     // total on this page refuses rather than absorbs it.
@@ -1228,6 +1729,62 @@ async function namesFor(ids: Array<string | null | undefined>): Promise<Map<stri
 
 /** The note under a figure whose read has not returned — which of the two
  *  states it is missing for, never a shrug. */
+/**
+ * The answer box on one exception row.
+ *
+ * Two states, and the asymmetry between them is the whole design.
+ * `accepted` REMOVES the row from what an accountant is looking at, so the
+ * reason is required — supabase/parts/181 enforces that at the database as
+ * well, because an exception silently taken off a reconciliation with nothing
+ * recorded is exactly the row somebody asks about later. `flagged` removes
+ * nothing; it is a bookmark, so a bare one is a complete thought.
+ *
+ * There is deliberately no "dismiss". It and "explain" would be two words for
+ * one action with different implications about whether anybody actually looked,
+ * and a month later nothing on screen could tell them apart.
+ */
+function Answer({ kind, subjectId, tenantId, me, existing, onDone, onCancel, onErr }: {
+  kind: 'invoice' | 'payment'; subjectId: string; tenantId: string; me: Me;
+  existing: ReconcileMark | null;
+  onDone: () => void; onCancel: () => void; onErr: (s: string | null) => void;
+}) {
+  const [state, setState] = useState<MarkState>(existing?.state ?? 'accepted');
+  const [note, setNote] = useState(existing?.note ?? '');
+  const [busy, setBusy] = useState(false);
+  const blocker = markBlocker(state, note);
+
+  const go = async () => {
+    if (blocker) { onErr(blocker); return; }
+    setBusy(true);
+    try {
+      await markException(supabase, tenantId, {
+        subjectKind: kind, subjectId, state, note, markedBy: me.id,
+      });
+      onErr(null);
+      onDone();
+    } catch (e: any) {
+      onErr(`That answer was NOT recorded: ${e?.message ?? 'the write was refused'}. The row is still an open question.`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <span className="no-print" style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'normal' }}>
+      <select value={state} onChange={(e) => setState(e.target.value as MarkState)}
+              style={{ ...field, padding: '3px 5px', fontSize: 12, width: 130 }}
+              aria-label="What this row is">
+        <option value="accepted">Expected</option>
+        <option value="flagged">Wrong</option>
+      </select>
+      <input value={note} onChange={(e) => setNote(e.target.value)}
+             placeholder={state === 'accepted' ? 'Why this is fine' : 'What is wrong (optional)'}
+             style={{ ...field, padding: '3px 5px', fontSize: 12, width: 210 }}
+             aria-label="The reason" />
+      <button style={linkBtn} disabled={busy || !!blocker} onClick={go}>Save</button>
+      <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={onCancel}>Cancel</button>
+    </span>
+  );
+}
+
 function note<T>(r: Read<T>, what: string): string | undefined {
   if (r.state === 'loading') return `reading ${what}…`;
   if (r.state === 'failed') return `${what} could not be read`;
@@ -1264,6 +1821,29 @@ function Part<T>({ read, what, cost, children }: {
 const field = {
   background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
   borderRadius: 0, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+} as const;
+
+const primaryBtn = {
+  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
+  padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+} as const;
+
+const linkBtn = {
+  background: 'none', border: 'none', color: 'var(--brand)', cursor: 'pointer',
+  fontSize: 12.5, padding: 0, fontFamily: 'var(--sans)',
+} as const;
+
+const formRow = {
+  display: 'flex', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--ring)',
+  flexWrap: 'wrap' as const, alignItems: 'center',
+};
+
+/** A date field with its own word beside it. `<input type="date">` renders an
+ *  empty box with a picker icon and nothing saying which date it wants, and two
+ *  of them in one row is a coin toss. */
+const dateLabel = {
+  display: 'flex', alignItems: 'center', gap: 6,
+  color: 'var(--ink3)', fontSize: 12.5,
 } as const;
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {

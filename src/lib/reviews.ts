@@ -273,3 +273,225 @@ export function unansweredCount(rows: Review[], status: LoadStatus): number | nu
   if (status !== 'ready') return null;
   return rows.filter((r) => !(r.coachReply ?? '').trim()).length;
 }
+
+
+/* ── asking for one ────────────────────────────────────────────────────────
+ *
+ * ── What was measured ────────────────────────────────────────────────────
+ *
+ * A coach can READ their reviews and post a right of reply, and that is the
+ * whole of it. Grep `askForReview|requestReview` across app/ and src/: nothing.
+ * A review arrives only if a client thinks of it unprompted, which most of them
+ * never will — and reviews are the coach's marketing asset. The app builds the
+ * shelf and never offers to fill it.
+ *
+ * ── THE TWO RULES THIS SECTION HOLDS ─────────────────────────────────────
+ *
+ * 1. NOTHING IS SENT BY THE APP. What is produced is a DRAFT, in a box, which
+ *    the coach reads, edits and sends with their own thumb through the ordinary
+ *    thread. Exactly the rule app/(trainer)/nudges.tsx holds, for exactly the
+ *    reason its header gives: a message that appears to come from a person who
+ *    did not write it is a defect this codebase has already removed once, and
+ *    "your coach would love a review" arriving in a coach's voice from a server
+ *    is the same falsehood with better manners.
+ *
+ * 2. NOT ON A TIMER. Asked at a moment, and the moment is evidenced: somebody
+ *    who has just reached a goal they set themselves, or who has trained
+ *    steadily for long enough that there is something to review. A monthly
+ *    "rate your coach" sweep is how a five-star business collects two-star
+ *    reviews from people having a bad week, and it is the reason most coaches
+ *    have learned to distrust review prompts.
+ *
+ * And one refusal that is not negotiable: THE APP NEVER FILTERS BY EXPECTED
+ * RATING. Asking only the clients who look happy is review-gating; it is
+ * against the App Store guidelines, against Google's, and it is a lie told to
+ * everybody who reads the average afterwards. `coach_review_notify` (part 159)
+ * already fires "at every rating, unfiltered", and nothing here may undo that
+ * from the other end. The moments below are about whether there is anything to
+ * review, never about whether the review would be kind.
+ */
+
+/** Why this client is worth asking now. Evidence, not a score. */
+export type AskMoment =
+  /** They marked a goal of their own as reached. The strongest moment there
+   *  is: they have just told the app, in their own words, that the thing they
+   *  came for happened. */
+  | 'goal-reached'
+  /** A long enough steady record that there is something to write about. */
+  | 'settled'
+  /** Nothing that makes now better than any other day. */
+  | 'none';
+
+/** How long somebody has to have been on the book before there is anything to
+ *  review. Eight weeks is the shortest block most coaches sell, and asking
+ *  inside it is asking somebody to review a plan they are still on. */
+export const SETTLED_DAYS = 56;
+
+/** How recently a goal must have been reached for it to be the moment. A
+ *  fortnight: past that the coach is referring to something the client has
+ *  stopped thinking about, which reads as a prompt rather than as a
+ *  conversation. */
+export const GOAL_FRESH_DAYS = 14;
+
+const DAY = 86_400_000;
+
+/** What is known about one client, for the purpose of asking. */
+export interface AskCandidate {
+  clientId: string;
+  name: string | null;
+  /** When they joined the coach's book, ISO. Null when unknown — which is NOT
+   *  "they joined today", and produces no moment at all. */
+  since: string | null;
+  /** When they last marked a goal reached, ISO, or null. */
+  goalReachedAt: string | null;
+  /**
+   * Whether this coach has ALREADY ASKED them, on this device.
+   *
+   * ── Why "asked" and not "reviewed" ──────────────────────────────────────
+   *
+   * "Has this client already left a review" is the question this field wants to
+   * be, and it is one the coach's app cannot answer — by design, and the design
+   * is right. `coach_reviews` has no policy and no grant to `authenticated` at
+   * all, and part 130's comment gives the reason: RLS selects ROWS and never
+   * columns, so any policy wide enough to show a review to a stranger browsing
+   * the directory also hands over `client_id`. Reviews are anonymous to the
+   * coach on purpose, and nothing in this feature may erode that.
+   *
+   * So the record kept is the one the coach's own app is entitled to have: who
+   * they have already asked. It is device-local (see `askedKey` in
+   * src/ui/reviewAsks.ts) because it is a position rather than an answer, and
+   * because the alternative is a table recording which clients a coach has
+   * solicited — which is a worse thing to hold than the problem it solves.
+   *
+   * `boolean | null`, and null is a read that did not answer. A null NEVER
+   * produces a moment: asking twice is the single most irritating thing this
+   * feature could do, and doing it because a read failed is not a trade worth
+   * making. The screen says the record could not be read rather than pretending
+   * nobody has been asked.
+   */
+  asked: boolean | null;
+}
+
+/**
+ * Said on the screen, once, and not softened.
+ *
+ * A coach will notice that somebody who has already reviewed them is still on
+ * this list, and will report it as a bug. It is not one — it is the reviewer
+ * anonymity `coach_reviews` enforces, seen from the coach's side — and telling
+ * them so is cheaper than the support conversation and much cheaper than the
+ * "fix" somebody would otherwise reach for.
+ */
+export const WHO_REVIEWED_IS_HIDDEN =
+  'Repple cannot tell you who has already written one. Reviews carry a name only where the reviewer put one, and which client wrote which is not something this app will hand a coach — so somebody who has already reviewed you may still appear here. They will say so.';
+
+/**
+ * Whether now is a moment, and which.
+ *
+ * Order matters: a goal reached outranks a settled record, because a client who
+ * has done both is being asked about the goal.
+ */
+export function askMoment(c: AskCandidate, now: number = Date.now()): AskMoment {
+  // Already asked, or we could not check. Both stop here — see `asked`.
+  if (c.asked !== false) return 'none';
+
+  const goal = c.goalReachedAt ? Date.parse(c.goalReachedAt) : NaN;
+  if (Number.isFinite(goal) && now - goal >= 0 && now - goal <= GOAL_FRESH_DAYS * DAY) {
+    return 'goal-reached';
+  }
+
+  const since = c.since ? Date.parse(c.since) : NaN;
+  // An unknown join date is not a long one. A client the roster cannot date is
+  // as likely to have joined on Tuesday as last year, and the honest answer is
+  // no moment rather than a guess in the direction that produces a prompt.
+  if (Number.isFinite(since) && now - since >= SETTLED_DAYS * DAY) return 'settled';
+
+  return 'none';
+}
+
+/** Sentence case. Why this person and not somebody else — printed on the row,
+ *  because a coach asked to send something has to be able to see the reason. */
+export function askMomentNote(m: AskMoment, c: AskCandidate, now: number = Date.now()): string {
+  if (m === 'goal-reached') {
+    const goal = c.goalReachedAt ? Date.parse(c.goalReachedAt) : NaN;
+    const days = Number.isFinite(goal) ? Math.max(0, Math.round((now - goal) / DAY)) : null;
+    return days == null
+      ? 'They have marked a goal of their own as reached.'
+      : days === 0
+        ? 'They marked a goal of their own as reached today.'
+        : `They marked a goal of their own as reached ${days} day${days === 1 ? '' : 's'} ago.`;
+  }
+  if (m === 'settled') {
+    const since = c.since ? Date.parse(c.since) : NaN;
+    const weeks = Number.isFinite(since) ? Math.floor((now - since) / (7 * DAY)) : null;
+    return weeks == null
+      ? 'They have been with you long enough to have something to say.'
+      : `They have been with you ${weeks} weeks, so there is something to write about.`;
+  }
+  return 'Nothing about today makes it a better moment than any other.';
+}
+
+/**
+ * The draft. A starting point for the coach, and never a message.
+ *
+ * Written to the same three rules `draftMessage` in src/lib/nudge.ts keeps, and
+ * one more of its own: IT DOES NOT ASK FOR A GOOD REVIEW. "If you've got a
+ * minute" and "a good word" are two different requests, and the second is the
+ * one that turns an average into a number nobody should trust. The coach may
+ * edit it to anything they like; what matters is that the version they start
+ * from is one they could show the client afterwards.
+ */
+export function reviewAskDraft(
+  m: AskMoment,
+  clientName: string | null | undefined,
+  coachName: string | null | undefined,
+): string {
+  const who = firstWord(clientName);
+  const me = firstWord(coachName);
+  const hi = who ? `Hi ${who} — ` : '';
+  const sign = me ? `\n\n${me}` : '';
+  const opener = m === 'goal-reached'
+    ? 'congratulations again on hitting that. '
+    : '';
+  return `${hi}${opener}If you have a couple of minutes, would you write a short review of the coaching in the app? `
+    + `It is the main way people decide whether to work with me, and it helps far more than you would think. `
+    + `Say whatever you actually think — it goes up as written.${sign}`;
+}
+
+/** First word only, and never a fragment of an email address or a bare uuid: a
+ *  draft opening "Hi 7f3a9c21" is worse than one opening with no name at all.
+ *  The same rule `greetingName` keeps in src/lib/nudge.ts. */
+function firstWord(name: string | null | undefined): string | null {
+  const first = String(name ?? '').trim().split(/\s+/)[0] ?? '';
+  if (!first) return null;
+  if (first.includes('@')) return null;
+  if (/^[0-9a-f-]{8,}$/i.test(first)) return null;
+  if (!/[A-Za-zÀ-ÿ]/.test(first)) return null;
+  return first;
+}
+
+/**
+ * The line above a list of people worth asking, true in every state.
+ *
+ * Null in means null out — the same rule `boardNote` and `summariseDrift` keep.
+ * Before the read lands there is nobody to ask, and "nobody is worth asking
+ * right now" printed while it is in flight tells a coach something about their
+ * book that nothing has checked.
+ */
+export function askListNote(rows: readonly { moment: AskMoment }[] | null): string {
+  if (rows == null) return 'Working out who is worth asking…';
+  const n = rows.filter((r) => r.moment !== 'none').length;
+  if (n === 0) {
+    return 'Nobody on the part of your book that was read is at a moment worth asking at. That is a real answer — this list is not a monthly sweep, and asking everybody every month is how a good business collects bad reviews.';
+  }
+  return `${n} ${n === 1 ? 'client is' : 'clients are'} at a moment worth asking at. Nothing is sent from here: you get a draft, you edit it, you send it yourself.`;
+}
+
+/**
+ * Said on the screen, once, and not softened.
+ *
+ * The sentence a coach needs before they press anything, and the one that stops
+ * this feature turning into review-gating the first time somebody asks for a
+ * "only ask the happy ones" filter.
+ */
+export const ASK_IS_UNFILTERED =
+  'Repple does not choose who to ask by how they are likely to rate you, and it never will — asking only the people who look happy is a lie told to everybody who reads the average afterwards. What decides this list is whether there is anything to review yet.';

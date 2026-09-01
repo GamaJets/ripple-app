@@ -32,9 +32,16 @@ import { assertWhole, capLimit } from '@lib/rowCap';
 import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
 import {
-  monthWindow, recentMonths, monthKeyOf, buildClose, isOverdue, closeHeadline,
+  monthWindow, recentMonths, monthKeyOf, buildClose, isOverdue, closeHeadline, monthEnded,
   type CloseRecord, type MonthClose, type GymInvoice, type Line, type Blocker,
 } from '@lib/monthEnd';
+import {
+  fetchCloses, closeMonth, reopenMonth, snapshotOf, liveCloseFor,
+  closeBlocker, reopenBlocker, driftSince,
+  type MonthCloseRow,
+} from '@lib/gymClose';
+import { toCsv } from '@lib/gymExport';
+import { saveText } from '@/lib/save';
 
 const EMPTY: CloseRecord = {
   payments: sliceLoading(),
@@ -63,6 +70,16 @@ export default function Close() {
   // wrong month's receivables, however briefly, is the exact failure this page
   // exists to prevent. A mismatch reads as "not loaded yet", which is true.
   const [loaded, setLoaded] = useState<{ key: string; rec: CloseRecord }>({ key: '', rec: EMPTY });
+
+  // Every close and reopen this gym has recorded. Not scoped to the month on
+  // screen: the history is the half an auditor wants, and a month closed,
+  // reopened and closed again is three rows that only make sense together.
+  //
+  // null is "not read", which is NOT the same as "this gym has never closed a
+  // month" — the section below says which, because offering a Close button over
+  // a failed read is how a month gets closed twice.
+  const [closes, setCloses] = useState<MonthCloseRow[] | null>(null);
+  const [closesErr, setClosesErr] = useState<string | null>(null);
 
   // Default to the month that has actually finished. Opening on the running
   // month would greet an owner with a refusal about a month nobody claimed was
@@ -94,13 +111,31 @@ export default function Close() {
     // it: the close is allowed to be partial, but only if it says which part
     // failed and refuses to be called closed over it.
     const [payments, invoices, sessions, memberships, passes] = await Promise.all([
-      slice(() => fetchPayments(supabase, tenantId, mw.fromIso)),
+      // Bounded at BOTH ends. This computed a start date and no end, so a close
+      // opened on a month from a year ago read every payment from that month up
+      // to today — an unbounded set that the month's figures then filter back
+      // down, and one that trips `assertWhole` on any gym that has crossed a
+      // thousand payments since. Nothing outside the month is used here.
+      slice(() => fetchPayments(supabase, tenantId, mw.fromIso, mw.toIso)),
       slice(() => fetchInvoices(tenantId, mw.lastDay)),
       slice(() => fetchSessions(supabase, tenantId, mw.fromIso, mw.toIso)),
       slice(() => fetchMemberships(supabase, tenantId)),
       slice(() => fetchPasses(supabase, tenantId)),
     ]);
     setLoaded({ key: mw.key, rec: { payments, invoices, sessions, memberships, passes } });
+    try {
+      setCloses(await fetchCloses(supabase, tenantId));
+      setClosesErr(null);
+    } catch (e: any) {
+      // Kept apart from the five reads above because it is not part of the
+      // close: it is the record OF closes. A failure here leaves the figures
+      // perfectly readable and only the Close button unusable, which is the
+      // right trade — a Close pressed over a read that could not say whether
+      // the month was already closed is the one mistake this table exists to
+      // prevent.
+      setCloses(null);
+      setClosesErr(e?.message ?? 'The record of closed months could not be read.');
+    }
   }, []);
 
   useEffect(() => {
@@ -236,7 +271,12 @@ export default function Close() {
       {!w || !close ? (
         <Banner tone="crit">{key} is not a month this console can open.</Banner>
       ) : (
-        <CloseView c={close} rec={rec} currency={currency} feeRead={feeRead} sessionFee={sessionFee} />
+        <CloseView
+          c={close} rec={rec} currency={currency} feeRead={feeRead} sessionFee={sessionFee}
+          gymName={gymName} monthKey={key} tenantId={me.tenantId!} me={me}
+          closes={closes} closesErr={closesErr}
+          onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }}
+        />
       )}
     </Shell>
   );
@@ -244,18 +284,30 @@ export default function Close() {
 
 /* ── the close itself ──────────────────────────────────────────────────────── */
 
-function CloseView({ c, rec, currency, feeRead, sessionFee }: {
+function CloseView({ c, rec, currency, feeRead, sessionFee, gymName, monthKey, tenantId, me, closes, closesErr, onChange }: {
   c: MonthClose;
   rec: CloseRecord;
   currency: TenantCurrency;
   feeRead: 'ok' | 'failed';
   sessionFee: number | null;
+  gymName: string | null;
+  monthKey: string;
+  tenantId: string;
+  me: Me;
+  closes: MonthCloseRow[] | null;
+  closesErr: string | null;
+  onChange: () => void;
 }) {
   const m = (cents: number | null | undefined) => money(cents, currency);
 
   return (
     <>
       <Verdict c={c} />
+      <Signoff
+        c={c} currency={currency} monthKey={monthKey} tenantId={tenantId} me={me}
+        closes={closes} closesErr={closesErr} onChange={onChange}
+      />
+      <Handoff c={c} rec={rec} currency={currency} gymName={gymName} monthKey={monthKey} />
 
       {c.warning ? <Banner tone="crit">{c.warning}</Banner> : null}
       {feeRead === 'failed' ? (
@@ -356,6 +408,289 @@ function Verdict({ c }: { c: MonthClose }) {
       ) : null}
     </section>
   );
+}
+
+/* ── closing it, and keeping it closed ─────────────────────────────────────── */
+
+/**
+ * The button this screen has never had.
+ *
+ * /close had no `closed_at`, no lock, no sign-off and no write of any kind:
+ * `buildClose` recomputed the verdict from live rows on every load. So a month
+ * closed on Monday was open again on Tuesday if anybody recorded a late
+ * payment, /accounting re-reported it with different numbers, and the figure
+ * the owner handed their accountant last week was unrecoverable — not disputed,
+ * gone, because it was never a stored thing.
+ *
+ * Three things happen when this is pressed, and only the first is obvious:
+ *
+ *   1. A row records that this month was closed, by whom, and WITH THE FIGURES
+ *      AS THEY STOOD. Snapshotted, exactly as `payroll_settlements` snapshots
+ *      what was handed over rather than recomputing it from today's fee.
+ *   2. The database stops accepting payments and invoices dated inside it —
+ *      supabase/parts/182. A stored close that any later write can invalidate
+ *      is a note, not a close.
+ *   3. If the month is closed anyway over blockers, the blockers are stored
+ *      verbatim, so a close made over a known problem reads as exactly that.
+ *
+ * Reopening is deliberate, needs a reason, and leaves the original close
+ * standing. A month that closed and then moved is two facts and an auditor
+ * wants both.
+ */
+function Signoff({ c, currency, monthKey, tenantId, me, closes, closesErr, onChange }: {
+  c: MonthClose; currency: TenantCurrency; monthKey: string; tenantId: string; me: Me;
+  closes: MonthCloseRow[] | null; closesErr: string | null; onChange: () => void;
+}) {
+  const [note, setNote] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const live = closes ? liveCloseFor(monthKey, closes) : null;
+  const history = (closes ?? []).filter((r) => r.monthKey === monthKey);
+  const snap = snapshotOf(c, currency);
+  const ended = monthEnded(c.window);
+  const blocker = closes === null
+    ? 'The record of closed months could not be read, so this console cannot tell whether this month is already closed. Closing it again would be refused by the database with an error nobody could act on.'
+    : closeBlocker(monthKey, ended, live);
+
+  const drift = live ? driftSince(live, snap, (cents) => money(cents, live.currency ?? currency) ?? 'an unstateable amount') : [];
+
+  const doClose = async () => {
+    setBusy(true); setErr(null);
+    try {
+      await closeMonth(supabase, tenantId, monthKey, snap, me.id, note.trim() || null);
+      setNote('');
+      onChange();
+    } catch (e: any) {
+      setErr(`${monthKey} was NOT closed: ${e?.message ?? 'the write was refused'}. Nothing has changed and the month is still open.`);
+    } finally { setBusy(false); }
+  };
+
+  const doReopen = async () => {
+    if (!live) return;
+    const why = reopenBlocker(reason);
+    if (why) { setErr(why); return; }
+    setBusy(true); setErr(null);
+    try {
+      await reopenMonth(supabase, live.id, reason, me.id);
+      setReason('');
+      onChange();
+    } catch (e: any) {
+      setErr(`${monthKey} was NOT reopened: ${e?.message ?? 'the write was refused'}. It is still closed, and the desk still cannot record a payment dated inside it.`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Section
+      title={live ? `${monthKey} is closed` : `Close ${monthKey}`}
+      sub={live
+        ? 'The figures below are what the record says today. The ones stored at the close are beside them, and any difference is named — that is the whole reason they are stored.'
+        : 'Closing writes the figures as they stand and stops the database accepting a payment or an invoice dated inside this month. Reopening is possible and takes a reason.'}
+    >
+      {closesErr ? (
+        <Banner tone="crit">
+          The record of closed months could not be read: {closesErr}. This section cannot say
+          whether {monthKey} is closed, so it offers nothing rather than a button that might close
+          it twice.
+        </Banner>
+      ) : null}
+      {err ? <Banner tone="crit">{err}</Banner> : null}
+
+      {live ? (
+        <>
+          <div style={{ padding: '12px 14px', fontSize: 13, color: 'var(--ink2)' }}>
+            Closed by {live.closedByName ?? 'somebody whose name could not be read'} on{' '}
+            <span className="mono">{new Date(live.closedAt).toLocaleString()}</span>.
+            {live.note ? <> &ldquo;{live.note}&rdquo;</> : null}
+          </div>
+          {live.blockersAtClose ? (
+            <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', whiteSpace: 'pre-line', maxWidth: '80ch' }}>
+              Closed over these, which were outstanding at the time:{'\n'}{live.blockersAtClose}
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', padding: '0 14px 14px' }}>
+            <Kpi label="Taken, at the close" text={money(live.takenCents, live.currency)} note={live.currency ? undefined : NO_CURRENCY_NOTE} />
+            <Kpi label="Billed, at the close" text={money(live.invoicedCents, live.currency)} />
+            <Kpi label="Still owed, at the close" text={money(live.outstandingCents, live.currency)} />
+            <Kpi label="Payroll, at the close" text={money(live.payrollCents, live.currency)}
+                 note={live.unmarkedSessions ? `${live.unmarkedSessions} session(s) were unmarked` : undefined} />
+          </div>
+          {drift.length ? (
+            <div style={{ padding: '12px 14px', borderTop: '1px solid var(--ring)' }}>
+              <h3 style={{ fontSize: 13, margin: 0, color: 'var(--warn)' }}>
+                The record has moved since this month was closed
+              </h3>
+              <p style={{ margin: '4px 0 8px', color: 'var(--ink3)', fontSize: 12, maxWidth: '76ch' }}>
+                Not necessarily an error &mdash; a refund recorded in a later month correctly changes
+                what this month&rsquo;s ledger says about a payment in it. It IS something the
+                person holding the filed figure has to be told, and before the close was stored
+                there was no way to know it had happened.
+              </p>
+              <ul style={{ margin: 0, padding: '0 0 0 18px', color: 'var(--ink2)', fontSize: 12.5, lineHeight: 1.6 }}>
+                {drift.map((d) => <li key={d}>{d}</li>)}
+              </ul>
+            </div>
+          ) : (
+            <p style={{ margin: 0, padding: '0 14px 14px', color: 'var(--ink3)', fontSize: 12.5 }}>
+              Every figure reads today exactly as it read at the close.
+            </p>
+          )}
+          <div className="no-print" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', padding: '12px 14px', borderTop: '1px solid var(--ring)' }}>
+            <input value={reason} onChange={(e) => setReason(e.target.value)}
+                   placeholder="Why this month is being reopened"
+                   style={{ ...field, flex: 2, minWidth: 260 }} aria-label="Why this month is being reopened" />
+            <button onClick={doReopen} disabled={busy || !reason.trim()} style={primaryBtn}>Reopen</button>
+            <span style={{ fontSize: 12, color: 'var(--ink3)', maxWidth: '52ch' }}>
+              The close above is kept and the reopen is recorded beside it, so a month that closed
+              and then moved is visible as exactly that rather than as a month nobody ever closed.
+            </span>
+          </div>
+        </>
+      ) : (
+        <div className="no-print" style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input value={note} onChange={(e) => setNote(e.target.value)}
+                   placeholder="A note for whoever reads this later (optional)"
+                   style={{ ...field, flex: 2, minWidth: 260 }} aria-label="A note on this close" />
+            <button onClick={doClose} disabled={busy || !!blocker} style={primaryBtn}>
+              {busy ? 'Closing…' : `Close ${monthKey}`}
+            </button>
+          </div>
+          {blocker ? (
+            <p style={{ margin: '9px 0 0', fontSize: 12.5, color: '#f0c04e', maxWidth: '76ch' }}>{blocker}</p>
+          ) : c.state === 'blocked' ? (
+            <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '76ch' }}>
+              This month is not ready by the checks above, and it can still be closed. The reasons
+              are stored on the close, word for word, so a month signed off over a known problem
+              reads later as a decision somebody took rather than as a clean month.
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      {history.length > 1 ? (
+        <div style={{ padding: '12px 14px', borderTop: '1px solid var(--ring)' }}>
+          <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>Everything that has happened to {monthKey}</h3>
+          <ul style={{ margin: '6px 0 0', padding: '0 0 0 18px', color: 'var(--ink2)', fontSize: 12.5, lineHeight: 1.6 }}>
+            {history.map((h) => (
+              <li key={h.id}>
+                Closed {new Date(h.closedAt).toLocaleDateString()} by {h.closedByName ?? 'somebody'}
+                {h.reopenedAt
+                  ? <>, reopened {new Date(h.reopenedAt).toLocaleDateString()} by {h.reopenedByName ?? 'somebody'} &mdash; &ldquo;{h.reopenReason}&rdquo;</>
+                  : ' — still in force'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── getting the close out of the browser ──────────────────────────────────── */
+
+/**
+ * The close, as a file and as a printed page.
+ *
+ * Same reasoning as the handoff on /accounting and the same shape, deliberately:
+ * these are the two screens written for month-end, and before this wave neither
+ * had an export, a print, a PDF or an email. A gym's month-end left the building
+ * as a screenshot or a retyped column.
+ *
+ * One file. A close is a document — the verdict, the blockers, the takings, the
+ * receivables and the payroll are read together, and five downloads is how the
+ * blocker list ends up in Downloads on its own with nothing saying which month
+ * it belongs to.
+ *
+ * The VERDICT and the BLOCKERS go in first, above every figure, for the same
+ * reason they are at the top of the screen: a reader acts on the first thing
+ * they see, and a file that opened with the takings would be a file whose
+ * refusals are below the fold.
+ */
+function Handoff({ c, rec, currency, gymName, monthKey }: {
+  c: MonthClose; rec: CloseRecord; currency: TenantCurrency;
+  gymName: string | null; monthKey: string;
+}) {
+  const download = () => {
+    const parts: string[] = [];
+
+    parts.push(toCsv(
+      ['Report', 'Gym', 'Month', 'From', 'To', 'Verdict', 'Currency', 'Generated'],
+      [[
+        'Month-end close', gymName ?? '(gym name unread)', c.window.label,
+        c.window.firstDay, c.window.lastDay,
+        c.state === 'blocked' ? 'NOT CLOSEABLE' : 'Closeable',
+        currency ?? '(this gym has not set one)',
+        new Date().toISOString(),
+      ]],
+    ));
+
+    parts.push('\nWHY IT IS NOT CLOSEABLE\n');
+    parts.push(c.blockers.length
+      ? toCsv(['Kind', 'What is in the way'], c.blockers.map((b) => [b.kind, b.text]), false)
+      : 'Nothing is in the way.\n');
+
+    parts.push('\nHEADLINE FIGURES — minor units, in the currency above\n');
+    parts.push(toCsv(
+      ['Figure', 'Amount (minor units)', 'Note'],
+      [
+        ['Taken', c.income?.takenCents ?? null,
+          c.income ? `${c.income.count} payment(s)${c.income.currencies.length > 1 ? ', more than one currency so no total' : ''}` : 'the payments were not read'],
+        ['Still owed', c.arrears?.outstandingCents ?? null,
+          c.arrears ? `${c.arrears.outstanding} open, ${c.arrears.overdue} past due` : 'the invoices were not read'],
+        ['Payroll', c.payroll?.total.cents ?? null,
+          c.payroll ? (c.payroll.total.unmarked > 0 ? `NOT FINAL — ${c.payroll.total.unmarked} unmarked` : `${c.payroll.total.delivered} delivered`) : 'the sessions were not read'],
+      ],
+      false,
+    ));
+
+    parts.push('\nWHAT CAME IN, BY METHOD\n');
+    parts.push(c.income
+      ? toCsv(['How it arrived', 'Payments', 'Amount (minor units)'],
+              c.income.byMethod.map((l) => [l.label, l.count, l.cents]), false)
+      : 'NOT EXPORTED — the payments could not be read. This is unknown, not nil.\n');
+
+    parts.push('\nSTILL OWED AT THE MONTH END\n');
+    parts.push(rec.invoices.state === 'ready'
+      ? toCsv(
+          ['Member', 'Issued', 'Due', 'Amount (minor units)', 'Currency', 'Status'],
+          rec.invoices.rows
+            .filter((i) => (i.status === 'open' || i.status === 'overdue') && i.issuedOn <= c.window.lastDay)
+            .map((i) => [i.memberName, i.issuedOn, i.dueOn, i.amountCents, i.currency, i.status]),
+          false)
+      : 'NOT EXPORTED — the invoice register could not be read. This is unknown, not nil.\n');
+
+    parts.push('\nPAYROLL BY TRAINER\n');
+    parts.push(c.payroll
+      ? toCsv(
+          ['Trainer', 'Delivered', 'No-shows', 'Cancelled', 'Unmarked', 'Pay (minor units)'],
+          c.payroll.lines.map((l) => [l.trainerName, l.delivered, l.noShows, l.cancelled, l.unmarked, l.cents]),
+          false)
+      : 'NOT EXPORTED — the sessions could not be read. This is unknown, not nil.\n');
+
+    saveText(parts.join(''), `${slugOf(gymName)}-${monthKey}-close.csv`);
+  };
+
+  return (
+    <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 22px' }}>
+      <button onClick={download} style={primaryBtn}>Export this close (CSV)</button>
+      <button onClick={() => window.print()} style={{ ...primaryBtn, background: 'transparent', color: 'var(--ink2)', border: '1px solid var(--ring)' }}>
+        Print / save as PDF
+      </button>
+      <span style={{ fontSize: 12, color: 'var(--ink3)', maxWidth: '58ch' }}>
+        The verdict and the blockers are the first two sections of the file, above every figure, for
+        the same reason they are the first two things on this screen.
+      </span>
+    </div>
+  );
+}
+
+/** A filename fragment from the gym's name, or a fallback rather than a file
+ *  called "-2026-08-close.csv" that sorts before everything in a folder. */
+function slugOf(name: string | null): string {
+  const s = (name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return s || 'gym';
 }
 
 /* ── what came in, and what it was for ─────────────────────────────────────── */
@@ -878,6 +1213,11 @@ function Failed({ reason, what, cost }: { reason: string; what: string; cost?: s
 const field = {
   background: 'var(--surface2)', color: 'var(--ink)', border: '1px solid var(--ring)',
   borderRadius: 0, padding: '8px 10px', fontSize: 13, fontFamily: 'var(--sans)', minWidth: 0,
+} as const;
+
+const primaryBtn = {
+  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
+  padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
 } as const;
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {

@@ -114,7 +114,13 @@ export function useLeads(): LeadBook {
 
     try {
       const res = await supabase.from('coach_leads')
-        .select('id, name, contact, note, via_code, at, state')
+        // `joined_at` and `joined_via` are part 211's. A database without it
+        // answers 42703 and the whole read fails, which is the right outcome
+        // and the reason `shapeLeads` distinguishes an ABSENT key from a null
+        // one: the fallback path is a build talking to an older schema, and
+        // there a missing column must read as "not known" and never as "they
+        // did not join".
+        .select('id, name, contact, note, via_code, at, state, joined_at, joined_via')
         .eq('trainer_id', uid)
         .order('at', { ascending: false })
         .limit(capLimit());

@@ -271,7 +271,11 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         // hour before their session a client tapped "Session in 1 hour" and
         // landed on the dashboard, with the session they had just been
         // reminded of one more tap away on the calendar.
-        scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000), { route: '/(client)/calendar' });
+        // Category 'sessions', so the member's own switch decides whether this
+        // arrives — and, deliberately, so quiet hours do NOT move it: they
+        // booked a 6:30am session and the warning has to reach them before the
+        // session does. See CATEGORIES in src/lib/notifyPrefs.ts.
+        scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000), { route: '/(client)/calendar' }, 'sessions');
       }
     };
     if (!USE_SUPABASE || !uid) { apply(); return false; }

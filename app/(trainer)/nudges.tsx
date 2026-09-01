@@ -65,10 +65,12 @@ import { useNudges } from '../../src/ui/nudges';
 import { useThread } from '../../src/ui/messaging';
 import { DRIFT_LABEL, bandNote, type Drift } from '../../src/lib/clientDrift';
 import {
-  WHAT_IT_CANNOT_SEE, ACTION_LABEL, refusalsIn,
+  WHAT_IT_CANNOT_SEE, ACTION_LABEL, refusalsIn, watchDigestNote,
   type Evidence, type Nudge, type MutedRow,
 } from '../../src/lib/nudge';
 import { paceNote } from '../../src/lib/interventions';
+import { cadenceLine, overdueNote } from '../../src/lib/cadence';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 
 /** The mark beside a verdict. A coloured dot beside ink text, never coloured
  *  text: the scale reserves status colour for status and none of these clears
@@ -95,6 +97,10 @@ export default function Nudges() {
   const [drafting, setDrafting] = useState<Nudge | null>(null);
   const [explaining, setExplaining] = useState<Nudge | MutedRow | null>(null);
   const [showMuted, setShowMuted] = useState(false);
+  // The watch digest opens itself when it is due for the week and is otherwise
+  // a section the coach may open. Its own flag: sharing one with `showMuted`
+  // would make closing one close the other.
+  const [showWatch, setShowWatch] = useState(false);
 
   const board = n.board;
 
@@ -177,6 +183,12 @@ export default function Nudges() {
 
         <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{n.note}</Text>
 
+        {/* What "quiet" is measured against, in one dismissible row. The banners
+            below already say what a failed read means; this says what the word
+            means when the read succeeded, which is the half a coach carries to
+            the phone call. src/lib/screenHelp.ts holds the words. */}
+        <ScreenHelp screen="coach-quiet" />
+
         {!USE_SUPABASE ? (
           <Section>
             <Notice tone={t.warn} kicker="Not loaded" title="This build is running without the server"
@@ -222,7 +234,55 @@ export default function Nudges() {
               </Section>
             ) : null}
 
+            {/* ── due back ───────────────────────────────────────────────
+                The earlier signal, and it is deliberately ABOVE the quiet list
+                rather than folded into it. Drift needs a fortnight of silence
+                before it can say anything; a client's own interval between
+                visits says "four days past their usual gap" on day four. By the
+                time somebody reaches the list below, the conversation that
+                would have kept them was ten days ago.
+
+                Nobody on the board appears here — a client who is both quiet
+                and late is one person, and naming them in two sections on one
+                screen is how a coach comes to distrust both counts.
+
+                No draft, and no Set Aside. Being a few days late is not enough
+                to justify a message written for somebody, and a per-client
+                prompt at this sensitivity is the nagging src/lib/nudge.ts
+                refuses. What this offers is the client's own screen. */}
             <Rule />
+
+            {n.dueBack && n.dueBack.length ? (
+              <Section>
+                <SectionHead title="Due back" note={`${n.dueBack.length}`} />
+                <Text style={{ ...ty.label, color: t.ink2 }}>{overdueNote(n.dueBack)}</Text>
+                <View style={{ marginTop: sp.md }}>
+                  {n.dueBack.map((d, i) => (
+                    <View key={d.clientId}
+                      style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.serious }} />
+                        <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }}>
+                          {d.name ?? 'Unnamed client'}
+                        </Text>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>
+                          {d.cadence.overdueDays} day{d.cadence.overdueDays === 1 ? '' : 's'} late
+                        </Text>
+                      </View>
+                      <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{cadenceLine(d.cadence)}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHAT_IT_CANNOT_SEE}</Text>
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
+                        <Ghost label="Open Their Record"
+                          a11yLabel={`Open the record for ${d.name ?? 'this client'}`}
+                          onPress={() => router.push(`/(trainer)/client?clientId=${encodeURIComponent(d.clientId)}` as any)} />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </Section>
+            ) : null}
+
+            {n.dueBack && n.dueBack.length ? <Rule /> : null}
 
             <Section>
               <SectionHead title="Worth a message"
@@ -237,6 +297,68 @@ export default function Nudges() {
                 <View>{board.nudges.map(nudgeCard)}</View>
               )}
             </Section>
+
+            {/* ── the watch band, once a week ────────────────────────────
+                `earnsNudge` refuses `watch` and that refusal stays: a client
+                who is down and not far down describes a busy fortnight as often
+                as it describes anything, and a suggestion per busy fortnight per
+                client is exactly the nagging that makes a coach stop reading
+                this screen.
+
+                But `at_risk` is often already too late — sixty per cent off
+                their own rate — and `watch` is where a word still costs
+                nothing. So the band is surfaced as a DIGEST: one section, once a
+                week, no draft, no Set Aside, and no per-client prompt. Closing
+                it puts it away until the following Monday (`weekKey`); the
+                rows are still reachable by opening the section, which is the
+                coach asking rather than the app telling.
+
+                `watchDigestDue` is null until the stored week is read back, and
+                null renders nothing — a section that appears for one frame and
+                vanishes is worse than one that arrives a frame late. */}
+            {board.watching.length ? (
+              <>
+                <Rule />
+                <Section>
+                  <SectionHead
+                    title="Slipping"
+                    note={showWatch || n.watchDigestDue ? (showWatch ? 'hide' : `${board.watching.length}`) : `${board.watching.length}`}
+                    onPress={() => setShowWatch((v) => !v)}
+                  />
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{watchDigestNote(board.watching)}</Text>
+                  {n.watchDigestDue || showWatch ? (
+                    <View style={{ marginTop: sp.md }}>
+                      {board.watching.map((w, i) => (
+                        <View key={w.clientId}
+                          style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.serious }} />
+                            <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }}>
+                              {w.name ?? 'Unnamed client'}
+                            </Text>
+                          </View>
+                          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{w.observed}</Text>
+                          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
+                            <Ghost label="Open Their Record"
+                              a11yLabel={`Open the record for ${w.name ?? 'this client'}`}
+                              onPress={() => router.push(`/(trainer)/client?clientId=${encodeURIComponent(w.clientId)}` as any)} />
+                          </View>
+                        </View>
+                      ))}
+                      {n.watchDigestDue ? (
+                        <View style={{ marginTop: sp.lg }}>
+                          <Ghost label="Read for This Week" onPress={n.dismissWatchDigest} />
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                            This closes until Monday. Nobody here is removed from your book and nothing changes for
+                            them — it is this section that goes quiet, not them.
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </Section>
+              </>
+            ) : null}
 
             {/* Set aside · quietened, never hidden. A coach who wants to see who
                 they parked can; the app does not raise them unprompted, which

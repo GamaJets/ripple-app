@@ -39,6 +39,44 @@ export interface DailyMetrics {
    *  which the client derives the same shape. */
   zoneSeconds: ZoneSeconds | null;
   workoutMins: number | null;
+  /**
+   * Nightly heart-rate variability in MILLISECONDS, and always RMSSD.
+   *
+   * Named in the unit because the two vendors that publish it publish it in
+   * different ones and neither says so in the field name: WHOOP's recovery
+   * score carries `hrv_rmssd_milli` in SECONDS (0.0621 for 62 ms), Oura's
+   * `average_hrv` on a sleep document is already milliseconds. The conversion
+   * belongs in the edge function next to the field it reads, and this comment
+   * exists so nobody "fixes" a 62 that looks small by multiplying it again.
+   *
+   * It is deliberately NOT comparable between people. HRV is a personal
+   * baseline — 40 ms is excellent for one member and a red flag for another —
+   * so every screen that prints it prints it as a trend against that member's
+   * own history, never against a population norm this app does not have.
+   */
+  hrv: number | null;
+  /**
+   * The vendor's own 0–100 verdict on how recovered the member is: WHOOP
+   * recovery, Oura readiness.
+   *
+   * One field for two vendors because they answer the same question on the same
+   * scale in the same direction. `recoverySource` says which one, because the
+   * screens must be able to name it — "Recovery 34%" with no attribution is a
+   * number the member cannot check against the app they already trust.
+   */
+  recoveryPct: number | null;
+  /** Which vendor's word `recoveryPct` is. Null whenever recoveryPct is. */
+  recoverySource: 'whoop' | 'oura' | null;
+  /**
+   * WHOOP day strain, on WHOOP's 0–21 logarithmic scale.
+   *
+   * The scale is stated because it is not a percentage and not out of 10, and a
+   * 14.2 rendered against either of those reads as a completely different day.
+   * Only WHOOP publishes it; nothing else in this app computes one, and nothing
+   * may derive one — a "strain" invented from sets and reps would sit on the
+   * same row as a measured one with no way for the member to tell them apart.
+   */
+  strain: number | null;
   updatedAt: string;            // ISO timestamp of the sync
   source: ProviderId;
 }
@@ -100,5 +138,5 @@ export interface WearableProvider {
 export function emptyMetrics(source: ProviderId): DailyMetrics {
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return { date, activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, updatedAt: d.toISOString(), source };
+  return { date, activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, hrv: null, recoveryPct: null, recoverySource: null, strain: null, updatedAt: d.toISOString(), source };
 }

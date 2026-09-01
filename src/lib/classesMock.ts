@@ -25,6 +25,20 @@ export interface GymClass {
   durationMin: number;
   capacity: number;
   booked: number;        // confirmed count (from class_counts on the backend)
+  /**
+   * How many people are on the waitlist for this class.
+   *
+   * Null means UNKNOWN, and there are two ways to get there: the counts read
+   * failed (`countsKnown` false), or the database predates part 210 and
+   * `class_counts()` returned no such column. Zero means a settled read found
+   * nobody queueing.
+   *
+   * That distinction is the whole point of the field. A full class with six
+   * people waiting is a second session on Thursday; a full class with an
+   * unknown queue is not, and drawing a dash rather than a zero is what stops
+   * a coach concluding there is no demand when nobody looked.
+   */
+  waiting: number | null;
 }
 
 // Common studio-class formats (chain-agnostic; a gym can add its own).

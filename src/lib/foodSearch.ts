@@ -75,6 +75,14 @@ export interface FoodResult {
   /** Short Title Case badge: "Common", "Restaurant · Italian", "Branded". */
   label: string;
   kcal: number; protein: number; carbs: number; fat: number;
+  /** What the figures are FOR — '100 g', '1 serving' — where the source says.
+   *  Null for a common food, whose name already carries its portion.
+   *
+   *  This is what makes the portion question askable. A row handed four numbers
+   *  and no basis cannot ask "how many of these did you have" without inventing
+   *  what one of them is, which is the "figure nobody chose" this file's own
+   *  note refuses. See src/lib/foodPortion.ts. */
+  basis: string | null;
 }
 
 export interface FoodSourceResults {
@@ -151,6 +159,10 @@ export function mergeFoodResults(
     source: 'common',
     label: 'Common',
     kcal: f.k, protein: f.p, carbs: f.c, fat: f.f,
+    // The name carries it — "Chicken Breast, Grilled (170 g)" — so a second
+    // basis printed beside it would be the same fact twice, and sometimes
+    // twice differently.
+    basis: null,
   }, `${f.n} ${f.alias ?? ''}`, i));
 
   sources.restaurant.forEach((d, i) => {
@@ -165,6 +177,9 @@ export function mergeFoodResults(
       source: 'restaurant',
       label: `Restaurant · ${d.cuisine}`,
       kcal: e.kcal, protein: e.protein, carbs: e.carbs, fat: e.fat,
+      // `estimateDish(d, 1)` is one standard serving of the dish, so that is
+      // what a multiplier multiplies.
+      basis: '1 serving',
     }, `${d.name} ${d.cuisine}`, i);
   });
 
@@ -178,6 +193,7 @@ export function mergeFoodResults(
       source: 'branded',
       label: 'Branded',
       kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat,
+      basis: p.serving || null,
     }, p.name, i);
   });
 

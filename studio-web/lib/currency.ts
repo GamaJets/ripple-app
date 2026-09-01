@@ -77,13 +77,16 @@ export function currencyNote(cents: number | null | undefined, currency: TenantC
  * floor.
  */
 export async function readTenant(
-  sb: {
-    from: (t: string) => {
-      select: (c: string) => {
-        eq: (k: string, v: string) => { single: () => PromiseLike<{ data: any; error: any }> };
-      };
-    };
-  },
+  // Structurally typed as `any`-returning `from`, exactly like every module in
+  // src/lib. It was declared as a hand-written chain — `from(...).select(...)
+  // .eq(...).single()` — which reads as more careful and is worse in two ways:
+  // it does not describe the real builder (which is thenable at every step, and
+  // whose `eq` returns something with thirty other methods on it), and passing
+  // the actual supabase-js client to it makes TypeScript walk that type until
+  // it gives up with "type instantiation is excessively deep". That is why this
+  // function had no callers at all: it could not be called with the client this
+  // console holds.
+  sb: { from: (t: string) => any },
   tenantId: string,
 ): Promise<{ name: string | null; currency: TenantCurrency; error: string | null }> {
   // supabase-js resolves on a database error rather than rejecting, so the

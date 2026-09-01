@@ -51,12 +51,14 @@ import { isQueryableId } from '../../src/lib/clientDrift';
 import { shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
 import {
   coachInvoiceDoc, invoiceShareBlurb, invoiceBlockers, invoiceNumber, invoiceDayLabel,
-  invoiceBook, money, kindLabel,
+  invoiceBook, money, kindLabel, ageingBook, invoiceAge, chaseBlocker, chaseHistoryLine,
+  BUCKET_TITLE, AGEING_IS_YOUR_OWN_RECORD, INVOICE_DUE_NOT_A_TERM, plusDays,
+  type AgeBucket,
   type CoachInvoice, type InvoiceDraft, type InvoiceKind,
 } from '../../src/lib/coachInvoice';
 import { minorMoney } from '../../src/lib/coachMoney';
 import {
-  fetchMyInvoices, fetchInvoiceIssuer, fetchInvoiceCurrency, issueInvoice, voidInvoice,
+  fetchMyInvoices, fetchInvoiceIssuer, fetchInvoiceCurrency, issueInvoice, voidInvoice, remindInvoice,
   type InvoiceCurrency,
 } from '../../src/ui/coachInvoices';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
@@ -83,6 +85,11 @@ export default function Invoices() {
   const [clientId, setClientId] = useState<string | null>(null);
   const [description, setDescription] = useState('');
   const [amountText, setAmountText] = useState('');
+  // Typed, and empty by default. There is no offered "30 days" and no offered
+  // "14 days": a payment term this app suggested would be printed on a document
+  // under the coach's name, and most coaches settle on terms this app has never
+  // been told about. Empty stays empty all the way to the column.
+  const [dueText, setDueText] = useState('');
   const [kind, setKind] = useState<InvoiceKind>('requested');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -122,13 +129,20 @@ export default function Invoices() {
   // allows a day's grace either side for exactly this.
   const today = isoToday(new Date());
 
+  // Aged against THE SAME `today`, which is the device's day and not the
+  // server's UTC one. A coach in Auckland reading this at 10am would otherwise
+  // have yesterday's arithmetic applied to their own book — every invoice a day
+  // less late than it is, which is the wrong side of a chasing decision.
+  const ageing = useMemo(() => ageingBook(rows, status, today), [rows, status, today]);
+
   const draft = (): InvoiceDraft => ({
-    billTo, description, amountText, currency: ccy.currency, kind, issuedOn: today, note: note.trim() || null,
+    billTo, description, amountText, currency: ccy.currency, kind, issuedOn: today,
+    dueOn: dueText.trim() || null, note: note.trim() || null,
   });
   const blockers = invoiceBlockers(draft());
   const canIssue = blockers.length === 0 && !busy;
 
-  const reset = () => { setBillTo(''); setClientId(null); setDescription(''); setAmountText(''); setKind('requested'); setNote(''); };
+  const reset = () => { setBillTo(''); setClientId(null); setDescription(''); setAmountText(''); setDueText(''); setKind('requested'); setNote(''); };
 
   const onIssue = async () => {
     const d = draft();
@@ -198,8 +212,77 @@ export default function Invoices() {
     await load();
   };
 
+  /**
+   * Chase one, and say what actually happened to both halves.
+   *
+   * Two facts, and they are reported apart because they can differ: the chase
+   * was RECORDED against the coach's own row, and the client WAS or WAS NOT
+   * told. A screen that implied the second from the first would leave a coach
+   * believing they had sent a reminder that never reached anybody, and they
+   * would stop asking. `remindInvoice` carries the second as a three-state
+   * answer for exactly this.
+   */
+  const onChase = async (inv: CoachInvoice) => {
+    const blocked = chaseBlocker(inv);
+    if (blocked) { Alert.alert('Nothing to chase', blocked); return; }
+    setBusy(true);
+    const res = await remindInvoice(inv.id);
+    setBusy(false);
+    if (!res.ok) { Alert.alert('That reminder was not recorded', res.error || 'Nothing changed.'); return; }
+    await load();
+    const told = res.notified === true
+      ? 'They have a notification about it. It names the number so they can match it to the document you already sent, and it is not a second invoice.'
+      : res.notified === false
+        ? 'They could not be notified, so nothing reached them. The chase is recorded on your side only — send it to them the way you sent it the first time.'
+        : 'This one is not tied to an account, so nobody was notified.';
+    Alert.alert(`Chased invoice ${invoiceNumber(inv.seq)}`, told);
+  };
+
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const G = layout.gutter;
+
+  /**
+   * One row on an ageing list: the number, who it is for, the amount, how late
+   * it is, and the one action that does anything about it.
+   *
+   * The amount goes through `money()`, which returns null rather than a bare
+   * figure when the currency is missing — a number with no currency beside it
+   * is not an amount of money, and this is a list a coach chases from.
+   */
+  const agedRow = (inv: CoachInvoice, ageLine: string) => {
+    const amount = money(inv);
+    const chased = chaseHistoryLine(inv);
+    const blocked = chaseBlocker(inv);
+    return (
+      <View key={inv.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
+          <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{invoiceNumber(inv.seq)}</Text>
+          <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{inv.billTo}</Text>
+          <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{amount ?? DASH}</Text>
+        </View>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{ageLine}</Text>
+        {chased ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{chased}</Text> : null}
+        {/* The reason, never a dead control. A coach who taps nothing and is
+            told nothing concludes the button is broken; a coach who is told
+            "this one is not tied to an account" knows to send it by hand. */}
+        {blocked ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{blocked}</Text>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+            <Pressable onPress={() => { void onChase(inv); }} hitSlop={8} accessibilityRole="button"
+              accessibilityLabel={`Chase invoice ${invoiceNumber(inv.seq)}`} disabled={busy}
+              style={{ paddingVertical: sp.xs }}>
+              <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>Chase it</Text>
+            </Pressable>
+            <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
+              accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)} again`} style={{ paddingVertical: sp.xs }}>
+              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Send again</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+    );
+  };
 
   // The gate. Said as a sentence a coach can act on, naming who sets it —
   // never as a silent fallback to a currency nobody chose.
@@ -297,6 +380,81 @@ export default function Invoices() {
 
         <Rule />
 
+        {/* ── WHO OWES YOU ────────────────────────────────────────────────
+            "Who owes me money" was the most common unanswered question in this
+            app, and every part of the answer here is something the coach
+            themselves recorded: a kind they chose, a due date they typed, a
+            void they performed. Nothing is inferred from a payment processor,
+            because nothing about a payment processor reaches this table — which
+            is also why an invoice stays on this list until the coach says
+            otherwise rather than until somebody pays. */}
+        <Section>
+          <SectionHead title="Owed to You" note="Invoices you are still asking for" />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{AGEING_IS_YOUR_OWN_RECORD}</Text>
+
+          {ageing.withheld ? (
+            <Flag>{ageing.withheld}</Flag>
+          ) : ageing.outstanding && ageing.outstanding.pots.length ? (
+            <View>
+              {ageing.outstanding.pots.map((p) => (
+                <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                  <Text style={{ ...ty.label, color: t.ink2 }}>
+                    {p.count} outstanding in {p.currency}
+                  </Text>
+                  <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>
+                    {minorMoney(p.minorUnits, p.currency) ?? DASH}
+                  </Text>
+                </View>
+              ))}
+              {/* Currencies never merge. Said, because two rows of figures is
+                  exactly the shape somebody adds up in their head. */}
+              {ageing.outstanding.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+              {ageing.outstanding.unlabelled > 0 ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {ageing.outstanding.unlabelled} outstanding invoice{ageing.outstanding.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so {ageing.outstanding.unlabelled === 1 ? 'it is' : 'they are'} in no figure above.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Nothing you have issued is still being asked for. Every read came back in full, so this is your record rather than a failure.
+            </Text>
+          )}
+
+          {/* The invoices with no due date, said out loud and kept out of every
+              figure above. This is the bucket every invoice issued before the
+              due-date column existed lands in, and calling it "not due" would
+              put a coach's whole back catalogue into the reassuring pile. */}
+          {ageing.undatedNote ? <Flag style={{ marginTop: sp.sm }}>{ageing.undatedNote}</Flag> : null}
+        </Section>
+
+        {/* One group per band, longest overdue first. Grouped rather than
+            listed flat because chasing is done in bands: a coach clears the
+            two-month column before they look at last week's. */}
+        {(['61+', '31-60', '8-30', '1-7'] as AgeBucket[]).map((b) => {
+          const inBand = ageing.overdue.filter((a) => a.age.bucket === b);
+          if (!inBand.length) return null;
+          return (
+            <Section key={b}>
+              <SectionHead title={BUCKET_TITLE[b]} />
+              {inBand.map(({ invoice, age }) => agedRow(invoice, age.line))}
+            </Section>
+          );
+        })}
+
+        {ageing.upcoming.length ? (
+          <Section>
+            <SectionHead title="Not Yet Due" />
+            {ageing.upcoming.map(({ invoice, age }) => agedRow(invoice, age.line))}
+          </Section>
+        ) : null}
+
+        <Rule />
+
         <Section>
           {/* A count, and "nothing", are both claims about the coach's own
               sequence — so neither may be made from a list that is not the
@@ -331,6 +489,10 @@ export default function Invoices() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }} numberOfLines={2}>
                   {invoiceDayLabel(inv.issuedOn)} · {kindLabel(inv.kind)} · {inv.description}
                 </Text>
+                {/* Where it stands, on every row rather than only on the ageing
+                    lists above. A coach scrolling their whole book should not
+                    have to scroll back up to find out whether 0031 is late. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{invoiceAge(inv, today).line}</Text>
                 {inv.voidedAt ? (
                   <Flag style={{ marginTop: sp.sm }}>
                     Voided{inv.voidReason ? ` — ${inv.voidReason}` : ''}. Its number is not reused.
@@ -440,6 +602,32 @@ export default function Invoices() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
                 Whichever you choose is printed as your own statement. Repple does not check it against a bank or a card processor, and the document says so.
               </Text>
+
+              {/* Optional, and empty by default, and there is no suggested
+                  term. Thirty days is a convention in one trade in one country;
+                  a coach settling weekly in cash has never agreed to it. A
+                  default here would be a deadline printed on a document under
+                  the coach's name that they did not choose — so the shortcuts
+                  below preselect nothing and the field stays empty until one is
+                  tapped or a date is typed. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>When you expect to be paid (optional)</Text>
+              <TextInput value={dueText} onChangeText={setDueText} autoCapitalize="none" autoCorrect={false}
+                placeholder="YYYY-MM-DD, or leave it empty" placeholderTextColor={t.ink3}
+                accessibilityLabel="Due date" style={inp} />
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                {([['On the day', 0], ['In a week', 7], ['In two weeks', 14], ['In a month', 30]] as [string, number][]).map(([label, n]) => {
+                  const when = plusDays(today, n);
+                  return (
+                    <Pressable key={label} onPress={() => setDueText(dueText === when ? '' : when)}
+                      accessibilityRole="button" accessibilityLabel={label}
+                      accessibilityState={{ selected: dueText === when }}
+                      style={{ flex: 1, paddingVertical: 8, borderRadius: radius.sm, alignItems: 'center', backgroundColor: dueText === when ? t.brand : t.surface2 }}>
+                      <Text style={{ ...ty.micro, color: dueText === when ? '#fff' : t.ink2 }}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{INVOICE_DUE_NOT_A_TERM}</Text>
 
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A note, if you want one (optional)</Text>
               <TextInput value={note} onChangeText={setNote} multiline

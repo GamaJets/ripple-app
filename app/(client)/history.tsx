@@ -64,8 +64,8 @@
 // and a zero-height bar is a measurement claim. For the same reason the monthly
 // chart is bars rather than a line — a polyline from February to May paints ink
 // across two months nobody trained and invents a trajectory through them.
-import { useState, useCallback, useRef, type ReactNode } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Svg, { Rect, Line, Text as SvgText } from 'react-native-svg';
@@ -80,6 +80,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn, volumeHeadline, est1RMIn, liftLabel, weightDeltaIn, convertedNote, type WeightUnit } from '../../src/lib/units';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import { num } from '../../src/lib/format';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { wholeMonths } from '../../src/lib/historyWindow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
@@ -92,6 +93,12 @@ import {
 import { tonnageNote } from '../../src/lib/bodyweightSets';
 import { useClientData } from '../../src/ui/clientData';
 import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
+// Volume by muscle group — the first question anybody asks of a training
+// history and the one nothing in this app could answer. See
+// src/lib/muscleVolume.ts for why it is a join against the catalogue rather
+// than a column on the workout row.
+import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
+import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 
 /* ── the read ─────────────────────────────────────────────────────────────
  * Three states, never two. See the header.
@@ -620,6 +627,10 @@ export default function History() {
       ))}
     </Section>
 
+    {/* ── what you have actually trained ─────────────────────────────────── */}
+    <Rule />
+    <MuscleSection log={log} unit={wu} weightSeries={weightSeries} />
+
     {/* ── one movement, followed ─────────────────────────────────────────── */}
     {/* The charts above answer "how far have I come"; this answers "where am I
         on bench press", which is the question that actually decides what goes
@@ -639,4 +650,125 @@ export default function History() {
       voice={{ they: 'You', their: 'your', have: 'have' }}
     />
   </>);
+}
+
+/**
+ * Volume by muscle group, over a window the reader picks.
+ *
+ * Its own component because it has its own READ — the exercise catalogue —
+ * with its own three states, and the page around it is drawn from a read that
+ * has already landed. Folding a second, later, independently-failing read into
+ * that render is how a screen comes to show half a board with nothing saying
+ * which half.
+ *
+ * Two windows and no more. Seven days answers "have I trained legs this week",
+ * which is the question; twenty-eight answers "have I trained legs at all this
+ * block", which is the one somebody asks next when the answer to the first is
+ * no.
+ */
+function MuscleSection({ log, unit, weightSeries }: {
+  log: WorkoutEntry[]; unit: WeightUnit; weightSeries: { t: string; v: number }[];
+}) {
+  const t = useTheme();
+  const [days, setDays] = useState<7 | 28>(7);
+  const { rows, status, signedOut } = useExerciseCatalogue();
+  const board = useMemo(
+    () => muscleBoard(log, rows, {
+      sinceMs: Date.now() - days * 86_400_000,
+      history: weightSeries,
+      // Only a whole read may support "you have not trained this". A truncated
+      // or failed catalogue is a list we have not seen the end of, and naming
+      // an absent group off it is a statement about somebody's training drawn
+      // from a query that did not finish.
+      catalogueWhole: status === 'ready',
+    }),
+    [log, rows, days, weightSeries, status],
+  );
+  const note = unmatchedNote(board);
+  const trained = board.groups.reduce((a, g) => a + g.sets, 0);
+  const most = board.groups.length ? board.groups[0].sets : 0;
+
+  return (
+    <Section>
+      <SectionHead title="By Muscle Group" note={status === 'ready' ? `last ${days} days` : undefined} />
+      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+        {([7, 28] as const).map((d) => {
+          const on = days === d;
+          return (
+            <Pressable key={d} onPress={() => setDays(d)}
+              accessibilityRole="button" accessibilityState={{ selected: on }}
+              accessibilityLabel={`Last ${d} days`}
+              style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: 999, backgroundColor: on ? t.brand : t.surface2 }}>
+              <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{d} days</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* The catalogue read has three answers and only one of them is a board.
+          "Nothing trained" off a failed read is the sentence that would send
+          somebody to redo a leg session they already did. */}
+      {status === 'loading' ? (
+        <Text style={{ ...ty.label, color: t.ink3 }}>Reading the exercise catalogue&hellip;</Text>
+      ) : status === 'error' || signedOut ? (
+        <Text style={{ ...ty.label, color: t.ink3 }}>
+          {signedOut
+            ? 'The exercise catalogue is only available once you are signed in, so we cannot say which muscles your sessions worked.'
+            : 'We could not read the exercise catalogue, so we cannot say which muscles your sessions worked. Your training is not affected and nothing is missing from it.'}
+        </Text>
+      ) : !board.groups.length ? (
+        <Text style={{ ...ty.body, color: t.ink2 }}>
+          {note
+            ? `Nothing in the last ${days} days could be matched to a muscle group. ${note}`
+            : `Nothing logged with sets in the last ${days} days, so there is no muscle work to break down. Cardio is logged as time and distance rather than as sets and does not appear here.`}
+        </Text>
+      ) : (<>
+        {board.groups.map((g) => (
+          <View key={g.group} style={{ marginTop: sp.md }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{g.group}</Text>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+                {g.sets} set{g.sets === 1 ? '' : 's'}
+                {g.volumeKg != null ? ` · ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}
+              </Text>
+            </View>
+            {/* The bar is a share of the most-trained group, so it compares
+                muscles against each other and never against a target nobody
+                set. There is no right number of sets for a back, and drawing
+                one would be this screen inventing a programme. */}
+            <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
+              <View style={{ height: 3, borderRadius: 2, width: `${most ? Math.round((g.sets / most) * 100) : 0}%`, backgroundColor: t.brand }} />
+            </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+              {g.exercises.slice(0, 3).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
+            </Text>
+            {g.unpricedSets > 0 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                {tonnageNote({ kg: g.volumeKg ?? 0, unknownSets: g.unpricedSets })}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+          {trained} set{trained === 1 ? '' : 's'} across {board.groups.length} muscle group
+          {board.groups.length === 1 ? '' : 's'} in the last {days} days. Bars compare the groups
+          with each other, not with a target — there is no right number of sets and this screen
+          does not pretend to know one.
+        </Text>
+
+        {/* An absence stated only where the read can carry it. */}
+        {board.untrained && board.untrained.length ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            Nothing logged for {board.untrained.slice(0, 6).join(', ')}
+            {board.untrained.length > 6 ? `, and ${board.untrained.length - 6} more` : ''} in this window.
+          </Text>
+        ) : null}
+
+        {note ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text>
+        ) : null}
+      </>)}
+    </Section>
+  );
 }

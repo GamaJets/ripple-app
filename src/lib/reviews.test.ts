@@ -9,6 +9,9 @@ import {
   ratingDisplay, formatAverage, ratingLine, reviewGate, reviewGateNote,
   reviewListState, gymLine, reviewerLabel, writeOutcome, asWriteResult,
   validateReview, draftProblemText, validateReply, unansweredCount,
+  askMoment, askMomentNote, reviewAskDraft, askListNote,
+  SETTLED_DAYS, GOAL_FRESH_DAYS, ASK_IS_UNFILTERED, WHO_REVIEWED_IS_HIDDEN,
+  type AskCandidate,
   MIN_FOR_AVERAGE, MIN_RATING, MAX_RATING, MAX_BODY,
   IDENTITY_NOTE, EDIT_NOTE, WITHDRAW_NOTE, REPLY_NOTE,
   type Review, type WriteResult,
@@ -181,6 +184,103 @@ eq(unansweredCount([rev({ coachReply: '   ' })], 'ready'), 1, 'a blank reply is 
 eq(unansweredCount([rev({})], 'error'), null, 'nothing is counted off a read that failed');
 eq(unansweredCount([rev({})], 'partial'), null,
   'nor off a truncated one — "all answered" would be the wrong thing to tell a coach');
+
+
+/* ── asking for one ─────────────────────────────────────────────────────── */
+
+// The refusal that is not negotiable. Asking only the clients who look happy is
+// review-gating: against Apple's guidelines, against Google's, and a lie told
+// to everybody who reads the average afterwards. Nothing in `AskCandidate`
+// carries a rating, a drift band or anything else that could stand in for one,
+// and that absence is the enforcement.
+const ASK_DAY = 86_400_000;
+const NOW_ASK = Date.parse('2026-09-01T12:00:00.000Z');
+const cand = (o: Partial<AskCandidate>): AskCandidate => ({
+  clientId: 'c1', name: 'Sarah Ahmed', since: null, goalReachedAt: null, asked: false, ...o,
+});
+
+// A goal they set themselves and reached is the strongest moment there is: they
+// have just told the app, in their own words, that the thing they came for
+// happened.
+eq(askMoment(cand({ goalReachedAt: new Date(NOW_ASK - 2 * ASK_DAY).toISOString() }), NOW_ASK),
+  'goal-reached', 'a goal reached two days ago is the moment');
+eq(askMoment(cand({ goalReachedAt: new Date(NOW_ASK - (GOAL_FRESH_DAYS + 5) * ASK_DAY).toISOString() }), NOW_ASK),
+  'none', 'and a goal reached three weeks ago is not — that is a prompt, not a conversation');
+
+// Long enough on the book that there is something to write about.
+eq(askMoment(cand({ since: new Date(NOW_ASK - (SETTLED_DAYS + 10) * ASK_DAY).toISOString() }), NOW_ASK),
+  'settled', 'a long steady record is a moment');
+eq(askMoment(cand({ since: new Date(NOW_ASK - 20 * ASK_DAY).toISOString() }), NOW_ASK),
+  'none', 'three weeks in is asking somebody to review a plan they are still on');
+
+// A goal outranks a settled record: a client who is both is asked about the goal.
+eq(askMoment(cand({
+  since: new Date(NOW_ASK - 200 * ASK_DAY).toISOString(),
+  goalReachedAt: new Date(NOW_ASK - 1 * ASK_DAY).toISOString(),
+}), NOW_ASK), 'goal-reached', 'the goal wins over the tenure');
+
+// THE two refusals.
+eq(askMoment(cand({ since: new Date(NOW_ASK - 300 * ASK_DAY).toISOString(), asked: true }), NOW_ASK),
+  'none', 'somebody the coach has already asked is never asked again');
+eq(askMoment(cand({ since: new Date(NOW_ASK - 300 * ASK_DAY).toISOString(), asked: null }), NOW_ASK),
+  'none', 'and neither is somebody the record could not be read for — a failed read must not produce a prompt');
+// The question this field WANTS to be is "have they already reviewed me", and
+// the coach's app cannot answer it: `coach_reviews` has no policy and no grant
+// to authenticated, because RLS selects rows and not columns and any policy
+// wide enough to show a review to a stranger also hands over `client_id`. That
+// refusal is right and this feature does not erode it.
+ok(/cannot tell you who/i.test(WHO_REVIEWED_IS_HIDDEN), 'and the screen says so plainly');
+ok(/may still appear/i.test(WHO_REVIEWED_IS_HIDDEN), 'including what a coach will actually notice');
+// An undateable join is not a long one. A client the roster cannot date is as
+// likely to have joined on Tuesday as last year.
+eq(askMoment(cand({ since: null }), NOW_ASK), 'none', 'an unknown join date is no moment at all');
+eq(askMoment(cand({ since: 'not a date' }), NOW_ASK), 'none', 'and neither is an unparseable one');
+// A goal dated in the future — a wrong clock, a bad write — is not a moment.
+eq(askMoment(cand({ goalReachedAt: new Date(NOW_ASK + 5 * ASK_DAY).toISOString() }), NOW_ASK),
+  'none', 'a goal dated in the future is not a moment that has happened');
+
+/* ── the words ──────────────────────────────────────────────────────────── */
+
+for (const m of ['goal-reached', 'settled', 'none'] as const) {
+  const note = askMomentNote(m, cand({
+    since: new Date(NOW_ASK - 100 * ASK_DAY).toISOString(),
+    goalReachedAt: new Date(NOW_ASK - 3 * ASK_DAY).toISOString(),
+  }), NOW_ASK);
+  ok(note.endsWith('.'), `${m} has a sentence`);
+  ok(!note.includes('!'), `${m} does not shout`);
+  ok(!/undefined|null|NaN/.test(note), `${m} renders no placeholder`);
+}
+
+const draft = reviewAskDraft('goal-reached', 'Sarah Ahmed', 'Tim Rodgers');
+ok(draft.includes('Sarah'), 'the draft greets them');
+ok(draft.includes('Tim'), 'and signs off as the coach');
+ok(/congratulations/i.test(draft), 'and a goal-reached draft opens on the goal');
+ok(!/congratulations/i.test(reviewAskDraft('settled', 'Sarah', 'Tim')),
+  'while a settled one does not congratulate somebody on nothing in particular');
+// THE assertion about the words. "A good review" and "a review" are two
+// different requests, and only one of them leaves an average worth reading.
+ok(!/(good|great|five|5[ -]star|positive|glowing|kind) (word|review)/i.test(draft),
+  'the draft asks for a review and never for a good one');
+ok(/whatever you actually think/i.test(draft), 'and says so out loud');
+ok(!draft.includes('!'), 'and does not shout');
+ok(!/undefined|null/.test(reviewAskDraft('settled', null, null)),
+  'a nameless client and a nameless coach still produce a readable message');
+
+/* ── the list note ──────────────────────────────────────────────────────── */
+
+eq(askListNote(null), 'Working out who is worth asking…', 'null in, null out');
+ok(askListNote([{ moment: 'none' as const }]).includes('real answer'),
+  'an empty list is a real answer rather than an apology');
+ok(askListNote([{ moment: 'none' as const }]).includes('monthly'),
+  'and it says why this is not a monthly sweep');
+ok(askListNote([{ moment: 'settled' as const }]).includes('1 client is'), 'one, singular');
+ok(askListNote([{ moment: 'settled' as const }, { moment: 'goal-reached' as const }]).includes('2 clients are'), 'two, plural');
+ok(askListNote([{ moment: 'settled' as const }]).includes('send it yourself'),
+  'and every state says the app sends nothing');
+
+ok(/never will/i.test(ASK_IS_UNFILTERED), 'the no-gating sentence is not hedged');
+ok(!/[!]/.test(ASK_IS_UNFILTERED), 'and does not shout');
+
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`reviews: ok (average from ${MIN_FOR_AVERAGE}, ${RESULTS.length} outcomes)`);

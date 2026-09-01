@@ -122,12 +122,43 @@ export interface ReadinessBreakdownInput {
   hydrationStatus: LoadStatus;
   /** 0..1 as passed to readinessScore, or null when it was not scored. */
   hydrationPct: number | null;
+  /**
+   * 0..100 as passed to readinessScore, or null when no device published one.
+   *
+   * Optional so that the three callers this shipped alongside do not all have
+   * to be edited in the same commit to keep compiling — an omitted field means
+   * the same as an explicit null, which is what every caller without a device
+   * would be passing anyway.
+   */
+  recoveryPct?: number | null;
+  /**
+   * What to CALL the device the score came from — "WHOOP", "Oura Ring" — or
+   * null when there is nothing to name.
+   *
+   * The name is not decoration. WHOOP calls this figure recovery and Oura calls
+   * it readiness, both on 0–100, and a member checking Repple's number against
+   * the app on their other home screen needs to know which of the two they are
+   * being shown. An unattributed "Recovery 62%" inside a screen that also
+   * produces its own readiness score is two different numbers wearing one word.
+   */
+  recoveryFrom?: string | null;
+  /**
+   * Whether a device that COULD have published a recovery score is connected.
+   *
+   * This is the whole reason a null recoveryPct is not one sentence. Nobody
+   * connected — nothing is missing, and saying "your recovery could not be
+   * read" to somebody who owns no strap invents a fault. Connected and null —
+   * either the device does not score recovery, or today's sync has not landed,
+   * and the member can do something about the second.
+   */
+  recoveryDeviceConnected?: boolean;
   /** As passed to readinessScore: null means the training log was unreadable. */
   workoutsLast2Days: number | null;
 }
 
 export interface ReadinessBreakdown {
-  /** One per signal, in scale order: sleep, hydration, recent sessions. */
+  /** One per signal, in scale order: sleep, recovery, hydration, recent
+   *  sessions. Scale order is order of weight — see Readiness.from. */
   lines: ReadinessInputLine[];
   /**
    * How much of what the score COULD have been built from was actually read.
@@ -245,6 +276,43 @@ function sleepLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInpu
   };
 }
 
+/**
+ * The device's own verdict, or the reason there isn't one.
+ *
+ * Four outcomes and they are not interchangeable, which is the same discipline
+ * `sleepLine` applies one function up. The one that matters most is the last:
+ * a member with a WHOOP whose sync has not landed is told their device did not
+ * report today, because that is something they can go and fix in the WHOOP app
+ * — and the member with no device at all is told nothing of the kind, because
+ * for them nothing is wrong.
+ */
+function recoveryLine(i: ReadinessBreakdownInput): ReadinessInputLine {
+  // Title Case, and "Device Recovery" rather than "Recovery": this screen is
+  // reached from a hero labelled Readiness and sits on a screen called
+  // Recovery, so a bare "Recovery" row would be the third use of the word on
+  // one screen for the third different thing.
+  const title = 'Device Recovery';
+  const pct = i.recoveryPct;
+  if (pct != null && Number.isFinite(pct)) {
+    const who = i.recoveryFrom ? `${i.recoveryFrom}'s ` : '';
+    // The vendor's own word for its own figure. Oura ships this as readiness
+    // and WHOOP as recovery, and printing one vendor's word over the other's
+    // number is how a member concludes the app is showing them something else.
+    const word = i.recoveryFrom === 'Oura Ring' ? 'readiness score' : 'recovery score';
+    return { key: 'recovery', title, state: 'scored', detail: `${who}${word}, ${Math.round(pct)} out of 100` };
+  }
+  if (!i.recoveryDeviceConnected) {
+    return {
+      key: 'recovery', title, state: 'not-tracked',
+      detail: 'not in the scale — no connected device scores recovery',
+    };
+  }
+  return {
+    key: 'recovery', title, state: 'unread',
+    detail: 'not in the scale — your device has not reported a recovery score today',
+  };
+}
+
 function hydrationLine(i: ReadinessBreakdownInput): ReadinessInputLine {
   const title = 'Hydration';
   const pct = i.hydrationPct;
@@ -339,7 +407,7 @@ function caveatsFor(i: ReadinessBreakdownInput, trust: LoadStatus): string[] {
  */
 export function readinessBreakdown(i: ReadinessBreakdownInput): ReadinessBreakdown {
   const trust = deviceSleepTrust(i.deviceStatus, i.sources);
-  const lines = [sleepLine(i, trust), hydrationLine(i), loadLine(i)];
+  const lines = [sleepLine(i, trust), recoveryLine(i), hydrationLine(i), loadLine(i)];
   const caveats = caveatsFor(i, trust);
 
   // With no score, the status is about the READ that failed to produce one —

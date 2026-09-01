@@ -266,3 +266,92 @@ export async function joinByCode(input: string, mode: CoachedMode = 'online'): P
     return { ok: false, reason: spentCodeMessage(e?.message) ?? joinErrorMessage(e?.message) };
   }
 }
+
+
+/* ── a code that costs nothing ─────────────────────────────────────────────
+ *
+ * app/(trainer)/ad-spend.tsx reports every code with no spend against it as
+ * "cost unknown", on the reasonable premise that an unpriced channel is a gap
+ * in the record. For a paid channel it is. For a code a coach read out at the
+ * end of a class, put in an Instagram caption, or printed on a card they had
+ * anyway, it is not — the cost is nothing, and that is a real answer.
+ *
+ * Today the two are indistinguishable, so a coach with four organic codes and
+ * one unpriced ad reads a list of five gaps, decides the section is noise, and
+ * stops looking at it — which is where the one that mattered was.
+ *
+ * ── Why not simply record a spend of zero ────────────────────────────────
+ *
+ * A row in `coach_code_spend` with `cents = 0` says "I have measured this
+ * channel and it cost nothing THIS PERIOD". `is_organic` says "this channel has
+ * no cost, ever". They behave identically in an arithmetic sum and differently
+ * in every sentence: only the second can honestly be left out of "codes you
+ * have not priced yet", and the first would have to be re-entered every month
+ * to keep saying so.
+ */
+
+/** Which of the caller's codes are marked as costing nothing.
+ *
+ *  A Set rather than a map of booleans, and the DISTINCTION the caller needs is
+ *  carried by the return being nullable: null is "we could not read it", which
+ *  must render as "cost unknown" exactly as it did before this existed. An
+ *  empty Set is a settled read that found no organic codes. */
+export async function fetchOrganicCodes(): Promise<Set<string> | null> {
+  if (!USE_SUPABASE) return null;
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id;
+    if (!uid) return null;
+    // Read straight from the table rather than through `my_join_codes()`. That
+    // RPC's return type is consumed by three screens, and widening it would be
+    // a drop-and-recreate of a function every one of them depends on for the
+    // sake of one boolean this screen alone reads. `coach_join_codes_owner_read`
+    // already admits the caller's own rows.
+    const { data, error } = await supabase
+      .from('coach_join_codes').select('id, is_organic').eq('trainer_id', uid);
+    if (error) { reportError('joinCode.organic.read', error); return null; }
+    const out = new Set<string>();
+    for (const r of (data ?? []) as { id: unknown; is_organic: unknown }[]) {
+      if (r?.is_organic === true && typeof r.id === 'string') out.add(r.id);
+    }
+    return out;
+  } catch (e) {
+    reportError('joinCode.organic.read', e);
+    return null;
+  }
+}
+
+/**
+ * Mark one of the coach's own codes as costing nothing, or stop doing so.
+ *
+ * Through `set_code_organic()` and NOT a direct update. Part 152 revokes
+ * INSERT, UPDATE and DELETE on `coach_join_codes` from `authenticated`
+ * outright, and a PostgREST update matching zero rows is not an error
+ * (src/lib/wroteRows.ts) — so a direct write here would have reported success
+ * and changed nothing, forever, which is the exact failure part 153 describes
+ * finding on the owner's brand screen.
+ */
+export async function setCodeOrganic(
+  id: string,
+  organic: boolean,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!USE_SUPABASE) return { ok: false, reason: 'Not signed in, so nothing was changed.' };
+  try {
+    const { data, error } = await supabase.rpc('set_code_organic', { p_id: id, p_organic: organic });
+    if (error) {
+      reportError('joinCode.organic.write', error);
+      return { ok: false, reason: 'That did not save, so the code is unchanged.' };
+    }
+    // The function returns false for "not yours" and for "no such code", and
+    // both are real answers rather than faults. Reporting either as saved would
+    // leave a coach believing a channel is marked free when the next screen
+    // will still call it unknown.
+    if (data !== true) {
+      return { ok: false, reason: 'That code could not be found on your account, so nothing was changed.' };
+    }
+    return { ok: true };
+  } catch (e) {
+    reportError('joinCode.organic.write', e);
+    return { ok: false, reason: 'That did not save, so the code is unchanged.' };
+  }
+}

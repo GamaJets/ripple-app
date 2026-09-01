@@ -55,8 +55,12 @@ import {
 } from '../../src/lib/coachCredentials';
 import {
   reviewListState, reviewerLabel, gymLine, unansweredCount, validateReply,
+  askMomentNote, reviewAskDraft, askListNote, ASK_IS_UNFILTERED, WHO_REVIEWED_IS_HIDDEN,
   MAX_RATING, MAX_REPLY, REPLY_NOTE, type Review,
 } from '../../src/lib/reviews';
+import { useReviewAsks, type AskRow } from '../../src/ui/reviewAsks';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { useThread } from '../../src/ui/messaging';
 
 const EMPTY: CredentialDraft = {
   kind: 'certification', title: '', issuer: '', reference: '', issuedOn: '', expiresOn: '',
@@ -299,6 +303,30 @@ export default function TrainerCredentials() {
 
         <Rule />
 
+        {/* ── asking for one ─────────────────────────────────────────────────
+            The shelf was built and nothing ever offered to fill it: a coach
+            could read their reviews and reply to them, and `askForReview`
+            appeared nowhere in this repository. A review arrives only if a
+            client thinks of it unprompted, which most of them never will.
+
+            Two rules, and both are the nudge screen's:
+
+            · NOTHING IS SENT FROM HERE. What comes out is a draft, in a box,
+              that the coach edits and sends with their own thumb through the
+              ordinary thread. A message that appears to come from a person who
+              did not write it is a defect this codebase has already removed
+              once.
+            · NOT ON A TIMER. Asked at an evidenced moment — a goal they marked
+              reached, or a long enough record to have something to say. A
+              monthly "rate your coach" sweep is how a five-star business
+              collects two-star reviews from people having a bad week.
+
+            And the refusal that is not negotiable: this list is NOT filtered by
+            who is likely to rate well. See `ASK_IS_UNFILTERED`. */}
+        <ReviewAsks />
+
+        <Rule />
+
         {/* ── reviews, and the answer back ───────────────────────────────── */}
         <Section>
           <SectionHead
@@ -519,6 +547,169 @@ export default function TrainerCredentials() {
           ) : null}
         </View>
       </Modal>
+    </SafeAreaView>
+  );
+}
+
+
+/* ── who is worth asking, and the draft ─────────────────────────────────────── */
+
+/**
+ * The list, and one sheet.
+ *
+ * Its own component and its own reads: this screen is about credentials and
+ * reviews, and folding a roster read plus a goals read into its load would make
+ * opening it wait on both. Renders nothing at all while the reads are in
+ * flight, for src/ui/ScreenHelp.tsx's reason — a section that appears for one
+ * frame and vanishes is worse than one that arrives a frame late.
+ */
+function ReviewAsks() {
+  const t = useTheme();
+  const asks = useReviewAsks();
+  const [drafting, setDrafting] = useState<AskRow | null>(null);
+
+  const rows = asks.rows;
+  if (asks.status === 'loading' || rows == null) return null;
+  const worth = rows.filter((r) => r.moment !== 'none');
+
+  return (
+    <Section>
+      <SectionHead title="Worth Asking" note={worth.length ? String(worth.length) : undefined} />
+      <Text style={{ ...ty.label, color: t.ink2 }}>{askListNote(rows)}</Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{ASK_IS_UNFILTERED}</Text>
+
+      {/* The list is shorter than it should be, for a reason that is not about
+          the clients. Said out loud rather than left as a short list. */}
+      {asks.askedUnread ? (
+        <View style={{ marginTop: sp.md }}>
+          <Flag tone={t.warn}>
+            Who you have already asked could not be read on this phone, so nobody is suggested — this is not a book
+            with nobody worth asking in it. Nothing has been sent either way.
+          </Flag>
+        </View>
+      ) : null}
+      {asks.status === 'partial' ? (
+        <View style={{ marginTop: sp.md }}>
+          <Flag tone={t.warn}>
+            Only part of your clients’ goals came back, so somebody who has just reached one may be missing from this
+            list. Nobody here is wrong; the list is short.
+          </Flag>
+        </View>
+      ) : null}
+
+      {worth.length ? (
+        <View style={{ marginTop: sp.md }}>
+          {worth.map((r, i) => (
+            <View key={r.clientId}
+              style={{ paddingVertical: sp.md, borderTopWidth: i ? 1 : 0, borderTopColor: t.ring }}>
+              <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{r.name ?? 'Unnamed client'}</Text>
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{askMomentNote(r.moment, r.candidate)}</Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
+                <Ghost label="Write the Ask"
+                  a11yLabel={`Write a review request to ${r.name ?? 'this client'}`}
+                  onPress={() => setDrafting(r)} />
+              </View>
+            </View>
+          ))}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{WHO_REVIEWED_IS_HIDDEN}</Text>
+        </View>
+      ) : null}
+
+      <Modal visible={!!drafting} animationType="slide" onRequestClose={() => setDrafting(null)}>
+        {drafting ? (
+          <AskSheet
+            row={drafting}
+            onClose={() => setDrafting(null)}
+            onSent={async () => {
+              // AFTER the message has landed, never before. A record written
+              // first would mark somebody asked who was never reached, and they
+              // would then never be suggested again. The same ordering
+              // app/(trainer)/nudges.tsx keeps for `client_nudges`.
+              await asks.markAsked(drafting.clientId);
+              setDrafting(null);
+            }}
+          />
+        ) : null}
+      </Modal>
+    </Section>
+  );
+}
+
+/**
+ * The draft, in a box, before anybody has sent anything.
+ *
+ * `useThread` is called here rather than in the list because it is keyed on one
+ * client and opens a realtime channel for that thread; hoisting it would mean
+ * the screen held a subscription to whichever client was selected last, for as
+ * long as it was open. The same reasoning `DraftSheet` gives on the nudge
+ * screen.
+ */
+function AskSheet({ row, onClose, onSent }: {
+  row: AskRow;
+  onClose: () => void;
+  onSent: () => Promise<void>;
+}) {
+  const t = useTheme();
+  const { name: coachName } = useMyTrainerProfile();
+  const { send } = useThread(row.clientId, 'coach');
+  const [body, setBody] = useState(reviewAskDraft(row.moment, row.name, coachName));
+  const [sending, setSending] = useState(false);
+
+  const doSend = async () => {
+    const text = body.trim();
+    if (!text || sending) return;
+    setSending(true);
+    const r = await send(text);
+    setSending(false);
+    if (!r.ok) {
+      Alert.alert('Not sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
+      return;
+    }
+    await onSent();
+  };
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={onClose} a11yLabel="Close without sending" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — nothing sent yet</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{row.name ?? 'Client'}</Text>
+          </View>
+        </View>
+
+        <Section>
+          <Text style={{ ...ty.label, color: t.ink2 }}>{askMomentNote(row.moment, row.candidate)}</Text>
+        </Section>
+
+        <Section>
+          <SectionHead title="Your Message" note="edit before sending" />
+          <TextInput
+            value={body}
+            onChangeText={setBody}
+            multiline
+            accessibilityLabel="Message asking for a review"
+            placeholderTextColor={t.ink3}
+            style={{
+              ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
+              padding: sp.md, minHeight: 150, textAlignVertical: 'top',
+            }}
+          />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            This goes to {row.name ?? 'them'} from you, in your ordinary chat thread. It is not sent until you press
+            Send, and what they write goes up exactly as they write it — at every rating.
+          </Text>
+        </Section>
+
+        <Section>
+          <Cta label={sending ? 'Sending…' : 'Send'} onPress={() => { void doSend(); }} wide
+            disabled={sending || !body.trim()} />
+          <View style={{ marginTop: sp.md }}>
+            <Ghost label="Close Without Sending" onPress={onClose} />
+          </View>
+        </Section>
+      </ScrollView>
     </SafeAreaView>
   );
 }

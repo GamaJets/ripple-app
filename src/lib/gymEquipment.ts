@@ -15,6 +15,7 @@
 // says why — it never reports 0, which would tell a gym its class cannot run.
 
 import { assertWrote } from './wroteRows';
+import { assertWhole, capLimit } from './rowCap';
 
 type Queryable = { from: (table: string) => any };
 
@@ -33,7 +34,15 @@ export interface Equipment {
   serviceIntervalDays: number | null;
   /** Null with an interval set means the schedule exists but nothing was recorded. */
   lastServicedOn: string | null;
+  /** The standing description of the machine. `recordService` CLEARS it, which
+   *  is why the reason a machine is out of action does NOT live here. */
   note: string | null;
+  /** Why it is out of action, in the words of whoever took it out. Null on a
+   *  machine in service. */
+  outOfServiceReason: string | null;
+  /** When it went out. "How long has that rower been broken" is the question an
+   *  owner actually asks, and a status column alone cannot answer it. */
+  outOfServiceSince: string | null;
 }
 
 /* ── pure rules (no database, so they are testable and shared) ─────────────── */
@@ -213,7 +222,7 @@ export function needsAttention(items: Equipment[], today: string): { item: Equip
 export async function fetchEquipment(sb: Queryable, tenantId: string): Promise<Equipment[]> {
   const { data, error } = await sb
     .from('gym_equipment')
-    .select('id, name, category, identifier, quantity, status, purchased_on, service_interval_days, last_serviced_on, note')
+    .select('id, name, category, identifier, quantity, status, purchased_on, service_interval_days, last_serviced_on, note, out_of_service_reason, out_of_service_since')
     .eq('tenant_id', tenantId)
     .order('category', { ascending: true })
     .order('name', { ascending: true });
@@ -229,6 +238,8 @@ export async function fetchEquipment(sb: Queryable, tenantId: string): Promise<E
     serviceIntervalDays: r.service_interval_days ?? null,
     lastServicedOn: r.last_serviced_on ?? null,
     note: r.note ?? null,
+    outOfServiceReason: r.out_of_service_reason ?? null,
+    outOfServiceSince: r.out_of_service_since ?? null,
   }));
 }
 
@@ -260,15 +271,48 @@ export async function addEquipment(sb: Queryable, tenantId: string, e: NewEquipm
   if (error) throw error;
 }
 
-/** Take a machine out of action, or put it back. Staff can do this; it is why they are standing there. */
+/**
+ * Take a machine out of action, or put it back.
+ *
+ * Staff can do this; it is why they are standing there.
+ *
+ * ── `reason` is a different column from `note`, and it has to be ──────────
+ *
+ * `note` is the standing description of the machine — "bought second hand,
+ * serial plate missing" — and `recordService` CLEARS it, on the grounds that
+ * whatever it said is presumably done. So a reason stored there disappears the
+ * first time anybody records a service, taking the description with it. Neither
+ * surface ever passed a note at all, and both then rendered "no reason
+ * recorded" about a column nothing could write.
+ *
+ * `out_of_service_reason` and `out_of_service_since` (supabase/parts/186) are
+ * where the reason lives now. `since` is what answers the question an owner
+ * actually asks — how long has that rower been broken — which a status column
+ * alone never could.
+ */
 export async function setStatus(
   sb: Queryable,
   id: string,
   status: EquipmentStatus,
   note?: string | null,
+  reason?: string | null,
 ): Promise<void> {
   const patch: Record<string, unknown> = { status };
   if (note !== undefined) patch.note = note;
+  if (status === 'out_of_service') {
+    if (reason !== undefined) patch.out_of_service_reason = reason;
+    // Stamped only on the way OUT, and only when it is not already out: a
+    // machine reported again by a second member of staff must not have its
+    // clock reset to today, because the number this column exists to produce is
+    // how long it has been broken.
+    patch.out_of_service_since = new Date().toISOString().slice(0, 10);
+  } else {
+    // Back in service, or retired. Both clear the reason and the clock —
+    // leaving them would make a working machine read as out of action on every
+    // screen that renders the reason.
+    patch.out_of_service_reason = null;
+    patch.out_of_service_since = null;
+  }
   // Counted, because an UPDATE matching zero rows is not an error — see
   // src/lib/wroteRows.ts. This is the write on the register with the most
   // physical consequence: a machine taken out of service is a machine nobody is
@@ -281,16 +325,198 @@ export async function setStatus(
   assertWrote(status === 'out_of_service' ? 'Taking that out of service' : 'That equipment', r);
 }
 
-/** Record a service. Clears the note, since whatever it said is presumably done. */
-export async function recordService(sb: Queryable, id: string, onIso?: string): Promise<void> {
+/**
+ * Record a service, and keep a record OF it.
+ *
+ * This used to be the whole of a gym's maintenance record: one date,
+ * overwritten, and the note deleted. Six services in three years left one date
+ * and no engineer, no cost, no findings and nothing about the five before it —
+ * so "when was this last looked at, and how often has it needed looking at"
+ * was unanswerable, which is precisely the question that tells a broken machine
+ * from a machine that keeps breaking.
+ *
+ * The log row is written FIRST and the cached date second. If the second write
+ * fails the history has an entry the machine's own `last_serviced_on` does not
+ * reflect — visible, wrong, and fixable. The other order would leave the
+ * machine looking serviced with nothing recording what was done, which is the
+ * state this function is being fixed out of.
+ *
+ * `last_serviced_on` is deliberately NOT dropped in favour of the log. It is
+ * what `serviceState` computes the due date from and it is read on two screens
+ * that list two hundred machines; turning it into a join against the newest log
+ * row would cost that on every render. It is the cached answer and the log is
+ * the evidence — the same relationship `payroll_settlements` has with the
+ * sessions it stamped.
+ */
+export async function recordService(
+  sb: Queryable,
+  id: string,
+  onIso?: string,
+  entry?: {
+    tenantId: string;
+    equipmentLabel: string | null;
+    kind?: LogKind;
+    performedBy?: string | null;
+    findings?: string | null;
+    costCents?: number | null;
+    currency?: string | null;
+    recordedBy?: string | null;
+  },
+): Promise<void> {
+  const day = onIso ?? new Date().toISOString().slice(0, 10);
+
+  if (entry) {
+    await addLogEntry(sb, entry.tenantId, {
+      equipmentId: id,
+      equipmentLabel: entry.equipmentLabel,
+      kind: entry.kind ?? 'service',
+      happenedOn: day,
+      performedBy: entry.performedBy ?? null,
+      findings: entry.findings ?? null,
+      costCents: entry.costCents ?? null,
+      currency: entry.currency ?? null,
+      recordedBy: entry.recordedBy ?? null,
+    });
+  }
+
   // Counted for the same reason, and with a maintenance record's own edge: a
   // service that was never written leaves the machine on the due list, so the
   // next person to look reads it as overdue and services it twice — or, having
   // been told it was recorded, trusts the date that is not there.
   const r = await sb
     .from('gym_equipment')
-    .update({ last_serviced_on: onIso ?? new Date().toISOString().slice(0, 10), note: null }, { count: 'exact' })
+    .update({ last_serviced_on: day, note: null }, { count: 'exact' })
     .eq('id', id);
   if (r.error) throw r.error;
   assertWrote('That service', r);
+}
+
+/* ── the history a register did not have ───────────────────────────────────── */
+
+export type LogKind = 'service' | 'repair' | 'inspection' | 'clean' | 'incident';
+
+export const LOG_KINDS: readonly LogKind[] =
+  ['service', 'repair', 'inspection', 'clean', 'incident'] as const;
+
+/**
+ * Five kinds in one table, because the answer to "what has happened to this
+ * rower" is all five interleaved.
+ *
+ * `incident` earns its place beyond maintenance: an accident book is a
+ * statutory requirement in most jurisdictions this product is sold into, and
+ * the place a gym looks for one is the machine it happened on. An incident with
+ * no machine — somebody slipping on a wet floor — is recorded with a null
+ * `equipment_id`, which is why that column is nullable.
+ */
+export const LOG_LABEL: Record<LogKind, string> = {
+  service: 'Service',
+  repair: 'Repair',
+  inspection: 'Inspection',
+  clean: 'Deep clean',
+  incident: 'Incident or accident',
+};
+
+export interface LogEntry {
+  id: string;
+  equipmentId: string | null;
+  equipmentLabel: string | null;
+  kind: LogKind;
+  happenedOn: string;
+  performedBy: string | null;
+  findings: string | null;
+  costCents: number | null;
+  currency: string | null;
+  reportedTo: string | null;
+  recordedBy: string | null;
+  createdAt: string;
+}
+
+/** Why an entry cannot be recorded, or null when it can. */
+export function logBlocker(
+  kind: LogKind, equipmentId: string | null, findings: string, cost: string, currency: string | null,
+): string | null {
+  if (!equipmentId && !findings.trim()) {
+    return 'An entry has to be about something. With no machine chosen, say what happened — otherwise this is a blank row in an accident book.';
+  }
+  if (kind === 'incident' && !findings.trim()) {
+    return 'An incident with no account of it is not a record of anything. Write what happened while it is fresh.';
+  }
+  if (cost.trim()) {
+    if (!/^\d+(\.\d{1,2})?$/.test(cost.trim().replace(/[,\s]/g, ''))) {
+      return 'Enter the cost as a number — 240, or 87.50. Leave it empty where there was none to record.';
+    }
+    if (!currency) {
+      return 'This gym has not set its currency, so a cost cannot say what money it is in. Record the entry without one, or set the currency first.';
+    }
+  }
+  return null;
+}
+
+export async function fetchLog(
+  sb: Queryable, tenantId: string, equipmentId?: string,
+): Promise<LogEntry[]> {
+  let q = sb
+    .from('gym_equipment_log')
+    .select('id, equipment_id, equipment_label, kind, happened_on, performed_by, findings, cost_cents, currency, reported_to, recorded_by, created_at')
+    .eq('tenant_id', tenantId);
+  if (equipmentId) q = q.eq('equipment_id', equipmentId);
+  const { data, error } = await q
+    .order('happened_on', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(capLimit());
+  if (error) throw error;
+  // Capped and refusing. A truncated maintenance history is one that has
+  // silently lost its OLDEST entries — the ones that answer "how often has this
+  // needed looking at", which is the whole question the log exists for.
+  return assertWhole(data, "this gym's maintenance and incident log").map((r: any) => ({
+    id: r.id,
+    equipmentId: r.equipment_id ?? null,
+    equipmentLabel: r.equipment_label ?? null,
+    kind: (LOG_KINDS as readonly string[]).includes(r.kind) ? r.kind : 'service',
+    happenedOn: r.happened_on,
+    performedBy: r.performed_by ?? null,
+    findings: r.findings ?? null,
+    costCents: Number.isFinite(r.cost_cents) ? r.cost_cents : null,
+    currency: r.currency ?? null,
+    reportedTo: r.reported_to ?? null,
+    recordedBy: r.recorded_by ?? null,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function addLogEntry(
+  sb: Queryable,
+  tenantId: string,
+  e: {
+    equipmentId: string | null;
+    /** What the machine was called at the time. Kept because the reference is
+     *  `on delete set null` — retiring a machine must not turn its accident
+     *  record into "somebody was hurt by something". */
+    equipmentLabel: string | null;
+    kind: LogKind;
+    happenedOn: string;
+    performedBy: string | null;
+    findings: string | null;
+    costCents: number | null;
+    currency: string | null;
+    reportedTo?: string | null;
+    recordedBy: string | null;
+  },
+): Promise<void> {
+  const { error } = await sb.from('gym_equipment_log').insert({
+    tenant_id: tenantId,
+    equipment_id: e.equipmentId,
+    equipment_label: e.equipmentLabel,
+    kind: e.kind,
+    happened_on: e.happenedOn,
+    performed_by: e.performedBy?.trim() || null,
+    findings: e.findings?.trim() || null,
+    // Both together or neither. An amount with no unit is not an amount, and
+    // the CHECK in supabase/parts/186 refuses the pair coming apart.
+    cost_cents: e.costCents ?? null,
+    currency: e.costCents == null ? null : e.currency,
+    reported_to: e.reportedTo?.trim() || null,
+    recorded_by: e.recordedBy,
+  });
+  if (error) throw error;
 }

@@ -44,6 +44,11 @@
 //    is not a total. There is no default currency in this file and no symbol
 //    table; an amount whose currency did not come back says so.
 import { capLimit, capped } from './rowCap';
+// The zero-decimal list and the one function that knows how to turn minor units
+// into a printable figure. Imported rather than re-derived: a second copy of
+// that list is a second thing to forget a currency in, and this file used to
+// hold the forgetting — see the note on `amount` below.
+import { minorMoney } from './coachMoney';
 
 type Queryable = { from: (table: string) => any };
 
@@ -225,12 +230,37 @@ export function planStateOf(m: Pick<MemberMembership, 'planId' | 'plan'>): PlanS
  *
  * There is no default currency. A row with none says so rather than borrowing
  * one, because a receipt is the document a member would take to a dispute.
+ *
+ * ── THE DIVISION IS A PROPERTY OF THE CURRENCY, NOT OF MONEY ──────────────
+ *
+ * This function used to be `(cents / 100).toFixed(2)` with no reference to the
+ * currency at all, and that is wrong in sixteen of them. There is no sen in a
+ * yen: a ¥5,000 class fee is stored as 5000 minor units, so dividing by a
+ * hundred showed a member "JPY 50.00" for something they paid five thousand
+ * yen for — a hundredth of the real figure, on the one screen in the app whose
+ * whole job is to be the record of what they were charged. The same is true of
+ * KRW, VND, CLP and the rest of `ZERO_DECIMAL`.
+ *
+ * So the body is now `minorMoney` from src/lib/coachMoney.ts, which was already
+ * carrying the zero-decimal list for the coach's side of exactly this money.
+ * One list, tested in one place; a second copy here is a second thing to forget
+ * a currency in.
+ *
+ * ── AND WITH NO CURRENCY, THE SCALE IS UNKNOWN TOO ────────────────────────
+ *
+ * The no-currency branch used to divide anyway and print "50.00 (currency not
+ * recorded)". That parenthesis is honest about the unit and silent about the
+ * far bigger problem: without knowing the currency we do not know whether the
+ * stored integer is hundredths of something or whole units of it, so the
+ * decimal point itself is a guess. The stored integer is printed instead. It is
+ * the one number we actually hold, and it is not dressed up as an amount that
+ * has been converted into anything.
  */
 export function amount(cents: number | null | undefined, currency: string | null | undefined): string {
   if (cents == null || !Number.isFinite(cents)) return '—';
-  const v = (cents / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const c = (currency || '').trim().toUpperCase();
-  return c ? `${c} ${v}` : `${v} (currency not recorded)`;
+  const stated = minorMoney(cents, currency);
+  if (stated) return stated;
+  return `${cents.toLocaleString('en-GB')} (currency not recorded)`;
 }
 
 export interface CurrencyTotal {

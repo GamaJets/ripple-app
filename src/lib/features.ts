@@ -70,7 +70,11 @@ export const CLIENT_FEATURES: Feature[] = [
   // different things.
   { key: 'injury-doc', label: 'Read an Injury From a Document', note: 'Photograph a physio or scan report', route: '/(client)/injury-doc', icon: 'camera', area: 'train', keywords: 'injury document physio report scan letter mri x-ray upload photo ocr extract' },
   { key: 'scan-machine', label: 'Scan a Machine', note: 'Point at a gym machine and log the set', route: '/(client)/scan-machine', icon: 'camera', area: 'train', keywords: 'scan machine qr barcode code gym equipment log set cardio rower bike' },
-  { key: 'reminders', label: 'Reminders', note: 'Hydration & supplement nudges', route: '/(client)/reminders', icon: 'bell', area: 'train', keywords: 'reminder reminders water hydration supplement nudge alarm notification daily' },
+  { key: 'reminders', label: 'Reminders', note: 'Hydration, training, weigh-in and your own nudges', route: '/(client)/reminders', icon: 'bell', area: 'train', keywords: 'reminder reminders water hydration supplement training weigh-in photo nudge alarm notification daily weekday' },
+  // Listed separately from Reminders, because the two answer different
+  // questions and somebody looking to stop a 6am class alert will search for
+  // "notifications" and "quiet", not for "reminders".
+  { key: 'notification-prefs', label: 'Notifications', note: 'Which kinds reach you, and quiet hours', route: '/(client)/notification-prefs', icon: 'bell', area: 'train', keywords: 'notification notifications push quiet hours silence mute class session badge streak turn off' },
 
   // ── Nutrition ─────────────────────────────────────────────
   { key: 'foodlog', label: 'Food Log', note: 'Search, barcode or photo', route: '/(client)/foodlog', icon: 'meals', area: 'meals', keywords: 'calories macros barcode photo diary' },
@@ -230,7 +234,18 @@ export const TRAINER_NAV: NavItem[] = [
   // and 'churn' are the words a coach uses for this; 'drift' is the word the
   // code uses, and both have to find it.
   { key: 'nudges', label: 'Quiet Clients', note: 'Who has gone quiet, and a draft you send yourself', route: '/(trainer)/nudges', icon: 'bell', keywords: 'nudge nudges quiet drift lapsed inactive ghosting churn at risk reach out check in draft message' },
-  { key: 'invoices', label: 'Invoices', note: 'Issue a document for what somebody paid you', route: '/(trainer)/invoices', icon: 'grid', keywords: 'invoice invoices bill receipt issue self employed paid cash transfer document statement number vat tax' },
+  { key: 'invoices', label: 'Invoices', note: 'Issue a document for what somebody paid you', route: '/(trainer)/invoices', icon: 'grid', keywords: 'invoice invoices bill receipt issue self employed paid cash transfer document statement number vat tax owed overdue due date chase unpaid outstanding who owes me money ageing aging' },
+  // The half of a coach's income Stripe never sees. Listed rather than left as
+  // a row on the Money screen because the words a coach types for it — "cash",
+  // "bank transfer", "paid me" — are the words they type when their takings
+  // figure looks too small, and until this screen existed those searches landed
+  // on Invoices, which is a different act with a document attached to it.
+  //
+  // Deliberately NOT keyworded with "earnings" or "pay". Those are the words
+  // for a gym paying an employed trainer, which is read-only to that trainer
+  // and is a different thing entirely; a coach searching them should not be
+  // landed on a screen that lets them type.
+  { key: 'receipts', label: 'Cash and Transfers', note: 'Record a payment a client made outside this app', route: '/(trainer)/receipts', icon: 'grid', keywords: 'cash transfer bank paid me record payment received outside app front desk manual money in takings not on stripe' },
   // Named 'statement' and never 'tax', because the screen deliberately is not
   // one — but 'tax', 'accountant' and 'year end' are the words a coach types
   // when they go looking for it, so search has to land them on the thing that
@@ -240,6 +255,24 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'documents', label: 'Your Documents', note: 'Your own waivers and forms, and who has accepted them', route: '/(trainer)/documents', icon: 'pencil', keywords: 'document documents waiver par-q parq form consent house rules paperwork upload accepted acceptance required studio' },
   { key: 'broadcast', label: 'Broadcast', note: 'Message a whole segment of clients at once', route: '/(trainer)/broadcast', icon: 'message', keywords: 'broadcast announce message all clients bulk segment tag push' },
   { key: 'broadcast-session', label: 'Share a Session', note: 'Your clip and caption, into any app you post from', route: '/(trainer)/broadcast-session', icon: 'share', keywords: 'publish post social clip session caption platforms share marketing' },
+  // ── the three that took no params and were listed nowhere ────────────────
+  //
+  // The exclusion rule above is about screens that need a route PARAM, and none
+  // of these three takes one: grep `useLocalSearchParams` across brand.tsx,
+  // group.tsx and share-kit.tsx returns nothing, so all three open perfectly
+  // well from a search result. They were missing anyway, and each was reachable
+  // from exactly one deep link — brand from a row at the bottom of Profile,
+  // group from a Ghost inside Program Templates, share kit from a card at the
+  // bottom of Share a Session. That is the same class of bug this file's own
+  // header describes finding once already: a screen that exists, compiles, and
+  // is findable only by somebody who already knows where it is.
+  //
+  // The keywords are what a coach TYPES rather than what the screen is called.
+  // Nobody searches "share kit"; they search "poster", "story", "instagram" or
+  // "graphic". Nobody searches "brand"; they search "my logo" or "my colour".
+  { key: 'share-kit', label: 'Share Kit', note: 'Your real numbers as a card you can post', route: '/(trainer)/share-kit', icon: 'share', keywords: 'share kit card graphic poster image story post instagram facebook social marketing promo advert testimonial results numbers screenshot' },
+  { key: 'brand', label: 'Your Branding', note: 'The name and colour your clients see around your coaching', route: '/(trainer)/brand', icon: 'sparkle', keywords: 'brand branding logo colour color accent trading name business name my brand white label look identity theme' },
+  { key: 'group', label: 'Program Groups', note: 'One programme, assigned to a whole group at once', route: '/(trainer)/group', icon: 'people', keywords: 'group groups bootcamp cohort squad team program programme assign many bulk class block eight week challenge' },
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
   { key: 'ad-spend', label: 'Ad Spend', note: 'What your ads cost, and what they brought in', route: '/(trainer)/ad-spend', icon: 'trending', keywords: 'ads ad spend marketing cost cac attribution campaign meta google leads' },
   // The other half of the funnel. Ad Spend above carries 'leads' as a keyword
@@ -279,6 +312,12 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'profile', label: 'Profile', note: 'Your bio, offers & rate', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers public profile' },
   // Sign out lives here, and it was findable from nowhere.
   { key: 'settings', label: 'Settings', note: 'Account, sign out, your data & version', route: '/(trainer)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export my data delete account version build units' },
+  // The coach's own Getting Started, and it is listed for the same reason the
+  // client's is: the dashboard row disappears the moment the list is finished,
+  // and a screen reachable only from a row that removes itself is a screen that
+  // becomes unreachable by being used. 'tutorial', 'how do i' and 'lost' are
+  // here because they are what somebody types when they are.
+  { key: 'getting-started', label: 'Getting Started', note: 'What is set up, and what is still worth doing', route: '/(trainer)/getting-started', icon: 'sparkle', keywords: 'getting started get started setup set up onboarding first run new tutorial guide help how do i where do i begin checklist what next lost confused currency rate stripe package join code availability waiver' },
   { key: 'notifications', label: 'Notifications', note: 'Coaching requests, bookings, subscriptions and anything sent to you', route: '/(trainer)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell request requests coaching request join code accepted document documents paperwork waiver signed subscription subscriptions payment failed past due churn cancelled ended booking cancellation' },
   // The coach's thread list. It carries 'inbox' and 'unread' as keywords even
   // though the row above does too, and that is deliberate rather than sloppy:

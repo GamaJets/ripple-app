@@ -33,8 +33,55 @@
 // term is Title Case because it is quoting a label the reader can see; the
 // explanation is a sentence and is punctuated as one.
 
-/** One tab. Keys are storage keys — renaming one resurrects a dismissed card. */
-export type ScreenHelpKey = 'home' | 'train' | 'meals' | 'progress' | 'me';
+// ── And the coach, who has fifty-one screens and had none of these ─────────
+//
+// SCREEN_HELP covered `home`, `train`, `meals`, `progress` and `me`: the five
+// CLIENT tabs, and nothing else. The component was already built and already
+// generic, so the coach's half of this feature was one record short of
+// existing — which is the cheapest possible version of "the app knows and does
+// not say".
+//
+// The coach's screens need it more, not less. A client's home screen has one
+// number on it that needs explaining; the coach's Clients tab has a band
+// heading computed from a fourteen-day window against a six-week baseline, and
+// the difference between "quiet" and "we could not read them" is a distinction
+// the whole retention feature turns on. A coach who reads an empty Quiet
+// Clients list as a calm week is the failure mode nudges.tsx spends its header
+// on, and one dismissible row is a cheaper defence than a longer banner.
+//
+// Which screens get a card, and why those:
+//
+//   coach-clients   the roster's bands, and the dash. The single most-asked
+//                   coach question, and the one place a wrong reading costs a
+//                   phone call to somebody who trained yesterday.
+//   coach-quiet     what "quiet" is measured against, and what it is not.
+//   coach-schedule  open slots versus bookings versus blocked time — three
+//                   things drawn on one grid.
+//   coach-enquiries the join code on an enquiry, and the fact that nothing is
+//                   ever sent from here.
+//   coach-adspend   matched against unmatched spend, and what "cost unknown"
+//                   is actually saying about a code.
+//
+// Deliberately NOT every screen. The complaint this feature answers is about
+// volume; a help row on all fifty-one is the disease wearing the cure's coat.
+
+/** One screen with a card. Keys are storage keys — renaming one resurrects a
+ *  dismissed card. The `coach-` prefix is part of the key and not decoration:
+ *  the two apps are separate binaries built from one tree and a coach and a
+ *  client can share a handset, so a key collision would dismiss one person's
+ *  card by the other person reading theirs. */
+export type ScreenHelpKey =
+  | 'home' | 'train' | 'meals' | 'progress' | 'me'
+  | 'coach-clients' | 'coach-quiet' | 'coach-schedule' | 'coach-enquiries' | 'coach-adspend';
+
+/** The client's five, in tab order. Exported so the test can assert on the two
+ *  populations separately — a coach card must never be countable as a client
+ *  tab, which is what a bare `Object.keys` length assertion would allow. */
+export const CLIENT_HELP_KEYS: readonly ScreenHelpKey[] = ['home', 'train', 'meals', 'progress', 'me'];
+
+/** The coach's, in the order a coach meets them. */
+export const COACH_HELP_KEYS: readonly ScreenHelpKey[] =
+  ['coach-clients', 'coach-quiet', 'coach-schedule', 'coach-enquiries', 'coach-adspend'];
 
 export interface HelpLine {
   /** The label as it appears on the screen, so the reader can find it. */
@@ -104,6 +151,56 @@ export const SCREEN_HELP: Record<ScreenHelpKey, ScreenHelp> = {
       { term: 'The Groups', means: 'every screen in the app, sorted. Tap a heading to fold one away.' },
       { term: 'Coaching', means: 'whether a coach programs for you, trains you in the room, both, or neither. It decides what the other tabs offer.' },
       { term: 'Search', means: 'the magnifier on the home screen finds any of these by name — faster than scrolling this list.' },
+    ],
+  },
+
+  /* ── the coach ─────────────────────────────────────────────────────────── */
+
+  'coach-clients': {
+    key: 'coach-clients',
+    title: 'What This Screen Shows',
+    lines: [
+      // The band heading, and the thing every coach reads as an absolute.
+      { term: 'At Risk', means: 'measured against that client’s own earlier rate, never against a target. Somebody who always trained twice a week is not at risk.' },
+      // The band clientDrift deliberately sorts SECOND rather than last.
+      { term: 'Nothing to Assess', means: 'the record holds too little to judge them on, which is not the same as fine. They sit high on purpose.' },
+      { term: 'A Dash', means: 'not measured, rather than zero. A failed read draws a dash and says so above the list.' },
+    ],
+  },
+  'coach-quiet': {
+    key: 'coach-quiet',
+    title: 'What Quiet Means Here',
+    lines: [
+      { term: 'Quiet', means: 'a fall in what the app was told, over two weeks against the six before them. It is not a fall in what they did.' },
+      { term: 'Could Not Be Assessed', means: 'people whose record did not come back. They are not on the list below and they are not fine.' },
+      { term: 'Write a Message', means: 'a draft in a box for you to edit and send yourself. Nothing on this screen sends anything.' },
+    ],
+  },
+  'coach-schedule': {
+    key: 'coach-schedule',
+    title: 'What This Grid Shows',
+    lines: [
+      { term: 'An Open Slot', means: 'time you have offered that nobody has taken. Clients see it and can book it until you withdraw it.' },
+      { term: 'Blocked', means: 'time nobody can book across. Blocking withdraws the open slots inside it and refuses if a session is already booked.' },
+      { term: 'Unmarked', means: 'a session that has happened and that you have not said what became of. Those sessions count nowhere until you do.' },
+    ],
+  },
+  'coach-enquiries': {
+    key: 'coach-enquiries',
+    title: 'What This Screen Shows',
+    lines: [
+      { term: 'An Enquiry', means: 'somebody who filled in your join page and did not make an account. They are not a client yet and not counted as one.' },
+      { term: 'The Code', means: 'the join code they arrived through, so you can tell which flyer or post produced them.' },
+      { term: 'Contacted', means: 'a note to yourself that you reached out. Nothing is sent from this screen on your behalf.' },
+    ],
+  },
+  'coach-adspend': {
+    key: 'coach-adspend',
+    title: 'What These Figures Mean',
+    lines: [
+      { term: 'Matched Spend', means: 'money against an ad whose link carries one of your join codes. Only matched spend can be attributed to anybody.' },
+      { term: 'Unmatched', means: 'money the app can see but cannot attribute, because nothing in the ad names a code of yours.' },
+      { term: 'Cost Unknown', means: 'a code with joins and no spend behind it. Mark it free and it stops being reported as a gap.' },
     ],
   },
 };

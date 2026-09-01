@@ -51,7 +51,7 @@
 // reads it back as an email, a phone number, or NEITHER, and 'unknown' is a real
 // answer: an Instagram handle gets no dial button, because a coach finds out
 // that a tel: link over a handle dials nothing only after they have tapped it.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -62,8 +62,12 @@ import { num } from '../../src/lib/format';
 import { useLeads } from '../../src/ui/leads';
 import {
   FOLLOW_UP_IS_MANUAL, MISTYPED_CODE_NOTE, LEAD_STATE_LABEL, LEAD_STATE_NOTE, MAX_FOLLOW_UP,
-  type LeadRow, type LeadState,
+  FOLLOW_UP_LABEL, FOLLOW_UP_WHEN, followUpDraft, followUpLink, followUpRecord,
+  type LeadRow, type LeadState, type FollowUpKind,
 } from '../../src/lib/leads';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { fetchMyCoachBrand } from '../../src/ui/coachBrand';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 
 /** A date as a coach reads one. Unknown stays unknown. */
 function when(iso: string | null): string {
@@ -102,6 +106,31 @@ export default function TrainerLeads() {
   const [writing, setWriting] = useState<LeadRow | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // Which enquiry the draft picker is open for. Its own flag: iOS will not
+  // stack two modals from the same parent, and check-runtime-traps.mjs exists
+  // for a sibling pair whose `visible` expressions share an identifier.
+  const [drafting, setDrafting] = useState<LeadRow | null>(null);
+
+  // Who the message is from. The coach's own name and their own TRADING name —
+  // never this app's. A prospect reading their first message from a coach must
+  // not meet the coach's supplier in it, and a chain's member must not meet a
+  // competitor: the same violation the join page was fixed for, on the one
+  // message somebody reads before they are anybody's customer.
+  const { name: coachName } = useMyTrainerProfile();
+  const [tradingName, setTradingName] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const b = await fetchMyCoachBrand();
+        // A failed read is no trading name, which reads perfectly well — the
+        // draft simply does not name a business. It is NOT a reason to fall
+        // back to the app's own name, which is the one name it must not use.
+        if (live) setTradingName(b?.brandName ?? null);
+      } catch { if (live) setTradingName(null); }
+    })();
+    return () => { live = false; };
+  }, []);
 
   const listed = book.rows.filter((r) => filter === 'all' || r.state === filter);
 
@@ -142,6 +171,47 @@ export default function TrainerLeads() {
     });
   };
 
+  /**
+   * Hand the drafted words to the coach's own mail or messages app.
+   *
+   * Nothing is sent by this app and nothing leaves a server. That is not a
+   * compromise on the white-label rule, it is a better answer than a sending
+   * domain would be: the address it arrives from is the account already on the
+   * coach's phone, so a chain's coach writes from the chain's address and this
+   * software's name appears nowhere.
+   *
+   * The follow-up note is pre-filled afterwards rather than written, and it says
+   * "opened" rather than "sent" — the coach may edit the draft to nothing or
+   * close the mail app, and this app observed neither.
+   */
+  const openDraft = (lead: LeadRow, kind: FollowUpKind) => {
+    const draft = followUpDraft(kind, lead, coachName, tradingName);
+    const url = followUpLink(lead, draft);
+    if (!url) {
+      Alert.alert(
+        'Nothing to open it with',
+        'What they left is neither an email address nor a phone number, so there is no app to hand this to. The details are on the screen behind this — copy them out by hand.',
+      );
+      return;
+    }
+    setDrafting(null);
+    Linking.openURL(url).then(
+      () => {
+        // Pre-fill the note rather than write it. A coach who has just opened
+        // their mail app is exactly the person who will not come back and type
+        // one, and a record nobody wrote is the reason somebody gets rung twice.
+        setWriting(lead);
+        setDraft(followUpRecord(kind, lead.contactKind === 'email' ? 'email' : 'text'));
+      },
+      () => {
+        Alert.alert(
+          'Could not open that',
+          'Your phone would not open an app for this. Nothing has been sent and nothing has been recorded.',
+        );
+      },
+    );
+  };
+
   const saveFollowUp = () => {
     const lead = writing;
     if (!lead || saving) return;
@@ -175,6 +245,29 @@ export default function TrainerLeads() {
             : `${lead.viaCode} · ${when(lead.at)}`}
         </Text>
 
+        {/* ── the enquiry that became a client ───────────────────────────
+            Part 157 refused a fourth STATE and was right to: `state` is the
+            coach's own workflow and a value in it that the app wrote would be
+            the app deciding where their enquiry had got to. This is a different
+            thing on different columns — an account with this exact email joined
+            through this exact code — and it is evidence rather than a guess.
+
+            Only drawn when it is TRUE. `joined` is three-valued and the two
+            other values render nothing at all: false is "no match", which is
+            not "did not join" (they may have joined on another code, or typed a
+            different address), and null is a database without part 211. A badge
+            reading "not a client" against either would be a verdict this screen
+            has not earned. */}
+        {lead.joined === true ? (
+          <View style={{ marginTop: sp.sm }}>
+            <Flag tone={t.good}>
+              Somebody with this email address joined you on this code{lead.joinedAt ? ` on ${when(lead.joinedAt)}` : ''}.
+              That is a match on the address and the code, not a guess — it is the only evidence this app has that a
+              channel produced a client rather than a click.
+            </Flag>
+          </View>
+        ) : null}
+
         {lead.note ? (
           <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{lead.note}</Text>
         ) : (
@@ -201,6 +294,15 @@ export default function TrainerLeads() {
           ) : (
             <Ghost label="Reopen" onPress={() => mark(lead, 'new')} />
           )}
+          {/* Only where there is something to open it with. `contactKind`
+              returns 'unknown' rather than guessing, and offering to draft a
+              message to an Instagram handle is worse than offering nothing —
+              the coach finds out after they have tapped it. */}
+          {lead.contactKind !== 'unknown' ? (
+            <Ghost label="Draft a Message"
+              a11yLabel={`Draft a message to ${lead.name}`}
+              onPress={() => setDrafting(lead)} />
+          ) : null}
           <Ghost label="Record a Follow-up" onPress={() => { setWriting(lead); setDraft(''); }} />
           <Ghost label="Remove" onPress={() => remove(lead)} />
         </View>
@@ -252,6 +354,11 @@ export default function TrainerLeads() {
         <View style={{ marginTop: sp.xl }}>
           <Notice tone={t.warn} kicker="Nothing is sent" title="Following these up is you, by hand" note={FOLLOW_UP_IS_MANUAL} />
         </View>
+
+        {/* What the words on the rows below actually mean — an enquiry is not a
+            client, the code is the attribution, and "contacted" is a note to
+            self. src/lib/screenHelp.ts holds them; one dismissible row. */}
+        <ScreenHelp screen="coach-enquiries" />
 
         <Section>
           <SectionHead title="Your enquiries" />
@@ -319,6 +426,43 @@ export default function TrainerLeads() {
         </Section>
 
       </ScrollView>
+
+      {/* ── which draft ───────────────────────────────────────────────────
+          Three moments a coach actually writes, rather than one generic
+          "message". The captions are there so a coach picks the right one and
+          not the first one — a last word sent as a first reply is the worst
+          version of this feature.
+
+          Nothing is sent from here. The draft goes to the mail or messages app
+          already on the coach's phone, signed in as them, so it arrives from
+          THEIR address. That is what makes this safe under white-label: no
+          sending domain is involved, so nobody's prospect meets this software's
+          name in their first message. */}
+      <Modal visible={!!drafting} animationType="slide" transparent onRequestClose={() => setDrafting(null)}>
+        <View style={{ flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34 }}>
+            <Text style={{ ...ty.head, color: t.ink }}>Write to {drafting?.name ?? 'this enquiry'}</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              This opens your own {drafting?.contactKind === 'email' ? 'mail app' : 'messages app'} with the words
+              already in it, from your own address. Nothing is sent until you press send there, and Repple sends
+              nothing at any point.
+            </Text>
+            <View style={{ marginTop: sp.lg }}>
+              {(['first', 'second', 'last'] as FollowUpKind[]).map((k, i) => (
+                <View key={k} style={{ marginTop: i ? sp.md : 0 }}>
+                  <Cta label={FOLLOW_UP_LABEL[k]}
+                    a11yLabel={`${FOLLOW_UP_LABEL[k]} to ${drafting?.name ?? 'this enquiry'}`}
+                    wide onPress={() => { if (drafting) openDraft(drafting, k); }} />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{FOLLOW_UP_WHEN[k]}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={{ marginTop: sp.lg }}>
+              <Ghost label="Cancel" onPress={() => setDrafting(null)} />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* ── recording a follow-up ─────────────────────────────────────────── */}
       <Modal visible={!!writing} animationType="slide" transparent onRequestClose={() => setWriting(null)}>

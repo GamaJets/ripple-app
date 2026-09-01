@@ -69,9 +69,18 @@ import { minorMoney, sumTaken, ZERO_DECIMAL, type Taken, type TakenRow } from '.
  *
  * 'received' is "I have been paid"; 'requested' is "I am asking". Repple checks
  * neither, and the document prints each as the coach's own statement rather
- * than as a fact the platform is standing behind. There is deliberately no
- * third value: 'overdue' would require a due date this app does not collect and
- * a clock it does not run, and 'paid' unqualified would read as verification.
+ * than as a fact the platform is standing behind.
+ *
+ * There is STILL deliberately no third value, and the reason has changed. It
+ * used to be that 'overdue' would need a due date this app did not collect and
+ * a clock it did not run. Part 168 collects the date — as a field the coach
+ * TYPES, which is not the same as this app inventing a payment term — and the
+ * clock is the device's own. But lateness is a DERIVED reading of two facts
+ * that are already here, and putting it in this union would make it a stored
+ * one: a row written 'overdue' on Tuesday is still 'overdue' after the client
+ * pays on Wednesday, and nothing in this app is told when they pay. So the
+ * union stays two words the coach chose, and `invoiceAge()` below computes the
+ * rest from the due date every time it is asked.
  */
 export type InvoiceKind = 'received' | 'requested';
 
@@ -93,6 +102,28 @@ export interface CoachInvoice {
   kind: InvoiceKind;
   /** `YYYY-MM-DD`. */
   issuedOn: string;
+  /**
+   * `YYYY-MM-DD` the coach typed as the day they expect to be paid by, or null
+   * because they did not state one.
+   *
+   * NULL IS NOT "NOT DUE". It is the absence of a statement, and `invoiceAge()`
+   * reports it as its own state rather than folding it in with the invoices
+   * that are inside their terms. An invoice with no due date on it cannot be
+   * late and cannot be on time; the only true thing to say about it is that
+   * nobody said when it was for.
+   *
+   * Optional on the type rather than `string | null` so that every existing
+   * construction of a CoachInvoice — the tests, the statement, the notification
+   * copy — keeps compiling and means exactly what it meant before.
+   */
+  dueOn?: string | null;
+  /** When the coach last chased it, ISO, or null because they never have.
+   *  The coach's own record of an act they performed — this app does not send
+   *  the chase anywhere the coach did not send the document. */
+  remindedAt?: string | null;
+  /** How many times they have chased. Zero and null are the same fact here and
+   *  both read as "not yet chased". */
+  reminderCount?: number | null;
   note?: string | null;
   voidedAt?: string | null;
   voidReason?: string | null;
@@ -276,6 +307,280 @@ export function invoiceDayLabel(iso: string | null | undefined): string {
   return `${Number(m[3])} ${MONTHS[mi]} ${m[1]}`;
 }
 
+/* ── how late it is, which is never a stored fact ─────────────────────────── */
+
+/**
+ * The one thing a due date is, and the several things it is not.
+ *
+ * Printed on the document, because a date the coach typed that the client never
+ * sees is a term nobody agreed to. It is the coach's own statement of when they
+ * expect the money, in the same voice as `kind` — Repple does not enforce it,
+ * does not charge interest on it, does not apply a statutory late fee, and is
+ * never told whether the money arrived. "Overdue" on this screen means "past a
+ * date you typed and you have not marked it settled", and nothing more.
+ */
+export const INVOICE_DUE_NOT_A_TERM =
+  'Any date shown as due is the issuer’s own statement of when they expect to be paid. It is not a payment term this app enforces, no interest or late fee is calculated anywhere on it, and this app is never told whether the money arrived.';
+
+/**
+ * What a coach's ageing list may and may not say.
+ *
+ * The list is built from ONE fact — a date the coach typed — against ONE clock,
+ * the device's. It is not a statement that a client has failed to pay: Repple
+ * is not told when a bank transfer lands, and a coach who was paid in cash on
+ * Friday marks it by issuing a 'received' invoice, not by this app noticing.
+ */
+export const AGEING_IS_YOUR_OWN_RECORD =
+  'This list is built from the due dates you typed and this phone’s clock. Nothing here has been checked against a bank or a card processor, and nobody tells this app when a client pays you — an invoice stays on this list until you say otherwise.';
+
+/**
+ * Where one invoice stands against its own due date.
+ *
+ * Six states rather than a boolean, and the two that are not about lateness are
+ * the reason. A settled invoice ('received' — the coach's own claim that the
+ * money came in) and a voided one are not late and never will be; an invoice
+ * with NO due date is neither late nor on time, and reporting it as "not due"
+ * would put every invoice a coach issued before part 168 into the reassuring
+ * bucket. That is the same class of mistake as an empty list under 'error'.
+ */
+export type InvoiceAgeState =
+  | 'settled'
+  | 'voided'
+  | 'undated'
+  | 'not-due'
+  | 'due-today'
+  | 'overdue';
+
+/** How late, in the bands a person chases in. Null unless 'overdue'. */
+export type AgeBucket = '1-7' | '8-30' | '31-60' | '61+';
+
+export interface InvoiceAge {
+  state: InvoiceAgeState;
+  /** Whole calendar days past the due date. Only ever positive, and only under
+   *  'overdue'. Null everywhere else, including 'due-today' — nought days late
+   *  and not late are different readings and a zero here would blur them. */
+  daysOverdue: number | null;
+  bucket: AgeBucket | null;
+  /** The sentence for a list row. Sentence case: it is prose beside a number,
+   *  not a label. */
+  line: string;
+}
+
+/**
+ * Whole calendar days from `a` to `b`, both `YYYY-MM-DD`, or null.
+ *
+ * Through `Date.UTC` on the PARTS rather than `Date.parse` on the strings, and
+ * never through a local Date. Two calendar days are a fixed number of days
+ * apart; a local-midnight subtraction is 23 or 25 hours across a DST boundary,
+ * and `(b - a) / 86400000` then floors to one day fewer than it should. In
+ * March that would show a seven-day-old invoice as six days old, which is the
+ * wrong side of a chasing decision.
+ */
+function daysBetween(a: string, b: string): number | null {
+  const ma = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(a ?? ''));
+  const mb = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(b ?? ''));
+  if (!ma || !mb) return null;
+  const ta = Date.UTC(Number(ma[1]), Number(ma[2]) - 1, Number(ma[3]));
+  const tb = Date.UTC(Number(mb[1]), Number(mb[2]) - 1, Number(mb[3]));
+  if (!Number.isFinite(ta) || !Number.isFinite(tb)) return null;
+  return Math.round((tb - ta) / 86_400_000);
+}
+
+/**
+ * `n` days after an ISO day, as an ISO day.
+ *
+ * Through `Date.UTC` on the parts and back out through the UTC getters, never
+ * through a local Date. A local `new Date(y, m, d + 7)` is seven days later by
+ * the calendar but the arithmetic runs through a DST boundary twice a year, and
+ * the round trip back to a `YYYY-MM-DD` can land a day out. On a due date that
+ * is a deadline printed on somebody's invoice.
+ *
+ * Returns '' for anything that is not an ISO day, so a caller cannot get a
+ * plausible-looking wrong date out of a broken one.
+ */
+export function plusDays(isoDay: string, n: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDay ?? ''));
+  if (!m || !Number.isFinite(n)) return '';
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + Math.trunc(n)));
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Which band a number of days late falls in. */
+export function ageBucket(days: number): AgeBucket {
+  if (days <= 7) return '1-7';
+  if (days <= 30) return '8-30';
+  if (days <= 60) return '31-60';
+  return '61+';
+}
+
+/** The band's own heading. Title Case, because it heads a group. */
+export const BUCKET_TITLE: Readonly<Record<AgeBucket, string>> = {
+  '1-7': 'Up to a Week Late',
+  '8-30': 'One to Four Weeks Late',
+  '31-60': 'One to Two Months Late',
+  '61+': 'Over Two Months Late',
+};
+
+/**
+ * Where this invoice stands, as of the day the caller says it is.
+ *
+ * `today` is passed in rather than read from a clock inside this function, for
+ * the reason every date function in this file is written that way: `new Date()`
+ * here would be UTC-shaped and untestable, and the caller already knows which
+ * day the DEVICE is on — which is the only day that matters to the person
+ * holding it. `isoToday()` in src/lib/dayPlan.ts is what produces it.
+ */
+export function invoiceAge(inv: CoachInvoice, today: string): InvoiceAge {
+  if (inv.voidedAt) {
+    return { state: 'voided', daysOverdue: null, bucket: null, line: 'Voided, so it is not owed and it is not late.' };
+  }
+  if (inv.kind === 'received') {
+    return { state: 'settled', daysOverdue: null, bucket: null, line: 'You stated this one was received, so it is not outstanding.' };
+  }
+  const due = String(inv.dueOn ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+    return {
+      state: 'undated',
+      daysOverdue: null,
+      bucket: null,
+      // Never "not due". The absence of a date is the absence of a statement,
+      // and an invoice from before part 168 must not be reported as being
+      // comfortably within terms nobody ever wrote down.
+      line: 'No due date was stated on this one, so nothing here says whether it is late.',
+    };
+  }
+  const days = daysBetween(due, today);
+  if (days == null) {
+    return { state: 'undated', daysOverdue: null, bucket: null, line: 'The due date on this one could not be read, so nothing here says whether it is late.' };
+  }
+  if (days < 0) {
+    const n = -days;
+    return { state: 'not-due', daysOverdue: null, bucket: null, line: `Due in ${n} ${n === 1 ? 'day' : 'days'}, on ${invoiceDayLabel(due)}.` };
+  }
+  if (days === 0) {
+    return { state: 'due-today', daysOverdue: null, bucket: null, line: 'Due today.' };
+  }
+  return {
+    state: 'overdue',
+    daysOverdue: days,
+    bucket: ageBucket(days),
+    line: `${days} ${days === 1 ? 'day' : 'days'} past the ${invoiceDayLabel(due)} you stated.`,
+  };
+}
+
+/** One invoice and where it stands, so a screen sorts and groups without
+ *  recomputing the age per render. */
+export interface AgedInvoice { invoice: CoachInvoice; age: InvoiceAge }
+
+export interface AgeingBook {
+  /** Overdue invoices, longest overdue first — the order a person chases in. */
+  overdue: AgedInvoice[];
+  /** Due today or later, soonest first. */
+  upcoming: AgedInvoice[];
+  /** Live, requested, and carrying no due date at all. Its own list because it
+   *  is its own answer: these are neither chased nor safe. */
+  undated: AgedInvoice[];
+  /**
+   * What is outstanding, per currency, over the OVERDUE and UPCOMING sets
+   * together — every live requested invoice with a date on it.
+   *
+   * Null under anything but a whole read. A coach asking "who owes me money"
+   * and being handed a figure over the first page of their book is being handed
+   * a wrong number, not a small one, and it is the number they would chase on.
+   * The undated ones are deliberately NOT in it, and `undatedNote` says so.
+   */
+  outstanding: Taken | null;
+  /** Why there is no figure, or null when there is one. */
+  withheld: string | null;
+  /** What the figure leaves out, or null when it leaves nothing out. */
+  undatedNote: string | null;
+}
+
+/**
+ * The coach's unpaid book, aged.
+ *
+ * "Who owes me money" is the most common unanswered question in this app, and
+ * every part of the answer here is derived from what the coach themselves
+ * recorded: a kind they chose, a date they typed, and a void they performed.
+ * Nothing is inferred from a payment processor, because nothing about a payment
+ * processor reaches this table.
+ */
+export function ageingBook(rows: readonly CoachInvoice[], status: LoadStatus, today: string): AgeingBook {
+  const overdue: AgedInvoice[] = [];
+  const upcoming: AgedInvoice[] = [];
+  const undated: AgedInvoice[] = [];
+  for (const invoice of rows) {
+    const age = invoiceAge(invoice, today);
+    if (age.state === 'overdue') overdue.push({ invoice, age });
+    else if (age.state === 'due-today' || age.state === 'not-due') upcoming.push({ invoice, age });
+    else if (age.state === 'undated') undated.push({ invoice, age });
+    // 'settled' and 'voided' are on no list. They are not outstanding and the
+    // screen that lists everything already shows them.
+  }
+  // Longest overdue first, then by number so the order cannot flap between two
+  // invoices that are equally late.
+  overdue.sort((a, b) => (b.age.daysOverdue ?? 0) - (a.age.daysOverdue ?? 0) || a.invoice.seq - b.invoice.seq);
+  upcoming.sort((a, b) => String(a.invoice.dueOn ?? '').localeCompare(String(b.invoice.dueOn ?? '')) || a.invoice.seq - b.invoice.seq);
+  undated.sort((a, b) => b.invoice.seq - a.invoice.seq);
+
+  const withheld = status === 'ready'
+    ? null
+    : status === 'partial'
+      ? 'More invoices are on record than could be read in one request, so no outstanding figure is stated. What is listed is real; it is not all of it.'
+      : status === 'loading'
+        ? 'Still reading your invoices, so no outstanding figure is stated yet.'
+        : 'Your invoices could not be read, so no outstanding figure is stated. An empty list here is not a statement that nobody owes you anything.';
+
+  const outstanding = status === 'ready'
+    ? sumTaken([...overdue, ...upcoming].map(({ invoice }): TakenRow => ({
+      amount_cents: invoice.amountCents,
+      currency: invoice.currency,
+      created_at: invoice.issuedOn,
+    })))
+    : null;
+
+  const undatedNote = status === 'ready' && undated.length
+    ? `${undated.length} invoice${undated.length === 1 ? '' : 's'} you are still asking for ${undated.length === 1 ? 'has' : 'have'} no due date on ${undated.length === 1 ? 'it' : 'them'}, so ${undated.length === 1 ? 'it is' : 'they are'} in no figure above and on no list of what is late. A due date is stated when the invoice is issued and cannot be added afterwards.`
+    : null;
+
+  return { overdue, upcoming, undated, outstanding, withheld, undatedNote };
+}
+
+/* ── chasing one ──────────────────────────────────────────────────────────── */
+
+/**
+ * Whether this invoice can be chased, and the reason when it cannot.
+ *
+ * Null means it can go. A sentence means it cannot, and the sentence is what
+ * the coach reads — never a dead button.
+ *
+ * There is no cooldown here on purpose. The rate at which a self-employed
+ * person chases their own customer is their decision and not this app's, and
+ * the nudge machinery's thirty-day floor (src/lib/nudge.ts) exists to stop the
+ * app nagging a CLIENT on the coach's behalf. This is the coach performing an
+ * act, once, each time they tap. What the screen does instead is SAY how many
+ * times and when, so a coach who has already sent four can see that they have.
+ */
+export function chaseBlocker(inv: CoachInvoice): string | null {
+  if (inv.voidedAt) return 'This one is voided, so there is nothing to chase.';
+  if (inv.kind === 'received') return 'You stated this one was received, so there is nothing outstanding to chase.';
+  if (!inv.clientId) return 'This one is not tied to an account, so there is nobody here to notify. Send it to them the way you sent it the first time.';
+  return null;
+}
+
+/** How often this one has been chased, said in words, or null the first time.
+ *  Sentence case: it sits under a row as prose. */
+export function chaseHistoryLine(inv: CoachInvoice): string | null {
+  const n = Number(inv.reminderCount ?? 0);
+  if (!Number.isFinite(n) || n < 1) return null;
+  const when = String(inv.remindedAt ?? '').slice(0, 10);
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(when) ? invoiceDayLabel(when) : null;
+  return `Chased ${n} ${n === 1 ? 'time' : 'times'}${day ? `, last on ${day}` : ''}.`;
+}
+
 /* ── issuing: what stops one being issued ─────────────────────────────────── */
 
 /** What the coach typed, before it is anything. */
@@ -288,6 +593,15 @@ export interface InvoiceDraft {
   currency: string | null;
   kind: InvoiceKind;
   issuedOn: string;
+  /**
+   * `YYYY-MM-DD`, or null/'' because the coach did not state one.
+   *
+   * Optional to type AND optional to leave out. A required due date would be a
+   * payment term this app had invented on the coach's behalf, and a defaulted
+   * one — "thirty days" — would be worse, because it would be printed on a
+   * document under their name as though they had chosen it.
+   */
+  dueOn?: string | null;
   note?: string | null;
 }
 
@@ -357,6 +671,19 @@ export function invoiceBlockers(d: InvoiceDraft): string[] {
     );
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.issuedOn ?? ''))) out.push('The date this is issued on could not be read.');
+  // A due date is optional and is refused rather than corrected when it is
+  // wrong. Part 168 has the same CHECK on the column, so a date this accepts
+  // and the database refuses cannot exist — and a date BEFORE the issue date is
+  // refused here rather than silently swapped, because a document that says it
+  // was due before it was written is not a document anybody can act on.
+  const due = String(d.dueOn ?? '').trim();
+  if (due) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+      out.push('The due date could not be read. Write it as a date, or leave it empty and no due date is stated on the document at all.');
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(String(d.issuedOn ?? '')) && due < String(d.issuedOn)) {
+      out.push('The due date is before the date this is issued on. An invoice cannot fall due before it exists.');
+    }
+  }
   return out;
 }
 
@@ -457,6 +784,19 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
   }
   H.push(`<p>${escapeHtml(kindLine(inv.kind))}</p>`);
   T.push(kindLine(inv.kind));
+  // The due date goes on the DOCUMENT, not only on the coach's own list. A date
+  // the coach types into their phone and chases against, that the person being
+  // chased has never been shown, is a term nobody agreed to — and the first
+  // that client would hear of it is a reminder about a deadline they were never
+  // given. Printed only where one was stated: an absent due date prints nothing
+  // rather than "none", which would read as a term of its own.
+  {
+    const due = String(inv.dueOn ?? '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+      H.push(`<p><b>Due:</b> ${escapeHtml(invoiceDayLabel(due))}</p>`);
+      T.push(`Due: ${invoiceDayLabel(due)}`);
+    }
+  }
   if (inv.note) {
     H.push(`<p class="lede">Note from the issuer: ${escapeHtml(inv.note)}</p>`);
     T.push(`Note from the issuer: ${inv.note}`);
@@ -470,6 +810,12 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
   T.push(INVOICE_TAX);
   H.push(`<p class="lede">${escapeHtml(INVOICE_NOT_A_RECEIPT)}</p>`);
   T.push(INVOICE_NOT_A_RECEIPT);
+  // Said on EVERY document, including the ones with no due date on them. A
+  // reader who has one needs to know what it is and is not; a reader who has
+  // none is entitled to know that this app never adds interest or a late fee to
+  // anything, which is the question a missing due date raises.
+  H.push(`<p class="lede">${escapeHtml(INVOICE_DUE_NOT_A_TERM)}</p>`);
+  T.push(INVOICE_DUE_NOT_A_TERM);
 
   /* ── foot ──────────────────────────────────────────────────────────────── */
   const foot = voided

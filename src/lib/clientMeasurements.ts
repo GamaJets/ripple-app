@@ -80,9 +80,20 @@ export interface MeasurementRow {
 export const MEASURE_SITES = [
   { key: 'waist', label: 'Waist' },
   { key: 'chest', label: 'Chest' },
-  { key: 'arm', label: 'Arm' },
-  { key: 'thigh', label: 'Thigh' },
+  { key: 'shoulders', label: 'Shoulders' },
+  { key: 'neck', label: 'Neck' },
   { key: 'hips', label: 'Hips' },
+  // The unqualified `arm` and `thigh` stay beside the sided ones rather than
+  // being folded into them. A row already stored as 'arm' carries no side, and
+  // assigning it to one would put a year of somebody's measurements on the
+  // wrong limb — see the longer note at METRICS in src/ui/measurements.tsx.
+  { key: 'arm', label: 'Arm' },
+  { key: 'armL', label: 'Left Arm' },
+  { key: 'armR', label: 'Right Arm' },
+  { key: 'thigh', label: 'Thigh' },
+  { key: 'thighL', label: 'Left Thigh' },
+  { key: 'thighR', label: 'Right Thigh' },
+  { key: 'calf', label: 'Calf' },
 ] as const;
 
 export type MeasureSite = (typeof MEASURE_SITES)[number]['key'];

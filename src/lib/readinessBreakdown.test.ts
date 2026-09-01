@@ -52,7 +52,7 @@ const sleepOf = (d: number, t: number): ReadinessSleep => {
   };
 };
 
-const scored = readinessScore({ avgSleepHours: 7.5, hydrationPct: 0.5, workoutsLast2Days: 1 }) as Readiness;
+const scored = readinessScore({ avgSleepHours: 7.5, hydrationPct: 0.5, recoveryPct: null, workoutsLast2Days: 1 }) as Readiness;
 
 /** A member with a ring, a water goal, a readable log and nothing wrong. */
 const whole: ReadinessBreakdownInput = {
@@ -138,10 +138,14 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(b.status, 'ready', 'everything read, so the score is over the whole picture');
   eq(b.caveats.length, 0, 'and there is nothing to warn about');
   eq(b.absence, null, 'there is a score, so there is no reason for its absence');
-  eq(b.lines.length, 3, 'three signals, three rows — always, even the ones that were not scored');
-  eq(b.lines.map((l) => l.key).join(','), 'sleep,hydration,load', 'in scale order');
-  eq(b.lines.map((l) => l.title).join(','), 'Sleep,Hydration,Recent Sessions',
+  eq(b.lines.length, 4, 'four signals, four rows — always, even the ones that were not scored');
+  eq(b.lines.map((l) => l.key).join(','), 'sleep,recovery,hydration,load', 'in scale order, which is order of weight');
+  eq(b.lines.map((l) => l.title).join(','), 'Sleep,Device Recovery,Hydration,Recent Sessions',
     'titles are Title Case, per the house rule for a label beside a value');
+  // "Device Recovery" rather than "Recovery": this breakdown renders on a
+  // screen called Recovery, under a hero called Readiness, and a third bare
+  // "Recovery" would be one word for three different things in one viewport.
+  ok(!b.lines.some((l) => l.title === 'Recovery'), 'and none of them is a bare "Recovery", which the screen already uses twice');
 }
 
 // ── a shortened window is NOT a short read ────────────────────────────────
@@ -176,7 +180,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 
 // ── hydration: untracked and unread are one null and two sentences ────────
 {
-  const untracked = br({ hydrationGoal: false, hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, workoutsLast2Days: 1 }) });
+  const untracked = br({ hydrationGoal: false, hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 1 }) });
   const h = lineFor(untracked, 'hydration');
   eq(h.state, 'not-tracked', 'no goal set is not a failure');
   eq(h.detail, 'not in the scale — you have not set a daily water goal',
@@ -185,7 +189,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(untracked.caveats.length, 0, 'nor does it warrant a warning');
 }
 {
-  const unread = br({ hydrationStatus: 'error', hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, workoutsLast2Days: 1 }) });
+  const unread = br({ hydrationStatus: 'error', hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 1 }) });
   const h = lineFor(unread, 'hydration');
   eq(h.state, 'unread', 'a goal that exists and a count that could not be read is a FAILED read, not an untracked one');
   eq(h.detail, "not in the scale — today's count could not be read", 'said as what it is');
@@ -196,7 +200,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 {
   // Still in flight is not a failure, and a hero that flashes a warning on
   // every launch is a hero nobody reads.
-  const loading = br({ hydrationStatus: 'loading', hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, workoutsLast2Days: 1 }) });
+  const loading = br({ hydrationStatus: 'loading', hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 1 }) });
   eq(loading.caveats.length, 0, 'a count still loading has not failed');
 }
 {
@@ -323,6 +327,39 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(lineFor(typedLoading, 'sleep').detail, 'still being read', 'and the other way round');
 }
 
+// ── the device's recovery score, and the three ways it can be absent ──────
+//
+// The row's job is to keep "you own no strap" apart from "your strap has not
+// reported today". Both are a null recoveryPct, both leave the signal out of
+// the scale, and only one of them is something the member can go and fix.
+{
+  const withScore = br({ recoveryPct: 62, recoveryFrom: 'WHOOP', recoveryDeviceConnected: true });
+  const line = lineFor(withScore, 'recovery');
+  eq(line.state, 'scored', 'a vendor figure is a scored signal');
+  ok(/62/.test(line.detail), 'and the figure is printed');
+  ok(/WHOOP/.test(line.detail), 'ATTRIBUTED to the device that made it — an unattributed recovery is a second unexplained number on a screen that already has one');
+  ok(/recovery/i.test(line.detail), 'in WHOOP’s own word for it');
+
+  const oura = lineFor(br({ recoveryPct: 71, recoveryFrom: 'Oura Ring', recoveryDeviceConnected: true }), 'recovery');
+  ok(/readiness/i.test(oura.detail),
+    'and in OURA’S own word for it — the two vendors name the same 0-100 figure differently and a member cross-checking needs ours to match theirs');
+
+  const noStrap = lineFor(br({ recoveryPct: null, recoveryDeviceConnected: false }), 'recovery');
+  eq(noStrap.state, 'not-tracked',
+    'NO DEVICE IS NOT A FAILED READ — telling somebody with no strap that we could not read their recovery invents a fault');
+  ok(!/could not|not reported/i.test(noStrap.detail), 'and the sentence does not blame a read that never happened');
+
+  const silent = lineFor(br({ recoveryPct: null, recoveryDeviceConnected: true }), 'recovery');
+  eq(silent.state, 'unread',
+    'a connected strap with no figure today IS unread — that is the one the member can act on');
+  ok(silent.detail !== noStrap.detail, 'the two absences must never share a sentence');
+
+  // Neither absence is a deduction, and both say so, for the same reason the
+  // hydration row does: a member reading "no recovery score" under a lower
+  // number will assume they were marked down for it.
+  for (const l of [noStrap, silent]) ok(/not in the scale/.test(l.detail), 'an absent signal says it left the scale rather than scoring zero');
+}
+
 // ── the breakdown never contradicts the score ─────────────────────────────
 //
 // It describes the values that were handed to readinessScore rather than
@@ -331,14 +368,16 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 {
   for (const pct of [null, 0, 0.5, 1]) {
     for (const load of [null, 0, 1, 3]) {
-      const r = readinessScore({ avgSleepHours: 7.5, hydrationPct: pct, workoutsLast2Days: load });
-      const b = br({ readiness: r, hydrationPct: pct, workoutsLast2Days: load, hydrationGoal: pct != null });
+      for (const rec of [null, 0, 62, 100]) {
+      const r = readinessScore({ avgSleepHours: 7.5, hydrationPct: pct, recoveryPct: rec, workoutsLast2Days: load });
+      const b = br({ readiness: r, hydrationPct: pct, recoveryPct: rec, recoveryDeviceConnected: rec != null, workoutsLast2Days: load, hydrationGoal: pct != null });
       const scoredSignals = b.lines.filter((l) => l.state === 'scored').map((l) => l.key);
       if (r) {
         eq(scoredSignals.join(','), r.from.join(','),
-          `the rows marked scored are exactly readinessScore's own \`from\` (hydration ${pct}, load ${load})`);
+          `the rows marked scored are exactly readinessScore's own \`from\` (hydration ${pct}, recovery ${rec}, load ${load})`);
       } else {
-        ok(b.absence != null, `no score means a stated reason (hydration ${pct}, load ${load})`);
+        ok(b.absence != null, `no score means a stated reason (hydration ${pct}, recovery ${rec}, load ${load})`);
+      }
       }
     }
   }

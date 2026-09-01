@@ -100,6 +100,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="attendance" options={{ href: null, title: 'Attendance' }} />
       <Tabs.Screen name="injury-doc" options={{ href: null, title: 'Read a Document' }} />
       <Tabs.Screen name="reminders" options={{ href: null, title: 'Reminders' }} />
+      <Tabs.Screen name="notification-prefs" options={{ href: null, title: 'Notifications' }} />
       <Tabs.Screen name="packages" options={{ href: null, title: 'Memberships & Packs' }} />
       <Tabs.Screen name="report" options={{ href: null, title: 'Weekly Report' }} />
       <Tabs.Screen name="records" options={{ href: null, title: 'Personal Records' }} />

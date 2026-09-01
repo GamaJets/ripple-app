@@ -41,6 +41,7 @@
 //    so rather than counting a client as not having been to a gym nobody
 //    looked at.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -54,9 +55,11 @@ import {
   type ActivityEvent, type Drift,
 } from '../lib/clientDrift';
 import {
-  buildNudgeBoard, explainDrift, mutedDaysFor, boardNote,
+  buildNudgeBoard, explainDrift, mutedDaysFor, boardNote, weekKey, watchDigestDue,
   type Evidence, type NudgeBoard, type NudgeCandidate, type NudgeRecord,
 } from '../lib/nudge';
+import { assessCadence, worthRaising, byLateness, type Cadence } from '../lib/cadence';
+import { fetchCoachPrefs } from '../lib/coachPrefsStore';
 
 /**
  * How far back the record of what the coach did is read.
@@ -68,15 +71,68 @@ import {
  */
 const RECORDS_DAYS = 366;
 
+/**
+ * Where "I have read this week's watch digest" lives.
+ *
+ * On the DEVICE and not on the account, deliberately. It is a position rather
+ * than an answer — losing it costs one dismissal and losing an answer would
+ * cost the answer — which is the same call src/lib/firstRun.ts makes about a
+ * setup draft. It also means a coach with two handsets is shown it on each,
+ * which is the right way round for a thing whose whole purpose is to be seen.
+ */
+const WATCH_DIGEST_KEY = 'repple.watchDigest.week';
+
 const DAY = 86_400_000;
 
 export type NudgeWrite = { ok: true } | { ok: false; reason: string };
+
+/** One client who is past their own usual gap between visits. */
+export interface DueRow {
+  clientId: string;
+  name: string | null;
+  cadence: Cadence;
+}
 
 export interface NudgeBook {
   /** The worst of the four reads. Nothing is suggested unless this is 'ready'. */
   status: LoadStatus;
   /** Null until every read has landed whole. Never a partially-true board. */
   board: NudgeBoard | null;
+  /**
+   * Clients past their OWN usual gap between visits, most overdue first.
+   *
+   * The earlier half of the same question the board answers, and deliberately a
+   * separate list rather than more rows on it. Drift needs a fortnight of
+   * silence before it can speak; a client's own interval speaks on day four.
+   * See src/lib/cadence.ts.
+   *
+   * Null under anything but a whole read, for the identical reason `board` is:
+   * a client whose record did not come back has no interval and no silence, and
+   * an empty list here would read as "nobody is late".
+   *
+   * Anybody already on the board — suggested or set aside — is left out. They
+   * are the same person and the board is the louder of the two lists; naming
+   * them twice on one screen is how a coach comes to believe the counts are
+   * made up.
+   */
+  dueBack: DueRow[] | null;
+  /**
+   * Whether this week's watch digest is still owed.
+   *
+   * False once the coach has closed it, until the following Monday. The rows
+   * themselves are on `board.watching` whether or not this is true — a coach who
+   * has closed the digest can still open the section, which is a coach asking
+   * rather than the app telling.
+   *
+   * Null while the stored week has not been read back. Not false: a digest that
+   * flashes on and vanishes as the read lands is worse than one that arrives a
+   * frame late, and false would be a claim that it has been seen.
+   */
+  watchDigestDue: boolean | null;
+  /** Close this week's digest. Best effort — a dismissal we could not write
+   *  costs the coach one more sighting, and failing the tap would cost them the
+   *  section. */
+  dismissWatchDigest: () => void;
   /** The line under the heading, true in all four states. */
   note: string;
   /** What the coach has already done, newest first. */
@@ -130,6 +186,43 @@ export function useNudges(): NudgeBook {
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [loaded, setLoaded] = useState<Loaded>(EMPTY);
   const [coachId, setCoachId] = useState<string | null>(null);
+  // The coach's own floor on how often the same person may be raised.
+  // `undefined` until the read lands and null when they have not set one; the
+  // two are the same behaviour and are kept apart anyway, because a read that
+  // failed must not be recorded as a coach who chose the default.
+  const [cooldownPref, setCooldownPref] = useState<number | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { prefs, status: st } = await fetchCoachPrefs();
+      // A refused read is the app's own pacing, not a zero. `cooldownFloor`
+      // refuses anything outside 1..365 anyway, so this is belt and braces on
+      // the one value that could silence a coach's whole list.
+      if (live) setCooldownPref(st === 'ready' ? prefs.nudgeCooldownDays : null);
+    })();
+    return () => { live = false; };
+  }, [authRev]);
+
+  // null until the stored week comes back. See `watchDigestDue` on NudgeBook.
+  const [digestSeen, setDigestSeen] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      let seen: string | null = null;
+      try { seen = await AsyncStorage.getItem(WATCH_DIGEST_KEY); }
+      catch { seen = null; /* unread is shown, which is the safe direction */ }
+      if (live) setDigestSeen(seen);
+    })();
+    return () => { live = false; };
+  }, [authRev]);
+
+  const dismissWatchDigest = useCallback(() => {
+    const wk = weekKey();
+    setDigestSeen(wk);
+    AsyncStorage.setItem(WATCH_DIGEST_KEY, wk).catch(() => {});
+  }, []);
 
   // The roster arrives from its own provider and re-renders on its own clock.
   // Keying the effect on the ids rather than on the array stops a re-render
@@ -223,10 +316,34 @@ export function useNudges(): NudgeBook {
 
   const board = useMemo(
     () => (combined === 'ready'
-      ? buildNudgeBoard(loaded.candidates, loaded.records, { doorLogRead: !!tenantId })
+      ? buildNudgeBoard(loaded.candidates, loaded.records, {
+        doorLogRead: !!tenantId,
+        bounds: { minCooldownDays: cooldownPref },
+      })
       : null),
-    [combined, loaded, tenantId],
+    [combined, loaded, tenantId, cooldownPref],
   );
+
+  // Who was due, from each client's own interval. Computed off the SAME
+  // candidates the board was built from, so a client cannot be assessable by one
+  // and not the other — and only for candidates whose activity actually came
+  // back, which is `activity.read` and not "their event list is empty".
+  const dueBack = useMemo(() => {
+    if (combined !== 'ready' || !board) return null;
+    const already = new Set<string>([
+      ...board.nudges.map((n) => n.clientId),
+      ...board.muted.map((m) => m.clientId),
+    ]);
+    const rows: DueRow[] = [];
+    for (const c of loaded.candidates) {
+      if (!c.activity.read) continue;
+      if (already.has(c.clientId)) continue;
+      const cadence = assessCadence(c.activity.events, Date.now(), DEFAULT_WINDOWS.historyDays);
+      if (!worthRaising(cadence)) continue;
+      rows.push({ clientId: c.clientId, name: c.name, cadence });
+    }
+    return byLateness(rows);
+  }, [combined, board, loaded.candidates]);
 
   const note = useMemo(() => {
     if (combined === 'error') {
@@ -309,6 +426,9 @@ export function useNudges(): NudgeBook {
   return {
     status: combined,
     board,
+    dueBack,
+    watchDigestDue: digestSeen === undefined ? null : watchDigestDue(digestSeen),
+    dismissWatchDigest,
     note,
     records: loaded.records,
     evidenceFor,

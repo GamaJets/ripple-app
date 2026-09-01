@@ -13,11 +13,13 @@ import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchPlans, createPlan, setPlanActive,
   fetchMemberships, createMembership, setMembershipStatus,
-  fetchPayments, recordPayment,
-  summarise, money,
+  setMembershipDates, setMembershipPlan,
+  fetchPayments, recordPayment, reversePayment, reversalBlocker, reversedAgainst,
+  summarise, money, PAYMENT_KIND_LABEL,
   type MembershipPlan, type Membership, type GymPayment,
-  type PlanInterval, type PaymentMethod,
+  type PlanInterval, type PaymentMethod, type CorrectionKind,
 } from '@lib/gymRecord';
+import { isoDay } from '@lib/gymInvoices';
 import {
   fetchPassTypes, createPassType, setPassTypeActive, passTypeBlocker,
   type PassType, type PassKind,
@@ -497,20 +499,44 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
 }) {
   const [memberId, setMemberId] = useState('');
   const [planId, setPlanId] = useState('');
+  // When this membership actually began, and when it ends. Both were absent
+  // and `startedOn` was hardcoded to today — which for a gym MIGRATING its
+  // existing roster is not a small omission: every member arrives dated the day
+  // the owner typed them in, so tenure is wrong for everybody on day one,
+  // cohort retention measures from a date nobody joined, and the ageing on
+  // /accounting has no history to age. None of it is recoverable afterwards
+  // without a write that offers the field.
+  const [startedOn, setStartedOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [endsOn, setEndsOn] = useState('');
   const [busy, setBusy] = useState(false);
-  // Covers both writes in this section — adding a membership and changing one's
-  // status. Either failing has to be visible; neither may look like nothing.
+  // Covers every write in this section — adding a membership, changing its
+  // status, correcting its dates and moving it to another plan. Any of them
+  // failing has to be visible; none may look like nothing.
   const [writeErr, setWriteErr] = useState<string | null>(null);
+  // Which row has its dates open for editing. One at a time: an inline editor
+  // on every row at once is four hundred uncommitted date fields, and the first
+  // reload throws all of them away without saying so.
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const dateBlocker =
+    !isoDay(startedOn) ? 'The start date has to be a real date — YYYY-MM-DD.'
+    : endsOn && !isoDay(endsOn) ? 'The end date has to be a real date, or empty for an open-ended membership.'
+    : endsOn && endsOn < startedOn ? 'That membership would end before it started.'
+    : null;
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!memberId.trim()) return;
+    if (dateBlocker) { setWriteErr(dateBlocker); return; }
     setBusy(true); setWriteErr(null);
     try {
       await createMembership(supabase, tenantId, {
         memberId: memberId.trim(),
         planId: planId || null,
-        startedOn: new Date().toISOString().slice(0, 10),
+        startedOn,
+        // '' is an open-ended membership, which is a real state and not the
+        // same as expired. It is written as null rather than as today.
+        endsOn: endsOn || null,
       });
       setMemberId(''); onChange();
     } catch (e: any) {
@@ -518,11 +544,39 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
     } finally { setBusy(false); }
   };
 
+  const savePlan = (m: Membership, next: string) => {
+    setMembershipPlan(supabase, m.id, next || null)
+      .then(() => { setWriteErr(null); onChange(); })
+      .catch((err: any) => setWriteErr(
+        `Could not move ${m.memberName || 'that membership'} onto another plan: ${err?.message ?? 'the change was refused'}. It is still on ${m.planName ?? 'no plan'}.`));
+  };
+
   const cols: Column<Membership>[] = [
     { key: 'member', header: 'Member', value: (m) => m.memberName || null },
-    { key: 'plan', header: 'Plan', value: (m) => m.planName },
-    { key: 'started', header: 'Started', value: (m) => m.startedOn },
-    { key: 'ends', header: 'Ends', value: (m) => m.endsOn },
+    // A plan change, not a cancel-and-recreate. The console used to force the
+    // second, which resets `started_on` and files the old row as churn — so a
+    // four-year member reads as a new one on every retention figure the product
+    // computes the moment they upgrade.
+    { key: 'plan', header: 'Plan', value: (m) => m.planName,
+      render: (m) => (
+        <select
+          value={m.planId ?? ''}
+          onChange={(e) => savePlan(m, e.target.value)}
+          style={{ ...field, padding: '4px 6px', fontSize: 12, maxWidth: 170 }}
+          aria-label={`The plan ${m.memberName ?? 'this membership'} is on`}
+        >
+          <option value="">{plans === null ? 'no plan — price book unread' : 'no plan'}</option>
+          {(plans ?? []).filter((p) => p.active || p.id === m.planId).map((p) => (
+            <option key={p.id} value={p.id}>{p.name}{p.active ? '' : ' (retired)'}</option>
+          ))}
+        </select>
+      ) },
+    { key: 'started', header: 'Started', value: (m) => m.startedOn,
+      render: (m) => editing === m.id
+        ? <MembershipDates m={m} onDone={() => { setEditing(null); onChange(); }} onErr={setWriteErr} />
+        : <button style={linkBtn} onClick={() => setEditing(m.id)} title="Correct these dates">{m.startedOn}</button> },
+    { key: 'ends', header: 'Ends', value: (m) => m.endsOn,
+      render: (m) => m.endsOn ?? <span className="dash">open-ended</span> },
     { key: 'status', header: 'Status', value: (m) => m.status,
       render: (m) => <span style={{ textTransform: 'capitalize' }}>{m.status}</span> },
     { key: 'act', header: '', value: () => '', align: 'right',
@@ -553,7 +607,7 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
   ];
 
   return (
-    <Section title="Memberships" sub="The member id is their Repple account id — the same person who signs into the app.">
+    <Section title="Memberships" sub="The member id is their Repple account id — the same person who signs into the app. Start and end dates are the gym's to state: a migrated roster whose every member starts today has no tenure and no cohort to measure.">
       <form onSubmit={add} style={formRow}>
         <input value={memberId} onChange={(e) => setMemberId(e.target.value)}
                placeholder="Member account id (uuid)" style={{ ...field, flex: 3, fontFamily: 'var(--mono)', fontSize: 12.5 }} />
@@ -567,8 +621,26 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
-        <button type="submit" disabled={busy} style={primaryBtn}>Add membership</button>
+        <label style={dateLabel}>
+          started
+          <input type="date" value={startedOn} onChange={(e) => setStartedOn(e.target.value)}
+                 style={{ ...field, width: 148 }} aria-label="The day this membership began" />
+        </label>
+        <label style={dateLabel}>
+          ends
+          <input type="date" value={endsOn} onChange={(e) => setEndsOn(e.target.value)}
+                 style={{ ...field, width: 148 }} aria-label="The day this membership ends, if it does" />
+        </label>
+        <button type="submit" disabled={busy || !!dateBlocker} style={primaryBtn}>Add membership</button>
       </form>
+      <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>
+        Leave the end date empty for a membership that runs until somebody cancels it — open-ended
+        is a decision a gym makes and it is not the same as expired. Click a start date in the table
+        to correct it.
+      </p>
+      {dateBlocker && !writeErr ? (
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{dateBlocker}</p>
+      ) : null}
       {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
       {members === null ? (
         readErr ? (
@@ -586,6 +658,57 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
   );
 }
 
+/**
+ * The two dates of one membership, corrected in place.
+ *
+ * Inline rather than in a sheet because the correction is almost always made
+ * while reading the row — an owner who has just noticed that everybody on the
+ * migrated roster says they joined last Tuesday. A modal would put the list
+ * they are checking against behind it.
+ */
+function MembershipDates({ m, onDone, onErr }: {
+  m: Membership; onDone: () => void; onErr: (s: string | null) => void;
+}) {
+  const [from, setFrom] = useState(m.startedOn);
+  const [to, setTo] = useState(m.endsOn ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const bad =
+    !isoDay(from) ? 'not a date'
+    : to && !isoDay(to) ? 'end is not a date'
+    : to && to < from ? 'ends before it starts'
+    : null;
+
+  const save = async () => {
+    if (bad) { onErr(`Those dates cannot be saved — ${bad}.`); return; }
+    setBusy(true);
+    try {
+      await setMembershipDates(supabase, m.id, { startedOn: from, endsOn: to || null });
+      onErr(null);
+      onDone();
+    } catch (e: any) {
+      // setMembershipDates checks the ROW COUNT, so a refusal by
+      // `memberships_owner` arrives here rather than as a silent 204 that
+      // leaves the old dates on screen looking saved.
+      onErr(`Those dates were NOT changed: ${e?.message ?? 'the write was refused'}. The membership still starts ${m.startedOn}.`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+      <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+             style={{ ...field, padding: '3px 5px', fontSize: 12, width: 130 }}
+             aria-label="The day this membership began" />
+      <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
+             style={{ ...field, padding: '3px 5px', fontSize: 12, width: 130 }}
+             aria-label="The day it ends, if it does" />
+      <button style={linkBtn} disabled={busy || !!bad} onClick={save}>Save</button>
+      <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={onDone}>Cancel</button>
+      {bad ? <span style={{ fontSize: 11.5, color: '#f0c04e' }}>{bad}</span> : null}
+    </span>
+  );
+}
+
 /* ── payments ──────────────────────────────────────────────────────────────── */
 
 function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
@@ -595,13 +718,36 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
   const [amount, setAmount] = useState('');
   const [memberId, setMemberId] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('card');
+  // Three fields `recordPayment` has always accepted and this form never sent.
+  //
+  //   takenAt      Saturday's cash could not be entered on Monday. Every
+  //                payment was stamped with the moment somebody typed it, so a
+  //                gym that does its books weekly had a week's takings all
+  //                landing on one day — and a month-end that bore no relation
+  //                to when the money arrived.
+  //   note         the Note column this same screen renders was a dash on
+  //                every row, because nothing could write one.
+  //   membershipId the only HARD link between a payment and what it was for.
+  //                Its absence is why /accounting's reconciliation is a 45-day
+  //                fuzzy match on member, amount and currency — the page says
+  //                so on screen — and why /revenue has to attribute payments by
+  //                asking whether the payer held a membership covering the day.
+  const [takenOn, setTakenOn] = useState('');
+  const [note, setNote] = useState('');
+  const [membershipId, setMembershipId] = useState('');
   const [busy, setBusy] = useState(false);
   const [writeErr, setWriteErr] = useState<string | null>(null);
+  /** The payment being corrected, or null. One at a time, deliberately. */
+  const [correcting, setCorrecting] = useState<GymPayment | null>(null);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     const major = parseFloat(amount);
     if (!isFinite(major)) return;
+    if (takenOn && !isoDay(takenOn)) {
+      setWriteErr('That payment was NOT recorded: the date it was taken is not a real date. Leave it empty to record it as now.');
+      return;
+    }
     // The money was handed over in something. `gym_payments.currency` is `not
     // null default 'AED'`, so a write that does not say which stamps dirhams on
     // a figure an owner will later reconcile against a bank statement — and
@@ -619,8 +765,15 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
         method,
         recordedBy: me.id,
         currency: ccy,
+        // Midday UTC rather than midnight, for a date the owner typed. A
+        // payment stamped 00:00 on the 1st lands in the previous month for
+        // every gym west of Greenwich, and the whole point of this field is
+        // getting a payment into the month it actually belongs to.
+        takenAt: takenOn ? `${takenOn}T12:00:00.000Z` : undefined,
+        note: note.trim() || null,
+        membershipId: membershipId || null,
       });
-      setAmount(''); onChange();
+      setAmount(''); setNote(''); setMembershipId(''); onChange();
     } catch (e: any) {
       // recordPayment throws on a PostgREST error. With a try/finally and no
       // catch, a refused write looked exactly like a successful one whose list
@@ -632,19 +785,58 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
     } finally { setBusy(false); }
   };
 
+  const rows = payments ?? [];
+
   const cols: Column<GymPayment>[] = [
     { key: 'when', header: 'Taken', value: (p) => p.takenAt,
       render: (p) => new Date(p.takenAt).toLocaleString() },
     { key: 'member', header: 'Member', value: (p) => p.memberName },
     { key: 'amount', header: 'Amount', value: (p) => p.amountCents, numeric: true,
-      render: (p) => money(p.amountCents, p.currency) },
+      // A correction renders in the critical colour with its sign, because it
+      // is the one row on this table whose amount reduces the total and a
+      // reader scanning a column of figures will not otherwise see the minus.
+      render: (p) => (
+        <span style={{ color: p.amountCents < 0 ? 'var(--crit)' : undefined }}>
+          {money(p.amountCents, p.currency)}
+        </span>
+      ) },
+    { key: 'kind', header: 'Kind', value: (p) => PAYMENT_KIND_LABEL[p.kind],
+      render: (p) => p.kind === 'payment'
+        ? <span style={{ color: 'var(--ink3)' }}>payment</span>
+        : <span style={{ color: 'var(--crit)' }}>{PAYMENT_KIND_LABEL[p.kind].toLowerCase()}</span> },
     { key: 'method', header: 'Method', value: (p) => p.method.replace('_', ' ') },
     { key: 'note', header: 'Note', value: (p) => p.note },
+    { key: 'fix', header: '', value: () => '', align: 'right',
+      render: (p) => {
+        // Only an ordinary payment can be corrected. Correcting a correction
+        // leaves two rows nobody can read as a pair, and the amount is already
+        // negative — the second minus would ADD money to the ledger.
+        if (p.kind !== 'payment') {
+          const orig = rows.find((x) => x.id === p.reversesPaymentId);
+          return (
+            <span style={{ color: 'var(--ink3)', fontSize: 12 }}>
+              {orig
+                ? `against ${new Date(orig.takenAt).toLocaleDateString()}`
+                : 'against a payment outside this window'}
+            </span>
+          );
+        }
+        const done = reversedAgainst(p.id, rows);
+        if (done >= p.amountCents) {
+          return <span style={{ color: 'var(--ink3)', fontSize: 12 }}>reversed in full</span>;
+        }
+        return <button style={linkBtn} onClick={() => { setWriteErr(null); setCorrecting(p); }}>Refund or correct</button>;
+      } },
   ];
 
   const options = [...new Map((members ?? [])
     .filter((m) => m.memberName)
     .map((m) => [m.memberId, m.memberName!])).entries()];
+
+  // Only live memberships, plus whichever member is selected. A payment against
+  // a cancelled membership is ordinary — arrears are usually paid after the
+  // membership stops — so the list narrows by member rather than by status.
+  const memberships = (members ?? []).filter((m) => !memberId || m.memberId === memberId);
 
   return (
     <Section title="Payments taken" sub="Last 30 days. A payment appears here because somebody recorded it — never because it was inferred.">
@@ -669,10 +861,43 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
           <option value="direct_debit">direct debit</option>
           <option value="other">other</option>
         </select>
+        <label style={dateLabel}>
+          taken
+          <input type="date" value={takenOn} onChange={(e) => setTakenOn(e.target.value)}
+                 style={{ ...field, width: 148 }} aria-label="The day the money was handed over" />
+        </label>
+        <select value={membershipId} onChange={(e) => setMembershipId(e.target.value)} style={{ ...field, flex: 2 }}
+                aria-label="The membership this payment settles">
+          <option value="">Not against a membership</option>
+          {memberships.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.memberName ?? 'Unnamed'} — {m.planName ?? 'no plan'} (from {m.startedOn})
+            </option>
+          ))}
+        </select>
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note"
+               style={{ ...field, flex: 2 }} aria-label="A note on this payment" />
         <button type="submit" disabled={busy || !ccy} style={primaryBtn}>Record</button>
       </form>
+      <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>
+        Leave the date empty to record the money as arriving now. Saying which membership a payment
+        settles is what turns the reconciliation on{' '}
+        <a href="/accounting" style={{ color: 'var(--brand)' }}>Accounting</a> from a 45-day guess
+        into a fact — nothing else in the database links a payment to what it was for.
+      </p>
       {ccy ? null : <Banner>Payments cannot be recorded until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. A recorded amount is permanent, and it is only a number until it says what money it is.</Banner>}
       {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {correcting ? (
+        <Correction
+          p={correcting}
+          all={rows}
+          tenantId={tenantId}
+          me={me}
+          onDone={() => { setCorrecting(null); onChange(); }}
+          onCancel={() => setCorrecting(null)}
+          onErr={setWriteErr}
+        />
+      ) : null}
       {payments === null ? (
         readErr ? (
           <Banner tone="crit">
@@ -686,6 +911,107 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
           empty="No payments recorded in the last 30 days." />
       )}
     </Section>
+  );
+}
+
+/* ── correcting money ──────────────────────────────────────────────────────── */
+
+/**
+ * Take money back off the ledger.
+ *
+ * There was no refund, no void, no credit note and no edit for a payment
+ * anywhere in this product. An owner who typed 5000 instead of 500 had created
+ * a permanent row that this screen lists, /revenue totals, /accounting
+ * reconciles against and /close carries into a month somebody files.
+ *
+ * A correction is a NEW ROW with a negative amount pointing at what it undoes,
+ * never a status flag on the original. supabase/parts/168 argues that at
+ * length; the short version is that eleven queries in this console add
+ * `amount_cents` up, a `status <> 'void'` predicate would have to be added to
+ * all of them and to everything written after today, and the one that forgets
+ * is silently wrong in the direction of MORE money.
+ *
+ * Two words for it, because they are two events. A REFUND is money that left
+ * the till and went back to the member. A CORRECTION is money that was never in
+ * it — a mis-key, a duplicate, a payment entered against the wrong person. Both
+ * are negative and an accountant reads them differently.
+ */
+function Correction({ p, all, tenantId, me, onDone, onCancel, onErr }: {
+  p: GymPayment; all: GymPayment[]; tenantId: string; me: Me;
+  onDone: () => void; onCancel: () => void; onErr: (s: string | null) => void;
+}) {
+  const already = reversedAgainst(p.id, all);
+  const remaining = p.amountCents - already;
+  const [kind, setKind] = useState<CorrectionKind>('refund');
+  // Pre-filled with what is left, because a full reversal is the common case
+  // and typing an amount that has to match to the penny is where a partial
+  // reversal nobody meant comes from.
+  const [amt, setAmt] = useState((remaining / 100).toFixed(2));
+  const [note, setNote] = useState('');
+  const [method, setMethod] = useState<PaymentMethod>(p.method);
+  const [busy, setBusy] = useState(false);
+
+  const cents = Math.round(parseFloat(amt) * 100);
+  const blocker =
+    reversalBlocker(p, already, Number.isFinite(cents) ? cents : NaN)
+    ?? (note.trim() ? null : 'Say what this is for. A negative row in the ledger with no reason on it is the line an accountant asks about and nobody can answer.');
+
+  const go = async () => {
+    if (blocker) { onErr(blocker); return; }
+    setBusy(true);
+    try {
+      await reversePayment(supabase, tenantId, p, {
+        kind, amountCents: cents, note: note.trim(), method, recordedBy: me.id,
+      });
+      onErr(null);
+      onDone();
+    } catch (e: any) {
+      onErr(`Nothing was taken back: ${e?.message ?? 'the write was refused'}. The original payment of ${money(p.amountCents, p.currency) ?? 'that amount'} still stands in full.`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{
+      margin: '0 14px 14px', padding: '12px 14px', background: 'var(--surface2)',
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
+    }}>
+      <div className="micro">Correcting {money(p.amountCents, p.currency)} from {p.memberName ?? 'nobody named'}</div>
+      <p style={{ margin: '7px 0 10px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '72ch' }}>
+        This writes a new row for the negative amount rather than changing the one above. The
+        original stays exactly as it was recorded, because it is what happened, and the two net to
+        the right figure in every total on every screen &mdash; including the ones written after
+        today. It is dated TODAY, not the day of the original: money handed back in September
+        belongs in September, and a month that has already been closed will refuse it.
+        {already > 0 ? ` ${money(already, p.currency)} has already been taken back off this payment.` : ''}
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={kind} onChange={(e) => setKind(e.target.value as CorrectionKind)}
+                style={{ ...field, minWidth: 220 }} aria-label="What kind of correction this is">
+          <option value="refund">Refund — the money went back to them</option>
+          <option value="correction">Correction — it was never taken</option>
+        </select>
+        <input value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="decimal"
+               style={{ ...field, width: 130 }}
+               aria-label={`How much to take back, in ${p.currency}`}
+               placeholder={`Amount (${p.currency})`} />
+        <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}
+                style={{ ...field, width: 150 }} aria-label="How the money went back">
+          <option value="card">card</option>
+          <option value="cash">cash</option>
+          <option value="transfer">transfer</option>
+          <option value="direct_debit">direct debit</option>
+          <option value="other">other</option>
+        </select>
+        <input value={note} onChange={(e) => setNote(e.target.value)}
+               placeholder="Why — this is on the record permanently"
+               style={{ ...field, flex: 2, minWidth: 220 }} aria-label="Why this is being taken back" />
+        <button onClick={go} disabled={busy || !!blocker} style={primaryBtn}>
+          {busy ? 'Writing…' : 'Take it back'}
+        </button>
+        <button onClick={onCancel} style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
+      </div>
+      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: '#f0c04e', maxWidth: '68ch' }}>{blocker}</p> : null}
+    </div>
   );
 }
 
@@ -718,6 +1044,14 @@ const formRow = {
   display: 'flex', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--ring)',
   flexWrap: 'wrap' as const, alignItems: 'center',
 };
+
+/** A date field with its own word beside it. `<input type="date">` renders an
+ *  empty box with a picker icon and nothing saying what date it wants, and two
+ *  of them in one row is a coin toss. */
+const dateLabel = {
+  display: 'flex', alignItems: 'center', gap: 6,
+  color: 'var(--ink3)', fontSize: 12.5,
+} as const;
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (

@@ -28,7 +28,14 @@
 // do with training, and nobody consented to that by disclosing an injury. The
 // screen says so out loud, because a promise the user cannot see is not one.
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, ActivityIndicator, Alert, Linking } from 'react-native';
+// No `Linking`. It used to be here, for the Open button, and handing a signed
+// URL to a medical document to whatever app owns http on this device is the
+// defect src/lib/injuryDocView.ts was written to close. `Image` and `Modal` are
+// what replaced it for a photographed report; a PDF goes through
+// `openInAppBrowser`. React Native's own <Image> rather than expo-image's:
+// this is a still photograph, there is nothing to animate, and RN's is in every
+// binary ever built so no guard is needed and no install can be without it.
+import { View, Text, Image, Modal, Pressable, ScrollView, TextInput, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -56,7 +63,9 @@ import type { LoadStatus } from '../../src/ui/loadStatus';
 // picker. See src/ui/nativeModules.ts.
 import {
   HAS_NATIVE_DOCUMENT_PICKER, DOCUMENT_PICKER_UNAVAILABLE_NOTE, pickDocument,
+  openInAppBrowser, IN_APP_BROWSER_UNAVAILABLE_NOTE,
 } from '../../src/ui/nativeModules';
+import { injuryDocKind, injuryDocRoute, OPENS_IN_APP_NOTE } from '../../src/lib/injuryDocView';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
   { id: 'mild', label: 'Mild' }, { id: 'moderate', label: 'Moderate' }, { id: 'severe', label: 'Severe' },
@@ -90,6 +99,9 @@ export default function InjuryDoc() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [docs, setDocs] = useState<InjuryDocFile[]>([]);
   const [docsStatus, setDocsStatus] = useState<LoadStatus>('loading');
+  // The document currently being read, full-screen, inside this app. Null is
+  // the ordinary state; there is no route out of this screen to a browser.
+  const [viewing, setViewing] = useState<InjuryDocFile | null>(null);
 
   const refreshDocs = useCallback(async () => {
     const r = await listInjuryDocs();
@@ -175,6 +187,36 @@ export default function InjuryDoc() {
       at: new Date().toISOString(),
     }));
     setDraft(cand.key, { verdict: 'added' });
+  };
+
+  /**
+   * Open a stored document, and never outside this app.
+   *
+   * The route is decided by src/lib/injuryDocView.ts rather than here, so the
+   * rule is assertable without a device — see injuryDocView.test.ts. A
+   * photographed report is drawn by this screen and the signed URL reaches
+   * nothing but the image decoder; anything else goes to the browser sheet this
+   * app presents over itself, which is dismissed back into it.
+   *
+   * The old branch was `Linking.openURL(doc.url)`, which handed the URL to
+   * Safari or Chrome. That URL stays live for an hour, so it sat in another
+   * app's history — and, with iCloud tabs or a signed-in Chrome, on every other
+   * device on the account — for that hour. A private bucket with own-folder
+   * policies behind an Open button that does that is not a private bucket.
+   */
+  const openDoc = async (doc: InjuryDocFile) => {
+    if (!doc.url) return;
+    if (injuryDocRoute(injuryDocKind(doc.name)) === 'in-app-viewer') {
+      setViewing(doc);
+      return;
+    }
+    const opened = await openInAppBrowser(doc.url);
+    // Only the open's own answer decides what we say happened, and the two
+    // silences are different sentences: a build with no in-app browser cannot
+    // be fixed by tapping again, and must not fall through to the system one.
+    if (!opened) {
+      Alert.alert('Could not open it privately', IN_APP_BROWSER_UNAVAILABLE_NOTE);
+    }
   };
 
   const removeDoc = (doc: InjuryDocFile) => {
@@ -297,8 +339,14 @@ export default function InjuryDoc() {
         <Notice tone={t.s3} kicker="Guidance only" title="Not medical advice"
           note="Nothing here reads, checks or corrects a diagnosis. For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
 
+        {/* The second sentence is new and it is not decoration. The screen has
+            always promised the file is private, and the Open button used to
+            break that promise by handing the document to the phone's web
+            browser. It now opens in the app, so the promise and the button
+            agree — and the member is told which, because a privacy property
+            nobody can see is one they have no reason to believe. */}
         <Notice tone={t.brand} kicker="Private" title="Your coach never sees the file"
-          note="The document stays in your account and only you can open it. What your coach sees is the injury you confirm below — the area, how bad it is and your note — the same as if you had typed it in yourself." />
+          note={`The document stays in your account and only you can open it. ${OPENS_IN_APP_NOTE} What your coach sees is the injury you confirm below — the area, how bad it is and your note — the same as if you had typed it in yourself.`} />
 
         {busy ? (
           <Card style={{ marginTop: sp.md }}>
@@ -422,7 +470,7 @@ export default function InjuryDoc() {
               </Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                 {doc.url ? (
-                  <Ghost label="Open" onPress={() => { Linking.openURL(doc.url!).catch(() => Alert.alert('Could not open it', 'Your device would not open that document.')); }} />
+                  <Ghost label="Open" onPress={() => { void openDoc(doc); }} />
                 ) : null}
                 <Ghost label="Delete" onPress={() => removeDoc(doc)} />
               </View>
@@ -430,6 +478,57 @@ export default function InjuryDoc() {
           ))}
         </Section>
       </ScrollView>
+
+      {/* ── the document, full-screen, still inside this app ───────────────
+          The whole point of item 46. A photographed report is drawn here by
+          React Native's own <Image>, so the signed URL is fetched by this
+          process and reaches nothing else: no browser history, no other app's
+          recently-closed tabs, and nothing to sync to a laptop.
+
+          `transparent={false}` and a solid backdrop rather than a dimmed sheet,
+          because a medical document behind a translucent overlay is still a
+          medical document somebody can read over your shoulder — and because
+          the screen underneath lists the member's other reports by name.
+
+          `onRequestClose` is not optional: on Android the hardware back button
+          is how most people will close this, and without it the gesture goes to
+          the router and leaves the modal up over a different screen. */}
+      <Modal visible={viewing != null} animationType="fade" onRequestClose={() => setViewing(null)}
+        supportedOrientations={['portrait', 'landscape']}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingVertical: sp.md }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.body, fontWeight: '500', color: '#fff' }} numberOfLines={1}>
+                {viewing?.name ?? ''}
+              </Text>
+              {/* Repeated here rather than assumed from the screen behind it.
+                  This is the moment the member is actually looking at their own
+                  report, and it is the moment the sentence is worth reading. */}
+              <Text style={{ ...ty.caption, color: '#999', marginTop: 2 }}>
+                Open in the app · not in your browser
+              </Text>
+            </View>
+            <Pressable onPress={() => setViewing(null)} hitSlop={12}
+              accessibilityRole="button" accessibilityLabel="Close this document"
+              style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
+              <Text style={{ ...ty.label, fontWeight: '600', color: '#fff' }}>Close</Text>
+            </Pressable>
+          </View>
+          {viewing?.url ? (
+            <Image
+              source={{ uri: viewing.url }}
+              // Contain, never cover. A report cropped to fill the screen has
+              // lost the edge of the page, which on a scan is where the dates
+              // and the clinician's name are.
+              resizeMode="contain"
+              style={{ flex: 1, width: '100%' }}
+              accessible
+              accessibilityRole="image"
+              accessibilityLabel={`Your document, ${viewing.name}`}
+            />
+          ) : null}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }

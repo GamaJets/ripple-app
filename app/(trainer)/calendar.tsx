@@ -36,6 +36,13 @@ import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 import { isWhole } from '../../src/ui/loadStatus';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { useCoachReminders } from '../../src/ui/coachReminders';
+import {
+  blockDates, summariseBlocks, blockSummaryLine, blockPlanLabel,
+  type BlockOutcome, type BlockResult,
+} from '../../src/lib/blockRange';
+import { useAuth } from '../../src/ui/auth';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -189,6 +196,49 @@ export default function TrainerSchedule() {
   useFocusEffect(useCallback(() => { reloadFees(); }, [reloadFees]));
   const { tenant } = useTenant();
   const nameOf = (id: string | null) => roster.find((c) => c.id === id)?.name ?? 'Open slot';
+
+  // ── The one person in the transaction this app never reminded ───────────
+  //
+  // `scheduleLocal` is wired into three places and all three are the CLIENT's:
+  // their booking, their class, their streak. A client who forgets their 6:30
+  // has wasted their own hour; a coach who forgets it has stood somebody up.
+  //
+  // Armed off THIS screen's own read rather than a second query — same rows,
+  // same status, so the phone's reminders and the grid can never describe
+  // different diaries. Under 'error' the provider hands back an empty list and
+  // nothing is passed at all: null means "the read did not answer" and the sync
+  // then does nothing, which is the important half. Cancelling every armed
+  // reminder because one query failed would leave a coach with a silent phone
+  // and no way to know it.
+  //
+  // The window handed in is the window that was actually READ, so an arming for
+  // a session outside it is left alone rather than cancelled on the strength of
+  // a query that never asked about it. See src/lib/coachReminders.ts.
+  const { user } = useAuth();
+  const remindable = known
+    ? sessions.map((s) => ({
+      id: s.id,
+      startsAt: s.startsAt,
+      status: s.status,
+      // `TrainingSession` carries no outcome — this provider reads the diary
+      // rather than the delivery record. Null is the honest value and it is
+      // also the safe one: `toArm` only refuses a session whose outcome is
+      // KNOWN to be set, and the arming window is seven days ahead, where
+      // nothing has an outcome yet by definition.
+      outcome: null as string | null,
+      clientName: s.clientId ? (roster.find((c) => c.id === s.clientId)?.name ?? null) : null,
+    }))
+    : null;
+  // The provider reads from the start of the current month forward, and the
+  // grid pages through months, so the honest window is "everything this screen
+  // has looked at". Taken from the rows themselves rather than assumed.
+  const readFrom = remindable && remindable.length
+    ? Math.min(...remindable.map((s) => Date.parse(s.startsAt)).filter(Number.isFinite))
+    : Date.now();
+  const readTo = remindable && remindable.length
+    ? Math.max(...remindable.map((s) => Date.parse(s.startsAt)).filter(Number.isFinite))
+    : Date.now();
+  useCoachReminders(user?.id ?? null, remindable, readFrom, readTo);
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
   const [selKey, setSelKey] = useState(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
@@ -226,6 +276,21 @@ export default function TrainerSchedule() {
   const [blkTo, setBlkTo] = useState(17);
   const [blkAllDay, setBlkAllDay] = useState(false);
   const [blkBusy, setBlkBusy] = useState(false);
+  // ── Blocking more than one day ──────────────────────────────────────────
+  //
+  // `doBlock` blocked ONE day per confirmation, so a coach going away for a
+  // fortnight tapped through fourteen sheets and a coach who never works Sunday
+  // blocked this Sunday and then had to remember again next week.
+  //
+  // This is NOT the roadmap's "block time from the phone's own calendar":
+  // reading the device calendar needs `expo-calendar`, which is not a
+  // dependency, so it is a new native module and a new binary — the same
+  // objection that took two-way sync off this wave. What was actually painful
+  // was the fourteen sheets, and that half needs nothing new.
+  //
+  // Both default to 1, which is exactly the behaviour that was there before.
+  const [blkDays, setBlkDays] = useState(1);
+  const [blkWeeks, setBlkWeeks] = useState(1);
   const [avDow, setAvDow] = useState(1);
   const [avHour, setAvHour] = useState(9);
   const [avMinute, setAvMinute] = useState(0);
@@ -566,56 +631,69 @@ export default function TrainerSchedule() {
   // somebody arranged to be there, so this refuses and the coach cancels it
   // themselves, which tells the client.
   const doBlock = async () => {
-    const start = new Date(selY, selM, selD);
-    start.setHours(blkAllDay ? 0 : blkFrom, 0, 0, 0);
     const mins = blkAllDay ? 24 * 60 : (blkTo - blkFrom) * 60;
     if (mins <= 0) {
       Alert.alert('Pick an end after the start', 'The finish time needs to be later than the start time.');
       return;
     }
-    setBlkBusy(true);
-    let row: any = null;
-    let failed = false;
-    try {
-      const { data, error } = await supabase.rpc('block_time', { p_starts_at: start.toISOString(), p_duration_min: mins });
-      if (error) failed = true;
-      else row = Array.isArray(data) ? data[0] : data;
-    } catch { failed = true; }
-    setBlkBusy(false);
-    // `hourLabel` rather than the arithmetic inline: 24 is midnight, and
-    // `24 % 12 || 12` is 12 while `24 >= 12` is pm — so blocking 6pm to
-    // midnight confirmed "6:00pm to 12pm", which is noon, the other end of the
-    // day, and reads as a span running backwards. The chip and the button
-    // already special-cased 24; the confirmation did not, so the sentence a
-    // coach reads LAST was the one that was wrong.
-    const span = blkAllDay ? 'That whole day' : `${timeLabel(start.toISOString())} to ${hourLabel(blkTo)}`;
-    if (failed || !row?.ok) {
-      Alert.alert(
-        'Not blocked',
-        row?.reason === 'booked'
-          ? `You have a session booked in that time, so nothing was changed. Cancel it first — that tells the client — and then block the time.`
-          // 'already-blocked' is the reason supabase/parts/113 added, and it
-          // exists because this branch used to be reached by an exception and
-          // answered with the sentence below — which was false in both halves.
-          // Extending a block (block the morning, then decide to take the whole
-          // day) raised a raw exclusion_violation out of the RPC, and the coach
-          // was told their time was NOT blocked and clients could still book it,
-          // when the block that caused the error was the very thing stopping
-          // them. They were then invited to try again, forever.
-          : row?.reason === 'already-blocked'
-            ? `You have already blocked time that overlaps this, so nothing was changed — and nobody can book across it. To cover a longer period, free the existing block up on this day first, then block the new hours.`
-            : `That did not save, so the time is not blocked and clients can still book it. Try again.`,
-        [{ text: 'OK' }],
-      );
+
+    // Every day the plan covers, as a local `YYYY-MM-DD`. `selKey` is already
+    // one — the grid builds it — and it is used rather than rebuilt, so this
+    // cannot drift from the day the coach tapped.
+    //
+    // Built by `blockDates` rather than inline, because a range built by adding
+    // 86,400,000ms lands an hour out across a daylight-saving change: one day of
+    // a fortnight's holiday silently missing and another blocked twice. See
+    // src/lib/blockRange.ts, which is run under three time zones.
+    const dayList = blockDates({
+      from: `${selY}-${String(selM + 1).padStart(2, '0')}-${String(selD).padStart(2, '0')}`,
+      days: blkDays,
+      repeatWeeks: blkWeeks,
+    });
+    if (dayList.length === 0) {
+      Alert.alert('Nothing to block', 'That range does not cover any days. Pick a length between one day and two months.');
       return;
     }
+
+    setBlkBusy(true);
+    const results: BlockResult[] = [];
+    for (const day of dayList) {
+      const [dy, dm, dd] = day.split('-').map(Number);
+      const dayStart = new Date(dy, dm - 1, dd);
+      dayStart.setHours(blkAllDay ? 0 : blkFrom, 0, 0, 0);
+      let outcome: BlockOutcome = 'failed';
+      let withdrawn = 0;
+      try {
+        const { data, error } = await supabase.rpc('block_time', { p_starts_at: dayStart.toISOString(), p_duration_min: mins });
+        const row = Array.isArray(data) ? data[0] : data;
+        // The server's three answers, kept apart. Only 'failed' means the day
+        // may still be bookable and the coach should try again; the other two
+        // are the server declining for a reason, and reporting either as a
+        // failure would send somebody back to press the same button forever —
+        // which is the exact loop part 113 was written to end, when extending a
+        // block raised a raw exclusion_violation and the coach was told their
+        // time was NOT blocked by the block that was stopping every booking.
+        if (error) outcome = 'failed';
+        else if (row?.ok) { outcome = 'blocked'; withdrawn = Number(row.withdrawn) || 0; }
+        else if (row?.reason === 'booked') outcome = 'booked';
+        else if (row?.reason === 'already-blocked') outcome = 'already-blocked';
+        else outcome = 'failed';
+      } catch { outcome = 'failed'; }
+      results.push({ day, outcome, withdrawn });
+    }
+    setBlkBusy(false);
+
+    // ONE alert for the whole run, naming each kind of outcome. A fortnight
+    // produces a mixture, and the two sentences a coach must never be shown are
+    // "blocked" while four days are still bookable and "not blocked" while ten
+    // were. Both describe a diary that is not the diary — and a coach skimming
+    // an alert takes the SHAPE of it, so the title changes too.
+    const summary = summariseBlocks(results);
     setBlockOpen(false);
     await refresh();
-    const withdrawn = Number(row.withdrawn) || 0;
     Alert.alert(
-      'Time blocked',
-      `${span} on ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)} is blocked, and no client can book across it.` +
-        (withdrawn ? `\n\n${withdrawn} open slot${withdrawn === 1 ? '' : 's'} inside it ${withdrawn === 1 ? 'was' : 'were'} withdrawn.` : ''),
+      summary.blocked === 0 ? 'Nothing blocked' : summary.needsAttention ? 'Partly blocked' : 'Time blocked',
+      blockSummaryLine(summary),
       [{ text: 'Done' }],
     );
   };
@@ -932,6 +1010,12 @@ export default function TrainerSchedule() {
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Schedule</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Tap a day to see sessions · add or cancel any time</Text>
         </View>
+
+        {/* Three different things are drawn on one grid — an open slot, a
+            booking, and blocked time — and a coach who reads a blocked hour as
+            an offer withdraws availability they never had. One dismissible row;
+            src/lib/screenHelp.ts holds the words. */}
+        <ScreenHelp screen="coach-schedule" />
 
         {/* ── the hero: how much of the schedule is spoken for ────────────── */}
         <Hero
@@ -1364,10 +1448,59 @@ export default function TrainerSchedule() {
                 ))}
               </ScrollView>
             </>) : null}
+
+            {/* ── how many days, and how many weeks ────────────────────────
+                Both default to one, which is exactly what this sheet did
+                before. A coach going away for a fortnight tapped through
+                fourteen of these; a coach who never works Sunday blocked this
+                Sunday and had to remember again next week.
+
+                Not a device-calendar import: that needs `expo-calendar`, which
+                is not a dependency, so it is a new native module and a new
+                binary. The fourteen sheets were the actual pain and they need
+                nothing new. */}
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm, marginBottom: sp.sm }}>How many days</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+              {[1, 2, 3, 5, 7, 10, 14, 21, 28].map((d) => (
+                <Chip key={'bd' + d} t={t} label={d === 1 ? 'Just this day' : `${d} days`} on={blkDays === d}
+                  onPress={() => setBlkDays(d)} />
+              ))}
+            </ScrollView>
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Repeat weekly</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+              {[1, 2, 4, 6, 8, 12].map((w) => (
+                <Chip key={'bw' + w} t={t} label={w === 1 ? 'No repeat' : `${w} weeks`} on={blkWeeks === w}
+                  onPress={() => setBlkWeeks(w)} />
+              ))}
+            </ScrollView>
+            <Text style={{ ...ty.caption, color: t.ink3, paddingBottom: sp.md }}>
+              Each day is blocked on its own, so a day with a session already booked in it is refused and the rest
+              still go through. You are told exactly which, and nothing is cancelled on your behalf.
+            </Text>
           </ScrollView>
           <View style={{ height: sp.md }} />
-          <Cta wide disabled={blkBusy}
-            label={blkBusy ? 'Blocking…' : blkAllDay ? 'Block the Whole Day' : `Block ${hourLabel(blkFrom)} — ${hourLabel(blkTo)}`}
+          {/* `selKey` is the GRID's key and is `${year}-${monthIndex}-${day}`
+              with no padding — not a `YYYY-MM-DD`. Passing it here would make
+              `blockDates` return nothing and disable the button forever, which
+              is a bug that looks exactly like a broken screen. The padded form
+              is built once, next to the one `doBlock` builds. */}
+          <Cta wide disabled={blkBusy || blockPlanLabel({
+            from: `${selY}-${String(selM + 1).padStart(2, '0')}-${String(selD).padStart(2, '0')}`,
+            days: blkDays, repeatWeeks: blkWeeks,
+          }) === null}
+            label={blkBusy
+              ? 'Blocking…'
+              // The button says what it will actually do. `blockPlanLabel`
+              // counts the days the plan covers rather than multiplying the two
+              // chips: a ten-day run repeated weekly overlaps itself and covers
+              // seventeen days, not twenty, and a button promising twenty would
+              // be wrong before it was pressed.
+              : (blockPlanLabel({
+                from: `${selY}-${String(selM + 1).padStart(2, '0')}-${String(selD).padStart(2, '0')}`,
+                days: blkDays, repeatWeeks: blkWeeks,
+              }) ?? 'Block This Day')
+                + (blkAllDay ? '' : ` · ${hourLabel(blkFrom)} — ${hourLabel(blkTo)}`)}
             onPress={doBlock} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setBlockOpen(false)} />

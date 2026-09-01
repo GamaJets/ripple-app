@@ -169,8 +169,22 @@ ok(!/AED|USD|\$/.test(RECURRING_END_RULE + RECURRING_CREDIT_NOTE + RECURRING_CLA
 
 /* ── Credits are not drawn eight weeks in advance ─────────────────────────── */
 
-ok(/doesn’t draw credits/i.test(RECURRING_CREDIT_NOTE), 'the credit note says a series does not draw a pack down');
-ok(/settles/i.test(RECURRING_CREDIT_NOTE), 'and says who does settle it');
+// The promise changed with part 193 and the assertion changed with it, but the
+// half that matters did not: nothing is taken off a pack for sessions that have
+// not happened. The materialiser runs eight weeks ahead, and a client who
+// opened the app to find their ten-pack empty in the first fortnight would be
+// right to think they had been charged for weeks they had not had.
+ok(/Nothing comes off a session pack when the dates/i.test(RECURRING_CREDIT_NOTE),
+  'the credit note still promises that booking the dates costs nothing');
+ok(/not paid for in advance/i.test(RECURRING_CREDIT_NOTE),
+  'and says outright that future weeks are not paid for up front');
+// And the half that is new: a credit IS drawn, one at a time, as each session
+// is delivered. A note that only said what did not happen would leave a client
+// believing the standing Tuesday is free.
+ok(/marked done, one at a time/i.test(RECURRING_CREDIT_NOTE),
+  'and it says when a credit actually comes off, so the sessions are not read as free');
+ok(!/settles what’s owed/i.test(RECURRING_CREDIT_NOTE),
+  'and no longer tells the client to settle it with their coach, which was the app admitting it had lost track');
 
 /* ── A clash skips a date, it does not sink the series ────────────────────── */
 

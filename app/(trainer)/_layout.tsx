@@ -94,6 +94,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="share-kit" options={{ href: null, title: 'Share Kit' }} />
       <Tabs.Screen name="documents" options={{ href: null, title: 'Documents' }} />
       <Tabs.Screen name="invoices" options={{ href: null, title: 'Invoices' }} />
+      <Tabs.Screen name="receipts" options={{ href: null, title: 'Cash and Transfers' }} />
       <Tabs.Screen name="nudges" options={{ href: null, title: 'Nudges' }} />
       <Tabs.Screen name="client-report" options={{ href: null, title: 'Their Record' }} />
       <Tabs.Screen name="credentials" options={{ href: null, title: 'Credentials' }} />
@@ -101,6 +102,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="money" options={{ href: null, title: 'Money' }} />
       <Tabs.Screen name="brand" options={{ href: null, title: 'Branding' }} />
       <Tabs.Screen name="statement" options={{ href: null, title: 'Statement' }} />
+      <Tabs.Screen name="getting-started" options={{ href: null, title: 'Getting Started' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>
     <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />

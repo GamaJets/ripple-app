@@ -64,12 +64,34 @@
  * reads — see src/lib/units.ts.
  */
 import { countsToVolume } from './setMethods';
+import { intensityOf, type Intensity } from './setIntensity';
 
-/** One row of the table. See the header for what an absent key means. */
+/**
+ * One row of the table. See the header for what an absent key means.
+ *
+ * `rpe`, `pct1rm` and `tempo` arrived later than the other three and obey the
+ * identical rule — absent inherits the exercise, present is the row's own
+ * answer, `null` included. They are documented at length in
+ * src/lib/setIntensity.ts, which owns every parse, every bound and the one
+ * sentence a coach has to be told: the CLIENT'S renderer does not draw them
+ * yet. Adding them here was safe precisely because absence round-trips through
+ * jsonb and AsyncStorage unchanged, so every programme written before them
+ * expands exactly as it did before.
+ */
 export type SetRow = {
   reps?: string | null;
   loadKg?: number | null;
   method?: string | null;
+  /** Prescribed effort on the RPE scale, in halves. See src/lib/setIntensity.ts. */
+  rpe?: number | null;
+  /** Prescribed share of a one-rep max, as a whole percentage. Never converted
+   *  to a load by anything in this file: the maximum it is a share of is an
+   *  estimate for almost every client, and inventing kilograms from it would
+   *  put weight on a bar the coach did not write. */
+  pct1rm?: number | null;
+  /** Prescribed rep speed, canonical `3-1-1-0`. Distinct from the 'tempo' SET
+   *  METHOD, which says the speed matters and cannot say what it is. */
+  tempo?: string | null;
 };
 
 /**
@@ -83,6 +105,9 @@ export type SetSpec = {
   reps: string;
   loadKg?: number | null;
   method?: string | null;
+  rpe?: number | null;
+  pct1rm?: number | null;
+  tempo?: string | null;
   setRows?: SetRow[] | null;
 };
 
@@ -99,6 +124,17 @@ export type PlannedSet = {
    * still showing the old single-spec fields.
    */
   fromRow: boolean;
+  /**
+   * Effort, share of a max and rep speed, all three resolved by the same
+   * absent-inherits rule as the fields above.
+   *
+   * Carried as one object rather than three loose keys so that a renderer
+   * cannot draw two of them and forget the third — which is precisely how
+   * `tempo` came to exist as a set METHOD with no notation behind it. Every one
+   * of the three is null on every programme written before src/lib/setIntensity.ts,
+   * and `intensityLine` returns null for that case so nothing renders at all.
+   */
+  intensity: Intensity;
 };
 
 const own = (o: object, k: string): boolean =>
@@ -139,9 +175,14 @@ export function expandSets(ex: SetSpec): PlannedSet[] {
   const exReps = ex.reps ?? '';
   const exLoad = ex.loadKg ?? null;
   const exMethod = ex.method ?? null;
+  // Resolved ONCE for the whole exercise rather than per row, because with no
+  // rows there is nothing to override it with. `intensityOf(ex, null)` is the
+  // exercise's own three fields.
+  const exIntensity = intensityOf(ex, null);
   if (!hasSetRows(ex)) {
     return Array.from({ length: specCount(ex.sets) }, (_, i) => ({
       n: i + 1, reps: exReps, loadKg: exLoad, method: exMethod, fromRow: false,
+      intensity: exIntensity,
     }));
   }
   return (ex.setRows as SetRow[]).map((r, i) => ({
@@ -151,6 +192,10 @@ export function expandSets(ex: SetSpec): PlannedSet[] {
     loadKg: own(r, 'loadKg') ? (r.loadKg ?? null) : exLoad,
     method: own(r, 'method') ? (r.method ?? null) : exMethod,
     fromRow: true,
+    // The same rule, applied by the one function that owns it. Deliberately not
+    // re-implemented here: three more `own(r, k) ? … : …` ternaries is three
+    // more places for a future field to be added to two of them.
+    intensity: intensityOf(ex, r),
   }));
 }
 
@@ -259,7 +304,30 @@ export type RowsPatch = { setRows: SetRow[]; sets: number };
  * row goes on asking the exercise, and a row that wants to differ says so.
  */
 function materialise(ex: SetSpec): SetRow[] {
-  return expandSets(ex).map((s) => ({ reps: s.reps, loadKg: s.loadKg }));
+  // ── and why the row's OWN keys are carried through ─────────────────────
+  //
+  // This used to be `expandSets(ex).map((s) => ({ reps: s.reps, loadKg: s.loadKg }))`
+  // and that dropped every other key on every existing row, every time. The
+  // three editing functions all begin here, so a coach who had marked set 1 a
+  // warm-up and then typed into set 3's reps box got set 1's warm-up silently
+  // deleted — the method badge vanished from a row they had not touched, and
+  // with it the exclusion that keeps a warm-up out of the volume tally. The
+  // same edit would now also have deleted an RPE, a percentage and a tempo.
+  //
+  // The fix is to spread the row that is already there and then overwrite only
+  // the two columns this function is materialising. Which is exactly what the
+  // paragraph below already says the intent was: `reps` and `loadKg` are the
+  // columns being made concrete, and everything else is left as the coach left
+  // it — present where they set it, absent where it still asks the exercise.
+  //
+  // An exercise with no table has no rows to preserve and `existing` is null,
+  // which is the original behaviour unchanged: two columns, `sets` times over.
+  const existing = hasSetRows(ex) ? (ex.setRows as SetRow[]) : null;
+  return expandSets(ex).map((s, i) => ({
+    ...(existing ? existing[i] : null),
+    reps: s.reps,
+    loadKg: s.loadKg,
+  }));
 }
 
 /**

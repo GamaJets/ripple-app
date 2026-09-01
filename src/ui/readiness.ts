@@ -23,6 +23,7 @@
 // collects the provider state and hands it over.
 import { useMemo } from 'react';
 import { useWellness } from './wellness';
+import { useWearables } from './wearables';
 import { useDeviceSleep } from './deviceSleep';
 import { useHabits } from './habits';
 import { useWorkoutLog } from './workoutLog';
@@ -58,6 +59,7 @@ export function useReadiness(): ReadinessView {
   const devSleep = useDeviceSleep();
   const { water, waterGoal, waterStatus } = useHabits();
   const { log, status: logStatus } = useWorkoutLog();
+  const { states: deviceStates, metrics: deviceMetrics } = useWearables();
 
   const reads = devSleep.reads;
   const nights = devSleep.nights;
@@ -80,9 +82,43 @@ export function useReadiness(): ReadinessView {
     // set is thirty points off for a network blip.
     const hydrationPct = waterGoal && isWhole(waterStatus) ? water / waterGoal : null;
 
+    // The device's own recovery verdict, from whichever connected provider
+    // published one today.
+    //
+    // Only CONNECTED providers are consulted. `metrics` keeps the last roll-up
+    // a provider produced and `disconnect()` clears it, but a provider whose
+    // token died sets state to 'disconnected' and leaves the metrics in place
+    // on purpose — so reading the map alone would score a member on the
+    // recovery their strap reported before it stopped talking to us, for as
+    // long as the app stayed open.
+    //
+    // First rather than best. Two straps both scoring recovery is vanishingly
+    // rare, and taking the higher of two would be picking the flattering one;
+    // taking the first in registry order is at least a rule that does not
+    // depend on which number is nicer. The name travels with it so the
+    // breakdown can attribute the figure to the device that made it.
+    let recoveryPct: number | null = null;
+    let recoveryFrom: string | null = null;
+    let recoveryDeviceConnected = false;
+    for (const [id, m] of Object.entries(deviceMetrics)) {
+      if (deviceStates[id] !== 'connected') continue;
+      // A device that scores recovery at all — which is what makes a null
+      // meaningful. Apple Health publishes no such score, so an iPhone-only
+      // member is "no connected device scores recovery" rather than "your
+      // device has not reported one today", and is not sent to look for a
+      // sync that was never going to happen.
+      if (id === 'whoop' || id === 'oura') recoveryDeviceConnected = true;
+      if (recoveryPct != null) continue;
+      const v = m?.recoveryPct;
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+      recoveryPct = v;
+      recoveryFrom = providerById(id as ProviderId)?.meta.name ?? id;
+    }
+
     const readiness = readinessScore({
       avgSleepHours: sleep.avgHours,
       hydrationPct,
+      recoveryPct,
       workoutsLast2Days,
     });
 
@@ -109,8 +145,11 @@ export function useReadiness(): ReadinessView {
         hydrationGoal: waterGoal != null,
         hydrationStatus: waterStatus,
         hydrationPct,
+        recoveryPct,
+        recoveryFrom,
+        recoveryDeviceConnected,
         workoutsLast2Days,
       }),
     };
-  }, [nights, typed, typedStatus, reads, deviceStatus, water, waterGoal, waterStatus, log, logStatus]);
+  }, [nights, typed, typedStatus, reads, deviceStatus, water, waterGoal, waterStatus, log, logStatus, deviceStates, deviceMetrics]);
 }

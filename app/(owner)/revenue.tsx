@@ -1,6 +1,25 @@
-// Owner · Revenue analytics (track A). Deepens the money view: MRR/ARR, an
-// accumulating trend, a trend-based forecast, revenue by plan, revenue at risk,
-// and trainer LTV. Computed from the live roster + persisted MRR history.
+// Owner · Revenue. What the gym was actually paid, what its coaches delivered,
+// and the trend behind both.
+//
+// ── The screen used to be called Revenue and was not about revenue ────────
+//
+// Every figure on it was derived from ONE calculation: delivered sessions ×
+// `tenants.session_fee`. Membership dues, class income, packages and pass sales
+// were absent entirely — from a screen headed "Your gym's revenue" — while
+// app/(owner)/members.tsx has been reading `gym_payments` two screens away for
+// months. A gym whose income is mostly memberships, which is most gyms, was
+// shown a revenue screen reporting a fraction of its takings as the whole of
+// them, with nothing on screen saying which fraction.
+//
+// So the hero is now MONEY SOMEBODY RECORDED RECEIVING, from `gym_payments`,
+// whatever it was for. Sessions × fee is still here and still worth having —
+// it is what the coaching is WORTH, which is a different and useful question —
+// but it is beside the takings under its own label rather than standing in for
+// them.
+//
+// The two are never added. A payment recorded at the desk for a PT block and a
+// session delivered out of that block are the same money counted twice, and
+// nothing in the record links them.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`): four bordered stat boxes and five stacked cards became
@@ -11,7 +30,7 @@
 // whenever no churn had been observed. It rendered as "Trainer LTV $X · ~24 mo
 // lifespan" — a measured-looking unit economic derived from a magic number.
 // With no churn signal there is no lifespan and no LTV; the screen says so.
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { num } from '../../src/lib/format';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +43,9 @@ import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { gymRollup, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
+import { supabase } from '../../src/lib/supabase';
+import { fetchPayments, sharedCurrency, money, type GymPayment } from '../../src/lib/gymRecord';
+import { reportError } from '../../src/lib/reportError';
 
 export default function OwnerRevenue() {
   const t = useTheme();
@@ -101,6 +123,47 @@ export default function OwnerRevenue() {
   // is empty until payments are switched on, so this stays null rather than
   // dividing by a number nobody has earned.
   const fee = tenant?.sessionFee ?? null;
+
+  /**
+   * What the gym was actually paid in the last 30 days.
+   *
+   * `undefined` is "not read yet", `null` is "the read failed", and an array is
+   * the answer — three states, because an empty array here would say "this gym
+   * took nothing this month", which is the single most expensive wrong sentence
+   * a revenue screen can produce.
+   */
+  const tenantId = tenant?.id ?? null;
+  const [takings, setTakings] = useState<GymPayment[] | null | undefined>(undefined);
+  useEffect(() => {
+    let on = true;
+    if (!tenantId) { setTakings(undefined); return; }
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    fetchPayments(supabase, tenantId, since)
+      .then((r) => { if (on) setTakings(r); })
+      // fetchPayments throws on a PostgREST error and on a truncated read. Both
+      // become null, which renders a dash and a sentence — never a zero.
+      .catch((e) => { reportError('ownerRevenue.payments', e); if (on) setTakings(null); });
+    return () => { on = false; };
+  }, [tenantId]);
+
+  /**
+   * The till, and the currency it is honestly in.
+   *
+   * `sharedCurrency` is the same rule /money and the console's Overview use: a
+   * set whose rows disagree has NO currency, and a row stating none does not
+   * agree with one that does. A gym that changed its currency has two in its
+   * ledger, and adding them is not a total — it is a bigger number.
+   */
+  const till = useMemo(() => {
+    if (!takings) return null;
+    if (!takings.length) return { cents: 0, count: 0, currency: cur, empty: true };
+    return {
+      cents: takings.reduce((a, p) => a + p.amountCents, 0),
+      count: takings.length,
+      currency: sharedCurrency(takings),
+      empty: false,
+    };
+  }, [takings, cur]);
   // `roll.payroll30` is delivered × fee over an empty roster, which is a real 0
   // when the gym delivered nothing and an unknown when we could not ask.
   const revenue30 = trainersUnknown ? null : roll.payroll30;
@@ -127,23 +190,23 @@ export default function OwnerRevenue() {
         </View>
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
+        {/* The hero is the TILL, not the coaching. Whatever the money was for
+            — a membership, a class, a pack, a drop-in at the desk — if somebody
+            recorded it, it is in here; if nobody did, it is not, and the note
+            says how many payments the figure is made of so a suspiciously small
+            one is legible as a recording gap rather than a bad month. */}
         <Hero
-          label="Sessions Delivered · 30 Days"
-          figure={trainersUnknown ? '—' : num(roll.sessions30)}
-          note={loading
-            ? 'Reading your roster…'
-            : trainersUnread
-            ? unreadNote
-            // gymMoney is null when the fee is unset OR the gym has not set a
-            // currency, and both have to be branched on before the value is
-            // interpolated — `${null}` puts the word "null" in the sentence.
-            : delta !== 0
-            ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} vs last month${gymMoney(revenue30, cur) != null ? ` · ${gymMoney(revenue30, cur)} at your fee` : ''}`
-            : gymMoney(revenue30, cur) != null
-              ? `${gymMoney(revenue30, cur)} at your session fee`
-              : revenue30 != null
-                ? "Set your gym's currency in Ops to value these"
-                : 'Set a session fee in Ops to value these'}
+          label="Taken · 30 Days"
+          figure={fig(till && !till.empty ? money(till.cents, till.currency) : till?.empty ? money(0, cur) : null)}
+          note={takings === undefined
+            ? 'Reading what your gym was paid…'
+            : takings === null
+            ? 'Your payments could not be read — this is not a month in which the gym took nothing.'
+            : till?.empty
+            ? 'No payment has been recorded in 30 days. That is not the same as no income — it is the same as nobody having entered one.'
+            : till && till.currency == null
+            ? `${till.count} payments, in more than one currency — so there is no one total to state.`
+            : `${till?.count} payment${till?.count === 1 ? '' : 's'} recorded — memberships, classes, packs and the desk, whatever somebody entered`}
         />
 
         {/* Said once, at the top, rather than left for an owner to infer from a
@@ -169,6 +232,23 @@ export default function OwnerRevenue() {
           {/* The session fee is the tenant's own row, not a roll-up, so it
               survives a failed roster read and is still worth stating. */}
           <KpiRow items={[
+            {
+              label: 'Sessions · 30 Days',
+              value: trainersUnknown ? '—' : num(roll.sessions30),
+              delta: loading ? 'not read yet'
+                : trainersUnread ? unreadNote
+                : delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} vs last month`
+                : 'delivered',
+            },
+            {
+              // What the COACHING is worth, and it is deliberately not added to
+              // the till above: a pack paid for at the desk and the sessions
+              // drawn out of it are the same money, and nothing in the record
+              // links the two.
+              label: 'At Your Fee',
+              value: trainersUnknown ? '—' : fig(gymMoney(revenue30, cur)),
+              delta: fee == null ? 'no session fee set' : 'sessions × fee, not takings',
+            },
             { label: 'Session Fee', value: fig(gymMoney(fee, cur)), delta: fee == null ? 'not set' : 'per delivered session' },
             { label: 'Value / Client', value: trainersUnknown ? '—' : fig(gymMoney(valuePerClient, cur)),
               delta: loading ? 'not read yet' : trainersUnread ? unreadNote : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },

@@ -5,6 +5,10 @@ import { addNotificationTapListener } from '../src/ui/pushNotifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ClientDataProvider } from '../src/ui/clientData';
 import { WearablesProvider } from '../src/ui/wearables';
+import { BadgeWatchProvider } from '../src/ui/badgeWatch';
+import { NotifyPrefsProvider } from '../src/ui/notifyPrefs';
+import { ReminderSyncProvider } from '../src/ui/reminderSync';
+import { MotivationNudgeProvider } from '../src/ui/motivationNudges';
 import { DeviceSleepProvider } from '../src/ui/deviceSleep';
 import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
@@ -104,10 +108,37 @@ export default function RootLayout() {
         <AuthProvider>
         <TenantProvider>
         <ClientDataProvider>
+          {/* Above everything that can schedule a notification, and it seeds
+              src/lib/notifyPrefsLatch.ts — the synchronous read the gate inside
+              scheduleLocal uses. High in the tree because a session reminder is
+              armed by a booking callback that could fire from almost anywhere. */}
+          <NotifyPrefsProvider>
+          {/* Inside NotifyPrefsProvider, because it waits for the stored
+              preferences to have seeded that latch before scheduling anything —
+              otherwise a launch could re-arm a reminder at an hour the member
+              asked to be left alone in, and not correct it until the next
+              launch, where the same race could happen again. The reminders
+              screen said of itself that "nothing anywhere re-schedules them
+              from the saved payload later"; this is that. Renders nothing. */}
+          <ReminderSyncProvider>
           <WearablesProvider>
                   <DeviceSleepProvider>
             <SessionsProvider>
               <WorkoutLogProvider>
+                {/* Inside WorkoutLogProvider and ClientDataProvider, because it
+                    watches both: a badge is earned by the training log, and
+                    four of the twelve need the weight history for a bodyweight
+                    set to count for anything. It renders nothing — it exists so
+                    that an unlock is an event wherever the member happens to be
+                    rather than something to be noticed on a screen most people
+                    never open. `useBadgeWatch` returns a safe empty view when
+                    this is absent, so the coach and owner builds are unaffected
+                    by it not being mounted for them. */}
+                <BadgeWatchProvider>
+                {/* Inside WorkoutLogProvider, because a streak and a quiet week
+                    are facts about the training log — and it refuses to arm
+                    anything off an incomplete read of it. Renders nothing. */}
+                <MotivationNudgeProvider>
                 <MyTrainerProfileProvider>
                   <RosterProvider>
                     <InjuryAcksProvider>
@@ -159,10 +190,14 @@ export default function RootLayout() {
                     </InjuryAcksProvider>
                   </RosterProvider>
                 </MyTrainerProfileProvider>
+                </MotivationNudgeProvider>
+                </BadgeWatchProvider>
               </WorkoutLogProvider>
             </SessionsProvider>
           </DeviceSleepProvider>
                   </WearablesProvider>
+          </ReminderSyncProvider>
+          </NotifyPrefsProvider>
         </ClientDataProvider>
         </TenantProvider>
         </AuthProvider>

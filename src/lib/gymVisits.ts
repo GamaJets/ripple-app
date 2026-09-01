@@ -126,6 +126,79 @@ export function peakHour(visits: Pick<Visit, 'enteredAt'>[]): { hour: number; vi
   return best.visits === 0 ? null : best;
 }
 
+/** Days of the week, Monday first — the week a rota is written in. */
+export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+
+/**
+ * Visit counts by day of the week, Monday first, every day present.
+ *
+ * Every day is included at zero for the same reason `visitsByHour` includes
+ * every hour: the shape of the week is the answer. A gym that is dead on
+ * Fridays needs to see the gap, and a chart that omits it draws a line straight
+ * through.
+ */
+export function visitsByWeekday(visits: Pick<Visit, 'enteredAt'>[]): { day: string; visits: number }[] {
+  const out = WEEKDAYS.map((day) => ({ day, visits: 0 }));
+  for (const v of visits) {
+    const d = new Date(v.enteredAt);
+    if (Number.isNaN(d.getTime())) continue;
+    // getDay is 0 = Sunday; the rota's week opens on Monday.
+    out[(d.getDay() + 6) % 7].visits += 1;
+  }
+  return out;
+}
+
+/** One weekday-and-hour slot of the week, with how many came through it. */
+export interface BusySlot {
+  /** 0 = Monday, matching WEEKDAYS. */
+  weekday: number;
+  hour: number;
+  visits: number;
+  /** How many distinct calendar days in the window contributed to this slot,
+   *  so a caller can say "23 across 4 Tuesdays" rather than implying one. */
+  days: number;
+}
+
+/**
+ * The busiest weekday-and-hour slots across a window, busiest first.
+ *
+ * This is the staffing question, and neither `peakHour` nor `visitsByHour`
+ * answers it: both flatten the week, so a gym whose Saturday mornings are
+ * heaving and whose Tuesday mornings are empty reads as "busy at 09:00" and
+ * gets somebody rostered on the wrong day. A rota is written per weekday, so
+ * the figure it needs is per weekday.
+ *
+ * `days` is carried because the average matters more than the total when the
+ * window does not divide evenly into weeks: 30 days holds five Mondays and four
+ * Fridays, and a total alone would make Monday look 25% busier than it is.
+ *
+ * Ties break toward the earlier slot in the week, so a reader given two equal
+ * answers is pointed at the one they reach first.
+ */
+export function busiestSlots(
+  visits: Pick<Visit, 'enteredAt'>[],
+  limit = 5,
+): BusySlot[] {
+  const counts = new Map<string, { weekday: number; hour: number; visits: number; days: Set<string> }>();
+  for (const v of visits) {
+    const d = new Date(v.enteredAt);
+    if (Number.isNaN(d.getTime())) continue;
+    const weekday = (d.getDay() + 6) % 7;
+    const hour = d.getHours();
+    const key = `${weekday}:${hour}`;
+    let cell = counts.get(key);
+    if (!cell) { cell = { weekday, hour, visits: 0, days: new Set<string>() }; counts.set(key, cell); }
+    cell.visits += 1;
+    cell.days.add(dayOf(v.enteredAt));
+  }
+  return [...counts.values()]
+    .map((c) => ({ weekday: c.weekday, hour: c.hour, visits: c.visits, days: c.days.size }))
+    .sort((a, b) => b.visits - a.visits
+      || a.weekday - b.weekday
+      || a.hour - b.hour)
+    .slice(0, Math.max(0, limit));
+}
+
 /** Distinct identified members. Anonymous head-counts are excluded by design. */
 export function uniqueMembers(visits: Pick<Visit, 'memberId'>[]): number {
   const seen = new Set<string>();
@@ -296,13 +369,49 @@ export async function checkOut(sb: Queryable, visitId: string, exitedAtIso?: str
 }
 
 /**
- * Close visits left open past `hours` — the ones where somebody left without
- * scanning out.
+ * The exact note a sweep writes, and the marker that stops it running twice.
  *
- * These are deliberately closed with a null exit rather than a guessed time:
- * the note records that it was swept, and `averageDwellMinutes` continues to
- * ignore them. Stamping a plausible exit would quietly corrupt every dwell
- * figure built afterwards.
+ * Exported because two callers depend on the exact string: the sweep itself, to
+ * skip rows it has already marked, and the Door screen, to tell a visit nobody
+ * ever closed from one the sweep has already accounted for.
+ */
+export const SWEEP_NOTE = 'auto-closed: no exit recorded';
+
+/** True when this visit has already been through a sweep. */
+export function wasSwept(v: Pick<Visit, 'note'>): boolean {
+  return v.note === SWEEP_NOTE;
+}
+
+/**
+ * Mark the visits nobody closed — the ones where somebody left without scanning
+ * out.
+ *
+ * ── What it does NOT do, deliberately ─────────────────────────────────────
+ *
+ * It does not write `exited_at`. The visit stays open forever and
+ * `averageDwellMinutes` continues to ignore it, because stamping a plausible
+ * exit would quietly corrupt every dwell figure computed afterwards — and a
+ * twenty-hour stay in the average is not a rounding error, it is the reason the
+ * average exists. What the sweep records is that somebody has LOOKED at the row
+ * and it is not a person standing in the building.
+ *
+ * ── Why the note is also a guard ──────────────────────────────────────────
+ *
+ * This used to match on `exited_at is null and entered_at < cutoff` alone, so
+ * every run re-updated every stale visit the gym had ever accumulated and
+ * returned the same growing count each time. Nightly that is wasted writes; from
+ * a button on the Door screen it is a lie — "12 swept" every single press, for
+ * the same twelve rows, when eleven of them were swept last Tuesday.
+ *
+ * The `or` is how PostgREST expresses "not already swept" over a nullable
+ * column: a plain `.neq('note', …)` drops rows whose note IS null, which is the
+ * majority of them and exactly the set that most needs sweeping. Rows carrying
+ * a note the DESK wrote are still swept — theirs is overwritten, which is a
+ * real cost and the smaller one: a desk note on a visit nobody closed is worth
+ * less than an accurate count of what remains open.
+ *
+ * Returns how many rows this run actually marked. Zero is a real answer and
+ * means the building is tidy, not that the sweep failed.
  */
 export async function sweepStaleVisits(
   sb: Queryable,
@@ -312,10 +421,14 @@ export async function sweepStaleVisits(
   const cutoff = new Date(Date.now() - hours * 3600_000).toISOString();
   const { data, error } = await sb
     .from('gym_visits')
-    .update({ note: 'auto-closed: no exit recorded' })
+    .update({ note: SWEEP_NOTE })
     .eq('tenant_id', tenantId)
     .is('exited_at', null)
     .lt('entered_at', cutoff)
+    // Double-quoted: PostgREST splits an `or` on commas and dots, and the note
+    // contains a space and a colon. Unquoted, the filter is parsed as a
+    // different clause and the guard silently stops guarding.
+    .or(`note.is.null,note.neq."${SWEEP_NOTE}"`)
     .select('id');
   if (error) throw error;
   return (data ?? []).length;

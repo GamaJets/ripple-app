@@ -16,6 +16,7 @@
 // argument, so the console and the phone app can both use it and neither owns
 // it.
 
+import { assertWhole, capLimit } from './rowCap';
 import type { SessionOutcome } from './gymSessions';
 import type { GymClass } from './gymSchedule';
 
@@ -59,10 +60,17 @@ export async function fetchPtSlots(
     .eq('tenant_id', tenantId)
     .gte('starts_at', fromISO)
     .lte('starts_at', toISO)
-    .order('starts_at', { ascending: true });
+    .order('starts_at', { ascending: true })
+    .limit(capLimit());
   if (error) throw error;
 
-  const rows = data ?? [];
+  // Capped, because PostgREST stops at 1000 rows and says nothing (see
+  // src/lib/rowCap.ts). The order is ascending, so a truncated read drops the
+  // END of the window — the board would simply stop partway through the week,
+  // and /timetable would report "Double-booked 0" and a floor-cover strip with
+  // holes in it, both of which are statements about the gym's week rather than
+  // about a query that was cut off. A busy gym passes 1000 sessions in a month.
+  const rows = assertWhole(data as any[] | null, 'the one-to-ones in this window');
   if (!rows.length) return [];
 
   const ids = [...new Set(
@@ -579,9 +587,15 @@ export async function updatePtSlot(
 export async function fetchTrainerOptions(
   sb: Queryable, tenantId: string,
 ): Promise<{ id: string; name: string | null }[]> {
-  const { data, error } = await sb.from('trainers').select('id').eq('tenant_id', tenantId);
+  const { data, error } = await sb
+    .from('trainers').select('id').eq('tenant_id', tenantId).limit(capLimit());
   if (error) throw error;
-  const ids: string[] = (data ?? []).map((r: any) => r.id as string);
+  // A gym with a thousand trainers is not a gym, so this cap will not fire on
+  // real data — which is why it is here. If it ever does, the tenant filter has
+  // been lost in an edit, and the failure without a guard is a coach picker
+  // offering every trainer on the platform to a gym owner about to attach one
+  // of them to a class. A read that refuses is recoverable; that is not.
+  const ids: string[] = assertWhole(data as any[] | null, "this gym's trainers").map((r: any) => r.id as string);
   if (!ids.length) return [];
 
   const { data: profs, error: nameErr } = await sb

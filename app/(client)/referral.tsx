@@ -35,12 +35,14 @@
 // A signup is also not a conversion, and the screen is explicit about which one
 // it counts: a friend has converted when they log their first workout.
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, Share, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Share, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useBrand } from '../../src/ui/brand';
 import { myReferralCode, myReferrals, myReferralSummary } from '../../src/lib/referrals';
+import { referralLink, referralMessage } from '../../src/lib/referralLink';
+import { copyToClipboard, HAS_NATIVE_CLIPBOARD } from '../../src/ui/nativeModules';
 import {
   CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, REWARD_NOTE, friendLine, shapeReferrals,
   summaryLine, type ReferralRow,
@@ -81,18 +83,56 @@ export default function Referral() {
 
   useEffect(() => { load(); }, [load]);
 
-  const shareMsg = code
-    ? `Join me on ${appName} — the app I use to plan workouts, track progress and dial in my nutrition. Use my code ${code} when you sign up.`
-    : '';
+  // The message and the bare link, both from src/lib/referralLink.ts so that
+  // the thing shared, the thing copied and the thing a friend's app opens are
+  // one string built once. This screen used to compose the sentence inline and
+  // put NO LINK in it at all — the friend had to read the code off a message
+  // and type it into an optional field near the bottom of a sign-up form.
+  const shareMsg = code ? referralMessage(code, appName) : '';
+  const link = code ? referralLink(code) : '';
 
   const invite = async () => {
     if (!code) return;
     try { await Share.share({ message: shareMsg }); } catch { /* user cancelled */ }
   };
 
+  /**
+   * What was last copied, so the button can say it worked.
+   *
+   * Held as the label rather than a boolean because there are two things to
+   * copy and a confirmation that does not say WHICH is a confirmation the
+   * member has to test by pasting. Cleared on a timer so it does not sit there
+   * claiming a copy that happened five minutes ago.
+   */
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = async (what: 'link' | 'code') => {
+    const text = what === 'link' ? link : code;
+    if (!text) return;
+    // Reported, never assumed. expo-clipboard is native and is absent from any
+    // build made before it landed — and "copied" is a sentence somebody acts on
+    // by pasting, so claiming it when nothing was copied means an empty paste
+    // and a message with no link in it.
+    const ok = await copyToClipboard(text);
+    if (!ok) {
+      Alert.alert(
+        'Not copied',
+        HAS_NATIVE_CLIPBOARD
+          ? 'That could not be put on your clipboard just now. Share My Invite sends the same link straight to whichever app you pick.'
+          : 'This version of the app cannot use the clipboard. Share My Invite sends the same link straight to whichever app you pick.',
+      );
+      return;
+    }
+    setCopied(what === 'link' ? 'Link copied' : 'Code copied');
+    setTimeout(() => setCopied(null), 2500);
+  };
+
   const steps = [
-    { n: '1', label: 'Share Your Code', note: 'Send it to a friend or training partner.' },
-    { n: '2', label: 'They Join ' + appName, note: 'They enter your code when they sign up.' },
+    // Step 2 used to read "They enter your code when they sign up", which was
+    // an accurate description of the only thing that could happen and also the
+    // step that lost most people. The link now carries the code through
+    // install and sign-up, so the step says what actually happens.
+    { n: '1', label: 'Share Your Link', note: 'Send it to a friend or training partner.' },
+    { n: '2', label: 'They Join ' + appName, note: 'Your code travels with the link, so there is nothing for them to type.' },
     { n: '3', label: 'They Start Training', note: 'The referral counts once they log their first workout.' },
   ];
 
@@ -142,6 +182,13 @@ export default function Referral() {
               </Text>
             </View>
 
+            {/* The link, shown as well as sent. A member pasting their invite
+                into an Instagram bio or a WhatsApp group needs the URL itself,
+                and a share sheet cannot put it there. */}
+            {code ? (
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.md }} numberOfLines={2}>{link}</Text>
+            ) : null}
+
             <View style={{ marginTop: sp.lg }}>
               {code ? (
                 <Cta label="Share My Invite" wide onPress={invite} />
@@ -149,6 +196,16 @@ export default function Referral() {
                 <Ghost label="Try Again" onPress={load} />
               )}
             </View>
+            {code ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
+                <Ghost label="Copy Link" icon="share" onPress={() => copy('link')} />
+                <Ghost label="Copy Code" onPress={() => copy('code')} />
+                {/* Ink, not a coloured flash. `copied` is a fact about what
+                    just happened rather than a state worth a status colour, and
+                    t.crit/t.warn are marks in this app and not text anyway. */}
+                {copied ? <Text style={{ ...ty.caption, color: t.ink2 }}>{copied}</Text> : null}
+              </View>
+            ) : null}
           </Card>
         </Section>
 

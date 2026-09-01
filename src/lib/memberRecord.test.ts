@@ -162,6 +162,22 @@ ok(/currency not recorded/.test(amount(5000, null)),
 ok(!/[$£€]/.test(amount(5000, 'USD')), 'no symbol is ever guessed — billing.ts already billed a Dubai gym in dollars that way');
 eq(amount(123456789, 'AED'), 'AED 1,234,567.89', 'and a figure over three digits is separated');
 
+// ── the receipt of a member who pays in a currency with no minor unit ──────
+// This is the whole of item 43 in one assertion. `(cents / 100).toFixed(2)`
+// showed somebody who paid five thousand yen a receipt reading "JPY 50.00", on
+// the single screen in the app whose job is to be the record of what they were
+// charged. There is no sen in a yen: the stored integer IS the amount.
+eq(amount(5000, 'JPY'), 'JPY 5,000', 'a zero-decimal currency is not divided and grows no decimal point');
+eq(amount(5000, 'jpy'), 'JPY 5,000', 'and the lower-case code from the column is the same currency');
+eq(amount(1200000, 'KRW'), 'KRW 1,200,000', 'won too, separated and undivided');
+eq(amount(0, 'VND'), 'VND 0', 'a real zero in a zero-decimal currency is still a zero, not "0.00"');
+// The other half of "driven by the currency in hand": with no currency there is
+// no answer to whether this integer is hundredths or whole units, so the
+// decimal point would be a guess on top of a guess. The stored integer is what
+// we hold and it is what is printed.
+eq(amount(5000, null), '5,000 (currency not recorded)',
+  'with no currency the scale is unknown too, so nothing is divided and nothing is dressed up as converted');
+
 eq(methodLabel('direct_debit'), 'Direct debit', 'the method reads as a person would say it');
 eq(methodLabel(null), 'Not recorded', 'and one the gym left blank is not silently called a card payment');
 

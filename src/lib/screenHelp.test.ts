@@ -7,7 +7,8 @@
 // logic ones: a stored list that fails to read as a list, and a key written
 // twice so the round trip through storage compounds. Both are pinned below.
 import {
-  SCREEN_HELP, dismissedFrom, isDismissed, withDismissed, isHelpKey,
+  SCREEN_HELP, CLIENT_HELP_KEYS, COACH_HELP_KEYS,
+  dismissedFrom, isDismissed, withDismissed, isHelpKey,
   type ScreenHelpKey,
 } from './screenHelp';
 
@@ -20,11 +21,33 @@ const ALL = Object.keys(SCREEN_HELP) as ScreenHelpKey[];
 
 /* ── one card per tab, and no more ──────────────────────────────────────── */
 
-// Five, matching the five tabs in app/(client)/_layout.tsx. A sixth card is a
-// sixth thing on a screen, and the whole argument for this feature is that the
-// app already has too many.
-eq(ALL.length, 5, 'there is one card per tab');
-same(ALL, ['home', 'train', 'meals', 'progress', 'me'], 'the five, in tab order');
+// Two populations, asserted separately and never as one total. A bare
+// `ALL.length === 10` would pass just as happily if a coach card were added and
+// a client tab's card deleted, which is the exact accident the client half of
+// this feature could not survive: the five below match the five tabs in
+// app/(client)/_layout.tsx and a sixth is a sixth thing on a screen, which the
+// whole argument for this feature is against.
+same(CLIENT_HELP_KEYS, ['home', 'train', 'meals', 'progress', 'me'], 'the client five, in tab order');
+eq(CLIENT_HELP_KEYS.length, 5, 'there is one card per client tab');
+
+// The coach's five are not tabs — the coach app has no tab bar — they are the
+// five screens whose numbers are computed rather than typed. Capped at five for
+// the same volume reason: a help row on all fifty-one coach screens is the
+// complaint this feature answers, restated.
+eq(COACH_HELP_KEYS.length, 5, 'and five for the coach');
+for (const k of COACH_HELP_KEYS) {
+  ok(k.startsWith('coach-'), `${k} is namespaced to the coach — a client and a coach can share a handset, and a collision dismisses the wrong card`);
+}
+
+// Every key belongs to exactly one of the two lists, and every entry in the
+// record is reachable from one of them. A card in SCREEN_HELP that is in
+// neither list is a card no screen can be pointed at and no test can watch.
+eq(ALL.length, CLIENT_HELP_KEYS.length + COACH_HELP_KEYS.length, 'the record holds the two lists and nothing else');
+for (const k of ALL) {
+  const inClient = CLIENT_HELP_KEYS.includes(k);
+  const inCoach = COACH_HELP_KEYS.includes(k);
+  ok(inClient !== inCoach, `${k} is listed in exactly one of the two populations`);
+}
 
 for (const k of ALL) {
   const h = SCREEN_HELP[k];

@@ -136,7 +136,7 @@ Deno.serve(async (req) => {
   const action = String(body.action || 'checkout');
 
   // ── managing a subscription already sold ──────────────────────────────────
-  if (action === 'cancel' || action === 'resume' || action === 'portal') {
+  if (action === 'cancel' || action === 'resume' || action === 'portal' || action === 'end_now') {
     const subId = String(body.subscription_id || '');
     if (!subId) return json({ error: 'missing subscription_id' }, 400);
 
@@ -208,20 +208,74 @@ Deno.serve(async (req) => {
       } catch (e) { return stripeError('billing portal', e); }
     }
 
-    // Cancel at the end of the period, never immediately: the client has paid
-    // for the month they are in and cancelling now would take the rest of it
-    // away from them. `resume` is the same switch thrown back, and exists
-    // because a cancellation the client can only undo by resubscribing at
-    // today's price is a trap rather than a setting.
+    // ── ending it TODAY ──────────────────────────────────────────────────
     //
-    // That holds just as firmly when it is the COACH throwing the switch, and
-    // more so — a coach cancelling immediately would be taking back weeks of
-    // coaching somebody has already paid for. There is no immediate cancel in
-    // this function for either party, and no refund: refunds are a different
-    // Stripe API with different consequences (partial amounts, application-fee
-    // reversals, the money leaving a connected account that may already have
-    // paid out) and none of that is modelled here. Stripe's own dashboard is
-    // where a refund is issued, and the screen says so.
+    // Separate from the switch below, and separate on purpose. `cancel` and
+    // `resume` are one boolean thrown back and forth on a subscription that
+    // keeps running to the end of a period somebody has paid for; `end_now`
+    // deletes the subscription at Stripe and there is no way back from it
+    // except a new checkout at today's price.
+    //
+    // It exists because the alternative was worse. A client who asks to be
+    // cancelled today and is billed again in three weeks writes the review that
+    // costs the coach the next five clients, and until now the only answer this
+    // app had for them was "it stops at the end of the period" — true, and not
+    // what they asked for.
+    //
+    // WHAT IT DOES NOT DO IS REFUND. No proration, no credit note, no invoice:
+    // `prorate: false`, stated rather than defaulted, so a later Stripe default
+    // cannot start issuing credit notes on somebody's behalf. The client has
+    // paid for the period they are in and ending it takes the rest of that away
+    // from them without giving the money back — which is a real cost to a real
+    // person, so `END_NOW_TAKES_THE_REST` in src/lib/refunds.ts is printed in
+    // front of the coach BEFORE they confirm, and giving the money back is a
+    // separate act through supabase/functions/connect-refund.
+    if (action === 'end_now') {
+      let ended: Stripe.Subscription | null = null;
+      try {
+        // In the subscription's OWN account context, for the same reason the
+        // update below is: a direct-charge subscription cancelled without it is
+        // not found, and this function would tell a coach the cancellation
+        // failed while the charge carried on either way.
+        ended = await stripe.subscriptions.cancel(subId, { prorate: false }, acctOpts);
+      } catch (e) { return stripeError('end_now', e); }
+      if (!ended) return json({ error: 'Stripe did not confirm the change, so nothing has changed and the subscription is still running.' }, 502);
+
+      const { error: eErr, count: eCount } = await service.from('client_subscriptions').update({
+        status: ended.status,
+        // Stripe leaves `cancel_at_period_end` false on a subscription it has
+        // actually cancelled, and mirroring that verbatim is right: a screen
+        // reading "ends at the end of the period" beside a status of 'canceled'
+        // is two contradictory sentences about the same row.
+        cancel_at_period_end: !!ended.cancel_at_period_end,
+        current_period_end: ended.current_period_end ? new Date(ended.current_period_end * 1000).toISOString() : null,
+        stripe_event_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { count: 'exact' }).eq('stripe_subscription_id', subId);
+      if (eErr) console.error('connect-checkout: subscription ended at Stripe but not mirrored:', eErr.message);
+      else if (eCount === 0) console.error('connect-checkout: subscription ended at Stripe but no row matched ' + subId + ' to mirror it onto');
+
+      return json({
+        ok: true,
+        status: ended.status,
+        ended_now: true,
+        cancel_at_period_end: !!ended.cancel_at_period_end,
+        current_period_end: ended.current_period_end ? new Date(ended.current_period_end * 1000).toISOString() : null,
+      });
+    }
+
+    // Cancel at the end of the period: the client has paid for the month they
+    // are in and stopping it now would take the rest of it away from them.
+    // `resume` is the same switch thrown back, and exists because a
+    // cancellation the client can only undo by resubscribing at today's price
+    // is a trap rather than a setting. This stays the default and the screens
+    // offer it first — `end_now` above is the exception, taken deliberately.
+    //
+    // Still no refund on this path, and none is implied by it: refunds are a
+    // different Stripe API with different consequences and they now live in
+    // supabase/functions/connect-refund, which is keyed on the CHARGE rather
+    // than on the subscription. Ending a subscription and giving money back are
+    // separate acts and are separate everywhere.
     const cancelAtPeriodEnd = action === 'cancel';
     // A cancellation that failed must say so. Answering ok on a throw would
     // leave somebody believing they had stopped a charge that is still running.
@@ -384,6 +438,36 @@ Deno.serve(async (req) => {
           ...(model === 'direct' ? {} : { transfer_data: { destination: acct.stripe_account_id } }),
           metadata: subMeta,
         },
+        // ── the coach's own discount codes ───────────────────────────────
+        //
+        // Collected on STRIPE'S hosted page, so no screen in this app needs a
+        // field for it and the client simply types the code where they type
+        // their card. The codes themselves live on the coach's connected
+        // account and are created by supabase/functions/connect-promo; this
+        // app stores none of them.
+        //
+        // ON THE SUBSCRIPTION BRANCH ONLY, and the reason is the platform fee.
+        // Here Repple's cut is `application_fee_percent` — a percentage — so a
+        // 20% off code means the client pays 20% less and Repple takes its
+        // share of the smaller amount, correctly, with no arithmetic anywhere.
+        //
+        // On the one-off branch below the cut is `application_fee_amount`: an
+        // absolute figure computed from the LIST price at the moment the
+        // session is created, because nothing then knows a code will be typed.
+        // Stripe would discount the charge and leave the fee alone, so a coach
+        // running 30% off a £100 pack would receive £70 and still pay a fee
+        // worked out on £100 — eating the whole discount AND a fee on money
+        // they never got — and at a large enough discount the fee exceeds the
+        // charge and Stripe refuses the payment outright, which the client
+        // meets as a checkout that will not complete.
+        //
+        // The fix for the one-off case is not a cap. It is for the code to be
+        // supplied WHEN THE SESSION IS CREATED, so the fee can be computed from
+        // the discounted total — which needs a field on the client's own
+        // checkout flow. Until that exists, `promoBlocker` in
+        // src/lib/packagePromo.ts refuses a one-off package by name and says
+        // why, and this flag stays off down there.
+        allow_promotion_codes: true,
         success_url: successUrl,
         cancel_url: cancelUrl,
         metadata: { repple_kind: 'connect_subscription', package_id: packageId, trainer_id: pkg.trainer_id, client_id: uid, repple_account: acctMeta },

@@ -234,6 +234,36 @@ export default function TrainerClasses() {
                     {full ? <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.warn }} /> : null}
                     <Text style={{ ...value(16), color: t.ink }}>{countsKnown ? c.booked : '—'}/{c.capacity}</Text>
                   </View>
+                  {/* ── the six people nobody could see ────────────────────
+                      `class_counts()` counted a waitlister as a booking until
+                      part 210, so this class read "17/12" and the queue was
+                      folded into a number that made no sense. Now they are
+                      separate, and the queue is the more valuable of the two: a
+                      full class is a full class, and a full class with six
+                      waiting is a second session on Thursday.
+
+                      Only drawn when there IS one. A "0 waiting" under every
+                      class in the timetable is furniture, and the line that
+                      matters would be lost in it. A NULL waiting draws nothing
+                      either — that is the counts read having failed or a
+                      database without part 210, and "nobody is waiting" is
+                      exactly the claim that would stop the second session. The
+                      dash on the booked figure beside it already says the
+                      numbers are unknown. */}
+                  {countsKnown && c.waiting != null && c.waiting > 0 ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      {/* The tone is the dot, the count is ink. t.warn measures
+                          3.87–4.08:1 on the three light palettes — under the
+                          4.5:1 a word needs and over the 3:1 a mark needs, so
+                          it draws the mark and never the number. The word
+                          "waiting" is on the line regardless, so colour is not
+                          carrying the meaning on its own. */}
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} />
+                      <Text style={{ ...ty.caption, color: t.ink2 }}>
+                        {c.waiting} waiting
+                      </Text>
+                    </View>
+                  ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{!countsKnown ? 'capacity' : full ? 'full' : 'booked'}</Text>
                 </View>
                 <Ghost label="Check In" onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} />

@@ -200,7 +200,14 @@ ok(siteFor('chest')?.previous?.cm === 102,
 
 const mJunk = readMeasurements([
   mRow('waist', '2026-08-23', 84),
-  mRow('calf', '2026-08-23', 38),
+  // A site name this build has never heard of. It used to be 'calf', which
+  // stopped being unnameable the day the tape sites grew from five to twelve —
+  // so the assertion below silently became a test of a site that IS named, and
+  // passed for the wrong reason until the site list changed under it. 'forearm'
+  // is not in MEASURE_SITES and the point of the row is that it is not: a
+  // newer build writing a site this one cannot name is a thing that happens,
+  // and it must be counted rather than swallowed.
+  mRow('forearm', '2026-08-23', 28),
   mRow('waist', '2026-08-23', 0),
   mRow('waist', 'not a date', 84),
   mRow('waist', '2026-08-23', null),
@@ -288,8 +295,21 @@ ok(measureBoard(null).state === 'unreadable',
 ok(measureBoard([]).state === 'none', 'a read that came back empty is a client with nothing recorded');
 ok(measureBoard(mRead.sites).state === 'measured', 'and readings are readings');
 
-ok(unmeasuredSites(mRead.sites).join(',') === 'Arm,Hips',
-  `the sites nobody has measured are named, got "${unmeasuredSites(mRead.sites).join(',')}"`);
+// Every site in MEASURE_SITES except the three `mRead` holds, in the order the
+// client's own screen lists them. Asserted against the list rather than against
+// a hardcoded pair, because the sites grew from five to twelve the day left and
+// right arms were added and a literal here would have to be rewritten every
+// time — which is how an assertion stops being read and starts being updated to
+// match whatever the code now does.
+{
+  const named = unmeasuredSites(mRead.sites);
+  const measured = new Set(['Waist', 'Chest', 'Thigh']);
+  const expected = MEASURE_SITES.map((s) => s.label).filter((l) => !measured.has(l));
+  ok(named.join(',') === expected.join(','),
+    `the sites nobody has measured are named, in the screen's own order — got "${named.join(',')}", wanted "${expected.join(',')}"`);
+  ok(!named.some((l) => measured.has(l)),
+    'and a site that HAS been measured is never listed as one that has not');
+}
 ok(unmeasuredSites([]).length === MEASURE_SITES.length,
   'and a client with nothing recorded has not measured any of them');
 

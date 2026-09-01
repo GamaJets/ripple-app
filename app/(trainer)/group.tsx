@@ -60,6 +60,7 @@ import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import { useProgramGroups, type ProgramGroup } from '../../src/ui/groupProgram';
 import {
   planFanOut, programSignature, memberState, groupCoverage, listNames, fanOutSubject,
+  memberVersions, versionSpread, behindNote, bespokeNote,
   type FanOutMember, type MemberState,
 } from '../../src/lib/groupProgram';
 import type { LoadStatus } from '../../src/ui/loadStatus';
@@ -135,6 +136,38 @@ export default function Groups() {
     [open, groupSig, programStatus, getProgram],
   );
   const cover = groupCoverage(states, groupStatus, programStatus);
+
+  /* ── which VERSION of the group's programme each of them is on ───────────
+     `memberState` answers 'diverged' for two people who need opposite things:
+     one is still on last month's version of this programme and needs one tap,
+     and the other had their Thursday rewritten around a shoulder and must not
+     be written to at all. The group's past programmes make the difference
+     sayable — and it is DERIVED, every render, from what each of them is
+     actually training, rather than stamped on them when the fan-out ran and
+     left to go stale the moment somebody edits one client's copy in the
+     builder. See supabase/parts/177 and src/lib/groupProgram.ts. */
+  const currentVersion = useMemo(() => {
+    const vs = open?.versions ?? [];
+    // The version whose fingerprint matches the group's programme AS IT STANDS,
+    // and not simply the highest number. A group whose plan was changed while
+    // the version write was refused has a live programme that is not its newest
+    // version, and calling that newest one "current" would report every member
+    // as behind something nobody has.
+    const match = vs.filter((v) => v.signature != null && v.signature === groupSig);
+    return match.length ? Math.max(...match.map((v) => v.version)) : null;
+  }, [open, groupSig]);
+  const versionRows = useMemo(
+    () => memberVersions(programStatus, open?.versions ?? [], currentVersion,
+      (open?.memberIds ?? []).map((id) => ({ clientId: id, assigned: getProgram(id) })), groupSig),
+    [programStatus, open, currentVersion, groupSig, getProgram],
+  );
+  const spread = useMemo(
+    () => versionSpread(versionRows, groupStatus, programStatus, currentVersion),
+    [versionRows, groupStatus, programStatus, currentVersion],
+  );
+  const nameOfClient = (id: string) => roster.find((c) => c.id === id)?.name ?? 'One client';
+  const behind = behindNote(versionRows, nameOfClient, spread);
+  const bespoke = bespokeNote(versionRows, nameOfClient, spread);
 
   const plan = useMemo(
     () => planFanOut(groupStatus, programStatus, members, !!open?.program, fanOutSubject(members.length)),
@@ -366,6 +399,36 @@ export default function Groups() {
                 </Text>
               ) : null}
 
+              {/* ── which version each of them is on ────────────────────────
+                  The group still does not own the plan; what it now keeps is
+                  the programmes it used to have, so "on an older version of
+                  this" can be told apart from "on something else entirely".
+                  Those two need opposite actions and they are two separate
+                  sentences for exactly that reason — the second half of a
+                  paragraph is the half that gets skimmed, and the half being
+                  skimmed here is the one where a coach silently reverts the
+                  change they made for somebody's shoulder. */}
+              {open.program && spread.countable && (spread.behind > 0 || spread.bespoke > 0 || currentVersion != null) ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Versions</Text>
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>
+                    {currentVersion == null
+                      ? 'This programme has not been recorded as a version yet, so nobody can be placed against it. Changing the programme records one.'
+                      : `${num(spread.onCurrent)} on version ${num(currentVersion)} · ${num(spread.behind)} on an earlier one · ${num(spread.bespoke)} on something else`}
+                  </Text>
+                  {behind ? (
+                    <View style={{ marginTop: sp.sm }}>
+                      <Flag tone={t.warn}>{behind}</Flag>
+                    </View>
+                  ) : null}
+                  {bespoke ? (
+                    <View style={{ marginTop: sp.sm }}>
+                      <Flag tone={t.ink3}>{bespoke}</Flag>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
               <View style={{ marginTop: sp.lg }} />
               <Rule />
 
@@ -389,6 +452,12 @@ export default function Groups() {
               {open.memberIds.map((id, i) => {
                 const m = asMember(id);
                 const st = states[i] ?? 'unknown';
+                // Which version this one is on, where their programme is one of
+                // the group's. Null for a client on a bespoke plan and for one
+                // whose assignment could not be read, and `st` is what tells
+                // those two apart — a version number over an unread row would
+                // be a fact invented out of a failure.
+                const mv = versionRows[i];
                 const held = plan.blocked.find((b) => b.clientId === id);
                 const tone = held ? t.warn : st === 'on' ? t.good : st === 'unknown' ? t.ink3 : t.ink3;
                 return (
@@ -400,6 +469,20 @@ export default function Groups() {
                       <View style={{ flex: 1 }}>
                         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{m.name}</Text>
                         <Text style={{ ...ty.caption, color: tone, marginTop: 2 }}>{STATE_LABEL[st]}</Text>
+                        {/* Named only where the record supports it. A version
+                            number beside somebody whose assignment could not be
+                            read would be a fact invented out of a failure, and
+                            "on a different programme" is not "on version 2" —
+                            it is the client whose copy was edited for them. */}
+                        {mv?.behind && mv.version != null ? (
+                          <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
+                            on version {num(mv.version)} of this programme — send it again to move them onto the current one
+                          </Text>
+                        ) : st === 'diverged' && mv && mv.version == null ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                            not any version of this programme — somebody edited their copy
+                          </Text>
+                        ) : null}
                       </View>
                       {/* One person's copy, edited without touching anybody
                           else's — which is the whole reason the group owns the

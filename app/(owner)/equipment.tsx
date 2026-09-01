@@ -132,7 +132,21 @@ export default function OwnerEquipment() {
         // Said out loud: a service that was not written leaves the machine on
         // the due list, and an owner told nothing reads the reloaded register
         // as the record having been kept.
-        try { await recordService(supabase, e.id, today); await load(); }
+        // The log entry goes with the date. `recordService` clears the note as
+        // it writes, so the description of what was wrong with the machine is
+        // about to be deleted — carrying it into the entry's findings is the
+        // only thing that keeps it, and before supabase/parts/186 there was
+        // nowhere for it to go.
+        try {
+          await recordService(supabase, e.id, today, tenant?.id ? {
+            tenantId: tenant.id,
+            equipmentLabel: e.name,
+            kind: 'service',
+            findings: e.note,
+            recordedBy: null,
+          } : undefined);
+          await load();
+        }
         catch (err) {
           reportError('equipment.service', err);
           Alert.alert('Could not record that service',
@@ -145,6 +159,45 @@ export default function OwnerEquipment() {
   const toggleStatus = (e: Equipment) => {
     const next = e.status === 'in_service' ? 'out_of_service' : 'in_service';
     const verb = next === 'out_of_service' ? 'Take out of service' : 'Put back in service';
+
+    /**
+     * Taking a machine out asks WHY, and putting it back does not.
+     *
+     * `setStatus` has accepted a reason since it was written and neither
+     * surface ever passed one, so every out-of-action machine in the product
+     * rendered "no reason recorded" — about a field nothing could fill in. The
+     * person tapping this is standing next to the machine and is the only
+     * person who knows; asking anywhere else is asking somebody to remember.
+     *
+     * `Alert.prompt` is iOS-only. On Android it is undefined, so the fallback
+     * below records the status change with no reason rather than doing nothing
+     * — a machine an owner cannot take out of service because their phone is
+     * the wrong shape is a worse failure than a missing sentence.
+     */
+    const write = async (reason: string | null) => {
+      try {
+        await setStatus(supabase, e.id, next, undefined, reason);
+        await load();
+      } catch (err) {
+        reportError('equipment.status', err);
+        Alert.alert(`Could not ${verb.toLowerCase()}`,
+          (err instanceof Error && err.message) || 'The register is unchanged. Check your connection and try again.');
+      }
+    };
+
+    if (next === 'out_of_service' && typeof Alert.prompt === 'function') {
+      Alert.prompt(
+        'What is wrong with it?',
+        `${e.name}${e.quantity > 1 ? ` (${e.quantity} units)` : ''} — this is what everyone else sees beside it until it is back.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Take out', style: 'destructive', onPress: (v?: string) => { void write((v ?? '').trim() || null); } },
+        ],
+        'plain-text',
+      );
+      return;
+    }
+
     Alert.alert(verb + '?', `${e.name}${e.quantity > 1 ? ` (${e.quantity} units)` : ''}`, [
       { text: 'Cancel', style: 'cancel' },
       { text: verb, style: next === 'out_of_service' ? 'destructive' : 'default', onPress: async () => {
@@ -152,12 +205,7 @@ export default function OwnerEquipment() {
         // marked out of service is one nobody is meant to stand on — and a
         // refusal that only reached the error log left it marked in service
         // under an owner who believed otherwise.
-        try { await setStatus(supabase, e.id, next); await load(); }
-        catch (err) {
-          reportError('equipment.status', err);
-          Alert.alert(`Could not ${verb.toLowerCase()}`,
-            (err instanceof Error && err.message) || 'The register is unchanged. Check your connection and try again.');
-        }
+        await write(null);
       } },
     ]);
   };
@@ -311,6 +359,27 @@ export default function OwnerEquipment() {
                       {e.quantity > 1 ? ` · ${e.quantity} units` : ''}
                       {down ? ' · out of service' : retired ? ' · retired' : ''}
                     </Text>
+                    {/* The reason and how long, on the row where somebody is
+                        deciding whether to chase it. Both are separate columns
+                        from `note` because recordService clears the note — a
+                        reason stored there disappeared the first time anybody
+                        serviced the machine — and until supabase/parts/186
+                        neither surface could write either, so every screen said
+                        "no reason recorded" about a field nothing filled in. */}
+                    {down ? (
+                      // A MARK carries the tone and the words stay in ink.
+                      // `t.warn` is tuned to the 3:1 a mark needs, not the 4.5:1
+                      // text needs, and it measures 3.87:1 as ink on the three
+                      // light palettes — so a reason printed in it is a sentence
+                      // somebody on a bright gym floor cannot read.
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} />
+                        <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={2}>
+                          {e.outOfServiceReason ?? 'No reason was recorded'}
+                          {e.outOfServiceSince ? ` · since ${e.outOfServiceSince}` : ''}
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
                   {!retired ? <Pill t={t} state={st} /> : null}
                   {!retired ? (

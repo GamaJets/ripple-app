@@ -123,6 +123,13 @@ import {
 } from '../../src/lib/coachChannels';
 import { useLateCancelCharges } from '../../src/ui/sessions';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
+import { fetchMyReceipts } from '../../src/ui/coachReceipts';
+import { fetchMyPayouts } from '../../src/ui/coachPayouts';
+import {
+  payoutSummary, payoutStateLabel, payoutFailureLine, payoutsEmptyLine,
+  PAYOUT_IS_NOT_A_SALE, PAYOUT_STRIPE_IS_THE_RECORD, type CoachPayout,
+} from '../../src/lib/coachPayouts';
+import { receiptsTaken, receiptsEmptyLine, RECEIPT_MAY_DOUBLE_COUNT, type CoachReceipt } from '../../src/lib/coachReceipts';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 
 /** The month a period figure covers, in the words a person uses for it. */
@@ -144,11 +151,21 @@ export default function CoachMoney() {
   const [codes, setCodes] = useState<CodeReturnsRead>({ status: 'loading', rows: [] });
   const [connect, setConnect] = useState<{ acct: ConnectStatus | null; read: LoadStatus }>({ acct: null, read: 'loading' });
   const [issued, setIssued] = useState<{ count: number; status: LoadStatus }>({ count: 0, status: 'loading' });
+  // The third strand of Coming In, and for most coaches the biggest one. Its
+  // own state and its own status: it fails independently of Stripe's two
+  // tables, and a screen that shared one status would hide a working half
+  // behind a broken one.
+  const [receipts, setReceipts] = useState<{ rows: CoachReceipt[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  // What Stripe says actually reached the bank. Deliberately NOT a strand of
+  // the Coming In ledger: a payout is a balance, not a sale, and adding it to
+  // the charges it partly consists of would count the same money twice. It is
+  // its own section and the two are never subtracted from each other.
+  const [payouts, setPayouts] = useState<{ rows: CoachPayout[]; status: LoadStatus }>({ rows: [], status: 'loading' });
 
   const fees = useLateCancelCharges();
 
   const load = useCallback(async () => {
-    const [p, r, sub, inv, cr, ca, docs] = await Promise.all([
+    const [p, r, sub, inv, cr, ca, docs, rec, pay] = await Promise.all([
       fetchClientPurchases(),
       fetchMySubscriptionPayments(),
       fetchMySubscription(),
@@ -156,6 +173,8 @@ export default function CoachMoney() {
       fetchMyCodeReturns(),
       fetchMyConnect(),
       fetchMyInvoices(),
+      fetchMyReceipts(),
+      fetchMyPayouts(),
     ]);
     setSales(p);
     setRenewals(r);
@@ -169,6 +188,8 @@ export default function CoachMoney() {
     setCodes(cr);
     setConnect({ acct: ca, read: ca == null ? 'error' : 'ready' });
     setIssued({ count: docs.rows.length, status: docs.status });
+    setReceipts(rec);
+    setPayouts(pay);
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -191,22 +212,39 @@ export default function CoachMoney() {
     () => sales.rows.map((r) => ({ amount_cents: r.amount_cents, currency: r.currency, created_at: r.created_at })),
     [sales.rows],
   );
+  // Dated by the day the coach says the money ARRIVED, never by the day they
+  // wrote the row down. A coach catching up on three weeks of cash on a Sunday
+  // evening would otherwise have all of it land in that Sunday's month, which
+  // is the one thing that would make this figure worse than not having it.
+  const receiptRows = useMemo<TakenRow[]>(
+    () => receipts.rows.map((r) => ({ amount_cents: r.amountCents, currency: r.currency, created_at: r.receivedOn })),
+    [receipts.rows],
+  );
 
-  const strandsFor = (rows: { sale: TakenRow[]; renewal: TakenRow[] }): Strand[] => ([
+  const strandsFor = (rows: { sale: TakenRow[]; renewal: TakenRow[]; receipt: TakenRow[] }): Strand[] => ([
     { key: 'sales', label: 'one-off sales', status: sales.status, taken: sumTaken(rows.sale) },
     { key: 'renewals', label: 'subscription renewals', status: renewals.status, taken: sumTaken(rows.renewal) },
+    // A third strand rather than a separate figure, because it is the same
+    // question: what came in. `ledger()` withholds the whole total the moment
+    // any strand is not whole, which is exactly right here — a coach's takings
+    // with the cash half missing is not a smaller number, it is a wrong one,
+    // and for most coaches it is the larger half that would be missing.
+    { key: 'receipts', label: 'payments you recorded yourself', status: receipts.status, taken: sumTaken(rows.receipt) },
   ]);
 
   const monthIn = useMemo(
-    () => ledger(strandsFor({ sale: since(saleRows, from), renewal: since(renewalRows, from) })),
+    () => ledger(strandsFor({ sale: since(saleRows, from), renewal: since(renewalRows, from), receipt: since(receiptRows, from) })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [saleRows, renewalRows, from, sales.status, renewals.status],
+    [saleRows, renewalRows, receiptRows, from, sales.status, renewals.status, receipts.status],
   );
   const allIn = useMemo(
-    () => ledger(strandsFor({ sale: saleRows, renewal: renewalRows })),
+    () => ledger(strandsFor({ sale: saleRows, renewal: renewalRows, receipt: receiptRows })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [saleRows, renewalRows, sales.status, renewals.status],
+    [saleRows, renewalRows, receiptRows, sales.status, renewals.status, receipts.status],
   );
+
+  const recordedByHand = useMemo(() => receiptsTaken(receipts.rows), [receipts.rows]);
+  const landed = useMemo(() => payoutSummary(payouts.rows, payouts.status), [payouts.rows, payouts.status]);
 
   /* ── recorded against clients, and never collected by Repple ───────────── */
 
@@ -339,6 +377,41 @@ export default function CoachMoney() {
           <SectionHead title="All Recorded" note="Every payment Repple has a record of" />
           {drawIn(allIn, 'in')}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{STRIPE_AUTHORITY_NOTE}</Text>
+        </Section>
+
+        {/* ── THE HALF STRIPE NEVER SAW ──────────────────────────────────
+            For most self-employed coaches this is the bigger half. It is drawn
+            as its own section as well as being inside the two ledgers above,
+            because a coach reading a total needs to see how much of it is their
+            own word rather than Stripe's — the two are different KINDS of fact
+            and this screen's whole design is about not blurring those. */}
+        <Section>
+          <SectionHead title="Recorded by You" note="Cash, transfers and anything taken at a gym" />
+          {receipts.status === 'partial' ? (
+            <PartialRead what="recorded payments" shown={receipts.rows.length} onPress={load} />
+          ) : null}
+          {receipts.status !== 'ready' ? (
+            <Flag>{receiptsEmptyLine(receipts.status)}</Flag>
+          ) : recordedByHand.pots.length ? (
+            <View>
+              {recordedByHand.pots.map((p) => potRow(
+                p.currency,
+                `${p.count} ${plural(p.count, 'payment', 'payments')} in ${p.currency}`,
+                minorMoney(p.minorUnits, p.currency),
+              ))}
+              {recordedByHand.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{receiptsEmptyLine(receipts.status)}</Text>
+          )}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
+          <ListRow icon="grid" title="Cash and Transfers"
+            note="Record a payment that did not go through this app"
+            onPress={() => router.push('/(trainer)/receipts')} />
         </Section>
 
         <Section>
@@ -592,6 +665,88 @@ export default function CoachMoney() {
 
         {/* ── WHERE IT LANDS ─────────────────────────────────────────────── */}
 
+        {/* ── WHAT ACTUALLY LANDED ───────────────────────────────────────
+            The figure a coach argues with. Every number above this is GROSS —
+            what a client was charged — and the gap between "AED 4,800 taken"
+            and "AED 4,281 in my account" is the gap a coach fills with a
+            suspicion about the platform. Part 194 mirrors Stripe's payout
+            events so the question has an answer.
+
+            It is its own section and it is NEVER subtracted from anything
+            above. A payout is a BALANCE reaching a bank — many charges at once,
+            less what Stripe and Repple took and anything refunded, on Stripe's
+            own schedule — so "taken minus landed equals fees" is wrong on all
+            three numbers. `PAYOUT_IS_NOT_A_SALE` is that sentence on the page,
+            and this is the same discipline `NO_NET_NOTE` keeps at the top. */}
+        <Section>
+          <SectionHead title="What Landed in Your Bank" note="Mirrored from Stripe as each payout happens" />
+          {payouts.status === 'partial' ? (
+            <PartialRead what="payouts" shown={payouts.rows.length} onPress={load} />
+          ) : null}
+          {landed.withheld ? (
+            <Flag>{landed.withheld}</Flag>
+          ) : landed.arrived && landed.arrived.pots.length ? (
+            <View>
+              {landed.arrived.pots.map((p) => potRow(
+                p.currency,
+                `${p.count} ${plural(p.count, 'payout', 'payouts')} in ${p.currency}`,
+                minorMoney(p.minorUnits, p.currency),
+              ))}
+              {landed.arrived.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{payoutsEmptyLine(payouts.status)}</Text>
+          )}
+
+          {/* A payout that bounced is a coach who is not being paid and does
+              not know it. It is the one row on this screen that has to be acted
+              on, so it is drawn above the ones that are merely on their way. */}
+          {landed.failed ? (
+            <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
+              {landed.failed} {plural(landed.failed, 'payout did not reach your bank', 'payouts did not reach your bank')}. Until that is sorted out at Stripe, money stays in your Stripe balance instead of arriving.
+            </Flag>
+          ) : null}
+          {payouts.rows.filter((p) => payoutFailureLine(p)).slice(0, 3).map((p) => (
+            <Text key={p.id} style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{payoutFailureLine(p)}</Text>
+          ))}
+          {landed.onTheWay ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+              {landed.onTheWay} {plural(landed.onTheWay, 'payout is', 'payouts are')} on the way and {plural(landed.onTheWay, 'is', 'are')} in no figure above. Money in transit is not money in a bank account.
+            </Flag>
+          ) : null}
+          {landed.unknown ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+              {landed.unknown} {plural(landed.unknown, 'payout carries a state', 'payouts carry a state')} this app does not recognise, so {plural(landed.unknown, 'it is', 'they are')} counted and not added to anything. Your Stripe dashboard says what happened to {plural(landed.unknown, 'it', 'them')}.
+            </Flag>
+          ) : null}
+
+          {/* The three most recent, so the section is a record rather than a
+              single figure. Stripe's own status word is resolved through
+              `payoutStateLabel`, which answers "Not Stated" for anything it
+              does not know rather than assuming the money arrived. */}
+          {payouts.status === 'ready' && payouts.rows.length ? (
+            <View style={{ marginTop: sp.md }}>
+              {payouts.rows.slice(0, 3).map((p) => (
+                <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>
+                    {payoutStateLabel(p.status)}{p.arrivalOn ? ` · ${p.arrivalOn}` : ''}
+                  </Text>
+                  <Text style={{ ...ty.label, ...numeric, color: t.ink2 }}>
+                    {minorMoney(p.amountCents, p.currency) ?? 'not denominated'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{PAYOUT_IS_NOT_A_SALE}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAYOUT_STRIPE_IS_THE_RECORD}</Text>
+        </Section>
+
         <Section>
           <SectionHead title="Where It Lands" />
           {connect.read === 'error' ? (
@@ -616,7 +771,7 @@ export default function CoachMoney() {
         <Section>
           <SectionHead title="What Is Not Here" />
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Cash, bank transfers and work paid for through a gym are invisible to Repple, so the figures above are a floor and not the whole of what you earn. Nothing on this page is a projection or a forecast — it is what has been recorded, over the period each heading names.
+            Cash, bank transfers and work paid for through a gym never reach Repple on their own. What you have recorded yourself is in the figures above and the rest is not, so they are a floor and only you know by how much. Nothing on this page is a projection or a forecast — it is what has been recorded, over the period each heading names.
           </Text>
         </Section>
       </ScrollView>

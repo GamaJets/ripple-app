@@ -1,12 +1,38 @@
 // Training readiness — a simple, transparent 0–100 score from the data the app
-// already has: recent sleep, hydration, and short-term training load. Higher =
-// better recovered. Pure function so it unit-tests and ships over-the-air; when
-// HealthKit/wearable HRV lands it can feed in as a fourth signal.
+// already has: recent sleep, the device's own recovery verdict, hydration, and
+// short-term training load. Higher = better recovered. Pure function so it unit
+// tests and ships over-the-air.
+//
+// ── The fourth signal, and why it is the vendor's score and not raw HRV ─────
+//
+// This file's header promised a fourth signal "when HealthKit/wearable HRV
+// lands" for as long as the file has existed, and the wearable layer has been
+// reading nothing but sleep out of a WHOOP the whole time. A member could have
+// a strap on their wrist reporting 31% recovered and open a screen whose entire
+// purpose is to say whether to train today, and the screen would not have
+// looked.
+//
+// What went in is `recoveryPct` — WHOOP recovery, Oura readiness — and NOT a
+// raw HRV or a resting heart rate, even though the wearable layer now carries
+// both. The reason is that neither of those means anything without the
+// member's own baseline: 42 ms of RMSSD is an excellent night for one person
+// and an alarm for another, and this app holds no per-member HRV history to
+// compare against. Scoring an absolute figure against a population norm we do
+// not have would be exactly the kind of invented number the rest of this file
+// exists to refuse. The vendor's 0–100 score is already normalised against
+// that member's own weeks of data, by the device that collected them, which is
+// the only place that baseline exists today.
+//
+// It is scored the way hydration is — a signal that leaves the scale when it is
+// absent, rather than one that withholds the score. Most members own no such
+// device and never will, and that is a permanent, true state rather than a
+// failed read; see the long note on readinessScore below, which already had to
+// draw this exact line once.
 export type ReadinessTone = 'good' | 'moderate' | 'low';
 
 /** The signals the score is built from, named so a screen can say which of them
  *  it actually had. */
-export type ReadinessSignal = 'sleep' | 'hydration' | 'load';
+export type ReadinessSignal = 'sleep' | 'recovery' | 'hydration' | 'load';
 
 export interface Readiness {
   score: number;        // 0..100
@@ -14,9 +40,10 @@ export interface Readiness {
   tip: string;          // one-line guidance
   tone: ReadinessTone;
   /**
-   * What the number is made of, in scale order. Always contains 'sleep' and
-   * 'load' — without either there is no score at all — and contains
-   * 'hydration' only when a hydration figure was scored.
+   * What the number is made of, in scale order — which is order of WEIGHT:
+   * sleep 50, recovery 40, hydration 30, recent sessions 20. Always contains
+   * 'sleep' and 'load' — without either there is no score at all — and contains
+   * 'recovery' and 'hydration' only when each was actually scored.
    *
    * This exists because the score is the first and largest figure on the home
    * screen, and an 83 built from sleep and training alone and an 83 built from
@@ -41,6 +68,22 @@ export interface ReadinessInput {
   /** 0..1 (cups / goal today). null means there is no honest hydration figure —
    *  either the client tracks no water, or today's count could not be read. */
   hydrationPct: number | null;
+  /**
+   * The connected device's own 0–100 recovery verdict — WHOOP recovery, Oura
+   * readiness — or **null when no device published one today**.
+   *
+   * Null is by far the commonest value and is not a failure: most members own
+   * no device that scores recovery, and a device that could not be read lands
+   * in the same null deliberately. Both leave the signal out of the scale
+   * rather than scoring zero against it, exactly as an untracked hydration does
+   * — see the long note on this function about why the two absences that
+   * RESCALE differ from the one that withholds.
+   *
+   * Values outside 0–100 are clamped rather than refused: the field is the
+   * vendor's, we do not control it, and a 101 is a rounding artefact rather
+   * than a reason to delete somebody's readiness for the day.
+   */
+  recoveryPct: number | null;
   /**
    * Sessions in the last two days, or **null when the training log could not be
    * read**. Null is not zero, and this channel exists because it used to not:
@@ -96,6 +139,16 @@ export interface ReadinessInput {
  *   still at its initial 0, which scored a network blip as a day of drinking
  *   nothing and took thirty points off.
  *
+ *   RECOVERY. Identical in shape to hydration and for a stronger reason: a
+ *   member with no WHOOP and no Oura has no recovery score and never will, and
+ *   they are most of the app. Withholding readiness from everybody without a
+ *   strap would delete the feature for the majority in order to be strict about
+ *   a minority's missing figure. A device that failed to sync joins the same
+ *   null for the same reason hydration's failed read does — it joins a large
+ *   population that already exists rather than inventing a new claim — and
+ *   readinessBreakdown says in words which of the two happened, because the
+ *   member's next action differs.
+ *
  *   TRAINING LOAD. There is no equivalent. Every member has a training log, and
  *   `workoutsLast2Days` is never legitimately absent — a null there means one
  *   thing only: the read failed. Dropping it from the scale would raise the
@@ -119,8 +172,25 @@ export function readinessScore(i: ReadinessInput): Readiness | null {
   const pct = i.hydrationPct;
   const tracked = pct != null && Number.isFinite(pct);
   const hydration = tracked ? Math.max(0, Math.min(1, pct as number)) * 30 : 0;
-  const raw = sleep + rest + hydration;
-  const outOf = tracked ? 100 : 70;
+
+  // The device's verdict, worth 40 — more than hydration and less than sleep.
+  //
+  // The weight is a judgement and it is written down so it can be argued with:
+  // WHOOP and Oura each compute their score from a night of HRV, resting heart
+  // rate and sleep against that member's own baseline, which is more physiology
+  // than anything else on this scale, and less than sleep only because sleep is
+  // the one signal every member can supply. Nothing here re-derives it — a
+  // vendor score is taken at face value or not at all.
+  const rec = i.recoveryPct;
+  const scored = rec != null && Number.isFinite(rec);
+  const recovery = scored ? Math.max(0, Math.min(1, (rec as number) / 100)) * 40 : 0;
+
+  const raw = sleep + rest + hydration + recovery;
+  // Built up from the signals that were actually in the scale rather than
+  // written as a literal, so adding a fifth signal cannot leave a stale
+  // denominator behind — a mismatch here does not throw, it silently shifts
+  // everybody's number.
+  const outOf = 70 + (tracked ? 30 : 0) + (scored ? 40 : 0);
   const score = Math.round((raw / outOf) * 100);
 
   let tone: ReadinessTone, label: string, tip: string;
@@ -134,8 +204,19 @@ export function readinessScore(i: ReadinessInput): Readiness | null {
     tone = 'low'; label = 'Under-recovered';
     tip = 'Prioritise sleep, water and a lighter session or rest today.';
   }
-  const from: ReadinessSignal[] = tracked ? ['sleep', 'hydration', 'load'] : ['sleep', 'load'];
-  return { score, label, tip, tone, from, confidence: tracked ? 'full' : 'partial' };
+  const from: ReadinessSignal[] = [
+    'sleep',
+    ...(scored ? ['recovery' as const] : []),
+    ...(tracked ? ['hydration' as const] : []),
+    'load',
+  ];
+  // 'full' means every signal in the scale was scored, which now takes a device
+  // as well as a water goal — so it is rarer than it was, and that is the field
+  // reporting the truth rather than the bar moving. Nothing in the app hides
+  // behind it: `readinessMadeOf` is printed under the score on every screen and
+  // on every day, precisely so that a member never has to infer completeness
+  // from a word they cannot see.
+  return { score, label, tip, tone, from, confidence: from.length === 4 ? 'full' : 'partial' };
 }
 
 /**
@@ -149,6 +230,10 @@ export function readinessScore(i: ReadinessInput): Readiness | null {
 export function readinessMadeOf(r: Readiness): string {
   const words: Record<ReadinessSignal, string> = {
     sleep: 'your sleep',
+    // "your device's recovery score" rather than "recovery": the member has to
+    // be able to tell this apart from the app's own opinion, which is the whole
+    // number it sits inside.
+    recovery: 'your device’s recovery score',
     hydration: 'hydration',
     load: 'recent sessions',
   };

@@ -35,6 +35,8 @@ import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships, fetchPlans, money } from '@lib/gymRecord';
 import { fetchVisits } from '@lib/gymVisits';
 import { fetchPasses } from '@lib/gymPasses';
+import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
+import { searchRows, searchNote } from '@lib/consoleSearch';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
 import {
   buildPassConversion, suppressionSentence,
@@ -75,6 +77,10 @@ export default function Passes() {
   // single row's currency to borrow and inherits the gym's — or prints nothing.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
   const [rec, setRec] = useState<PassConversionRecord>(EMPTY);
+  // Null is "not read", never an empty Map: "no phone number recorded" and
+  // "we could not ask" send an owner to two different places.
+  const [contacts, setContacts] = useState<Map<string, GymMemberRecord> | null>(null);
+  const [contactsErr, setContactsErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
     setRec(EMPTY);
@@ -114,6 +120,20 @@ export default function Passes() {
       if (live) {
         setGymName(tErr ? null : t?.name ?? null);
         setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+      }
+      // The gym's own contact details, read separately. This page produces a
+      // CALL LIST and had no way to call anybody: nothing in the schema carried
+      // a phone number until part 197, and `profiles` has neither a number nor
+      // an address a client may read.
+      //
+      // Separate from `load` on purpose — a gym that has not applied part 197
+      // gets one stated failure on one section rather than a page that will not
+      // load at all.
+      try {
+        const rows = await fetchMemberRecords(supabase, who.tenantId);
+        if (live) { setContacts(byMember(rows)); setContactsErr(null); }
+      } catch (e: any) {
+        if (live) { setContacts(null); setContactsErr(e?.message ?? 'The gym’s contact details could not be read.'); }
       }
       await load(who.tenantId);
     })();
@@ -295,7 +315,8 @@ export default function Passes() {
         ) : null}
       </Section>
 
-      <Holders c={c} rec={rec} ccy={ccy} />
+      <CallList c={c} rec={rec} contacts={contacts} contactsErr={contactsErr} />
+      <Holders c={c} rec={rec} ccy={ccy} contacts={contacts} />
       <Hosts c={c} rec={rec} />
       <Money c={c} rec={rec} />
     </Shell>
@@ -455,13 +476,33 @@ function IntervalStrip({ days, median }: { days: number[]; median: number }) {
 
 /* ── holders ───────────────────────────────────────────────────────────────── */
 
-function Holders({ c, rec, ccy }: {
+function Holders({ c, rec, ccy, contacts }: {
   c: PassConversion; rec: PassConversionRecord; ccy: TenantCurrency;
+  contacts: Map<string, GymMemberRecord> | null;
 }) {
   const cols: Column<PassHolder>[] = [
     {
       key: 'name', header: 'Holder', value: (h) => h.name ?? '￿',
-      render: (h) => h.name ?? <span className="dash">unnamed account</span>,
+      // A link, not a label. This table names people and every one of them has
+      // a record two clicks away that the page had no way to reach: /retention
+      // had the same shape, naming a drifting member and linking to a roster
+      // with no id on it.
+      render: (h) => (
+        <a href={`/members?member=${encodeURIComponent(h.holderId)}`} style={{ color: 'var(--brand)' }}>
+          {h.name ?? 'unnamed account'}
+        </a>
+      ),
+    },
+    {
+      key: 'contact', header: 'Reach them on', value: (h) => contactLine(contacts?.get(h.holderId) ?? null),
+      render: (h) => {
+        // Three answers, not two: the gym has a number, the gym has none, or
+        // nobody could read the records. Only the middle one is a fact about
+        // this person.
+        if (contacts === null) return <span className="dash">not read</span>;
+        return contactLine(contacts.get(h.holderId) ?? null)
+          ?? <span className="dash">nothing recorded</span>;
+      },
     },
     { key: 'passes', header: 'Passes', value: (h) => h.passes, numeric: true },
     {
@@ -518,6 +559,126 @@ function Holders({ c, rec, ccy }: {
           empty="No pass has been issued to somebody with an account. Passes sold to walk-ins are listed nowhere here, because there is no person for them to be a row about."
         />
       ) : null}
+    </Section>
+  );
+}
+
+/* ── the list this page exists to produce ──────────────────────────────────── */
+
+/**
+ * People who held a pass, used it up, and never joined.
+ *
+ * ── Why this is a section rather than a filter on the table below ─────────
+ *
+ * Because it is the only thing on this page anybody DOES anything with.
+ * /passes measures whether pass holders convert; the answer is a percentage,
+ * and the action behind the percentage is a phone call to a specific list of
+ * named people. That list was computed, rendered inside a seven-column table
+ * mixed with three other outcomes, and offered no contact, no export, no way to
+ * log the call and no link to the person's record. It was a dead end, and the
+ * same shape appears on /staff.
+ *
+ * `undecided` holders are deliberately excluded: their pass is still live, they
+ * have not decided anything, and ringing somebody who has three visits left to
+ * ask why they did not join is the wrong conversation.
+ */
+function CallList({ c, rec, contacts, contactsErr }: {
+  c: PassConversion; rec: PassConversionRecord;
+  contacts: Map<string, GymMemberRecord> | null; contactsErr: string | null;
+}) {
+  const [q, setQ] = useState('');
+
+  const all = (c.holders ?? []).filter((h) => h.outcome === 'no-membership');
+  const shown = searchRows(all, q, (h) => [
+    h.name, contactLine(contacts?.get(h.holderId) ?? null),
+  ]);
+  const note = searchNote(q, shown.length, all.length);
+  const reachable = all.filter((h) => contactLine(contacts?.get(h.holderId) ?? null) !== null).length;
+
+  const cols: Column<PassHolder>[] = [
+    { key: 'name', header: 'Who', value: (h) => h.name ?? '￿',
+      render: (h) => (
+        <a href={`/members?member=${encodeURIComponent(h.holderId)}`} style={{ color: 'var(--brand)' }}>
+          {h.name ?? 'unnamed account'}
+        </a>
+      ) },
+    { key: 'contact', header: 'Reach them on',
+      value: (h) => contactLine(contacts?.get(h.holderId) ?? null),
+      render: (h) => {
+        if (contacts === null) return <span className="dash">not read</span>;
+        const line = contactLine(contacts.get(h.holderId) ?? null);
+        if (!line) {
+          return (
+            <a href={`/members?member=${encodeURIComponent(h.holderId)}`} style={{ color: 'var(--ink3)' }}>
+              add a number
+            </a>
+          );
+        }
+        const rc = contacts.get(h.holderId);
+        // A `tel:` where there is a number, because this table is read with a
+        // telephone in hand. Plain text where there is only an address.
+        return rc?.phone
+          ? <a href={`tel:${rc.phone.replace(/\s+/g, '')}`} style={{ color: 'var(--brand)' }}>{line}</a>
+          : <span>{line}</span>;
+      } },
+    { key: 'passes', header: 'Passes', value: (h) => h.passes, numeric: true,
+      render: (h) => `${h.redeemed} of ${h.passes} used` },
+    { key: 'last', header: 'Last pass', value: (h) => h.lastPassOn || null },
+    { key: 'seen', header: 'Last at the door', value: (h) => h.firstUsedOn,
+      render: (h) => h.firstUsedOn ?? <span className="dash">no door record</span> },
+  ];
+
+  const csv = () => {
+    const cell = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = [['Member id', 'Name', 'Passes', 'Used', 'Last pass', 'Phone', 'Email'].map(cell).join(',')];
+    for (const h of shown) {
+      const rc = contacts?.get(h.holderId) ?? null;
+      lines.push([
+        cell(h.holderId), cell(h.name), cell(String(h.passes)), cell(String(h.redeemed)),
+        cell(h.lastPassOn), cell(rc?.phone), cell(rc?.email),
+      ].join(','));
+    }
+    const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pass-holders-who-did-not-join-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (rec.passes.state !== 'ready' || rec.memberships.state !== 'ready') return null;
+  if (all.length === 0) return null;
+
+  return (
+    <Section
+      title="Held a pass, never joined"
+      sub={`The call list this page exists to produce: ${all.length} ${all.length === 1 ? 'person' : 'people'} whose passes ran out without a membership. People whose pass is still live are not here — they have not decided anything yet, and asking them why they did not join is the wrong conversation.`}
+    >
+      {contactsErr ? (
+        <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: '#f0c04e' }}>
+          Contact details could not be read: {contactsErr}. The column below says
+          &ldquo;not read&rdquo; rather than &ldquo;nothing recorded&rdquo; — this is not a list of
+          people the gym has no number for.
+        </p>
+      ) : (
+        <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {reachable} of {all.length} have a number or an address on record. The rest can be given
+          one from their member record — the name in the first column goes there.
+        </p>
+      )}
+
+      <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '10px 14px', flexWrap: 'wrap' }}>
+        <input
+          value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Search this list" aria-label="Search the call list"
+          style={{ ...field, flex: 1, minWidth: 200 }}
+        />
+        {q ? <button onClick={() => setQ('')} style={linkBtn}>clear</button> : null}
+        <button onClick={csv} style={ghostBtn}>Export{q ? ' what is shown' : ''}</button>
+      </div>
+      {note ? <p style={{ margin: 0, padding: '0 14px 8px', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p> : null}
+
+      <DataTable rows={shown} columns={cols} rowKey={(h) => h.holderId} empty="Nobody to call." />
     </Section>
   );
 }
@@ -663,6 +824,24 @@ function Cell({ state, value, empty }: {
 }
 
 /* ── shared bits (same shapes as the Money, Members and Retention screens) ─── */
+
+/* The same input and button shapes as the Door and Members screens. This page
+ * had no control of any kind until the call list gained a search and an export. */
+const field = {
+  padding: '9px 11px', borderRadius: 0, fontSize: 13.5,
+  background: 'var(--surface2)', color: 'var(--ink)',
+  border: '1px solid var(--ring)', fontFamily: 'var(--sans)', minWidth: 0,
+} as const;
+
+const ghostBtn = {
+  ...field, background: 'var(--surface2)', color: 'var(--ink2)',
+  cursor: 'pointer', flex: 'none',
+} as const;
+
+const linkBtn = {
+  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+  color: 'var(--brand)', fontSize: 13, fontFamily: 'var(--sans)',
+} as const;
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (

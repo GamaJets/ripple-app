@@ -36,7 +36,10 @@ interface ClassesValue {
   cancel: (id: string) => Promise<boolean>;
   /** Resolves true only when the class is on the timetable everyone else reads,
    *  rather than on the creating device alone. */
-  addClass: (c: Omit<GymClass, 'id' | 'booked'>) => Promise<boolean>;
+  /** `waiting` is excluded alongside `booked` for the same reason: both are
+   *  counted by `class_counts()` on read and neither is a property of the class
+   *  the coach is creating. A new class has nobody in it and nobody waiting. */
+  addClass: (c: Omit<GymClass, 'id' | 'booked' | 'waiting'>) => Promise<boolean>;
   refresh: () => void;
   /** The initial load has settled — unchanged, screens branch on it to stop a
    *  spinner. It says nothing about whether the load worked; `status` does. */
@@ -64,6 +67,11 @@ const rowToClass = (r: any): GymClass => ({
   id: String(r.id), title: r.title, kind: r.kind ?? '', instructor: r.instructor ?? '',
   branch: r.branch ?? '', room: r.room ?? '', startsAt: r.starts_at, durationMin: r.duration_min ?? 45,
   capacity: r.capacity ?? 12, booked: 0,
+  // Null and not 0. `class_counts()` gained a `waiting` column in part 210, and
+  // a build talking to a database without it reads `undefined` — which must
+  // NEVER settle to zero, because "nobody is waiting" is exactly the claim that
+  // stops a coach putting on a second session for the six people who are.
+  waiting: null,
 });
 
 export function ClassesProvider({ children }: { children: React.ReactNode }) {
@@ -124,8 +132,23 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
           if (cntErr || !Array.isArray(counts) || cntPage.truncated) setCountsKnown(false);
           else {
             const cmap: Record<string, number> = {};
-            cntPage.rows.forEach((c: any) => { cmap[String(c.class_id)] = c.booked; });
-            list.forEach((cl) => { cl.booked = cmap[cl.id] ?? 0; });
+            const wmap: Record<string, number | null> = {};
+            cntPage.rows.forEach((c: any) => {
+              cmap[String(c.class_id)] = c.booked;
+              // Absent on a database that has not had part 210 applied. Kept as
+              // null rather than coerced: the coach's screen draws a dash for
+              // null and nothing at all for zero, and those are different
+              // sentences about a queue.
+              wmap[String(c.class_id)] = typeof c.waiting === 'number' ? c.waiting : null;
+            });
+            list.forEach((cl) => {
+              cl.booked = cmap[cl.id] ?? 0;
+              // A class with no row in the answer has nobody booked AND nobody
+              // waiting — the group-by only omits a class with no bookings at
+              // all — so zero is the right value here and null is the right one
+              // for a column the server did not send.
+              cl.waiting = cl.id in wmap ? wmap[cl.id] : 0;
+            });
             setCountsKnown(true);
           }
         } catch { setCountsKnown(false); }
@@ -214,7 +237,10 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addClass: ClassesValue['addClass'] = async (c) => {
-    const local: GymClass = { ...c, id: 'local-' + Date.now(), booked: 0 };
+    // Zero and not null: a class this device has just created genuinely has
+    // nobody waiting for it, which is a settled answer rather than an unread
+    // one. It is replaced by the server's own count on the next load.
+    const local: GymClass = { ...c, id: 'local-' + Date.now(), booked: 0, waiting: 0 };
     setClasses((p) => [...p, local].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)));
     if (!USE_SUPABASE || !uid) return false;
     try {

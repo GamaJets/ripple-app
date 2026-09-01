@@ -34,6 +34,16 @@ import {
   type SettlementMethod,
 } from '@lib/gymSessions';
 import { fetchGymTrainers, payroll30For, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
+import {
+  fetchTrainerPay, saveTrainerPay, withResolvedRates, payRateBlocker, parseRate,
+  fetchAdjustments, addAdjustment, adjustmentBlocker, adjustmentSign,
+  fetchClassPay, reverseSettlement, reversalReasonBlocker, stampRunExtras,
+  runTotal, runCurrencyBlocker, payCurrency,
+  ADJUSTMENT_KINDS, ADJUSTMENT_LABEL, CLASS_PAY_LABEL,
+  type PayIndex, type TrainerPay, type Adjustment, type AdjustmentKind,
+  type ClassPayLine, type ClassPayKind,
+} from '@lib/gymPay';
+import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 import { money } from '@lib/gymRecord';
 import { isoDate } from '@lib/format';
 
@@ -117,11 +127,31 @@ export default function Payroll() {
   const [periodKey, setPeriodKey] = useState(periods[0].key);
   const period = periods.find((p) => p.key === periodKey) ?? periods[0];
 
-  // Whether a no-show is payable is a gym policy, not something this screen may
-  // assume. Same control, same default, same wording as /sessions and /staff —
-  // three screens holding three opinions about the same money would be worse
-  // than any of them being wrong.
-  const [policy, setPolicy] = useState<PayPolicy>(PAY_DELIVERED_ONLY);
+  /**
+   * The gym's stored pay policy, READ rather than held.
+   *
+   * This screen was the fifth copy of the same unsaved `useState`. Four of them
+   * — /sessions, /staff, /close and /coach/earnings — were closed by
+   * supabase/parts/166, which put one nullable column on `tenants` and made
+   * every screen read it. This one was left holding its own, which is worse
+   * than any of the four were: an owner setting the policy on Gym and coming
+   * here to actually pay somebody would settle against a number the policy they
+   * had just chosen did not produce, permanently, with the sessions stamped.
+   *
+   * Null means the gym has not decided, and the floor below is delivered
+   * sessions only — the LEAST the gym owes, said out loud rather than presented
+   * as the gym's answer.
+   */
+  const [policyCode, setPolicyCode] = useState<string | null>(null);
+
+  /** What this gym pays each coach, and what it pays them to teach. */
+  const [pay, setPay] = useState<PayIndex | null>(null);
+  const [payErr, setPayErr] = useState<string | null>(null);
+  /** Class-teaching lines and non-session adjustments, both unsettled and
+   *  settled — the run needs the first to pay them and the second to show what
+   *  a reversed run put back. */
+  const [classPay, setClassPay] = useState<ClassPayLine[] | null>(null);
+  const [adjustments, setAdjustments] = useState<Adjustment[] | null>(null);
 
   const [sessions, setSessions] = useState<PtSession[] | null>(null);
   const [trainers, setTrainers] = useState<GymTrainer[] | null>(null);
@@ -163,13 +193,27 @@ export default function Payroll() {
     // sessions — so a screen whose only fault was not knowing what had already
     // been paid instead reported a month with no work in it, and the two wrong
     // facts pointed opposite ways.
-    const [sRes, tRes, rRes] = await Promise.allSettled([
+    const [sRes, tRes, rRes, pRes, cRes, aRes] = await Promise.allSettled([
       fetchSessions(supabase, tenantId, p.fromIso, p.toIso),
       fetchGymTrainers(supabase, tenantId),
       fetchSettlements(supabase, tenantId),
+      fetchTrainerPay(supabase, tenantId),
+      fetchClassPay(supabase, tenantId),
+      fetchAdjustments(supabase, tenantId),
     ]);
 
     if (stale()) return;
+
+    // The pay rates get their own error rather than joining the banner above.
+    // A failed read here does not empty the run — every session falls back to
+    // the gym's standard fee, which is what happened before this table existed
+    // — so the figures are still figures. They are the WRONG figures for any
+    // coach on their own rate, and silently smaller, so the screen says so
+    // rather than showing a payroll that merely looks unremarkable.
+    if (pRes.status === 'fulfilled') { setPay(pRes.value); setPayErr(null); }
+    else { setPay(null); setPayErr(failure(pRes, 'what this gym pays each coach')); }
+    setClassPay(cRes.status === 'fulfilled' ? cRes.value : null);
+    setAdjustments(aRes.status === 'fulfilled' ? aRes.value : null);
 
     // A read that failed is null, never []. [] is the gym saying it has none;
     // null is nobody knowing. On this screen those two answers differ by a
@@ -199,11 +243,12 @@ export default function Payroll() {
       // refused read looking exactly like a gym with no fee set: every unrated
       // session priced at nothing, and payroll quietly smaller than it owes.
       const { data: g, error } = await supabase
-        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', who.tenantId).single();
       if (!live) return;
       setGymName(error ? null : g?.name ?? null);
       setSessionFee(error ? null : g?.session_fee ?? null);
       setCcy(error ? null : (((g?.currency ?? '') as string).trim().toUpperCase() || null));
+      setPolicyCode(error ? null : (((g as any)?.session_pay_policy ?? null) as string | null));
       setGymError(error ? (error.message || 'Could not read your gym.') : null);
     })();
     return () => { live = false; };
@@ -224,12 +269,33 @@ export default function Payroll() {
   // The gym's fee is in major units; everything downstream is minor units.
   const fallbackCents = sessionFee == null ? null : Math.round(sessionFee * 100);
 
+  const stated = payPolicyOf(policyCode);
+  const policy: PayPolicy = stated ?? PAY_DELIVERED_ONLY;
+
+  /**
+   * The sessions with the rate that actually applies written onto each one.
+   *
+   * Three layers, resolved ONCE: the rate snapshotted at delivery, then what
+   * this gym pays this coach, then the gym's standard fee. Doing it here rather
+   * than inside each of `payrollByTrainer`, `settleableSessions` and
+   * `settlementAmount` is the whole point — those three have already disagreed
+   * about what "priced" means once, and the result was a screen saying AED
+   * 1,500 owed while the button handed over 900 and stamped the sessions paid.
+   */
+  const priced = useMemo(
+    () => (sessions ? withResolvedRates(sessions, pay ?? new Map(), fallbackCents) : null),
+    [sessions, pay, fallbackCents],
+  );
+
   // Stays null while `sessions` is null rather than collapsing to []. Handing
   // payrollByTrainer an empty array would produce a confident, complete-looking
   // run of nobody owed anything, built out of a read that never returned.
   const lines = useMemo(
-    () => sessions && payrollByTrainer(sessions, policy, fallbackCents),
-    [sessions, policy, fallbackCents],
+    // `null` and not `fallbackCents`: the fallback has already been applied by
+    // `withResolvedRates` above. Passing it again would be harmless today and
+    // is exactly how the three functions came to disagree the first time.
+    () => priced && payrollByTrainer(priced, policy, null),
+    [priced, policy],
   );
   const total = useMemo(() => payrollTotal(lines ?? []), [lines]);
 
@@ -349,6 +415,8 @@ export default function Payroll() {
         name: l.trainerName,
         line: l,
         outstanding: [],
+        classes: [],
+        adjustments: [],
         blocker: null,
         onRoster: false,
       });
@@ -356,8 +424,29 @@ export default function Payroll() {
     // Only sessions with a recorded outcome, a rate, and no settlement already
     // stamped on them. Paying by session rather than by period is what stops a
     // late-marked session being paid twice.
-    for (const s of settleableSessions(sessions, policy)) {
+    for (const s of settleableSessions(priced ?? [], policy)) {
       byTrainer.get(s.trainerId)?.outstanding.push(s);
+    }
+    // Class teaching and adjustments join the same run. Both are settled per
+    // LINE and not per period, exactly as sessions are — so a class registered
+    // after its month was settled joins the next run instead of being lost or
+    // paid twice, which is the argument supabase/parts/36 makes about sessions
+    // and which applies unchanged to anything else a run pays for.
+    for (const c of (classPay ?? []).filter((x) => x.settlementId == null)) {
+      const row = byTrainer.get(c.trainerId);
+      if (row) row.classes.push(c);
+      else byTrainer.set(c.trainerId, {
+        trainerId: c.trainerId, name: c.trainerName, line: null,
+        outstanding: [], classes: [c], adjustments: [], blocker: null, onRoster: false,
+      });
+    }
+    for (const a of (adjustments ?? []).filter((x) => x.settlementId == null)) {
+      const row = byTrainer.get(a.trainerId);
+      if (row) row.adjustments.push(a);
+      else byTrainer.set(a.trainerId, {
+        trainerId: a.trainerId, name: a.trainerName, line: null,
+        outstanding: [], classes: [], adjustments: [a], blocker: null, onRoster: false,
+      });
     }
     for (const r of byTrainer.values()) {
       // A run with no currency is blocked, not merely displayed as a dash.
@@ -370,10 +459,29 @@ export default function Payroll() {
       // Settle button that can only ever throw, and a payroll run that fails at
       // the database is a worse way to learn the currency is missing than being
       // told so before pressing anything.
-      r.blocker = settleBlocker(r.outstanding, r.line?.unmarked ?? 0)
-        ?? (r.outstanding.length && !ccy
-          ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
-          : null);
+      // A run with SOMETHING on it is settleable even when no session is: a
+      // coach who taught four classes and delivered no one-to-ones is owed for
+      // four classes, and `settleBlocker` — which only ever saw sessions —
+      // answered "Nothing outstanding for this trainer" and left them unpaid.
+      const anything = r.outstanding.length + r.classes.length + r.adjustments.length;
+      const sessionSide = settleBlocker(r.outstanding, r.line?.unmarked ?? 0);
+      r.blocker =
+        (r.line?.unmarked ?? 0) > 0 ? sessionSide
+        : anything === 0 ? 'Nothing outstanding for this trainer.'
+        : !ccy ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
+        // Two currencies on one run is not a smaller run, it is one nobody can
+        // hand over. A coach whose class rate is in EUR and whose gym pays in
+        // GBP has two amounts and no total.
+        : runCurrencyBlocker([
+            ccy,
+            ...r.classes.map((c) => c.currency),
+            ...r.adjustments.map((a) => a.currency),
+          ])
+        // A session that could not be priced at any of the three layers is
+        // unpriced, not free, and `settleableSessions` has already excluded it
+        // — so this is the case where sessions exist, none is settleable, and
+        // the class and adjustment lines are all there is.
+        ?? null;
     }
     for (const t of trainers ?? []) {
       const existing = byTrainer.get(t.id);
@@ -383,7 +491,9 @@ export default function Payroll() {
         name: t.name,
         line: null,
         outstanding: [],
-        blocker: 'No sessions in this period.',
+        classes: [],
+        adjustments: [],
+        blocker: 'Nothing outstanding for this trainer.',
         onRoster: true,
       });
     }
@@ -400,15 +510,22 @@ export default function Payroll() {
   const paidHere = (() => {
     if (!sessions || !runs) return null;
     const ids = new Set(sessions.map((s) => s.settlementId).filter((x): x is string => x != null));
+    // Class lines and adjustments carry a settlement id too, so a run that paid
+    // for four classes and no sessions is still this period's run. Before this
+    // it was invisible here — settled, real, and not on the screen that lists
+    // what has been settled.
+    for (const c of classPay ?? []) if (c.settlementId) ids.add(c.settlementId);
+    for (const a of adjustments ?? []) if (a.settlementId) ids.add(a.settlementId);
     return runs.filter((r) => ids.has(r.id));
   })();
   const alreadySettled = sessions && sessions.filter((s) => s.settlementId != null).length;
 
   const settle = async (r: RunRow) => {
-    if (r.blocker || r.outstanding.length === 0 || !ccy) return;
+    if (r.blocker || !ccy) return;
+    if (r.outstanding.length + r.classes.length + r.adjustments.length === 0) return;
     setSettling(r.trainerId);
     try {
-      await recordSettlement(supabase, tenantId, {
+      const id = await recordSettlement(supabase, tenantId, {
         trainerId: r.trainerId,
         // The period's own bounds, not the first and last session in it: this
         // run is "August", and a settlement covering the 4th to the 22nd would
@@ -416,7 +533,12 @@ export default function Payroll() {
         // reads the settlement history.
         periodFrom: period.fromDate,
         periodTo: period.toDate,
-        amountCents: settlementAmount(r.outstanding),
+        // Sessions, plus the classes taught, plus the adjustments — signed, so
+        // a deduction subtracts. `payroll_settlements.amount_cents` has a
+        // `>= 0` check, so a run whose deductions exceed its pay is refused by
+        // the database rather than stored as a negative payment; that is the
+        // right refusal and the screen says so before the button is pressed.
+        amountCents: rowOwed(r) ?? 0,
         sessionIds: r.outstanding.map((s) => s.id),
         // Said, never defaulted — see the note on `method` above.
         method,
@@ -426,6 +548,11 @@ export default function Payroll() {
         // above stops the button reaching here without one.
         currency: ccy ?? undefined,
       });
+      // Second, and separately, because `recordSettlement` is shared with the
+      // phone app and knows only about sessions. A partial stamp throws rather
+      // than being swallowed: the unstamped remainder is silently payable a
+      // SECOND time, which is the expensive direction.
+      await stampRunExtras(supabase, id, r.classes.map((c) => c.id), r.adjustments.map((a) => a.id));
       await load(tenantId, period);
     } catch (e: any) {
       setErr(e?.message ?? 'Could not record that settlement.');
@@ -530,25 +657,51 @@ export default function Payroll() {
         </Banner>
       ) : null}
 
+      {/* Stated, not set — and this screen was the LAST of five holding its own
+          unsaved copy. The other four were closed by supabase/parts/166; this
+          one, the screen that actually hands money over, was left with two
+          toggles that reset on every reload. So an owner could set the policy on
+          Gym, come here to pay somebody, and settle against a figure the policy
+          they had just chosen did not produce — permanently, with the sessions
+          stamped and no way back until this wave. */}
       <Section
         title="Pay policy"
-        sub="A gym decision, not a default. It changes which sessions are payable, and therefore the figure above."
+        sub="A gym decision, stored once. It decides which sessions are payable, and therefore the figure above and the money this screen hands over."
       >
-        <div style={{ padding: 14, display: 'flex', gap: 22, flexWrap: 'wrap' }}>
-          <Toggle
-            label="Pay for no-shows"
-            hint="The trainer held the hour and turned up."
-            on={policy.payNoShows}
-            onChange={(v) => setPolicy((p) => ({ ...p, payNoShows: v }))}
-          />
-          <Toggle
-            label="Pay for late cancellations"
-            hint="Cancelled too late to fill the slot."
-            on={policy.payLateCancellations}
-            onChange={(v) => setPolicy((p) => ({ ...p, payLateCancellations: v }))}
-          />
+        <div style={{ padding: 14, fontSize: 13, color: 'var(--ink2)', maxWidth: '72ch' }}>
+          {gymError ? (
+            <>
+              The gym&rsquo;s record could not be read, so its pay policy is unknown here rather
+              than unset. Everything below prices delivered sessions only, which is the least this
+              gym owes &mdash; not necessarily what it has agreed to pay. Do not settle on it.
+            </>
+          ) : stated ? (
+            <>
+              <strong style={{ color: 'var(--ink)' }}>{PAY_POLICY_LABEL[policyCode as PayPolicyCode]}.</strong>{' '}
+              Change it on <a href="/settings" style={{ color: 'var(--brand)' }}>Gym</a> and every
+              screen that prices a session moves with it, including this one.
+            </>
+          ) : (
+            <>
+              <strong style={{ color: 'var(--ink)' }}>Not set</strong> &mdash; {NO_PAY_POLICY_NOTE}.
+              Everything below therefore counts delivered sessions only. That is the floor rather
+              than an answer: a coach who held an hour for somebody who did not turn up is not in
+              it, and settling now pays them for a session the gym may well owe. Say what this gym
+              pays for on <a href="/settings" style={{ color: 'var(--brand)' }}>Gym</a>.
+            </>
+          )}
         </div>
       </Section>
+
+      <Rates
+        trainers={trainers} pay={pay} payErr={payErr} ccy={ccy}
+        sessionFee={sessionFee} tenantId={tenantId} me={me} onChange={refresh}
+      />
+
+      <Adjustments
+        trainers={trainers} rows={adjustments} ccy={ccy}
+        tenantId={tenantId} me={me} period={period} onChange={refresh}
+      />
 
       <Blocking sessions={awaiting} unread={sessionsUnread} ccy={ccy} />
 
@@ -573,7 +726,8 @@ export default function Payroll() {
         ccy={ccy}
       />
 
-      <Paid runs={paidHere} unread={unread(runs, runsErr)} sessionsUnread={sessionsUnread} period={period} />
+      <Paid runs={paidHere} unread={unread(runs, runsErr)} sessionsUnread={sessionsUnread}
+            period={period} me={me} onChange={refresh} onErr={setErr} />
 
       <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '0 0 30px' }}>
         Recording a payment stamps those exact sessions with the run that paid
@@ -590,6 +744,10 @@ export default function Payroll() {
 interface RunRow {
   trainerId: string;
   name: string | null;
+  /** Class-teaching lines not yet stamped with a settlement. */
+  classes: ClassPayLine[];
+  /** Bonuses, deductions, reimbursements and advances not yet settled. */
+  adjustments: Adjustment[];
   /** Null when this trainer has no sessions at all in the period. */
   line: PayrollLine | null;
   /** Marked, priced, payable, and not already settled. */
@@ -636,6 +794,282 @@ function Blocking({ sessions, unread, ccy }: {
           rows={sessions} columns={cols} rowKey={(s) => s.id}
           empty="Nothing waiting — every finished session in this period has an outcome."
         />
+      )}
+    </Section>
+  );
+}
+
+/* ── what this gym pays each coach ─────────────────────────────────────────── */
+
+/**
+ * A rate per trainer, and a rate for teaching a class.
+ *
+ * `payroll30For` multiplied delivered sessions by a single `tenants.session_fee`
+ * and this screen offered no override anywhere, so a coach of fifteen years and
+ * a trainee in their first month were worth an identical amount to payroll.
+ *
+ * `trainers.session_fee` is NOT this and must never be read as it: it is what a
+ * coach CHARGES a client for private work booked through the app, added by
+ * supabase/parts/23 as part of their public directory listing. Reading it here
+ * would hand a coach's own price list to their employer's payroll run.
+ *
+ * The class rate is two fields rather than one, and that is the whole reason
+ * this section is not a single number per row: "80 per class" and "8 a head"
+ * are the same digits and completely different money. A gym that meant the
+ * second and stored the first pays a coach twelve times what it agreed.
+ */
+function Rates({ trainers, pay, payErr, ccy, sessionFee, tenantId, me, onChange }: {
+  trainers: GymTrainer[] | null; pay: PayIndex | null; payErr: string | null;
+  ccy: TenantCurrency; sessionFee: number | null;
+  tenantId: string; me: Me; onChange: () => void;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const gymRate = sessionFee == null ? null : Math.round(sessionFee * 100);
+
+  const cols: Column<GymTrainer>[] = [
+    { key: 'name', header: 'Trainer', value: (t) => t.name },
+    { key: 'rate', header: 'Per session', value: (t) => pay?.get(t.id)?.sessionRateCents ?? null, numeric: true,
+      render: (t) => {
+        const own = pay?.get(t.id);
+        if (own?.sessionRateCents != null) {
+          return amount(own.sessionRateCents, own.currency ?? ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>;
+        }
+        // Not a dash, and not the fee printed as though somebody chose it for
+        // this coach. It says which of the two it is, because "on the gym's
+        // standard fee" and "nobody has priced this coach" are the same figure
+        // and different facts — and only one of them wants doing something about.
+        return gymRate == null
+          ? <span className="dash">no rate, and no gym fee to fall back on</span>
+          : <span style={{ color: 'var(--ink3)' }}>
+              {amount(gymRate, ccy) ?? '—'} <span style={{ fontSize: 11 }}>(the gym&rsquo;s fee)</span>
+            </span>;
+      } },
+    { key: 'class', header: 'Per class', value: (t) => pay?.get(t.id)?.classRateCents ?? null, numeric: true,
+      render: (t) => {
+        const own = pay?.get(t.id);
+        if (own?.classRateCents == null || own.classPayKind == null) {
+          return <span className="dash">not paid for teaching</span>;
+        }
+        return (
+          <span>
+            {amount(own.classRateCents, own.currency ?? ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>}{' '}
+            <span style={{ fontSize: 11, color: 'var(--ink3)' }}>
+              {own.classPayKind === 'per_attendee' ? 'each person' : 'the class'}
+            </span>
+          </span>
+        );
+      } },
+    { key: 'set', header: '', value: () => 0, align: 'right',
+      render: (t) => editing === t.id
+        ? <RateEditor
+            trainer={t} existing={pay?.get(t.id) ?? null} ccy={ccy} tenantId={tenantId} me={me}
+            onDone={() => { setEditing(null); setErr(null); onChange(); }}
+            onCancel={() => setEditing(null)}
+            onErr={setErr}
+          />
+        : <button style={linkBtn} onClick={() => setEditing(t.id)}>Set</button> },
+  ];
+
+  return (
+    <Section
+      title="What this gym pays each coach"
+      sub="Per delivered session, and per class taught. Blank means the gym's standard session fee — which is not the same as nothing, and is why an unset rate says so rather than showing a dash."
+    >
+      {payErr ? (
+        <Banner tone="crit">
+          {payErr}. Every coach below is therefore priced at the gym&rsquo;s standard fee, which is
+          what happened before per-coach rates existed. For anybody on their own rate that is the
+          WRONG figure and it is silently smaller &mdash; do not settle a run until this reads.
+        </Banner>
+      ) : null}
+      {err ? <Banner tone="crit">{err}</Banner> : null}
+      {!ccy ? (
+        <Banner>
+          A rate cannot be set until this gym states its currency &mdash; {NO_CURRENCY_NOTE}. What
+          somebody is paid is a permanent record and it is only a number until it says what money it
+          is in. Set it on <a href="/settings" style={{ color: 'var(--brand)' }}>Gym</a>.
+        </Banner>
+      ) : null}
+      {trainers === null ? (
+        <Unresolved state="loading" what="the roster, so there is nobody to price" />
+      ) : (
+        <DataTable
+          rows={trainers} columns={cols} rowKey={(t) => t.id}
+          empty="Nobody is on the roster, so there is nobody to set a rate for."
+        />
+      )}
+    </Section>
+  );
+}
+
+function RateEditor({ trainer, existing, ccy, tenantId, me, onDone, onCancel, onErr }: {
+  trainer: GymTrainer; existing: TrainerPay | null; ccy: TenantCurrency;
+  tenantId: string; me: Me; onDone: () => void; onCancel: () => void; onErr: (s: string | null) => void;
+}) {
+  const cents = (c: number | null | undefined) => (c == null ? '' : (c / 100).toFixed(2));
+  const [session, setSession] = useState(cents(existing?.sessionRateCents));
+  const [cls, setCls] = useState(cents(existing?.classRateCents));
+  const [kind, setKind] = useState<ClassPayKind | ''>(existing?.classPayKind ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const blocker = payRateBlocker(session, cls, kind, ccy);
+
+  const save = async () => {
+    if (blocker) { onErr(blocker); return; }
+    const s = parseRate(session);
+    const c = parseRate(cls);
+    setBusy(true);
+    try {
+      await saveTrainerPay(supabase, tenantId, {
+        trainerId: trainer.id,
+        sessionRateCents: s.kind === 'rate' ? s.cents : null,
+        classRateCents: c.kind === 'rate' ? c.cents : null,
+        classPayKind: c.kind === 'rate' ? (kind || null) as ClassPayKind | null : null,
+        currency: ccy,
+        updatedBy: me.id,
+      });
+      onErr(null);
+      onDone();
+    } catch (e: any) {
+      onErr(`${trainer.name}'s rate was NOT saved: ${e?.message ?? 'the write was refused'}. They are still on whatever they were on.`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'normal' }}>
+      <input value={session} onChange={(e) => setSession(e.target.value)} inputMode="decimal"
+             placeholder={ccy ? `Session (${ccy})` : 'Session'}
+             style={{ ...field, padding: '3px 5px', fontSize: 12, width: 110 }}
+             aria-label={`What the gym pays ${trainer.name} per session`} />
+      <input value={cls} onChange={(e) => setCls(e.target.value)} inputMode="decimal"
+             placeholder={ccy ? `Class (${ccy})` : 'Class'}
+             style={{ ...field, padding: '3px 5px', fontSize: 12, width: 100 }}
+             aria-label={`What the gym pays ${trainer.name} per class`} />
+      <select value={kind} onChange={(e) => setKind(e.target.value as ClassPayKind | '')}
+              style={{ ...field, padding: '3px 5px', fontSize: 12, width: 150 }}
+              aria-label="How the class rate is counted">
+        <option value="">counted how?</option>
+        {(Object.keys(CLASS_PAY_LABEL) as ClassPayKind[]).map((k) => (
+          <option key={k} value={k}>{CLASS_PAY_LABEL[k]}</option>
+        ))}
+      </select>
+      <button style={linkBtn} disabled={busy || !!blocker} onClick={save}>Save</button>
+      <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={onCancel}>Cancel</button>
+    </span>
+  );
+}
+
+/* ── the lines a run pays for that are not sessions ────────────────────────── */
+
+/**
+ * A bonus, a deduction, a reimbursement or an advance.
+ *
+ * `recordSettlement` was insert-only and all-or-nothing per trainer, with no
+ * adjustment line of any kind — so a gym owing a coach a bonus, or recovering
+ * an advance it had already handed over, had nowhere to put it and did the
+ * arithmetic outside the product. A payslip whose total is the product's figure
+ * plus a number somebody worked out in their head is not a payslip anybody can
+ * query.
+ *
+ * The SIGN comes from the kind and is never typed. A screen that asks somebody
+ * for a negative number will one day be handed a positive one, and a deduction
+ * of fifty recorded as plus fifty is a coach paid a hundred more than they
+ * should have been. supabase/parts/183 enforces the same rule at the database,
+ * so the two say it independently.
+ */
+function Adjustments({ trainers, rows, ccy, tenantId, me, period, onChange }: {
+  trainers: GymTrainer[] | null; rows: Adjustment[] | null; ccy: TenantCurrency;
+  tenantId: string; me: Me; period: Period; onChange: () => void;
+}) {
+  const [trainerId, setTrainerId] = useState('');
+  const [kind, setKind] = useState<AdjustmentKind>('bonus');
+  const [amt, setAmt] = useState('');
+  const [note, setNote] = useState('');
+  const [on, setOn] = useState(period.toDate);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const blocker = !trainerId
+    ? 'Choose who this is for.'
+    : adjustmentBlocker(amt, note, ccy);
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (blocker || !ccy) { setErr(blocker); return; }
+    const r = parseRate(amt);
+    if (r.kind !== 'rate') return;
+    setBusy(true); setErr(null);
+    try {
+      await addAdjustment(supabase, tenantId, {
+        trainerId, kind, amountCents: r.cents, currency: ccy,
+        note, appliesOn: on, createdBy: me.id,
+      });
+      setAmt(''); setNote('');
+      onChange();
+    } catch (e: any) {
+      setErr(`That adjustment was NOT recorded: ${e?.message ?? 'the write was refused'}. Nothing has been added to or taken off anybody's pay.`);
+    } finally { setBusy(false); }
+  };
+
+  const cols: Column<Adjustment>[] = [
+    { key: 'when', header: 'Applies', value: (a) => a.appliesOn },
+    { key: 'who', header: 'Trainer', value: (a) => a.trainerName },
+    { key: 'kind', header: 'Kind', value: (a) => ADJUSTMENT_LABEL[a.kind] },
+    { key: 'amount', header: 'Amount', value: (a) => a.amountCents, numeric: true,
+      render: (a) => (
+        <span style={{ color: a.amountCents < 0 ? 'var(--crit)' : 'var(--good)' }}>
+          {money(a.amountCents, a.currency)}
+        </span>
+      ) },
+    { key: 'note', header: 'Why', value: (a) => a.note },
+    { key: 'settled', header: 'Paid', value: (a) => (a.settlementId ? 1 : 0),
+      render: (a) => a.settlementId
+        ? <span style={{ color: 'var(--ink3)' }}>on a settled run</span>
+        : <span style={{ color: 'var(--ink2)' }}>on the next run</span> },
+  ];
+
+  return (
+    <Section
+      title="Bonuses, deductions and reimbursements"
+      sub="Everything a run pays for that is not a session or a class. Picked up by the next settlement for that coach and stamped with it, exactly as a session is — so nothing here can be paid twice."
+    >
+      <form onSubmit={add} style={formRow}>
+        <select value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, flex: 2, minWidth: 170 }}
+                aria-label="Who this adjustment is for">
+          <option value="">{trainers === null ? 'The roster could not be read' : 'Who is this for?'}</option>
+          {(trainers ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <select value={kind} onChange={(e) => setKind(e.target.value as AdjustmentKind)} style={{ ...field, flex: 2, minWidth: 200 }}
+                aria-label="What kind of adjustment this is">
+          {ADJUSTMENT_KINDS.map((k) => <option key={k} value={k}>{ADJUSTMENT_LABEL[k]}</option>)}
+        </select>
+        <input value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="decimal"
+               placeholder={ccy ? `Amount (${ccy})` : 'Amount'} style={{ ...field, width: 130 }}
+               aria-label="How much, as a positive number" />
+        <input type="date" value={on} onChange={(e) => setOn(e.target.value)} style={{ ...field, width: 148 }}
+               aria-label="The date this belongs to" />
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What it is for"
+               style={{ ...field, flex: 2, minWidth: 180 }} aria-label="Why this adjustment exists" />
+        <button type="submit" disabled={busy || !!blocker} style={primaryBtn}>Add</button>
+      </form>
+      <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)', maxWidth: '78ch' }}>
+        Enter every amount as a positive number. A deduction and an advance subtract; a bonus and a
+        reimbursement add, and Repple applies the sign from the kind rather than asking anybody to
+        type a minus. A reimbursement is money the coach spent being paid back and a bonus is pay
+        &mdash; the same arithmetic and different things to whoever files it, which is why they are
+        separate kinds rather than one signed line.
+      </p>
+      {blocker && (trainerId || amt) && !err ? (
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '72ch' }}>{blocker}</p>
+      ) : null}
+      {err ? <Banner tone="crit">{err}</Banner> : null}
+      {rows === null ? (
+        <Unresolved state="failed" what="the adjustments, so what is about to be added to or taken off anybody's pay is unknown" />
+      ) : (
+        <DataTable rows={rows} columns={cols} rowKey={(a) => a.id}
+                   empty="No adjustment has been recorded. Every run below is sessions and classes only." />
       )}
     </Section>
   );
@@ -690,14 +1124,42 @@ function Run({ rows, unread, rosterUnread, settling, onSettle, method, onMethod,
           ? <span className="dash">—</span>
           : (amount(c, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>);
       } },
-    { key: 'owed', header: 'Owed now', value: (r) => (r.blocker ? -1 : settlementAmount(r.outstanding)), numeric: true,
-      render: (r) => r.blocker
+    { key: 'classes', header: 'Classes', value: (r) => (r.classes.length || null), numeric: true,
+      render: (r) => r.classes.length === 0
         ? <span className="dash">—</span>
-        : (amount(settlementAmount(r.outstanding), ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+        : <span title={r.classes.map((c) => `${c.payKind === 'per_attendee' ? `${c.attendees ?? '?'} × ` : ''}${c.rateCents / 100}`).join(', ')}>
+            {r.classes.length}
+          </span> },
+    { key: 'adjust', header: 'Adjustments', value: (r) => (r.adjustments.length ? r.adjustments.reduce((a, x) => a + x.amountCents, 0) : null), numeric: true,
+      // Signed and coloured, because a deduction and a bonus of the same size
+      // are the same digits and opposite money.
+      render: (r) => {
+        if (!r.adjustments.length) return <span className="dash">—</span>;
+        const cents = r.adjustments.reduce((a, x) => a + x.amountCents, 0);
+        return (
+          <span style={{ color: cents < 0 ? 'var(--crit)' : 'var(--good)' }}>
+            {amount(cents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>}
+          </span>
+        );
+      } },
+    { key: 'owed', header: 'Owed now', value: (r) => (r.blocker ? -1 : rowOwed(r) ?? -1), numeric: true,
+      render: (r) => {
+        if (r.blocker) return <span className="dash">—</span>;
+        const owed = rowOwed(r);
+        // Null is unpriced work, never nothing owed — `settlementAmount` would
+        // have returned a number here by treating an unpriced session as zero,
+        // which is how a coach gets paid less than the screen above says.
+        if (owed == null) return <span className="dash">not priced</span>;
+        return amount(owed, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>;
+      } },
     { key: 'why', header: 'Status', value: (r) => r.blocker ?? '',
       render: (r) => (
         <span style={{ color: r.blocker ? 'var(--ink3)' : 'var(--ink2)', whiteSpace: 'normal' }}>
-          {r.blocker ?? `${r.outstanding.length} session${r.outstanding.length === 1 ? '' : 's'} unpaid`}
+          {r.blocker ?? [
+            r.outstanding.length ? `${r.outstanding.length} session${r.outstanding.length === 1 ? '' : 's'}` : null,
+            r.classes.length ? `${r.classes.length} class${r.classes.length === 1 ? '' : 'es'}` : null,
+            r.adjustments.length ? `${r.adjustments.length} adjustment${r.adjustments.length === 1 ? '' : 's'}` : null,
+          ].filter(Boolean).join(', ') + ' unpaid'}
         </span>
       ) },
     { key: 'pay', header: '', value: () => 0, align: 'right',
@@ -776,6 +1238,28 @@ function Run({ rows, unread, rosterUnread, settling, onSettle, method, onMethod,
  * row is the fabricated number this codebase exists to refuse: it is smaller
  * than the truth and it looks exactly like the truth.
  */
+/**
+ * What this run would hand over, or null when part of it cannot be priced.
+ *
+ * Null and not a smaller number. `settlementAmount` prices an unpriced session
+ * at zero through its `?? 0`, which is unreachable for anything
+ * `settleableSessions` returns and would still be the wrong shape here — a run
+ * containing work nobody has priced is not a smaller run, it is one that must
+ * not be handed over.
+ */
+function rowOwed(r: RunRow): number | null {
+  if (r.outstanding.some((s) => s.rateCents == null)) return null;
+  const cents = runTotal({
+    sessionCents: settlementAmount(r.outstanding),
+    sessions: r.outstanding.length,
+    classCents: r.classes.reduce((a, c) => a + c.amountCents, 0),
+    classes: r.classes.length,
+    adjustmentCents: r.adjustments.reduce((a, x) => a + x.amountCents, 0),
+    adjustments: r.adjustments.length,
+  });
+  return cents;
+}
+
 function periodCents(r: RunRow): number | null {
   if (!r.line) return null;
   if (r.line.unmarked > 0) return null;
@@ -915,9 +1399,48 @@ function CrossCheck({ trainers, unread, sessionFee, gymError, ccy }: {
 
 /* ── what has already gone out ─────────────────────────────────────────────── */
 
-function Paid({ runs, unread, sessionsUnread, period }: {
+/**
+ * What has been paid, and the way back from a run that should not have been.
+ *
+ * `recordSettlement` was insert-only, all-or-nothing, with no reverse. Pressing
+ * "Mark as paid" before the money actually moves stamps every session in the
+ * run permanently and drops them all out of "Owed now" — so the coach is shown
+ * as settled, the sessions can never be paid again, and the only way back was
+ * editing rows in the Supabase dashboard.
+ *
+ * Reversing is four writes in a fixed order and `reverseSettlement` holds the
+ * argument for it: the sessions, the class lines and the adjustments are
+ * unstamped FIRST and the settlement is marked reversed last. The other order
+ * would mark the run reversed while its sessions were still stamped against it,
+ * which excludes them from "Owed now" for ever — a coach silently never paid,
+ * by the feature that exists to fix having paid them too early.
+ *
+ * The settlement row is never deleted. It is a statement that money went out;
+ * deleting it leaves neither the statement nor the withdrawal.
+ */
+function Paid({ runs, unread, sessionsUnread, period, me, onChange, onErr }: {
   runs: Settlement[] | null; unread: Unread; sessionsUnread: Unread; period: Period;
+  me: Me; onChange: () => void; onErr: (s: string | null) => void;
 }) {
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const doReverse = async (r: Settlement) => {
+    const why = reversalReasonBlocker(reason);
+    if (why) { onErr(why); return; }
+    setBusy(true);
+    try {
+      await reverseSettlement(supabase, r.id, reason, me.id);
+      onErr(null);
+      setUndoing(null);
+      setReason('');
+      onChange();
+    } catch (e: any) {
+      onErr(`That run was NOT reversed: ${e?.message ?? 'the write was refused'}. It still stands as paid, and its sessions are still stamped against it.`);
+    } finally { setBusy(false); }
+  };
+
   const cols: Column<Settlement>[] = [
     { key: 'when', header: 'Paid', value: (r) => r.settledAt,
       render: (r) => new Date(r.settledAt).toLocaleDateString() },
@@ -940,6 +1463,21 @@ function Paid({ runs, unread, sessionsUnread, period }: {
       // column reads as nothing having been paid.
       render: (r) => money(r.amountCents, r.currency)
         ?? <span className="dash">— this run records no currency</span> },
+    { key: 'undo', header: '', value: () => 0, align: 'right',
+      render: (r) => undoing === r.id ? (
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'normal' }}>
+          <input value={reason} onChange={(e) => setReason(e.target.value)}
+                 placeholder="Why this run is being taken back"
+                 style={{ ...field, padding: '3px 5px', fontSize: 12, width: 240 }}
+                 aria-label="Why this settlement is being reversed" />
+          <button style={linkBtn} disabled={busy || !reason.trim()} onClick={() => doReverse(r)}>Reverse</button>
+          <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={() => setUndoing(null)}>Cancel</button>
+        </span>
+      ) : (
+        <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={() => { onErr(null); setUndoing(r.id); }}>
+          Reverse
+        </button>
+      ) },
   ];
   return (
     <Section
@@ -957,7 +1495,18 @@ function Paid({ runs, unread, sessionsUnread, period }: {
             : 'what has already been paid. Do not pay anybody a second time on the strength of this page — reload first'}
         />
       ) : (
-        <DataTable rows={runs} columns={cols} rowKey={(r) => r.id} empty="Nothing in this period has been paid yet." />
+        <>
+          <DataTable rows={runs} columns={cols} rowKey={(r) => r.id} empty="Nothing in this period has been paid yet." />
+          {runs.length ? (
+            <p style={{ margin: 0, padding: '11px 14px', borderTop: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '80ch' }}>
+              Reversing a run puts its sessions, classes and adjustments straight back into
+              &ldquo;Owed now&rdquo; and keeps the settlement row, marked reversed, with the reason
+              on it. It does not move any money &mdash; if the payment actually left the account,
+              recovering it is between the gym and the coach, and an advance is the adjustment kind
+              for recording that.
+            </p>
+          ) : null}
+        </>
       )}
     </Section>
   );
@@ -971,24 +1520,20 @@ const field = {
   border: '1px solid var(--ring)', fontFamily: 'var(--sans)', minWidth: 0,
 } as const;
 
+const primaryBtn = {
+  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
+  padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+} as const;
+
+const formRow = {
+  display: 'flex', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--ring)',
+  flexWrap: 'wrap' as const, alignItems: 'center',
+};
+
 const linkBtn = {
   background: 'none', border: 'none', padding: 0, cursor: 'pointer',
   color: 'var(--brand)', fontSize: 12.5, fontFamily: 'var(--sans)',
 } as const;
-
-function Toggle({ label, hint, on, onChange }: {
-  label: string; hint: string; on: boolean; onChange: (v: boolean) => void;
-}) {
-  return (
-    <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', cursor: 'pointer', maxWidth: 300 }}>
-      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} style={{ marginTop: 3 }} />
-      <span>
-        <span style={{ display: 'block', fontSize: 13.5, color: 'var(--ink)' }}>{label}</span>
-        <span style={{ display: 'block', fontSize: 12, color: 'var(--ink3)', marginTop: 2 }}>{hint}</span>
-      </span>
-    </label>
-  );
-}
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (

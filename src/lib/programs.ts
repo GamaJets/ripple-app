@@ -2,6 +2,7 @@
 // The client just logs weight/reps against the plan; every exercise has
 // alternatives if they'd rather not do it.
 import type { Goal } from './types';
+import type { SetRow } from './setRows';
 import type { WeightUnit } from './units';
 
 export interface ProgramExercise {
@@ -170,10 +171,142 @@ export interface ProgramExercise {
    * Loads are KILOGRAMS here as they are everywhere else in this file; see
    * `loadKg` above for why a second convention is not on offer.
    */
-  setRows?: Array<{ reps?: string | null; loadKg?: number | null; method?: string | null }> | null;
+  setRows?: SetRow[] | null;
+  /**
+   * The PRESCRIBED effort for this movement on the RPE scale, in halves, or
+   * absent because the coach did not write one.
+   *
+   * Not `feel`. `feel` in src/lib/mockData.ts is the client's own report after
+   * the set — "easy", "hard" — recorded by the person who did it, and it is
+   * evidence. This is an instruction written before the set by somebody who was
+   * not there. Conflating the two would let a coach's target overwrite a
+   * client's account of their own session, which is the one direction this app
+   * never lets data flow.
+   *
+   * Absent is the ordinary case and every programme in the database is absent.
+   * See src/lib/setIntensity.ts for the scale, the bounds and — the part that
+   * matters most — the fact that the CLIENT'S Train tab does not render this
+   * yet, so anything they need at the machine still belongs in `note`.
+   */
+  rpe?: number | null;
+  /**
+   * The prescribed share of a one-rep max, as a whole percentage, or absent.
+   *
+   * Never turned into a load by anything in this app. The maximum it is a share
+   * of is, for almost every client here, an Epley estimate off logged sets —
+   * `priorBest1RM` in src/lib/progression.ts — and printing "82.5 kg" beside
+   * "75%" would be the app putting a weight on a bar derived from a number
+   * nobody tested. `percentLoadKg` exists and takes the maximum as an argument
+   * precisely so the claim belongs to whoever supplies it.
+   */
+  pct1rm?: number | null;
+  /**
+   * The prescribed rep speed, canonically `3-1-1-0` — down, pause, up, pause.
+   *
+   * Distinct from the 'tempo' SET METHOD in src/lib/setMethods.ts, which has
+   * been in this app since the method catalogue landed and says only that the
+   * speed matters. It could never say what the speed was, so the notation went
+   * into `note` as free text in whichever of the common orders the coach
+   * learned. This field has ONE order, `tempoMeaning` spells it out in words
+   * wherever it is shown, and a coach who reads the other convention sees the
+   * disagreement while they are typing rather than four weeks later.
+   */
+  tempo?: string | null;
 }
 export interface ProgramDay { day: string; focus: string; cardio?: string; exercises: ProgramExercise[]; }
-export interface Program { title: string; focus: string[]; note: string; days: ProgramDay[]; }
+
+/**
+ * ONE WEEK of a block, past the first.
+ *
+ * ── Why `Program.days` is still week one ──────────────────────────────────
+ *
+ * `Program` was one week and nothing else: a title, a focus list, a note and
+ * seven days. Every coach who sells a six-, eight- or twelve-week block was
+ * writing week one and telling the client the rest by message.
+ *
+ * The obvious model — replace `days` with `weeks[]` — cannot be done. A
+ * `Program` lives in THREE homes and no migration reaches all three:
+ * `program_templates.program`, every client's `assigned_programs.program`, and
+ * the coach's own on-device draft in AsyncStorage (`DRAFT_KEY` in app/(trainer)/builder.tsx). And
+ * the reader that matters most is not in this repo's control at all: the
+ * SHIPPED client app draws `program.days` and knows nothing about weeks. A
+ * build that moved the days would empty every Train tab on every phone that had
+ * not updated.
+ *
+ * So `days` stays exactly what it was — WEEK ONE — and `weeks` is an OPTIONAL
+ * list that carries the whole block including week one. A reader that does not
+ * know about `weeks` shows `days`, which is week one, which is what it showed
+ * before and is a true week of the programme rather than an error.
+ *
+ * ── The duplication, and why it is the same pattern as `sets` ─────────────
+ *
+ * `weeks[0].days` and `days` are the same fact written twice, and whoever
+ * writes one writes the other. That is uncomfortable and it is the identical
+ * trade `setRows` already makes with `sets`: every existing reader counts
+ * against the old field, none of them knows the new one exists, and a
+ * disagreement between the two is a client shown the wrong session. There is
+ * exactly one place that resolves them — `programWeeks` in
+ * src/lib/programBlock.ts — and exactly one place that writes them —
+ * `withWeeks` in the same file. Neither this interface nor any screen builds
+ * the pair by hand.
+ *
+ * ── absent means exactly what it meant before ─────────────────────────────
+ *
+ * A programme with no `weeks` is a one-week programme, which is what every
+ * programme in every one of the three homes is today. `programWeeks` returns a
+ * single week built from `days` for it, `weekCount` returns 1, and nothing
+ * anywhere renders a week number. Nothing writes `weeks` onto a programme the
+ * coach has not deliberately given a second week to.
+ */
+export interface ProgramWeek {
+  /** The days of THIS week, in the same shape a one-week programme uses. */
+  days: ProgramDay[];
+  /**
+   * What the coach calls this week — 'Accumulation', 'Week 3', 'Deload'. Absent
+   * is the ordinary case and the screen falls back to the position, which is
+   * `Week ${n}` and is always true.
+   *
+   * Free text rather than an enum of periodisation phases. There is no settled
+   * vocabulary — one coach's "intensification" is another's "peak" — and an
+   * enum would force every coach through somebody else's model of training.
+   */
+  label?: string;
+  /**
+   * What the coach wants said about this week specifically. A different field
+   * from `Program.note`, for the same reason `ProgramExercise.note` is: that
+   * one is the letter at the top of the block and is read once, this one is
+   * read on the Monday of week four.
+   */
+  note?: string;
+  /**
+   * Whether the coach has marked this week a deload.
+   *
+   * A FLAG the coach sets, never inferred. The tempting version reads the
+   * volume of each week and calls the light one a deload, and it would be wrong
+   * on every block that ramps volume and drops intensity — which is most of
+   * them — and on every week a coach wrote light because their client is
+   * travelling. Absent means "the coach has not said", not "no".
+   */
+  deload?: boolean;
+}
+
+export interface Program {
+  title: string;
+  focus: string[];
+  note: string;
+  /** WEEK ONE. See `ProgramWeek` for why this field cannot be replaced. */
+  days: ProgramDay[];
+  /**
+   * The whole block, week one included, or absent for the one-week programme
+   * every programme in the database currently is.
+   *
+   * Read through `programWeeks` and written through `withWeeks`, both in
+   * src/lib/programBlock.ts. Nothing else should touch it: the invariant that
+   * `weeks[0].days === days` is not expressible in TypeScript and is held by
+   * those two functions and the assertions on them.
+   */
+  weeks?: ProgramWeek[];
+}
 
 const E = (key: string, name: string, group: string, sets: number, reps: string, alternatives: string[]): ProgramExercise => ({ key, name, group, sets, reps, alternatives });
 

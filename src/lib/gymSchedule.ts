@@ -8,10 +8,23 @@
 // Framework-agnostic, like gymTrainers and gymRecord: the Supabase client comes
 // in as an argument so neither front end owns this.
 
-import { readAll } from './rowCap';
+import { assertWhole, capLimit, readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
+
+/**
+ * Whether a class is still on, or was called off.
+ *
+ * `cancelled` is a row that is KEPT. Until part 195 there was no such state and
+ * `deleteClass` was the only verb the console had — and
+ * `class_bookings.class_id` is `on delete cascade`, so
+ * calling off a snowed-off Tuesday destroyed the twelve bookings that prove the
+ * slot is wanted, every `attended_at` on them, and the waiting list. It also
+ * flattered the month: the bad Tuesday stopped being in the average the moment
+ * somebody acted on it.
+ */
+export type ClassStatus = 'scheduled' | 'cancelled';
 
 export interface GymClass {
   id: string;
@@ -22,6 +35,31 @@ export interface GymClass {
   startsAt: string;
   durationMin: number;
   capacity: number;
+  /**
+   * ── The four fields below are OPTIONAL, and that is deliberate ───────────
+   *
+   * They arrive from columns part 195 added, and `fetchClasses` always fills
+   * them in. They are optional on the TYPE because `GymClass` is constructed by
+   * hand in two test files that belong to nobody in particular
+   * (`coverage.test.ts`, `gymClassFill.test.ts`), and making four new fields
+   * required would break a suite over rows whose subject is rate arithmetic and
+   * which have no opinion about cancellation at all.
+   *
+   * Every reader below therefore treats `undefined` as `'scheduled'` — see
+   * `isCancelled`, which is the single place that decision is made.
+   */
+  status?: ClassStatus;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
+  /**
+   * The weekly series this occurrence belongs to, or null for a one-off.
+   *
+   * `createSeries` materialises real rows so a single week can be moved,
+   * re-roomed or dropped — the right call, argued on `weeklyOccurrences`. What
+   * was missing is that the rows knew nothing about each other, so "the Tuesday
+   * 6am Spin" could not be re-priced, re-staffed or called off as a thing.
+   */
+  seriesId?: string | null;
   /**
    * PLACES SOLD — bookings whose status is `booked`, filled in by
    * `fetchClasses`. Waitlisters are not in here and never were meant to be.
@@ -80,6 +118,36 @@ export function classFillState(capacity: number, booked: number): ClassFill {
   return left <= Math.max(2, Math.ceil(cap * 0.15)) ? 'nearly' : 'open';
 }
 
+/**
+ * Whether this class was called off.
+ *
+ * The one place `status: undefined` is interpreted, so every reader agrees. A
+ * row read before part 195 landed, or a `GymClass` built by hand in a test, has
+ * no status and is a class that is ON — which is what it was before the column
+ * existed and is the only reading that cannot silently drop a real class out of
+ * a figure.
+ */
+export function isCancelled(c: Pick<GymClass, 'status'>): boolean {
+  return c.status === 'cancelled';
+}
+
+/** Only the classes that were actually on. */
+export function classesThatRan<T extends Pick<GymClass, 'status'>>(classes: T[]): T[] {
+  return classes.filter((c) => !isCancelled(c));
+}
+
+/**
+ * Places still for sale, or null when the class never recorded a capacity.
+ *
+ * Null rather than 0, for the reason every rate in this file returns null: a
+ * class nobody sized has an UNKNOWN number of free places, and 0 reads as sold
+ * out — which is what the front desk turns somebody away on.
+ */
+export function placesLeft(c: Pick<GymClass, 'capacity' | 'booked'>): number | null {
+  if (!c.capacity || c.capacity <= 0) return null;
+  return Math.max(0, c.capacity - c.booked);
+}
+
 export interface RosterEntry {
   bookingId: string;
   userId: string;
@@ -136,17 +204,36 @@ const ID_CHUNK = 150;
  */
 export async function fetchClasses(
   sb: Queryable, tenantId: string, fromISO: string, toISO: string,
+  opts: { includeCancelled?: boolean } = {},
 ): Promise<GymClass[]> {
   const rows = await readAll<any>(
-    (from, to) => sb
-      .from('gym_classes')
-      .select('id, title, room, instructor, trainer_id, starts_at, duration_min, capacity')
-      .eq('tenant_id', tenantId)
-      .gte('starts_at', fromISO)
-      .lte('starts_at', toISO)
-      .order('starts_at', { ascending: true })
-      .order('id', { ascending: true })
-      .range(from, to),
+    (from, to) => {
+      let q = sb
+        .from('gym_classes')
+        .select('id, title, room, instructor, trainer_id, starts_at, duration_min, capacity, status, cancelled_at, cancel_reason, series_id')
+        .eq('tenant_id', tenantId)
+        .gte('starts_at', fromISO)
+        .lte('starts_at', toISO);
+      // ── Cancelled classes are OUT by default, and that is the safe default ──
+      //
+      // Six screens call this and only two of them are about cancellation.
+      // /analytics, the Overview, /equipment and /retention all turn these rows
+      // into a rate, and a class that was called off still carries its capacity
+      // — so left in, it puts twenty unsold places into the denominator of a
+      // month in which the room was never opened. That is the silent-wrong-
+      // number failure this codebase is written against, and it would arrive at
+      // four screens whose authors never asked for a status column.
+      //
+      // Excluding by default means every existing caller keeps meaning what it
+      // has always meant: the classes that are on. The two screens that need to
+      // SHOW a cancellation — the board and the performance screen — ask for it
+      // by name, and say so on screen.
+      if (!opts.includeCancelled) q = q.neq('status', 'cancelled');
+      return q
+        .order('starts_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to);
+    },
     'the classes in this window',
   );
   if (!rows.length) return [];
@@ -202,6 +289,13 @@ export async function fetchClasses(
     startsAt: r.starts_at,
     durationMin: r.duration_min,
     capacity: r.capacity,
+    // `?? 'scheduled'` rather than `?? null`: the column is NOT NULL with a
+    // default, so a null here can only mean a row read before part 195 landed,
+    // and a class from before cancellation existed is a class that was on.
+    status: (r.status ?? 'scheduled') as ClassStatus,
+    cancelledAt: r.cancelled_at ?? null,
+    cancelReason: r.cancel_reason ?? null,
+    seriesId: r.series_id ?? null,
     booked: tally.booked.get(r.id) ?? 0,
     attended: tally.attended.get(r.id) ?? 0,
     waitlisted: tally.waitlisted.get(r.id) ?? 0,
@@ -270,6 +364,9 @@ export interface NewClass {
   room?: string | null;
   instructor?: string | null;
   trainerId?: string | null;
+  /** Set by `createSeries` on every occurrence it writes. A single class made
+   *  with `createClass` leaves it undefined, which is a real answer. */
+  seriesId?: string | null;
 }
 
 export async function createClass(sb: Queryable, tenantId: string, c: NewClass): Promise<void> {
@@ -288,34 +385,261 @@ export async function createClass(sb: Queryable, tenantId: string, c: NewClass):
  *
  * `skip` takes yyyy-mm-dd dates to leave out, which is how a holiday is handled.
  */
+export interface SeriesShape {
+  /**
+   * Weeks between occurrences. 1 is weekly; 2 is the fortnightly class every
+   * gym with a small studio runs and this function could not express.
+   */
+  everyWeeks?: number;
+  /**
+   * Stop at this local date (yyyy-mm-dd), inclusive. `weeks` is still the hard
+   * ceiling — an end date is the shape a gym thinks in ("until the end of
+   * term"), and a count is the shape that cannot run away.
+   */
+  untilDate?: string | null;
+  /** Stamped on every occurrence, so the rows know they are one thing. */
+  seriesId?: string | null;
+}
+
+/**
+ * The local calendar date of an instant, yyyy-mm-dd.
+ *
+ * LOCAL, and this is the whole of the skip-date fix. Skip dates were compared
+ * against `iso.slice(0, 10)` — the UTC date — and this product sells in AED. A
+ * class at 01:00 on the 25th in a UTC+4 gym is 21:00 on the 24th in UTC, so a
+ * gym closing for Christmas typed 2026-12-25, watched the occurrence survive,
+ * and found out on the day. The reverse case is worse and quieter: a late class
+ * skipped a week nobody asked to skip.
+ *
+ * The gym's own wall clock is the only calendar a timetable is read against —
+ * the same reasoning `localDate` in gymRota.ts and `dayOf` in gymVisits.ts make.
+ */
+function localDay(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
 export function weeklyOccurrences(
-  first: NewClass, weeks: number, skip: string[] = [],
+  first: NewClass, weeks: number, skip: string[] = [], shape: SeriesShape = {},
 ): NewClass[] {
   const out: NewClass[] = [];
-  const skipSet = new Set(skip);
+  const skipSet = new Set(skip.map((s) => s.trim()).filter(Boolean));
   const start = new Date(first.startsAt);
+  if (Number.isNaN(start.getTime())) return out;
+  // Floored at 1: a step of 0 would write the same instant `weeks` times, and a
+  // negative one would walk backwards into the past. Both are typos, and both
+  // are silent — the count comes back right and the timetable is wrong.
+  const step = Math.max(1, Math.floor(shape.everyWeeks ?? 1));
+  const until = (shape.untilDate ?? '').trim() || null;
+
   for (let i = 0; i < weeks; i++) {
     const d = new Date(start.getTime());
-    d.setDate(d.getDate() + i * 7);
-    const iso = d.toISOString();
-    if (skipSet.has(iso.slice(0, 10))) continue;
-    out.push({ ...first, startsAt: iso });
+    // setDate rather than adding 7 * 86_400_000, so a clock change adds or
+    // drops the right hour instead of moving a 6am class to 5am for the winter.
+    d.setDate(d.getDate() + i * step * 7);
+    const day = localDay(d);
+    // Inclusive, and compared as strings: both sides are yyyy-mm-dd, which
+    // sorts lexicographically the same way it sorts chronologically.
+    if (until && day > until) break;
+    if (skipSet.has(day)) continue;
+    out.push({ ...first, startsAt: d.toISOString(), seriesId: shape.seriesId ?? first.seriesId ?? null });
   }
   return out;
 }
 
-export async function createSeries(
-  sb: Queryable, tenantId: string, first: NewClass, weeks: number, skip: string[] = [],
-): Promise<number> {
-  const rows = weeklyOccurrences(first, weeks, skip);
-  if (!rows.length) return 0;
-  const { error } = await sb.from('gym_classes').insert(rows.map((c) => row(tenantId, c)));
-  if (error) throw error;
-  return rows.length;
+/**
+ * A fresh series id.
+ *
+ * `crypto.randomUUID` is present in every browser this console supports and in
+ * Node 20, which package.json already requires. It is reached through
+ * `globalThis` and checked rather than called blind: a series id that came back
+ * `undefined` would be written as null on every row, and the whole series would
+ * silently be a set of unrelated one-offs — which is the exact defect this
+ * column exists to fix, arriving as a fix for it.
+ */
+function newSeriesId(): string {
+  const c = (globalThis as any).crypto;
+  const id = typeof c?.randomUUID === 'function' ? c.randomUUID() : null;
+  if (typeof id !== 'string' || !id) {
+    throw new Error(
+      'This browser cannot generate a series id, so the weekly classes would be written as unrelated one-offs. Add them one at a time, or use a current browser.',
+    );
+  }
+  return id;
 }
 
 /**
- * Take a class off the timetable.
+ * Write a series, and hand back the id that binds it.
+ *
+ * Returns the id as well as the count because the caller has to be able to say
+ * "twelve added" AND to offer, immediately, the two verbs the id makes possible:
+ * change the whole series, and call the whole series off.
+ */
+export async function createSeries(
+  sb: Queryable, tenantId: string, first: NewClass, weeks: number, skip: string[] = [],
+  shape: SeriesShape = {},
+): Promise<{ seriesId: string; created: number }> {
+  const seriesId = shape.seriesId ?? newSeriesId();
+  const rows = weeklyOccurrences(first, weeks, skip, { ...shape, seriesId });
+  if (!rows.length) return { seriesId, created: 0 };
+  const { error } = await sb.from('gym_classes').insert(rows.map((c) => row(tenantId, c)));
+  if (error) throw error;
+  return { seriesId, created: rows.length };
+}
+
+/* ── changing a class that is already on the board ─────────────────────────── */
+
+/** The fields an owner may correct after a class is up. Every one is optional:
+ *  an absent key is "leave it alone", which is not the same as null. */
+export interface ClassPatch {
+  title?: string;
+  room?: string | null;
+  instructor?: string | null;
+  trainerId?: string | null;
+  durationMin?: number;
+  capacity?: number;
+  startsAt?: string;
+}
+
+/** The patch as database columns. Only the keys actually present are sent, so
+ *  an empty patch is caught by the caller rather than blanking a row. */
+function patchRow(p: ClassPatch): Record<string, unknown> {
+  const r: Record<string, unknown> = {};
+  if (p.title !== undefined) r.title = p.title;
+  if (p.room !== undefined) r.room = p.room;
+  if (p.instructor !== undefined) r.instructor = p.instructor;
+  if (p.trainerId !== undefined) r.trainer_id = p.trainerId;
+  if (p.durationMin !== undefined) r.duration_min = p.durationMin;
+  if (p.capacity !== undefined) r.capacity = p.capacity;
+  if (p.startsAt !== undefined) r.starts_at = p.startsAt;
+  return r;
+}
+
+/**
+ * Correct one class.
+ *
+ * There was no edit-a-class path in the product at all: a class typed in with
+ * the wrong capacity could only be deleted and retyped, which took its bookings
+ * with it (see `deleteClass`). The count is checked, because the two policies on
+ * `gym_classes` FILTER rather than refuse — a trainer editing a class that is not
+ * theirs matches zero rows and gets no error, and the board redraws unchanged.
+ */
+export async function updateClass(sb: Queryable, classId: string, patch: ClassPatch): Promise<void> {
+  const fields = patchRow(patch);
+  if (!Object.keys(fields).length) return;
+  const r = await sb.from('gym_classes').update(fields, { count: 'exact' }).eq('id', classId);
+  if (r.error) throw r.error;
+  assertWrote('That change to the class', r);
+}
+
+/**
+ * Change every occurrence of a series from `fromISO` onward.
+ *
+ * FROM a point, never the whole series, and the distinction is the reason this
+ * is safe to offer. The classes already run are the gym's attendance record: a
+ * coach change applied backwards would re-attribute last month's classes to
+ * somebody who did not teach them, and re-price the class hours on /staff for
+ * two people at once. What is being edited is the arrangement going forward,
+ * which is the only part of a series anybody can actually change.
+ *
+ * `startsAt` is deliberately NOT accepted here. Moving a whole series to a new
+ * time means moving each occurrence by the same offset, which is a different
+ * operation from setting them all to one instant — and setting them all to one
+ * instant is what a naive `startsAt` in this patch would do: twelve classes
+ * stacked on one Tuesday evening.
+ */
+export async function updateSeriesFrom(
+  sb: Queryable, seriesId: string, fromISO: string, patch: Omit<ClassPatch, 'startsAt'>,
+): Promise<number> {
+  const fields = patchRow(patch);
+  if (!Object.keys(fields).length) return 0;
+  const { data, error } = await sb
+    .from('gym_classes')
+    .update(fields)
+    .eq('series_id', seriesId)
+    .gte('starts_at', fromISO)
+    .select('id');
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
+/**
+ * Call a class off, keeping it and everything attached to it.
+ *
+ * The counterpart to `deleteClass`, and the two are not interchangeable. This
+ * one is for a class that was on the timetable and did not happen: the bookings
+ * stay, the register stays, and the row says why. `deleteClass` is for a class
+ * that should never have been typed in.
+ *
+ * The reason is required and trimmed rather than optional, because a cancelled
+ * class with no reason is the record saying the class was called off by nobody
+ * for nothing — and "instructor off sick" against "nobody booked it" is the
+ * whole value of keeping the row.
+ */
+export async function cancelClass(sb: Queryable, classId: string, reason: string): Promise<void> {
+  const why = (reason ?? '').trim();
+  if (!why) throw new Error('Say why the class is off. A cancelled class with no reason tells the next reader nothing.');
+  const r = await sb
+    .from('gym_classes')
+    .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancel_reason: why }, { count: 'exact' })
+    .eq('id', classId)
+    // Only a class that is currently on, so a second click cannot overwrite the
+    // first reason with a later timestamp and a different sentence.
+    .neq('status', 'cancelled');
+  if (r.error) throw r.error;
+  assertWrote('That cancellation', r);
+}
+
+/** Put a cancelled class back on. The reason and the timestamp are cleared —
+ *  a class that ran was not cancelled, and a stale reason on a live class would
+ *  be read as one. */
+export async function restoreClass(sb: Queryable, classId: string): Promise<void> {
+  const r = await sb
+    .from('gym_classes')
+    .update({ status: 'scheduled', cancelled_at: null, cancel_reason: null }, { count: 'exact' })
+    .eq('id', classId)
+    .eq('status', 'cancelled');
+  if (r.error) throw r.error;
+  assertWrote('Putting that class back on', r);
+}
+
+/**
+ * Call off every occurrence of a series from `fromISO` onward.
+ *
+ * The count comes back so the screen can say "nine cancelled" rather than
+ * "done" — a bulk write whose scale is not reported is one nobody can check.
+ * Classes already cancelled are skipped rather than restamped, for the same
+ * reason `cancelClass` guards: the first reason is the true one.
+ */
+export async function cancelSeriesFrom(
+  sb: Queryable, seriesId: string, fromISO: string, reason: string,
+): Promise<number> {
+  const why = (reason ?? '').trim();
+  if (!why) throw new Error('Say why the series is off. A cancelled class with no reason tells the next reader nothing.');
+  const { data, error } = await sb
+    .from('gym_classes')
+    .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancel_reason: why })
+    .eq('series_id', seriesId)
+    .gte('starts_at', fromISO)
+    .neq('status', 'cancelled')
+    .select('id');
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
+/**
+ * Erase a class that should never have existed.
+ *
+ * NOT the way to call one off — `cancelClass` is. `class_bookings.class_id` is
+ * `on delete cascade`, so this destroys every booking, every `attended_at` and
+ * the whole waiting list along with the row, and the month's fill rate quietly
+ * improves because the class that went badly is no longer in the average. That
+ * is the right behaviour for a class typed in wrong five minutes ago and the
+ * wrong behaviour for every other case, which is why the console now offers the
+ * two as different verbs with different words and reserves this one for classes
+ * nobody has booked.
  *
  * The count is checked, not `error` alone — see src/lib/wroteRows.ts. A DELETE
  * that matches nothing is a 204 with a null error, and the two policies on
@@ -332,14 +656,26 @@ export async function deleteClass(sb: Queryable, classId: string): Promise<void>
 
 /* ── the roster ────────────────────────────────────────────────────────────── */
 
+/**
+ * Everybody on one class, booked and waiting.
+ *
+ * Capped through src/lib/rowCap.ts. One class cannot honestly hold a thousand
+ * bookings, so this cap will never fire on real data — which is exactly why it
+ * is here: if it ever does, the cause is a query that lost its `class_id`
+ * filter in an edit, and the failure mode without the guard is a register
+ * showing the first thousand people in the gym as attendees of a spin class.
+ * A read that refuses is recoverable; a register that quietly lists strangers
+ * gets ticked.
+ */
 export async function fetchRoster(sb: Queryable, classId: string): Promise<RosterEntry[]> {
   const { data, error } = await sb
     .from('class_bookings')
     .select('id, user_id, status, attended_at')
-    .eq('class_id', classId);
+    .eq('class_id', classId)
+    .limit(capLimit());
   if (error) throw error;
 
-  const rows = data ?? [];
+  const rows = assertWhole(data as any[] | null, 'the bookings on this class');
   if (!rows.length) return [];
 
   const ids = [...new Set(rows.map((r: any) => r.user_id))];
@@ -351,7 +687,12 @@ export async function fetchRoster(sb: Queryable, classId: string): Promise<Roste
   // visible to whoever is looking at it; losing a count is not.
   // no-error-ok: an unreadable name leaves the shift labelled by id; the shift itself is unaffected
   const { data: profs } = await sb.from('profiles').select('id, full_name').in('id', ids);
-  const names = new Map((profs ?? []).map((p: any) => [p.id, (p.full_name || '').trim()]));
+  // Typed explicitly. `assertWhole` now hands back `any[]` rather than `any`,
+  // which is stricter and better — and it made TypeScript infer this Map's
+  // value as `{}`, so `names.get(...)` no longer satisfied `name: string | null`.
+  const names = new Map<string, string>(
+    (profs ?? []).map((p: any) => [String(p.id), (p.full_name || '').trim()] as [string, string]),
+  );
 
   const entries: RosterEntry[] = rows.map((r: any) => ({
     bookingId: r.id,
@@ -385,6 +726,85 @@ export async function setAttendance(
   assertWrote(present ? 'That attendance tick' : 'Clearing that attendance tick', r);
 }
 
+/* ── the waiting list ──────────────────────────────────────────────────────── */
+
+/** How many of a roster hold a place, and how many are waiting for one. */
+export function splitRoster(rows: RosterEntry[]): { booked: RosterEntry[]; waiting: RosterEntry[] } {
+  return {
+    booked: rows.filter((r) => r.status === 'booked'),
+    // Matched positively, the same way `tallyBookings` is and for the same
+    // reason: an unrecognised status is neither a place sold nor a person
+    // waiting, so widening the constraint later cannot silently promote
+    // somebody by accident.
+    waiting: rows.filter((r) => r.status === 'waitlist'),
+  };
+}
+
+/**
+ * Give a waiting member the place that just came free.
+ *
+ * ── Why the desk needs this, given `book_class` already promotes ───────────
+ *
+ * It does not, for anybody the desk is talking to. `cancel_class`
+ * (02-domain-schema.sql, re-issued tenant-scoped in part 38) promotes the first
+ * waitlister automatically — but only when the MEMBER cancels from their own
+ * app, because it deletes `where user_id = auth.uid()`. Neither RPC is callable
+ * on somebody else's behalf, and neither is called anywhere in this console.
+ *
+ * So the whole of the front desk's half of the queue is manual: the member who
+ * rings up to drop out, the coach who says there is room for one more, the
+ * no-show at 06:05 whose bike is now free. Until this existed the waiting list
+ * was a set of rows nothing in the gym's own console could read or act on, and
+ * `web/client.html` was already selling the feature to members.
+ *
+ * ── Why it is a plain UPDATE and not an RPC ───────────────────────────────
+ *
+ * `class_bookings_staff_u` (165-a-coach-cannot-take-their-own-register.sql)
+ * grants staff UPDATE on the bookings of their own gym's classes, and that
+ * file's own comment names this exact use: "a staff member could promote a
+ * waitlister by hand. That is a thing a front desk does anyway." So the
+ * permission is deliberate and already in place.
+ *
+ * The count is checked, because that policy FILTERS: a row somebody else
+ * promoted a second earlier, or a booking on another gym's class, matches
+ * nothing and returns no error — and the desk would watch the list reload with
+ * the same person still waiting and tell them the system is slow.
+ *
+ * Capacity is NOT enforced here. It is checked by the caller, which is the only
+ * place that knows how many places the class has and how many are already sold,
+ * and which has to be able to over-fill deliberately — a coach who says one
+ * more can squeeze in is making a decision the database has no business
+ * refusing. Over-sell is visible on /classes and is reported there as real.
+ */
+export async function promoteFromWaitlist(sb: Queryable, bookingId: string): Promise<void> {
+  const r = await sb
+    .from('class_bookings')
+    .update({ status: 'booked' }, { count: 'exact' })
+    .eq('id', bookingId)
+    // Only somebody actually waiting. Without this a double click re-writes a
+    // booked row to booked and reports success twice for one promotion.
+    .eq('status', 'waitlist');
+  if (r.error) throw r.error;
+  assertWrote('That promotion off the waiting list', r);
+}
+
+/**
+ * Put a booked member back on the waiting list.
+ *
+ * The undo for the button above, and it is needed rather than tidy: a promotion
+ * onto the wrong person's row is a place given away, and without this the only
+ * correction available is to ask the member to cancel from their own phone.
+ */
+export async function returnToWaitlist(sb: Queryable, bookingId: string): Promise<void> {
+  const r = await sb
+    .from('class_bookings')
+    .update({ status: 'waitlist' }, { count: 'exact' })
+    .eq('id', bookingId)
+    .eq('status', 'booked');
+  if (r.error) throw r.error;
+  assertWrote('Putting that booking back on the waiting list', r);
+}
+
 /** Put a member on a class at the desk — a walk-in, or someone who phoned. */
 export async function bookOnto(sb: Queryable, classId: string, userId: string): Promise<void> {
   const { error } = await sb
@@ -413,7 +833,12 @@ export interface AttendanceSummary {
   waitlistAttended: number;
 }
 
-export function summariseAttendance(classes: GymClass[]): AttendanceSummary {
+export function summariseAttendance(all: GymClass[]): AttendanceSummary {
+  // A class that was called off is not a class with empty places: its capacity
+  // was never on sale. `fetchClasses` already excludes cancelled rows unless a
+  // caller asks for them, and this second filter is what makes that opt-in safe
+  // — the two screens that DO ask for them pass the same list to this function.
+  const classes = classesThatRan(all);
   const booked = classes.reduce((a, c) => a + c.booked, 0);
   const attended = classes.reduce((a, c) => a + c.attended, 0);
   const capacity = classes.reduce((a, c) => a + (c.capacity || 0), 0);
@@ -462,10 +887,14 @@ function mondayOf(d: Date): string {
  * rate, which is not the same as everybody failing to turn up.
  */
 export function weeklyAttendance(
-  classes: GymClass[],
+  all: GymClass[],
   weeks = 12,
   now: number = Date.now(),
 ): AttendanceWeek[] {
+  // Same exclusion, same reason, as `summariseAttendance` above: a cancelled
+  // class puts its capacity into the week's denominator and nothing into the
+  // numerator, so a week the gym closed would read as a week nobody came.
+  const classes = classesThatRan(all);
   const thisMonday = mondayOf(new Date(now));
 
   // Seed every week first, so quiet weeks survive into the series.
@@ -520,5 +949,9 @@ function row(tenantId: string, c: NewClass) {
     room: c.room ?? null,
     instructor: c.instructor ?? null,
     trainer_id: c.trainerId ?? null,
+    // Null for a one-off, and null is the answer rather than a gap: a class
+    // that belongs to no series must not be given a private series of one, or
+    // "this class" and "this and every later one" become the same button.
+    series_id: c.seriesId ?? null,
   };
 }

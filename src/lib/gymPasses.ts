@@ -530,9 +530,14 @@ export async function fetchRedemptions(sb: Queryable, passId: string): Promise<R
     .from('gym_pass_redemptions')
     .select('id, pass_id, class_id, redeemed_at, redeemed_by')
     .eq('pass_id', passId)
-    .order('redeemed_at', { ascending: false });
+    .order('redeemed_at', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+  // The last read in this file without a cap. A single pass cannot hold a
+  // thousand redemptions, so this guards the shape of the bug rather than the
+  // volume: a `pass_id` filter lost in an edit turns this into every redemption
+  // in the database, newest first, rendered as the history of one pass.
+  return assertWhole(data as any[] | null, 'the visits taken off this pass').map((r: any) => ({
     id: r.id,
     passId: r.pass_id,
     classId: r.class_id ?? null,

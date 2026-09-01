@@ -58,8 +58,10 @@ import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchClasses, fetchRoster, setAttendance, pct,
+  promoteFromWaitlist, splitRoster, placesLeft,
   type GymClass, type RosterEntry,
 } from '@lib/gymSchedule';
+import { searchRows, searchNote } from '@lib/consoleSearch';
 import { fetchTrainerOptions } from '@lib/gymPtSchedule';
 import { summariseClassRows, type ClassSummaryRow, type ClassRates } from '@lib/classRates';
 
@@ -107,6 +109,10 @@ export default function Classes() {
   const [err, setErr] = useState<string | null>(null);
   const [days, setDays] = useState<number>(28);
   const [open, setOpen] = useState<GymClass | null>(null);
+  // One search box over the two long tables on this page. The console had none
+  // anywhere: at 90 days a busy gym runs several hundred classes, and finding
+  // "the Thursday Spin" meant sorting a column and scrolling.
+  const [q, setQ] = useState('');
 
   const load = useCallback(async (tenantId: string, window: number) => {
     setClasses(null); setTrainers(null); setUpcoming(null); setErr(null);
@@ -380,11 +386,24 @@ export default function Classes() {
         </Banner>
       ) : null}
 
-      <Empties rows={rows} unread={unread} />
+      {/* Placed above the tables it filters rather than inside one of them, so
+          the same query narrows both and there is one control to clear. */}
+      <div style={{ display: 'flex', gap: 9, alignItems: 'center', margin: '0 0 18px', flexWrap: 'wrap' }}>
+        <input
+          value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Search a class, a slot or a coach"
+          aria-label="Search the classes below"
+          style={{ ...field, flex: 1, minWidth: 220 }}
+        />
+        {q ? <button onClick={() => setQ('')} style={linkBtn}>clear</button> : null}
+      </div>
+
+      <Waiting classes={classes} unread={unread} nameOf={nameOf} onOpen={setOpen} />
+      <Empties rows={rows} unread={unread} query={q} />
       <Unmarked classes={unmarked} unread={unread} nameOf={nameOf} nameUnread={nameUnread} onOpen={setOpen} />
       <ByCoach rows={rows} unread={unread} namesRead={trainers !== null} />
       <EveryClass
-        classes={classes ?? []} rows={rows} unread={unread}
+        classes={classes ?? []} rows={rows} unread={unread} query={q}
         nameOf={nameOf} nameUnread={nameUnread} onOpen={setOpen}
       />
 
@@ -461,8 +480,12 @@ function groupSlots(rows: ClassSummaryRow[]): Slot[] {
   });
 }
 
-function Empties({ rows, unread }: { rows: ClassSummaryRow[]; unread: Unread }) {
-  const slots = useMemo(() => groupSlots(rows), [rows]);
+function Empties({ rows, unread, query }: {
+  rows: ClassSummaryRow[]; unread: Unread; query: string;
+}) {
+  const all = useMemo(() => groupSlots(rows), [rows]);
+  const slots = useMemo(() => searchRows(all, query, (s) => [s.title, s.when]), [all, query]);
+  const note = searchNote(query, slots.length, all.length);
 
   const cols: Column<Slot>[] = [
     { key: 'slot', header: 'Slot', value: (s) => `${s.when} ${s.title}`,
@@ -488,12 +511,78 @@ function Empties({ rows, unread }: { rows: ClassSummaryRow[]; unread: Unread }) 
       title="Where the empty places are"
       sub="Grouped by the slot that repeats, worst first. A single quiet Tuesday is weather; the same Tuesday quiet for a month is a decision waiting to be made."
     >
+      {/* Rendered above the table, because the failure it guards against is a
+          filtered table read as an empty gym — and the reader has to see the
+          sentence before they read the blank. */}
+      {note ? <p style={{ margin: 0, padding: '0 14px 10px', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p> : null}
       {unread ? <Unresolved state={unread} what="the classes" /> : (
         <DataTable
           rows={slots} columns={cols} rowKey={(s) => s.key}
           empty="No classes ran in this window, so there are no empty places to report — which is not the same as a full gym."
         />
       )}
+    </Section>
+  );
+}
+
+/* ── the queue the gym could not see ───────────────────────────────────────── */
+
+/**
+ * Classes people wanted a place in and did not get one.
+ *
+ * The banner above already counts them. This is the actionable half: WHICH
+ * classes, so the owner can put another occurrence on — which is the fix a
+ * bigger room is not — and a way into each register, where the place that just
+ * came free can actually be given to somebody.
+ *
+ * Waitlisters are out of the fill rate on purpose (`tallyBookings`), which means
+ * that without a section like this they are invisible: a class at 100% with
+ * eleven people behind it looks exactly like a class at 100% with nobody.
+ */
+function Waiting({ classes, unread, nameOf, onOpen }: {
+  classes: GymClass[] | null; unread: Unread;
+  nameOf: (c: GymClass) => string; onOpen: (c: GymClass) => void;
+}) {
+  const queued = (classes ?? []).filter((c) => c.waitlisted > 0);
+  if (unread || queued.length === 0) return null;
+
+  const cols: Column<GymClass>[] = [
+    { key: 'when', header: 'When', value: (c) => c.startsAt,
+      render: (c) => new Date(c.startsAt).toLocaleString([], {
+        weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+      }) },
+    { key: 'title', header: 'Class', value: (c) => c.title },
+    { key: 'coach', header: 'Coach', value: (c) => nameOf(c) || null,
+      render: (c) => nameOf(c) || <span className="dash">—</span> },
+    { key: 'booked', header: 'Sold', value: (c) => c.booked, numeric: true,
+      render: (c) => c.capacity > 0 ? `${c.booked} / ${c.capacity}` : String(c.booked) },
+    { key: 'waiting', header: 'Waiting', value: (c) => c.waitlisted, numeric: true,
+      render: (c) => <span style={{ color: 'var(--brand)' }}>{c.waitlisted}</span> },
+    { key: 'left', header: 'Free now', value: (c) => placesLeft(c), numeric: true,
+      // A free place beside a waiting list is somebody who should be rung. Null
+      // is a class nobody sized, and 0 there would read as "full" — which is
+      // exactly the wrong answer to give the desk.
+      render: (c) => {
+        const left = placesLeft(c);
+        if (left == null) return <span className="dash">no capacity set</span>;
+        return left > 0
+          ? <span style={{ color: 'var(--good)' }}>{left}</span>
+          : <span className="dash">none</span>;
+      } },
+    { key: 'in', header: 'Let in', value: (c) => c.waitlistAttended, numeric: true,
+      render: (c) => c.waitlistAttended > 0 ? String(c.waitlistAttended) : <span className="dash">—</span> },
+    { key: 'act', header: '', value: () => 0, align: 'right',
+      render: (c) => <button style={linkBtn} onClick={() => onOpen(c)}>Open the list</button> },
+  ];
+
+  const total = queued.reduce((a, c) => a + c.waitlisted, 0);
+
+  return (
+    <Section
+      title="Waiting lists"
+      sub={`${total} ${total === 1 ? 'person' : 'people'} across ${queued.length} ${queued.length === 1 ? 'class' : 'classes'}. Demand the gym did not sell — deliberately out of the fill rate, and therefore invisible without this. A place freed at the desk is given away from the register; the app only promotes somebody when a member cancels on their own phone.`}
+    >
+      <DataTable rows={queued} columns={cols} rowKey={(c) => c.id} empty="Nobody is waiting for a place." />
     </Section>
   );
 }
@@ -620,8 +709,8 @@ function ByCoach({ rows, unread, namesRead }: {
 
 /* ── every class ───────────────────────────────────────────────────────────── */
 
-function EveryClass({ classes, rows, unread, nameOf, nameUnread, onOpen }: {
-  classes: GymClass[]; rows: ClassSummaryRow[]; unread: Unread;
+function EveryClass({ classes, rows, unread, query, nameOf, nameUnread, onOpen }: {
+  classes: GymClass[]; rows: ClassSummaryRow[]; unread: Unread; query: string;
   nameOf: (c: GymClass) => string; nameUnread: (c: GymClass) => boolean;
   onOpen: (c: GymClass) => void;
 }) {
@@ -630,6 +719,15 @@ function EveryClass({ classes, rows, unread, nameOf, nameUnread, onOpen }: {
     for (const r of rows) m.set(r.classId, summariseClassRows([r]));
     return m;
   }, [rows]);
+
+  // Searchable on the coach as well as the class, because "how did Sam's
+  // classes go" is the question this table is opened for as often as "how did
+  // Spin go", and there is no per-coach filter anywhere else.
+  const shown = useMemo(
+    () => searchRows(classes, query, (c) => [c.title, c.room, nameOf(c)]),
+    [classes, query, nameOf],
+  );
+  const shownNote = searchNote(query, shown.length, classes.length);
 
   const cols: Column<GymClass>[] = [
     { key: 'when', header: 'When', value: (c) => c.startsAt,
@@ -662,9 +760,10 @@ function EveryClass({ classes, rows, unread, nameOf, nameUnread, onOpen }: {
       title="Every class in the window"
       sub="One row per class that has already started. A dash in Fill or Show is a denominator that was never recorded, not a rate of nil."
     >
+      {shownNote ? <p style={{ margin: 0, padding: '0 14px 10px', fontSize: 12.5, color: 'var(--ink3)' }}>{shownNote}</p> : null}
       {unread ? <Unresolved state={unread} what="the classes" /> : (
         <DataTable
-          rows={classes} columns={cols} rowKey={(c) => c.id}
+          rows={shown} columns={cols} rowKey={(c) => c.id}
           empty="No classes ran in this window."
         />
       )}
@@ -705,7 +804,30 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
     }
   };
 
+  /**
+   * Give a waiting member the place that just came free.
+   *
+   * The same write the board's register makes, and here for the same reason:
+   * `cancel_class` only promotes when the MEMBER cancels from their own phone,
+   * so every case the gym handles — the phone call, the no-show, the coach who
+   * says one more can squeeze in — had no path at all. See
+   * `promoteFromWaitlist` in gymSchedule.ts.
+   */
+  const promote = async (r: RosterEntry) => {
+    setMsg(null);
+    try {
+      await promoteFromWaitlist(supabase, r.bookingId);
+      await load();
+    } catch (e: any) {
+      setMsg(e?.message ?? 'That place was not given, so they are still waiting.');
+    }
+  };
+
+  const split = rows ? splitRoster(rows) : null;
   const present = rows ? rows.filter((r) => r.attendedAt).length : null;
+  // Off the roster in hand rather than the window's snapshot: a place freed
+  // while this dialog has been open is a place the desk can give away now.
+  const left = split ? placesLeft({ capacity: gymClass.capacity, booked: split.booked.length }) : null;
 
   return (
     <div
@@ -731,9 +853,10 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
           <div>
             <h2>{gymClass.title}</h2>
             <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-              {new Date(gymClass.startsAt).toLocaleString()} · {gymClass.booked} booked
+              {new Date(gymClass.startsAt).toLocaleString()} · {split ? split.booked.length : gymClass.booked} booked
               {gymClass.capacity > 0 ? ` of ${gymClass.capacity}` : ' · capacity not set'}
               {present == null ? '' : ` · ${present} marked present`}
+              {split && split.waiting.length > 0 ? ` · ${split.waiting.length} waiting` : ''}
             </p>
           </div>
           <button onClick={onClose} style={ghostBtn}>Done</button>
@@ -752,35 +875,78 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
           </div>
         ) : (
           <div>
-            {rows.map((r) => (
-              <div
-                key={r.bookingId}
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--ring)',
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, color: 'var(--ink2)' }}>
-                    {r.name ?? <span className="dash">name not readable</span>}
-                  </div>
-                  <div className="micro" style={{ marginTop: 2 }}>{r.status}</div>
-                </div>
-                <button
-                  onClick={() => toggle(r)}
-                  style={{
-                    ...field, cursor: 'pointer', flex: 'none',
-                    background: r.attendedAt ? 'var(--surface3)' : 'var(--surface2)',
-                    color: r.attendedAt ? 'var(--good)' : 'var(--ink2)',
-                  }}
-                >
-                  {r.attendedAt ? 'Present' : 'Mark present'}
-                </button>
-              </div>
+            {/* Booked first, waiting after, with a heading between them. One
+                flat list showed `r.status` as a grey micro-label under each
+                name, which is not a distinction anybody reads at a desk — and
+                the queue is the half the gym could not see at all. */}
+            {(split?.booked ?? []).map((r) => (
+              <Line key={r.bookingId} r={r} waiting={false} onToggle={toggle} onPromote={promote} full={false} />
             ))}
+            {split && split.waiting.length > 0 ? (
+              <>
+                <div style={{ padding: '10px 16px', background: 'var(--surface2)', borderBottom: '1px solid var(--ring)' }}>
+                  <h3 style={{ fontSize: 12.5, color: 'var(--ink2)' }}>Waiting — {split.waiting.length}</h3>
+                  <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
+                    {left == null
+                      ? 'This class records no capacity, so nothing can say whether a place is free.'
+                      : left > 0
+                        ? `${left} ${left === 1 ? 'place is' : 'places are'} free — give one away here.`
+                        : 'Full. Letting somebody in from here is a deliberate over-sell, which Fill will report as real.'}
+                  </p>
+                </div>
+                {split.waiting.map((r) => (
+                  <Line key={r.bookingId} r={r} waiting onToggle={toggle} onPromote={promote} full={left != null && left <= 0} />
+                ))}
+              </>
+            ) : null}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** One person on a register. Pulled out because the booked half and the waiting
+ *  half render identically apart from one button, and two near-copies of a
+ *  fifteen-line row is how the two lists drift apart. */
+function Line({ r, waiting, full, onToggle, onPromote }: {
+  r: RosterEntry; waiting: boolean; full: boolean;
+  onToggle: (r: RosterEntry) => void; onPromote: (r: RosterEntry) => void;
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--ring)',
+    }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, color: 'var(--ink2)' }}>
+          {r.name ?? <span className="dash">name not readable</span>}
+        </div>
+        {/* Said only where it changes what the reader should do. A waitlister
+            somebody already let in and ticked is counted apart from `attended`
+            so a show rate cannot exceed its own denominator — and that is worth
+            seeing on the row rather than only in the arithmetic. */}
+        {waiting && r.attendedAt ? (
+          <div className="micro" style={{ marginTop: 2, color: 'var(--warn)' }}>let in and marked present</div>
+        ) : null}
+      </div>
+      <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+        {waiting ? (
+          <button onClick={() => onPromote(r)} style={linkBtn}>
+            {full ? 'Squeeze them in' : 'Give them the place'}
+          </button>
+        ) : null}
+        <button
+          onClick={() => onToggle(r)}
+          style={{
+            ...field, cursor: 'pointer', flex: 'none',
+            background: r.attendedAt ? 'var(--surface3)' : 'var(--surface2)',
+            color: r.attendedAt ? 'var(--good)' : 'var(--ink2)',
+          }}
+        >
+          {r.attendedAt ? 'Present' : 'Mark present'}
+        </button>
+      </span>
     </div>
   );
 }

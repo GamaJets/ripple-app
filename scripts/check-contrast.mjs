@@ -73,7 +73,8 @@ const NEXT_COLOR_PROP = /[A-Za-z]Color\s*:/;
 
 /**
  * Lines where `color:` is a key in a DATA object handed to something that draws
- * a mark, not a style property. Each carries the reason it is genuinely a mark,
+ * a mark — or, rarely, a style property on a <Text> whose content is a GLYPH
+ * rather than words. Each carries the reason it is genuinely a mark,
  * because "it's fine" is a claim that has to survive somebody changing the line
  * — and if the line changes, this stops matching and the claim gets made again.
  */
@@ -107,6 +108,13 @@ const MARKS = [
     file: 'app/(client)/progression.tsx',
     line: "deload: { label: 'Ease Back', icon: 'swap', color: (t) => t.crit },",
     why: 'META.color is drawn as an <Icon> and a dot only; the label sits in ink beside it',
+  },
+  {
+    file: 'app/(trainer)/client-training.tsx',
+    line: "<Text style={{ ...ty.label, width: 14, color: m.coverage === 'logged' ? t.good : m.coverage === 'not-logged' ? t.warn : t.ink3 }}>",
+    why: 'a 14pt \u2713 / \u00b7 / ? glyph, not words: the three states differ by SHAPE, and the '
+      + 'same row spells each one out ("logged 3 days", "not logged", "could not be answered") '
+      + 'in t.ink3. Colour is the third channel here, never the only one',
   },
 ];
 

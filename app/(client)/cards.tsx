@@ -13,8 +13,9 @@
 // they are built to be screenshotted and posted — so a client reading pounds
 // was being handed a card announcing a number in a unit they never use, to an
 // audience with no way to know that. Both now read in the client's unit.
-import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Share, Alert } from 'react-native';
+import { useRef, useState } from 'react';
+import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import Svg, { Rect, Text as SvgText, Line } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -30,6 +31,99 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useBrand } from '../../src/ui/brand';
 import { currentStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
+import { charsPerLine, wrapLines } from '../../src/lib/shareAsset';
+import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
+
+/**
+ * The card as an EXPORTABLE GRAPHIC, drawn in SVG so `toDataURL` can turn it
+ * into a PNG.
+ *
+ * ── Why this exists next to the on-screen card ─────────────────────────────
+ *
+ * This screen used to share a string and then print "Tip: screenshot the card
+ * above to post the visual too." — an app telling somebody to work around it,
+ * on the one surface built to leave the app and be seen by people who do not
+ * have it. The whole SVG → toDataURL → PNG → share-sheet pipeline already
+ * existed on the coach side (app/(trainer)/share-kit.tsx, src/lib/social.ts)
+ * and no client screen had ever imported it.
+ *
+ * It is a second component rather than a render of the on-screen one because
+ * the two have different jobs and different units. The screen card is laid out
+ * in points against the member's theme; this is laid out in EXPORT PIXELS on a
+ * fixed dark ground, because it is an artefact for somebody else's feed rather
+ * than a view — a member who happens to have a light palette on should not get
+ * a white card, and the same milestone should not come out looking like a
+ * different template depending on a setting they changed months ago.
+ *
+ * The one thing that does follow the app is the accent, because that is the
+ * tenant's brand colour and this is a white-label product.
+ *
+ * Every string goes through `wrapLines`. SVG has no line box: `<Text>` draws
+ * one line and lets it run off the edge of the image, silently, in the exported
+ * PNG that nobody opens again before posting it.
+ */
+const EXPORT_W = 1080;
+const EXPORT_H = 1350;   // 4:5 — the tallest an Instagram or Facebook feed post
+                         // may be without being cropped, so the most pixels a
+                         // member gets for free.
+
+function CardArt({ accent, appName, kicker, big, unit, sub, ref }: {
+  accent: string; appName: string; kicker: string; big: string; unit: string; sub: string;
+  ref?: React.Ref<Svg>;
+}) {
+  const w = EXPORT_W, h = EXPORT_H;
+  const GROUND = '#0B0F14';
+  const INK = '#FFFFFF';
+  const MUTED = 'rgba(255,255,255,0.58)';
+  const pad = Math.round(w * 0.089);
+  const contentW = w - pad * 2;
+
+  const kickerSize = Math.round(w * 0.032);
+  // The figure shrinks as it lengthens. "12" and "-14.5" are the same element
+  // at two very different widths, and a fixed size lets the longer one run into
+  // the margin of the exported image.
+  const bigSize = Math.round(w * (big.length > 5 ? 0.20 : big.length > 3 ? 0.26 : 0.32));
+  const subSize = Math.round(w * 0.042);
+  const subLines = wrapLines(sub, charsPerLine(contentW, subSize), 3);
+
+  const footerY = h - pad;
+  const ruleY = footerY - Math.round(h * 0.045);
+  const bigY = ruleY - Math.round(h * 0.10);
+  const subTop = bigY + Math.round(subSize * 1.7);
+
+  return (
+    <Svg ref={ref} width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+      <Rect x={0} y={0} width={w} height={h} fill={GROUND} />
+      {/* The accent, spent on two marks and nothing else — the rule under the
+          kicker and the tick beside the footer. The instrument-panel rule from
+          src/ui/kit: colour marks the live thing, not the chrome. */}
+      <Rect x={pad} y={pad} width={Math.round(w * 0.075)} height={Math.round(h * 0.006)} fill={accent} rx={Math.round(h * 0.003)} />
+      <SvgText x={pad} y={pad + kickerSize + Math.round(h * 0.03)} fill={MUTED} fontSize={kickerSize} fontWeight="600" letterSpacing={kickerSize * 0.12}>
+        {kicker.toUpperCase()}
+      </SvgText>
+
+      <SvgText x={pad} y={bigY} fill={INK} fontSize={bigSize} fontWeight="700">
+        {big}
+        {unit ? <SvgText fill={MUTED} fontSize={Math.round(bigSize * 0.32)} fontWeight="600">{`  ${unit}`}</SvgText> : null}
+      </SvgText>
+
+      {subLines.map((l, i) => (
+        <SvgText key={`s${i}`} x={pad} y={subTop + i * Math.round(subSize * 1.35)} fill={INK} fontSize={subSize} fontWeight="500">
+          {l}
+        </SvgText>
+      ))}
+
+      <Line x1={pad} y1={ruleY} x2={w - pad} y2={ruleY} stroke="rgba(255,255,255,0.16)" strokeWidth={2} />
+      {/* The tenant's name, never the word Repple: this graphic is the most
+          public thing the app produces, and a white-label gym's member posting
+          their supplier's name is the gate on the first white-label sale. */}
+      <SvgText x={pad} y={footerY} fill={MUTED} fontSize={Math.round(w * 0.03)} fontWeight="600">
+        {wrapLines(appName, charsPerLine(contentW * 0.7, Math.round(w * 0.03)), 1)[0] ?? ''}
+      </SvgText>
+      <Rect x={w - pad - Math.round(w * 0.03)} y={footerY - Math.round(w * 0.022)} width={Math.round(w * 0.03)} height={Math.round(w * 0.008)} fill={accent} rx={Math.round(w * 0.004)} />
+    </Svg>
+  );
+}
 
 function ShareCard({ t, appName, kicker, big, unit, sub }: { t: Theme; appName: string; kicker: string; big: string; unit: string; sub: string }) {
   return (
@@ -141,8 +235,60 @@ export default function Cards() {
       ? `${deltaLabel(wDeltaShown, { since: null })}${wu} since I started with ${appName}. Progress you can measure.`
       : `Training with ${appName}. Every rep ripples out.`;
   };
+  const svgRef = useRef<Svg>(null);
+  const [busy, setBusy] = useState(false);
+
+  /**
+   * The card as a base64 PNG, or null when this build cannot make one.
+   *
+   * `toDataURL` is callback-based and native, and it has two failure modes a
+   * plain promise wrapper would turn into a button that spins for ever: the
+   * method is absent on some react-native-svg / architecture combinations, and
+   * on others the callback is simply never invoked. Absent is checked, silent
+   * is timed out, and both come back as null — which the share path below turns
+   * into an honest "the words went as text" rather than a hang.
+   *
+   * Lifted verbatim in shape from app/(trainer)/share-kit.tsx, which has been
+   * carrying this pipeline alone.
+   */
+  const capture = (): Promise<string | null> => new Promise((resolve) => {
+    const node = svgRef.current as unknown as { toDataURL?: (cb: (d: string) => void, o?: object) => void } | null;
+    if (!node || typeof node.toDataURL !== 'function') { resolve(null); return; }
+    let settled = false;
+    const finish = (v: string | null) => { if (!settled) { settled = true; resolve(v); } };
+    const timer = setTimeout(() => finish(null), 5000);
+    try {
+      node.toDataURL((data: string) => { clearTimeout(timer); finish(data || null); }, { width: EXPORT_W, height: EXPORT_H });
+    } catch { clearTimeout(timer); finish(null); }
+  });
+
   const shareCard = async () => {
-    try { await Share.share({ message: shareText(idx) }); } catch { Alert.alert('Could not open share', 'Try screenshotting the card instead.'); }
+    if (busy) return;
+    setBusy(true);
+    const png = await capture();
+    // The caption is put on the clipboard and the image goes through the sheet.
+    // A share sheet will not carry both to an arbitrary destination — the long
+    // note on `sharePngAsset` is the argument — so they travel separately and
+    // the member is told which happened.
+    const r = await sharePngAsset(png ?? '', `${appName.replace(/[^A-Za-z0-9]+/g, '-')}-${card.kicker.toLowerCase()}.png`, shareText(idx));
+    setBusy(false);
+    if (r.sent === 'image') {
+      Alert.alert(
+        'Card sent to your share sheet',
+        r.captionCopied
+          ? 'Your words are on the clipboard — paste them into the post. A share sheet cannot carry a picture and its words to the same place, so they travel separately.'
+          : 'This version of the app could not put your words on the clipboard, so the picture went on its own.',
+      );
+      return;
+    }
+    // No image. Say which of the two reasons it was rather than letting the
+    // member conclude the card failed to draw: one is a build that predates the
+    // image pipeline, the other is that the graphic itself could not be made.
+    const blocked = imageShareBlocker();
+    Alert.alert(
+      'Sent as text',
+      blocked ?? 'The picture could not be made on this phone, so your words went on their own. The card on screen is unchanged.',
+    );
   };
 
   return (
@@ -170,11 +316,30 @@ export default function Cards() {
 
           <ShareCard t={t} appName={appName} kicker={card.kicker} big={card.big} unit={card.unit} sub={card.sub} />
 
+          {/* The export, off-screen and rendered at full size.
+              It has to be MOUNTED for `toDataURL` to have anything to read, and
+              it must not be visible — so it is pushed out of the layout rather
+              than hidden with `display: none`, which on Android detaches the
+              view and hands the capture back an empty bitmap. Only the
+              available card is drawn: a locked one has a dash where the figure
+              goes and there is nothing to export. */}
+          {card.available ? (
+            <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+              style={{ position: 'absolute', left: -EXPORT_W * 2, top: 0, width: EXPORT_W, height: EXPORT_H, opacity: 0 }}>
+              <CardArt ref={svgRef} accent={t.brand} appName={appName} kicker={card.kicker} big={card.big} unit={card.unit} sub={card.sub} />
+            </View>
+          ) : null}
+
           <View style={{ marginTop: layout.section }}>
-            <Cta label="Share This Card" wide disabled={!card.available} onPress={shareCard} />
+            <Cta label={busy ? 'Preparing…' : 'Share This Card'} wide disabled={!card.available || busy} onPress={shareCard} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
-            {card.available ? 'Tip: screenshot the card above to post the visual too.'
+            {/* This line used to read "Tip: screenshot the card above to post
+                the visual too." — the app asking the member to work around it
+                on its main organic-growth surface. It now says what the button
+                does, or names the reason the picture cannot be made on this
+                build, which is a different sentence with a different answer. */}
+            {card.available ? (imageShareBlocker() ?? 'The card goes as a picture, and your words go on the clipboard to paste beside it.')
               : logKnown ? 'This card unlocks once there is something real to show.'
               : 'Cards stay locked until we can read your record — nothing has been lost.'}
           </Text>

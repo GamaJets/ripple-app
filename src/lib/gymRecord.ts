@@ -30,6 +30,18 @@ export interface MembershipPlan {
 
 export interface Membership {
   id: string;
+  /**
+   * Still `string` and not `string | null`, and that is a dated statement
+   * rather than an oversight.
+   *
+   * `memberships.member_id` is NOT NULL today. supabase/parts/172 drops that —
+   * it has to, because an erasure currently CASCADES the membership and the
+   * invoices away while keeping the cash, which unbalances /accounting
+   * permanently. The moment that part is applied this becomes nullable, and the
+   * six screens that use it as a `Map` key have to say what they do with a
+   * membership whose member is gone. `memberName` below already falls back to
+   * the retained label, so the row stays legible; the id does not.
+   */
   memberId: string;
   memberName: string | null;
   planId: string | null;
@@ -38,6 +50,24 @@ export interface Membership {
   endsOn: string | null;
   status: MembershipStatus;
 }
+
+/**
+ * What a row of `gym_payments` is: money taken, money handed back, or a
+ * mis-keyed row being undone.
+ *
+ * Three kinds rather than a boolean, because a refund and a correction are not
+ * the same event even where the arithmetic agrees. A refund is money that left
+ * the till; a correction is money that was never in it. An accountant reads
+ * them differently and the amount alone cannot tell them apart. See the header
+ * of supabase/parts/168.
+ */
+export type PaymentKind = 'payment' | 'refund' | 'correction';
+
+export const PAYMENT_KIND_LABEL: Record<PaymentKind, string> = {
+  payment: 'Payment',
+  refund: 'Refund',
+  correction: 'Correction',
+};
 
 export interface GymPayment {
   id: string;
@@ -48,6 +78,17 @@ export interface GymPayment {
   method: PaymentMethod;
   takenAt: string;
   note: string | null;
+  /** 'payment' unless this row undoes another one. Negative for the other two. */
+  kind: PaymentKind;
+  /** The payment this row takes back, or null on an ordinary one. */
+  reversesPaymentId: string | null;
+  /** The invoice somebody has said this settles. Null is the ordinary case —
+   *  see the note on `matchPayment` about why nothing infers it. */
+  invoiceId: string | null;
+  /** The membership this was taken against, where the capture screen recorded
+   *  one. It is the only HARD link between a payment and what it was for, and
+   *  /accounting's whole 45-day heuristic exists because it used to be empty. */
+  membershipId: string | null;
 }
 
 /* ── plans ─────────────────────────────────────────────────────────────────── */
@@ -122,7 +163,7 @@ export async function setPlanActive(sb: Queryable, planId: string, active: boole
 export async function fetchMemberships(sb: Queryable, tenantId: string): Promise<Membership[]> {
   const { data, error } = await sb
     .from('memberships')
-    .select('id, member_id, plan_id, started_on, ends_on, status')
+    .select('id, member_id, member_label, plan_id, started_on, ends_on, status')
     .eq('tenant_id', tenantId)
     .order('started_on', { ascending: false })
     .limit(capLimit());
@@ -141,7 +182,11 @@ export async function fetchMemberships(sb: Queryable, tenantId: string): Promise
   return rows.map((r: any) => ({
     id: r.id,
     memberId: r.member_id,
-    memberName: names.get(r.member_id) ?? null,
+    // The live name while there is one, then the label supabase/parts/172
+    // snapshots at erasure. A membership survives an erasure from that part on
+    // — it is the contract the invoices hang off — and a surviving contract
+    // that names nobody is a row an owner cannot reconcile anything against.
+    memberName: names.get(r.member_id) ?? r.member_label ?? null,
     planId: r.plan_id ?? null,
     planName: r.plan_id ? planNames.get(r.plan_id) ?? null : null,
     startedOn: r.started_on,
@@ -185,17 +230,84 @@ export async function setMembershipStatus(
   assertWrote('That membership', r);
 }
 
+/**
+ * Correct when a membership actually started, and when it ends.
+ *
+ * `createMembership` has always accepted both and the console's only caller
+ * hardcoded today as the start and never offered an end. For a gym MIGRATING
+ * its existing members that is not a small omission: every member arrives dated
+ * the day the owner typed them in, so tenure is wrong for the whole roster on
+ * day one, cohort retention measures from a date nobody joined, and the ageing
+ * on /accounting has no history to age. None of it is recoverable later without
+ * this write.
+ *
+ * `endsOn` may be set to null on purpose, which is why the field is present-or-
+ * absent rather than nullable-and-always-sent: null means open-ended, which is
+ * not the same as expired and is a state the schema has always had.
+ */
+export async function setMembershipDates(
+  sb: Queryable,
+  membershipId: string,
+  dates: { startedOn?: string; endsOn?: string | null },
+): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  if (dates.startedOn !== undefined) patch.started_on = dates.startedOn;
+  if (dates.endsOn !== undefined) patch.ends_on = dates.endsOn;
+  // An empty patch is refused rather than sent: PostgREST answers an empty
+  // update with a 204 and a count of zero, which `assertWrote` would then
+  // report as a refusal — a confusing error for pressing Save with nothing
+  // changed. Same reasoning as `saveGymProfile` in src/lib/gymPolicy.ts.
+  if (!Object.keys(patch).length) return;
+  const r = await sb.from('memberships').update(patch, { count: 'exact' }).eq('id', membershipId);
+  if (r.error) throw r.error;
+  assertWrote('Those membership dates', r);
+}
+
+/**
+ * Move a membership onto a different plan.
+ *
+ * The alternative — cancel and recreate — is what the console forces today, and
+ * it breaks TENURE: the member's `started_on` resets to the day they upgraded,
+ * so a four-year member reads as a new one on every retention figure the
+ * product computes, and the cancelled row sits in the churn count as somebody
+ * who left. An upgrade from Bronze to Gold is one member, continuously, on a
+ * different plan.
+ *
+ * What this does NOT do is pro-rate anything or raise the difference as an
+ * invoice. Both are real and neither is guessable — a mid-month upgrade may be
+ * billed now, at the next renewal, or not at all, and that is the gym's
+ * commercial decision. The screen says so and offers to raise the invoice
+ * beside it, which keeps the money an act somebody performed.
+ */
+export async function setMembershipPlan(
+  sb: Queryable, membershipId: string, planId: string | null,
+): Promise<void> {
+  const r = await sb.from('memberships')
+    .update({ plan_id: planId }, { count: 'exact' })
+    .eq('id', membershipId);
+  if (r.error) throw r.error;
+  assertWrote('That plan change', r);
+}
+
 /* ── payments ──────────────────────────────────────────────────────────────── */
 
 export async function fetchPayments(
-  sb: Queryable, tenantId: string, sinceISO?: string,
+  sb: Queryable, tenantId: string, sinceISO?: string, untilISO?: string,
 ): Promise<GymPayment[]> {
   let q = sb
     .from('gym_payments')
-    .select('id, member_id, amount_cents, currency, method, taken_at, note')
+    .select('id, member_id, membership_id, amount_cents, currency, method, taken_at, note, kind, reverses_payment_id, invoice_id, payer_name')
     .eq('tenant_id', tenantId)
     .order('taken_at', { ascending: false });
   if (sinceISO) q = q.gte('taken_at', sinceISO);
+  // An UPPER bound as well as a lower one, and it is not optional politeness.
+  // /accounting and /close both computed a start date and no end date, so
+  // opening a month from a year ago read every payment from that month up to
+  // today — a set that grows without bound, that the month's figures then have
+  // to filter back down, and that trips `assertWhole` on any gym busy enough to
+  // have crossed a thousand payments since. The read is now exactly the window
+  // the caller asked for.
+  if (untilISO) q = q.lt('taken_at', untilISO);
   q = q.limit(capLimit());
   const { data, error } = await q;
   if (error) throw error;
@@ -210,13 +322,123 @@ export async function fetchPayments(
   return rows.map((r: any) => ({
     id: r.id,
     memberId: r.member_id ?? null,
-    memberName: r.member_id ? names.get(r.member_id) ?? null : null,
+    // `payer_name` is the snapshot supabase/parts/172 leaves behind when an
+    // account is erased. Before it, `member_id` went null and the surviving row
+    // named nobody at all — cash in the books that could never be reconciled to
+    // the invoice it settled. The live name wins while there is one.
+    memberName: (r.member_id ? names.get(r.member_id) : undefined) ?? r.payer_name ?? null,
     amountCents: r.amount_cents,
     currency: r.currency,
     method: r.method,
     takenAt: r.taken_at,
     note: r.note ?? null,
+    // Anything the column's CHECK does not permit is read back as 'payment'
+    // rather than passed through. A value this module does not recognise on a
+    // POSITIVE row is a payment; on a negative one the amount already says what
+    // it is, and no screen decides that from the label alone.
+    kind: r.kind === 'refund' || r.kind === 'correction' ? r.kind : 'payment',
+    reversesPaymentId: r.reverses_payment_id ?? null,
+    invoiceId: r.invoice_id ?? null,
+    membershipId: r.membership_id ?? null,
   }));
+}
+
+/* ── correcting money ──────────────────────────────────────────────────────── */
+
+export type CorrectionKind = 'refund' | 'correction';
+
+/**
+ * Why a payment cannot be reversed, or null when it can.
+ *
+ * The amount is in MINOR units and POSITIVE — what is being taken back, as a
+ * person would say it. The sign is applied by `reversePayment`, never typed,
+ * because a screen that asks somebody to enter a negative number will one day
+ * be handed a positive one and file a second payment.
+ */
+export function reversalBlocker(
+  original: GymPayment,
+  alreadyReversedCents: number,
+  amountCents: number,
+): string | null {
+  if (original.kind !== 'payment') {
+    return 'That row is itself a correction. Correcting a correction leaves two rows nobody can read as a pair — reverse the original payment instead.';
+  }
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    return 'Enter what is being taken back, as a positive amount. Repple applies the minus.';
+  }
+  const remaining = original.amountCents - alreadyReversedCents;
+  if (remaining <= 0) {
+    return 'This payment has already been reversed in full. Reversing it again would take back money the gym never had.';
+  }
+  if (amountCents > remaining) {
+    return `That is more than is left on this payment — ${(remaining / 100).toFixed(2)} of ${(original.amountCents / 100).toFixed(2)} is still outstanding against it.`;
+  }
+  return null;
+}
+
+/** What has already been taken back off a payment, in minor units and positive. */
+export function reversedAgainst(paymentId: string, all: GymPayment[]): number {
+  return all
+    .filter((p) => p.reversesPaymentId === paymentId)
+    .reduce((a, p) => a + Math.abs(p.amountCents), 0);
+}
+
+/**
+ * Take money back off the ledger, as a row rather than as a flag.
+ *
+ * A correction is a NEGATIVE payment pointing at what it undoes. That is a
+ * deliberate design choice and supabase/parts/168 argues it at length; the short
+ * version is that there are eleven places in this console that add
+ * `gym_payments.amount_cents` up, a `status <> 'void'` predicate would have to
+ * be added to all eleven and to every query written after today, and the one
+ * that forgets is silently wrong in the direction of MORE money — the direction
+ * nobody checks.
+ *
+ * `takenAt` defaults to NOW and not to the original's date. A refund handed over
+ * in September belongs in September: back-dating it into an August somebody has
+ * already filed changes a month that has been reported, and — since
+ * supabase/parts/170 — the database refuses it outright if that month is closed.
+ *
+ * The currency is copied from the original and cannot be chosen. You cannot
+ * refund pounds against a payment taken in dirhams.
+ */
+export async function reversePayment(
+  sb: Queryable,
+  tenantId: string,
+  original: GymPayment,
+  r: {
+    kind: CorrectionKind;
+    /** Positive minor units. The sign is applied here. */
+    amountCents: number;
+    /** Required. A correction with no reason on it is the row an accountant
+     *  asks about and nobody can answer. */
+    note: string;
+    method?: PaymentMethod;
+    takenAt?: string;
+    recordedBy?: string | null;
+  },
+): Promise<void> {
+  const { error } = await sb.from('gym_payments').insert({
+    tenant_id: tenantId,
+    member_id: original.memberId,
+    membership_id: original.membershipId,
+    amount_cents: -Math.abs(r.amountCents),
+    // The original's money, always. A correction denominated in anything else
+    // would not net against the row it is correcting, and the two would sit in
+    // the ledger as an unexplained pair in two currencies.
+    currency: original.currency,
+    // How the money went back, which is not necessarily how it came in — a card
+    // payment refunded in cash at the desk is ordinary. Defaults to the way it
+    // arrived, which is the common case and is a fact about this row rather
+    // than a guess about the world.
+    method: r.method ?? original.method,
+    taken_at: r.takenAt ?? new Date().toISOString(),
+    note: r.note,
+    recorded_by: r.recordedBy ?? null,
+    kind: r.kind,
+    reverses_payment_id: original.id,
+  });
+  if (error) throw error;
 }
 
 /**
@@ -247,11 +469,25 @@ export async function recordPayment(
     note?: string | null;
     recordedBy?: string | null;
     currency: string;
+    /**
+     * The membership this settles.
+     *
+     * The column has existed since supabase/parts/29 and this function could
+     * not write it, so the console's only capture screen recorded every payment
+     * with no link to what it was for. That absence is the whole reason
+     * /accounting's reconciliation is a 45-day fuzzy match on member, amount and
+     * currency — the page says so on screen — and why /revenue has to attribute
+     * payments by asking whether the payer held a membership covering the day
+     * the money arrived. One nullable field, written at the moment the person
+     * taking the money knows the answer, replaces both guesses.
+     */
+    membershipId?: string | null;
   },
 ): Promise<void> {
   const { error } = await sb.from('gym_payments').insert({
     tenant_id: tenantId,
     member_id: p.memberId,
+    membership_id: p.membershipId ?? null,
     amount_cents: p.amountCents,
     method: p.method,
     taken_at: p.takenAt ?? new Date().toISOString(),
@@ -260,6 +496,26 @@ export async function recordPayment(
     currency: p.currency,
   });
   if (error) throw error;
+}
+
+/**
+ * Match a payment to the invoice it settled, or unmatch it.
+ *
+ * Nothing infers this and nothing may. /accounting's 45-day rule is explicitly
+ * a stated guess — "the match is made on member, exact amount, currency and a
+ * payment within 45 days of the invoice date" — and a guess that writes itself
+ * into the ledger stops being a guess on screen while remaining one in fact.
+ * The rule stays as the way the SCREEN groups unmatched rows; this is how a
+ * person records that they looked and it is right.
+ */
+export async function matchPayment(
+  sb: Queryable, paymentId: string, invoiceId: string | null,
+): Promise<void> {
+  const r = await sb.from('gym_payments')
+    .update({ invoice_id: invoiceId }, { count: 'exact' })
+    .eq('id', paymentId);
+  if (r.error) throw r.error;
+  assertWrote(invoiceId ? 'That match' : 'Unmatching that payment', r);
 }
 
 /* ── derived, and honest about it ──────────────────────────────────────────── */

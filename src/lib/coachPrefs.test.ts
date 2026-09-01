@@ -25,7 +25,10 @@
 import {
   parseRate, rateText, payEstimate, parseGoal, goalText, goalPct,
   goalsEmptyLine, rateFieldNote,
+  parseCooldown, cooldownText, cooldownNote, MIN_NUDGE_COOLDOWN, MAX_NUDGE_COOLDOWN,
 } from './coachPrefs';
+import { paceFor, cooldownFloor, MIN_COOLDOWN_DAYS, MAX_COOLDOWN_DAYS, DEFAULT_COOLDOWN_DAYS } from './interventions';
+import { mutedDaysFor, DISMISS_FLOOR_DAYS } from './nudge';
 import type { LoadStatus } from '../ui/loadStatus';
 
 const errors: string[] = [];
@@ -153,6 +156,83 @@ ok(rateFieldNote('loading') !== rateErr, 'still reading is not the same as could
 for (const s of ['loading', 'error'] as LoadStatus[]) {
   ok(rateFieldNote(s) !== null, `${s} gets a sentence rather than a bare empty box`);
 }
+
+
+
+/* ── the coach's own nudge cooldown ─────────────────────────────────────── */
+
+// The same three-way answer the rate box gives, and for the same reason: a
+// half-typed "1" on its way to "14" must not be saved as one day, which would
+// turn the whole quiet list into a daily prompt for every client the coach has.
+eq(parseCooldown('').kind, 'empty', 'an empty box asks for the app’s own pacing back');
+eq(parseCooldown('   ').kind, 'empty', 'and so does whitespace');
+const fourteen = parseCooldown('14');
+eq(fourteen.kind, 'value', 'a whole number of days is a value');
+eq(fourteen.kind === 'value' ? fourteen.value : null, 14, 'and it is the number typed');
+eq(parseCooldown('0').kind, 'invalid', 'zero days is refused — that is a prompt every morning');
+eq(parseCooldown('-3').kind, 'invalid', 'and so is a negative');
+eq(parseCooldown('7.5').kind, 'invalid', 'there is no half a day between two phone calls');
+eq(parseCooldown('14abc').kind, 'invalid', 'parseInt would have taken the 14 out of this');
+eq(parseCooldown('1e3').kind, 'invalid', 'and Number would have made a thousand of this');
+eq(parseCooldown(String(MAX_NUDGE_COOLDOWN)).kind, 'value', 'a year is allowed');
+eq(parseCooldown(String(MAX_NUDGE_COOLDOWN + 1)).kind, 'invalid', 'more than a year is not');
+eq(parseCooldown(String(MIN_NUDGE_COOLDOWN)).kind, 'value', 'and one day is the floor');
+
+eq(cooldownText(null), '', 'no preference is an empty box, never the digit zero');
+eq(cooldownText(undefined), '', 'and so is nothing at all');
+eq(cooldownText(21), '21', 'a stored window round-trips');
+const round = parseCooldown(cooldownText(30));
+eq(round.kind === 'value' ? round.value : null, 30, 'and survives the round trip through the box');
+
+// Two different states with the same behaviour, and a coach who cannot tell
+// them apart cannot decide whether to change anything.
+ok(cooldownNote(null) !== cooldownNote(7), 'unset and set-to-seven read differently');
+ok(/never closer than a week/i.test(cooldownNote(null)), 'unset says what the app does instead');
+ok(/14 days/.test(cooldownNote(14)), 'and a set one states the number');
+ok(/1 day\b/.test(cooldownNote(1)) && !/1 days/.test(cooldownNote(1)), 'one day is singular');
+
+/* ── and what the number actually does ──────────────────────────────────── */
+
+// The refusal. Anything outside the range falls back to the module's own floor
+// rather than being clamped — clamping would invent a number the coach never
+// chose and then pace their whole book off it.
+eq(cooldownFloor(null), MIN_COOLDOWN_DAYS, 'no preference is the module’s own floor');
+eq(cooldownFloor({ minCooldownDays: null }), MIN_COOLDOWN_DAYS, 'and so is an explicit null');
+eq(cooldownFloor({ minCooldownDays: 0 }), MIN_COOLDOWN_DAYS, 'a zero is refused, not honoured');
+eq(cooldownFloor({ minCooldownDays: 100000 }), MIN_COOLDOWN_DAYS, 'and so is three centuries');
+eq(cooldownFloor({ minCooldownDays: 21 }), 21, 'a sane number is used as typed');
+
+// THE property worth the whole setting: the per-client pacing survives it. A
+// client who trained four times a week and one who trained fortnightly still
+// get different windows under the same coach preference — a floor composes with
+// the pacing, an override would have deleted it.
+const keen = paceFor(4, { minCooldownDays: 10 });
+const rare = paceFor(0.5, { minCooldownDays: 10 });
+ok(keen.cooldownDays >= 10, 'the keen client is never raised inside the coach’s floor');
+ok(rare.cooldownDays > keen.cooldownDays, 'and the fortnightly one is still left longer than the daily one');
+
+// A floor above the module's ceiling raises the ceiling rather than being
+// pushed back down to it. A coach who typed 45 means 45.
+const strict = paceFor(4, { minCooldownDays: 45 });
+eq(strict.cooldownDays, 45, 'a floor past the cap wins — the cap is the app’s opinion, not the coach’s');
+ok(45 > MAX_COOLDOWN_DAYS, 'and it really is past it');
+
+// With no pattern to pace against, the coach's convention beats the app's.
+eq(paceFor(null).cooldownDays, DEFAULT_COOLDOWN_DAYS, 'no pattern and no preference is the app’s fortnight');
+eq(paceFor(null, { minCooldownDays: 30 }).cooldownDays, 30, 'no pattern with a preference is the coach’s number');
+eq(paceFor(null, { minCooldownDays: 0 }).cooldownDays, DEFAULT_COOLDOWN_DAYS,
+  'and a refused preference falls back rather than being honoured');
+
+// The dismissal floor moves with it. A coach who will not be prompted inside
+// forty-five days must not have a set-aside expire in thirty.
+const drift = { baselinePerWeek: 4 } as any;
+ok(mutedDaysFor('dismissed', drift) >= DISMISS_FLOOR_DAYS, 'a dismissal is at least a month by default');
+eq(mutedDaysFor('dismissed', drift, { minCooldownDays: 45 }), 45,
+  'and at least the coach’s own floor when that is longer');
+eq(mutedDaysFor('sent', drift, { minCooldownDays: 45 }), 45, 'sending honours it too');
+// No preference must behave exactly as it did before this existed.
+eq(mutedDaysFor('sent', drift), mutedDaysFor('sent', drift, null),
+  'an absent preference changes nothing at all');
 
 if (errors.length) {
   console.error(`coachPrefs.test.ts — ${errors.length} failure(s):`);

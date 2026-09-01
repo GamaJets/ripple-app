@@ -30,7 +30,7 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
-import { endCoaching } from '../lib/endCoaching';
+import { endCoaching, endCoachingWithReason, type EndReason } from '../lib/endCoaching';
 import { reportError } from '../lib/reportError';
 import { activeInjuries, type Injury } from '../lib/injuries';
 import { mergeRoster } from '../lib/rosterMerge';
@@ -74,7 +74,16 @@ interface RosterValue {
    *  removal resolves false AND puts the client back on the roster, because a
    *  roster that quietly drops somebody the server still has is the same lie
    *  this file's header is about. */
-  removeClient: (id: string) => Promise<boolean>;
+  /**
+   * Take somebody off the book.
+   *
+   * `reason` and `note` are optional and are only ever used on the RELATIONSHIP
+   * path — a manually-added `coach_clients` row is a name the coach typed and
+   * there is no relationship to record an ending against. Optional rather than
+   * required so the existing bulk callers are unchanged: a caller that has not
+   * asked why must not be made to invent an answer.
+   */
+  removeClient: (id: string, reason?: EndReason | null, note?: string | null) => Promise<boolean>;
   /** Resolves true only when the classification was stored server-side. It is
    *  always kept on this device, so false means "this phone only", not "lost". */
   setClientMode: (id: string, mode: CoachedMode) => Promise<boolean>;
@@ -403,7 +412,11 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   // returning false is that same question answered from the other side ("no
   // record of a link with this person"), which is why neither call may be
   // treated as a success by default.
-  const removeClient = async (id: string): Promise<boolean> => {
+  const removeClient = async (
+    id: string,
+    reason?: EndReason | null,
+    note?: string | null,
+  ): Promise<boolean> => {
     // Where they were, so a removal the server refuses can be undone rather
     // than leaving a real client invisible until the app is relaunched.
     const at = roster.findIndex((c) => c.id === id);
@@ -429,7 +442,13 @@ export function RosterProvider({ children }: { children: ReactNode }) {
     } catch (e) { manualErr = e; }
     if (manualErr) reportError('roster.removeClient.manual', manualErr, { id });
 
-    const ended = await endCoaching(id);
+    // With a reason, the ending and the reason are ONE server call. Two calls
+    // have a state between them — ended, unexplained — that every dropped
+    // connection reaches, and the ending is the only moment the question makes
+    // sense to ask.
+    const ended = reason
+      ? await endCoachingWithReason(id, reason, note ?? null)
+      : await endCoaching(id);
     if (ended.ok && ended.ended) return true;
     if (!ended.ok) reportError('roster.removeClient.end', new Error(ended.reason), { id });
     // Neither table had anything to remove, or the server refused. Either way
@@ -520,7 +539,11 @@ export function RosterProvider({ children }: { children: ReactNode }) {
   const impl = useRef({ addClient, removeClient, setClientMode, hydrate });
   impl.current = { addClient, removeClient, setClientMode, hydrate };
   const addClientStable = useCallback((name: string, goal: string, mode: CoachedMode = 'online') => impl.current.addClient(name, goal, mode), []);
-  const removeClientStable = useCallback((id: string) => impl.current.removeClient(id), []);
+  const removeClientStable = useCallback(
+    (id: string, reason?: EndReason | null, note?: string | null) =>
+      impl.current.removeClient(id, reason, note),
+    [],
+  );
   const setClientModeStable = useCallback((id: string, mode: CoachedMode) => impl.current.setClientMode(id, mode), []);
   const refreshStable = useCallback(() => impl.current.hydrate(), []);
 

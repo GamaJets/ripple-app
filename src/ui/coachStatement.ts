@@ -111,6 +111,7 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
     sessions: { status, rows: [] },
     packs: { status, rows: [] },
     subscriptions: { status, rows: [] },
+    receipts: { status, rows: [] },
     invoices: { status, rows: [] },
     lateCancellations: { status, rows: [] },
     payouts: { status, hasAccount: false, chargesEnabled: false, detailsSubmitted: false },
@@ -125,7 +126,7 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
   const uid = auth?.user?.id;
   if (!uid) return nothing('error');
 
-  const [issuer, sessions, packs, subs, invoices, fees, payouts] = await Promise.all([
+  const [issuer, sessions, packs, subs, receipts, invoices, fees, payouts] = await Promise.all([
     fetchInvoiceIssuer(),
 
     // Sessions. Counted, never priced — `rate_cents` is a gym payroll rate and
@@ -155,6 +156,36 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
       .range(f, t) as unknown as PromiseLike<{ data: TakenRow[] | null; error: unknown }>),
 
     fetchRenewals(uid, bounds.fromIso, bounds.toIso),
+
+    // Payments the coach recorded themselves (part 170). `received_on` is a
+    // Postgres `date` and is compared as a CALENDAR DAY, both here and in
+    // `splitByPeriod` — which is why the bounds passed are the period's own
+    // `from`/`to` strings rather than the instant range the timestamp columns
+    // use. Cash was handed over on a day, in the place both people were
+    // standing, and comparing it as an instant would drop a payment taken on
+    // the first of the period for every coach west of Greenwich.
+    //
+    // No `.eq('coach_id', uid)`: `coach_receipts_owner_read` is `coach_id =
+    // auth.uid()` and there is no other read policy on the table.
+    paged<{ amount_cents: number | string | null; currency: string | null; received_on: string | null }>(
+      'the payments you recorded yourself in this period', (f, t) => supabase
+        .from('coach_receipts')
+        .select('amount_cents, currency, received_on')
+        .gte('received_on', period.from)
+        .lte('received_on', period.to)
+        .order('received_on', { ascending: true })
+        .order('id', { ascending: true })
+        .range(f, t) as unknown as PromiseLike<{ data: any[] | null; error: unknown }>)
+      .then((r) => ({
+        status: r.status,
+        rows: r.rows.map((x): TakenRow => ({
+          amount_cents: toInt(x.amount_cents),
+          currency: (x.currency || '').trim() || null,
+          // An empty string will not parse, which keeps an undated payment out
+          // of every period rather than sweeping it into this one.
+          created_at: x.received_on ?? '',
+        })),
+      })),
 
     // `issued_on` is a Postgres `date` and is compared as a calendar day, both
     // here and in `splitByDay`. Comparing it as an instant would put an invoice
@@ -193,6 +224,7 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
     sessions,
     packs,
     subscriptions: subs,
+    receipts,
     invoices,
     lateCancellations: fees,
     payouts,

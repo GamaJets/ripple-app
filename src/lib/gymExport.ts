@@ -178,24 +178,133 @@ export function slug(name: string | null | undefined): string {
 
 /* ── the parts of the record ───────────────────────────────────────────────── */
 
+/**
+ * ── The eight parts this bundle used to leave behind ──────────────────────
+ *
+ * The list below was eleven entities, and a gym leaving on it took no record of
+ * what it had INVOICED, what it had PAID ITS STAFF, what it OWNS, who was
+ * ROSTERED, who it had CONTACTED about drifting away, what it had DISCOUNTED,
+ * what had HAPPENED in the building, or what its coaches had SOLD.
+ *
+ * Every one of those is a thing a gym is asked for after it leaves. The
+ * invoices and the settlements are the two an accountant asks for first and the
+ * two with a statutory retention period attached; the equipment register is
+ * what an insurer asks for; `member_interventions` is the only record that
+ * anybody was ever contacted, which is the one a member disputing a cancellation
+ * asks about. An export that quietly omitted all eight was not the gym's
+ * record — it was the parts of the record the first version of this file
+ * happened to cover.
+ *
+ * They are declared here as narrow row shapes rather than imported from the
+ * modules that read them, deliberately: `gym_shifts`, `promos` and
+ * `member_interventions` belong to other parts of this codebase, and an export
+ * that breaks when one of them changes a field name is an export nobody can
+ * rely on at exactly the moment they need it.
+ */
 export type ExportPart =
   | 'plans'
   | 'members'
   | 'memberships'
   | 'payments'
+  | 'invoices'
   | 'classes'
   | 'attendance'
   | 'sessions'
   | 'passTypes'
   | 'passes'
   | 'visits'
-  | 'invites';
+  | 'invites'
+  | 'settlements'
+  | 'equipment'
+  | 'shifts'
+  | 'interventions'
+  | 'promos'
+  | 'events'
+  | 'purchases';
 
 export const EXPORT_PARTS: ExportPart[] = [
-  'plans', 'members', 'memberships', 'payments',
+  'plans', 'members', 'memberships', 'payments', 'invoices',
   'classes', 'attendance', 'sessions',
   'passTypes', 'passes', 'visits', 'invites',
+  'settlements', 'equipment', 'shifts',
+  'interventions', 'promos', 'events', 'purchases',
 ];
+
+/* ── the rows the eight new parts are made of ──────────────────────────────── */
+
+/** One row of `gym_invoices`. Nullable throughout: an invoice with no amount is
+ *  money of unknown size and must export as a blank, never as a zero. */
+export interface ExportInvoice {
+  id: string; number: number | null; memberId: string | null; memberName: string | null;
+  amountCents: number | null; currency: string | null;
+  issuedOn: string; dueOn: string | null; status: string | null; note: string | null;
+}
+
+/** One row of `payroll_settlements` — money that left the account. */
+export interface ExportSettlement {
+  id: string; trainerId: string | null; trainerName: string | null;
+  periodFrom: string | null; periodTo: string | null;
+  amountCents: number | null; currency: string | null;
+  sessionsCount: number | null; method: string | null; settledAt: string;
+  reversedAt: string | null; reverseReason: string | null;
+}
+
+/** One row of `gym_equipment`. */
+export interface ExportEquipment {
+  id: string; name: string; category: string | null; identifier: string | null;
+  quantity: number | null; status: string | null; purchasedOn: string | null;
+  serviceIntervalDays: number | null; lastServicedOn: string | null; note: string | null;
+}
+
+/** One row of `gym_shifts` — who was rostered, and whether they worked it. */
+export interface ExportShift {
+  id: string; trainerId: string | null; trainerName: string | null;
+  startsAt: string | null; endsAt: string | null; role: string | null;
+  status: string | null; note: string | null;
+}
+
+/**
+ * One row of `member_interventions` — the record that somebody was contacted.
+ *
+ * `by_name` is exported beside `by_id` and not instead of it. The column exists
+ * for exactly this moment: `by_id` is `on delete set null`, so once the trainer
+ * who made the call has left, the id is a dead uuid and the name written down at
+ * the time is the only thing that answers "has anybody already spoken to her?".
+ *
+ * There is deliberately no follow-up column. What followed a contact is
+ * COMPUTED in src/lib/interventions.ts from the member's training either side of
+ * it — it is not stored, it changes as more training is recorded, and exporting
+ * a snapshot of it as though it were a field would put a judgement into the
+ * record dressed as a fact.
+ */
+export interface ExportIntervention {
+  id: string; memberId: string | null; memberName: string | null;
+  channel: string | null; outcome: string | null;
+  byId: string | null; byName: string | null;
+  note: string | null; at: string | null;
+}
+
+/** One row of `promos`. */
+export interface ExportPromo {
+  id: string; code: string | null; discount: number | null;
+  active: boolean | null; redemptions: number | null; createdAt: string | null;
+}
+
+/** One row of `gym_events` — the trigger-written activity log. */
+export interface ExportEvent {
+  id: string; kind: string | null; summary: string | null;
+  subjectId: string | null; actorId: string | null; at: string;
+}
+
+/** One row of `client_purchases` — a coach's own checkout trail, scoped to this
+ *  gym's roster. It carries no tenant column, so the scoping is done by the
+ *  caller and stated in the file's note. */
+export interface ExportPurchase {
+  id: string; trainerId: string | null; trainerName: string | null;
+  clientId: string | null; amountCents: number | null; currency: string | null;
+  sessionsTotal: number | null; sessionsUsed: number | null;
+  status: string | null; createdAt: string | null;
+}
 
 /** What each part is called in a sentence an owner reads. */
 export const EXPORT_LABEL: Record<ExportPart, string> = {
@@ -203,6 +312,7 @@ export const EXPORT_LABEL: Record<ExportPart, string> = {
   members: 'the member roster',
   memberships: 'memberships',
   payments: 'payments',
+  invoices: 'the invoice register',
   classes: 'the timetable',
   attendance: 'class attendance',
   sessions: 'one-to-ones',
@@ -210,6 +320,13 @@ export const EXPORT_LABEL: Record<ExportPart, string> = {
   passes: 'passes issued',
   visits: 'the door log',
   invites: 'invites',
+  settlements: 'payroll settlements',
+  equipment: 'the equipment register',
+  shifts: 'the rota',
+  interventions: 'member contact',
+  promos: 'promo codes',
+  events: 'the activity log',
+  purchases: 'PT packs sold',
 };
 
 /** What leaving a part out of the bundle actually costs. Named so the warning
@@ -219,6 +336,7 @@ export const EXPORT_COST: Record<ExportPart, string> = {
   members: 'who the members are',
   memberships: 'who holds what plan, since when, and in what state',
   payments: 'every payment the gym has recorded',
+  invoices: 'what the gym billed, to whom, and what is still owed on it',
   classes: 'what was on the timetable',
   attendance: 'who booked a class and who turned up',
   sessions: 'one-to-ones delivered and what they were worth',
@@ -226,6 +344,13 @@ export const EXPORT_COST: Record<ExportPart, string> = {
   passes: 'passes sold and the visits still owed on them',
   visits: 'who came through the door and when',
   invites: 'who was invited and whether they joined',
+  settlements: 'what the gym actually paid its staff, and when',
+  equipment: 'what the gym owns and what is due a service',
+  shifts: 'who was rostered on the floor and when',
+  interventions: 'the record that anybody was ever contacted about leaving',
+  promos: 'what was discounted and how often it was used',
+  events: 'what happened in the building, as the database recorded it',
+  purchases: 'what the coaches sold through their own checkout',
 };
 
 /** The basename each part writes to, before the bundle prefix. */
@@ -234,6 +359,7 @@ export const EXPORT_FILE: Record<ExportPart, string> = {
   members: 'members.csv',
   memberships: 'memberships.csv',
   payments: 'payments.csv',
+  invoices: 'invoices.csv',
   classes: 'classes.csv',
   attendance: 'attendance.csv',
   sessions: 'sessions.csv',
@@ -241,6 +367,13 @@ export const EXPORT_FILE: Record<ExportPart, string> = {
   passes: 'passes.csv',
   visits: 'door-log.csv',
   invites: 'invites.csv',
+  settlements: 'payroll-settlements.csv',
+  equipment: 'equipment.csv',
+  shifts: 'rota.csv',
+  interventions: 'member-contact.csv',
+  promos: 'promos.csv',
+  events: 'activity-log.csv',
+  purchases: 'pt-packs.csv',
 };
 
 /* ── what goes in ──────────────────────────────────────────────────────────── */
@@ -261,6 +394,15 @@ export interface GymExportInput {
    *  cannot imply it covers more than it asked for. Null for "everything". */
   from?: string | null;
   to?: string | null;
+  /**
+   * Set when this bundle is ONE MEMBER's record rather than the gym's.
+   *
+   * It changes the filename, the manifest and the README, and it has to: a
+   * subject-access response and a whole-gym backup are the same eleven CSVs
+   * with completely different meanings, and a bundle that could not say which
+   * it was would eventually be sent as the wrong one.
+   */
+  subject?: { memberId: string; memberName: string | null } | null;
 
   plans: Slice<MembershipPlan>;
   memberships: Slice<Membership>;
@@ -272,6 +414,14 @@ export interface GymExportInput {
   passes: Slice<GymPass>;
   visits: Slice<Visit>;
   invites: Slice<MemberInvite>;
+  invoices: Slice<ExportInvoice>;
+  settlements: Slice<ExportSettlement>;
+  equipment: Slice<ExportEquipment>;
+  shifts: Slice<ExportShift>;
+  interventions: Slice<ExportIntervention>;
+  promos: Slice<ExportPromo>;
+  events: Slice<ExportEvent>;
+  purchases: Slice<ExportPurchase>;
 }
 
 /** The slice a part is read from. `members` rides on `memberships`. */
@@ -288,6 +438,14 @@ export function partSlice(input: GymExportInput, part: ExportPart): Slice<unknow
     case 'passes': return input.passes;
     case 'visits': return input.visits;
     case 'invites': return input.invites;
+    case 'invoices': return input.invoices;
+    case 'settlements': return input.settlements;
+    case 'equipment': return input.equipment;
+    case 'shifts': return input.shifts;
+    case 'interventions': return input.interventions;
+    case 'promos': return input.promos;
+    case 'events': return input.events;
+    case 'purchases': return input.purchases;
   }
 }
 
@@ -326,7 +484,12 @@ export interface ExportPartReport {
 
 export interface ExportManifest {
   app: 'Repple';
-  kind: 'gym-record-export';
+  /** Which of the two bundles this is. They are the same CSVs with entirely
+   *  different meanings, and a file that could not say which would eventually
+   *  be sent as the wrong one. */
+  kind: 'gym-record-export' | 'member-record-export';
+  /** Who a member export is about. Null on a whole-gym bundle. */
+  subject: { memberId: string; memberName: string | null } | null;
   formatVersion: 1;
   gym: string | null;
   tenantId: string | null;
@@ -388,6 +551,107 @@ export function incompleteWarning(missing: MissingPart[]): string | null {
   );
 }
 
+/* ── one member's record ───────────────────────────────────────────────────── */
+
+/**
+ * The parts of the bundle that are ABOUT a person rather than about the gym.
+ *
+ * The price book, the timetable, the equipment register, the rota and the promo
+ * codes are the gym's own record and belong to nobody. Including them in one
+ * member's file would hand a subject-access request the gym's whole commercial
+ * position, which is both wrong and — under every regime that grants the right
+ * — outside what was asked for.
+ */
+export const MEMBER_PARTS: ExportPart[] = [
+  'memberships', 'payments', 'invoices', 'attendance', 'sessions',
+  'passes', 'visits', 'invites', 'interventions', 'purchases', 'events',
+];
+
+/**
+ * One member's gym-side record, built by FILTERING the whole-gym reads.
+ *
+ * ── Why this is a filter rather than eleven new queries ───────────────────
+ *
+ * Because the alternative is two implementations of "what does this gym hold
+ * about this person", and the day they disagree is the day a subject-access
+ * request goes out short. The export screen has already read every one of these
+ * tables, with its three states intact; narrowing them is pure, testable and
+ * cannot fail in a way the whole-gym bundle would not have failed already.
+ *
+ * It also means a part that could NOT be read stays unreadable here, and comes
+ * out as the same loudly-named stub with the same INCOMPLETE in the filename.
+ * A member export that quietly omitted the payments because a query 500'd would
+ * be a formal answer to a legal request with a hole in it and nothing saying so.
+ *
+ * ── What it deliberately does not do ──────────────────────────────────────
+ *
+ * It does not touch the member's own app data — their workouts, their photos,
+ * their messages, their measurements. Those are the member's and are exported
+ * by src/lib/gdpr.ts from their own account. This is the GYM-SIDE record, which
+ * is the half `web/delete-account.html` currently tells members to "ask us" for.
+ */
+export function memberSlices(input: GymExportInput, memberId: string): GymExportInput {
+  const keep = <T>(s: Slice<T>, mine: (row: T) => boolean): Slice<T> =>
+    s.state === 'ready' ? { state: 'ready', rows: s.rows.filter(mine) } : s;
+  const none = <T>(s: Slice<T>): Slice<T> =>
+    // A gym-wide part is EMPTY in a member export, not missing: it was read
+    // fine and it is simply not about this person. A failed read stays failed,
+    // because "we could not read the timetable" is still true of the class
+    // attendance that hangs off it.
+    (s.state === 'ready' ? { state: 'ready', rows: [] } : s);
+
+  return {
+    ...input,
+    plans: none(input.plans),
+    classes: none(input.classes),
+    passTypes: none(input.passTypes),
+    settlements: none(input.settlements),
+    equipment: none(input.equipment),
+    shifts: none(input.shifts),
+    promos: none(input.promos),
+
+    memberships: keep(input.memberships, (m) => m.memberId === memberId),
+    payments: keep(input.payments, (p) => p.memberId === memberId),
+    invoices: keep(input.invoices, (i) => i.memberId === memberId),
+    attendance: keep(input.attendance, (b) => b.memberId === memberId),
+    // `clientId`, not `memberId`: a one-to-one names the CLIENT, and filtering
+    // on the wrong field would hand a member every session the gym ran.
+    sessions: keep(input.sessions, (x) => x.clientId === memberId),
+    // A pass they hold, and a pass somebody bought FOR them. `hostMemberId` is
+    // the member who brought a guest — a guest pass on their account is part of
+    // their record even though they are not its holder.
+    passes: keep(input.passes, (p) => p.holderId === memberId || p.hostMemberId === memberId),
+    visits: keep(input.visits, (v) => v.memberId === memberId),
+    invites: keep(input.invites, (i) => i.acceptedBy === memberId),
+    interventions: keep(input.interventions, (i) => i.memberId === memberId),
+    purchases: keep(input.purchases, (p) => p.clientId === memberId),
+    // The activity log, narrowed to events ABOUT them. `subject_id` is who an
+    // event is about; `actor_id` is who did it, and a member is never the actor
+    // of a gym event, so filtering on the subject is the whole of it.
+    events: keep(input.events, (e) => e.subjectId === memberId),
+  };
+}
+
+/**
+ * How many rows one member's record actually comes to.
+ *
+ * Offered before the download, because the honest answer is sometimes zero and
+ * an owner answering a subject-access request needs to know that BEFORE they
+ * send a bundle of empty files with a covering note saying it is complete.
+ */
+export function memberRowCount(input: GymExportInput, memberId: string): number | null {
+  const scoped = memberSlices(input, memberId);
+  let n = 0;
+  for (const part of MEMBER_PARTS) {
+    const s = partSlice(scoped, part);
+    // One unreadable part makes the COUNT unknown rather than smaller. A
+    // smaller number here would read as "this member has little on file".
+    if (s.state !== 'ready') return null;
+    n += s.rows.length;
+  }
+  return n;
+}
+
 /* ── the bundle ────────────────────────────────────────────────────────────── */
 
 export function buildGymExport(input: GymExportInput): GymExportBundle {
@@ -423,7 +687,12 @@ export function buildGymExport(input: GymExportInput): GymExportBundle {
 
   const complete = missing.length === 0;
   const day = isoDatePart(input.generatedAt) || 'undated';
-  const stem = ['repple-export', slug(input.gymName), day].filter(Boolean).join('-');
+  const stem = input.subject
+    // Named for the person, so a folder of these does not need opening to tell
+    // one member's record from another's — and so a whole-gym backup can never
+    // be mistaken for a subject-access response by its filename alone.
+    ? ['repple-member-record', slug(input.gymName), slug(input.subject.memberName) || input.subject.memberId.slice(0, 8), day].filter(Boolean).join('-')
+    : ['repple-export', slug(input.gymName), day].filter(Boolean).join('-');
   const prefix = complete ? stem : stem + '-INCOMPLETE';
   const named = (basename: string) => `${prefix}-${basename}`;
 
@@ -492,7 +761,8 @@ export function buildGymExport(input: GymExportInput): GymExportBundle {
 
   const manifest: ExportManifest = {
     app: 'Repple',
-    kind: 'gym-record-export',
+    kind: input.subject ? 'member-record-export' : 'gym-record-export',
+    subject: input.subject ? { memberId: input.subject.memberId, memberName: input.subject.memberName } : null,
     formatVersion: 1,
     gym: input.gymName ?? null,
     tenantId: input.tenantId ?? null,
@@ -542,7 +812,111 @@ function tableFor(part: ExportPart, input: GymExportInput): Table {
     case 'passes': return passesTable(readyRows(input.passes));
     case 'visits': return visitsTable(readyRows(input.visits));
     case 'invites': return invitesTable(readyRows(input.invites));
+    case 'invoices': return invoicesTable(readyRows(input.invoices));
+    case 'settlements': return settlementsTable(readyRows(input.settlements));
+    case 'equipment': return equipmentTable(readyRows(input.equipment));
+    case 'shifts': return shiftsTable(readyRows(input.shifts));
+    case 'interventions': return interventionsTable(readyRows(input.interventions));
+    case 'promos': return promosTable(readyRows(input.promos));
+    case 'events': return eventsTable(readyRows(input.events));
+    case 'purchases': return purchasesTable(readyRows(input.purchases));
   }
+}
+
+/* ── the eight that used to be left behind ─────────────────────────────────── */
+
+/**
+ * The invoice register.
+ *
+ * `amount_cents` is written as a blank where the row carries none, not as a 0.
+ * An invoice of unknown size in a file somebody files is the one row that must
+ * not read as free — and `minorToDecimal` already returns '' for null, which is
+ * why every money column here goes through it rather than through toFixed.
+ */
+function invoicesTable(rows: ExportInvoice[]): Table {
+  return {
+    header: ['invoice_number', 'issued_on', 'due_on', 'member_name', 'member_id', 'amount', 'currency', 'amount_cents', 'status', 'note', 'invoice_id'],
+    rows: rows.map((i) => [
+      i.number, i.issuedOn, i.dueOn, i.memberName, i.memberId,
+      minorToDecimal(i.amountCents), i.currency, i.amountCents,
+      i.status, i.note, i.id,
+    ]),
+    note: 'What the gym billed. A blank amount is an invoice that records none — it is not a free one. `status` is the register\u2019s own word; overdue is computed from due_on and is not stored.',
+  };
+}
+
+/** Payroll settlements — money that actually left the account. */
+function settlementsTable(rows: ExportSettlement[]): Table {
+  return {
+    header: ['settled_at', 'trainer_name', 'trainer_id', 'period_from', 'period_to', 'amount', 'currency', 'amount_cents', 'sessions', 'method', 'reversed_at', 'reverse_reason', 'settlement_id'],
+    rows: rows.map((r) => [
+      r.settledAt, r.trainerName, r.trainerId, r.periodFrom, r.periodTo,
+      minorToDecimal(r.amountCents), r.currency, r.amountCents,
+      r.sessionsCount, r.method, r.reversedAt, r.reverseReason, r.id,
+    ]),
+    note: 'Amounts are snapshots of what was handed over and are never recomputed. A row with reversed_at set was TAKEN BACK — it is kept because a settlement that was recorded and then withdrawn is two facts, and it must not be counted as money out.',
+  };
+}
+
+/** The equipment register. */
+function equipmentTable(rows: ExportEquipment[]): Table {
+  return {
+    header: ['name', 'category', 'identifier', 'quantity', 'status', 'purchased_on', 'service_interval_days', 'last_serviced_on', 'note', 'equipment_id'],
+    rows: rows.map((e) => [
+      e.name, e.category, e.identifier, e.quantity, e.status, e.purchasedOn,
+      e.serviceIntervalDays, e.lastServicedOn, e.note, e.id,
+    ]),
+    note: 'A blank last_serviced_on beside a service interval means the schedule exists and nobody has recorded a service — which is not the same as serviced today.',
+  };
+}
+
+/** The rota. */
+function shiftsTable(rows: ExportShift[]): Table {
+  return {
+    header: ['starts_at', 'ends_at', 'trainer_name', 'trainer_id', 'role', 'status', 'note', 'shift_id'],
+    rows: rows.map((s) => [s.startsAt, s.endsAt, s.trainerName, s.trainerId, s.role, s.status, s.note, s.id]),
+    note: 'Who was rostered. `gym_shifts` carries no rate, so this file says who was on the floor and cannot say what the floor cost to staff.',
+  };
+}
+
+/** Member contact — the record that anybody was ever spoken to. */
+function interventionsTable(rows: ExportIntervention[]): Table {
+  return {
+    header: ['at', 'member_name', 'member_id', 'channel', 'outcome', 'contacted_by', 'contacted_by_id', 'note', 'intervention_id'],
+    rows: rows.map((i) => [i.at, i.memberName, i.memberId, i.channel, i.outcome, i.byName, i.byId, i.note, i.id]),
+    note: 'The only record in this product that a member was contacted about drifting away — it is what answers a member who says nobody ever got in touch. What FOLLOWED a contact is not here: that is computed from training either side of it, it changes as more training is recorded, and a snapshot of it in a file would be a judgement dressed as a fact.',
+  };
+}
+
+/** Promo codes. */
+function promosTable(rows: ExportPromo[]): Table {
+  return {
+    header: ['code', 'discount_pct', 'active', 'redemptions', 'created_at', 'promo_id'],
+    rows: rows.map((p) => [p.code, p.discount, p.active == null ? '' : p.active, p.redemptions, p.createdAt, p.id]),
+    note: 'A redemption count with no amount beside it is deliberate: nothing records which payment a redemption applied to, so a percentage of an unknown price is not an amount and none is written.',
+  };
+}
+
+/** The activity log. */
+function eventsTable(rows: ExportEvent[]): Table {
+  return {
+    header: ['at', 'kind', 'summary', 'subject_id', 'actor_id', 'event_id'],
+    rows: rows.map((e) => [e.at, e.kind, e.summary, e.subjectId, e.actorId, e.id]),
+    note: 'Written by database triggers as things happened, so nothing here was typed by anyone. The summary was composed at write time and names people as they were called then — it does not change when somebody is renamed or erased.',
+  };
+}
+
+/** PT packs sold through the coaches' own checkout. */
+function purchasesTable(rows: ExportPurchase[]): Table {
+  return {
+    header: ['created_at', 'trainer_name', 'trainer_id', 'client_id', 'amount', 'currency', 'amount_cents', 'sessions_total', 'sessions_used', 'status', 'purchase_id'],
+    rows: rows.map((p) => [
+      p.createdAt, p.trainerName, p.trainerId, p.clientId,
+      minorToDecimal(p.amountCents), p.currency, p.amountCents,
+      p.sessionsTotal, p.sessionsUsed, p.status, p.id,
+    ]),
+    note: '`client_purchases` carries no tenant column, so these rows are scoped by the trainers on this gym\u2019s roster — a purchase against a coach who has since left the roster is not here. A blank currency means the package it was sold from has been deleted and the unit is unrecoverable; it is never guessed.',
+  };
 }
 
 /**

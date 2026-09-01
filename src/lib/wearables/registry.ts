@@ -44,13 +44,23 @@ export const PROVIDERS: WearableProvider[] = [
   // question; a missing row leaves them to guess.
   cloud({ id: 'garmin', name: 'Garmin', icon: '⌚', kind: 'cloud', blurb: 'Needs Garmin’s approval before Repple can read it — on iPhone it comes through Apple Health', metrics: [] }),
   cloud({ id: 'fitbit', name: 'Fitbit', icon: '⌚', kind: 'cloud', blurb: 'Not set up in Repple yet — nothing to connect to', metrics: [] }),
-  // `metrics: []` even though Repple now reads blood sugar out of Health
-  // Connect, because this row is a CONNECT button for training data and
-  // connecting it supplies none. Blood sugar is read from the Blood Sugar
-  // screen, under its own separate permission, and listing it here would
-  // advertise it as something this button delivers — the exact promise this
-  // file's header says a blurb may not make.
-  cloud({ id: 'googlefit', name: 'Google Fit / Health Connect', icon: '🟢', kind: 'health-connect', blurb: 'Android’s health store — Repple reads blood sugar from it, but not training', metrics: [] }),
+  // This row carried `metrics: []` and a blurb saying Repple read no training
+  // from Health Connect, and both were true: an Android member could sync
+  // nothing but blood sugar, which was the whole Android wearable story.
+  //
+  // `./healthConnectTraining.ts` reads all five now, and the blurb lists them
+  // under the rule this file's header sets — a blurb describes what THIS build
+  // can read. Blood sugar is still not listed, and that is not an oversight:
+  // this row is a CONNECT button, connecting it does not grant blood sugar, and
+  // blood sugar is asked for separately on its own screen.
+  //
+  // The blurb does not promise a working connection, because that depends on
+  // the installed binary declaring the health permissions in its manifest and
+  // this catalogue cannot see the manifest. What happens on a build that cannot
+  // ask is that Connect fails with a sentence naming both reasons it might have
+  // — see cloudProvider.connect() — rather than a blurb hedging a capability
+  // for everybody in order to describe a minority of installs.
+  cloud({ id: 'googlefit', name: 'Google Fit / Health Connect', icon: '🟢', kind: 'health-connect', blurb: 'Android’s health store — the steps, heart rate, calories, workouts and sleep your phone and watch write into it', metrics: ['Steps', 'Heart rate', 'Calories', 'Workouts', 'Sleep'] }),
 ];
 
 export function providerById(id: ProviderId): WearableProvider | undefined {

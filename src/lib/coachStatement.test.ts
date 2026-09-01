@@ -64,6 +64,13 @@ function input(over: Partial<StatementInput> = {}): StatementInput {
     sessions: { status: 'ready', rows: [{ startsAt: at(2026, 6, 10), outcome: 'completed' }] },
     packs: { status: 'ready', rows: [packRow()] },
     subscriptions: { status: 'ready', rows: [packRow({ amount_cents: 60000, created_at: at(2026, 4, 1) })] },
+    // Part 170: the cash and transfers the coach wrote down themselves. A
+    // required field on StatementInput rather than an optional one, because an
+    // optional default would put "you recorded nothing outside this app" on a
+    // statement built by a caller that forgot to pass it — and for most
+    // self-employed coaches that is the larger half of their income reported
+    // confidently as zero.
+    receipts: { status: 'ready', rows: [packRow({ amount_cents: 20000, created_at: '2026-05-20' })] },
     invoices: { status: 'ready', rows: [invoice()] },
     lateCancellations: { status: 'ready', rows: [fee()] },
     payouts: { status: 'ready', hasAccount: true, chargesEnabled: true, detailsSubmitted: true },
@@ -75,8 +82,11 @@ function input(over: Partial<StatementInput> = {}): StatementInput {
 const sec = (s: ReturnType<typeof coachStatement>, key: string) => s.sections.find((x) => x.key === key)!;
 
 /* ── 1. the periods this app is willing to name ───────────────────────────
-   A calendar period, never a fiscal or a tax one: this app does not know which
-   jurisdiction the reader is in, and offering "2025/26" would pick one. */
+   A calendar period, or one the COACH names. This app still does not know
+   which jurisdiction the reader is in and still infers nothing from a locale,
+   a currency or a timezone — but a year start the coach types is not this app
+   picking one, and `fiscalYear`/`customRange` (asserted in
+   src/lib/statementPeriod.test.ts) are what they type it into. */
 
 eq(calendarYear(2026).from, '2026-01-01', 'a year opens on 1 January');
 eq(calendarYear(2026).to, '2026-12-31', 'and closes on 31 December');
@@ -527,9 +537,21 @@ ok(!(withheldReason('error', 'sales') ?? '').includes('had not finished loading'
 {
   const p = payoutFacts({ status: 'ready', hasAccount: true, chargesEnabled: true, detailsSubmitted: true });
   const all = p.lines.join(' ').toLowerCase();
-  ok(all.includes('never told about a payout'), 'the screen says outright that this app is not told about payouts');
-  ok(!/\bnext payout\b|\barriv(es|ing) on\b|\bevery (monday|week|month)\b|\bin \d+ days\b/.test(all),
+  // Part 194 mirrors `payout.paid` and `payout.failed`, so "never told about a
+  // payout" stopped being true and this assertion moved with it. What did NOT
+  // move is the part that matters: knowing four payouts happened says nothing
+  // about when the fifth will, and a rendered schedule would be a promise about
+  // when somebody's rent money lands.
+  ok(all.includes('what is not here is a schedule'), 'the screen says outright that there is no payout timetable');
+  ok(all.includes('not told when the next payout will be sent'), 'and names the thing it is still not told');
+  ok(!/\bnext payout will (arrive|be sent) on\b|\barriv(es|ing) on\b|\bevery (monday|week|month)\b|\bin \d+ days\b/.test(all),
     'and no date, cadence or arrival is stated anywhere');
+  // The other half of the same discipline, and the reason payouts are a
+  // separate section rather than a correction to the takings above: a payout is
+  // a balance, so "taken minus landed equals fees" is wrong on all three
+  // numbers and the statement must never invite the subtraction.
+  ok(all.includes('nothing here subtracts one from the other'),
+    'and the statement says it never nets a payout against the charges above it');
   ok(!/\d+\.\d{2}/.test(all), 'and no amount is stated either');
   ok(!/https?:\/\//.test(all), 'no URL is invented for an account this app holds no link to');
 

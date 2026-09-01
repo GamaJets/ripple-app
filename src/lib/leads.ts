@@ -59,10 +59,17 @@ export type LeadState = 'new' | 'contacted' | 'closed';
 /**
  * The three states, in the order a coach works through them.
  *
- * There is no 'joined', and there cannot be. An enquiry carries no account, so
- * nothing can ever link it to the `coach_requests` row that person may later
- * create — a fourth state would be the app guessing, and a coach would divide
- * by it. Part 157 says the same thing on the column.
+ * There is still no 'joined', and there still cannot be. `state` is the COACH'S
+ * OWN WORKFLOW — untouched, unwritten by anything but them — and a fourth value
+ * in it would be the app deciding where their enquiry had got to.
+ *
+ * What part 211 added is a different thing on different columns: an EVIDENCED
+ * MATCH, where the email somebody typed on the form is the email of an account
+ * that later joined through the SAME CODE. That is a fact rather than a guess,
+ * it lives on `joined_at` / `joined_via`, and where it is absent nothing at all
+ * is claimed. `LeadRow.joined` below carries it and is deliberately three-
+ * valued: matched, not matched, and NOT KNOWN — the third being a database
+ * without part 211, which must never read as the second.
  */
 export const LEAD_STATES: LeadState[] = ['new', 'contacted', 'closed'];
 
@@ -89,6 +96,10 @@ export type RawLead = {
   via_code: string | null;
   at: string | null;
   state: string | null;
+  /** Part 204. Absent on a database that has not had it applied, which is
+   *  UNKNOWN and not "they did not join" — see `LeadRow.joined`. */
+  joined_at?: string | null;
+  joined_via?: string | null;
 };
 
 /** What kind of thing somebody typed to be reached on. */
@@ -115,6 +126,24 @@ export type LeadRow = {
   campaign: string | null;
   at: string | null;
   state: LeadState;
+  /**
+   * Whether an account matching this enquiry later joined on the same code.
+   *
+   * Three values and they are not interchangeable:
+   *
+   *   true   an account with this exact email address joined through this exact
+   *          code, after the enquiry was left. Part 204's trigger.
+   *   false  the read came back and there is no such match. It does NOT mean
+   *          they did not become a client — they may have joined on another
+   *          code, typed a different address, or been added by hand — so the
+   *          screen says "not matched" and never "did not join".
+   *   null   the columns were not there to read. A build talking to a database
+   *          without part 211 gets this, and rendering it as `false` would put a
+   *          confident "no" against every enquiry a coach has.
+   */
+  joined: boolean | null;
+  /** When the match happened, ISO, or null. */
+  joinedAt: string | null;
 };
 
 /** One line of what the coach did about an enquiry. Append-only server side. */
@@ -229,6 +258,13 @@ export function shapeLeads(rows: RawLead[] | null | undefined, codes: KnownCode[
       campaign: byCode.get(viaCode) ?? null,
       at: r?.at ?? null,
       state: asState(r?.state),
+      // `'joined_at' in r` and not `r.joined_at != null`. The two differ in
+      // exactly the case that matters: a database without part 211 sends no such
+      // key at all, and treating its absence as a null VALUE would be the app
+      // saying "no match" about every enquiry ever left. Present-and-null is a
+      // real answer; absent is not an answer.
+      joined: r && typeof r === 'object' && 'joined_at' in r ? r.joined_at != null : null,
+      joinedAt: (r?.joined_at ?? null) || null,
     });
   }
 
@@ -286,6 +322,7 @@ export function leadCountLine(status: LoadStatus, rows: LeadRow[]): string {
     return 'Your enquiries could not be read, so nothing here is a count. This is not an empty inbox.';
   }
   const waiting = rows.filter((r) => r.state === 'new').length;
+  const joined = rows.filter((r) => r.joined === true).length;
   if (status === 'partial') {
     return `More enquiries came back than could be read in one go. ${num(rows.length)} of them are below and there are more — this is not the whole list, and no figure on this screen is a total.`;
   }
@@ -293,7 +330,12 @@ export function leadCountLine(status: LoadStatus, rows: LeadRow[]): string {
     return 'Nobody has left their details yet. Your join link carries the form — share it and enquiries land here.';
   }
   const total = `${num(rows.length)} ${rows.length === 1 ? 'enquiry' : 'enquiries'}`;
-  return waiting ? `${total} · ${num(waiting)} waiting on you.` : `${total}, all of them dealt with.`;
+  // The conversion count is added only when there IS one. "0 became clients" is
+  // a figure a coach reads as a verdict on their own marketing, and on a
+  // database without part 211 every row's `joined` is null and the count would
+  // be zero for a reason that has nothing to do with the marketing.
+  const became = joined ? ` ${num(joined)} of them became clients.` : '';
+  return (waiting ? `${total} · ${num(waiting)} waiting on you.` : `${total}, all of them dealt with.`) + became;
 }
 
 /**
@@ -332,4 +374,220 @@ export function followUpProblem(body: string | null | undefined): string | null 
   if (!b) return 'Write what you did, so the next time you open this you know where it got to.';
   if (b.length > MAX_FOLLOW_UP) return `Keep it to ${MAX_FOLLOW_UP} characters or fewer.`;
   return null;
+}
+
+
+/* ── following one up, from the coach's own phone ───────────────────────────
+ *
+ * ── The premise that changed, and the one that did not ────────────────────
+ *
+ * `FOLLOW_UP_IS_MANUAL` above says this product "has no email channel at all",
+ * and when it was written that was true at every layer. It is no longer quite
+ * true: Supabase Auth now sends through Resend, so an account and a verified
+ * domain exist somewhere in this stack.
+ *
+ * What has NOT changed is the thing that actually blocks a follow-up, and it is
+ * worth being precise because the two are easy to confuse. The blocker was
+ * never the capability. It is the SENDING DOMAIN. This product is white-
+ * labelled: a chain that buys Repple gets their own bundle id, their own store
+ * listing and their own domain precisely so that their members never see their
+ * supplier's name. An enquiry follow-up that arrives from a Repple address —
+ * or worse, from a chain's competitor's address — is the same violation the
+ * join page was fixed for, on the one message a prospect reads before they are
+ * anybody's customer.
+ *
+ * ── So the message goes out of the coach's own phone ──────────────────────
+ *
+ * `mailto:` and `sms:` hand the drafted words to the mail or messages app the
+ * coach already uses, signed in as themselves. Nothing is sent by this app,
+ * nothing leaves a server, and the address it arrives from is the coach's own —
+ * which is not a compromise on white-label, it is a better answer than a
+ * sending domain would be. A chain's coach writes from the chain's address
+ * because that is the account on their phone.
+ *
+ * It also means `FOLLOW_UP_IS_MANUAL` stays literally true and stays on the
+ * screen. The coach presses send. The app writes the first draft.
+ *
+ * ── What a draft is not allowed to say ────────────────────────────────────
+ *
+ * The same rule `NEVER_SAYS` holds for a nudge, for the same reason: this is a
+ * stranger who left their number, and a message that claims something the app
+ * cannot know is one the coach sends without rereading. So no draft below
+ * states a price, a result, a promise about what training will do, or anything
+ * about the person. Every one of them says who is writing, what they are
+ * answering, and asks one question.
+ */
+
+/** The three moments a coach actually writes to an enquiry. */
+export type FollowUpKind = 'first' | 'second' | 'last';
+
+/** Title Case — these are the labels on the buttons. */
+export const FOLLOW_UP_LABEL: Record<FollowUpKind, string> = {
+  first: 'Draft a First Reply',
+  second: 'Draft a Second Try',
+  last: 'Draft a Last Word',
+};
+
+/** Sentence case — the line under the button, so a coach picks the right one
+ *  rather than the first one. */
+export const FOLLOW_UP_WHEN: Record<FollowUpKind, string> = {
+  first: 'the day they get in touch. The one that matters most.',
+  second: 'a few days later, when the first went unanswered.',
+  last: 'once, and then leave them alone. It closes the door politely.',
+};
+
+/** A drafted message, before anybody has sent anything. */
+export interface FollowUpDraft {
+  /** Only used by mail. A text message has no subject and inventing one puts
+   *  the word "Subject:" in somebody's SMS. */
+  subject: string;
+  body: string;
+}
+
+/** The coach's own first name, for signing off, or null. First word only and
+ *  never a fragment of an email address or a bare uuid — the same rule
+ *  `greetingName` in src/lib/nudge.ts keeps, and for the same reason: a message
+ *  signed "7f3a9c21" is worse than one signed with nothing. */
+export function senderName(name: string | null | undefined): string | null {
+  const first = String(name ?? '').trim().split(/\s+/)[0] ?? '';
+  if (!first) return null;
+  if (first.includes('@')) return null;
+  if (/^[0-9a-f-]{8,}$/i.test(first)) return null;
+  if (!/[A-Za-zÀ-ÿ]/.test(first)) return null;
+  return first;
+}
+
+/** Their given name, for the greeting. Same rule, applied to what they typed on
+ *  a form — where "Mr Smith" and "sarah" are both ordinary. */
+function theirName(name: string | null | undefined): string | null {
+  return senderName(name);
+}
+
+/**
+ * The draft.
+ *
+ * `business` is the coach's own trading name where they have set one, and their
+ * own name otherwise. It is NEVER this app's brand: the coach is writing as
+ * themselves and a prospect who has never heard of the software should not meet
+ * its name in the first sentence. Null is handled by simply not naming a
+ * business, which reads perfectly well.
+ */
+export function followUpDraft(
+  kind: FollowUpKind,
+  lead: Pick<LeadRow, 'name' | 'note'>,
+  coachName: string | null | undefined,
+  business?: string | null,
+): FollowUpDraft {
+  const who = theirName(lead.name);
+  const me = senderName(coachName);
+  const hi = who ? `Hi ${who},` : 'Hi,';
+  const sign = me ? `\n\n${me}` : '';
+  const trading = (business || '').trim();
+  // Only where they actually left one. "Thanks for your message" said to
+  // somebody who left a name and a number and nothing else is the app inventing
+  // a message they did not write.
+  const theirs = lead.note ? '\n\nYou mentioned: ' + lead.note.trim() : '';
+  const from = trading ? ` at ${trading}` : '';
+
+  if (kind === 'first') {
+    return {
+      subject: 'About your message',
+      body: `${hi}\n\nThanks for getting in touch${from} — I saw your enquiry and wanted to reply myself.${theirs}`
+        + `\n\nWhat are you hoping to get out of training at the moment? Once I know that I can tell you`
+        + ` honestly whether I am the right person for it.${sign}`,
+    };
+  }
+  if (kind === 'second') {
+    return {
+      subject: 'Following up',
+      body: `${hi}\n\nI wrote a few days ago about your enquiry${from} and I know how easily these get buried.`
+        + `\n\nIf you are still thinking about it, tell me what you are training for and I will come back with`
+        + ` something specific. If the timing is wrong, that is a fine answer too.${sign}`,
+    };
+  }
+  return {
+    subject: 'Leaving you to it',
+    body: `${hi}\n\nI have not heard back, so I will stop writing — nobody needs another inbox to clear.`
+      + `\n\nIf you want to pick it up later, reply to this and I will still be here.${sign}`,
+  };
+}
+
+/** URL-encode for a mailto/sms query, including the characters
+ *  `encodeURIComponent` leaves alone but a mail app treats as separators. */
+const q = (v: string): string =>
+  encodeURIComponent(v).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+
+/**
+ * A phone number as typed, reduced to something a dialler will accept.
+ *
+ * Three things happen and each is a real number a coach has in their list:
+ *
+ *   · A PARENTHESISED TRUNK PREFIX is dropped when the number is
+ *     international. `+44 (0)7700 900123` is the ordinary British way of
+ *     writing a number that is dialled as `+447700900123` from abroad and
+ *     `07700 900123` at home — the bracketed zero is explicitly the digit you
+ *     do NOT dial with the country code. Keeping it produces `+4407700900123`,
+ *     which is not a number anywhere, and the message silently fails to send.
+ *     Only applied to a `+` number: `(0161) 496 0000` is a UK area code and
+ *     every digit of it is dialled.
+ *   · Everything that is not a digit goes, brackets and spaces included. An
+ *     `sms:` URL carrying them fails to open at all on some Android builds, and
+ *     a button that does nothing is indistinguishable from a broken app.
+ *   · A `+` survives only in the first position. A stray one mid-string is a
+ *     typo or an extension marker and a dialler will refuse the whole string.
+ */
+function dialable(raw: string): string {
+  const s = raw.trim();
+  const intl = s.startsWith('+');
+  const body = intl ? s.slice(1).replace(/\(\s*\d+\s*\)/g, '') : s;
+  const digits = body.replace(/\D/g, '');
+  if (!digits) return '';
+  return intl ? '+' + digits : digits;
+}
+
+/**
+ * The link that opens the coach's own mail or messages app with the draft in
+ * it, or null when there is nothing to open it with.
+ *
+ * Null for a contact this app could not read as an email or a phone number, and
+ * that refusal is the whole reason `contactKind` returns 'unknown' rather than
+ * guessing: offering to dial an Instagram handle is worse than offering
+ * nothing, because the coach finds out after they have tapped it.
+ *
+ * A phone number is stripped to digits and a leading `+` — an `sms:` URL with
+ * brackets and spaces in it silently fails to open on some Android builds, and
+ * a button that does nothing is indistinguishable from an app that is broken.
+ *
+ * The SMS body is carried on `?body=`, which iOS and Android both honour and
+ * which is ignored rather than shown as text where they do not.
+ */
+export function followUpLink(lead: Pick<LeadRow, 'contact' | 'contactKind'>, draft: FollowUpDraft): string | null {
+  const to = String(lead.contact ?? '').trim();
+  if (!to) return null;
+  if (lead.contactKind === 'email') {
+    return `mailto:${q(to)}?subject=${q(draft.subject)}&body=${q(draft.body)}`;
+  }
+  if (lead.contactKind === 'phone') {
+    const digits = dialable(to);
+    if (!digits) return null;
+    return `sms:${digits}?body=${q(draft.body)}`;
+  }
+  return null;
+}
+
+/**
+ * The follow-up note to record after the coach sends one, pre-filled.
+ *
+ * A record of what was actually done is the whole of what this screen keeps,
+ * and a coach who has just opened their mail app is exactly the person who will
+ * not come back and type one. The note names WHICH draft was opened, because
+ * "wrote to them" three times in a row tells nobody which stage it reached.
+ *
+ * It is a starting point and not a claim: the coach may have edited the draft
+ * to nothing, or closed the mail app without sending. The wording says
+ * "opened", which is the only thing this app actually observed.
+ */
+export function followUpRecord(kind: FollowUpKind, channel: 'email' | 'text'): string {
+  const which = kind === 'first' ? 'first reply' : kind === 'second' ? 'second try' : 'last word';
+  return `Opened the ${which} as ${channel === 'email' ? 'an email' : 'a text'} from my own phone.`;
 }

@@ -204,11 +204,60 @@ export const MAX_COOLDOWN_DAYS = 28;
  *  derived, because it is a convention rather than a measurement. */
 export const DEFAULT_COOLDOWN_DAYS = 14;
 
-export function paceFor(baselinePerWeek: number | null): Pace {
+/**
+ * The coach's own bound on how often the app may raise the same person.
+ *
+ * The constants above are one set of numbers for every coach, and there is no
+ * one set. A coach whose clients come to a room every Tuesday knows within a
+ * week that somebody has stopped; a coach with an online-only book, where a
+ * client can be perfectly fine and invisible for a fortnight, needs longer.
+ * Today both are given the same seven-day floor and the same twenty-eight-day
+ * ceiling, and the first coach finds the list slow while the second finds it
+ * nagging — which are the same complaint about the same number from opposite
+ * ends.
+ *
+ * ONE number, and it is a FLOOR rather than an override. The per-client pace is
+ * the part that works: paced off the client's own rhythm, a fortnightly client
+ * is not chased mid-gap and a daily one is not left for a month. A coach who
+ * replaced that with a flat number would be throwing away the thing this
+ * module is for. What they are actually asking is "never inside N days", which
+ * is a floor, and a floor composes with the pacing instead of deleting it.
+ *
+ * The ceiling moves with it: a coach who says thirty days means thirty days,
+ * and clamping their floor back down to the twenty-eight-day cap would silently
+ * ignore what they typed.
+ */
+export interface PaceBounds {
+  /** Shortest gap the coach will accept between two approaches to one person,
+   *  in days. Null or absent is "use the module's own floor" — NOT zero, which
+   *  would be a coach asking to be prompted daily. */
+  minCooldownDays?: number | null;
+}
+
+/** The floor to use, from a coach's preference. Anything outside a day to a
+ *  year is refused rather than clamped: a stored 0 or a stored 100000 is a bad
+ *  write or an older build's field, and honouring it would either nag daily or
+ *  silence a client for three centuries. Refusing falls back to the module's
+ *  own number, which is a defensible answer; clamping would invent one the
+ *  coach never chose. */
+export function cooldownFloor(bounds?: PaceBounds | null): number {
+  const v = bounds?.minCooldownDays;
+  if (v == null || !Number.isFinite(v)) return MIN_COOLDOWN_DAYS;
+  const n = Math.round(v);
+  return n >= 1 && n <= 365 ? n : MIN_COOLDOWN_DAYS;
+}
+
+export function paceFor(baselinePerWeek: number | null, bounds?: PaceBounds | null): Pace {
+  const floor = cooldownFloor(bounds);
   if (baselinePerWeek == null || !(baselinePerWeek > 0)) {
     return {
       expectedGapDays: null,
-      cooldownDays: DEFAULT_COOLDOWN_DAYS,
+      // With no pattern the number is a convention rather than a measurement —
+      // and where the coach has stated their own convention, theirs is the one
+      // that applies. Only when they have not does the module's fortnight stand.
+      cooldownDays: bounds?.minCooldownDays != null && floor !== MIN_COOLDOWN_DAYS
+        ? floor
+        : DEFAULT_COOLDOWN_DAYS,
       judgeAfterDays: null,
       basis: 'no-pattern',
     };
@@ -216,7 +265,9 @@ export function paceFor(baselinePerWeek: number | null): Pace {
   const gap = 7 / baselinePerWeek;
   return {
     expectedGapDays: round1(gap),
-    cooldownDays: clamp(Math.round(gap * COOLDOWN_GAPS), MIN_COOLDOWN_DAYS, MAX_COOLDOWN_DAYS),
+    // The ceiling is raised to meet a floor above it rather than the floor being
+    // pushed down to meet the ceiling. A coach who typed 45 gets 45.
+    cooldownDays: clamp(Math.round(gap * COOLDOWN_GAPS), floor, Math.max(MAX_COOLDOWN_DAYS, floor)),
     judgeAfterDays: Math.max(MIN_JUDGE_DAYS, Math.round(gap * JUDGE_GAPS)),
     basis: 'own-pattern',
   };
@@ -225,8 +276,8 @@ export function paceFor(baselinePerWeek: number | null): Pace {
 /** The pace for a member, from their drift verdict. A member with no verdict at
  *  all — nothing that records attendance was read — paces as no-pattern, which
  *  is the honest reading: we do not know how often they came. */
-export function paceOf(drift: Drift | null): Pace {
-  return paceFor(drift?.baselinePerWeek ?? null);
+export function paceOf(drift: Drift | null, bounds?: PaceBounds | null): Pace {
+  return paceFor(drift?.baselinePerWeek ?? null, bounds);
 }
 
 /** Why this member's window is the length it is, in a sentence. */

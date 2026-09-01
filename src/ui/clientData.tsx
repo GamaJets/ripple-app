@@ -100,6 +100,29 @@ interface Value {
    *  scan is on this phone for this session and will be gone at relaunch — the
    *  local cache is cleared on launch when the backend is on. */
   addScan: (s: ScanRec) => Promise<boolean>;
+  /**
+   * Correct a scan that was entered wrong, by id.
+   *
+   * ── Why this had to exist ────────────────────────────────────────────────
+   *
+   * There was no way to change a scan and no `.delete()` against `scans`
+   * anywhere in the app, so a mistyped weight was permanent. That is not merely
+   * an untidy row: the LATEST scan is what `weightKg`, `bodyFatPct` and
+   * `muscleKg` resolve to, and those drive the client's calorie and macro
+   * targets, every body chart, the standards screen and the report their coach
+   * reads. A finger slip that entered 87 kg as 187 kg re-tuned the meal plan
+   * around it and there was nothing anybody could do about it from inside the
+   * app.
+   *
+   * Resolves true only once the change is on the server, for the same reason
+   * `addScan` does: an edit that only ever happened in memory is undone by the
+   * next launch, and the caller has to be able to say so.
+   */
+  updateScan: (id: string, patch: { takenAt?: string; weightKg?: number; bodyFatPct?: number; skeletalMuscleKg?: number | null }) => Promise<boolean>;
+  /** Remove a scan for good, by id. Resolves true only once the row is gone
+   *  from the server — a local-only removal reappears at the next launch, which
+   *  is worse than never having removed it. */
+  deleteScan: (id: string) => Promise<boolean>;
   weightSeries: Series[]; bodyFatSeries: Series[]; muscleSeries: Series[];
   /** Whether the signed-in user's profile AND scans were both read from the
    *  server. Under 'error' the fields above are defaults and nulls that were
@@ -563,6 +586,13 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       try {
         const { data, error } = await supabase.from('scans').insert({ client_id: sbUid, taken_at: String(s.takenAt).slice(0, 10), weight_kg: s.weightKg, body_fat_pct: s.bodyFatPct, skeletal_muscle_kg: s.skeletalMuscleKg, source: s.source }).select('id').single();
         if (error || !data?.id) { reportError('clientData.addScan', error); return false; }
+        // The caller's id was a local one ('s' + Date.now()); the row's id is
+        // the server's. They are swapped here rather than left to diverge,
+        // because `updateScan` and `deleteScan` address rows BY ID and a scan
+        // added this session would otherwise carry an id no row has — so
+        // correcting a scan you had just typed, which is when a typo is
+        // actually noticed, would silently match nothing.
+        setScans((p) => p.map((row) => (row.id === s.id ? { ...row, id: String(data.id) } : row)));
         if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
           // The composition breakdown is a second write against the row we just
           // made. Losing it costs the InBody detail, not the scan, so the scan
@@ -573,6 +603,67 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         }
         return true;
       } catch (e) { reportError('clientData.addScan', e); return false; }
+    },
+    updateScan: async (id, patch): Promise<boolean> => {
+      // Applied locally first, exactly as addScan does, so the correction is on
+      // screen while the write is in flight — and reported honestly afterwards
+      // rather than assumed.
+      setScans((p) => p.map((row) => (row.id === id ? {
+        ...row,
+        takenAt: patch.takenAt ?? row.takenAt,
+        weightKg: patch.weightKg ?? row.weightKg,
+        bodyFatPct: patch.bodyFatPct ?? row.bodyFatPct,
+        skeletalMuscleKg: patch.skeletalMuscleKg !== undefined ? patch.skeletalMuscleKg : row.skeletalMuscleKg,
+      } : row)));
+      // A manual weight typed after the scan was taken would otherwise go on
+      // beating the corrected figure (see manualBeatsScan) — so the same clear
+      // addScan does is done here, because a correction is a statement that the
+      // scan is now the right answer.
+      setManualWeight(null); setManualBodyFat(null);
+      if (!USE_SUPABASE || !sbUid) return false;
+      const row: Record<string, unknown> = {};
+      if (patch.takenAt !== undefined) row.taken_at = String(patch.takenAt).slice(0, 10);
+      if (patch.weightKg !== undefined) row.weight_kg = patch.weightKg;
+      if (patch.bodyFatPct !== undefined) row.body_fat_pct = patch.bodyFatPct;
+      if (patch.skeletalMuscleKg !== undefined) row.skeletal_muscle_kg = patch.skeletalMuscleKg;
+      if (!Object.keys(row).length) return true;
+      try {
+        // `.eq('client_id', sbUid)` as well as the id. RLS already scopes this
+        // to the signed-in account, so the clause changes nothing about what is
+        // permitted — it is here so that a bug handing this an id from another
+        // account fails to match rather than relying on the policy as the only
+        // thing between a client and somebody else's body record.
+        //
+        // `.select('id')` so the count is readable. An update matching NO rows
+        // is not an error in PostgREST, and without this a correction to a scan
+        // that had already been deleted elsewhere would report success.
+        const { data, error } = await supabase.from('scans').update(row).eq('id', id).eq('client_id', sbUid).select('id');
+        if (error) { reportError('clientData.updateScan', error); return false; }
+        return Array.isArray(data) && data.length > 0;
+      } catch (e) { reportError('clientData.updateScan', e); return false; }
+    },
+    deleteScan: async (id): Promise<boolean> => {
+      const before = scans;
+      setScans((p) => p.filter((row) => row.id !== id));
+      if (!USE_SUPABASE || !sbUid) return false;
+      try {
+        const { data, error } = await supabase.from('scans').delete().eq('id', id).eq('client_id', sbUid).select('id');
+        if (error || !Array.isArray(data) || data.length === 0) {
+          // Put it back. A scan that is still on the server and gone from the
+          // screen is the worst of the three states: the client believes it is
+          // deleted, their coach still sees it, and the next launch brings it
+          // back with no explanation. Restoring makes the failure visible at
+          // the moment the caller can still say so.
+          setScans(before);
+          if (error) reportError('clientData.deleteScan', error);
+          return false;
+        }
+        return true;
+      } catch (e) {
+        setScans(before);
+        reportError('clientData.deleteScan', e);
+        return false;
+      }
     },
     weightSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
     bodyFatSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],

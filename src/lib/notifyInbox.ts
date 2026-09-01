@@ -162,6 +162,21 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // above, which is the SAME DOCUMENT seen from the other side: the ask and the
   // answer should not be two different shapes in two inboxes.
   ['/(trainer)/client-intake', 'pencil'],
+  // ── and the two screens part 202 sends a coach to ────────────────────────
+  //
+  // Quiet Clients is 'bell' in TRAINER_NAV, which is also the fallback this
+  // list returns for a route it does not know — so the entry changes nothing at
+  // runtime and is here anyway. Without it the row's icon is an ACCIDENT that
+  // happens to be right, and the next person to add a fallback for unknown
+  // routes would change this notification without knowing they had.
+  ['/(trainer)/nudges', 'bell'],
+  // Working Toward is 'target' in TRAINER_NAV and `InboxIcon` has no 'target' —
+  // it is a deliberately short list, and widening it for one row would put a
+  // shape in coach inboxes that appears nowhere else. 'trophy' rather than the
+  // bell, because a goal reached is the one notification in this product where
+  // the trophy is literally what happened, and the bell means "we do not know
+  // what this is".
+  ['/(trainer)/client-goals', 'trophy'],
 ];
 
 const startsWithAny = (route: string, prefixes: readonly string[]): boolean =>
@@ -492,6 +507,36 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     where: 'supabase/parts/163 · pack_balance_notify',
     when: 'a paid session pack reaches none left — including via promote_from_waitlist()',
     to: 'trainer', title: 'A session pack has run out', route: '/(trainer)/payments', icon: 'grid',
+  },
+  // ── three the app computed and told nobody (part 202) ────────────────────
+  //
+  // The first and the third are the first SCHEDULED writers in this table.
+  // Everything above is a trigger firing inside somebody's transaction; these
+  // two are a nightly pg_cron pass, because both are about the ABSENCE of a
+  // write — nobody inserts a row saying "this client did not come in", and
+  // nobody inserts one saying "your insurance ran out today".
+  {
+    where: 'supabase/parts/202 · run_overdue_client_notices',
+    when: 'a client is past their own median gap between active days by more than the tolerance in src/lib/cadence.ts',
+    to: 'trainer', title: 'A client is past their usual gap', route: '/(trainer)/nudges', icon: 'bell',
+  },
+  {
+    where: 'supabase/parts/202 · goal_achieved_notify',
+    when: 'a client marks one of their own goals reached — the upward crossing of goal_targets.achieved_at',
+    // The parameter is the point, as it is for the coach's chat thread and
+    // their client's intake: client-goals.tsx has a roster picker and opens
+    // without one, so a missing id is not an error — it is a notification about
+    // a named person that opens a list of everybody.
+    to: 'trainer', title: 'A client has hit a goal',
+    route: '/(trainer)/client-goals?clientId=00000000-0000-0000-0000-000000000000', icon: 'trophy',
+  },
+  {
+    where: 'supabase/parts/202 · run_credential_expiry_notices',
+    when: 'a coach’s credential or insurance is sixty days from expiry, and again on the day it lapses',
+    // The only row in this table addressed to a coach about the COACH rather
+    // than about a client, and the only one whose consequence is outside the
+    // app: lapsed public liability means somebody is working uninsured.
+    to: 'trainer', title: 'Your insurance runs out soon', route: '/(trainer)/credentials', icon: 'trophy',
   },
 ];
 

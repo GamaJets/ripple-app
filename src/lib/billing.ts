@@ -6,6 +6,11 @@
 import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
+// The single copy of "which currencies have no minor unit". It lives in
+// coachMoney.ts because that is where it was first needed and it is tested
+// there; coachStatement.ts and coachInvoice.ts already import it from there
+// rather than keeping their own, and so does this file now.
+import { ZERO_DECIMAL } from './coachMoney';
 
 export interface Subscription { trainer_id: string; plan: string | null; status: string | null; current_period_end: string | null; cancel_at_period_end: boolean }
 export interface Invoice { id: string; trainer_id: string | null; amount_due: number | null; currency: string | null; status: string | null; attempt_count: number | null; hosted_invoice_url: string | null; created_at: string }
@@ -98,17 +103,39 @@ export async function fetchFailedInvoices(): Promise<Invoice[] | null> {
  * Unknown is a dash, and an unrecognised currency prints its ISO code rather
  * than a symbol invented for it. An honest "AED 600.00" beats a confident
  * "$600.00" every time.
+ *
+ * \u2500\u2500 AND THE THIRD: IT DIVIDED BY A HUNDRED WHATEVER THE CURRENCY WAS \u2500\u2500\u2500\u2500\u2500\u2500
+ *
+ * `cents / 100` is only true of a currency that has hundredths. Sixteen of the
+ * ones Stripe bills in do not \u2014 there is no sen in a yen, no jeon in a won \u2014
+ * and for those the amount Stripe sends IS the whole-unit figure. A \u00a55,000
+ * subscription was therefore printed as "JPY 50.00": a hundredth of what the
+ * customer is actually being charged, on the screen they check to see what they
+ * are being charged. `ZERO_DECIMAL` is the list, it is imported rather than
+ * copied, and the division now happens only when the currency in hand says it
+ * should.
+ *
+ * With NO currency the scale is unknown as well as the unit, because whether
+ * this integer is hundredths or whole units is precisely what the currency
+ * would have told us. So that branch prints the integer Stripe sent, undivided,
+ * and says the currency was not read. A confident "6.00" there is a made-up
+ * decimal point on top of a made-up currency.
  */
 export const money = (cents: number | null, cur: string | null = null): string => {
   if (cents == null || !Number.isFinite(cents)) return '\u2014';
-  const v = cents / 100;
-  const amount = v.toLocaleString(undefined, { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
-  const c = (cur || '').toLowerCase();
+  const c = (cur || '').trim().toLowerCase();
+  // Stripe always sends a currency, so its absence means the read did not land,
+  // and guessing is what this whole function exists to refuse.
+  if (!c) return `${cents.toLocaleString(undefined)} (currency not read)`;
+  const zero = ZERO_DECIMAL.has(c);
+  const v = zero ? cents : cents / 100;
+  const amount = v.toLocaleString(undefined, {
+    minimumFractionDigits: !zero && v % 1 ? 2 : 0,
+    maximumFractionDigits: zero ? 0 : 2,
+  });
   const sym = SYMBOLS[c];
   if (sym) return sym + amount;
-  // Including no currency at all: Stripe always sends one, so its absence means
-  // the read did not land, and guessing is what this whole change removes.
-  return c ? `${c.toUpperCase()} ${amount}` : `${amount} (currency not read)`;
+  return `${c.toUpperCase()} ${amount}`;
 };
 
 /**

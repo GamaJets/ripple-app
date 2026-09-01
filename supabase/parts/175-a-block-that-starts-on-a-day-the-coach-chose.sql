@@ -1,0 +1,85 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- "This one starts Monday" — a sentence the app made a coach set an alarm for.
+--
+-- `assigned_programs` is `(client_id, coach_id, program, updated_at)`. There is
+-- no date in it and there never has been, so an assignment IS a start: the
+-- write lands, the client's Train tab reads the row on its next render, and
+-- whatever they were going to do on Friday is gone.
+--
+-- A coach writing next week's block on a Thursday afternoon therefore has two
+-- options. Replace this week as well, or wait — on their phone, on Sunday
+-- night — and tap Assign at the right moment. They wait. That is this app
+-- making a self-employed person schedule a database write around their evening.
+--
+-- ── What this part adds, and the much larger thing it does NOT ────────────
+--
+-- One nullable column. `starts_on` is the day the COACH said the block begins.
+--
+-- It does not hold the programme back, and nothing in this part pretends
+-- otherwise. What a client trains today is decided in the CLIENT app —
+-- `app/(client)/workouts.tsx` picks the day by a modulo over `program.days`,
+-- `app/(client)/week.tsx` matches the exact weekday — and neither reads this
+-- column, because neither has been taught to and that app is already on
+-- people's phones. A trigger here that refused to serve a future assignment
+-- would not fix that; it would empty a client's Train tab, because the client
+-- app has no branch for "your programme exists and is not due yet" and would
+-- fall through to the generic auto plan, silently, mid-block.
+--
+-- So the column is a RECORD, the coach's screens do the arithmetic
+-- (src/lib/programStart.ts), and every screen that shows a start date carries
+-- `CLIENT_STARTS_NOW` — one string, so that the day the client app honours it
+-- there is one thing to delete and one grep that finds every promise made.
+--
+-- Saying so plainly is the whole safety argument. A coach who believes the date
+-- is enforced, and assigns a block "starting Monday" on a Thursday, has just
+-- replaced their client's Friday session while believing they did not. That is
+-- strictly worse than the Sunday night alarm this part is trying to end.
+--
+-- ── Why a DATE and not a timestamptz ──────────────────────────────────────
+--
+-- Because there is no client timezone anywhere in this schema. The coach's
+-- screens say so at length — `app/(trainer)/client-week.tsx` and
+-- src/lib/coachWeek.ts both refuse to state whether a past day was trained for
+-- exactly this reason — and a `timestamptz` here would invite a future writer
+-- to stamp the coach's midnight onto a client's calendar in another zone and
+-- call it a start. A bare date is what the coach wrote on the plan and what
+-- both of them read. The cost is bounded and visible: for a few hours a day two
+-- people in different zones disagree about which day today is, so a block can
+-- read as week 2 for one and week 1 for the other, and the week number is never
+-- shown without the date beside it.
+--
+-- ── Why nullable, with no default ─────────────────────────────────────────
+--
+-- NULL is "the coach did not say", and it is the state every assignment ever
+-- made is in. It is NOT "starts today": a default of `current_date` would
+-- back-date every existing row to the morning this migration ran and put every
+-- client in the app into week one of a block they are four weeks into.
+-- `blockPosition` reports NULL as its own phase — 'no-date' — with its own
+-- sentence, exactly as `coach_invoices.due_on` in part 168 reports an invoice
+-- with no stated term rather than folding it in with the ones inside terms.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role, so current_user is the same
+-- string for everybody on the platform.
+-- ─────────────────────────────────────────────────────────────────────────
+
+alter table public.assigned_programs add column if not exists starts_on date;
+
+comment on column public.assigned_programs.starts_on is
+  'The day the COACH said this block begins. Nullable and undefaulted: null means they did not say, never "today". It does NOT gate what the client sees — the client app renders whatever is on this row from the moment it is written — and every screen showing it says so.';
+
+-- No index. This column is only ever read alongside the row it sits on, one
+-- client at a time, off a primary key lookup — there is no query anywhere that
+-- selects assignments BY start date, and an index that no plan uses is a write
+-- cost on the hottest table in the coach app.
+
+-- ── How long the block is, so the week number has a denominator ───────────
+--
+-- Deliberately NOT a column. A programme's length is a fact about the
+-- `program` jsonb — `weeks` on it, resolved by `weekCount` in
+-- src/lib/programBlock.ts — and duplicating it here would create two answers to
+-- "how many weeks is this", one of which would be stale the moment a coach
+-- added a week. The same reasoning `setRows` gives about `sets` applies with
+-- the opposite conclusion: there the two numbers are written together by one
+-- function in one file, and here the second one would be written by the
+-- database and never updated by the edit that changed it.

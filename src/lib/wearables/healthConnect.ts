@@ -16,9 +16,16 @@
 // and the same one that keeps BloodGlucose OUT of the iOS set. One record
 // type, asked for when the person opens the screen that uses it.
 //
+// That separation is now a FILE separation: `./healthConnectTraining.ts` reads
+// steps, heart rate, calories and workouts, under its own permission set,
+// asked for only when somebody taps Connect on Watch & Devices. Blood sugar
+// stays here and stays alone, so the sheet somebody sees on the Blood Sugar
+// screen still lists exactly one record type. Both share `hcModule()` below,
+// because the native module and the ways it can be missing are one problem, not
+// two.
+//
 // It also does not implement `WearableProvider`. That contract is about daily
-// metrics, and this module has none — `registry.ts` still lists Health Connect
-// as a device Repple cannot connect for training data, and that is still true.
+// metrics, and this module has none.
 //
 // ── WHY EVERY NATIVE CALL IS GUARDED ───────────────────────────────────────
 //
@@ -91,6 +98,18 @@ function hc(): any {
  */
 export function healthConnectPresent(): boolean {
   return Platform.OS === 'android' && !!hc();
+}
+
+/**
+ * The same guarded, cached native module, for `./healthConnectTraining.ts`.
+ *
+ * Exported rather than duplicated. A second `require` in a second file would be
+ * a second `tried` latch and a second set of guards, and the whole point of the
+ * caching note above is that the answer is permanent within a process — two
+ * copies of a permanent answer is two places for it to be wrong.
+ */
+export function hcModule(): any {
+  return hc();
 }
 
 /**

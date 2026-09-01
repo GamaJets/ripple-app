@@ -44,6 +44,19 @@ import type { WorkoutSample } from '../../src/lib/wearables/types';
 import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { est1RM } from '../../src/lib/streaks';
 import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
+// A hold is a set whose first number is seconds. The programme builder writes
+// '45 sec' planks and '30 sec/side' side planks, so the prescription is read
+// here to decide which box this screen opens with — see src/lib/timedSets.ts.
+import { isTimedPrescription, prescribedSeconds, readHold, holdLabel, timedSetLabel } from '../../src/lib/timedSets';
+// The set row itself, which used to be a local component and so was reachable
+// from this screen and nowhere else. See src/ui/LogSetRow.tsx.
+import { LogSetRow, SetKindChip, type LoggedSet } from '../../src/ui/LogSetRow';
+// A member's own changes to the plan, kept — and sent to their coach. Four
+// `useState`s held all of this and nothing wrote any of them anywhere; see
+// src/lib/planEdits.ts for what that cost, and src/ui/planEdits.tsx for the
+// hook that replaced them.
+import { planEditsNote } from '../../src/lib/planEdits';
+import { usePlanEdits } from '../../src/ui/planEdits';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 // Three outcomes, not two. Since src/ui/workoutLog.tsx was brought onto the
@@ -273,7 +286,11 @@ export default function Train() {
   const startMode: TrainMode = (['strength', 'cardio', 'hiit', 'mobility', 'recovery', 'stretch'] as const)
     .find((m) => m === modeParam) ?? 'strength';
   const [mode, setMode] = useState<TrainMode>(startMode);
-  const [swaps, setSwaps] = useState<Record<string, string>>({});
+  // Swaps, edits, removals and added movements, all four persisted. They were
+  // plain `useState` — a swap made on Tuesday was gone on Wednesday and the
+  // coach never heard about any of it.
+  const planEdits = usePlanEdits(cd.id);
+  const { swaps, setSwaps, exEdits, setExEdits, removedEx, setRemovedEx, customEx, setCustomEx } = planEdits;
   // `kg` is KILOGRAMS, whatever unit the member typed it in. The conversion
   // happens once, in `LogRow` at the keyboard, rather than being deferred to
   // the save — so a draft written in pounds and reopened after the setting is
@@ -285,7 +302,11 @@ export default function Train() {
   // required, because a draft written by a build that predates it is read back
   // out of AsyncStorage as-is and an absent flag has to mean what it meant
   // then: an ordinary set.
-  const [logged, setLogged] = useState<Record<string, { reps: string; kg: string; bw?: boolean }[]>>({});
+  // `timed` is the member saying this set was HELD, in which case `reps` holds
+  // SECONDS — see src/lib/timedSets.ts. Optional for the same reason `bw` is: a
+  // draft written by a build that predates it reads back out of AsyncStorage
+  // as-is, and an absent flag has to mean what it meant then.
+  const [logged, setLogged] = useState<Record<string, { reps: string; kg: string; bw?: boolean; timed?: boolean }[]>>({});
 
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number | null }[]>([]);
   const [nlw, setNlw] = useState('');
@@ -471,7 +492,6 @@ export default function Train() {
   };
   const [confetti, setConfetti] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [customEx, setCustomEx] = useState<ProgramExercise[]>([]);
   /**
    * Sets, reps and load a member has changed on a PROGRAMME exercise.
    *
@@ -487,11 +507,11 @@ export default function Train() {
    * be changed at all. The load was the one people noticed, because it is the
    * one that changes every week.
    */
-  const [exEdits, setExEdits] = useState<Record<string, { sets?: number; reps?: string; loadKg?: number | null }>>({});
+  // (held by `usePlanEdits` above.)
   const [addOpen, setAddOpen] = useState(false);
-  // Exercises the user took off today, by uid. Today only — the programme
-  // itself is not edited, so tomorrow's copy of the same lift still appears.
-  const [removedEx, setRemovedEx] = useState<string[]>([]);
+  // Exercises the user took off, by uid — a WEEKDAY and a key, so taking
+  // Monday's bench off takes Monday's bench off. The programme itself is not
+  // edited, so Wednesday's copy of the same lift still appears.
   // When set, the add sheet is editing this custom exercise rather than
   // creating one. Same sheet, because renaming IS replacing for a lift the
   // user typed themselves — it has no catalogue alternatives to swap to.
@@ -855,13 +875,30 @@ export default function Train() {
     removed: removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length,
     injuryHidden: injHidden.filter((u) => !injRevealed.includes(u)).length,
   });
-  const logSet = (e: ProgramExercise, reps: string, kg: number | null, bw = false) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg: kg == null ? '' : String(kg), ...(bw ? { bw: true } : {}) }] }); tapLight(); };
+  const logSet = (e: ProgramExercise, set: LoggedSet) => {
+    if (!set.value) return;
+    setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), {
+      reps: String(set.value),
+      kg: set.kg == null ? '' : String(set.kg),
+      ...(set.bw ? { bw: true } : {}),
+      ...(set.timed ? { timed: true } : {}),
+    }] });
+    tapLight();
+  };
   // One tap records the set the plan is asking for — TF-27, "can't tap an
   // exercise to log it". This function has existed here unreferenced: the only
   // way to record a set was to expand the row and type the two numbers the app
   // had already worked out and was showing you. It is offered next to that
   // suggestion, so the number you tap is the number you are looking at.
-  const quickLog = (e: ProgramExercise) => { const sg = suggestForExercise(workoutLog, nameOf(e), e.reps, 2.5, wu); logSet(e, String(parseInt(e.reps, 10) || 8), sg ? sg.weight : null); };
+  // A movement prescribed in seconds is quick-logged as the hold it asks for,
+  // not as a rep count parsed off the front of '45 sec'. Without this the one
+  // tap the plan offers recorded forty-five repetitions of a plank.
+  const quickLog = (e: ProgramExercise) => {
+    const sg = suggestForExercise(workoutLog, nameOf(e), e.reps, 2.5, wu);
+    const secs = prescribedSeconds(e.reps);
+    if (secs != null) { logSet(e, { value: secs, kg: sg ? sg.weight : null, bw: sg == null, timed: true }); return; }
+    logSet(e, { value: parseInt(e.reps, 10) || 8, kg: sg ? sg.weight : null, bw: false, timed: false });
+  };
   // One write path for every non-strength session, whether it was timed live in
   // the runner below or typed in afterwards. History, the calendar and the
   // trends all read this one shape, so a second writer would only be a second
@@ -959,6 +996,10 @@ export default function Train() {
       // On a bodyweight set the second number is what was ADDED to the person,
       // not the load — so the flags travel with the pairs or the pairs lie.
       const bwFlags = s.map((x) => x.bw === true);
+      // And on a timed set the FIRST number is seconds rather than reps, which
+      // is the other way the same pair can be read wrong. Both flags are
+      // written together with the sets they describe or neither means anything.
+      const timedFlags = s.map((x) => x.timed === true);
       // The PR claim below still ignores bodyweight sets, deliberately.
       // `priorBest1RM` lives in src/lib/progression.ts and reads a set's second
       // number as the load, so a pull-up's history reads as a run of zeros
@@ -966,7 +1007,7 @@ export default function Train() {
       // every single pull-up session a lifetime record, with confetti. The set
       // is stored, counted in the tonnage and eligible for the Records board;
       // only the mid-session claim waits for that function to learn about it.
-      const bestE1 = Math.max(0, ...setPairs.map(([r, kg], i) => (r && kg && !bwFlags[i] ? est1RM(kg, r) : 0)));
+      const bestE1 = Math.max(0, ...setPairs.map(([r, kg], i) => (r && kg && !bwFlags[i] && !timedFlags[i] ? est1RM(kg, r) : 0)));
       // The same guard SessionRunner carries, for the same reason, on the other
       // path into the same claim. `priorBest1RM` over an unread log returns 0
       // and EVERY set beats it, so a refused read turned an ordinary Tuesday
@@ -979,7 +1020,11 @@ export default function Train() {
       // Absent, not an array of false. A row written without the column means
       // "nobody was asked", which is the honest state for every entry logged
       // before this existed and the one a screen already knows how to read.
-      return { t: nowISO, exercise: nameOf(e), sets: setPairs, ...(bwFlags.some(Boolean) ? { bw: bwFlags } : {}) };
+      return {
+        t: nowISO, exercise: nameOf(e), sets: setPairs,
+        ...(bwFlags.some(Boolean) ? { bw: bwFlags } : {}),
+        ...(timedFlags.some(Boolean) ? { timed: timedFlags } : {}),
+      };
     }).filter(Boolean) as WorkoutEntry[];
     if (!entries.length) return;
     const out = await logWorkouts(entries);
@@ -1319,7 +1364,14 @@ export default function Train() {
                             <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5 }}>
                               {/* A blank load is a bodyweight set, and stays a
                                   dash rather than becoming "0" — see readLift. */}
-                              <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s.reps}×{fig(liftIn(s.kg === '' ? null : Number(s.kg), wu))} {wu}</Text>
+                              {/* A hold is printed as a clock and never as
+                                  "45×", which is what a reps chip would say
+                                  about a plank the app itself asked for. */}
+                              <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
+                                {s.timed
+                                  ? `${holdLabel(Number(s.reps) || 0)}${s.kg === '' ? '' : ` × ${fig(liftIn(Number(s.kg), wu))} ${wu}`}`
+                                  : `${s.reps}×${fig(liftIn(s.kg === '' ? null : Number(s.kg), wu))} ${wu}`}
+                              </Text>
                             </View>
                           ))}
                           <Pressable onPress={() => setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; })} hitSlop={6} style={{ paddingHorizontal: 4 }}>
@@ -1423,7 +1475,9 @@ export default function Train() {
                               <Pressable accessibilityRole="button" accessibilityLabel={'Swap ' + nameOf(e) + ' for another movement'} onPress={() => setSwapFor(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
                             ) : null}
                           </View>
-                          <LogRow t={t} unit={wu} onLog={(reps, kg, bw) => logSet(e, reps, kg, bw)} />
+                          {/* Opened on the hold box for a movement the plan
+                              prescribes in seconds. See src/ui/LogSetRow.tsx. */}
+                          <LogSetRow t={t} unit={wu} timedDefault={isTimedPrescription(e.reps)} onLog={(set) => logSet(e, set)} />
                         </View>
                       ) : null}
                     </View>
@@ -1437,6 +1491,19 @@ export default function Train() {
                   <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>Rest Day</Text>
                   <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>Nothing scheduled today — recovery is where the gains happen. Pick another day above to train, or switch to Cardio to log a session.</Text>
                 </View>
+              ) : null}
+
+              {/* Where the member's own changes are. Said out loud because
+                  until now they were nowhere: a swap or a corrected load lived
+                  in a React state until the app was next killed, and the coach
+                  went on writing a programme the member went on quietly
+                  rewriting. The three states are three sentences — see
+                  `planEditsNote` — and "your coach can see them" is never said
+                  off a write nobody answered. */}
+              {planEditsNote(planEdits.edits, planEdits.shared) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                  {planEditsNote(planEdits.edits, planEdits.shared)}
+                </Text>
               ) : null}
 
               {exercises.length > 0 || customEx.length > 0 ? (
@@ -2054,105 +2121,11 @@ export default function Train() {
   );
 }
 
-/**
- * The two boxes that record one set.
- *
- * The load is read through `readLift` rather than `parseFloat(kg) || 0`, which
- * is what this shipped with: a fat-fingered load became a confident 0, and a
- * 0 in a set row is a BODYWEIGHT set as far as the volume, the estimated 1RM
- * and next session's target are concerned. A typo is not a claim that the bar
- * was empty, so it is refused instead — and the bound in that refusal is
- * stated in the unit on the keyboard, because telling somebody typing pounds
- * that 1,000 is impossible would be wrong.
- *
- * What leaves here is kilograms. The unit is a reading and typing convention;
- * the record is metric, and the coach's console reads the same row.
- *
- * The third thing it records is whether the set was the member's own body. That
- * used to be recorded by leaving the box empty and hoping — the alert below
- * has always said "the box can stay empty for a bodyweight set" — and an empty
- * box stored a zero that every reader downstream threw away. So an empty box
- * now says BODYWEIGHT out loud, and the toggle exists for the case an empty box
- * could never express: a pull-up with twenty kilos on a belt, where the number
- * typed is what was added to the person rather than what was on a bar.
- */
-function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: string, kg: number | null, bw: boolean) => void }) {
-  const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
-  const [bwOn, setBwOn] = useState(false);
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, flex: 1, ...ty.body } as const;
-  return (
-    <View style={{ marginTop: sp.md }}>
-    <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
-      <Field label="Reps">
-        <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
-      </Field>
-      {/* The unit is switchable here, not only in Settings. Somebody who thinks
-          in kilos should not have to leave a live session to say so — see
-          src/ui/WeightUnitToggle.tsx for why it moves the account setting
-          rather than just this box. */}
-      <Field label={bwOn ? 'Added' : 'Load'} accessory={<WeightUnitToggle />} a11y={bwOn ? (unit === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight') : (unit === 'kg' ? 'Load in kilograms' : 'Load in pounds')}>
-        <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad" style={inp} />
-      </Field>
-      <Pressable accessibilityRole="button" accessibilityLabel="Log set" onPress={() => {
-        // The reps are checked HERE and said out loud. `logSet` guarded with a
-        // bare `if (!reps) return`, so tapping this with an empty reps box —
-        // which is what happens when somebody types the load first and then
-        // reaches for the button — did nothing at all: no set, no haptic, no
-        // reason. And `parseInt` on anything unparseable is what would have put
-        // a zero-rep set in the log.
-        const r = parseInt(reps, 10);
-        if (!Number.isFinite(r) || r <= 0) { Alert.alert('How many reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
-        const read = readLift(kg, unit);
-        // Left in the box on a refusal, with the reason said, rather than
-        // cleared — the number was typed once and the app has no better guess.
-        if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
-        // An empty load box IS a bodyweight set, which is what the alert above
-        // has always told people. Recorded rather than inferred later: a stored
-        // 0 cannot be told apart from a load nobody typed, and inferring it at
-        // read time would relabel every old zero as a pull-up.
-        onLog(String(r), read.kg, bwOn || read.kg == null); setReps(''); setKg('');
-      }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
-        <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log set</Text>
-      </Pressable>
-    </View>
-    <BodyweightChip t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)} unit={unit} />
-    </View>
-  );
-}
-
-/**
- * "This set was my own bodyweight."
- *
- * One chip, used by both log paths, because the two of them have already drifted
- * apart once over the same idea — the typed-in screen and the guided runner
- * each carry their own copy of the reps guard and the load guard, word for word,
- * with a comment on each saying it mirrors the other.
- *
- * It is a checkbox rather than a segmented control because the negative case has
- * no name a member would recognise. "Bodyweight" versus "External load" reads
- * like a form; an unticked box beside the load field reads like the ordinary
- * set it is.
- */
-function BodyweightChip({ t, on, onToggle, unit }: { t: Theme; on: boolean; onToggle: () => void; unit: WeightUnit }) {
-  return (
-    <Pressable
-      onPress={onToggle}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: on }}
-      accessibilityLabel="Bodyweight set"
-      accessibilityHint={on
-        ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
-        : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm, paddingVertical: 6 }}>
-      <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: hairline, borderColor: on ? t.brand : t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-        {on ? <Icon name="check" size={12} color={t.brandInk} /> : null}
-      </View>
-      <Text style={{ ...ty.caption, color: on ? t.ink : t.ink3 }}>
-        {on ? `Bodyweight set — the box above is what you added, in ${unit}` : 'Bodyweight set'}
-      </Text>
-    </Pressable>
-  );
-}
+// The set row and its two chips used to live here, as `LogRow` and
+// `BodyweightChip`. They are src/ui/LogSetRow.tsx now: a member standing in
+// front of a machine reaches app/(client)/exercise.tsx, not this screen, and a
+// row that could only be typed into from the plan was the whole of why that
+// screen could not log a set.
 
 /**
  * The measured half of a live session: the clock, the current heart rate, the
@@ -2637,13 +2610,18 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   // `bw` marks a set the member did with their own body; `kg` is then what
   // they ADDED to it. Optional, so a guided draft restored from a build that
   // predates the flag reads back as the ordinary sets it recorded.
-  const [results, setResults] = useState<{ reps: number; kg: number; bw?: boolean }[][]>(() => exercises.map(() => []));
+  const [results, setResults] = useState<{ reps: number; kg: number; bw?: boolean; timed?: boolean }[][]>(() => exercises.map(() => []));
   // `load` is TEXT in the member's own unit; `results` is kilograms. The
   // conversion happens at this one keyboard, so everything downstream of the
   // runner — the PR check, the warm-up ramp, the entries written to the log —
   // goes on working in the metric the rest of the app is built on.
   const [reps, setReps] = useState(''); const [load, setLoad] = useState('');
   const [bwOn, setBwOn] = useState(false);
+  // Whether the box above the load is counting SECONDS. Seeded per movement
+  // from the coach's own prescription in the effect that follows `idx`, because
+  // a runner that opens on a reps box for a set written as '45 sec' is asking
+  // the member to fix the app before they can record what it told them to do.
+  const [timedOn, setTimedOn] = useState(false);
   const showLoad = (kg: number) => (kg ? plain(liftIn(kg, unit) ?? 0) : '');
   const [rest, setRest] = useState(0);
   // Whether the demonstration is on screen for the current exercise.
@@ -2840,6 +2818,12 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     const sug = suggestForExercise(log, nameOf(cur), cur.reps, 2.5, unit);
     setLoad(sug ? showLoad(sug.weight) : '');
     setReps('');
+    // The movement's own prescription decides which box opens. `next` and
+    // `back` clear the bodyweight tick for the same reason and this is the
+    // same rule: how a set is measured is a property of the MOVEMENT, and
+    // carrying "seconds" from a plank to the squat rack would record a
+    // forty-five second squat.
+    setTimedOn(isTimedPrescription(expandSets(cur)[0]?.reps ?? cur.reps));
     setPrMsg(null);
     setPendingFeel(null);
     setDemoOpen(false);
@@ -2938,11 +2922,22 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
    */
   const methodAt = (i: number) => plan[i]?.method ?? ex?.method ?? null;
   const logSet = () => {
-    const r = parseInt(reps, 10) || 0;
-    // Said, not swallowed. This returned silently, so tapping the tick with an
-    // empty reps box — the commonest thing to do after typing only the load —
-    // did nothing at all, gave no haptic and left the member tapping harder.
-    if (!r) { Alert.alert('How many reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
+    // Reps, or SECONDS when this movement is a hold. Read through `readHold`
+    // rather than parsed here, so the runner and src/ui/LogSetRow.tsx accept
+    // and refuse exactly the same things — including '1:30', which is how
+    // anybody who has looked at a clock writes ninety seconds.
+    let r: number;
+    if (timedOn) {
+      const held = readHold(reps);
+      if (!held.ok) { Alert.alert('How long was the hold?', held.reason); return; }
+      r = held.secs;
+    } else {
+      r = parseInt(reps, 10) || 0;
+      // Said, not swallowed. This returned silently, so tapping the tick with an
+      // empty reps box — the commonest thing to do after typing only the load —
+      // did nothing at all, gave no haptic and left the member tapping harder.
+      if (!r) { Alert.alert('How many reps?', `Type the reps you did before logging the set. The ${unit} box can stay empty for a bodyweight set.`); return; }
+    }
     // Refused rather than coerced: `parseFloat(kg) || 0` is what this shipped
     // with, and a mistyped load silently becoming 0 records a bodyweight set
     // in the middle of a session and drags the volume, the PR check and the
@@ -2963,7 +2958,10 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     // Comparing a real bodyweight load against that would fire "New PR!" on
     // every set of every calisthenics session forever. The set is recorded and
     // counted everywhere else; only this banner holds off.
-    const newE1 = wkg && r && !bw ? est1RM(wkg, r) : 0;
+    // …and never for a hold. Epley over seconds returns a strength figure
+    // computed from a stopwatch, and it would fire "New PR!" at somebody for
+    // holding a plank three seconds longer.
+    const newE1 = wkg && r && !bw && !timedOn ? est1RM(wkg, r) : 0;
     // A personal record is a claim about EVERYTHING this person has ever
     // lifted, so it can only be made when the whole history was read.
     //
@@ -2982,7 +2980,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
       0,
     );
     if (historyWhole && newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`); setConfetti(true); }
-    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg, ...(bw ? { bw: true } : {}) }); return n; });
+    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg, ...(bw ? { bw: true } : {}), ...(timedOn ? { timed: true } : {}) }); return n; });
     // Only after the first set of an exercise. By set three they have done the
     // movement three times and do not need it offered again.
     if (done.length === 0) setDemoOpen(true);
@@ -3022,6 +3020,26 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   };
   const buildEntries = (): WorkoutEntry[] => {
     const nowISO = new Date().toISOString();
+    // How long the session actually ran, from the clock this screen has been
+    // keeping all along.
+    //
+    // It was measured, printed on the finish screen as "Time", and then thrown
+    // away: `sessionMins` existed on the entry with a working setter in
+    // src/ui/workoutLog.tsx, and nothing on this screen ever wrote it. So the
+    // one honest measure of how long somebody trained reached the finish
+    // screen and never the record — and `sessionDuration` in
+    // wearables/appleHealthWrite.ts, which needs a start and an end to write a
+    // strength session to Apple Health at all, was left with nothing but the
+    // sentence "No length recorded. Enter how long this session ran and it can
+    // be written."
+    //
+    // Whole minutes, and zero is not written. `workouts.session_mins` carries a
+    // `> 0` check constraint and would refuse the row outright, which would
+    // lose the SETS as well as the length — and a session under thirty seconds
+    // rounded up to "1 min" is a figure nobody trained. Session-scoped, so
+    // every entry sharing this timestamp carries the same number, which is what
+    // the field's own doc comment requires.
+    const mins = Math.round(elapsed / 60);
     return results
       .map((sets, i) => (sets.length ? {
         t: nowISO,
@@ -3031,6 +3049,11 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         // itself: a missing flag means nobody was asked, and that is the only
         // thing true of every session logged before this existed.
         bw: sets.some((s) => s.bw) ? sets.map((s) => s.bw === true) : undefined,
+        // And absent rather than an array of false for the same reason: a
+        // session logged before holds could be recorded is not a session of
+        // repetitions, it is a session nobody was asked about.
+        timed: sets.some((s) => s.timed) ? sets.map((s) => s.timed === true) : undefined,
+        ...(mins > 0 ? { sessionMins: mins } : {}),
         feel: (rpes[i] && rpes[i].length) ? rpes[i] : undefined,
         // No `kcal`. It used to carry `volume / 60 + sets * 8` — an expression
         // with no body weight, no heart rate and no measurement of any kind in
@@ -3116,6 +3139,9 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   // walks to the rack and types 60 into a box that now means "sixty kilos on
   // top of me".
   const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setBwOn(false); startRest(0); } else finish(); };
+  // `timedOn` is not cleared here: the effect on `idx` re-seeds it from the new
+  // movement's own prescription, which is a better answer than false and is the
+  // only place that decision is made.
   /**
    * Back to the movement before this one.
    *
@@ -3198,7 +3224,12 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
       if (!e) return true;
       return countsToVolume(expandSets(e)[j]?.method ?? e.method ?? null);
     };
-    const volume = results.reduce((a, r, i) => a + r.reduce((x, st, j) => x + (counts(i, j) ? st.reps * st.kg : 0), 0), 0);
+    // A hold contributes nothing here, and that is the point rather than an
+    // omission: seconds × kilograms is not a mass moved, and a member who held
+    // 45 seconds under a 10 kg plate has not lifted 450 kg. See
+    // src/lib/timedSets.ts, which keeps every reader of a set agreeing about
+    // what its first number means.
+    const volume = results.reduce((a, r, i) => a + r.reduce((x, st, j) => x + (counts(i, j) && !st.timed ? st.reps * st.kg : 0), 0), 0);
     const workingSets = results.reduce((a, r, i) => a + r.filter((_, j) => counts(i, j)).length, 0);
     // Sets that happened and are saved, but are not part of either figure
     // above. Said out loud below rather than silently subtracted: a member who
@@ -3577,7 +3608,9 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
 
         {done.length > 0 ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xl }}>
-            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
+            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.timed
+                ? timedSetLabel(s.reps, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null, s.bw === true)
+                : s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
           </View>
         ) : null}
 
@@ -3605,7 +3638,8 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           Log set {done.length + 1}{variedPlan && nextSet ? ` · ${nextSet.reps}${nextSet.loadKg != null ? ' × ' + fig(liftLabel(nextSet.loadKg, unit)) : ''}` : ''}
         </Text>
         <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'flex-end' }}>
-          <Field label="Reps">
+          <Field label={timedOn ? 'Hold' : 'Reps'} hint={timedOn ? 'seconds' : undefined}
+            a11y={timedOn ? 'How long you held it, in seconds' : 'How many reps you did'}>
             <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
           </Field>
           <Field label={bwOn ? 'Added' : 'Load'} accessory={<WeightUnitToggle />} a11y={bwOn ? (unit === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight') : (unit === 'kg' ? 'Load in kilograms' : 'Load in pounds')}>
@@ -3613,7 +3647,20 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           </Field>
           <Pressable accessibilityLabel="Log set" accessibilityRole="button" onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
         </View>
-        <BodyweightChip t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)} unit={unit} />
+        <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap' }}>
+          <SetKindChip t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)}
+            label="Bodyweight set"
+            onLabel={`Bodyweight set — the box above is what you added, in ${unit}`}
+            a11yHint={bwOn
+              ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
+              : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'} />
+          <SetKindChip t={t} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
+            label="Timed set"
+            onLabel="Timed set — the first box is seconds held"
+            a11yHint={timedOn
+              ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
+              : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'} />
+        </View>
 
         {pendingFeel != null ? (
           <View style={{ marginTop: sp.xl }}>

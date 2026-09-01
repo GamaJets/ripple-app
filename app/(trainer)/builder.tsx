@@ -60,7 +60,22 @@ import { exerciseSlug } from '../../src/lib/exerciseId';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
-import { buildProgram, type Program } from '../../src/lib/programs';
+import { buildProgram, type Program, type ProgramDay } from '../../src/lib/programs';
+// A programme can now be more than one week. `programWeeks` is the ONE reader
+// that resolves the block, `withWeeks` the ONE writer that keeps `days` — which
+// is what the shipped client app renders — in step with week one. Neither this
+// screen nor any other builds the pair by hand; see src/lib/programBlock.ts.
+import { canAddWeek, isBlock, programWeeks, weekLabel, withWeeks } from '../../src/lib/programBlock';
+// Effort, share of a max and rep speed — three columns a coach was writing into
+// a free-text note because there was nowhere else for them. src/lib/setIntensity.ts
+// owns every parse and every bound, and the sentence saying the CLIENT does not
+// see them yet.
+import {
+  CLIENT_CANNOT_SEE_INTENSITY, readPercent1RM, readRpe, readTempo, tempoMeaning,
+} from '../../src/lib/setIntensity';
+// The day the coach said the block begins, and the sentence that stops it
+// becoming a promise this app does not keep.
+import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
 import { alreadyAt, progressionOffer, loadTapLabel } from '../../src/lib/builderProgression';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
@@ -89,6 +104,10 @@ import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDay
 import { notifySuccess } from '../../src/ui/haptics';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** One week of a block, as this screen edits it. The mirror of `ProgramWeek`
+ *  in src/lib/programs.ts over the builder's own `BDay`, which carries a draft
+ *  key and a unit the coach typed in that no stored programme needs. */
+type BWeek = { days: BDay[]; label?: string; deload?: boolean };
 /** 's' unless there is exactly one of them. Four counts on this screen said
  *  "1 exercises" — the Assign button, the Training Days head, the template rows
  *  and the save sheet — because the day count was pluralised and the exercise
@@ -112,6 +131,27 @@ const GENERATED_NOTE = /latest InBody scan/i;
 
 let KEY = 1;
 const nextKey = () => 'e' + KEY++;
+
+/**
+ * A stored week as this screen edits it.
+ *
+ * Hoisted out of `loadFrom` because a block loads several weeks through it and
+ * a copy of this mapping per week is a copy of the list of fields — which is
+ * exactly the drift `loadFrom`'s own comment warns about, where a field added
+ * to the builder later gets remembered in one of the two places.
+ */
+const toBuilderDays = (ds: readonly ProgramDay[]): BDay[] =>
+  (ds ?? []).map((d) => ({
+    day: d.day, focus: d.focus, cardio: d.cardio,
+    exercises: (d.exercises ?? []).map((e) => ({
+      key: nextKey(), name: e.name, group: e.group, sets: e.sets, reps: e.reps,
+      loadKg: e.loadKg ?? null, loadUnit: e.loadUnit, note: e.note, restSec: e.restSec ?? null,
+      setGroupId: e.setGroupId ?? null, method: e.method ?? null,
+      rpe: e.rpe ?? null, pct1rm: e.pct1rm ?? null, tempo: e.tempo ?? null,
+      setRows: e.setRows && e.setRows.length ? e.setRows.map((r) => ({ ...r })) : null,
+    })),
+  }));
+
 
 type BEx = {
   key: string; name: string; group: string; sets: number; reps: string;
@@ -165,6 +205,24 @@ type BEx = {
    * produce a "superset" of four, and nothing could tell it was wrong.
    */
   setGroupId?: string | null;
+  /**
+   * The prescribed effort on the RPE scale, the prescribed share of a one-rep
+   * max, and the prescribed rep speed. Absent on every exercise of every
+   * programme ever written, and absent is what round-trips.
+   *
+   * NOT `feel`. `feel` is the client's own report after the set, recorded by
+   * the person who did it, and it is evidence; `rpe` is an instruction written
+   * beforehand by somebody who was not there. src/lib/setIntensity.ts owns the
+   * scale, the bounds and the refusal to convert a percentage into kilograms
+   * off a maximum nobody tested.
+   *
+   * They are per-EXERCISE here and per-ROW on `setRows`, by the same
+   * absent-inherits rule as `method` — so a ramp can carry one target on the
+   * top set and none on the back-offs.
+   */
+  rpe?: number | null;
+  pct1rm?: number | null;
+  tempo?: string | null;
   /**
    * How the sets are performed — warm-up, drop set, to failure, AMRAP and the
    * rest of `src/lib/setMethods.ts`. Null and 'normal' both mean an ordinary
@@ -251,7 +309,55 @@ export default function Builder() {
   const [clientId, setClientId] = useState((params.clientId as string) || roster[0]?.id || '');
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
-  const [days, setDays] = useState<BDay[]>([]);
+  /**
+   * ── The block, and why `days` stopped being state ─────────────────────────
+   *
+   * `Program` held one week and so did this screen. Every coach on this
+   * platform sells a six-, eight- or twelve-week block, and what they did
+   * instead was write week one, assign it, and then reopen the builder every
+   * Sunday night to retype next week's loads over the top of it — which is the
+   * app making a self-employed person do a database write on their evening,
+   * and which destroyed the previous week every time.
+   *
+   * The obvious change is to make `days` a list of weeks. It cannot be done
+   * that way: `Program.days` is what the SHIPPED CLIENT APP renders, and it has
+   * never heard of a week index. So `days` stays week one on the way out (see
+   * `composeProgram`, and the argument in full on `ProgramWeek` in
+   * src/lib/programs.ts) and `blockWeeks` is the whole block in here.
+   *
+   * `days` is now DERIVED from it rather than being state of its own, and
+   * `setDays` writes into the week being edited. That is deliberate and it is
+   * the only safe shape: there are forty-odd `setDays(...)` calls on this
+   * screen and every one of them goes on meaning "change the week I am looking
+   * at" without being touched. Two pieces of state — a week list and a copy of
+   * the current week — would have needed a sync point at every one of those
+   * forty, and the failure of a missed one is a coach's edit vanishing when
+   * they tap a week chip.
+   */
+  const [blockWeeks, setBlockWeeks] = useState<BWeek[]>([{ days: [] }]);
+  /** Which week is on screen. Always a valid index into `blockWeeks` — every
+   *  path that shortens the block clamps it, because a week index past the end
+   *  renders an empty builder over a programme that is not empty. */
+  const [weekIdx, setWeekIdx] = useState(0);
+  /**
+   * The day the coach says this block begins, `YYYY-MM-DD`, or '' because they
+   * have not said — which stays the default, because "assign it now" is what
+   * this control has always meant and every assignment ever made is that.
+   *
+   * IT DOES NOT HOLD THE PROGRAMME BACK. The client's Train tab renders
+   * whatever is on their row the moment it is written, and
+   * `CLIENT_STARTS_NOW` is printed under the field saying so. That sentence is
+   * the whole safety argument: a coach who believes the date is enforced, and
+   * assigns a block "starting Monday" on a Thursday, has just replaced their
+   * client's Friday session while believing they did not — which is strictly
+   * worse than the Sunday-night alarm this field exists to end.
+   */
+  const [startsOn, setStartsOn] = useState('');
+  const days: BDay[] = blockWeeks[weekIdx]?.days ?? [];
+  const setDays: React.Dispatch<React.SetStateAction<BDay[]>> = (updater) =>
+    setBlockWeeks((ws) => ws.map((w, i) => (i === weekIdx
+      ? { ...w, days: typeof updater === 'function' ? (updater as (d: BDay[]) => BDay[])(w.days) : updater }
+      : w)));
   /**
    * ── Why a programme in progress is written to the phone ───────────────────
    *
@@ -552,21 +658,24 @@ export default function Builder() {
   const loadFrom = (p: Program, from: string | null) => {
     setTitle(p.title);
     setNote(p.note && !GENERATED_NOTE.test(p.note) ? p.note : '');
-    setDays(p.days.map((d) => ({
-      day: d.day, focus: d.focus, cardio: d.cardio,
-      exercises: d.exercises.map((e) => ({
-        key: nextKey(), name: e.name, group: e.group, sets: e.sets, reps: e.reps,
-        loadKg: e.loadKg ?? null, loadUnit: e.loadUnit, note: e.note, restSec: e.restSec ?? null,
-        setGroupId: e.setGroupId ?? null, method: e.method ?? null,
-        setRows: e.setRows && e.setRows.length ? e.setRows.map((r) => ({ ...r })) : null,
-      })),
+    // `programWeeks` is the ONE reader of the block, and it answers a single
+    // week built from `days` for every programme that has none — which is every
+    // programme in `program_templates`, on every assignment and in every draft.
+    // So a one-week programme loads exactly as it always did, into week one,
+    // with no week strip drawn for it.
+    setBlockWeeks(programWeeks(p).map((w) => ({
+      days: toBuilderDays(w.days), label: w.label, deload: w.deload,
     })));
+    // Back to week one on every load. A coach who was editing week five of one
+    // client's block and taps another client must not land on week five of a
+    // programme that may have two weeks in it.
+    setWeekIdx(0);
     setSeededFor(from);
     // Every day is a different day now, so an index that was folded names
     // somebody else's Wednesday. Same reasoning as `removeDay`.
     setFoldedDays(foldsForNewProgramme());
   };
-  const clearBuilder = () => { setTitle(''); setNote(''); setDays([]); setSeededFor(null); setFoldedDays(foldsForNewProgramme()); };
+  const clearBuilder = () => { setTitle(''); setNote(''); setBlockWeeks([{ days: [] }]); setWeekIdx(0); setSeededFor(null); setFoldedDays(foldsForNewProgramme()); };
 
   // Load the client's current program (assigned if any, else their auto plan)
   // whenever the selected client changes — but only once we actually know what
@@ -677,6 +786,17 @@ export default function Builder() {
    * until the box is left.
    */
   const [loadDraft, setLoadDraft] = useState<Record<string, string>>({});
+  /**
+   * Raw text per exercise for the three intensity boxes, for the same reason
+   * `loadDraft` exists: "8." on the way to "8.5" and "3-1" on the way to
+   * "3-1-1-0" are both valid things to be part-way through typing, and neither
+   * survives a round trip through its reader and back. The committed value is
+   * written behind the draft only when the reader accepts it, so a refused
+   * keystroke leaves the last good value alone rather than clearing it.
+   */
+  const [rpeDraft, setRpeDraft] = useState<Record<string, string>>({});
+  const [pctDraft, setPctDraft] = useState<Record<string, string>>({});
+  const [tempoDraft, setTempoDraft] = useState<Record<string, string>>({});
   /**
    * Raw rest text per exercise, for the same reason `loadDraft` exists. A coach
    * part way through typing "9" on the way to "90" has momentarily typed a
@@ -834,7 +954,7 @@ export default function Builder() {
       try {
         const raw = await AsyncStorage.getItem(DRAFT_KEY);
         if (!live || !raw) return;
-        const d = JSON.parse(raw) as { title?: string; note?: string; days?: BDay[] };
+        const d = JSON.parse(raw) as { title?: string; note?: string; days?: BDay[]; weeks?: BWeek[] };
         // Only restore a draft with something IN it. An empty one is not worth
         // resurrecting over whatever the screen has already been given.
         if ((Array.isArray(d.days) && d.days.length) || (typeof d.title === 'string' && d.title.trim())) {
@@ -845,7 +965,16 @@ export default function Builder() {
           // on the movement. A draft that silently dropped one of those would
           // be worse than one that dropped everything: the coach would come
           // back to what looks like their week with the cues gone.
-          setDays(Array.isArray(d.days) ? d.days : []);
+          // `weeks` when the draft has one, and `days` — which is week one —
+          // when it does not. Every draft written before blocks existed is the
+          // second case, and restoring it as a one-week block is what it is.
+          // The two are written together below for the same reason
+          // `Program.days` and `Program.weeks` are: a draft carrying only
+          // `weeks` would come back empty on a build that had been rolled back.
+          setBlockWeeks(Array.isArray(d.weeks) && d.weeks.length
+            ? d.weeks.map((w) => ({ days: Array.isArray(w?.days) ? w.days : [], label: w?.label, deload: w?.deload }))
+            : [{ days: Array.isArray(d.days) ? d.days : [] }]);
+          setWeekIdx(0);
           // The draft carries the days; it does not carry which of them were
           // folded, so nothing may claim to know. Reset rather than left at
           // whatever the empty builder happened to be holding.
@@ -877,9 +1006,19 @@ export default function Builder() {
     // So autosave only ever WRITES. The draft is cleared deliberately, at the
     // two moments the work is safely elsewhere — saved as a template, or
     // assigned — and by nothing else.
-    if (!days.length && !title.trim() && !note.trim()) return;
-    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ title, note, days })).catch(() => {});
-  }, [title, note, days, draftLoaded]);
+    // Any week having content is work worth saving. Testing only the week on
+    // screen would throw away a six-week block the moment the coach opened its
+    // one empty week — which is exactly the shape of loss this autosave exists
+    // to prevent.
+    const anyContent = blockWeeks.some((w) => w.days.length);
+    if (!anyContent && !title.trim() && !note.trim()) return;
+    // `days` is still written, and it is still week one. A build rolled back to
+    // before blocks existed reads that key and finds a whole week, rather than
+    // finding nothing and presenting a coach with an empty builder.
+    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({
+      title, note, days: blockWeeks[0]?.days ?? [], weeks: blockWeeks,
+    })).catch(() => {});
+  }, [title, note, blockWeeks, draftLoaded]);
 
   /** Called once the work is somewhere durable, and only then — a saved
    *  template that the server counted, or an assignment that landed on every
@@ -1066,11 +1205,18 @@ export default function Builder() {
    * stored as a note draws an empty bubble under the movement in the client's
    * app, which reads as their coach having written something and left it blank.
    */
-  const composeProgram = (): Program => ({
-    title: title.trim() || 'Custom program',
-    focus: ['Coach-assigned', 'Personalised for you'],
-    note: note.trim() || 'Your coach built this program for you. Progress the weight when you hit the top of the rep range.',
-    days: days.filter((d) => d.exercises.length).map((d) => ({
+  /**
+   * One week of the block, as it will actually be stored.
+   *
+   * Split out of `composeProgram` so that every week of a block goes through
+   * exactly the same rewriting — the reps default, the blank note dropped, the
+   * set count recomputed from the rows. A second spelling of this loop for the
+   * later weeks would be a second chance for week four to be assigned with a
+   * `sets` that disagrees with its table, which is a client shown "3/3 sets"
+   * with a fourth row unlogged underneath it.
+   */
+  const composeDays = (source: readonly BDay[]): ProgramDay[] =>
+    source.filter((d) => d.exercises.length).map((d) => ({
       day: d.day, focus: d.focus.trim() || 'Training', cardio: d.cardio,
       exercises: d.exercises.map((e, i) => ({
         key: d.day + '-' + i, name: e.name, group: e.group || '',
@@ -1081,6 +1227,15 @@ export default function Builder() {
         restSec: e.restSec ?? null,
         setGroupId: e.setGroupId ?? null,
         method: e.method ?? null,
+        // Null and never undefined for the three intensity fields, so that
+        // clearing an RPE a template carried actually clears it. `undefined`
+        // does not survive `JSON.stringify` or a jsonb column, so an
+        // undefined here would leave the old value on the row it was meant to
+        // remove — which is the one direction this must not fail in: a target
+        // the coach deleted going out to a client anyway.
+        rpe: e.rpe ?? null,
+        pct1rm: e.pct1rm ?? null,
+        tempo: e.tempo ?? null,
         // `undefined` and never `[]` for an exercise the coach did not open a
         // table on: an empty array would be a claim that this movement has no
         // sets, and it is the one value src/lib/setRows.ts has to defend
@@ -1094,8 +1249,30 @@ export default function Builder() {
         // of four is the failure it would produce.
         sets: setCount(e),
       })),
-    })),
-  });
+    }));
+
+  /**
+   * The programme as it leaves this screen.
+   *
+   * `withWeeks` is the ONE writer of the block and it keeps `Program.days` —
+   * which is what the shipped client app renders — equal to week one. It also
+   * DROPS `weeks` entirely for a one-week programme, so a coach who never
+   * touched the week strip produces a programme byte-identical to one written
+   * before blocks existed. That is not tidiness: `programSignature` decides
+   * which members of a group are on the group's plan, and a `weeks: [...]`
+   * meaning nothing would have to be reasoned about there too.
+   */
+  const composeProgram = (): Program => {
+    const base: Program = {
+      title: title.trim() || 'Custom program',
+      focus: ['Coach-assigned', 'Personalised for you'],
+      note: note.trim() || 'Your coach built this program for you. Progress the weight when you hit the top of the rep range.',
+      days: composeDays(blockWeeks[0]?.days ?? []),
+    };
+    return withWeeks(base, blockWeeks.map((w) => ({
+      days: composeDays(w.days), label: w.label, deload: w.deload,
+    })));
+  };
 
   /** Whether the list of what the checks look at is open. Closed by default:
    *  a coach reading findings wants the findings, and the catalogue is what
@@ -1136,7 +1313,7 @@ export default function Builder() {
     }),
     // `composeProgram` is rebuilt every render and is a pure function of these.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [days, title, note, clientId, clientInjuries, disclosureStatus, reviewLog, reviewLogStatus, autoGoal],
+    [blockWeeks, title, note, clientId, clientInjuries, disclosureStatus, reviewLog, reviewLogStatus, autoGoal],
   );
 
   /**
@@ -1327,7 +1504,12 @@ export default function Builder() {
           };
         }
       }
-      const r = await assignProgramTo(tg.clientId, program);
+      // Only ever sent when the coach typed a real date. `undefined` leaves
+      // the column alone on an overwrite — a screen that did not offer a date
+      // must not silently clear one set from a screen that did — and an
+      // unparseable string is not sent at all rather than stored as a date
+      // nobody can read back.
+      const r = await assignProgramTo(tg.clientId, program, isStartDate(startsOn) ? startsOn : undefined);
       return { clientId: tg.clientId, name: tg.name, ok: r.ok, why: r.why };
     }));
     setAssignBusy(false);
@@ -1678,15 +1860,122 @@ export default function Builder() {
 
         <Rule />
 
+        {/* ── the block ──────────────────────────────────────────────────
+            Drawn ONLY once there is more than one week, plus the one control
+            that makes a second. A coach writing a single week must see exactly
+            the screen they saw before — a week strip over a one-week programme
+            is a decoration that implies a structure that is not there. */}
+        <Section>
+          <SectionHead title="Weeks" note={isBlock(composeProgram()) ? `${blockWeeks.length}` : undefined} />
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            A block is the six, eight or twelve weeks you actually sell. Week one is what the client trains
+            now — the later weeks are stored with the programme and are yours to edit before you send them.
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+            {blockWeeks.map((w, wi) => (
+              <Pressable key={wi} onPress={() => setWeekIdx(wi)} accessibilityRole="button"
+                accessibilityState={{ selected: wi === weekIdx }}
+                accessibilityLabel={`Edit ${weekLabel(w, wi + 1)}`}
+                style={{
+                  paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
+                  backgroundColor: wi === weekIdx ? t.brand : t.surface2,
+                }}>
+                <Text style={{ ...ty.micro, color: wi === weekIdx ? t.brandInk : t.ink2 }}>{weekLabel(w, wi + 1)}</Text>
+              </Pressable>
+            ))}
+            {canAddWeek(composeProgram()) ? (
+              <Pressable
+                onPress={() => {
+                  // The new week is a COPY of the last, for the reason
+                  // `addSetRow` copies a set: nobody adds week five in order to
+                  // leave it empty, and a blank week would send the coach back
+                  // to retyping the session — which is the thing they do today.
+                  setBlockWeeks((ws) => {
+                    // Written out here rather than through `addWeek`, because that
+                    // works on a stored `Program` and this list holds the
+                    // builder's own `BEx` — with its draft keys and the unit
+                    // the coach typed in. Round-tripping through `composeProgram`
+                    // to add a week would silently apply every one of its
+                    // rewritings to the week being copied.
+                    const last = ws[ws.length - 1];
+                    const copied: BWeek = {
+                      days: (last?.days ?? []).map((d) => ({
+                        ...d,
+                        // Fresh keys, and this is the whole of why the copy is
+                        // written out rather than spread. `key` is what every
+                        // list, drag handler and per-row draft on this screen
+                        // matches on; two weeks sharing one would make typing
+                        // into week five's bench press edit week four's as well.
+                        exercises: d.exercises.map((e) => ({ ...e, key: nextKey(), setRows: e.setRows ? e.setRows.map((r) => ({ ...r })) : e.setRows })),
+                      })),
+                    };
+                    return [...ws, copied];
+                  });
+                  setWeekIdx(blockWeeks.length);
+                  setFoldedDays(foldsForNewProgramme());
+                }}
+                accessibilityRole="button" accessibilityLabel="Add another week to this block"
+                style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                <Text style={{ ...ty.micro, color: t.ink2 }}>Add Week</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {blockWeeks.length > 1 ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md, alignItems: 'center' }}>
+              <Ghost label={blockWeeks[weekIdx]?.deload ? 'Not a Deload' : 'Mark as Deload'}
+                onPress={() => setBlockWeeks((ws) => ws.map((w, i) => (i === weekIdx ? { ...w, deload: !w.deload } : w)))} />
+              <Ghost label="Remove This Week" onPress={() => {
+                // Removing WEEK ONE moves what the client trains, immediately,
+                // because week two becomes week one and `days` follows it. The
+                // coach is told which of the two they are doing rather than
+                // both being one silent button.
+                const first = weekIdx === 0;
+                Alert.alert(
+                  first ? 'Remove week one?' : `Remove ${weekLabel(blockWeeks[weekIdx], weekIdx + 1).toLowerCase()}?`,
+                  first
+                    ? 'Week one is the week the client is training. Removing it promotes week two in its place, and that is what they will see the next time you assign this.'
+                    : 'The later weeks move up. Nothing the client is training changes until you assign this again.',
+                  [
+                    { text: 'Keep It', style: 'cancel' },
+                    { text: 'Remove', style: 'destructive', onPress: () => {
+                      setBlockWeeks((ws) => (ws.length <= 1 ? ws : ws.filter((_, i) => i !== weekIdx)));
+                      // Clamped, because a week index past the end renders an
+                      // empty builder over a programme that is not empty.
+                      setWeekIdx((i) => Math.max(0, Math.min(i, blockWeeks.length - 2)));
+                      setFoldedDays(foldsForNewProgramme());
+                    } },
+                  ],
+                );
+              }} />
+            </View>
+          ) : null}
+        </Section>
+
+        <Rule />
+
         {/* ── days ───────────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Training Days"
+          <SectionHead title={blockWeeks.length > 1 ? weekLabel(blockWeeks[weekIdx], weekIdx + 1) : 'Training Days'}
             note={days.length ? `${days.length} day${s(days.length)} · ${num(totalExercises)} exercise${s(totalExercises)}` : undefined} />
 
           {days.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
               No training days yet — add one to start building.
             </Text>
+          ) : null}
+
+          {/* Said once, at the top, and only when the coach has actually
+              written one of the three. A coach who types a tempo believes they
+              have told somebody to lower the bar over three seconds; today they
+              have not, because the client's Train tab draws reps, load and the
+              method badge and nothing else. Letting that belief stand is worse
+              than not shipping the fields, because the coach then stops writing
+              it in the note as well — and the instruction reaches the client
+              through nothing at all. */}
+          {days.some((d) => d.exercises.some((e) => e.rpe != null || e.pct1rm != null || e.tempo)) ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Flag tone={t.ink3}>{CLIENT_CANNOT_SEE_INTENSITY}</Flag>
+            </View>
           ) : null}
 
           {days.map((d, di) => (
@@ -2145,6 +2434,83 @@ export default function Builder() {
                       assignment, and carried in the on-device draft — and the
                       client reads it at the machine, attributed to the coach
                       who wrote it. */}
+                  {/* ── effort, share of a max, and rep speed ──────────────
+                      Three things a coach had nowhere to write and put in the
+                      exercise NOTE instead — "@8", "@75%", "3-1-1" — where they
+                      are a sentence rather than a column, cannot line up with
+                      the set they describe, and are read once instead of at the
+                      machine.
+
+                      Offered per EXERCISE rather than per row. The data model
+                      holds both (`setRows` carries all three, and a row that
+                      says nothing inherits from here, exactly as it does for
+                      `method`) — but the set table already has five columns and
+                      three more would not fit a phone, so a ramp with one target
+                      on the top set is written today by giving the exercise the
+                      target and the rows their own loads. Whoever adds the
+                      per-row controls writes into the same fields.
+
+                      Every one of the three is REFUSED rather than corrected
+                      when it cannot be stored faithfully: a silently rounded
+                      8.3 is a prescription nobody wrote. See
+                      src/lib/setIntensity.ts. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>RPE</Text>
+                    <TextInput
+                      value={rpeDraft[e.key] ?? (e.rpe == null ? '' : String(e.rpe))}
+                      onChangeText={(v) => {
+                        // A text draft beside the committed number, for the same
+                        // reason `loadDraft` exists above: "8." is a valid thing
+                        // to be part-way through typing and does not survive a
+                        // round trip through the reader and back.
+                        setRpeDraft((prev) => ({ ...prev, [e.key]: v }));
+                        if (!v.trim()) { patchEx(di, e.key, { rpe: null }); return; }
+                        const r = readRpe(v);
+                        if (r.ok) patchEx(di, e.key, { rpe: r.rpe });
+                      }}
+                      onBlur={() => setRpeDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      keyboardType="decimal-pad" placeholder="8.5" placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Prescribed effort for ${e.name}, on the RPE scale`}
+                      style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>% of 1RM</Text>
+                    <TextInput
+                      value={pctDraft[e.key] ?? (e.pct1rm == null ? '' : String(e.pct1rm))}
+                      onChangeText={(v) => {
+                        setPctDraft((prev) => ({ ...prev, [e.key]: v }));
+                        if (!v.trim()) { patchEx(di, e.key, { pct1rm: null }); return; }
+                        const r = readPercent1RM(v);
+                        if (r.ok) patchEx(di, e.key, { pct1rm: r.pct });
+                      }}
+                      onBlur={() => setPctDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      keyboardType="number-pad" placeholder="75" placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Prescribed share of a one-rep max for ${e.name}, as a whole percentage`}
+                      style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>Tempo</Text>
+                    <TextInput
+                      value={tempoDraft[e.key] ?? (e.tempo ?? '')}
+                      onChangeText={(v) => {
+                        setTempoDraft((prev) => ({ ...prev, [e.key]: v }));
+                        if (!v.trim()) { patchEx(di, e.key, { tempo: null }); return; }
+                        const r = readTempo(v);
+                        if (r.ok) patchEx(di, e.key, { tempo: r.tempo });
+                      }}
+                      onBlur={() => setTempoDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      autoCapitalize="characters" autoCorrect={false}
+                      placeholder="3-1-1-0" placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Prescribed rep speed for ${e.name}, as down, pause, up and pause`}
+                      style={[inp, { width: 84, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                  </View>
+                  {/* The tempo IN WORDS, under the box, while they type. The
+                      four-digit notation is near-universal and it is not
+                      unanimous — a minority of coaching literature writes the
+                      lifting phase first — and a stored ambiguity is worse than
+                      no field. A coach who reads the other convention sees this
+                      one disagreeing with them now, rather than after their
+                      client has done four weeks of reversed reps. */}
+                  {e.tempo && tempoMeaning(e.tempo) ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{tempoMeaning(e.tempo)}</Text>
+                  ) : null}
+
                   {/* ── Rest, method, and grouping ────────────────────────
                       Three things a coach could not say before, on one row
                       because they are all answers to "how is this performed"
@@ -2487,6 +2853,45 @@ export default function Builder() {
               </Flag>
             </View>
           ) : null}
+
+          {/* ── the day the block begins ──────────────────────────────────
+              Coaches sit on their phone on a Sunday night and tap Assign at the
+              right moment, because an assignment IS a start: the write lands and
+              the client's Train tab reads the row on its next render.
+
+              This field records the day the coach chose. It does NOT hold the
+              programme back, and the sentence under it says so — because a
+              coach who believes it does, and assigns a block "starting Monday"
+              on a Thursday, has replaced their client's Friday session while
+              believing they did not. That is strictly worse than the alarm.
+
+              Left blank is the ordinary case and the default: "assign it now"
+              is what this control has always meant. */}
+          <View style={{ marginBottom: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Starts on</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+              <TextInput value={startsOn} onChangeText={setStartsOn}
+                placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
+                autoCapitalize="none" autoCorrect={false}
+                accessibilityLabel="The day this block begins, as year, month and day"
+                style={[inp, { flex: 1, paddingVertical: 9, paddingHorizontal: 12 }]} />
+              {startsOn ? (
+                <Ghost label="Clear" onPress={() => setStartsOn('')} />
+              ) : null}
+            </View>
+            {/* Refused rather than corrected, and said while they type. A date
+                this app cannot read is not stored at all — a stored value that
+                will not parse puts every screen reading it into "unreadable"
+                for ever, over a plan the coach believes carries a date. */}
+            {startsOn && !isStartDate(startsOn) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
+                Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
+                programme goes out with no start date rather than one nothing can read back.
+              </Flag>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{CLIENT_STARTS_NOW}</Text>
+            )}
+          </View>
 
           <View style={{ opacity: canAssign ? 1 : 0.4 }} pointerEvents={canAssign && !assignBusy ? 'auto' : 'none'}>
             <Cta wide label={assignCtaLabel({

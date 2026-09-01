@@ -42,7 +42,7 @@
 // has five branches, nothing in this repository can execute a plpgsql function,
 // and an unexecutable rule is an unchecked one.
 import { num } from './format';
-import { invoiceNumber, money, type CoachInvoice } from './coachInvoice';
+import { invoiceDayLabel, invoiceNumber, money, type CoachInvoice } from './coachInvoice';
 
 /* ── the caps the database will apply anyway ──────────────────────────────── */
 
@@ -158,6 +158,49 @@ export function invoiceNotification(inv: CoachInvoice): Notification {
   return {
     title: inv.kind === 'received' ? 'Your coach recorded a payment' : 'An invoice from your coach',
     body: clip(`${line} ${claim} Ask them for a copy of the document.`, NOTICE_BODY_MAX),
+  };
+}
+
+/**
+ * The row a client gets when their coach chases an invoice.
+ *
+ * ── Why it is not the same row twice ──────────────────────────────────────
+ *
+ * `invoiceNotification` above announces a document that has just come into
+ * existence. This one is about a document the client has already been told
+ * about, and re-sending the first copy would read as a SECOND invoice — the
+ * exact confusion the number in it exists to prevent. So the title says it is a
+ * reminder and the body says it is about the one they already have.
+ *
+ * ── The hedges, and why each is here ──────────────────────────────────────
+ *
+ *   'still shows'    Repple is not told when anybody pays. A bank transfer that
+ *                    landed this morning is invisible here, so the app must not
+ *                    say "you have not paid" to somebody who has. What is true
+ *                    is that the COACH's record still has it outstanding, and
+ *                    that is what is said.
+ *   the due date     printed only where the coach stated one, because a
+ *                    reminder that invents a deadline is worse than no reminder.
+ *   no arithmetic    no days-late count, no interest, no late fee. This app
+ *                    calculates none of those and part 168 refuses to.
+ *   ask them         `coach_invoices` is readable by the issuing coach alone.
+ *                    There is no client screen for it, by design.
+ */
+export function invoiceReminderNotification(inv: CoachInvoice): Notification {
+  const n = invoiceNumber(inv.seq);
+  const amount = money(inv);
+  const what = clip(inv.description || '', 120);
+  const line = amount
+    ? `Invoice ${n} for ${amount}${what ? ` — ${what}` : ''}.`
+    : `Invoice ${n}${what ? ` — ${what}` : ''}. The amount could not be stated in a currency, so none is shown here.`;
+  const due = String(inv.dueOn ?? '').slice(0, 10);
+  const when = /^\d{4}-\d{2}-\d{2}$/.test(due) ? ` They stated it was due on ${invoiceDayLabel(due)}.` : '';
+  return {
+    title: 'A reminder from your coach',
+    body: clip(
+      `${line} Their record still shows this one as outstanding.${when} If you have already settled it, tell them — this app is not told when a payment reaches them. Ask them for a copy of the document.`,
+      NOTICE_BODY_MAX,
+    ),
   };
 }
 

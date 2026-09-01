@@ -69,9 +69,23 @@ eq(mayAct(row, CLIENT, 'portal'), true, 'a client may open their own billing por
 eq(mayAct(row, COACH, 'portal'), false, 'a coach may NOT open their client’s card, invoices and receipts');
 eq(mayAct(row, OTHER_COACH, 'portal'), false, 'a stranger may not open anybody’s billing portal');
 
+// Ending it TODAY. Both parties, and the reason it is not the coach's alone is
+// the one that made it worth building: it is the CLIENT who asks to be
+// cancelled today, and an app that can only offer them "it stops in three
+// weeks" is the reason they write the review.
+eq(mayAct(row, CLIENT, 'end_now'), true, 'a client may end their own subscription today');
+eq(mayAct(row, COACH, 'end_now'), true, 'and so may their coach');
+eq(mayAct(row, OTHER_COACH, 'end_now'), false, 'a stranger may not end anybody’s subscription');
+
 // An action nobody has written is refused rather than allowed by default.
-eq(mayAct(row, COACH, 'refund'), false, 'an unknown action is refused for the coach');
-eq(mayAct(row, CLIENT, 'refund'), false, 'an unknown action is refused for the client too');
+// 'refund' is deliberately one of those and will stay one: a refund is about a
+// CHARGE, not a subscription, it is authorised in
+// supabase/functions/connect-refund against the sale row's own coach, and
+// putting it here would put a refund inside the branch that cancels
+// subscriptions.
+eq(mayAct(row, COACH, 'refund'), false, 'a refund is not a subscription action, for the coach');
+eq(mayAct(row, CLIENT, 'refund'), false, 'nor for the client');
+eq(mayAct(row, COACH, 'delete'), false, 'and an action nobody has written is refused rather than allowed by default');
 eq(mayAct(row, COACH, ''), false, 'an empty action is refused');
 
 // ── what each refusal says ──────────────────────────────────────────────────
@@ -172,7 +186,7 @@ const mutants: { name: string; rule: Rule }[] = [
 const cases: { r: SubscriptionParties; uid: string | null; action: string }[] = [];
 for (const r of [row, { client_id: null, trainer_id: null }, { client_id: null, trainer_id: COACH }]) {
   for (const uid of [CLIENT, COACH, OTHER_COACH, OWNER, null, '']) {
-    for (const action of ['cancel', 'resume', 'portal', 'refund', '']) {
+    for (const action of ['cancel', 'resume', 'portal', 'end_now', 'refund', '']) {
       cases.push({ r, uid, action });
     }
   }

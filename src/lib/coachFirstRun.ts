@@ -1,0 +1,258 @@
+// Coach · the first twenty minutes, as a list that stays.
+//
+// ── What was there, and what it was not ────────────────────────────────────
+//
+// src/lib/firstRun.ts is the client's. Every route in its `CHECKLIST` is
+// `/(client)/…` and every question in `SETUP_QUESTIONS` is a client's; the
+// trainer app mounts only the generic `WhatsNewSheet` from its layout. So a
+// brand-new coach was shown a release-notes sheet and nothing else, and the
+// tour they may or may not have been caught by on the right launch is a
+// carousel — consumed once, per device, gone.
+//
+// The report this answers was filed about the client app and is quoted at
+// length in firstRun.ts. It applies to the coach with more force, not less: a
+// client who never finishes setup gets a plan built from a default, which is
+// wrong and recoverable. A coach who never sets a currency has SIX screens
+// showing dashes — Money, Analytics, Invoices, Payments, the Statement and
+// their own Profile all withhold every figure, correctly, and none of them
+// offers to fix it. A coach who reaches that state concludes the money features
+// do not work, and they are not wrong about what they can see.
+//
+// ── Why a list and not a wizard ────────────────────────────────────────────
+//
+// The same argument the client's screen makes. A wizard is one sitting: skip it
+// and there is no way back that anybody would find, and a coach's seven
+// prerequisites are not seven things anybody will do in one sitting anyway —
+// connecting Stripe is a five-minute detour through an identity check, and
+// writing a waiver is a job for a Sunday. So this is a list of things worth
+// doing, each naming the screen that does it, with a tick, a dash, or nothing.
+//
+// ── The rule every item here has to pass ───────────────────────────────────
+//
+// The same one firstRun.ts states: name what BREAKS if it is never done, not
+// what would be nicer with it. That rule is what keeps this at eight rows. Each
+// `breaks` string below is the failure a coach would otherwise report as a bug,
+// and every one of them is a thing this repo already refuses to guess at.
+//
+// Deliberately NOT on the list, and each for a stated reason:
+//
+//   · A photo or a bio      — the directory row looks thinner. Nothing computes
+//                             from either, and app/(trainer)/profile.tsx already
+//                             has its own prompt in place.
+//   · A branded colour      — cosmetic by construction. app/(trainer)/brand.tsx
+//                             is now in the directory (see features.ts) which is
+//                             the discoverability half of that problem.
+//   · Ad accounts           — blocked on Meta App Review for most coaches, so it
+//                             would be an item a coach cannot complete.
+//   · Notification permission — asked in context by the OS at the moment it
+//                             first matters, which is the right ask.
+//
+// ── And the rule that makes a tick safe ────────────────────────────────────
+//
+// Every fact is `boolean | null`. `null` is a provider saying it did not
+// answer — NOT that the thing has not been done. An unread row draws a dash, is
+// counted neither as done nor as outstanding, and stops the list calling itself
+// finished. "You have not connected Stripe" said to a coach who connected it in
+// March, because one read was refused for thirty seconds, is the sentence that
+// sends them to disconnect and reconnect a working payout account.
+import type { LoadStatus } from '../ui/loadStatus';
+
+/** The eight, by id. Storage-free — nothing persists a coach's position here,
+ *  because every one of these is read from the account rather than from the
+ *  handset, so the list is correct on a new phone with no migration. */
+export type CoachSetupId =
+  | 'currency' | 'rate' | 'client' | 'availability'
+  | 'package' | 'stripe' | 'code' | 'document';
+
+export interface CoachSetupItem {
+  id: CoachSetupId;
+  /** Title Case — it renders as the row's title. */
+  title: string;
+  /** Sentence case. What doing it gets them, in their words. */
+  note: string;
+  /** What is wrong, withheld or invented while it is undone. Printed on the row
+   *  when it is outstanding, because "why should I?" is the question a
+   *  checklist item that only nags cannot answer. */
+  breaks: string;
+  /** The screen that does it. Pushed with NO params, so every route here must
+   *  open on its own — the same rule TRAINER_NAV keeps for Explore, and the
+   *  reason none of these is a per-client screen. */
+  route: string;
+}
+
+/**
+ * In the order they are worth doing, which is not the order they are easiest.
+ *
+ * Currency is first and is not negotiable: it is the one setting whose absence
+ * blanks six other screens, and a coach who does it last spends their first
+ * fortnight believing the app cannot count. Rate second because it is a number
+ * they already know and it is the input to every session figure. A client
+ * third, because everything after it has somebody to be for.
+ *
+ * Stripe sits AFTER creating a package deliberately. A coach sent through an
+ * identity check before they have decided what they sell has been asked to do
+ * the hardest thing on the list for no visible return; with a package already
+ * written, connecting is the step that makes it purchasable.
+ */
+export const COACH_SETUP: readonly CoachSetupItem[] = [
+  {
+    id: 'currency',
+    title: 'Set Your Currency',
+    note: 'the code every price and total in the app is printed in',
+    // Measured: 35 of 54 live tenants have `tenants.currency` NULL. Part 150
+    // states there is no default currency anywhere and that is right — Repple
+    // is white-labelled and a guess here is a guess about somebody's money.
+    breaks: 'every money figure in the app is withheld and shown as a dash, on six separate screens',
+    route: '/(trainer)/settings',
+  },
+  {
+    id: 'rate',
+    title: 'Set Your Session Rate',
+    note: 'what one hour with you costs',
+    breaks: 'sessions are recorded with no value on them, so nothing you deliver adds up to a figure',
+    route: '/(trainer)/profile',
+  },
+  {
+    id: 'client',
+    title: 'Add Your First Client',
+    note: 'invite somebody, or write them down by hand',
+    breaks: 'every screen in the app is empty, and an empty screen looks the same as a broken one',
+    route: '/(trainer)/dashboard',
+  },
+  {
+    id: 'availability',
+    title: 'Set When You Work',
+    note: 'the hours clients may book, week by week',
+    breaks: 'nobody can book you, because there is nothing on offer for them to take',
+    route: '/(trainer)/calendar',
+  },
+  {
+    id: 'package',
+    title: 'Create Something To Sell',
+    note: 'a session pack or a monthly package, at your price',
+    breaks: 'there is nothing for a client to buy, so no payment can ever start',
+    route: '/(trainer)/payments',
+  },
+  {
+    id: 'stripe',
+    title: 'Connect Stripe',
+    note: 'so a client can pay you from inside the app',
+    // The honest framing: Repple never holds the money. The coach's Stripe
+    // account does, and until it exists a package is a price list.
+    breaks: 'a client can see what you sell and cannot pay for it — the money has nowhere to land',
+    route: '/(trainer)/payments',
+  },
+  {
+    id: 'code',
+    title: 'Name a Join Code',
+    note: 'one code per flyer, post or referral card',
+    breaks: 'every client arrives from an unnamed source, so nothing can tell you which of your channels works',
+    route: '/(trainer)/dashboard',
+  },
+  {
+    id: 'document',
+    title: 'Upload Your Paperwork',
+    note: 'your waiver, your par-q, your house rules',
+    breaks: 'a client starts training with you having signed nothing of yours',
+    route: '/(trainer)/documents',
+  },
+];
+
+/** What the app knows about each item. `null` means the read behind it did not
+ *  answer, which is NOT that the thing has not been done. */
+export interface CoachSetupFacts {
+  currency: boolean | null;
+  rate: boolean | null;
+  client: boolean | null;
+  availability: boolean | null;
+  package: boolean | null;
+  stripe: boolean | null;
+  code: boolean | null;
+  document: boolean | null;
+}
+
+/** Done, still to do, or nobody could tell us. Deliberately the same three
+ *  words `firstRun.ts` uses, because the tick, the dash and the empty circle
+ *  are drawn by two screens that should not diverge. */
+export type CoachItemState = 'done' | 'todo' | 'unknown';
+
+export interface CoachSetupRow {
+  item: CoachSetupItem;
+  state: CoachItemState;
+}
+
+const stateOf = (v: boolean | null): CoachItemState => (v == null ? 'unknown' : v ? 'done' : 'todo');
+
+/** The rows, each with where it stands. */
+export function coachSetupRows(f: CoachSetupFacts): CoachSetupRow[] {
+  return COACH_SETUP.map((it) => ({ item: it, state: stateOf(f[it.id]) }));
+}
+
+/** How many are done. Never counts an unread one. */
+export function coachSetupDone(rows: readonly CoachSetupRow[]): number {
+  return rows.filter((r) => r.state === 'done').length;
+}
+
+/** How many are KNOWN to be outstanding. Never counts an unread one either —
+ *  "3 left" over a failed read is a number made out of our own failure. */
+export function coachSetupLeft(rows: readonly CoachSetupRow[]): number {
+  return rows.filter((r) => r.state === 'todo').length;
+}
+
+/** How many could not be established. `done + left + unknown` is the list. */
+export function coachSetupUnknown(rows: readonly CoachSetupRow[]): number {
+  return rows.filter((r) => r.state === 'unknown').length;
+}
+
+/** The next thing worth doing, or null when there is nothing KNOWN to do.
+ *  Order is the array's order, which is the order argued for above. */
+export function coachSetupNext(rows: readonly CoachSetupRow[]): CoachSetupItem | null {
+  return rows.find((r) => r.state === 'todo')?.item ?? null;
+}
+
+/**
+ * Whether the dashboard still carries the row.
+ *
+ * True while anything is outstanding AND true while anything is merely UNKNOWN.
+ * That second clause is the LoadStatus rule applied to a checklist: a list that
+ * takes itself off the screen because three of its reads failed has hidden the
+ * currency step from the coach whose currency is not set — which is the exact
+ * coach it exists for.
+ */
+export function showCoachSetup(rows: readonly CoachSetupRow[]): boolean {
+  return rows.some((r) => r.state !== 'done');
+}
+
+/**
+ * The heading, which has to be true in all three states.
+ *
+ * "4 of 8 done" states a denominator, and a denominator over a partly-unread
+ * list is a claim about the four we could not see. So the fraction is printed
+ * only when everything answered; otherwise the count stands alone.
+ */
+export function coachSetupHeading(rows: readonly CoachSetupRow[]): string {
+  const done = coachSetupDone(rows);
+  return coachSetupUnknown(rows) > 0 ? `${done} done` : `${done} of ${rows.length} done`;
+}
+
+/**
+ * The line under the heading.
+ *
+ * Four outcomes and they are not interchangeable. The one that matters is the
+ * third: a coach who has finished everything READABLE but whose Stripe read
+ * failed must not be told they are set up, because the next thing they do is
+ * stop looking.
+ */
+export function coachSetupNote(rows: readonly CoachSetupRow[], status: LoadStatus): string {
+  if (status === 'loading') return 'Checking what is already set up…';
+  const left = coachSetupLeft(rows);
+  const unknown = coachSetupUnknown(rows);
+  if (unknown > 0 && left === 0) {
+    return 'Everything that could be checked is done. Some of it could not be read just now, so those rows show a dash rather than a tick — that is this screen not knowing, not you not having done it.';
+  }
+  if (unknown > 0) {
+    return 'Work through these in any order. A dash means that row could not be read, so it is not counted either way.';
+  }
+  if (left === 0) return 'That is everything. This screen stays here if you want to look again.';
+  return 'Work through these in any order. Each one opens the screen that does it.';
+}

@@ -112,10 +112,6 @@ const KNOWN = new Map([
   ['app/(client)/workouts.tsx', { count: 1, why:
     'The new-PR message. `wkg` is the weight just logged on the set that beat the record, and ' +
     'the branch requires an estimated 1RM greater than zero, so there is a load to name.' }],
-  ['app/(owner)/class-analytics.tsx', { count: 3, why:
-    'Three arms of the payroll hero note, each ending "· —% turned up". The dash is a ' +
-    'percentage in a dot-separated strip of figures beside its own unit, not a word in a ' +
-    'sentence — the sentences in that note are the clauses after it, and they are literal.' }],
   ['app/(trainer)/analytics.tsx', { count: 2, why:
     'Both inside `gymCur ?` arms with the amount already proved non-null, so `priced()` has ' +
     'both halves it needs. The unguarded sibling of these two — the revenue-target line, where ' +

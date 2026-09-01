@@ -25,6 +25,7 @@
 // it done. `worstStatus` is what says so.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Program } from '../lib/programs';
+import { programSignature, type GroupVersion } from '../lib/groupProgram';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
@@ -42,6 +43,20 @@ export interface ProgramGroup {
   /** The clients in the group. Only meaningful when `status` is 'ready': under
    *  anything else an empty array means the membership did not come back. */
   memberIds: string[];
+  /**
+   * Every programme this group has been given, oldest first.
+   *
+   * The group still does NOT own the plan — assigning is a fan-out into each
+   * member's own `assigned_programs` row, and part 134 gives three reasons that
+   * have not changed. What this adds is something to compare against: with one
+   * stored programme, a member on last month's version and a member whose
+   * Thursday was rewritten around their shoulder both read 'diverged', which is
+   * true and useless because the two need opposite actions.
+   *
+   * Empty under a read that did not land. `status` is what says which, and
+   * `versionSpread` refuses to count anything unless both reads were whole.
+   */
+  versions: GroupVersion[];
   createdAt: string | null;
 }
 
@@ -97,10 +112,44 @@ export function useProgramGroups() {
         const gPage = capped(gRows);
         const list: ProgramGroup[] = (gPage.rows as any[]).map((r) => ({
           id: r.id, name: r.name, program: (r.program ?? null) as Program | null,
-          memberIds: [], createdAt: r.created_at ?? null,
+          memberIds: [], versions: [], createdAt: r.created_at ?? null,
         }));
 
         if (!list.length) { setGroups([]); setStatus(gPage.truncated ? 'partial' : 'ready'); return; }
+
+        // The versions, in the same round trip as the membership below. The
+        // FINGERPRINT is computed here rather than stored: `programSignature`
+        // already decides which members are on the group's plan, and a second
+        // stored copy of that judgement is a second thing to keep in step. See
+        // the note on `versions` above.
+        const { data: vRows, error: vErr } = await supabase
+          .from('program_group_versions')
+          .select('group_id, version, program, created_at')
+          .in('group_id', list.map((g) => g.id))
+          .order('group_id', { ascending: true }).order('version', { ascending: true })
+          .limit(capLimit());
+        if (cancelled) return;
+        if (vErr) {
+          // Reported and NOT fatal. A group whose version history could not be
+          // read still has a plan and a membership, and both are worth showing;
+          // what the screen loses is the ability to say who is on an older
+          // version, and `versionSpread` refuses to count under a status that
+          // is not 'ready' — so nobody is offered a re-send off this.
+          reportError('programGroups.versions', vErr);
+        } else {
+          const vPage = capped(vRows);
+          const byGroup = new Map<string, GroupVersion[]>();
+          for (const r of vPage.rows as any[]) {
+            const bucket = byGroup.get(r.group_id) ?? [];
+            bucket.push({
+              version: Number(r.version),
+              signature: programSignature((r.program ?? null) as Program | null),
+              createdAt: r.created_at ?? null,
+            });
+            byGroup.set(r.group_id, bucket);
+          }
+          for (const g of list) g.versions = byGroup.get(g.id) ?? [];
+        }
 
         // Membership, in one read across every group. Ordered on the primary
         // key so a capped read returns the same page each launch rather than a
@@ -143,7 +192,7 @@ export function useProgramGroups() {
     const nm = name.trim();
     if (!nm) return null;
     if (!USE_SUPABASE) {
-      const g: ProgramGroup = { id: localId(), name: nm, program: null, memberIds: [], createdAt: new Date().toISOString() };
+      const g: ProgramGroup = { id: localId(), name: nm, program: null, memberIds: [], versions: [], createdAt: new Date().toISOString() };
       LOCAL = [g, ...LOCAL]; setGroups(LOCAL);
       return g.id;
     }
@@ -157,7 +206,7 @@ export function useProgramGroups() {
       if (error) { reportError('programGroups.create', error, { name: nm }); return null; }
       if (!data || !data.length) { reportError('programGroups.create', new Error('insert returned no row'), { name: nm }); return null; }
       const row = data[0] as any;
-      setGroups((gs) => [{ id: row.id, name: nm, program: null, memberIds: [], createdAt: row.created_at ?? null }, ...gs]);
+      setGroups((gs) => [{ id: row.id, name: nm, program: null, memberIds: [], versions: [], createdAt: row.created_at ?? null }, ...gs]);
       return row.id as string;
     } catch (e) { reportError('programGroups.create', e, { name: nm }); return null; }
   }, [uid]);
@@ -179,12 +228,43 @@ export function useProgramGroups() {
     setGroups((gs) => gs.map((g) => (g.id === id ? { ...g, program } : g)));
     if (!USE_SUPABASE) { LOCAL = LOCAL.map((g) => (g.id === id ? { ...g, program } : g)); return true; }
     try {
-      const { data, error } = await supabase.from('program_groups')
-        .update({ program, updated_at: new Date().toISOString() }).eq('id', id).select('id');
+      // Through the RPC rather than a bare UPDATE, and the reason is that the
+      // group's live programme and the newest recorded version are ONE FACT.
+      // Two round trips would let a version exist that the group is not on —
+      // after which every member reads as behind a version nobody was ever
+      // sent — or the group move onto something with no version recorded, after
+      // which everybody reads as bespoke. `snapshot_group_program` allocates
+      // the number under a lock and writes both inside one statement, and it
+      // returns the existing row unchanged when the programme has not actually
+      // changed, so re-picking the same template mints nothing.
+      const { data, error } = await supabase.rpc('snapshot_group_program', {
+        p_group_id: id, p_program: program,
+      });
       if (error) { reportError('programGroups.setProgram', error, { id }); return false; }
-      // Zero rows is not an error here. It is a policy refusal, and it means
-      // the group on this screen is not the group on the server.
-      return !!data && data.length > 0;
+      // A null row is not success. The function raises for a group that is not
+      // this coach's, and PostgREST turns that into `error` — but a definer
+      // function returning nothing at all would arrive here as a quiet null,
+      // and the screen above announces the programme has changed.
+      if (!data) {
+        reportError('programGroups.setProgram', new Error('snapshot_group_program returned no row'), { id });
+        return false;
+      }
+      // The local copy of the version list follows the write. Without it the
+      // screen would go on comparing members against the version BEFORE this
+      // one and report everybody as behind the moment the coach changed the
+      // plan, which is the false alarm the whole feature exists to avoid.
+      const row = (Array.isArray(data) ? data[0] : data) as { version?: number; created_at?: string } | null;
+      if (row?.version != null) {
+        const v: GroupVersion = {
+          version: Number(row.version),
+          signature: programSignature(program),
+          createdAt: row.created_at ?? null,
+        };
+        setGroups((gs) => gs.map((g) => (g.id === id
+          ? { ...g, versions: [...g.versions.filter((x) => x.version !== v.version), v].sort((a, b) => a.version - b.version) }
+          : g)));
+      }
+      return true;
     } catch (e) { reportError('programGroups.setProgram', e, { id }); return false; }
   }, []);
 

@@ -36,6 +36,7 @@
 // wall clock; storage is timestamptz precisely so this conversion happens once,
 // here, rather than in every screen.
 
+import { assertWhole, capLimit } from './rowCap';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
@@ -56,6 +57,32 @@ export interface Shift {
   role: ShiftRole;
   status: ShiftStatus;
   note: string | null;
+  /**
+   * What this shift is worth, in minor units, for its WHOLE span — not per
+   * hour. Null is "nobody priced it", which is not "free": every figure derived
+   * from these keeps the two apart and says how many were unpriced.
+   *
+   * Added by 196-a-rota-that-cannot-be-costed.sql. Before it, neither surface
+   * could answer what the floor costs to staff — the only money figure in the
+   * product is `tenants.session_fee` times DELIVERED one-to-ones, and a trainer
+   * on the desk from six until ten delivers nothing and is owed four hours.
+   *
+   * OPTIONAL on the type, and only for the reason `GymClass.status` is: `Shift`
+   * is built by hand in `coverage.test.ts`, a file that belongs to no one lane,
+   * and making two new fields required would break a suite whose subject is
+   * hour arithmetic and which has no opinion about money. `fetchShifts` always
+   * fills both in, and every reader below treats undefined exactly as null.
+   */
+  rateCents?: number | null;
+  /**
+   * The currency of `rateCents`. Null exactly when `rateCents` is null, which
+   * the database enforces (`gym_shifts_priced_or_not`).
+   *
+   * There is no default currency in this product — part 150 removed all seven
+   * of them and says why — so a rate whose currency did not read is a number
+   * that cannot be written down, never a number in dirhams.
+   */
+  currency?: string | null;
 }
 
 /** An hour of work the gym has actually committed to: a class, or a booked PT. */
@@ -442,6 +469,63 @@ export interface RotaSummary {
   hours: number | null;
 }
 
+/**
+ * What a set of shifts costs, and how much of it is unknown.
+ *
+ * ── Why this returns four numbers rather than one ─────────────────────────
+ *
+ * Because a single total would be a lie in three separate ways, and each of
+ * them flatters the gym:
+ *
+ *  · a shift nobody priced contributes nothing, so an owner who has costed two
+ *    of nine shifts reads a week that costs almost nothing. `unpriced` is what
+ *    makes the total legible — "1,400 across 2 of 9 shifts" is a figure; "1,400"
+ *    on its own is a wrong one;
+ *  · a PULLED shift is not a cost. It is kept on the rota deliberately so an
+ *    hour somebody dropped out of stays distinguishable from one nobody was
+ *    booked for, and `isLive` is the same filter every other figure here uses;
+ *  · two currencies cannot be added. This product is white-label and a chain
+ *    can hold gyms in two countries; adding 40 GBP to 40 AED gives 80 of
+ *    nothing. `currency` comes back null and `mixedCurrency` true, and the
+ *    screen prints the reason rather than a number.
+ */
+export interface RotaCost {
+  /** Minor units, across the live shifts that carry a rate. Null when none do
+   *  — which is not zero, and is the state every gym starts in. */
+  cents: number | null;
+  /** The one currency every rated shift agreed on, or null. */
+  currency: string | null;
+  /** True when the rated shifts do not agree, which is why `cents` is null. */
+  mixedCurrency: boolean;
+  /** Live shifts carrying a rate, and live shifts carrying none. */
+  priced: number;
+  unpriced: number;
+}
+
+export function rotaCost(shifts: Shift[]): RotaCost {
+  const live = shifts.filter(isLive);
+  let cents: number | null = null;
+  let currency: string | null = null;
+  let mixed = false;
+  let priced = 0;
+
+  for (const s of live) {
+    if (s.rateCents == null || !s.currency) continue;
+    const cur = s.currency.trim().toUpperCase();
+    if (!cur) continue;
+    priced += 1;
+    if (currency == null) currency = cur;
+    else if (currency !== cur) mixed = true;
+    cents = (cents ?? 0) + s.rateCents;
+  }
+
+  // Mixed currencies leave the amount unstated rather than summed. The count of
+  // priced shifts survives, because "9 shifts are costed and they are in two
+  // currencies" is exactly the sentence the owner needs.
+  if (mixed) return { cents: null, currency: null, mixedCurrency: true, priced, unpriced: live.length - priced };
+  return { cents, currency, mixedCurrency: false, priced, unpriced: live.length - priced };
+}
+
 /** The week at a glance. */
 export function summariseRota(shifts: Shift[]): RotaSummary {
   const live = shifts.filter(isLive);
@@ -464,16 +548,21 @@ export async function fetchShifts(
 ): Promise<Shift[]> {
   const { data, error } = await sb
     .from('gym_shifts')
-    .select('id, trainer_id, starts_at, ends_at, role, status, note')
+    .select('id, trainer_id, starts_at, ends_at, role, status, note, rate_cents, currency')
     .eq('tenant_id', tenantId)
     // A shift that started before the window but runs into it still covers
     // hours inside it, so the window is opened on `ends_at`.
     .lt('starts_at', toISO)
     .gt('ends_at', fromISO)
-    .order('starts_at', { ascending: true });
+    .order('starts_at', { ascending: true })
+    .limit(capLimit());
   if (error) throw error;
 
-  const rows = data ?? [];
+  // Capped through src/lib/rowCap.ts. A week of one gym's shifts will not reach
+  // a thousand, which is why the guard is worth having: if it ever does, the
+  // window bound or the tenant filter has been lost in an edit, and the rota
+  // would silently render another gym's cover as this one's — with names on it.
+  const rows = assertWhole(data as any[] | null, 'the shifts in this week');
   if (!rows.length) return [];
 
   // Names live on `profiles`, not `trainers` — the trainers table carries the
@@ -498,6 +587,10 @@ export async function fetchShifts(
     role: r.role ?? 'floor',
     status: r.status ?? 'scheduled',
     note: r.note ?? null,
+    rateCents: typeof r.rate_cents === 'number' ? r.rate_cents : null,
+    // Trimmed and upper-cased on the way in, so 'gbp' and ' GBP ' cannot be
+    // read as two currencies by `rotaCost` and trip its mixed-currency guard.
+    currency: (r.currency ?? '').toString().trim().toUpperCase() || null,
   }));
 }
 
@@ -564,6 +657,51 @@ export interface NewShift {
   endsAt: string;
   role?: ShiftRole;
   note?: string | null;
+  /** Both or neither — `gym_shifts_priced_or_not` refuses one without the
+   *  other, because an amount with no currency is not an amount. */
+  rateCents?: number | null;
+  currency?: string | null;
+}
+
+/** The fields an owner may correct on a shift that is already on the rota. An
+ *  absent key is "leave it alone"; null is "clear it". */
+export interface ShiftPatch {
+  startsAt?: string;
+  endsAt?: string;
+  role?: ShiftRole;
+  note?: string | null;
+  rateCents?: number | null;
+  currency?: string | null;
+}
+
+/**
+ * Why this shift cannot be saved, in the owner's words, or null.
+ *
+ * Pure, so the sentence is assertable without a database and is shown while the
+ * form is still being filled in rather than after a refused round trip. Each of
+ * the three is a constraint the database also enforces — `gym_shifts_span`,
+ * `gym_shifts_rate_nonneg`, `gym_shifts_priced_or_not` — said in advance and in
+ * English instead of arriving as a Postgres error code.
+ */
+export function shiftBlocker(s: {
+  trainerId?: string | null; startsAt?: string | null; endsAt?: string | null;
+  rateCents?: number | null; currency?: string | null;
+}): string | null {
+  if (!s.trainerId) return 'Say who is on.';
+  const a = Date.parse(s.startsAt ?? '');
+  const b = Date.parse(s.endsAt ?? '');
+  if (Number.isNaN(a) || Number.isNaN(b)) return 'Give the shift a start and an end.';
+  if (b <= a) return 'A shift has to end after it starts — otherwise it covers no hours at all while looking like cover on the rota.';
+  if (s.rateCents != null && s.rateCents < 0) return 'A negative rate is a typo, and it would subtract from the week’s cost.';
+  // The pairing, said in the direction the form is actually filled in: somebody
+  // types an amount and the currency is what they forget.
+  if (s.rateCents != null && !(s.currency ?? '').trim()) {
+    return 'Say what money that is in. An amount with no currency is read in whatever the reader happens to be thinking in — and this product has no default currency.';
+  }
+  if (s.rateCents == null && (s.currency ?? '').trim()) {
+    return 'A currency with no amount is a setting pretending to be a cost. Give it a figure or clear the currency.';
+  }
+  return null;
 }
 
 /**
@@ -596,8 +734,48 @@ export async function addShift(sb: Queryable, tenantId: string, s: NewShift): Pr
     ends_at: s.endsAt,
     role: s.role ?? 'floor',
     note: s.note ?? null,
+    rate_cents: s.rateCents ?? null,
+    // Normalised here as well as on the read, so the row itself never holds two
+    // spellings of one currency.
+    currency: (s.currency ?? '').trim().toUpperCase() || null,
   });
   if (error) throw error;
+}
+
+/**
+ * Correct a shift that is already on the rota.
+ *
+ * `setShiftStatus` could pull one and `deleteShift` could remove one; neither
+ * could change a time, a role, a note or — once part 196 landed — a rate. So a
+ * shift entered an hour out could only be deleted and retyped, which is fine
+ * for a rota and would not be for anything with history attached.
+ *
+ * The count is checked, not `error` alone — see src/lib/wroteRows.ts.
+ * `gym_shifts_owner` is `is_owner_of(tenant_id)` and is the only policy granting
+ * UPDATE (`gym_shifts_staff_r` is SELECT only), so a trainer's edit matches zero
+ * rows, returns no error, and leaves them watching a rota redraw unchanged.
+ */
+export async function updateShift(sb: Queryable, id: string, patch: ShiftPatch): Promise<void> {
+  const fields: Record<string, unknown> = {};
+  if (patch.startsAt !== undefined) fields.starts_at = patch.startsAt;
+  if (patch.endsAt !== undefined) fields.ends_at = patch.endsAt;
+  if (patch.role !== undefined) fields.role = patch.role;
+  if (patch.note !== undefined) fields.note = patch.note;
+  // The two money columns move TOGETHER, always. Sending one without the other
+  // is how a row ends up with an amount and no currency — which the database
+  // would refuse outright, but as a constraint violation rather than as the
+  // sentence `shiftBlocker` already wrote.
+  if (patch.rateCents !== undefined || patch.currency !== undefined) {
+    const cents = patch.rateCents ?? null;
+    const cur = (patch.currency ?? '').trim().toUpperCase() || null;
+    fields.rate_cents = cents;
+    fields.currency = cents == null ? null : cur;
+  }
+  if (!Object.keys(fields).length) return;
+
+  const r = await sb.from('gym_shifts').update(fields, { count: 'exact' }).eq('id', id);
+  if (r.error) throw r.error;
+  assertWrote('That change to the shift', r);
 }
 
 /**

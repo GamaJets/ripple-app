@@ -31,7 +31,14 @@ import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 // so none of them may be written without `tenants.currency`.
 import { fetchSessions, PAY_DELIVERED_ONLY, type PayPolicy, type PayrollLine } from '@lib/gymSessions';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
-import { fetchShifts, fetchDemand, type DemandBlock } from '@lib/gymRota';
+import {
+  fetchShifts, fetchDemand, addShift, updateShift, setShiftStatus, deleteShift,
+  shiftFromHours, shiftBlocker, rotaCost, summariseRota, shiftHours, isLive,
+  weekStartOf, weekWindow, weekDays, shiftWeek,
+  type DemandBlock, type Shift, type ShiftRole,
+} from '@lib/gymRota';
+import { money } from '@lib/gymRecord';
+import { searchRows, searchNote } from '@lib/consoleSearch';
 import { fetchClientActivity, DRIFT_LABEL, DEFAULT_WINDOWS, type Drift } from '@lib/clientDrift';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
 import {
@@ -64,6 +71,9 @@ export default function Staff() {
   const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
   const [rec, setRec] = useState<StaffRecord>(EMPTY);
   const [sel, setSel] = useState<string | null>(null);
+  // No console page had a search input. A gym with thirty coaches reads this
+  // table by scrolling.
+  const [q, setQ] = useState('');
 
   /**
    * Whether a no-show is payable is a gym policy, and this screen now READS it
@@ -291,7 +301,7 @@ export default function Staff() {
         />
       </div>
 
-      <Roster view={view} rec={rec} sel={sel} onPick={setSel} ccy={ccy} />
+      <Roster view={view} rec={rec} sel={sel} onPick={setSel} ccy={ccy} query={q} onQuery={setQ} />
 
       {chosen ? (
         <Person m={chosen} rec={rec} onClose={() => setSel(null)} ccy={ccy} />
@@ -303,6 +313,8 @@ export default function Staff() {
         </Section>
       )}
 
+      <Rota tenantId={me.tenantId!} trainers={rec.trainers} ccy={ccy} />
+
       <OffRoster view={view} ccy={ccy} />
     </Shell>
   );
@@ -310,9 +322,9 @@ export default function Staff() {
 
 /* ── the roster ────────────────────────────────────────────────────────────── */
 
-function Roster({ view, rec, sel, onPick, ccy }: {
+function Roster({ view, rec, sel, onPick, ccy, query, onQuery }: {
   view: StaffView; rec: StaffRecord; sel: string | null; onPick: (id: string) => void;
-  ccy: TenantCurrency;
+  ccy: TenantCurrency; query: string; onQuery: (q: string) => void;
 }) {
   const cols: Column<StaffMember>[] = [
     {
@@ -395,15 +407,33 @@ function Roster({ view, rec, sel, onPick, ccy }: {
     },
   ];
 
+  // Filtered, never re-ordered. The band order on this table is the whole
+  // instrument — "a trainer with no data must never read as fine" — and a
+  // search that re-sorted would bury the row the page exists to raise.
+  const shown = searchRows(view.members ?? [], query, (m) => [m.name, m.trainerId]);
+  const note = searchNote(query, shown.length, view.members?.length ?? 0);
+
   return (
     <Section
       title="The roster"
       sub="Worst first, and Unknown directly beneath — a trainer the record cannot judge is never sorted in among the ones it can vouch for."
     >
+      <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '12px 14px 0', flexWrap: 'wrap' }}>
+        <input
+          value={query} onChange={(e) => onQuery(e.target.value)}
+          placeholder="Search a coach" aria-label="Search the roster"
+          style={{ ...field, flex: 1, minWidth: 200 }}
+        />
+        {query ? <button onClick={() => onQuery('')} style={linkBtn}>clear</button> : null}
+      </div>
+      {/* Above the table. An empty filtered roster on THIS page reads as a gym
+          with no staff problems at all, which is the sentence the whole screen
+          is written against. */}
+      {note ? <p style={{ margin: 0, padding: '8px 14px 0', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p> : null}
       <Part slice={rec.trainers} what="the staff roster">
         {view.members ? (
           <DataTable
-            rows={view.members} columns={cols} rowKey={(m) => m.trainerId}
+            rows={shown} columns={cols} rowKey={(m) => m.trainerId}
             empty="No trainer is attached to this gym yet. Invite one from the Repple Studio app and this page fills in."
           />
         ) : null}
@@ -615,6 +645,394 @@ function Book({ m, rec }: { m: StaffMember; rec: StaffRecord }) {
   );
 }
 
+/* ── the rota, and what it costs ───────────────────────────────────────────── */
+
+const ROLES: ShiftRole[] = ['floor', 'classes', 'pt', 'desk', 'admin'];
+
+/**
+ * The gym's rota: who is on, and what the floor costs to staff.
+ *
+ * ── Why this is on Staff and why it did not exist ─────────────────────────
+ *
+ * `addShift`, `setShiftStatus` and `deleteShift` have been in
+ * src/lib/gymRota.ts since the rota was built. `addShift` and `setShiftStatus`
+ * had no caller in `studio-web` at all; `deleteShift` had no caller ANYWHERE in
+ * the repository. So the console could read rostered hours, compare them
+ * against demand, and change none of them — a shift entered wrong could only be
+ * soft-pulled from a phone, and never removed or corrected.
+ *
+ * And `gym_shifts` carried no money, so neither surface could answer what a
+ * Saturday costs to cover. The only pay figure in the product is
+ * `tenants.session_fee` times DELIVERED one-to-ones; a trainer on the desk from
+ * six until ten delivers nothing and is owed four hours.
+ *
+ * ── Its own read, deliberately ────────────────────────────────────────────
+ *
+ * The page already reads 30 days of shifts into `rec.shifts` for the
+ * rostered-versus-delivered comparison. This section reads ONE WEEK, because a
+ * rota is edited a week at a time and pulling a month of rows to render seven
+ * days would make the week arrows re-read thirty. Two reads of the same table
+ * for two different questions is cheaper than one read that answers neither
+ * well.
+ */
+function Rota({ tenantId, trainers, ccy }: {
+  tenantId: string;
+  trainers: Slice<StaffTrainer>;
+  ccy: TenantCurrency;
+}) {
+  const [monday, setMonday] = useState(() => weekStartOf());
+  const [shifts, setShifts] = useState<Shift[] | null>(null);
+  const [readErr, setReadErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Shift | null>(null);
+
+  // The add form.
+  const [who, setWho] = useState('');
+  const [day, setDay] = useState(() => weekDays(weekStartOf())[0]);
+  const [from, setFrom] = useState('06');
+  const [to, setTo] = useState('14');
+  const [role, setRole] = useState<ShiftRole>('floor');
+  const [rate, setRate] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const w = weekWindow(monday);
+    if (!w) { setShifts(null); setReadErr('That week could not be read as a date range.'); return; }
+    try {
+      setShifts(await fetchShifts(supabase, tenantId, w.fromISO, w.toISO));
+      setReadErr(null);
+    } catch (e: any) {
+      // Null, never []: an empty rota under a failed read tells an owner that
+      // nobody is on the floor this week, which is the one sentence that gets
+      // somebody called in on their day off.
+      setShifts(null);
+      setReadErr(e?.message ?? 'The rota could not be read.');
+    }
+  }, [tenantId, monday]);
+
+  useEffect(() => { load(); }, [load]);
+  // The day picker follows the week, or it silently offers last week's dates.
+  useEffect(() => { setDay(weekDays(monday)[0]); }, [monday]);
+
+  const days = weekDays(monday);
+  const cost = shifts ? rotaCost(shifts) : null;
+  const summary = shifts ? summariseRota(shifts) : null;
+
+  // The gym's currency, because a shift rate has none of its own until it is
+  // typed. There is no default currency in this product — part 150 — so with
+  // `tenants.currency` unset the money half of the form is closed rather than
+  // guessed at.
+  const canPrice = !!ccy;
+
+  const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role);
+  const cents = rate.trim() === '' ? null : Math.round((parseFloat(rate) || 0) * 100);
+  const blocker = (who || rate)
+    ? shiftBlocker({
+        trainerId: who,
+        startsAt: draft?.startsAt ?? null,
+        endsAt: draft?.endsAt ?? null,
+        rateCents: cents,
+        currency: cents == null ? null : ccy,
+      })
+    : null;
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const d = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role);
+    const stop = shiftBlocker({
+      trainerId: who, startsAt: d?.startsAt ?? null, endsAt: d?.endsAt ?? null,
+      rateCents: cents, currency: cents == null ? null : ccy,
+    });
+    if (stop || !d) { setMsg(stop ?? 'That shift could not be built from those hours.'); return; }
+    setBusy(true); setMsg(null);
+    try {
+      await addShift(supabase, tenantId, { ...d, rateCents: cents, currency: cents == null ? null : ccy });
+      setMsg('On the rota.');
+      setRate('');
+      await load();
+    } catch (x: any) {
+      setMsg(x?.message ?? 'That shift was not added, so nobody is rostered for it.');
+    } finally { setBusy(false); }
+  };
+
+  const act = async (job: Promise<void>, done: string) => {
+    setMsg(null);
+    try { await job; setMsg(done); await load(); }
+    catch (x: any) { setMsg(x?.message ?? 'That change was refused, so the rota is unchanged.'); }
+  };
+
+  const options = trainers.state === 'ready' ? trainers.rows : null;
+
+  const cols: Column<Shift>[] = [
+    { key: 'when', header: 'When', value: (sh) => sh.startsAt,
+      render: (sh) => (
+        <span style={{ opacity: isLive(sh) ? 1 : 0.55 }}>
+          {new Date(sh.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          {' – '}
+          {new Date(sh.endsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+        </span>
+      ) },
+    { key: 'who', header: 'Who', value: (sh) => sh.trainerName,
+      render: (sh) => sh.trainerName
+        ?? <span className="mono" style={{ fontSize: 11 }}>{sh.trainerId.slice(0, 8)}</span> },
+    { key: 'role', header: 'On for', value: (sh) => sh.role },
+    { key: 'hours', header: 'Hours', value: (sh) => shiftHours(sh), numeric: true,
+      // Null, never 0: a span that cannot be read is not a shift of no length.
+      render: (sh) => shiftHours(sh) ?? <span className="dash">unreadable</span> },
+    { key: 'cost', header: 'Costs', value: (sh) => sh.rateCents ?? null, numeric: true,
+      render: (sh) => {
+        if (sh.rateCents == null) return <span className="dash">not priced</span>;
+        return money(sh.rateCents, sh.currency ?? null)
+          ?? <span className="dash">no currency on this shift</span>;
+      } },
+    { key: 'state', header: 'State', value: (sh) => sh.status,
+      render: (sh) => isLive(sh)
+        ? <span style={{ color: 'var(--good)' }}>on</span>
+        // A pulled shift is KEPT — "somebody dropped out" and "nobody was ever
+        // rostered" produce the same hole in the cover and are different
+        // problems. gymRota counts neither as cover.
+        : <span style={{ color: 'var(--warn)' }}>pulled</span> },
+    { key: 'act', header: '', value: () => 0, align: 'right',
+      render: (sh) => (
+        <span style={{ display: 'inline-flex', gap: 11 }}>
+          <button style={linkBtn} onClick={() => setEditing(sh)}>Edit</button>
+          {isLive(sh) ? (
+            <button style={{ ...linkBtn, color: 'var(--warn)' }}
+                    onClick={() => act(setShiftStatus(supabase, sh.id, 'cancelled'), 'Pulled — the hole is visible on the rota rather than hidden.')}>
+              Pull
+            </button>
+          ) : (
+            <button style={linkBtn}
+                    onClick={() => act(setShiftStatus(supabase, sh.id, 'scheduled'), 'Back on.')}>
+              Put back
+            </button>
+          )}
+          <button
+            style={{ ...linkBtn, color: 'var(--crit)' }}
+            onClick={() => {
+              // Delete is for a shift that should never have been written.
+              // Pulling is for one somebody dropped out of, and the confirm
+              // says which is which — the two leave different records.
+              if (!confirm('Delete this shift outright? Use Pull instead if somebody dropped out — a pulled shift stays on the rota so the hole is visible.')) return;
+              act(deleteShift(supabase, sh.id), 'Deleted.');
+            }}
+          >Delete</button>
+        </span>
+      ) },
+  ];
+
+  return (
+    <Section
+      title="The rota"
+      sub="Who is on the floor this week, and what it costs. A pulled shift is kept rather than deleted: an hour somebody dropped out of and an hour nobody was booked for make the same hole in the cover and are different problems."
+    >
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '12px 14px', flexWrap: 'wrap' }}>
+        <button style={ghostBtn} onClick={() => setMonday(shiftWeek(monday, -1))}>← Previous</button>
+        <button style={ghostBtn} onClick={() => setMonday(weekStartOf())} disabled={monday === weekStartOf()}>This week</button>
+        <button style={ghostBtn} onClick={() => setMonday(shiftWeek(monday, 1))}>Next →</button>
+        <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
+          week of {new Date(`${monday}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}
+        </span>
+      </div>
+
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+        gap: 1, background: 'var(--ring)', borderTop: '1px solid var(--ring)', borderBottom: '1px solid var(--ring)',
+      }}>
+        <Kpi label="Shifts on" text={summary ? String(summary.shifts - summary.cancelled) : null}
+             note={summary && summary.cancelled > 0 ? `${summary.cancelled} pulled` : undefined} />
+        <Kpi label="Rostered hours" text={summary?.hours == null ? null : String(Math.round(summary.hours * 10) / 10)}
+             note={summary?.hours == null ? 'nothing rostered this week' : undefined} />
+        <Kpi label="People on" text={summary ? String(summary.trainers) : null} />
+        <Kpi
+          label="Costs"
+          // Three different silences, and each gets its own words. A total that
+          // hid any of them would read as a cheap week.
+          text={
+            cost == null ? null
+              : cost.mixedCurrency ? null
+              : cost.cents == null ? null
+              : money(cost.cents, cost.currency) ?? null
+          }
+          note={
+            cost == null ? undefined
+              : cost.mixedCurrency ? 'two currencies on one rota — they cannot be added'
+              : cost.cents == null ? 'no shift this week carries a rate'
+              : cost.unpriced > 0 ? `across ${cost.priced} of ${cost.priced + cost.unpriced} shifts — ${cost.unpriced} carry no rate`
+              : `across all ${cost.priced} shifts`
+          }
+        />
+      </div>
+
+      <form onSubmit={add} style={{ display: 'flex', gap: 8, padding: 14, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid var(--ring)' }}>
+        {options === null ? (
+          <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
+            {trainers.state === 'failed'
+              ? 'Your roster did not come back, so nobody can be rostered from here. That is a failed query, not a gym with no staff.'
+              : 'Reading your roster…'}
+          </span>
+        ) : options.length === 0 ? (
+          <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Nobody on the roster to put on a shift yet.</span>
+        ) : (
+          <>
+            <select value={who} onChange={(e) => setWho(e.target.value)} style={{ ...field, minWidth: 160 }}
+                    aria-label="Who is on">
+              <option value="">Who is on?</option>
+              {options.map((t) => (
+                <option key={t.trainerId} value={t.trainerId}>{t.name ?? 'Unnamed trainer'}</option>
+              ))}
+            </select>
+            <select value={day} onChange={(e) => setDay(e.target.value)} style={{ ...field, minWidth: 140 }} aria-label="Which day">
+              {days.map((d) => (
+                <option key={d} value={d}>
+                  {new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                </option>
+              ))}
+            </select>
+            <input value={from} onChange={(e) => setFrom(e.target.value)} inputMode="numeric"
+                   aria-label="From hour" style={{ ...field, width: 60 }} />
+            <span style={{ color: 'var(--ink3)', fontSize: 12.5 }}>to</span>
+            <input value={to} onChange={(e) => setTo(e.target.value)} inputMode="numeric"
+                   aria-label="To hour" style={{ ...field, width: 60 }} />
+            <select value={role} onChange={(e) => setRole(e.target.value as ShiftRole)} style={{ ...field, width: 110 }} aria-label="On for">
+              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {/* Closed rather than defaulted when the gym has not said what money
+                it takes. There is no default currency in this product — part 150
+                removed all seven of them — so a figure typed here would be
+                stored in a currency nobody chose. */}
+            <input
+              value={rate} onChange={(e) => setRate(e.target.value)} disabled={!canPrice}
+              placeholder={canPrice ? `Cost (${ccy})` : 'Set the gym’s currency first'}
+              inputMode="decimal" aria-label="What this shift costs"
+              style={{ ...field, width: 150, opacity: canPrice ? 1 : 0.5 }}
+            />
+            <button type="submit" disabled={busy} style={btn}>{busy ? 'Adding…' : 'Add'}</button>
+          </>
+        )}
+      </form>
+
+      {!canPrice ? (
+        <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          This gym has not set its currency, so a shift can be rostered but not costed — an amount
+          with no currency is read in whatever money the reader happens to be thinking in. Set it on
+          the gym record and the cost column fills in.
+        </p>
+      ) : null}
+      {blocker ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
+      {msg ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+
+      {shifts === null ? (
+        <div style={{ padding: '26px 20px', color: 'var(--ink3)', fontSize: 13.5 }}>
+          {readErr
+            ? `The rota could not be read, so this week is unknown rather than empty: ${readErr}`
+            : 'Loading…'}
+        </div>
+      ) : (
+        <DataTable rows={shifts} columns={cols} rowKey={(sh) => sh.id}
+                   empty="Nobody is rostered this week. That is a rota nobody has written, not a gym with nobody in it." />
+      )}
+
+      {editing ? (
+        <EditShift
+          shift={editing} ccy={ccy}
+          onClose={(changed) => { setEditing(null); if (changed) load(); }}
+        />
+      ) : null}
+    </Section>
+  );
+}
+
+/** Correct a shift that is already on the rota. Until `updateShift` existed the
+ *  only correction available was delete-and-retype. */
+function EditShift({ shift, ccy, onClose }: {
+  shift: Shift; ccy: TenantCurrency; onClose: (changed: boolean) => void;
+}) {
+  const local = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const p = (n: number) => String(n).padStart(2, '0');
+    // Local wall clock, because that is what `datetime-local` takes. An ISO
+    // string here shows a UK owner their 06:00 shift as 05:00 in summer.
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const [startsAt, setStartsAt] = useState(local(shift.startsAt));
+  const [endsAt, setEndsAt] = useState(local(shift.endsAt));
+  const [role, setRole] = useState<ShiftRole>(shift.role);
+  const [note, setNote] = useState(shift.note ?? '');
+  const [rate, setRate] = useState(shift.rateCents == null ? '' : String(shift.rateCents / 100));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  // The shift's OWN currency wins over the gym's: a rate filed last March in
+  // one currency must not be silently re-denominated because the gym has since
+  // changed its setting. The gym's is only the default for a shift with none.
+  const cur = shift.currency ?? ccy;
+  const cents = rate.trim() === '' ? null : Math.round((parseFloat(rate) || 0) * 100);
+  const blocker = shiftBlocker({
+    trainerId: shift.trainerId,
+    startsAt: startsAt ? new Date(startsAt).toISOString() : null,
+    endsAt: endsAt ? new Date(endsAt).toISOString() : null,
+    rateCents: cents,
+    currency: cents == null ? null : cur,
+  });
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (blocker) { setMsg(blocker); return; }
+    setBusy(true); setMsg(null);
+    try {
+      await updateShift(supabase, shift.id, {
+        startsAt: new Date(startsAt).toISOString(),
+        endsAt: new Date(endsAt).toISOString(),
+        role,
+        note: note.trim() || null,
+        rateCents: cents,
+        currency: cents == null ? null : cur,
+      });
+      onClose(true);
+    } catch (x: any) {
+      setMsg(x?.message ?? 'That change was refused, so the shift is unchanged.');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div role="dialog" aria-label="Edit this shift"
+         style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', padding: 24, zIndex: 10 }}
+         onClick={() => onClose(false)}>
+      <div onClick={(e) => e.stopPropagation()}
+           style={{ width: 480, maxWidth: '100%', background: 'var(--surface)', border: '1px solid var(--ring)' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ring)' }}>
+          <h2>{shift.trainerName ?? 'This shift'}</h2>
+          <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
+            {isLive(shift) ? 'On the rota' : 'Pulled — still on the record'}
+          </p>
+        </div>
+        <form onSubmit={save} style={{ display: 'grid', gap: 9, padding: 14 }}>
+          <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} style={field} aria-label="Starts" />
+          <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} style={field} aria-label="Ends" />
+          <select value={role} onChange={(e) => setRole(e.target.value as ShiftRole)} style={field} aria-label="On for">
+            {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note" style={field} />
+          <input
+            value={rate} onChange={(e) => setRate(e.target.value)} disabled={!cur}
+            placeholder={cur ? `Cost (${cur})` : 'No currency set — this shift cannot be costed'}
+            inputMode="decimal" aria-label="What this shift costs"
+            style={{ ...field, opacity: cur ? 1 : 0.5 }}
+          />
+          {blocker ? <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="submit" disabled={busy || !!blocker} style={btn}>{busy ? 'Saving…' : 'Save'}</button>
+            <button type="button" onClick={() => onClose(false)} style={ghostBtn}>Cancel</button>
+          </div>
+          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* ── money owed to somebody who is not on the roster ───────────────────────── */
 
 function OffRoster({ view, ccy }: { view: StaffView; ccy: TenantCurrency }) {
@@ -637,6 +1055,25 @@ function OffRoster({ view, ccy }: { view: StaffView; ccy: TenantCurrency }) {
       title="Sessions run by somebody not on the roster"
       sub="Real work against a name this page cannot print — a trainer who has left, or a roster row that was never created. Surfaced rather than dropped, because it is money."
     >
+      {/* The section named money owed and offered nothing to do about it. This
+          is the honest half of the fix: it says exactly what is missing, what
+          the consequence is, and where the row comes from.
+          
+          It stops short of a button, and that is not an oversight. `trainers`
+          has no owner INSERT policy — `trainers_owner_r` is SELECT and
+          `trainers_self_rw` is `id = auth.uid()` — so a roster row is created
+          when the COACH accepts a join code (part 81), not by the owner. A
+          button here would be refused by the database, and a button that
+          silently matches zero rows is the exact failure this codebase is
+          written against. */}
+      <p style={{ margin: 0, padding: '12px 14px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
+        Everybody below has delivered sessions this gym owes money for and has no{' '}
+        <span className="mono">trainers</span> row, so they are missing from every per-coach figure
+        above — class hours, rostered cover, the drift bands and the payroll total. A roster row is
+        created when the coach accepts the gym&rsquo;s join code, not from here: the owner cannot
+        insert one, and a button that the database would refuse is worse than this sentence. Send
+        them the join code, and the rows below fold into the roster on their next visit.
+      </p>
       <DataTable rows={rows} columns={cols} rowKey={(l) => l.trainerId} empty="—" />
     </Section>
   );
@@ -804,6 +1241,25 @@ function stateNote(s: Slice<unknown>, what: string): string | undefined {
 }
 
 /* ── shared bits (same shapes as the Members and Close screens) ────────────── */
+
+/* The same input and button shapes as the Door and Money screens. This page had
+ * no control of any kind until the rota gained a form: `addShift`,
+ * `setShiftStatus` and `deleteShift` had no caller in this console at all. */
+const field = {
+  padding: '9px 11px', borderRadius: 0, fontSize: 13.5,
+  background: 'var(--surface2)', color: 'var(--ink)',
+  border: '1px solid var(--ring)', fontFamily: 'var(--sans)', minWidth: 0,
+} as const;
+
+const btn = {
+  ...field, background: 'var(--brand)', color: 'var(--brand-ink)',
+  fontWeight: 600, cursor: 'pointer', border: '1px solid transparent',
+} as const;
+
+const ghostBtn = {
+  ...field, background: 'var(--surface2)', color: 'var(--ink2)',
+  cursor: 'pointer', flex: 'none',
+} as const;
 
 const linkBtn = {
   background: 'none', border: 'none', padding: 0, cursor: 'pointer',

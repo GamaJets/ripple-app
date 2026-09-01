@@ -65,6 +65,7 @@ import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships } from '@lib/gymRecord';
 import { fetchVisits } from '@lib/gymVisits';
 import { fetchClasses } from '@lib/gymSchedule';
+import { searchRows, searchNote } from '@lib/consoleSearch';
 import { assertWhole, capLimit, readAll } from '@lib/rowCap';
 import { fetchSessions } from '@lib/gymSessions';
 import { buildDossiers, sliceLoading, sliceReady, sliceFailed, type Slice, type MemberBooking } from '@lib/memberView';
@@ -886,7 +887,16 @@ function Loop({ g, me, contacts, followUps, tally, onLogged }: {
   const cols: Column<Contact>[] = [
     {
       key: 'member', header: 'Member', value: (c) => names.get(c.memberId) ?? '￿',
-      render: (c) => names.get(c.memberId) ?? <span className="dash">not on the roster read</span>,
+      // Linked for the same reason as the board above: a log of who was rung
+      // is read by somebody deciding whether to ring again, and that decision
+      // is made on the member's record.
+      render: (c) => {
+        const n = names.get(c.memberId);
+        if (!n) return <span className="dash">not on the roster read</span>;
+        return (
+          <a href={`/members?member=${encodeURIComponent(c.memberId)}`} style={{ color: 'var(--brand)' }}>{n}</a>
+        );
+      },
     },
     { key: 'at', header: 'Contacted', value: (c) => c.at, render: (c) => shortWhen(c.at) },
     { key: 'how', header: 'How', value: (c) => CHANNEL_LABEL[c.channel] },
@@ -1160,13 +1170,23 @@ function Roster({ g, rec, contacts, surfaced }: {
     ?? (g.rows == null ? null : g.rows.map((row) => plain(row)));
 
   const quiet = surfaced ? quietenedCount(surfaced) : 0;
+  // The console had no search input on any of its twenty-two pages, and this is
+  // the one an owner opens holding a list of names.
+  const [q, setQ] = useState('');
 
   const cols: Column<Surfaced<RetentionRow>>[] = [
     {
       key: 'name', header: 'Member', value: (s) => s.row.name ?? '￿',
+      // The link carries the id now. It said `/members` with nothing on it, so
+      // this screen named a drifting member, sent the owner to an unselected
+      // roster of six hundred, and left them to hunt by eye for the person the
+      // page had just identified. /members reads `?member=` on arrival and
+      // opens that dossier — see the note on `pick` there.
       render: (s) => (
         <span style={{ opacity: s.quietened ? 0.55 : 1 }}>
-          <a href="/members">{s.row.name ?? <span className="dash">unnamed account</span>}</a>
+          <a href={`/members?member=${encodeURIComponent(s.row.memberId)}`}>
+            {s.row.name ?? <span className="dash">unnamed account</span>}
+          </a>
         </span>
       ),
     },
@@ -1229,11 +1249,41 @@ function Roster({ g, rec, contacts, surfaced }: {
     },
   ];
 
+  // Filtered, not re-ordered: the surfacing rule above is the whole point of
+  // this table and a search must not disturb it. A gym looking for one name in
+  // six hundred still sees that person in their own band.
+  const shown = searchRows(rows ?? [], q, (s) => [s.row.name, s.row.planName, s.row.status, s.row.memberId]);
+  const note = searchNote(q, shown.length, rows?.length ?? 0);
+
   return (
     <Section
       title="Every member, worst first"
       sub="Ordered exactly as the coach's client book orders it, so the two screens never name a different person as the one to call — then, within each band only, anybody contacted recently sinks to the bottom."
     >
+      <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '12px 16px 0', flexWrap: 'wrap' }}>
+        <input
+          value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Search a member or a plan"
+          aria-label="Search the roster"
+          style={{
+            padding: '9px 11px', borderRadius: 0, fontSize: 13.5, flex: 1, minWidth: 220,
+            background: 'var(--surface2)', color: 'var(--ink)',
+            border: '1px solid var(--ring)', fontFamily: 'var(--sans)',
+          }}
+        />
+        {q ? (
+          <button
+            onClick={() => setQ('')}
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--brand)', fontSize: 13, fontFamily: 'var(--sans)' }}
+          >clear</button>
+        ) : null}
+      </div>
+      {/* Above the table, because a filtered board that comes back empty is
+          indistinguishable from a gym with nobody drifting — and that is the
+          one reading this whole screen exists to prevent. */}
+      {note ? (
+        <p style={{ margin: 0, padding: '8px 16px 0', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p>
+      ) : null}
       {rec.memberships.state === 'loading' ? <Loading /> : null}
       {rec.memberships.state === 'failed' ? (
         <Failed reason={(rec.memberships as { reason: string }).reason} what="the membership list" />
@@ -1247,7 +1297,7 @@ function Roster({ g, rec, contacts, surfaced }: {
       ) : null}
       {rows ? (
         <DataTable
-          rows={rows} columns={cols} rowKey={(s) => s.row.memberId}
+          rows={shown} columns={cols} rowKey={(s) => s.row.memberId}
           empty="No memberships recorded yet. Open one under Money and this page fills in."
         />
       ) : null}

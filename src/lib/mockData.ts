@@ -64,6 +64,25 @@ export interface WorkoutEntry {
    *  inferred from a stored zero, and for what a bodyweight set contributes to
    *  a tonnage when nobody has recorded what the person weighs. */
   bw?: boolean[];
+  /** Which of those sets were HELD rather than repeated, aligned to `sets` the
+   *  same way. `timed[i] === true` changes what `sets[i][0]` MEANS: on an
+   *  ordinary set it is repetitions, on a timed set it is SECONDS.
+   *
+   *  This exists because the app prescribes holds and could not accept one:
+   *  `buildProgram` writes '45 sec' planks and '30 sec/side' side planks, the
+   *  isometric set method's own blurb says "the reps column is seconds", and
+   *  both log paths refused anything that was not a positive whole number of
+   *  reps. What people typed instead was 45 into a reps box, which reads for
+   *  ever after as forty-five plank repetitions.
+   *
+   *  Absent on every entry written before this existed, and absent is NOT
+   *  false-for-every-set: a 45 typed into a reps box last month is a figure
+   *  nobody can now interpret, and relabelling it as a hold would invent a
+   *  plank that may never have happened.
+   *
+   *  See src/lib/timedSets.ts for why a hold contributes no tonnage and no
+   *  estimated 1RM, and what it is worth instead. */
+  timed?: boolean[];
   feel?: ('easy' | 'ok' | 'hard')[]; // per-set perceived effort (RPE), aligned to sets
   cardio?: { mins: number; dist: number; unit: string; watts?: number; hrAvg?: number; hrHigh?: number };
   /** Seconds per heart-rate zone during the session. Absent when no HR source

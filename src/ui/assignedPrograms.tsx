@@ -35,7 +35,24 @@ interface AssignedProgramsValue {
    *  A bulk assign is twelve of these at once and has to report on each one by
    *  name — "8 of 12 saved" tells a coach something is wrong and nothing about
    *  which four or what to do. See src/lib/bulkActions.ts. */
-  assignProgramTo: (clientId: string, program: Program) => Promise<{ ok: boolean; why: string | null }>;
+  assignProgramTo: (clientId: string, program: Program, startsOn?: string | null) => Promise<{ ok: boolean; why: string | null }>;
+  /**
+   * The day the COACH said each client's block begins, `YYYY-MM-DD`, for the
+   * clients whose row carried one.
+   *
+   * Absent from the map is "they have no start date", which is every
+   * assignment made before supabase/parts/175 and every one a coach makes
+   * without choosing a date — that stays the default, because "assign it now"
+   * is what the control has always meant.
+   *
+   * IT DOES NOT GATE ANYTHING. The client's Train tab renders whatever is on
+   * their row from the moment it is written; this is the coach's own record of
+   * when the block starts, and `CLIENT_STARTS_NOW` in src/lib/programStart.ts
+   * is the sentence every screen showing it has to carry. A provider that
+   * withheld a programme until its start date would empty a Train tab, because
+   * the shipped client app has no branch for "exists and is not due yet".
+   */
+  startsOn: Record<string, string>;
   /** Resolves true only when the removal reached the server. A clear that was
    *  refused leaves the client still training the old program while the coach's
    *  screen shows it gone. */
@@ -53,6 +70,7 @@ const Ctx = createContext<AssignedProgramsValue | null>(null);
 export function AssignedProgramsProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
   const [programs, setPrograms] = useState<Record<string, Program>>({});
+  const [startsOn, setStartsOn] = useState<Record<string, string>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
@@ -91,8 +109,22 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         if (error) { setStatus('error'); return; }
         const page = capped(data);
         const m: Record<string, Program> = {};
-        for (const r of page.rows as any[]) { if (r.program) m[r.client_id] = r.program as Program; }
+        // Kept in its own map rather than folded onto the Program. A start date
+        // is a fact about the ASSIGNMENT — one client's copy of a plan and when
+        // their coach said it begins — and the same Program object is also the
+        // group's plan, a library template and an on-device draft, none of which
+        // has a start date. Hanging it on the programme would carry a date into
+        // a template and out to the next person it was assigned to.
+        const d: Record<string, string> = {};
+        for (const r of page.rows as any[]) {
+          if (r.program) m[r.client_id] = r.program as Program;
+          // Only a real date goes in the map. A null or an empty string is the
+          // coach not having said, and absence is how that is spelled — see
+          // `startsOn` on the interface above.
+          if (typeof r.starts_on === 'string' && r.starts_on) d[r.client_id] = r.starts_on;
+        }
         if (Object.keys(m).length) setPrograms((prev) => ({ ...prev, ...m }));
+        if (Object.keys(d).length) setStartsOn((prev) => ({ ...prev, ...d }));
         setStatus(page.truncated ? 'partial' : 'ready');
       } catch { setStatus('error'); /* stay in-memory, but say the read failed */ }
     })();
@@ -127,7 +159,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * The local map is still written FIRST, because the screen has to respond to
    * the tap — and it is put back if the write does not land. See below.
    */
-  const assignProgramTo = async (clientId: string, program: Program): Promise<{ ok: boolean; why: string | null }> => {
+  const assignProgramTo = async (clientId: string, program: Program, when?: string | null): Promise<{ ok: boolean; why: string | null }> => {
     // ── and why a failed write is PUT BACK ───────────────────────────────
     //
     // The optimistic entry is written first so the screen responds to the tap,
@@ -150,8 +182,16 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       return { ok: false, why: 'This programme was not saved — the app could not confirm who you are signed in as, so nothing was sent to the server.' };
     }
     try {
+      // `starts_on` is sent ONLY when the caller passed one, and `undefined` is
+      // dropped by the driver rather than written as null. That matters on an
+      // OVERWRITE: a screen that does not offer a start date must not silently
+      // clear the one a coach set from a screen that does. Passing an explicit
+      // `null` is how a caller says "take the date off", which is a different
+      // intent and is spelled differently.
+      const row: Record<string, unknown> = { client_id: clientId, coach_id: uid, program };
+      if (when !== undefined) row.starts_on = when;
       const r = await supabase.from('assigned_programs')
-        .upsert({ client_id: clientId, coach_id: uid, program }, { onConflict: 'client_id', count: 'exact' });
+        .upsert(row, { onConflict: 'client_id', count: 'exact' });
       const why = writeFailure('That programme', r);
       if (why) {
         reportError('assignedPrograms.assignProgram', new Error(why), { clientId });
@@ -163,6 +203,18 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         // fan-out wrote 1 row for the linked client and was refused 42501 for
         // the hand-added one beside it.
         return { ok: false, why: `${why} Clients you added by hand have no Train tab until they join.` };
+      }
+      // The local map follows the write, and only after it landed. The
+      // optimistic entry above is the PROGRAMME, because the screen has to
+      // respond to the tap; a start date is read back as prose ("week 3 of 8")
+      // and a wrong one is a sentence rather than a delay, so it is written
+      // once the server has agreed to it.
+      if (when !== undefined) {
+        setStartsOn((p) => {
+          const n = { ...p };
+          if (when) n[clientId] = when; else delete n[clientId];
+          return n;
+        });
       }
       return { ok: true, why: null };
     } catch (e) {
@@ -223,8 +275,16 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     // out of it because a delete was refused makes the next dialog say they are
     // on nothing while they are still training it.
     const previous = programs[clientId] ?? null;
-    const putBack = () => setPrograms((p) => (previous ? { ...p, [clientId]: previous } : p));
+    const previousStart = startsOn[clientId] ?? null;
+    const putBack = () => {
+      setPrograms((p) => (previous ? { ...p, [clientId]: previous } : p));
+      if (previousStart) setStartsOn((p) => ({ ...p, [clientId]: previousStart }));
+    };
     setPrograms((p) => { const n = { ...p }; delete n[clientId]; return n; });
+    // The date goes with the row it was on. A client taken off a programme is
+    // on no block, and a start date left behind would have the next screen say
+    // "week 3 of 8" about nothing.
+    setStartsOn((p) => { const n = { ...p }; delete n[clientId]; return n; });
     if (!USE_SUPABASE || !uid) {
       putBack();
       return { ok: false, why: 'The app could not confirm who you are signed in as, so nothing was sent to the server.' };
@@ -248,7 +308,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     (await clearProgramFrom(clientId)).ok;
 
   return (
-    <Ctx.Provider value={{ programs, getProgram, status, assignProgram, assignProgramTo, clearProgram, clearProgramFrom }}>
+    <Ctx.Provider value={{ programs, getProgram, status, startsOn, assignProgram, assignProgramTo, clearProgram, clearProgramFrom }}>
       {children}
     </Ctx.Provider>
   );

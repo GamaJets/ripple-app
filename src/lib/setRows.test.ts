@@ -7,7 +7,13 @@ const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) => {
   if (JSON.stringify(a) !== JSON.stringify(b)) errors.push(`${msg}: ${JSON.stringify(a)} !== ${JSON.stringify(b)}`);
+
 };
+
+/** What every set of every programme written before src/lib/setIntensity.ts
+ *  carries. Named rather than repeated so the assertions below read as "nothing
+ *  changed" rather than as three nulls somebody has to check by eye. */
+const NO_INTENSITY = { rpe: null, pct1rm: null, tempo: null };
 
 /** The shape every programme already on a phone has: one spec, no table. */
 const old: SetSpec = { sets: 3, reps: '8-10', loadKg: 42.5 };
@@ -18,14 +24,19 @@ const old: SetSpec = { sets: 3, reps: '8-10', loadKg: 42.5 };
 // database AND in an on-device draft, and no migration reaches both.
 ok(!hasSetRows(old), 'an exercise with no table has no table');
 eq(setCount(old), 3, 'its set count is still `sets`');
+// `intensity` is on every planned set and is three nulls for every programme
+// ever written — the RPE, %1RM and tempo columns arrived after these, and
+// absent still means absent. Asserted in full here rather than picked apart,
+// because the whole claim of src/lib/setIntensity.ts is that adding them
+// changed NOTHING about an exercise that carries none.
 eq(expandSets(old), [
-  { n: 1, reps: '8-10', loadKg: 42.5, method: null, fromRow: false },
-  { n: 2, reps: '8-10', loadKg: 42.5, method: null, fromRow: false },
-  { n: 3, reps: '8-10', loadKg: 42.5, method: null, fromRow: false },
+  { n: 1, reps: '8-10', loadKg: 42.5, method: null, fromRow: false, intensity: NO_INTENSITY },
+  { n: 2, reps: '8-10', loadKg: 42.5, method: null, fromRow: false, intensity: NO_INTENSITY },
+  { n: 3, reps: '8-10', loadKg: 42.5, method: null, fromRow: false, intensity: NO_INTENSITY },
 ], 'and it expands to `sets` copies of the one spec');
 eq(expandSets({ sets: 2, reps: '12' }), [
-  { n: 1, reps: '12', loadKg: null, method: null, fromRow: false },
-  { n: 2, reps: '12', loadKg: null, method: null, fromRow: false },
+  { n: 1, reps: '12', loadKg: null, method: null, fromRow: false, intensity: NO_INTENSITY },
+  { n: 2, reps: '12', loadKg: null, method: null, fromRow: false, intensity: NO_INTENSITY },
 ], 'a bodyweight exercise keeps its null load rather than gaining a 0');
 // The per-exercise method reaches every copy — that is what it means today.
 eq(expandSets({ sets: 2, reps: '5', method: 'drop' }).map((s) => s.method), ['drop', 'drop'],
@@ -51,9 +62,9 @@ const ramped: SetSpec = {
 };
 ok(hasSetRows(ramped), 'an exercise with rows has a table');
 eq(expandSets(ramped), [
-  { n: 1, reps: '10', loadKg: 42.5, method: null, fromRow: true },
-  { n: 2, reps: '10', loadKg: 42.5, method: null, fromRow: true },
-  { n: 3, reps: '8', loadKg: 45, method: null, fromRow: true },
+  { n: 1, reps: '10', loadKg: 42.5, method: null, fromRow: true, intensity: NO_INTENSITY },
+  { n: 2, reps: '10', loadKg: 42.5, method: null, fromRow: true, intensity: NO_INTENSITY },
+  { n: 3, reps: '8', loadKg: 45, method: null, fromRow: true, intensity: NO_INTENSITY },
 ], 'the top set can be heavier than the back-offs — the thing one spec could not say');
 
 // Absent inherits; present answers, `null` included.

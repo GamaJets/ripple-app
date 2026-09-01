@@ -27,7 +27,7 @@ import { useEffect, useMemo, useState } from 'react';
 // takes today's bundle and has no ExpoImage in it. A bare import would take
 // this whole screen down while it loaded. React Native's own <Image> is the
 // fallback and is in every binary ever built.
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -51,6 +51,21 @@ import { supabase } from '../../src/lib/supabase';
 import { useClientData } from '../../src/ui/clientData';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
 import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
+// The two things this screen could not do, and they are the two things somebody
+// standing in front of the machine actually wants. `ExerciseHistoryPanel` was
+// mounted on app/(client)/history.tsx and on the coach's client-training screen
+// and nowhere else, so "what did I do on this last time" was three screens away
+// from the movement; and the set row was a local component on Train, so this
+// screen — the one reached from the library, from a demo, from a search — could
+// not log anything at all.
+import { ExerciseTrail } from '../../src/ui/ExerciseHistory';
+import { LogSetRow } from '../../src/ui/LogSetRow';
+import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useSettings } from '../../src/ui/settings';
+import { exerciseIndex } from '../../src/lib/exerciseHistory';
+import { exerciseSlug } from '../../src/lib/exerciseId';
+import { unsentNote } from '../../src/lib/offlineQueue';
+import { tapLight } from '../../src/ui/haptics';
 
 
 export default function ExerciseScreen() {
@@ -89,6 +104,23 @@ export default function ExerciseScreen() {
   // that fails to resolve is an empty box with no error to read.
   const { frames, animUrl, animCacheKey, equipmentUrl } = useExerciseMedia(detail);
   const caption = demoCaption(detail?.source, frames.length);
+
+  // ── this member's own record of this movement ──────────────────────────
+  const { log, status: logStatus, unsent: unsentSets, logWorkouts } = useWorkoutLog();
+  const wu = useSettings().weightUnit;
+  // The member's weight over time, so a set of pull-ups is priced at the body
+  // that did them rather than left out of every figure on the panel below. An
+  // empty series is not an error — see src/lib/bodyweightSets.ts.
+  const weightSeries = cd.weightSeries;
+  const slug = exerciseSlug(name);
+  // Built from the whole log rather than from a filtered one, because the index
+  // is what knows whether a movement was logged with no sets against it at all
+  // — the cardio case, which reads as "never done" if it is filtered out first.
+  const summary = useMemo(
+    () => (slug ? exerciseIndex(log, weightSeries).find((e) => e.slug === slug) ?? null : null),
+    [log, weightSeries, slug],
+  );
+  const [saving, setSaving] = useState(false);
 
   const G = layout.gutter;
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
@@ -332,6 +364,83 @@ export default function ExerciseScreen() {
             </Section>
           </>
         ) : null}
+
+        {/* ── log a set of it, here ─────────────────────────────────────
+            The whole point of this screen being reachable from a machine. It
+            writes through the same provider Train does, so a set logged here
+            is the same row, on the same timestamp discipline, with the same
+            three outcomes said out loud — a set the server refused is not in
+            anybody's log and must never be reported as one. */}
+        {name ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Log a Set" />
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                Straight into today, without going back to Train. Leave the load box empty for a
+                bodyweight set, or tick Timed for a hold.
+              </Text>
+              <LogSetRow
+                t={t}
+                unit={wu}
+                onLog={async (set) => {
+                  if (saving) return;
+                  setSaving(true);
+                  try {
+                    const out = await logWorkouts([{
+                      t: new Date().toISOString(),
+                      exercise: detail?.name || name,
+                      sets: [[set.value, set.kg ?? 0]],
+                      ...(set.bw ? { bw: [true] } : {}),
+                      ...(set.timed ? { timed: [true] } : {}),
+                    }]);
+                    if (out === 'stored') { tapLight(); return; }
+                    if (out === 'unsent') {
+                      Alert.alert('Saved on this phone',
+                        'No connection, so this set has not reached your training log yet — nothing is lost. It is saved here and goes up on its own next time you have signal.');
+                      return;
+                    }
+                    Alert.alert('Not saved',
+                      'Your training log rejected this set, so it has not been recorded and it is not waiting to send.');
+                  } finally { setSaving(false); }
+                }}
+              />
+              {/* Sets on this phone that the server has not taken. They are
+                  not lost and they are not in the log a coach reads, and only
+                  one of those two is obvious from looking at the screen. */}
+              {unsentNote(unsentSets, 'set') ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unsentNote(unsentSets, 'set')}</Text>
+              ) : null}
+            </Section>
+          </>
+        ) : null}
+
+        {/* ── what you have done on it ──────────────────────────────────── */}
+        <Rule />
+        <Section>
+          {logStatus === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your training log&hellip;</Text>
+          ) : logStatus === 'error' ? (
+            <Flag tone={t.warn}>
+              Your training log could not be read, so we cannot say what you have done on this. That
+              is not the same as having done none of it.
+            </Flag>
+          ) : summary ? (
+            <ExerciseTrail
+              summary={summary}
+              log={log}
+              status={logStatus}
+              unit={wu}
+              voice={{ they: 'You', their: 'your', have: 'have' }}
+              history={weightSeries}
+            />
+          ) : (
+            <Text style={{ ...ty.body, color: t.ink2 }}>
+              You have not logged this movement yet. The first set you log above starts the trail —
+              every day you do it, the sets, the reps and the load as they were recorded.
+            </Text>
+          )}
+        </Section>
 
         <Rule />
         <Section>

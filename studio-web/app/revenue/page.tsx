@@ -41,6 +41,13 @@ import {
   fetchPlans, fetchMemberships, money,
   type MembershipPlan, type Membership, type PlanInterval,
 } from '@lib/gymRecord';
+import { assertWhole, capLimit } from '@lib/rowCap';
+// The PT ledger is added up by the same code the coach's own earnings screen
+// uses. Two implementations of "what has this coach been paid" is how the gym
+// and the coach come to disagree about the same money, and `sumTaken` already
+// holds the rule that an amount with no currency on it is a hole in the total
+// rather than a zero.
+import { sumTaken, combineTaken, minorMoney, type Taken } from '@lib/coachMoney';
 
 /** The cash window. Ninety days is a quarter: long enough that a month with one
  *  odd week does not read as a trend, short enough to still be this year's gym. */
@@ -90,17 +97,53 @@ interface Taking {
   takenAt: string;
 }
 
-/** A PT pack bought through a trainer's checkout. No tenant column, no currency
- *  column — both of those absences are stated on screen rather than papered
- *  over with a default. */
+/**
+ * A PT pack bought through a trainer's checkout.
+ *
+ * `client_purchases` still carries no tenant column — these rows are scoped by
+ * the trainers on this gym's roster — but it HAS carried a currency since
+ * supabase/parts/132, and this screen was selecting every other column and not
+ * that one. So it printed "the purchase record carries no currency" about a
+ * column that exists, and rendered the money as bare minor units: a figure with
+ * no unit, read in whatever the reader happens to be thinking in.
+ *
+ * Null currency is still reachable and still means the unit is UNRECOVERABLE —
+ * part 132: the package the sale was made from has been deleted and Stripe's
+ * word on it is gone with it. Those rows are counted and left out of the total,
+ * never folded into whichever currency is nearest.
+ */
 interface Pack {
   id: string;
   amountCents: number | null;
+  currency: string | null;
   sessionsTotal: number | null;
   sessionsUsed: number;
   status: string;
   createdAt: string;
 }
+
+/**
+ * A PAID renewal invoice on a client's coaching subscription — the ledger
+ * `client_subscription_payments` was created to be, and which nothing in this
+ * console read.
+ *
+ * A client paying AED 600 a month for a year appeared on this screen once, as
+ * the first purchase, and its eleven renewals were invisible. So the gym's own
+ * revenue screen undercounted PT income by the whole of the repeat business,
+ * which is the part a gym would most want to know about.
+ */
+interface Renewal {
+  id: string;
+  amountCents: number | null;
+  currency: string | null;
+  /** Stripe's `paid_at`, not the row's `created_at`. Empty when Stripe stated
+   *  none, which keeps the row out of every period rather than sweeping it into
+   *  the current one. */
+  createdAt: string;
+}
+
+/** The two halves of the PT ledger, read together and kept apart. */
+interface PtLedger { packs: Pack[]; renewals: Renewal[] }
 
 interface Promo {
   id: string;
@@ -120,7 +163,7 @@ export default function Revenue() {
   const [plans, setPlans] = useState<MembershipPlan[] | null>(null);
   const [members, setMembers] = useState<Membership[] | null>(null);
   const [takings, setTakings] = useState<Taking[] | null>(null);
-  const [packs, setPacks] = useState<Pack[] | null>(null);
+  const [packs, setPacks] = useState<PtLedger | null>(null);
   const [promos, setPromos] = useState<Promo[] | null>(null);
 
   const [plansErr, setPlansErr] = useState<string | null>(null);
@@ -169,7 +212,7 @@ export default function Revenue() {
       if (!live) return;
       setMe(who);
       if (!who?.tenantId) {
-        setPlans([]); setMembers([]); setTakings([]); setPacks([]); setPromos([]);
+        setPlans([]); setMembers([]); setTakings([]); setPacks({ packs: [], renewals: [] }); setPromos([]);
         return;
       }
       // supabase-js resolves with { data, error } on a database error rather
@@ -306,13 +349,15 @@ export default function Revenue() {
             : forecastNote}
         />
         <Kpi
-          label={`PT packs (${DAYS} days)`}
-          text={packSummary?.paidCents == null ? null : (packSummary.paidCents / 100).toFixed(2)}
+          label={`PT sold (${DAYS} days)`}
+          text={packSummary ? potLine(packSummary.total) : null}
           note={packSummary
-            ? (packSummary.paidCents == null
-                ? (packSummary.paid === 0 ? 'none sold in the window' : 'no amount recorded on any of them')
-                : 'no currency is recorded — see below')
-            : (packsErr ? 'the PT packs could not be read' : 'still reading')}
+            ? (packSummary.total.pots.length === 0
+                ? (packSummary.paid === 0 && packSummary.renewals === 0
+                    ? 'nothing sold in the window'
+                    : 'nothing sold in the window states an amount and a currency')
+                : `${packSummary.paid} pack${packSummary.paid === 1 ? '' : 's'}, ${packSummary.renewals} renewal${packSummary.renewals === 1 ? '' : 's'}`)
+            : (packsErr ? 'the PT ledger could not be read' : 'still reading')}
         />
         <Kpi
           label="Excluded from the forecast"
@@ -331,7 +376,7 @@ export default function Revenue() {
         s={split}
         state={takingsUnread ?? membersUnread}
         packs={packSummary}
-        packsState={unread(packs, packsErr)}
+        packsState={packs !== null ? null : packsErr ? 'failed' : 'loading'}
       />
       <Promos rows={promos} state={unread(promos, promosErr)} />
     </Shell>
@@ -779,27 +824,54 @@ function buildSplit(rows: Taking[], memberships: Membership[]): SplitView {
 
 interface PackView {
   paid: number;
-  paidCents: number | null;
-  unpriced: number;
+  /** One-off pack sales, per currency. Never merged across two. */
+  packTaken: Taken;
+  /** Paid renewal invoices, per currency — the ledger this screen never read. */
+  renewalTaken: Taken;
+  renewals: number;
+  /** Both halves added, one currency at a time. */
+  total: Taken;
   other: number;
   sessionsSold: number | null;
   sessionsUsed: number;
 }
 
-function buildPacks(packs: Pack[]): PackView {
-  const paid = packs.filter((p) => p.status === 'paid');
-  const priced = paid.filter((p) => p.amountCents != null);
+/**
+ * The PT ledger, both halves.
+ *
+ * `sumTaken` and `combineTaken` come from src/lib/coachMoney.ts, which is what
+ * the coach's own earnings screen adds these same rows up with. Two
+ * implementations of "what has this coach been paid" is how a gym and a coach
+ * come to disagree about the same money, and that module already holds the rule
+ * that matters here: an amount with no currency on it is a HOLE in the total,
+ * counted and reported, never folded into whichever currency is nearest.
+ */
+function buildPacks(l: PtLedger): PackView {
+  const paid = l.packs.filter((p) => p.status === 'paid');
   const withSessions = paid.filter((p) => p.sessionsTotal != null);
+  const packTaken = sumTaken(paid.map((p) => ({
+    amount_cents: p.amountCents, currency: p.currency, created_at: p.createdAt,
+  })));
+  const renewalTaken = sumTaken(l.renewals.map((r) => ({
+    amount_cents: r.amountCents, currency: r.currency, created_at: r.createdAt,
+  })));
   return {
     paid: paid.length,
-    // No currency column on client_purchases, so there is nothing to reconcile
-    // this against — it is a bare integer of minor units and is rendered as one.
-    paidCents: priced.length ? priced.reduce((a, p) => a + (p.amountCents ?? 0), 0) : null,
-    unpriced: paid.length - priced.length,
-    other: packs.length - paid.length,
+    packTaken,
+    renewalTaken,
+    renewals: l.renewals.length,
+    total: combineTaken(packTaken, renewalTaken),
+    other: l.packs.length - paid.length,
     sessionsSold: withSessions.length ? withSessions.reduce((a, p) => a + (p.sessionsTotal ?? 0), 0) : null,
     sessionsUsed: paid.reduce((a, p) => a + p.sessionsUsed, 0),
   };
+}
+
+/** Every pot on one line, or null when there is nothing to name. A gym selling
+ *  PT in two currencies gets both, side by side, and never a sum of them. */
+function potLine(t: Taken): string | null {
+  if (!t.pots.length) return null;
+  return t.pots.map((p) => minorMoney(p.minorUnits, p.currency)).filter(Boolean).join(' + ');
 }
 
 function Split({ s, state, packs, packsState }: {
@@ -859,14 +931,17 @@ function Split({ s, state, packs, packsState }: {
         <div style={{ padding: '11px 14px' }}>
           <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>PT packs</h3>
           <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
-            A different ledger. <span className="mono">client_purchases</span> is the
-            trainer&rsquo;s own checkout trail: it carries no tenant column — these rows are
-            scoped by the trainers on this gym&rsquo;s roster, so a purchase against a
-            trainer who is not on it is not counted — and no currency column, so the
-            amount below is minor units with nothing to name them. Nothing links a
-            purchase to a row in the till, so it is shown here and never added to the
-            figures above: summing them would double-count every pack the gym also
-            rang up at the desk, and ignoring it would drop the rest.
+            A different ledger, and two tables rather than one.{' '}
+            <span className="mono">client_purchases</span> is a one-off sale and{' '}
+            <span className="mono">client_subscription_payments</span> is a paid renewal
+            invoice; neither carries a tenant column, so these rows are scoped by the
+            trainers on this gym&rsquo;s roster and a purchase against a trainer who is not
+            on it is not counted. Both DO carry a currency, and every figure below is
+            denominated in the one the row itself states &mdash; a sale whose currency is
+            unrecoverable is counted out loud rather than added to its neighbours.
+            Nothing links either to a row in the till, so they are shown here and never
+            added to the figures above: summing them would double-count every pack the gym
+            also rang up at the desk, and ignoring them would drop the rest.
           </p>
         </div>
         {packsState ? (
@@ -874,19 +949,25 @@ function Split({ s, state, packs, packsState }: {
                       cost="pack revenue is unknown, not nil" />
         ) : packs ? (
           <p style={{ margin: 0, padding: '0 14px 14px', color: 'var(--ink2)', fontSize: 13 }}>
-            {packs.paid === 0 ? (
-              <>No pack was bought in the last {DAYS} days.</>
+            {packs.paid === 0 && packs.renewals === 0 ? (
+              <>No pack was bought and no renewal was collected in the last {DAYS} days.</>
             ) : (
               <>
-                {packs.paid} pack{packs.paid === 1 ? '' : 's'} paid for.{' '}
-                {packs.paidCents == null
-                  ? <>Not one carries an amount, so the money is <span className="dash">unknown</span>, not nothing.</>
-                  : <>
-                      <span className="mono">{(packs.paidCents / 100).toFixed(2)}</span> in minor
-                      units, currency unrecorded.
-                      {packs.unpriced ? ` ${packs.unpriced} pack${packs.unpriced === 1 ? ' carries' : 's carry'} no amount and ${packs.unpriced === 1 ? 'is' : 'are'} left out of it.` : ''}
-                    </>}
-                {' '}
+                {packs.paid} pack{packs.paid === 1 ? '' : 's'} paid for
+                {potLine(packs.packTaken) ? <> &mdash; {potLine(packs.packTaken)}</> : ' with no readable amount between them'}.{' '}
+                {/* The half this screen never read at all. A client paying 600 a
+                    month for a year appeared here once, as the first purchase,
+                    and the eleven renewals after it were invisible — so the
+                    gym's own revenue screen undercounted PT by the whole of the
+                    repeat business. */}
+                {packs.renewals} renewal{packs.renewals === 1 ? '' : 's'} collected
+                {potLine(packs.renewalTaken) ? <> &mdash; {potLine(packs.renewalTaken)}</> : ' with no readable amount between them'}.{' '}
+                {packs.total.unlabelled
+                  ? `${packs.total.unlabelled} sale${packs.total.unlabelled === 1 ? '' : 's'} state${packs.total.unlabelled === 1 ? 's' : ''} an amount in no currency anybody can recover, and ${packs.total.unlabelled === 1 ? 'is' : 'are'} left out of the totals rather than added to the nearest one. `
+                  : ''}
+                {packs.total.unpriced
+                  ? `${packs.total.unpriced} state${packs.total.unpriced === 1 ? 's' : ''} no amount at all. `
+                  : ''}
                 {packs.sessionsSold == null
                   ? <>No pack states how many sessions it bought, so nothing can be said about what is still owed in hours.</>
                   : <>{packs.sessionsSold} session{packs.sessionsSold === 1 ? '' : 's'} sold, {packs.sessionsUsed} delivered — the difference is coaching the gym has been paid for and still owes.</>}
@@ -959,8 +1040,19 @@ async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[
     .select('id, member_id, membership_id, amount_cents, currency, method, taken_at')
     .eq('tenant_id', tenantId)
     .gte('taken_at', sinceIso)
-    .order('taken_at', { ascending: false });
+    .order('taken_at', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
+  // Capped and REFUSING, which these three reads were not. They were the only
+  // uncapped money reads left in the console: no `capLimit()` and no
+  // `assertWhole`, so PostgREST's silent 1000-row ceiling applied to the
+  // quarter's till. A busy gym taking twelve payments a day crosses it inside
+  // three months, and what falls away is the OLDEST — so the trend on this
+  // screen would have flattened from the left, every figure would still have
+  // rendered confidently, and nothing anywhere would have said the set was a
+  // prefix. src/lib/rowCap.ts exists because that "succeeds, quietly, with the
+  // wrong number".
+  assertWhole(data, 'the payments in this window');
   return (data ?? []).map((r: any) => ({
     id: r.id,
     memberId: r.member_id ?? null,
@@ -986,30 +1078,77 @@ async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[
  * roster would both produce "no packs", and one of those is a gym with no PT
  * revenue while the other is a query nobody may draw a conclusion from.
  */
-async function fetchPacks(tenantId: string, sinceIso: string): Promise<Pack[]> {
+async function fetchPacks(tenantId: string, sinceIso: string): Promise<PtLedger> {
   const { data: trs, error: trErr } = await supabase
-    .from('trainers').select('id').eq('tenant_id', tenantId);
+    .from('trainers').select('id').eq('tenant_id', tenantId).limit(capLimit());
   if (trErr) throw trErr;
+  assertWhole(trs, "this gym's trainers");
 
   const ids: string[] = (trs ?? []).map((r: any) => r.id);
-  if (!ids.length) return [];
+  if (!ids.length) return { packs: [], renewals: [] };
 
-  const { data, error } = await supabase
-    .from('client_purchases')
-    .select('id, amount_cents, sessions_total, sessions_used, status, created_at')
-    .in('trainer_id', ids)
-    .gte('created_at', sinceIso)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
+  // Two reads, not one, and they can never be one query: `client_purchases` is
+  // a one-off sale and `client_subscription_payments` (supabase/parts/132) is a
+  // paid renewal. Both are gross amounts in minor units and both are money the
+  // same coach was paid through this gym's roster.
+  //
+  // The second was read by NOTHING in this console. `src/lib/coachMoney.ts`
+  // reads it for the coach's own earnings screen and the gym's revenue screen
+  // did not, so every recurring PT renewal — the whole of the repeat business —
+  // was missing from what this page reports as PT income. A client paying AED
+  // 600 a month for a year appeared once, as the first purchase, and eleven
+  // renewals were invisible.
+  const [pkRes, subRes] = await Promise.all([
+    supabase
+      .from('client_purchases')
+      // `currency` was added by supabase/parts/132 and this select did not name
+      // it, so the screen printed "the purchase record carries no currency"
+      // about a column that has existed since. The amount was rendered as bare
+      // minor units — a figure read in whatever money the reader is thinking in.
+      .select('id, amount_cents, currency, sessions_total, sessions_used, status, created_at')
+      .in('trainer_id', ids)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(capLimit()),
+    supabase
+      .from('client_subscription_payments')
+      .select('id, amount_cents, currency, paid_at')
+      .in('trainer_id', ids)
+      .gte('paid_at', sinceIso)
+      .order('paid_at', { ascending: false })
+      .limit(capLimit()),
+  ]);
+  if (pkRes.error) throw pkRes.error;
+  if (subRes.error) throw subRes.error;
 
-  return (data ?? []).map((r: any) => ({
-    id: r.id,
-    amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
-    sessionsTotal: Number.isFinite(r.sessions_total) ? r.sessions_total : null,
-    sessionsUsed: Number.isFinite(r.sessions_used) ? r.sessions_used : 0,
-    status: r.status ?? 'paid',
-    createdAt: r.created_at,
-  }));
+  assertWhole(pkRes.data, 'the PT packs bought in this window');
+  assertWhole(subRes.data, 'the PT renewals paid in this window');
+
+  return {
+    packs: (pkRes.data ?? []).map((r: any) => ({
+      id: r.id,
+      amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
+      // Null where Stripe stated none and the package it was sold from is gone
+      // — part 132 says that unit is unrecoverable and must never be guessed.
+      // `sumTaken` counts those rows as `unlabelled` and leaves them out of the
+      // total rather than adding them to whichever currency is nearest.
+      currency: r.currency ?? null,
+      sessionsTotal: Number.isFinite(r.sessions_total) ? r.sessions_total : null,
+      sessionsUsed: Number.isFinite(r.sessions_used) ? r.sessions_used : 0,
+      status: r.status ?? 'paid',
+      createdAt: r.created_at,
+    })),
+    renewals: (subRes.data ?? []).map((r: any) => ({
+      id: r.id,
+      amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
+      currency: r.currency ?? null,
+      // `paid_at` and not `created_at`: a webhook retried three days late must
+      // not move somebody's payment into a different month. A renewal Stripe
+      // never dated passes a value that will not parse, which keeps it out of
+      // every period rather than sweeping it into this one.
+      createdAt: r.paid_at ?? '',
+    })),
+  };
 }
 
 async function fetchPromos(tenantId: string): Promise<Promo[]> {
@@ -1017,8 +1156,10 @@ async function fetchPromos(tenantId: string): Promise<Promo[]> {
     .from('promos')
     .select('id, code, discount, active, redemptions')
     .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(capLimit());
   if (error) throw error;
+  assertWhole(data, "this gym's promo codes");
   return (data ?? []).map((r: any) => ({
     id: r.id,
     code: r.code,

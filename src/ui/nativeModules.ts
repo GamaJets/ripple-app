@@ -55,6 +55,18 @@ const IMAGE = 'ExpoImage';
 // base64 — but that module is imported by app/(client)/injury-doc.tsx, so a
 // throw there is the whole screen.
 const FILE_SYSTEM = 'ExpoFileSystem';
+// expo-web-browser's entry point reaches `requireNativeModule('ExpoWebBrowser')`
+// the same way the four above do, so it throws on a binary without it.
+//
+// It is on scripts/check-native.mjs's SETTLED_IN_EVERY_BINARY list — it entered
+// package.json at f0b0e2fb, before any binary now in anybody's pocket was built
+// — so a direct import of it is permitted and app/(client)/coach-documents.tsx
+// takes that route. The guard is here anyway, and only for the injury document:
+// that screen is the one place in the client app where a module-scope throw
+// costs somebody access to their own medical records, and the list of settled
+// modules "shrinks, it does not grow" — a screen that never joins it can never
+// be the reason it has to be re-argued.
+const WEB_BROWSER = 'ExpoWebBrowser';
 
 export const HAS_NATIVE_VIDEO = requireOptionalNativeModule(VIDEO) != null;
 /** Whether the rest timer can make a noise on THIS install. expo-audio landed
@@ -92,6 +104,9 @@ export const HAS_NATIVE_IMAGE = requireOptionalNativeModule(IMAGE) != null;
 /** Whether this binary can read a file off disk. */
 export const HAS_NATIVE_FILE_SYSTEM = requireOptionalNativeModule(FILE_SYSTEM) != null;
 
+/** Whether this binary can open a page WITHOUT handing it to another app. */
+export const HAS_NATIVE_WEB_BROWSER = requireOptionalNativeModule(WEB_BROWSER) != null;
+
 /**
  * The same sentence as UPDATE_REQUIRED_NOTE, for the two modules that landed
  * after it was written. Same shape deliberately: name the missing thing, say a
@@ -127,6 +142,59 @@ export const NativeExpoImage: any = ExpoImageComponent;
 
 let FileSystemModule: any = null;
 try { FileSystemModule = require('expo-file-system'); } catch { /* not in this build yet */ }
+
+let WebBrowserModule: any = null;
+try { WebBrowserModule = require('expo-web-browser'); } catch { /* not in this build yet */ }
+
+/**
+ * Open a URL in a browser sheet that belongs to THIS app.
+ *
+ * ── Why this is not `Linking.openURL`, and why it matters most here ───────
+ *
+ * `Linking.openURL` hands the URL to whatever app owns http on the device. That
+ * app then has it: in its history, in its recently-closed tabs, and — on iOS
+ * with iCloud tabs on, or on Android with a signed-in Chrome — synced to every
+ * other device on that account. For a link to a public page that is a shrug.
+ * For a member's physiotherapy report it is the report leaving the Face-ID
+ * locked app that stores it privately, and landing somewhere they never chose
+ * and cannot easily clear.
+ *
+ * `openBrowserAsync` renders SFSafariViewController on iOS and a Chrome Custom
+ * Tab on Android. Both are presented BY this app, over this screen, and are
+ * dismissed back into it. `createTask: false` keeps the Android tab out of the
+ * recent-apps list, where it would otherwise sit as a separate card showing the
+ * document to anybody who picks the phone up; `showInRecents: false` says the
+ * same thing to the older API level.
+ *
+ * Returns whether it opened. Reported rather than assumed, for the reason
+ * `copyToClipboard` above gives: the caller has a sentence to show if it did
+ * not, and silently doing nothing reads as the tap having missed.
+ */
+export async function openInAppBrowser(url: string): Promise<boolean> {
+  if (!HAS_NATIVE_WEB_BROWSER || !WebBrowserModule?.openBrowserAsync) return false;
+  try {
+    await WebBrowserModule.openBrowserAsync(url, {
+      createTask: false,
+      showInRecents: false,
+      // No reader mode: it re-renders the page as article text, which for a
+      // scanned report is either nothing or a mangled half of it.
+      readerMode: false,
+      dismissButtonStyle: 'close',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** What to tell somebody whose install predates expo-web-browser.
+ *
+ *  It is on check-native.mjs's settled list, so no install in circulation can
+ *  actually reach this — the sentence exists so the branch has one rather than
+ *  falling through to the system browser, which is the whole thing the caller
+ *  is avoiding. */
+export const IN_APP_BROWSER_UNAVAILABLE_NOTE =
+  'This version of the app cannot open a document without handing it to your web browser, and this one is too private for that. Updating to the latest build opens it inside the app instead.';
 
 /**
  * A file's bytes as base64, or null when this binary cannot read files.

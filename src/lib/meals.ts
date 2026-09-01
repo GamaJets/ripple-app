@@ -44,10 +44,115 @@ function componentAllergens(comp: Comp): Allergen[] {
   if (/tofu|tempeh|edamame|\bsoy|miso/.test(text)) out.push('soy');
   return out;
 }
+/**
+ * The components of a pool that honour the exclusions — and the fallback, said
+ * out loud instead of buried.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * This was `return filtered.length ? filtered : pool;` and nothing anywhere
+ * told the member. On the one screen where a quiet failure is least acceptable,
+ * an allergen that emptied a required pool was silently abandoned and the
+ * planner went on building meals out of the very components it had been asked
+ * to leave out. A member who ticked Dairy got a plan with dairy in it, drawn
+ * and priced and shopped for, with nothing on screen to suggest anything had
+ * happened.
+ *
+ * ── Why the fallback survives ─────────────────────────────────────────────
+ *
+ * Because the alternative is worse in a way that is harder to see. The pools
+ * are mixed-radix dimensions and every slot needs one component from each; an
+ * empty dimension means there is NO meal in this diet and this slot that
+ * honours every exclusion. Returning nothing would make `mealAt` build a meal
+ * out of nulls — it reads `base.step`, `pr.n`, `a.ico` straight off the parts —
+ * and a screen that crashes tells the member even less than one that lies.
+ *
+ * So the pool still falls back AND `poolGaps` names exactly which exclusions
+ * could not be honoured, `mealAllergens` says which of them are actually in a
+ * given meal, and app/(client)/nutrition.tsx prints both. The plan is drawn,
+ * and it is drawn with a warning on it rather than as though nothing were
+ * wrong.
+ */
 function poolFilter(pool: Comp[], avoid: Allergen[]): Comp[] {
   if (!avoid.length) return pool;
   const filtered = pool.filter((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
   return filtered.length ? filtered : pool;
+}
+
+/**
+ * The exclusions this diet and slot cannot honour, because honouring them would
+ * leave a required component pool with nothing in it.
+ *
+ * Per allergen rather than per pool, because that is the sentence a member
+ * needs: "we could not keep dairy out of your breakfasts" is actionable and
+ * "component dimension 2 is empty" is not. An allergen is reported when
+ * removing it ALONE would empty a pool, so a member excluding four things is
+ * told which of the four is the problem rather than being handed all four back.
+ */
+export function poolGaps(diet: Diet, slot: Slot, avoid: Allergen[] = []): Allergen[] {
+  if (!avoid.length) return [];
+  const pools = slot === 'Breakfast' ? [BREK_BASE, BREK_TOP, BREK_BOOST, BREK_STYLE]
+    : slot === 'Snack' ? [SNACK_A, SNACK_B, SNACK_PREP]
+    : [PROTEINS, CARBS, VEGS, FLAVORS];
+  const out: Allergen[] = [];
+  for (const a of avoid) {
+    const empties = pools.some((pool) => {
+      const forThisDiet = forDiet(pool, diet);
+      if (!forThisDiet.length) return false;   // the diet already empties it; not this allergen's doing
+      return !forThisDiet.some((cp) => !componentAllergens(cp).includes(a));
+    });
+    if (empties) out.push(a);
+  }
+  return out;
+}
+
+/** Every exclusion that cannot be honoured across a whole day's slots. */
+export function planGaps(diet: Diet, slots: Slot[], avoid: Allergen[] = []): Allergen[] {
+  const seen = new Set<Allergen>();
+  for (const slot of slots) for (const a of poolGaps(diet, slot, avoid)) seen.add(a);
+  return [...seen];
+}
+
+/**
+ * Which of the excluded allergens are actually present in a generated meal.
+ *
+ * The per-meal half of the same honesty. `poolGaps` says the filter could not
+ * be honoured somewhere in the slot; this says whether THIS meal, the one on
+ * screen with a name and a picture, contains the thing the member asked to
+ * avoid. A member is owed the flag on the row they are about to cook, not only
+ * a warning at the top of the screen.
+ *
+ * Read off the meal's own name and ingredients with the same matcher the
+ * components go through, so a meal assembled from parts is tested as the dish
+ * it became.
+ */
+export function mealAllergens(meal: { n: string; ing: Ing[] }, avoid: Allergen[] = []): Allergen[] {
+  if (!avoid.length) return [];
+  const found = componentAllergens({ n: meal.n, k: 0, p: 0, c: 0, f: 0, ing: meal.ing, d: [] });
+  return avoid.filter((a) => found.includes(a));
+}
+
+/** How an allergen reads in a sentence. The pills already have labels; this is
+ *  for prose, where 'Nuts' mid-sentence reads as a proper noun. */
+export function allergenLabel(a: Allergen): string {
+  return (ALLERGENS.find((x) => x.id === a)?.label ?? a).toLowerCase();
+}
+
+/**
+ * What to say when an exclusion could not be honoured, or null when they all
+ * were.
+ *
+ * The wording has one job: make it unmistakable that the plan below contains
+ * something the member asked to keep out, and say which. It does not apologise
+ * and it does not hedge — somebody with a real allergy has to be able to read
+ * this once and know.
+ */
+export function allergenGapNote(gaps: Allergen[]): string | null {
+  if (!gaps.length) return null;
+  const names = gaps.map(allergenLabel);
+  const list = names.length === 1 ? names[0]
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `Your plan still contains ${list}. There are not enough ${list.includes('and') ? 'suitable components' : `${list}-free components`} in this diet to build every meal without ${names.length === 1 ? 'it' : 'them'}, so the meals below have been built anyway and are marked where ${names.length === 1 ? 'it appears' : 'they appear'}. Check every dish before you cook it.`;
 }
 
 // ── LUNCH / DINNER components ──

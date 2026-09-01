@@ -267,17 +267,26 @@ export const NO_NET_NOTE =
   'What comes in and what goes out are kept apart and are never subtracted from each other. They are recorded in different places, in currencies that may differ, and neither is complete on its own — a single net figure would be a number about neither question.';
 
 /**
- * What Stripe knows and this app has never been told.
+ * What Stripe knows, and the one piece of it this app is now told.
  *
- * Every takings figure here is GROSS: what a client was charged. Stripe's
- * processing fee, the platform's application fee and whether the money has
- * cleared into the coach's bank are facts that live at Stripe, and no webhook
- * in this repo writes any of them. `supabase/parts/138` says the same thing
- * about an invoice, from the other direction: this app's document is the
- * coach's own statement, not a receipt for money that moved.
+ * Every takings figure here is still GROSS: what a client was charged. Stripe's
+ * processing fee and the platform's application fee are facts that live at
+ * Stripe and no webhook in this repo writes either of them.
+ *
+ * What HAS changed is the last clause. This note used to end "Repple is not
+ * told what Stripe paid out or when it cleared", and part 194 mirrors
+ * `payout.paid` and `payout.failed` — so the app does now know what reached the
+ * bank, in a separate section, from a separate source.
+ *
+ * The two are never subtracted from each other and the note says so, because
+ * the subtraction is the thing a reader would otherwise do in their head and
+ * every one of its three numbers would be wrong: a payout is a BALANCE — many
+ * charges at once, less fees, less refunds, on Stripe's own schedule — and it
+ * does not correspond to the charges listed above it. `PAYOUT_IS_NOT_A_SALE` in
+ * src/lib/coachPayouts.ts carries the long form.
  */
 export const STRIPE_AUTHORITY_NOTE =
-  'These are amounts clients were charged, before Stripe’s fee and the platform fee. Repple is not told what Stripe paid out or when it cleared — your Stripe dashboard is the record of what actually landed in your bank.';
+  'These are amounts clients were charged, before Stripe’s fee and the platform fee. What actually reached your bank is a different figure from a different source, shown separately under what landed — a payout is a balance rather than the proceeds of a sale, so the two are never subtracted from each other. Your Stripe dashboard is the record of what moved.';
 
 /** What a period figure counts, said next to the period. A total with no
  *  stated span is read as "all time" by half its readers and "this month" by

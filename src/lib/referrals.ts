@@ -54,6 +54,26 @@ export async function stashPendingReferral(code: string): Promise<void> {
   try { await AsyncStorage.setItem(PENDING_KEY, c); } catch { /* ignore */ }
 }
 
+/**
+ * Whatever a referral link left for us, or null. Does NOT consume it.
+ *
+ * Read by the sign-up form so the field arrives already filled in: the whole
+ * point of `repple://join?r=CODE` is that nobody has to remember six characters
+ * through an App Store install, and a stash the form cannot see would carry the
+ * code invisibly while still showing an empty box that reads as "no code".
+ *
+ * Not consumed here, because being SHOWN a code is not the same as having spent
+ * it — somebody who opens the form, gets distracted and comes back tomorrow must
+ * still be attributed. `flushPendingReferral` is the only thing that clears it,
+ * and only after a sign-in.
+ */
+export async function peekPendingReferral(): Promise<string | null> {
+  try {
+    const c = await AsyncStorage.getItem(PENDING_KEY);
+    return c && c.trim() ? c.trim() : null;
+  } catch { return null; }
+}
+
 /** After a successful sign-in, record any code stashed at signup, then clear it. */
 export async function flushPendingReferral(): Promise<void> {
   if (!USE_SUPABASE) return;

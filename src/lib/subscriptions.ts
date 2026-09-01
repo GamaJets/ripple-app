@@ -292,18 +292,58 @@ export async function subscribeToPackage(packageId: string): Promise<{ ok: boole
  * `client_id = auth.uid()`, so a coach calling it got "subscription not found"
  * every time and the coach's screen said out loud that it had no button.
  *
- * A refund is NOT here and is not a thing this app does. Stripe refunds are a
- * separate API with consequences this codebase models none of — partial
- * amounts, reversing the platform's application fee, pulling money back out of
- * a connected account that may already have paid out to a bank. A half-working
- * refund button is worse than no refund button, so refunds are the Stripe
- * dashboard's, and both screens say so.
+ * A refund is NOT here, and that is now a statement about SHAPE rather than a
+ * refusal. Refunds exist — `refundPurchase` and `refundRenewal` in
+ * src/lib/connect.ts, through supabase/functions/connect-refund — and they are
+ * keyed on the CHARGE, because the two things a coach can refund live in two
+ * tables under two keys and neither of them is a subscription id. Cancelling
+ * and refunding are separate acts and stay separate everywhere: cancelling
+ * stops the next charge and returns nothing, refunding returns money and stops
+ * nothing.
  *
  * The result is Stripe's answer, not ours. `ok: false` means it is still
  * running, which is exactly the case where a screen must not say "cancelled".
  */
 export async function cancelSubscription(subscriptionId: string): Promise<{ ok: boolean; endsAt?: string | null; error?: string }> {
   return setCancelAtPeriodEnd(subscriptionId, 'cancel');
+}
+
+/**
+ * Stop a subscription TODAY, and give nothing back.
+ *
+ * The deliberate exception to the rule above, and it exists because the
+ * alternative was worse. A client who asks to be cancelled today and is billed
+ * again in three weeks writes the review that costs the coach the next five
+ * clients — and until now the only answer this app had for them was "it stops
+ * at the end of the period", which is true and is not what they asked.
+ *
+ * IT DOES NOT REFUND. The client has paid for the period they are in and this
+ * takes the rest of it off them without returning the money;
+ * `END_NOW_TAKES_THE_REST` in src/lib/refunds.ts is the sentence that has to be
+ * in front of whoever taps it, and giving the money back is a SEPARATE act
+ * through `refundPurchase`/`refundRenewal` in src/lib/connect.ts. The two are
+ * kept apart everywhere, including here, because a coach who believes one
+ * implies the other has either short-changed their client or refunded somebody
+ * they did not mean to.
+ *
+ * There is no way back from it. Stripe cancels the subscription outright, and
+ * resuming is a new checkout at today's price — which is why `cancel` remains
+ * the default on every screen and this sits underneath it.
+ *
+ * Either party may call it, for the reason in src/lib/subscriptionScope.ts: it
+ * is usually the client who wants it.
+ */
+export async function endSubscriptionNow(subscriptionId: string): Promise<{ ok: boolean; status?: string | null; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('connect-checkout', {
+      body: { action: 'end_now', subscription_id: subscriptionId },
+    });
+    if (error) return { ok: false, error: error.message };
+    // Stripe's answer, not ours. `ok: false` means it is still running, which is
+    // exactly the case where a screen must not say "ended".
+    if (data?.ok) return { ok: true, status: data.status ?? null };
+    return { ok: false, error: data?.error || 'It was not ended, so it is still running.' };
+  } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
 /** Undo a pending cancellation, while it is still pending. Without this the

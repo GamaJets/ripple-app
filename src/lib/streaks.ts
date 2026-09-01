@@ -5,6 +5,10 @@
 // can light up confetti on a new milestone.
 import type { WorkoutEntry } from './mockData';
 import { isBodyweightSet, setLoadKg, entryTonnage, type BodyweightHistory } from './bodyweightSets';
+// A held set's first number is seconds, not reps. Epley over it returns a
+// strength figure computed from a stopwatch, so this board leaves holds alone
+// and src/lib/timedSets.ts keeps the record they do belong on.
+import { isTimedSet } from './timedSets';
 
 const DAY = 86_400_000;
 // LOCAL calendar day (not UTC): an evening workout must count as today for the user even after its ISO timestamp rolls into tomorrow in UTC.
@@ -139,6 +143,7 @@ export function personalRecords(log: WorkoutEntry[], history: BodyweightHistory 
   for (const e of log) {
     if (!e.sets) continue;
     for (let i = 0; i < e.sets.length; i++) {
+      if (isTimedSet(e, i)) continue;
       const [reps] = e.sets[i];
       if (!reps) continue;
       const weight = setLoadKg(e, i, e.sets[i], history, e.t);
@@ -165,6 +170,7 @@ export function isNewPR(log: WorkoutEntry[], entry: WorkoutEntry, history: Bodyw
   // best while being skipped in the old one — which would make every pull-up
   // session a record the first time this learned to read them.
   const top = (e: WorkoutEntry) => Math.max(0, ...(e.sets ?? []).map((s, i) => {
+    if (isTimedSet(e, i)) return 0;
     const w = setLoadKg(e, i, s, history, e.t);
     return w != null && s[0] ? est1RM(w, s[0]) : 0;
   }));

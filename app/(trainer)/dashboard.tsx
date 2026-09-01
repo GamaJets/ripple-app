@@ -112,6 +112,12 @@ import {
   base64ToUtf8, planBlocker, planSummary, resultSummary, rosterPlan,
   type RosterPlan, type RosterResult, type RowOutcome,
 } from '../../src/lib/rosterImport';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { useCoachSetup } from '../../src/ui/coachSetup';
+import { coachSetupRows, coachSetupLeft, coachSetupNext, showCoachSetup } from '../../src/lib/coachFirstRun';
+import { EndReasonSheet, UnexplainedDepartures } from '../../src/ui/EndReasonSheet';
+import type { EndReason } from '../../src/lib/endCoaching';
+import { promptUnmarkedBacklog } from '../../src/ui/coachReminders';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -321,6 +327,11 @@ export default function TrainerClients() {
   // refused read reached this screen as an empty list and was announced as
   // "No clients yet" — to a coach who has clients.
   const { roster, status: rosterStatus, addClient, removeClient, setClientMode } = useRoster();
+  // Who is being removed, while the "why did they leave" sheet is open. Its own
+  // flag rather than a field on `sel`: the client sheet is closed before this
+  // one opens, because iOS will not stack two modals from the same parent and
+  // check-runtime-traps.mjs exists for exactly that pair.
+  const [ending, setEnding] = useState<{ id: string; name: string } | null>(null);
   // The COACH's unit, not the client's: this roster is read by the coach, and
   // `weightDelta` is stored in kilograms. Both places it appeared printed a bare
   // "kg" whatever the coach reads in. `weightDeltaIn` converts the SPAN once —
@@ -776,6 +787,25 @@ export default function TrainerClients() {
   }, [coachId, authLoading]);
 
   const unmarked = mySessions === null ? null : awaitingOutcome(mySessions).length;
+
+  // ── Nothing prompted the coach to clear this ────────────────────────────
+  //
+  // The queue exists on app/(trainer)/sessions.tsx and the card above counts
+  // it, and both of those require a coach to open the app. Until the queue is
+  // cleared the statement, the payroll figure and the analytics revenue line
+  // are all short by exactly those sessions, and `settlementBlocker` refuses to
+  // settle a period containing them — so the backlog is not untidiness, it is
+  // somebody's pay held up.
+  //
+  // `unmarked` is NULL when the read did not answer, and null never prompts.
+  // `backlogDue` enforces that and this is the caller that could get it wrong by
+  // coercing: a banner about a coach's own business built out of a failed query
+  // is how somebody learns to ignore the next one. Weekly, not daily — clearing
+  // it is a sit-down job.
+  useEffect(() => {
+    if (sessionsUnread) return;
+    void promptUnmarkedBacklog(unmarked);
+  }, [unmarked, sessionsUnread]);
   /** Sessions actually delivered in the last month — a count of recorded
    *  outcomes, not an inference from the clock. Null until the read lands. */
   const delivered = mySessions === null
@@ -1151,6 +1181,28 @@ export default function TrainerClients() {
             be coached. Renders nothing at all when there are none. */}
         <CoachRequests />
         <UnmarkedSessions n={unmarked} failed={sessionsUnread} hasGym={!!tenant?.id} />
+
+        {/* What the band headings below actually mean. "At risk" is measured
+            against each client's OWN earlier rate and not against a target, and
+            "nothing to assess" is not "fine" — the two readings a coach gets
+            wrong are the two that cost a phone call to somebody who trained
+            yesterday. src/lib/screenHelp.ts holds the sentences; one row, shut,
+            gone for good once dismissed. */}
+        <ScreenHelp screen="coach-clients" />
+
+        {/* The first-run list, while it still has something to say. It removes
+            itself the moment every row is DONE — and not a moment earlier: a
+            row that could not be read keeps it here, because the coach whose
+            currency read failed is exactly the coach who needs the currency
+            step. Once it goes, Explore and Settings still reach the screen.
+            src/lib/coachFirstRun.ts holds the rule. */}
+        <CoachSetupRow />
+
+        {/* Endings nobody explained. Renders nothing when there are none and
+            nothing when the read failed — the Clients screen already carries
+            four honest warnings and a fifth saying "we could not check whether
+            anybody left" is noise. src/ui/EndReasonSheet.tsx. */}
+        <UnexplainedDepartures />
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
@@ -2048,7 +2100,14 @@ export default function TrainerClients() {
               <ListRow icon="bell" title="Send a Check-in Nudge" note={'A quick "how is it going?" message'} onPress={() => sendNudge(sel)} />
 
               <Pressable
-                onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { removeClient(s.id); setSel(null); } }]); }}
+                // Two steps rather than one, and the second step is the whole
+                // point: `end_coaching()` recorded no reason at all, so the
+                // only moment a coach could say why somebody left passed in
+                // silence every single time. The alert still asks whether they
+                // mean it — removing a client is destructive and a picker is
+                // not a confirmation — and the sheet then asks why, with an
+                // explicit way to record nothing. See src/ui/EndReasonSheet.tsx.
+                onPress={() => { const s = sel; Alert.alert('Remove client?', `Remove ${s.name} from your roster?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { setSel(null); setEnding({ id: s.id, name: s.name }); } }]); }}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 13, marginTop: sp.lg, marginBottom: sp.sm }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
                 <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Remove client</Text>
@@ -2059,6 +2118,27 @@ export default function TrainerClients() {
           )}
         </View>
               </KeyboardAvoidingView>
+
+      {/* ── why they left ─────────────────────────────────────────────────
+          Opened after the removal is confirmed and before it is performed, so
+          the ending and the reason reach the server as ONE call — two calls
+          have a state between them (ended, unexplained) that every dropped
+          connection reaches, and the ending is the only moment the question
+          makes sense. Skipping records nothing and still removes them. */}
+      <Modal visible={!!ending} animationType="slide" onRequestClose={() => setEnding(null)}>
+        {ending ? (
+          <EndReasonSheet
+            name={ending.name}
+            verb="Remove and Record This"
+            onCancel={() => setEnding(null)}
+            onDone={(reason: EndReason | null, note: string | null) => {
+              const e = ending;
+              setEnding(null);
+              void removeClient(e.id, reason, note);
+            }}
+          />
+        ) : null}
+      </Modal>
 
       {/* ── coach meal picker ─────────────────────────────────────────────
           Nested in the client sheet on purpose. "Choose" is only ever tapped
@@ -2862,5 +2942,54 @@ export default function TrainerClients() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+
+/* ── the first-run list, as one row ─────────────────────────────────────────── */
+
+/**
+ * One row on the Clients screen while setting up is unfinished.
+ *
+ * Its own component, and its own read, deliberately: this screen already mounts
+ * a dozen providers and folding eight more queries into the dashboard's own
+ * load would make opening the Clients tab wait on whether the coach has
+ * uploaded a waiver. It renders NOTHING until the read lands, for the reason
+ * src/ui/ScreenHelp.tsx gives — a card that appears for one frame and vanishes
+ * is worse than one that never appeared.
+ *
+ * The count is of rows KNOWN to be outstanding. An unread row is not counted
+ * and does not appear in the number, but it does keep the row on screen, which
+ * is why "3 things left" and "still worth a look" are two different sentences
+ * below rather than one with a number that might be made of our own failure.
+ */
+function CoachSetupRow() {
+  const t = useTheme();
+  const router = useRouter();
+  const { facts, status } = useCoachSetup();
+  if (status === 'loading') return null;
+  const rows = coachSetupRows(facts);
+  if (!showCoachSetup(rows)) return null;
+  const left = coachSetupLeft(rows);
+  const next = coachSetupNext(rows);
+  return (
+    <View style={{ marginTop: sp.lg }}>
+      <Card onPress={() => router.push('/(trainer)/getting-started')} tone={t.brand}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+          <Icon name="sparkle" size={20} color={t.brand} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+              {left > 0 ? `Setting up · ${left} left` : 'Setting up'}
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+              {next
+                ? `Next: ${next.title.toLowerCase()} — until it is done, ${next.breaks}.`
+                : 'Some of this could not be checked just now, so it is worth a look before you rely on it.'}
+            </Text>
+          </View>
+          <Icon name="chevron" size={15} color={t.ink3} />
+        </View>
+      </Card>
+    </View>
   );
 }

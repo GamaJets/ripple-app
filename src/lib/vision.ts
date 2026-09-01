@@ -9,7 +9,19 @@ import type { ScanMetrics } from './inbodyMetrics';
 // backend is on (USE_SUPABASE) OR the explicit EXPO_PUBLIC_ENABLE_VISION flag is
 // set — so an OTA that didn't carry the build flag still gets AI reading.
 
-export interface MealVision { name: string; kcal: number; protein: number; carbs: number; fat: number; confidence: number }
+export interface MealVision {
+  name: string;
+  kcal: number;
+  /** Null when the reader did not give us one. These were `?? 0`, so a model
+   *  that returned calories and nothing else recorded a zero-protein meal that
+   *  then fed the day's remaining-macro figures. A zero is a measurement and
+   *  "we were not told" is not one — src/lib/foodPortion.ts refuses to build a
+   *  loggable food out of a gap, and the member fills it in. */
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
+  confidence: number;
+}
 export interface InBodyVision { weightKg: number | null; bodyFatPct: number | null; skeletalMuscleKg: number | null; takenAt: string | null; metrics?: ScanMetrics }
 
 /** True when the vision function is reachable — backend on, or the flag is set. */
@@ -56,9 +68,10 @@ export async function analyzeMeal(imageBase64: string, mediaType?: string): Prom
   const r = await call('meal', imageBase64, mediaType);
   const kcal = toNum(r?.kcal);
   if (!r || kcal == null) return null;
+  const macro = (v: any): number | null => { const n = toNum(v); return n == null ? null : Math.round(n); };
   return {
     name: String(r.name ?? 'Meal'),
-    kcal: Math.round(kcal), protein: Math.round(toNum(r.protein) ?? 0), carbs: Math.round(toNum(r.carbs) ?? 0), fat: Math.round(toNum(r.fat) ?? 0),
+    kcal: Math.round(kcal), protein: macro(r.protein), carbs: macro(r.carbs), fat: macro(r.fat),
     confidence: toNum(r.confidence) ?? 0.6,
   };
 }

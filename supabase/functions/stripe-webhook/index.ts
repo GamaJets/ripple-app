@@ -391,6 +391,62 @@ Deno.serve(async (req) => {
         updated_at: new Date().toISOString(),
       }).eq('stripe_account_id', acct.id);
       if (error) return fail('connect_accounts', error.message);
+    } else if (event.type === 'payout.paid' || event.type === 'payout.failed'
+               || event.type === 'payout.updated' || event.type === 'payout.canceled') {
+      // ── what actually landed in the coach's bank ─────────────────────────
+      //
+      // Every takings figure in this app is GROSS — what a client was charged —
+      // and `STRIPE_AUTHORITY_NOTE` has always said that Stripe's fee, the
+      // platform's fee and whether the money cleared are things this app was
+      // never told. The gap between "AED 4,800 taken" and "AED 4,281 in my
+      // account" is the gap a coach fills with a suspicion about the platform,
+      // and nothing in the product could answer it.
+      //
+      // A payout is a BALANCE reaching a bank: the residue of many charges,
+      // minus fees, minus refunds. It can never be traced back to a particular
+      // sale and nothing here tries — see `PAYOUT_IS_NOT_A_SALE` in
+      // src/lib/coachPayouts.ts, which is the sentence on the screen.
+      const payout = event.data.object as Stripe.Payout;
+
+      // THE guard. Repple has a Stripe balance too and it pays out; those
+      // events arrive on the PLATFORM destination with no `event.account`, and
+      // recording one would put the platform's own banking on a coach's money
+      // screen. A payout with no connected account behind it is not a coach's.
+      if (!eventAccount) {
+        console.log('stripe-webhook: platform payout ' + payout.id + ' ignored — not a coach’s');
+      } else {
+        // Null when the account resolves to no coach. The row is still written:
+        // a payout this database cannot attribute still happened, and dropping
+        // it to protect a join would lose money from the record. Nobody can
+        // read such a row, which is the honest outcome rather than a guess.
+        const coachId = await trainerOfAccount(eventAccount);
+        if (!coachId) console.warn('stripe-webhook: payout ' + payout.id + ' on ' + eventAccount + ' resolves to no coach');
+
+        // Upserted on Stripe's own payout id, so at-least-once delivery and a
+        // `payout.updated` following a `payout.paid` overwrite rather than
+        // double. `stripe_event_at` moves with it and is what a later-arriving
+        // OLDER event would be filtered on by anything that reads these in
+        // order — webhooks are retried and are not ordered.
+        const { error } = await service.from('coach_payouts').upsert({
+          id: payout.id,
+          coach_id: coachId,
+          stripe_account_id: eventAccount,
+          amount_cents: payout.amount,
+          currency: payout.currency,
+          // Stripe's word, verbatim and never coerced. A status Stripe adds
+          // later must land here unchanged rather than be mapped to the nearest
+          // one this app knows — and `payoutStateLabel` resolves an unknown one
+          // to "not stated" rather than to "paid".
+          status: payout.status,
+          arrival_on: payout.arrival_date ? new Date(payout.arrival_date * 1000).toISOString().slice(0, 10) : null,
+          // The single most useful string on the row. A payout that bounced
+          // because the bank details are wrong is a coach who is not being paid
+          // and does not know it.
+          failure_message: payout.failure_message ?? null,
+          stripe_event_at: eventAt,
+        });
+        if (error) return fail('coach_payouts', error.message);
+      }
     } else if (event.type === 'checkout.session.completed') {
       // A client bought a trainer's package (Connect checkout).
       const sess = event.data.object as Stripe.Checkout.Session;
@@ -619,6 +675,8 @@ Deno.serve(async (req) => {
 //     invoice.payment_failed
 //     invoice.payment_action_required
 //     invoice.marked_uncollectible
+//     payout.paid
+//     payout.failed
 //
 // The PLATFORM destination keeps the same subscription list it has today: the
 // owner's own billing still runs there, and coaches still on destination

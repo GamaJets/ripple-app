@@ -232,8 +232,12 @@ const mem = (id: string, planId: string | null, status: Membership['status'] = '
   ({ id, memberId: 'm' + id, memberName: 'M', planId, planName: null,
      startedOn: '2026-01-01', endsOn: null, status });
 const pay = (cents: number): GymPayment =>
+  // The four fields supabase/parts/168 and 172 added are stated rather than
+  // spread from a default, because a fixture that quietly defaults them is a
+  // fixture that stops noticing when the shape of a payment changes again.
   ({ id: 'p' + cents, memberId: 'm', memberName: 'M', amountCents: cents,
-     currency: 'AED', method: 'card', takenAt: '2026-08-01T00:00:00Z', note: null });
+     currency: 'AED', method: 'card', takenAt: '2026-08-01T00:00:00Z', note: null,
+     kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null });
 
 const emptyGym = summarise([], [], []);
 ok(emptyGym.takenCents === null, 'a gym with no payments must report null, not 0');
@@ -702,7 +706,12 @@ ok(rollBlocked.sessions30 === 20, 'rollup still reports what the record shows to
 const kit = (o: Partial<Equipment>): Equipment => ({
   id: 'e', name: 'Rower', category: 'rower', identifier: null, quantity: 1,
   status: 'in_service', purchasedOn: null, serviceIntervalDays: null,
-  lastServicedOn: null, note: null, ...o,
+  lastServicedOn: null, note: null,
+  // Stated rather than spread from a default: the reason a machine is out of
+  // action is a SEPARATE column from `note` on purpose — recordService clears
+  // the note — and a fixture that quietly defaulted it would stop noticing if
+  // the two were ever merged back.
+  outOfServiceReason: null, outOfServiceSince: null, ...o,
 });
 
 // Two different unknowns must stay distinguishable.
@@ -2013,7 +2022,8 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   const mem = (memberId: string, memberName: string | null, status: Membership['status'], startedOn: string): Membership =>
     ({ id: 'ms-' + memberId + '-' + startedOn, memberId, memberName, planId: 'p1', planName: 'Full', startedOn, endsOn: null, status });
   const pay = (id: string, memberId: string, amountCents: number, takenAt: string): GymPayment =>
-    ({ id, memberId, memberName: null, amountCents, currency: 'AED', method: 'card', takenAt, note: null });
+    ({ id, memberId, memberName: null, amountCents, currency: 'AED', method: 'card', takenAt, note: null,
+       kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null });
   const visit = (id: string, memberId: string, enteredAt: string, classId: string | null = null): Visit =>
     ({ id, memberId, memberName: null, passId: null, classId, enteredAt, exitedAt: null, source: 'door', note: null });
   const book = (bookingId: string, memberId: string, startsAt: string, attended: boolean, status = 'booked'): MemberBooking =>
@@ -2403,7 +2413,8 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   // ── narrowing a slice to a month keeps all three states ──
   const junePay = (id: string, cents: number, opts: Partial<GymPayment> = {}): GymPayment => ({
     id, memberId: 'm1', memberName: 'Sara', amountCents: cents, currency: 'AED',
-    method: 'card', takenAt: new Date(2026, 5, 10, 9, 0).toISOString(), note: null, ...opts,
+    method: 'card', takenAt: new Date(2026, 5, 10, 9, 0).toISOString(), note: null,
+    kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null, ...opts,
   });
   const julyPay = junePay('late', 999, { takenAt: new Date(2026, 6, 2, 9, 0).toISOString() });
 
@@ -2726,9 +2737,9 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     { id: 'ms3', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl2', planName: 'Day pass', startedOn: '2024-02-02', endsOn: '2024-02-03', status: 'cancelled' },
   ];
   const payIn: GymPayment[] = [
-    { id: 'pay1', memberId: 'u1', memberName: '"Bob" Smith', amountCents: 45000, currency: 'AED', method: 'card', takenAt: '2026-08-02T09:14:00.000Z', note: 'Renewal; said "thanks"\nsecond line of the note' },
-    { id: 'pay2', memberId: 'u2', memberName: "O'Brien, Sean", amountCents: 5, currency: 'AED', method: 'cash', takenAt: '2026-07-01T00:00:00.000Z', note: null },
-    { id: 'pay3', memberId: null, memberName: null, amountCents: 1250, currency: 'AED', method: 'other', takenAt: '2026-06-01T00:00:00.000Z', note: 'walk-in, till float' },
+    { id: 'pay1', memberId: 'u1', memberName: '"Bob" Smith', amountCents: 45000, currency: 'AED', method: 'card', takenAt: '2026-08-02T09:14:00.000Z', note: 'Renewal; said "thanks"\nsecond line of the note', kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null },
+    { id: 'pay2', memberId: 'u2', memberName: "O'Brien, Sean", amountCents: 5, currency: 'AED', method: 'cash', takenAt: '2026-07-01T00:00:00.000Z', note: null, kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null },
+    { id: 'pay3', memberId: null, memberName: null, amountCents: 1250, currency: 'AED', method: 'other', takenAt: '2026-06-01T00:00:00.000Z', note: 'walk-in, till float', kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null },
   ];
   const clsIn: GymClass[] = [
     { id: 'c1', title: 'Spin, 45min', room: 'Studio 2', instructor: null, trainerId: 't1', startsAt: '2026-08-01T06:00:00.000Z', durationMin: 45, capacity: 20, booked: 2, attended: 1, waitlisted: 0, waitlistAttended: 0 },
@@ -2761,6 +2772,13 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     classes: sliceReady(clsIn), attendance: sliceReady(bkIn), sessions: sliceReady(sessIn),
     passTypes: sliceReady(ptIn), passes: sliceReady(passIn), visits: sliceReady(visIn),
     invites: sliceReady(invIn),
+    // The eight parts the bundle used to leave behind. Empty rather than
+    // omitted: this fixture is about ESCAPING, and every one of these is stated
+    // so that adding a twentieth part to EXPORT_PARTS fails to compile here
+    // rather than quietly producing a bundle with a hole in it.
+    invoices: sliceReady([]), settlements: sliceReady([]), equipment: sliceReady([]),
+    shifts: sliceReady([]), interventions: sliceReady([]), promos: sliceReady([]),
+    events: sliceReady([]), purchases: sliceReady([]),
   };
 
   // ── escaping: the assertion the whole file stands on ──
@@ -4208,31 +4226,31 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
  * opposite claims.
  */
 {
-  ok(readinessScore({ avgSleepHours: null, hydrationPct: null, workoutsLast2Days: 0 }) === null,
+  ok(readinessScore({ avgSleepHours: null, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 0 }) === null,
     'no sleep logged yields NO score - not the 20 that used to read as under-recovered');
-  ok(readinessScore({ avgSleepHours: null, hydrationPct: 0.5, workoutsLast2Days: 0 }) === null,
+  ok(readinessScore({ avgSleepHours: null, hydrationPct: 0.5, recoveryPct: null, workoutsLast2Days: 0 }) === null,
     'hydration alone cannot carry a readiness score');
-  ok(readinessScore({ avgSleepHours: 0, hydrationPct: null, workoutsLast2Days: 0 }) === null,
+  ok(readinessScore({ avgSleepHours: 0, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 0 }) === null,
     'zero hours is treated as absent rather than as a catastrophic night');
 
-  const rested = readinessScore({ avgSleepHours: 8, hydrationPct: 1, workoutsLast2Days: 0 });
+  const rested = readinessScore({ avgSleepHours: 8, hydrationPct: 1, recoveryPct: null, workoutsLast2Days: 0 });
   ok(rested != null && rested.score === 100, 'eight hours, hydrated, fresh - full marks');
   ok(rested != null && rested.tone === 'good', 'and that reads as well recovered');
 
   // Untracked hydration is not dehydration. Before rescaling, anybody who
   // ignored the water tracker was capped at 70 and told to rest.
-  const noWater = readinessScore({ avgSleepHours: 8, hydrationPct: null, workoutsLast2Days: 0 });
+  const noWater = readinessScore({ avgSleepHours: 8, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 0 });
   ok(noWater != null && noWater.score === 100,
     'eight hours and no water tracking still scores full - an untracked signal is not a failed one');
-  const someWater = readinessScore({ avgSleepHours: 8, hydrationPct: 0, workoutsLast2Days: 0 });
+  const someWater = readinessScore({ avgSleepHours: 8, hydrationPct: 0, recoveryPct: null, workoutsLast2Days: 0 });
   ok(someWater != null && someWater.score < 100,
     'but a tracked zero genuinely counts against it');
 
-  const tired = readinessScore({ avgSleepHours: 4, hydrationPct: 0.2, workoutsLast2Days: 3 });
+  const tired = readinessScore({ avgSleepHours: 4, hydrationPct: 0.2, recoveryPct: null, workoutsLast2Days: 3 });
   ok(tired != null && tired.tone === 'low', 'four hours, dehydrated, three sessions - genuinely under-recovered');
 
   for (const h of [1, 4, 6, 7, 8, 9, 12]) {
-    const r = readinessScore({ avgSleepHours: h, hydrationPct: 0.5, workoutsLast2Days: 1 });
+    const r = readinessScore({ avgSleepHours: h, hydrationPct: 0.5, recoveryPct: null, workoutsLast2Days: 1 });
     ok(r != null && r.score >= 0 && r.score <= 100, h + 'h stays within 0-100');
     ok(r != null && r.label.length > 0 && r.tip.length > 0, h + 'h carries a label and a tip');
   }

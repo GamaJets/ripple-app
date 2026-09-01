@@ -8,14 +8,18 @@
 // reporting one: until visits are recorded, attendance is only ever the subset
 // of people who booked a class, and retention is inferred from a number that
 // is missing most of its input.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchVisits, checkIn, checkOut, summariseVisits, dwellMinutes,
+  sweepStaleVisits, wasSwept, currentlyInside,
+  busiestSlots, visitsByHour, visitsByWeekday, averageDwellMinutes,
+  WEEKDAYS,
   type Visit,
 } from '@lib/gymVisits';
+import { searchRows } from '@lib/consoleSearch';
 import {
   fetchPasses, fetchPassTypes, issuePass, redeemPass,
   summarisePasses, passStatus, remainingUses,
@@ -175,8 +179,16 @@ export default function Door() {
   // that count forever. The tile crept upward all month and the two screens
   // disagreed. Visits left open from earlier days are counted separately and
   // said out loud: nobody is standing in the gym from Tuesday.
-  const inside = todays.filter((v) => !v.exitedAt);
+  // `currentlyInside` rather than a hand-rolled filter, so the Door and every
+  // other reader of the door log agree on what "inside" means. It had no caller
+  // anywhere in the repository until now — the definition existed, was tested,
+  // and every screen re-implemented it.
+  const inside = currentlyInside(todays);
   const openBefore = (visits ?? []).filter((v) => !v.exitedAt && dayOf(v.enteredAt) !== today);
+  // Of those, the ones a sweep has already accounted for. Two different things
+  // for the desk: "nobody has looked at these" and "these are known to be
+  // people who left without scanning out".
+  const sweptBefore = openBefore.filter(wasSwept);
 
   const sum = visits ? summariseVisits(todays) : null;
   const pSum = passes ? summarisePasses(passes, today) : null;
@@ -231,8 +243,16 @@ export default function Door() {
         membersUnread={unread(members)} classesUnread={unread(classes)}
         today={today} onChange={refresh}
       />
-      <Inside inside={inside} openBefore={openBefore.length} unread={unread(visits)} onChange={refresh} />
+      <Inside
+        inside={inside} openBefore={openBefore.length} swept={sweptBefore.length}
+        unread={unread(visits)} tenantId={tenantId} isOwner={me.role === 'owner'}
+        onChange={refresh}
+      />
       <Today visits={todays} unread={unread(visits)} />
+      {/* Thirty days rather than today, because "when is my gym busy" is not a
+          question about today. The window is the same one `load()` reads, so
+          nothing here needs a second query. */}
+      <Occupancy visits={visits} unread={unread(visits)} days={30} />
       <Passes
         passes={passes} types={types} members={members} summary={pSum}
         passesUnread={unread(passes)} typesUnread={unread(types)}
@@ -270,8 +290,6 @@ function CheckInBar({ members, passes, classes, tenantId, membersUnread, classes
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-
-  const active = (members ?? []).filter((m) => m.status === 'active');
 
   /* The live passes held by the person selected. Keyed on `holderId`, which is
    * the whole reason A1 had to be fixed first: a pass issued with only a
@@ -315,12 +333,10 @@ function CheckInBar({ members, passes, classes, tenantId, membersUnread, classes
   return (
     <Section title="Check someone in" sub="Leave the member blank to record a visit you cannot attribute — it still counts toward the day. Say what the visit was for and it reconciles against the class or the pass instead of counting twice.">
       <form onSubmit={go} style={formRow}>
-        <select value={memberId} onChange={(e) => pickMember(e.target.value)} style={{ ...field, flex: 2 }}>
-          <option value="">Anonymous / walk-in</option>
-          {active.map((m) => (
-            <option key={m.id} value={m.memberId}>{m.memberName ?? m.memberId}</option>
-          ))}
-        </select>
+        <MemberPicker
+          members={members} value={memberId} onPick={pickMember}
+          unread={membersUnread}
+        />
         <select value={reason} onChange={(e) => setReason(e.target.value)} style={{ ...field, flex: 2 }}
                 aria-label="What this visit was for">
           <option value="">Gym floor</option>
@@ -364,12 +380,170 @@ function CheckInBar({ members, passes, classes, tenantId, membersUnread, classes
   );
 }
 
+/* ── finding a member at the desk ──────────────────────────────────────────── */
+
+/** How many matches the picker shows before it asks for more typing. Enough to
+ *  cover a family with one surname; short enough that the desk is never
+ *  scrolling a list while somebody stands in front of them. */
+const PICKER_ROWS = 8;
+
+/**
+ * Find the person standing at the desk.
+ *
+ * ── What this replaces, and why a `<select>` was not merely inelegant ──────
+ *
+ * This was `<select>` over `members.filter(m => m.status === 'active')`, and it
+ * failed in two ways that both land on the same person:
+ *
+ *  · at 300 members a native select is a scroll list with no search — some
+ *    browsers offer type-ahead on the first characters of the label and none of
+ *    them find "Okafor" from "oka" if the label starts with "Sara". The desk
+ *    gives up and checks a member in as a walk-in, and the visit never reaches
+ *    that member's record;
+ *  · FROZEN AND LAPSED MEMBERS WERE NOT IN THE LIST AT ALL. The one member you
+ *    most want a row about — the one whose membership just ran out, who is
+ *    standing at the desk about to renew or about to leave — was the one the
+ *    desk could only record anonymously. That is the exact person /retention
+ *    and /passes exist to find, missing from the log at the moment they are
+ *    most visible.
+ *
+ * So every membership is searchable and the status is shown beside the name.
+ * Anonymous stays available and stays the default: an unattributable head-count
+ * is a real answer and it still counts toward the day.
+ */
+function MemberPicker({ members, value, onPick, unread }: {
+  members: Membership[] | null;
+  value: string;
+  onPick: (id: string) => void;
+  unread: Unread;
+}) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+
+  // One entry per PERSON, not per membership row. Somebody who froze a
+  // membership and opened another is one human being at the desk, and two
+  // identical names in a picker is how the wrong one gets clicked. The live
+  // membership wins the status label, because that is what the desk is being
+  // asked about.
+  const people = useMemo(() => {
+    const byPerson = new Map<string, { id: string; name: string; status: string; plan: string | null }>();
+    for (const m of members ?? []) {
+      const seen = byPerson.get(m.memberId);
+      const rank = (s: string) => (s === 'active' ? 3 : s === 'frozen' ? 2 : 1);
+      if (!seen || rank(m.status) > rank(seen.status)) {
+        byPerson.set(m.memberId, {
+          id: m.memberId,
+          name: m.memberName ?? m.memberId,
+          status: m.status,
+          plan: m.planName ?? null,
+        });
+      }
+    }
+    return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [members]);
+
+  const hits = useMemo(
+    // Searchable on the plan too, because "who is on Gold" is a question the
+    // desk asks out loud, and on the id because that is what a barcode scanner
+    // types into a text field.
+    () => searchRows(people, q, (p) => [p.name, p.plan, p.status, p.id]),
+    [people, q],
+  );
+
+  const chosen = value ? people.find((p) => p.id === value) ?? null : null;
+
+  // Chosen: the name, and a way back. Nothing is more confusing at a desk than
+  // a search box that still says "sara" after Sara has been selected.
+  if (chosen) {
+    return (
+      <span style={{ ...field, flex: 2, display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {chosen.name}
+          {chosen.status !== 'active'
+            ? <span style={{ color: 'var(--warn)', marginLeft: 7, fontSize: 11.5 }}>{chosen.status}</span>
+            : null}
+        </span>
+        <button type="button" style={linkBtn} onClick={() => { onPick(''); setQ(''); }}>change</button>
+      </span>
+    );
+  }
+
+  return (
+    <span style={{ flex: 2, minWidth: 180, position: 'relative' }}>
+      <input
+        value={q}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        // Closed on a delay rather than immediately: a click on one of the
+        // buttons below blurs this input first, and closing on blur would
+        // unmount the button before its own click handler ran.
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        placeholder={unread === 'failed' ? 'Member list unread — check in anonymously' : 'Search a member, or leave blank for a walk-in'}
+        aria-label="Search for the member at the desk"
+        style={{ ...field, width: '100%' }}
+      />
+      {open && q.trim() ? (
+        <span
+          style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 5,
+            background: 'var(--surface)', border: '1px solid var(--ring)', borderTop: 'none',
+            display: 'block', maxHeight: 260, overflowY: 'auto',
+          }}
+        >
+          {hits.slice(0, PICKER_ROWS).map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onPick(p.id); setQ(''); setOpen(false); }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
+                background: 'transparent', color: 'var(--ink2)', fontFamily: 'var(--sans)',
+                fontSize: 13, padding: '7px 11px', border: 'none',
+                borderBottom: '1px solid var(--ring2)',
+              }}
+            >
+              {p.name}
+              {/* The status is the whole reason a lapsed member is in this list.
+                  Said in colour as well as words, because the desk is reading
+                  it in two seconds with somebody waiting. */}
+              {p.status !== 'active' ? (
+                <span style={{ color: 'var(--warn)', marginLeft: 8, fontSize: 11.5 }}>{p.status}</span>
+              ) : null}
+              {p.plan ? <span style={{ color: 'var(--ink3)', marginLeft: 8, fontSize: 11.5 }}>{p.plan}</span> : null}
+            </button>
+          ))}
+          {hits.length > PICKER_ROWS ? (
+            <span style={{ display: 'block', padding: '7px 11px', color: 'var(--ink3)', fontSize: 11.5 }}>
+              {hits.length - PICKER_ROWS} more match — keep typing.
+            </span>
+          ) : null}
+          {hits.length === 0 ? (
+            <span style={{ display: 'block', padding: '9px 11px', color: 'var(--ink3)', fontSize: 12 }}>
+              {/* Three different sentences for three different facts, the same
+                  distinction the rest of this screen makes. An empty result
+                  under a failed read must never read as "we have no members". */}
+              {members === null
+                ? (unread === 'failed'
+                  ? 'The member list did not come back, so nobody can be found here. This is not a gym with no members.'
+                  : 'Still reading the member list…')
+                : `Nobody on the roster matches that. ${people.length} ${people.length === 1 ? 'person is' : 'people are'} searchable — frozen and cancelled included.`}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 /* ── who is inside ─────────────────────────────────────────────────────────── */
 
-function Inside({ inside, openBefore, unread, onChange }: {
-  inside: Visit[]; openBefore: number; unread: Unread; onChange: () => void;
+function Inside({ inside, openBefore, swept, unread, tenantId, isOwner, onChange }: {
+  inside: Visit[]; openBefore: number; swept: number; unread: Unread;
+  tenantId: string; isOwner: boolean; onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
+  const [sweeping, setSweeping] = useState(false);
 
   const close = async (v: Visit) => {
     setMsg(null);
@@ -397,8 +571,42 @@ function Inside({ inside, openBefore, unread, onChange }: {
         <button style={linkBtn} onClick={() => close(v)}>Check out</button>
       ) },
   ];
+  /**
+   * Mark the visits nobody closed.
+   *
+   * ── Why there is a button here at all ────────────────────────────────────
+   *
+   * `sweepStaleVisits` had no caller anywhere in the repository, and the
+   * sentence under this heading used to say a stale visit "is swept with a
+   * note" — a promise about a job that did not exist. Two ways to make that
+   * true: run it on a schedule, and let the person looking at the pile run it.
+   * Both are here. The scheduled half is
+   * `supabase/functions/sweep-stale-visits`, which is written and NOT deployed;
+   * this button works today, with the owner's own session, because
+   * `gym_visits_staff_u` already permits it.
+   *
+   * Owner-only, matching that policy's intent rather than its letter — the
+   * policy admits trainers too, and a trainer sweeping the gym's whole backlog
+   * of open visits is a housekeeping decision rather than a desk one.
+   */
+  const sweep = async () => {
+    setSweeping(true); setMsg(null);
+    try {
+      const n = await sweepStaleVisits(supabase, tenantId);
+      // Zero is a real answer and gets its own sentence: pressing the button
+      // twice must not report the same rows twice, and it does not — the sweep
+      // skips what it has already marked.
+      setMsg(n === 0
+        ? 'Nothing left to sweep — every visit still open has already been accounted for.'
+        : `${n} ${n === 1 ? 'visit' : 'visits'} marked as left without scanning out. They stay open on purpose: no exit time is invented, so none of them enters the average stay.`);
+      onChange();
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Those visits could not be swept, so nothing has changed.');
+    } finally { setSweeping(false); }
+  };
+
   return (
-    <Section title="Inside now" sub="Anyone who came in today and has not been checked out. A visit left open overnight is swept with a note, never a guessed exit time.">
+    <Section title="Inside now" sub="Anyone who came in today and has not been checked out. A visit left open overnight is marked with a note and never a guessed exit time — an invented exit would put a twenty-hour stay into the average.">
       {msg ? <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
       {openBefore > 0 ? (
         <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>
@@ -406,6 +614,15 @@ function Inside({ inside, openBefore, unread, onChange }: {
           day — check-ins nobody closed, not people standing in the gym, so they are said here and
           counted nowhere. There is no Check out on them on purpose: closing one now would stamp
           this minute as the exit and put a twenty-hour stay into the average.
+          {swept > 0 ? ` ${swept} of them ${swept === 1 ? 'has' : 'have'} already been marked.` : ''}
+          {isOwner && openBefore > swept ? (
+            <>
+              {' '}
+              <button type="button" style={linkBtn} disabled={sweeping} onClick={sweep}>
+                {sweeping ? 'Marking…' : `Mark the other ${openBefore - swept} as left without scanning out`}
+              </button>
+            </>
+          ) : null}
         </p>
       ) : null}
       {unread ? <Unresolved state={unread} what="the door log" /> : (
@@ -440,6 +657,145 @@ function Today({ visits, unread }: { visits: Visit[]; unread: Unread }) {
       {unread ? <Unresolved state={unread} what="the door log" /> : (
         <DataTable rows={visits} columns={cols} rowKey={(v) => v.id} empty="No visits logged today." />
       )}
+    </Section>
+  );
+}
+
+/* ── when is the gym busy ──────────────────────────────────────────────────── */
+
+/**
+ * The building's own shape: which hours are busy, which days, and how long
+ * people stay.
+ *
+ * ── Why this is here and was not anywhere ────────────────────────────────
+ *
+ * `visitsByHour`, `peakHour`, `averageDwellMinutes` and `currentlyInside` have
+ * all been written, commented and tested since the door log was built, and
+ * `src/lib/coverage.test.ts` was their only caller. The logic existed; no screen
+ * rendered it. "When is my gym busy" is the single most actionable staffing
+ * question an owner has, and the console could not answer it.
+ *
+ * ── Why the week and the day are shown separately ────────────────────────
+ *
+ * Because collapsing them produces a wrong rota. `visitsByHour` flattens every
+ * day together, so a gym whose Saturday mornings are heaving and whose Tuesday
+ * mornings are empty reads as "busy at 09:00" — and somebody gets rostered on a
+ * Tuesday. `busiestSlots` keeps the weekday, which is the unit a rota is
+ * actually written in, and carries how many calendar days each slot is averaged
+ * over so a 30-day window's five Mondays and four Fridays are not compared as
+ * though they were the same sample.
+ */
+function Occupancy({ visits, unread, days }: {
+  visits: Visit[] | null; unread: Unread; days: number;
+}) {
+  const hours = useMemo(() => (visits ? visitsByHour(visits) : null), [visits]);
+  const week = useMemo(() => (visits ? visitsByWeekday(visits) : null), [visits]);
+  const slots = useMemo(() => (visits ? busiestSlots(visits, 5) : null), [visits]);
+  const dwell = useMemo(() => (visits ? averageDwellMinutes(visits) : null), [visits]);
+
+  if (unread) {
+    return (
+      <Section title="When the gym is busy" sub={`Every arrival in the last ${days} days.`}>
+        <Unresolved state={unread} what="the door log" />
+      </Section>
+    );
+  }
+  if (!visits || !hours || !week || !slots) return null;
+
+  if (visits.length === 0) {
+    return (
+      <Section title="When the gym is busy" sub={`Every arrival in the last ${days} days.`}>
+        <p style={{ padding: '22px 14px', margin: 0, color: 'var(--ink3)', fontSize: 13 }}>
+          Nothing has been recorded at the door in {days} days, so there is no shape to show. That
+          is a desk that is not checking people in rather than a gym nobody visits — every figure on
+          this page, and the retention reading on Members, is built on these rows.
+        </p>
+      </Section>
+    );
+  }
+
+  // The tallest bar sets the scale. Floored at 1 so a single visit does not
+  // divide by zero, and taken over the hours actually present rather than a
+  // fixed maximum — the shape is what matters, not the absolute height.
+  const busiestHour = Math.max(1, ...hours.map((h) => h.visits));
+  const busiestDay = Math.max(1, ...week.map((d) => d.visits));
+
+  return (
+    <Section
+      title="When the gym is busy"
+      sub={`Every arrival in the last ${days} days, by hour and by day. A quiet hour is drawn as a quiet hour rather than left out.`}
+    >
+      <div style={{ padding: '14px 14px 4px' }}>
+        <div className="micro" style={{ marginBottom: 7 }}>By hour of the day</div>
+        <div style={{ display: 'grid', gap: 3, gridTemplateColumns: 'repeat(24, minmax(0, 1fr))' }}>
+          {hours.map((h) => (
+            <div key={h.hour} title={`${String(h.hour).padStart(2, '0')}:00 — ${h.visits} in`}
+                 style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
+              <span style={{
+                display: 'block', width: '100%',
+                height: 4 + Math.round((h.visits / busiestHour) * 34),
+                background: h.visits === 0 ? 'var(--ring)' : 'var(--brand)',
+                opacity: h.visits === 0 ? 0.5 : 1,
+              }} />
+              <span className="mono" style={{ fontSize: 8.5, color: 'var(--ink3)' }}>
+                {String(h.hour).padStart(2, '0')}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: '14px' }}>
+        <div className="micro" style={{ marginBottom: 7 }}>By day of the week</div>
+        <div style={{ display: 'grid', gap: 3, gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}>
+          {week.map((d) => (
+            <div key={d.day} title={`${d.day} — ${d.visits} in`} style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
+              <span style={{
+                display: 'block', width: '100%',
+                height: 4 + Math.round((d.visits / busiestDay) * 34),
+                background: d.visits === 0 ? 'var(--ring)' : 'var(--brand)',
+                opacity: d.visits === 0 ? 0.5 : 1,
+              }} />
+              <span className="mono" style={{ fontSize: 9, color: 'var(--ink3)' }}>{d.day}</span>
+              <span className="mono" style={{ fontSize: 10, color: d.visits === 0 ? 'var(--ink3)' : 'var(--ink2)' }}>
+                {d.visits === 0 ? '—' : d.visits}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: '0 14px 14px' }}>
+        <div className="micro" style={{ marginBottom: 7 }}>Busiest slots</div>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 5 }}>
+          {slots.map((s) => (
+            <li key={`${s.weekday}:${s.hour}`} style={{
+              display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap',
+              fontSize: 12.5, color: 'var(--ink2)',
+              border: '1px solid var(--ring)', background: 'var(--surface2)', padding: '6px 10px',
+            }}>
+              <span className="mono" style={{ color: 'var(--ink)' }}>
+                {WEEKDAYS[s.weekday]} {String(s.hour).padStart(2, '0')}:00
+              </span>
+              <span>{s.visits} in</span>
+              {/* The average is the number to staff against, and it needs its
+                  denominator said out loud: 30 days holds five Mondays and four
+                  Fridays, so a total alone makes Monday look busier than it is. */}
+              <span style={{ color: 'var(--ink3)' }}>
+                {s.days === 1 ? 'on one day' : `across ${s.days} of them — about ${Math.round((s.visits / s.days) * 10) / 10} each time`}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {/* Two figures, never one. A dwell average computed over the visits
+              that recorded an exit is honest only if it says how many that was
+              — half of them being open makes the average a sample, not a fact. */}
+          {dwell && dwell.minutes != null
+            ? `Average stay ${dwell.minutes} min, measured from the ${dwell.closed} of ${dwell.total} visits that recorded an exit.`
+            : `No visit in this window recorded an exit, so there is no average stay — that is a door with no way out recorded, not a gym nobody stays in.`}
+        </p>
+      </div>
     </Section>
   );
 }
@@ -587,13 +943,16 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
               for the member standing there holding an account — which is how a
               gym ends up unable to answer whether any pass it ever sold turned
               into a membership. */}
-          <select value={holderId} onChange={(e) => setHolderId(e.target.value)} style={{ ...field, flex: 2 }}
-                  aria-label="Which member the pass is for">
-            <option value="">Not a member — name below</option>
-            {activeMembers.map((m) => (
-              <option key={m.id} value={m.memberId}>{m.memberName ?? m.memberId}</option>
-            ))}
-          </select>
+          {/* The same searchable picker as the check-in bar, and for the same
+              reason plus one: a pass is most often sold to somebody whose
+              membership has just lapsed, and the `<select>` that stood here
+              listed active memberships only — so the one person a day pass is
+              for was the one person it could not be attributed to. */}
+          <MemberPicker
+            members={members} value={holderId}
+            onPick={(id) => { setHolderId(id); if (id) setHolderName(''); }}
+            unread={members === null ? 'failed' : null}
+          />
           {/* Disabled rather than hidden once a member is picked: the two are a
               real either/or — `issuePass` nulls the name when it is given an id
               — and a control that vanishes reads as one that was never there. */}

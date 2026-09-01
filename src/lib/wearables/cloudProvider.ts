@@ -13,6 +13,10 @@ import { parseVendorSleep, vendorReadsSleep } from '../vendorSleep';
 import { vendorFor, isConfigured } from './oauthConfig';
 import { connectVendor, fetchVendorDay, disconnectVendor, fetchVendorWorkouts, fetchVendorSleep } from './oauth';
 import { linkFor, noteMetric } from '../wearableLinkLedger';
+import {
+  fetchTrainingSleep, fetchTrainingToday, fetchTrainingWorkouts,
+  requestTrainingAccess, trainingReadable,
+} from './healthConnectTraining';
 
 export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
   const isHealthConnect = meta.kind === 'health-connect';
@@ -30,7 +34,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
    */
   const healthConnectReason = (): string =>
     Platform.OS === 'android'
-      ? 'Repple reads blood sugar from Health Connect, on the Blood Sugar screen. It does not read training from it — steps, heart rate and workouts still have to come from a watch, and WHOOP and Oura connect here on Android today.'
+      ? 'This build of Repple does not contain the Health Connect reader. It is part of the app itself, so it arrives with a new version rather than in an update — WHOOP and Oura connect here today and are unaffected.'
       : 'Health Connect is Android’s health store, so there is nothing on this phone for it to read. Apple Health above is the equivalent here.';
 
   return {
@@ -61,11 +65,28 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       // in order to ship one feature is a screen people stop reading, which is
       // the same argument `permissionSet` in appleHealth.ts makes.
       //
-      // So "can this provider run in the current binary right now?" still has
-      // one honest answer for the thing this provider is, and it is no. The
-      // reason sentence below no longer says Repple cannot read Health Connect
-      // at all, because that would now be false.
-      if (isHealthConnect) return false;
+      // ── That is no longer true, and this now answers the same question with
+      //    the same rigour and a different answer ─────────────────────────────
+      //
+      // `./healthConnectTraining.ts` reads steps, heart rate, calories,
+      // workouts and sleep out of Health Connect under its own permission set,
+      // so the DAILY METRICS contract this provider implements is one this
+      // build can genuinely serve on Android.
+      //
+      // The question is still asked of the BINARY and not of a config file. All
+      // this returns true on is `trainingReadable()` — Android, with the native
+      // module actually compiled in — which is exactly what `isAvailable()` is
+      // specified to mean. What it deliberately does NOT do is try to guess
+      // whether the installed manifest declares the health permissions: that is
+      // unknowable in-process, and every way of guessing it is wrong on the
+      // builds it matters for (see TRAINING_MANIFEST_PERMISSIONS on why
+      // Constants.expoConfig is a trap here).
+      //
+      // So the reconnect loop this comment was written about cannot come back,
+      // and it is prevented differently: `connect()` below only ever succeeds
+      // on a grant it watched arrive, and it fails with a sentence that names
+      // both reasons a grant can be missing rather than blaming the member.
+      if (isHealthConnect) return trainingReadable();
       // "once configured" was doing a lot of work in the old comment, and
       // nothing in the code. This returned true for EVERY cloud vendor —
       // including Fitbit and Garmin, whose client ids are empty strings in
@@ -88,6 +109,10 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       // phone to do something that would not have worked there either. On
       // Android it never rendered at all, because the provider claimed to be
       // available and the caller's guard is `!isAvailable() && reason`.
+      // Only ever consulted when `isAvailable()` is false, which for Health
+      // Connect now means "not Android, or the module is not in this binary" —
+      // so the sentence is about the device rather than about what Repple reads
+      // from it.
       if (isHealthConnect) return healthConnectReason();
       // `clientNote`, not `note`. The owner's registration instructions — env
       // var names, our Supabase secret names — were being printed on a client
@@ -102,7 +127,28 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       // for any caller that skips the check, and saying the SAME sentence,
       // because the previous one here ("added in the Android build") promised a
       // build that does not exist and named a module that was never added.
-      if (isHealthConnect) throw new Error(healthConnectReason());
+      if (isHealthConnect) {
+        if (!trainingReadable()) throw new Error(healthConnectReason());
+        // Connecting Health Connect is a PERMISSION GRANT, not an OAuth
+        // handshake, so there is no token to store and nothing server-side to
+        // record. What makes it a connection is that the member has said yes.
+        //
+        // The grant is re-read afterwards rather than inferred from the sheet
+        // returning, and a PARTIAL grant counts as connected: Health Connect
+        // lets somebody tick steps and leave heart rate, and refusing the
+        // connection over a withheld heart rate would throw away the steps they
+        // did agree to share.
+        const granted = await requestTrainingAccess();
+        if (!granted.length) {
+          // The one sentence in this file that must not guess. See the header
+          // of ./healthConnectTraining.ts: on Android an empty grant set is a
+          // decline and an undeclared manifest permission wearing the same
+          // clothes, and calling it a decline blames the member for a build.
+          const read = await fetchTrainingToday();
+          throw new Error(read.reason ?? 'Repple was not given access to Health Connect, so there is nothing to read.');
+        }
+        return;
+      }
       await connectVendor(meta.id);
     },
     async disconnect() {
@@ -110,7 +156,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       await disconnectVendor(meta.id);
     },
     async fetchWorkouts(sinceDays = 14): Promise<WorkoutSample[]> {
-      if (isHealthConnect) return [];
+      if (isHealthConnect) return fetchTrainingWorkouts(sinceDays);
       const raw = await fetchVendorWorkouts(meta.id, sinceDays);
       return raw.map((r: any) => ({
         id: String(r.id),
@@ -151,7 +197,14 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
         return { provider: meta.id, status: 'unsupported', readings: [], reason: why };
       };
       if (isHealthConnect) {
-        return absent(healthConnectReason());
+        // Not `absent()`. That helper records a metric-level gap in Repple and
+        // returns 'unsupported' unconditionally, which was right when this
+        // provider read no sleep at all and is wrong now that it reads it
+        // properly: a Health Connect that could not be reached must come back
+        // 'error', or a week of unknown nights renders as a week of no sleep in
+        // the readiness average.
+        if (!trainingReadable()) return absent(healthConnectReason());
+        return fetchTrainingSleep(sinceDays);
       }
       if (vendor?.special === 'partnership') {
         return absent(`${meta.name} needs an approved partnership before Repple can read anything from it.`);
@@ -186,7 +239,15 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       return { provider: meta.id, status: 'ready', readings: parseVendorSleep(meta.id, res.records, meta.name) };
     },
     async fetchToday(): Promise<DailyMetrics | null> {
-      if (isHealthConnect) return null;
+      if (isHealthConnect) {
+        // Null for every outcome except a read that worked — which is what the
+        // contract asks for, and what stops a refused or failed read reaching a
+        // screen as a day of zeroes. The REASON is not dropped on the floor: it
+        // is what `connect()` above surfaces when the grant is missing, which
+        // is the moment somebody is actually looking for it.
+        const read = await fetchTrainingToday();
+        return read.metrics;
+      }
       const raw = await fetchVendorDay(meta.id);
       if (!raw) return null;
       const m = emptyMetrics(meta.id);
@@ -205,6 +266,32 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
         ? { z1: num(rz.z1), z2: num(rz.z2), z3: num(rz.z3), z4: num(rz.z4), z5: num(rz.z5) }
         : null;
       m.workoutMins = typeof raw.workoutMins === 'number' ? raw.workoutMins : null;
+      // ── The three the catalogue advertises and this map used to drop ──────
+      //
+      // registry.ts sells WHOOP on "Strain, recovery, sleep & heart rate" and
+      // Oura on "Readiness, HRV & sleep". Seven fields were mapped here and the
+      // rest of the payload was discarded, so Strain, Recovery and HRV appeared
+      // in the device catalogue, appeared in the vendor's own app, and appeared
+      // NOWHERE in Repple — the exact shape registry.ts's own header forbids: a
+      // blurb promising something the provider layer refuses to hand over.
+      //
+      // Each stays null unless the edge function actually sent a number. An
+      // undeployed wearable-day sends none of these, and a null renders as
+      // unknown on every screen below rather than as a recovery of zero — which
+      // on a screen whose job is to say whether to train today would be the
+      // worst possible number to invent.
+      const numOrNull = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : null);
+      m.hrv = numOrNull(raw.hrv);
+      m.recoveryPct = numOrNull(raw.recoveryPct);
+      // Derived from the provider rather than trusted from the payload: this
+      // string is printed beside the figure as its attribution, and an
+      // attribution taken from the same response it is meant to attribute is
+      // not an attribution. Only the two vendors that publish such a score can
+      // carry one, so anything else leaves it null even if a number arrived.
+      m.recoverySource = m.recoveryPct != null && (meta.id === 'whoop' || meta.id === 'oura') ? meta.id : null;
+      if (m.recoverySource == null) m.recoveryPct = null;
+      // WHOOP's scale, so only WHOOP may fill it. See DailyMetrics.strain.
+      m.strain = meta.id === 'whoop' ? numOrNull(raw.strain) : null;
       return m;
     },
   };

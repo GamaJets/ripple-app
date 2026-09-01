@@ -17,14 +17,46 @@ import { useAuthRevision } from './authRevision';
 export interface MeasureEntry {
   id: string; at: string;
   waist?: number; chest?: number; arm?: number; thigh?: number; hips?: number;
+  armL?: number; armR?: number; thighL?: number; thighR?: number;
+  calf?: number; neck?: number; shoulders?: number;
 }
 
+/**
+ * The sites a member can record, in the order their screen lists them.
+ *
+ * ── Why `arm` and `thigh` survive alongside `armL` and `armR` ──────────────
+ *
+ * Five sites shipped originally — waist, chest, arm, thigh, hips — with no side
+ * on the two that have one. Anybody who has been taping a bicep for a year has
+ * it filed under `arm` with no record of which arm it was, and `kind` is a bare
+ * text column so those rows are simply the string 'arm'.
+ *
+ * Renaming or folding them is the tempting tidy-up and it is the destructive
+ * one: an existing `arm` row has no side, we cannot invent one, and assigning
+ * it to the right arm because most people are right-handed would silently put a
+ * year of somebody's left-arm measurements onto the wrong limb's chart. So the
+ * unqualified sites stay, labelled as what they are, and the sided ones are new
+ * rows a member starts when they want the distinction. A member who never wants
+ * it goes on using the row they always used.
+ *
+ * Nothing here has a check constraint behind it — `measurements.kind` is plain
+ * text (supabase/parts/02) — so adding a site needs no migration, and the
+ * mirror in src/lib/clientMeasurements.ts is kept in step by hand for the
+ * reason its own comment gives.
+ */
 export const METRICS: { key: keyof Omit<MeasureEntry, 'id' | 'at'>; label: string }[] = [
   { key: 'waist', label: 'Waist' },
   { key: 'chest', label: 'Chest' },
-  { key: 'arm', label: 'Arm' },
-  { key: 'thigh', label: 'Thigh' },
+  { key: 'shoulders', label: 'Shoulders' },
+  { key: 'neck', label: 'Neck' },
   { key: 'hips', label: 'Hips' },
+  { key: 'arm', label: 'Arm' },
+  { key: 'armL', label: 'Left Arm' },
+  { key: 'armR', label: 'Right Arm' },
+  { key: 'thigh', label: 'Thigh' },
+  { key: 'thighL', label: 'Left Thigh' },
+  { key: 'thighR', label: 'Right Thigh' },
+  { key: 'calf', label: 'Calf' },
 ];
 
 let SEQ = 1;

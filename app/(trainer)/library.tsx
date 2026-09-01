@@ -43,14 +43,14 @@
 // no fuzzy fallback. Here a near-miss would tell a coach they have filmed a
 // movement they have not — so the slug set below is tested with Set.has and
 // never with a scan for containment.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Ghost, PartialRead, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
@@ -59,6 +59,27 @@ import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { useAuth } from '../../src/ui/auth';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { catalogueValue as cap, num } from '../../src/lib/format';
+// ── the question that gets BETTER as a coach gets busier ───────────────────
+//
+// One client's history of one movement has been readable since
+// src/lib/exerciseHistory.ts landed, and app/(trainer)/exercise.tsx draws it.
+// "Who is stalled on bench across my roster" was answerable only by opening
+// forty screens, so nobody did — which meant the one coaching insight that
+// scales with the size of a book was the one the app withheld from a busy
+// coach. The two blockers were the flat row cap and an `exercise` column that
+// is free text; both are answered in supabase/parts/178, which aggregates in
+// the database so the answer is one row per client and can never be truncated.
+import { useRoster } from '../../src/ui/roster';
+import { useSettings } from '../../src/ui/settings';
+import { readRosterExercise } from '../../src/ui/rosterExercise';
+import {
+  LEVEL_NOTE, LEVEL_TITLE, ROSTER_WINDOW_DAYS, rankRosterExercise, rosterExerciseLine,
+  type RosterExerciseClient, type RosterExerciseRow, type StalledLevel,
+} from '../../src/lib/rosterExercise';
+import { liftIn } from '../../src/lib/units';
+import { deltaLabel } from '../../src/lib/deltaLabel';
+import { type LoadStatus } from '../../src/ui/loadStatus';
+
 
 const ALL = 'All';
 
@@ -119,6 +140,61 @@ export default function TrainerLibrary() {
   // Paged. Six hundred rows mounted at once is a visibly janky scroll on an
   // older phone, and nobody reads past the first screenful.
   const [shown, setShown] = useState(PAGE);
+
+  /* ── one movement, across the whole book ────────────────────────────────
+     Asked on demand rather than for every row of the catalogue: this is one
+     aggregate per movement, and running it for four hundred exercises the
+     moment the screen opens would be four hundred round trips in service of a
+     question the coach has not asked. So the row carries a control and the
+     answer opens under it.
+
+     `rosterStatus` and the aggregate's own status are held separately and
+     BOTH gate every figure — a coach told "3 of 40 are stalled" off a roster
+     that came back short is acting on a denominator that is not their book. */
+  const { roster, status: rosterStatus } = useRoster();
+  const coachUnit = useSettings().weightUnit;
+  const [askedFor, setAskedFor] = useState<string | null>(null);
+  const [rosterRows, setRosterRows] = useState<RosterExerciseRow[] | null>(null);
+  const [rosterAsk, setRosterAsk] = useState<LoadStatus>('ready');
+  // The movement whose answer is allowed to reach the screen. Tapping through
+  // several movements starts a read per tap and they do not come back in order,
+  // so without this a slow answer for the squat lands under the heading for the
+  // bench press — one movement's roster attributed to another. The same guard
+  // client-training.tsx and client-body.tsx use.
+  const wantedMovement = useRef<string | null>(null);
+
+  const askRoster = async (name: string) => {
+    if (askedFor === name) { setAskedFor(null); return; }
+    setAskedFor(name);
+    wantedMovement.current = name;
+    setRosterRows(null); setRosterAsk('loading');
+    const res = await readRosterExercise(name);
+    if (wantedMovement.current !== name) return;
+    setRosterRows(res.rows); setRosterAsk(res.status);
+  };
+
+  /** Every client on the BOOK, judged — not every client the aggregate had
+   *  something to say about. Somebody who has never touched the movement
+   *  produces no row at all and is the most interesting person on this list;
+   *  building it from the answer would silently only answer for the people who
+   *  already do the exercise. */
+  const rosterJudged: RosterExerciseClient[] = useMemo(
+    () => (rosterRows == null ? [] : rankRosterExercise(roster.map((c) => c.id), rosterRows)),
+    [rosterRows, roster],
+  );
+  const clientName = (id: string) => roster.find((c) => c.id === id)?.name ?? 'One client';
+
+  /** The bands, in the order `rankRosterExercise` already put them in, so the
+   *  headings follow the list rather than imposing a second order on it. */
+  const rosterBands = useMemo(() => {
+    const out: { level: StalledLevel; rows: RosterExerciseClient[] }[] = [];
+    for (const c of rosterJudged) {
+      const last = out[out.length - 1];
+      if (last && last.level === c.level) last.rows.push(c);
+      else out.push({ level: c.level, rows: [c] });
+    }
+    return out;
+  }, [rosterJudged]);
 
   const groups = useMemo(() => muscleGroups(rows), [rows]);
 
@@ -377,6 +453,86 @@ export default function TrainerLibrary() {
                           ) : null}
                           <Icon name="chevron" size={16} color={t.ink3} />
                         </Pressable>
+
+                        {/* ── who on the book is stalled on this one ────────
+                            Asked per movement, on a tap, because it is one
+                            aggregate per movement and running it for every row
+                            of the catalogue at open would be four hundred round
+                            trips for a question nobody asked. */}
+                        <View style={{ flexDirection: 'row', marginBottom: sp.md }}>
+                          <Ghost
+                            label={askedFor === r.name ? 'Hide Your Roster' : 'Across Your Roster'}
+                            a11yLabel={`Show every client on your book against ${r.name}`}
+                            onPress={() => { void askRoster(r.name); }} />
+                        </View>
+
+                        {askedFor === r.name ? (
+                          <View style={{ marginBottom: sp.lg }}>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              {rosterExerciseLine(rosterAsk, rosterStatus, rosterJudged, r.name)}
+                            </Text>
+                            {/* The judgement is named and so is its evidence.
+                                "Stalled" means one thing — logged in both halves
+                                of the window and no heavier in the second — and
+                                a coach who disagrees can point at the row rather
+                                than at a verdict. */}
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                              Compared over {ROSTER_WINDOW_DAYS} days, split in half: the heaviest set logged
+                              in the recent half against the heaviest in the earlier one. It is a claim about the
+                              record and nothing else — reps added at the same weight are progress and do not show here.
+                            </Text>
+                            {rosterAsk === 'error' ? (
+                              <View style={{ marginTop: sp.md }}>
+                                <Flag tone={t.warn}>
+                                  Nothing below is a statement about your clients. Hand-added clients have no account for
+                                  workouts to belong to, and they read the same way from here.
+                                </Flag>
+                              </View>
+                            ) : null}
+                            {rosterAsk === 'ready' ? rosterBands.map((band) => (
+                              <View key={band.level} style={{ marginTop: sp.md }}>
+                                <Text style={{ ...ty.micro, color: t.ink3 }}>{LEVEL_TITLE[band.level]}</Text>
+                                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                                  {`${band.rows.length === 1 ? 'This client ' : 'These clients '}${LEVEL_NOTE[band.level]}.`}
+                                </Text>
+                                {band.rows.map((c) => {
+                                  // Printed in the COACH's unit, which is the
+                                  // one this app is certain of on this device.
+                                  // Unlike the client-training screen — a
+                                  // transcript of one person's session, printed
+                                  // in theirs — this is a list of forty people
+                                  // and forty units would be unreadable.
+                                  const top = c.topKg == null ? null : liftIn(c.topKg, coachUnit);
+                                  // Through `deltaLabel`, never a sign written
+                                  // here: scripts/check-deltas.mjs exists
+                                  // because twenty-five screens each wrote
+                                  // their own and a change of nothing took
+                                  // whichever arm its author reached for first.
+                                  // `since: null` because the window is stated
+                                  // once above the whole list rather than
+                                  // repeated on forty rows.
+                                  const d = c.changePct == null ? null
+                                    : deltaLabel(c.changePct, { since: null, unit: '%', noChange: 'no change' });
+                                  return (
+                                    <View key={c.clientId} style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm, marginTop: 4 }}>
+                                      <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{clientName(c.clientId)}</Text>
+                                      <Text style={{ ...ty.caption, color: t.ink3 }}>
+                                        {top == null ? 'no load recorded' : `${num(top)} ${coachUnit}`}
+                                      </Text>
+                                      {d ? <Text style={{ ...ty.caption, color: t.ink3 }}>{d}</Text> : null}
+                                    </View>
+                                  );
+                                })}
+                              </View>
+                            )) : null}
+                            {rosterAsk === 'ready' && rosterJudged.some((c) => c.e1rmKg != null) ? (
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                                Any one-rep max behind these figures is an ESTIMATE off logged sets. Nobody in this app
+                                has tested one, and the same arithmetic is what a client's own progression screen uses.
+                              </Text>
+                            ) : null}
+                          </View>
+                        ) : null}
                       </View>
                     );
                   })}

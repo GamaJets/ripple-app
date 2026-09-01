@@ -85,11 +85,19 @@ export function partyOf(row: SubscriptionParties | null | undefined, uid: string
 /**
  * May this caller perform this action on this subscription?
  *
- * Anything that is not one of the three known actions is refused. The caller
+ * Anything that is not one of the four known actions is refused. The caller
  * decides which of the two refusals to print: a stranger is told the
  * subscription was not found (confirming an id exists to somebody who has no
  * business with it is itself a leak), while a coach asking for the billing
  * portal is told plainly that it is the client's.
+ *
+ * There is deliberately no 'refund' here and there never will be. A refund is
+ * about a CHARGE, not about a subscription — the two charges a coach can refund
+ * live in two different tables under two different keys, neither of which is a
+ * subscription id — and it is authorised by supabase/functions/connect-refund
+ * against the sale row's own coach. Putting it in this union would put a refund
+ * inside the branch that cancels subscriptions, which is exactly the confusion
+ * the feature must not create.
  */
 export function mayAct(
   row: SubscriptionParties | null | undefined,
@@ -100,7 +108,15 @@ export function mayAct(
   if (party === 'stranger') return false;
   // The client's card and invoices. Never the coach's to open. See above.
   if (action === 'portal') return party === 'client';
-  return action === 'cancel' || action === 'resume';
+  // 'end_now' stops the subscription TODAY and gives nothing back. Both parties
+  // may do it, and the reason it is not the coach's alone is the one that made
+  // it worth building: it is the CLIENT who asks to be cancelled today, and an
+  // app that can only offer them "it stops in three weeks" is the reason they
+  // write the review. A coach doing it to somebody who has paid for the month
+  // is taking coaching off them, so `END_NOW_TAKES_THE_REST` in
+  // src/lib/refunds.ts is printed in front of whoever taps it, and the money is
+  // given back — if it is to be given back — as a separate act.
+  return action === 'cancel' || action === 'resume' || action === 'end_now';
 }
 
 /**

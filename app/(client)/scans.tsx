@@ -73,6 +73,8 @@ import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } fr
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
+import { useGoalTracker } from '../../src/ui/goalTracker';
+import { goalOfKind, goalOnBody } from '../../src/lib/goalOnBody';
 import { fetchMyCoach, fetchMyShares, sharePhoto, unsharePhoto, shareStateOf, shareLabel, sharedNote, sendBlocker, revokeCaveat, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
 import { spanLabel } from '../../src/lib/photoCompare';
 // ── the handover document ─────────────────────────────────────────────────
@@ -445,6 +447,25 @@ export default function Scans() {
   const [mxOpen, setMxOpen] = useState<string | null>(null);
   const [scanMx, setScanMx] = useState<ScanMetrics | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  // The targets the member set on the Goals screen. Read here so the screen
+  // called Progress can say what progress is toward.
+  const { goals, status: goalStatus } = useGoalTracker();
+  // ── Correcting a scan ──────────────────────────────────────────────────
+  //
+  // The scan that is highest-dated decides `weightKg`, `bodyFatPct` and
+  // `muscleKg` for the whole app, which is to say it decides the client's
+  // calorie and protein targets, every body chart and the figures on the report
+  // their coach reads. Until now there was no way to change one and no way to
+  // remove one, so a mistyped 187 kg re-tuned the meal plan and stayed there
+  // for good.
+  //
+  // Held as the scan's id rather than a copy of the scan, so the sheet cannot
+  // go on editing a row that has been deleted underneath it — `editing` below
+  // resolves through `cd.scans` on every render and is null the moment the row
+  // is gone.
+  const [editId, setEditId] = useState<string | null>(null);
+  const [eWt, setEWt] = useState(''); const [eBf, setEBf] = useState(''); const [eSm, setESm] = useState('');
+  const [eBusy, setEBusy] = useState(false);
   const now = new Date();
   const [dD, setDD] = useState(now.getDate() - 1);
   const [dM, setDM] = useState(now.getMonth());
@@ -588,7 +609,7 @@ export default function Scans() {
 
   /** Upload + record. Re-reads the list rather than guessing at it, so the
    *  screen only ever shows photos the server has confirmed it holds. */
-  const savePhoto = async (uri: string): Promise<boolean> => {
+  const savePhoto = async (uri: string, takenAt?: string | null): Promise<boolean> => {
     setPhotoBusy(true);
     try {
       // Normalise to JPEG before it goes up. The library can hand back HEIC or
@@ -602,7 +623,33 @@ export default function Scans() {
         const mm = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG });
         if (mm.uri) out = mm.uri;
       } catch (e) { reportError('scans.photos.convert', e); }
-      await uploadProgressPhoto(out);
+      // ── The three arguments this call has always accepted and never been
+      //    given ──────────────────────────────────────────────────────────
+      //
+      // `uploadProgressPhoto` takes takenAt, weightKg and bodyFatPct, and its
+      // only caller passed none of them — so every progress photo in the
+      // database is dated the moment it was uploaded and carries two nulls.
+      // src/lib/photoCompare.ts already notes that the row's own `weight_kg`
+      // "is always null" and re-derives the figure from the nearest scan
+      // instead, which is a workaround for exactly this.
+      //
+      // The date is the photo's OWN date where the picker could tell us one —
+      // a photo chosen from the camera roll was taken on the day it was taken,
+      // and filing a March picture under today puts it at the wrong end of a
+      // comparison that is entirely about time. Null falls through to the
+      // upload's own default of now, which is right for a photo just taken.
+      //
+      // The body figures are the ones the app currently holds, and they are
+      // passed only when the read they came from was WHOLE: `cd.scansStatus`
+      // under 'error' leaves weightKg null, and a null written into the row is
+      // indistinguishable afterwards from a member who had never been weighed.
+      // Better to leave it null than to record a figure that was never read.
+      const bodyKnown = isWhole(cd.scansStatus);
+      await uploadProgressPhoto(out, {
+        takenAt: takenAt ?? undefined,
+        weightKg: bodyKnown ? cd.weightKg : null,
+        bodyFatPct: bodyKnown ? cd.bodyFatPct : null,
+      });
       setCmp([]);
       await loadPhotos();
       return true;
@@ -630,10 +677,48 @@ export default function Scans() {
     if (r) setPhys(r); else { setPhysOpen(false); Alert.alert('Could not analyze', 'Try a clearer, well-lit full-body photo.'); }
   };
 
+  /**
+   * When a picked photo was actually taken, from its own EXIF, or null.
+   *
+   * A progress photo's whole value is its position in time, and a picture
+   * chosen out of the camera roll in September may have been taken in March.
+   * Filing it under today puts it at the wrong end of every comparison the
+   * screen offers — the "before" shot lands after the "after" one.
+   *
+   * `DateTimeOriginal` is EXIF's own field and its format is not ISO: it is
+   * "2026:03:14 08:31:02", with colons in the date, which `Date.parse` refuses.
+   * The colons are swapped for dashes and the space for a T before parsing, and
+   * anything that still does not parse returns null rather than a guess — a
+   * wrong date is worse here than no date, because no date falls through to the
+   * upload's honest default of now.
+   *
+   * A future date is refused too. Camera clocks are wrong more often than
+   * anybody expects, and a photo dated next year sorts last forever.
+   */
+  const exifTakenAt = (asset: { exif?: Record<string, any> | null }): string | null => {
+    const raw = asset.exif?.DateTimeOriginal ?? asset.exif?.DateTime;
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    const iso = raw.trim().replace(/^(\d{4}):(\d{2}):(\d{2})[ T]/, '$1-$2-$3T');
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) return null;
+    // A minute of tolerance, because a phone taking a photo one second into the
+    // future by clock skew is not a broken date.
+    if (ms > Date.now() + 60_000) return null;
+    return new Date(ms).toISOString();
+  };
+
   const addPhoto = async (fromCamera: boolean) => {
     if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a scan'))) return;
-    const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.6 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (!res.canceled && res.assets && res.assets[0]) await savePhoto(res.assets[0].uri);
+    // `exif: true` only on the library path. A photo taken through the camera
+    // right now is dated now by definition, and asking for EXIF there would be
+    // reading a field to learn something we already know.
+    const res = fromCamera
+      ? await ImagePicker.launchCameraAsync({ quality: 0.6 })
+      : await ImagePicker.launchImageLibraryAsync({ quality: 0.6, exif: true });
+    if (!res.canceled && res.assets && res.assets[0]) {
+      const asset = res.assets[0];
+      await savePhoto(asset.uri, fromCamera ? null : exifTakenAt(asset));
+    }
   };
 
   const removePhoto = (p: ProgressPhoto) => {
@@ -748,6 +833,86 @@ export default function Scans() {
   // York and dated correctly in Dubai. Read through localDate instead, which is
   // what the rest of the app already does with this column.
   const fmt = bodyDayLabel;
+
+  /** The scan being corrected, resolved fresh so a deleted row closes the sheet. */
+  const editing = editId ? cd.scans.find((x) => x.id === editId) ?? null : null;
+
+  const openEdit = (sc: { id: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number | null }) => {
+    // Pre-filled in the client's OWN unit, through the same converter the Add
+    // sheet fills from a device reading. A pounds reader shown the stored
+    // kilograms would "correct" a figure that was never wrong and store the
+    // pounds as kilograms — which is the exact bug the note on saveScan says
+    // this screen has already shipped once.
+    setEWt(fieldFromKg(sc.weightKg));
+    setEBf(String(sc.bodyFatPct));
+    setESm(sc.skeletalMuscleKg != null ? fieldFromKg(sc.skeletalMuscleKg) : '');
+    setEditId(sc.id);
+  };
+
+  const saveEdit = async () => {
+    if (!editing || eBusy) return;
+    const w = weightToKg(eWt, wu);
+    const f = readNumber(eBf);
+    if (w == null || !(w > 0) || f == null || !(f > 0)) {
+      Alert.alert('Check the numbers', 'A scan needs a weight and a body-fat percentage. Clearing one is not the same as correcting it — delete the scan instead if it should not be there.');
+      return;
+    }
+    // Blank muscle means the report gave none, and clearing the box has to be
+    // able to SAY that — so an empty string sends null rather than being
+    // skipped, which is the difference between removing a wrong figure and
+    // leaving it in place forever.
+    const mNum = weightToKg(eSm, wu);
+    const m = eSm.trim() ? (mNum != null && mNum > 0 ? mNum : null) : null;
+    setEBusy(true);
+    const ok = await cd.updateScan(editing.id, { weightKg: w, bodyFatPct: f, skeletalMuscleKg: m });
+    setEBusy(false);
+    if (!ok) {
+      // The sheet stays open with the corrected numbers in it. Closing it would
+      // leave a corrected figure on screen that is not on the server, which is
+      // the state this whole screen's read-status handling exists to avoid.
+      Alert.alert('Not saved', 'That correction could not be saved, so the scan on your record is unchanged and so are your targets. Your numbers are still here — try again in a moment.');
+      return;
+    }
+    setEditId(null);
+  };
+
+  const removeScan = () => {
+    if (!editing || eBusy) return;
+    const sc = editing;
+    // The consequence is stated before it happens, and it is not "this row will
+    // disappear": deleting the newest scan hands the whole app back to the one
+    // before it, which moves the client's calorie and protein targets. Somebody
+    // deleting a duplicate has a right to know that.
+    const isNewest = cd.scans.length > 0 && cd.scans[cd.scans.length - 1].id === sc.id;
+    Alert.alert(
+      'Delete this scan?',
+      // Same rule as the row's label: the weight is omitted rather than
+      // dashed, because this line is prose in a confirmation somebody is about
+      // to act on irreversibly.
+      [fmt(sc.takenAt), weightLabel(sc.weightKg, wu), `${sc.bodyFatPct}% body fat`].filter(Boolean).join(' · ') + '.'
+      + (isNewest
+        ? ' This is your most recent scan, so your weight, body fat and daily targets will go back to the scan before it.'
+        : ' Your charts and your total change since starting are recalculated without it.')
+      + ' This cannot be undone.',
+      [
+        { text: 'Keep It', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setEBusy(true);
+            const ok = await cd.deleteScan(sc.id);
+            setEBusy(false);
+            if (!ok) {
+              Alert.alert('Not deleted', 'That scan could not be removed, so it is still on your record and still visible to your coach. Nothing has been changed — try again in a moment.');
+              return;
+            }
+            setEditId(null);
+          },
+        },
+      ],
+    );
+  };
   const today = todayISO();
 
   // ── where each figure came from, and when ────────────────────────────────
@@ -821,6 +986,18 @@ export default function Scans() {
   // the scan itself. Every figure below carries its own date instead.
   const ago = latest ? (agoLabel(latest.takenAt, today) ?? 'on an unreadable date') : null;
 
+  // Both target lines are computed from the same published series the figures
+  // above them are, rather than from `cd.scans` a second time — a target
+  // measured against a different series from the number it sits under is the
+  // "two screens, one body, two answers" this screen family has already shipped
+  // once.
+  const wtTarget = isWhole(goalStatus)
+    ? goalOnBody(goalOfKind(goals, 'weight'), cd.weightSeries.map((p) => ({ t: p.t, v: p.v })), { weight: true, unit: 'kg', wu })
+    : null;
+  const bfTarget = isWhole(goalStatus)
+    ? goalOnBody(goalOfKind(goals, 'bodyfat'), cd.bodyFatSeries.map((p) => ({ t: p.t, v: p.v })), { weight: false, unit: '%', wu })
+    : null;
+
   const input = { flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
   const G = layout.gutter;
 
@@ -868,6 +1045,35 @@ export default function Scans() {
             : 'No scans yet — add your InBody report to start tracking.'}
           onPress={() => router.push('/(client)/body-trends')}
         />
+        {/* ── What they are aiming at ─────────────────────────────────────
+            Two targets, on the two figures this screen leads with. The Goals
+            screen has stored these for months and no body screen has ever read
+            one, so a member set a target weight and then came here — the screen
+            called Progress — and found no mention of it anywhere.
+
+            Absent under a failed goal read rather than reported as "no target":
+            an empty `goals` list under 'error' means the targets could not be
+            read, and printing "no target set" off a dropped connection tells
+            somebody their goal is gone. */}
+        {bfTarget || wtTarget ? (
+          <View style={{ marginBottom: sp.md, gap: 3 }}>
+            {bfTarget ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View accessibilityElementsHidden importantForAccessibility="no"
+                  style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: bfTarget.reached ? t.brand : t.ink3 }} />
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Body fat · {bfTarget.note}</Text>
+              </View>
+            ) : null}
+            {wtTarget ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View accessibilityElementsHidden importantForAccessibility="no"
+                  style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: wtTarget.reached ? t.brand : t.ink3 }} />
+                <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>Weight · {wtTarget.note}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* Where a figure is stale, how stale — said under the figure itself,
             because the client is the only person who can judge whether a scan
             from eleven weeks ago still describes them, and they can only judge
@@ -1327,14 +1533,32 @@ export default function Scans() {
                 {scansReading ? 'Reading…' : scansWhole ? 'No scans yet.' : 'Your scans could not be read — this list is empty for that reason, not because there are none.'}
               </Text>
             ) : null}
+            {/* Each row is now a control. It was a flat list with no way in, so
+                a mistyped scan was permanent — and this list is the only place
+                in the app that shows the individual scans at all. */}
             {[...chrono].reverse().map((s, i, arr) => (
-              <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: i < arr.length - 1 ? hairline : 0, borderBottomColor: t.ring }}>
+              <Pressable key={s.id} onPress={() => openEdit(s)}
+                accessibilityRole="button"
+                // The weight is dropped from the sentence rather than dashed
+                // when it cannot be converted. `fig` gives a dash, and a dash
+                // read aloud inside a sentence is a word that has gone missing
+                // — "Scan from 14 March, dash, 22 percent body fat" reads as a
+                // broken row rather than as an unconverted figure. The date and
+                // the body fat still identify the row, which is what this
+                // label is for.
+                accessibilityLabel={[
+                  `Scan from ${fmt(s.takenAt)}`,
+                  weightLabel(s.weightKg, wu),
+                  `${s.bodyFatPct} percent body fat`,
+                ].filter(Boolean).join(', ') + '. Correct or delete it.'}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: i < arr.length - 1 ? hairline : 0, borderBottomColor: t.ring }}>
                 {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: radius.sm }} /> : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={16} color={t.ink3} /></View>}
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fig(weightLabel(s.weightKg, wu))} · {s.bodyFatPct}% BF</Text>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{fmt(s.takenAt)} · {s.source}</Text>
                 </View>
-              </View>
+                <Icon name="chevron" size={14} color={t.ink3} />
+              </Pressable>
             ))}
           </ScrollView>
         </View>
@@ -1367,6 +1591,56 @@ export default function Scans() {
         </View>
       </Modal>
       {/* ── end of the Add sheet, which the date wheel above sits inside ── */}
+      </Modal>
+
+      {/* ── Correcting or removing one scan ────────────────────────────────
+          A separate sheet from Add rather than a mode on it. Add is a long
+          flow — photograph the printout, read it, check three boxes, pick a
+          date, and it announces what your new targets are afterwards — and
+          none of that applies to fixing a digit. More to the point, Add's Save
+          would INSERT: reusing it would have made every correction a second
+          scan on the same day, which `sorted` folds by day so the wrong one
+          would simply have won again. */}
+      <Modal visible={editing != null} transparent animationType="slide" onRequestClose={() => setEditId(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setEditId(null)} accessibilityLabel="Close" accessibilityRole="button" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>{editing ? fmt(editing.takenAt) : ''}</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Correct This Scan</Text>
+            </View>
+            <Ghost label="Close" onPress={() => setEditId(null)} />
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg, alignItems: 'flex-end' }}>
+            <Field label="Weight" hint={wu} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
+              <TextInput value={eWt} onChangeText={setEWt} keyboardType="decimal-pad" style={input} />
+            </Field>
+            <Field label="Body fat" hint="%" a11y="Body fat percentage">
+              <TextInput value={eBf} onChangeText={setEBf} keyboardType="decimal-pad" style={input} />
+            </Field>
+            <Field label="Muscle" hint={wu} a11y={wu === 'kg' ? 'Skeletal muscle in kilograms' : 'Skeletal muscle in pounds'}>
+              <TextInput value={eSm} onChangeText={setESm} keyboardType="decimal-pad" style={input} />
+            </Field>
+          </View>
+
+          {/* The date is deliberately not editable here. A scan's date is what
+              decides whether it is the one the meal plan follows, and moving it
+              is a different act from fixing a digit — one that can silently
+              hand the client's targets to a different reading. Deleting and
+              re-adding says out loud what changing the date would do quietly. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+            {editing && cd.scans.length > 0 && cd.scans[cd.scans.length - 1].id === editing.id
+              ? 'This is your most recent scan, so correcting it moves your daily calorie and protein targets with it.'
+              : 'Correcting an older scan changes your charts and your total change since starting, not your daily targets.'}
+            {' '}To change the date, delete this scan and add it again.
+          </Text>
+
+          <Cta label={eBusy ? 'Saving…' : 'Save Correction'} wide disabled={eBusy} onPress={saveEdit} />
+          <View style={{ marginTop: sp.md, alignItems: 'center' }}>
+            <Ghost label="Delete This Scan" onPress={removeScan} />
+          </View>
+        </View>
       </Modal>
 
       <Modal visible={physOpen} transparent animationType="slide" onRequestClose={() => setPhysOpen(false)}>

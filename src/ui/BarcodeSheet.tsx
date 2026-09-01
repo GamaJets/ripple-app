@@ -61,6 +61,14 @@ import { radius, elevation, sp, type as ty, numeric } from '../theme/scale';
 
 export interface LoggedFood {
   name: string; kcal: number; protein: number; carbs: number; fat: number;
+  /** What those figures are FOR — '100 g', '1 serving', '330 ml' — exactly as
+   *  Open Food Facts described the basis it used.
+   *
+   *  It used to be dropped here, and dropping it is what made the portion
+   *  question unaskable: a caller handed four numbers and no basis cannot say
+   *  "how many of these did you have" without inventing what one of them is.
+   *  A member scanning a 500 g yogurt pot and eating all of it logged 100 g. */
+  basis: string | null;
 }
 
 /**
@@ -84,8 +92,9 @@ export function BarcodeSheet({
 }: {
   visible: boolean;
   onClose: () => void;
-  /** Called with the product once it has been read. The caller does the logging,
-   *  so this component never needs to know which diary it is writing to. */
+  /** Called with the product once it has been read. The caller does the logging
+   *  — and asks the portion, through src/ui/LogFoodSheet.tsx — so this
+   *  component never needs to know which diary it is writing to. */
   onLogged: (food: LoggedFood) => void;
 }) {
   const t = useTheme();
@@ -129,7 +138,7 @@ export function BarcodeSheet({
         [{ text: 'OK', onPress: () => setSeen(null) }]);
       return;
     }
-    onLogged({ name: p.name, kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat });
+    onLogged({ name: p.name, kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat, basis: p.serving || null });
     close();
   };
 

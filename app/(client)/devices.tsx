@@ -773,6 +773,25 @@ export default function Devices() {
            {m.heartRateResting != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.heartRateResting} resting</Text> : null}
            {m.steps != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.steps.toLocaleString()} steps</Text> : null}
            {m.workoutMins != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.workoutMins} min</Text> : null}
+           {/* The three the catalogue above this row has always advertised.
+               WHOOP's card sells "Strain, recovery, sleep & heart rate" and
+               Oura's sells "Readiness, HRV & sleep", and until now a member who
+               connected either one read those words and then found four rows of
+               calories, heart rate and steps underneath — no recovery, no
+               strain, no HRV anywhere in the app. Each is printed only when the
+               device actually sent a number, so an undeployed wearable-day
+               leaves them absent rather than showing a recovery of zero.
+
+               The recovery figure is attributed. WHOOP calls it recovery and
+               Oura calls it readiness, both 0–100 and both meaning the same
+               thing, and a member cross-checking against the vendor's own app
+               needs to know which word they are looking for. */}
+           {m.recoveryPct != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{Math.round(m.recoveryPct)}% {m.recoverySource === 'oura' ? 'readiness' : 'recovery'}</Text> : null}
+           {/* One decimal, because WHOOP's own app shows one and a rounded 14
+               and a rounded 15 are a meaningfully different day on a 0–21
+               logarithmic scale. */}
+           {m.strain != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.strain.toFixed(1)} strain</Text> : null}
+           {m.hrv != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{Math.round(m.hrv)} ms HRV</Text> : null}
           </View>
          );
         })()}

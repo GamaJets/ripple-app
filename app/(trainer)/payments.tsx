@@ -123,19 +123,29 @@
 // subscriptions. So the buttons are here: stop at period end, and put back one
 // that was stopped.
 //
-// Three things this screen still does not do, each on purpose:
+// Two of the three things this screen used to refuse are now here, and the
+// third still is not:
 //
-//   · Cancel immediately. The client paid for the period they are in and keeps
-//     it. There is no immediate cancel in the edge function for either party.
-//   · Refund. Stripe refunds are a separate API with consequences nothing here
-//     models — partial amounts, reversing the platform's application fee,
-//     pulling money out of a connected account that may already have paid out
-//     to a bank. A refund button that half works is worse on somebody's money
-//     than no refund button. The Stripe dashboard is where one is issued, and
-//     the note under the list says so rather than implying a control exists.
-//   · Open the client's billing portal. That is their saved card, their billing
-//     address and every receipt they have been sent. It stays theirs; a coach
-//     calling it is refused with a 403 that says why.
+//   · Cancel immediately — NOW HERE, underneath the safer option rather than
+//     beside it. Stopping at the end of the period is still the default and
+//     still what "Stop" means; ending it today is a second confirmation that
+//     says out loud that it takes the rest of a paid period off the client and
+//     returns nothing. It exists because a client who asks to be cancelled
+//     today and is billed again in three weeks writes the review that costs the
+//     coach the next five clients.
+//   · Refund — NOW HERE, for a one-off sale, in whole. What made it safe rather
+//     than half-working is in supabase/functions/connect-refund: the refund is
+//     made in the SALE'S OWN Stripe account (read off the row, never from the
+//     coach's current charge model), Stripe is called first and the row is
+//     written only from its answer, and Repple's share comes back in
+//     proportion. What is NOT here is a partial amount — the edge function
+//     accepts one, and a typed field that could credit somebody's card by a
+//     figure they did not choose is worth building properly rather than
+//     quickly.
+//   · Open the client's billing portal — still not here, and never will be.
+//     That is their saved card, their billing address and every receipt they
+//     have been sent. It stays theirs; a coach calling it is refused with a 403
+//     that says why.
 //
 // ── A status nobody wrote a sentence for ──────────────────────────────────
 //
@@ -177,11 +187,22 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
-import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, type ConnectStatus, type TrainerPackage, type CoachPurchase } from '../../src/lib/connect';
+import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, fetchMyPromoCodes, createPromoCode, archivePromoCode, type ConnectStatus, type TrainerPackage, type CoachPurchase } from '../../src/lib/connect';
 import { packageEditBlocker, isReprice, repriceNote } from '../../src/lib/packageEdit';
-import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
+import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, endSubscriptionNow, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
+import {
+  normaliseCode, promoBlocker, promoState, promoStateLabel, promoUseLine,
+  PROMO_IS_A_PERCENTAGE, PROMO_IS_TYPED_AT_CHECKOUT, PROMO_LIVES_AT_STRIPE, PROMO_WITHDRAW_IS_FORWARD_ONLY,
+  type PromoCode, type PromoTarget,
+} from '../../src/lib/packagePromo';
+import { isoToday } from '../../src/lib/dayPlan';
+import {
+  refundBlocker, refundableCents, isPartlyRefunded, isFullyRefunded,
+  REFUND_DOES_NOT, REFUND_FEES_NOTE, REFUND_IS_FINAL, END_NOW_TAKES_THE_REST, END_AT_PERIOD_IS_KINDER,
+  type Refundable,
+} from '../../src/lib/refunds';
 import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
 import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, type Pot, type TakenRow } from '../../src/lib/coachMoney';
 import { readNumber } from '../../src/lib/units';
@@ -233,6 +254,21 @@ export default function TrainerPayments() {
   // must not watch every other row grey out, because the row that greys out is
   // the one they will believe they acted on.
   const [subBusy, setSubBusy] = useState<string | null>(null);
+  /** The sale whose refund is in flight, so one row's button can be busy
+   *  without disabling every other row's — a coach refunding two people in a
+   *  row should not be locked out of the second by the first. */
+  const [refundBusy, setRefundBusy] = useState<string | null>(null);
+  // The coach's discount codes, read LIVE from their own Stripe account — there
+  // is no local table and no cache, because Stripe holds the redemption count
+  // and a second copy of it would be a second copy that can disagree. Its own
+  // status: it fails independently of everything else on this screen, and
+  // "you are running no offers" and "your offers could not be read" are
+  // different sentences to a coach who has just printed a poster.
+  const [promos, setPromos] = useState<{ codes: PromoCode[]; status: LoadStatus; reason: string | null }>({ codes: [], status: 'loading', reason: null });
+  const [promoCode, setPromoCode] = useState('');
+  const [promoPct, setPromoPct] = useState('');
+  const [promoPkg, setPromoPkg] = useState<string | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
   // What clients have actually bought. Same three-way distinction, and it
   // carries more weight here than anywhere else on the screen: an empty list
   // under 'error' is "we could not look", and rendering it as "nothing has been
@@ -250,12 +286,13 @@ export default function TrainerPayments() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [c, p, s, cur, b, r] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), myTenantCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments()]);
+    const [c, p, s, cur, b, r, pr] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), myTenantCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes()]);
     setConn(c); setPkgs(p); setPkgErr(p === null);
     setSubs(s.rows); setSubsStatus(s.status);
     setCurrency(cur.currency); setCurrencyErr(cur.error);
     setBuys(b.rows); setBuysStatus(b.status);
     setPays(r.rows); setPaysStatus(r.status);
+    setPromos(pr);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -321,7 +358,7 @@ export default function TrainerPayments() {
    * paying client's arrangement, and the two facts they need before they do it
    * are who it is and when it actually ends.
    */
-  const switchCancel = (s: Subscriber, to: 'cancel' | 'resume') => {
+  const switchCancel = (s: Subscriber, to: 'cancel' | 'resume' | 'end_now') => {
     const who = s.client_name || 'this client';
     const ends = s.current_period_end ? new Date(s.current_period_end).toLocaleDateString() : null;
     const price = pkgPriceLine(s.amount_cents, s.currency, s.billing_interval);
@@ -329,15 +366,17 @@ export default function TrainerPayments() {
       setSubBusy(s.stripe_subscription_id);
       const r = to === 'cancel'
         ? await cancelSubscription(s.stripe_subscription_id)
-        : await resumeSubscription(s.stripe_subscription_id);
+        : to === 'end_now'
+          ? await endSubscriptionNow(s.stripe_subscription_id)
+          : await resumeSubscription(s.stripe_subscription_id);
       setSubBusy(null);
       // `ok: false` is Stripe saying it did NOT change, so the row must not be
       // redrawn as though it had. The screen is reloaded either way — on
       // failure because whatever Stripe does think is truer than what is on
       // screen, on success because the edge function has already mirrored
       // Stripe's answer into the row this list reads.
-      if (!r.ok) Alert.alert(to === 'cancel' ? 'Not stopped' : 'Not restarted',
-        (r.error || 'The change did not go through.') + (to === 'cancel' ? '\n\nThis subscription is still charging.' : '\n\nThis subscription is still set to end.'));
+      if (!r.ok) Alert.alert(to === 'resume' ? 'Not restarted' : 'Not stopped',
+        (r.error || 'The change did not go through.') + (to === 'resume' ? '\n\nThis subscription is still set to end.' : '\n\nThis subscription is still charging.'));
       load();
     };
     if (to === 'resume') {
@@ -346,9 +385,194 @@ export default function TrainerPayments() {
         [{ text: 'Leave It', style: 'cancel' }, { text: 'Keep Running', onPress: go }]);
       return;
     }
+    // Ending it TODAY, which is its own confirmation and never a second button
+    // on the same dialog. It cannot be undone — Stripe cancels the subscription
+    // outright and the only way back is a new checkout at today's price — and
+    // it returns nothing, so `END_NOW_TAKES_THE_REST` is the sentence the coach
+    // reads before they confirm rather than the one they work out afterwards.
+    if (to === 'end_now') {
+      Alert.alert('End it today?',
+        `${who}${price ? ` — ${price}` : ''}\n\n${END_NOW_TAKES_THE_REST}\n\n${REFUND_IS_FINAL.replace('A refund cannot be taken back.', 'This cannot be taken back either.')}`,
+        [{ text: 'Leave It', style: 'cancel' }, { text: 'End It Today', style: 'destructive', onPress: go }]);
+      return;
+    }
+    // The kinder option first, and the immediate one offered from inside it
+    // rather than beside it. A coach reaching for "stop" nearly always means
+    // the end of the period, and a screen that put the irreversible option next
+    // to the reversible one at the same weight would get it tapped by mistake.
     Alert.alert('Stop this subscription?',
-      `${who}${price ? ` — ${price}` : ''}\n\nThey keep what they have already paid for${ends ? ` until ${ends}` : ''}, and are not charged again after that. Nothing is refunded, and you can put it back any time before it ends.`,
-      [{ text: 'Leave It', style: 'cancel' }, { text: 'Stop At Period End', style: 'destructive', onPress: go }]);
+      `${who}${price ? ` — ${price}` : ''}\n\nThey keep what they have already paid for${ends ? ` until ${ends}` : ''}, and are not charged again after that. Nothing is refunded, and you can put it back any time before it ends.\n\nIf they have asked to be stopped TODAY, the second option ends it now — which takes the rest of the period off them and still refunds nothing.`,
+      [
+        { text: 'Leave It', style: 'cancel' },
+        { text: 'End It Today', style: 'destructive', onPress: () => switchCancel(s, 'end_now') },
+        { text: 'Stop At Period End', style: 'destructive', onPress: go },
+      ]);
+  };
+
+  /**
+   * Give a client their money back, from here, for one sale.
+   *
+   * ── Why this exists now and did not before ─────────────────────────────
+   *
+   * The note under this list used to say refunds were "deliberately absent"
+   * because a half-working refund button is worse than no refund button. That
+   * was right about half-working and wrong about the cost: it left the coach's
+   * worst customer moment — somebody asking for their money back — answered by
+   * a sentence telling them to find a laptop and log into a dashboard belonging
+   * to a company their client has never heard of.
+   *
+   * What makes it whole rather than half:
+   *
+   *   · The refund is made IN THE SALE'S OWN STRIPE ACCOUNT, read off the row
+   *     rather than from the coach's current charge model — see
+   *     supabase/functions/connect-refund. A coach who has moved to direct
+   *     charges still has older sales on the platform, and refunding those in
+   *     the wrong context is a "No such charge" from Stripe.
+   *   · Stripe is called FIRST and the row is written from its answer, never
+   *     optimistically.
+   *   · Repple's share comes back in proportion, and Stripe's own processing
+   *     fee usually does not — `REFUND_FEES_NOTE` says so before the tap,
+   *     because a coach who reads "fully refunded" and expects to be square
+   *     finds a shortfall later with nothing to attribute it to.
+   *
+   * Whole only, for now, and that is a deliberate limit rather than an
+   * oversight. The edge function accepts a partial amount and refuses anything
+   * above what is left; what is missing here is a typed-amount field with a
+   * decimal pad and the currency beside it, and shipping the button without it
+   * is better than shipping a field that could credit somebody's card by a
+   * figure they did not choose.
+   */
+  /* ── discount codes ──────────────────────────────────────────────────────
+     Held at Stripe, on the coach's own connected account, and nowhere else —
+     Stripe already keeps the code, the percentage, the expiry, the limit AND
+     the redemption count, and a mirror here would be a second copy of a system
+     this app does not control. src/lib/packagePromo.ts carries the argument,
+     and the one restriction worth knowing about: a code can only be attached to
+     a SUBSCRIPTION package, because Repple's cut there is a percentage and
+     comes down with the price, while on a one-off it is an absolute figure
+     worked out before anybody types a code. */
+
+  /** The packages a code may be attached to, in the shape the rule reads. Only
+   *  the recurring ones are offered, and `promoBlocker` refuses a one-off by
+   *  name if a stale id somehow reaches it. */
+  const promoTargets: PromoTarget[] = (pkgs ?? [])
+    .filter((p) => p.active && !!p.billing_interval)
+    .map((p) => ({ id: p.id, name: p.name, billingInterval: p.billing_interval, active: p.active }));
+
+  const promoTarget = promoTargets.find((p) => p.id === promoPkg) ?? null;
+  const promoProblems = promoBlocker(promoCode, Math.trunc(Number(promoPct)), promoTarget);
+
+  const addPromo = async () => {
+    if (promoProblems.length) { Alert.alert('Not yet', promoProblems.join('\n\n')); return; }
+    setPromoBusy(true);
+    const r = await createPromoCode({
+      code: normaliseCode(promoCode),
+      percentOff: Math.trunc(Number(promoPct)),
+      packageId: promoTarget!.id,
+    });
+    setPromoBusy(false);
+    if (!r.ok) { Alert.alert('That code was not created', r.error || 'Nothing was created.'); return; }
+    setPromoCode(''); setPromoPct(''); setPromoPkg(null);
+    load();
+    Alert.alert('Code created', `${r.promo?.code ?? 'It'} is live. ${PROMO_IS_TYPED_AT_CHECKOUT}`);
+  };
+
+  const withdrawPromo = (p: PromoCode) => {
+    Alert.alert(
+      `Withdraw ${p.code}?`,
+      `${PROMO_WITHDRAW_IS_FORWARD_ONLY}\n\n${promoUseLine(p)}`,
+      [
+        { text: 'Leave It', style: 'cancel' },
+        {
+          text: 'Withdraw It',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setPromoBusy(true);
+              const r = await archivePromoCode(p.id);
+              setPromoBusy(false);
+              // `ok: false` means it is STILL LIVE, and a screen that redrew it
+              // as withdrawn would leave a coach handing out an offer they
+              // believe they have stopped.
+              if (!r.ok) Alert.alert('Still live', r.error || 'It was not withdrawn, so it still works.');
+              load();
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  /**
+   * What has already gone back on one sale, or null because none has.
+   *
+   * Never a bare figure: the amount goes through `minorMoney`, which returns
+   * null rather than a number when the currency is missing — a sale whose
+   * package was deleted before part 132 has no unit, and "200 refunded" with no
+   * currency beside it is not an amount of money.
+   */
+  const refundedLine = (b: CoachPurchase): string | null => {
+    const r: Refundable = {
+      kind: 'purchase',
+      amountCents: b.amount_cents,
+      currency: b.currency,
+      refundedCents: Number(b.refunded_cents ?? 0) || 0,
+      stripeRef: b.stripe_session_id ?? null,
+      paid: b.status === 'paid',
+    };
+    if (!isPartlyRefunded(r) && !isFullyRefunded(r)) return null;
+    const back = minorMoney(r.refundedCents, b.currency);
+    if (isFullyRefunded(r)) {
+      return back ? `Refunded in full — ${back} went back` : 'Refunded in full';
+    }
+    const left = minorMoney(refundableCents(r), b.currency);
+    return back && left ? `${back} refunded, ${left} of it still stands` : 'Partly refunded';
+  };
+
+  const doRefund = (b: CoachPurchase) => {
+    const money = minorMoney(b.amount_cents, b.currency);
+    const already = Number(b.refunded_cents ?? 0);
+    const refundable: Refundable = {
+      kind: 'purchase',
+      amountCents: b.amount_cents,
+      currency: b.currency,
+      refundedCents: Number.isFinite(already) ? already : 0,
+      stripeRef: b.stripe_session_id ?? null,
+      paid: b.status === 'paid',
+    };
+    // The reason, never a dead control. The screen's copy of the rule is a
+    // convenience; connect-refund runs the same one from the same module, so
+    // the two cannot say different things.
+    const blocked = refundBlocker(refundable);
+    if (blocked) { Alert.alert('Nothing to refund', blocked); return; }
+    const left = refundableCents(refundable);
+    const leftMoney = minorMoney(left, b.currency);
+    const who = b.client_name || 'this client';
+    const go = async () => {
+      setRefundBusy(b.id);
+      const r = await refundPurchase(b.id);
+      setRefundBusy(null);
+      if (!r.ok) {
+        Alert.alert('No refund was made', (r.error || 'Nothing has been given back.') + '\n\nThey have not been refunded and nothing on your side has changed.');
+        load();
+        return;
+      }
+      // The narrow, loud middle state: the money went back and this app could
+      // not write it down. Saying "it failed" would be false and the coach's
+      // next act would be to refund it a second time.
+      if (r.mirrored === false) {
+        Alert.alert('Refunded, and not recorded here',
+          'The money has gone back to them. This app could not write the refund onto the sale, so the figures on this screen are still showing the full amount. Do NOT refund it again — check your Stripe dashboard, which is the record of what actually moved.');
+      } else {
+        Alert.alert('Refunded', `${minorMoney(r.refundedCents ?? 0, r.currency ?? b.currency) ?? 'The amount'} has gone back to ${who}. Stripe emails them a receipt for it; anything else you want to say is yours to say.`);
+      }
+      load();
+    };
+    Alert.alert(
+      'Give this money back?',
+      `${who}${money ? ` — ${money}` : ''}\n\n${leftMoney ? `${leftMoney} would go back to the card they paid with.` : 'What is left on this sale would go back to the card they paid with.'}\n\n${REFUND_DOES_NOT}\n\n${REFUND_FEES_NOTE}\n\n${REFUND_IS_FINAL}`,
+      [{ text: 'Leave It', style: 'cancel' }, { text: 'Refund It', style: 'destructive', onPress: go }],
+    );
   };
 
   // ── changing a package that is already on sale ───────────────────────────
@@ -792,6 +1016,34 @@ export default function TrainerPayments() {
                         {' · '}{new Date(b.created_at).toLocaleDateString()}
                       </Text>
                     </View>
+                    {/* What has gone back, stated BESIDE the sale rather than
+                        taken off the amount above it. Every takings figure in
+                        this app is gross — what the client was charged — and
+                        silently netting a refund into one row while every
+                        other figure stays gross is how two numbers on the same
+                        screen come to disagree. A refunded sale is still a
+                        sale that happened, and it is marked rather than
+                        rewritten or removed. */}
+                    {refundedLine(b) ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refundedLine(b)}</Text>
+                    ) : null}
+                    {refundBlocker({
+                      kind: 'purchase',
+                      amountCents: b.amount_cents,
+                      currency: b.currency,
+                      refundedCents: Number(b.refunded_cents ?? 0) || 0,
+                      stripeRef: b.stripe_session_id ?? null,
+                      paid: b.status === 'paid',
+                    }) === null ? (
+                      <Pressable onPress={() => doRefund(b)} hitSlop={8} accessibilityRole="button"
+                        disabled={refundBusy === b.id}
+                        accessibilityLabel={`Refund the sale to ${b.client_name || 'this client'}`}
+                        style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
+                        <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === b.id ? t.ink3 : t.brand }}>
+                          {refundBusy === b.id ? 'Refunding…' : 'Refund'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
                   </View>
                 );
               })}
@@ -962,22 +1214,143 @@ export default function TrainerPayments() {
               ) : null}
 
               {/* What the buttons above do and do not do.
-                  Refunds are deliberately absent. They are a different Stripe
-                  API with consequences nothing in this repo models — partial
-                  amounts, reversing the platform's application fee, pulling
-                  money back out of a connected account that may already have
-                  paid it into a bank — and a refund button that half works is
-                  worse on somebody's money than no refund button. So it is not
-                  offered, and where one IS issued is said instead. */}
+                  Stopping and refunding are two acts and the copy keeps them
+                  two. Stopping ends the next charge and returns nothing;
+                  refunding returns money and stops nothing. A coach who
+                  believes either implies the other has short-changed their
+                  client or refunded somebody they did not mean to, and the
+                  refund control is on the SALE rather than on the subscriber
+                  row precisely so the two are not adjacent taps. */}
               {liveSubs.length ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                  Stopping a subscription ends it at the close of the period the client has already
-                  paid for — they keep what they bought, and are not charged again. You can put it
-                  back any time before it ends, and the client can do both from their Memberships
-                  screen too. Nothing here refunds: a refund is issued from your Stripe dashboard,
-                  where the amount and the fees can be seen.
-                </Text>
+                <>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                    Stopping a subscription ends it at the close of the period the client has already
+                    paid for — they keep what they bought, and are not charged again. You can put it
+                    back any time before it ends, and the client can do both from their Memberships
+                    screen too. Ending one today is offered inside that confirmation, and it cannot
+                    be undone.
+                  </Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{END_AT_PERIOD_IS_KINDER}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{END_NOW_TAKES_THE_REST}</Text>
+                </>
               ) : null}
+            </Section>
+
+            <Rule />
+
+            {/* ── DISCOUNT CODES ────────────────────────────────────────────
+                January and September offers are how coaches fill a book, and
+                running one used to mean creating a SECOND package at the lower
+                price, telling the right people, and remembering to withdraw it
+                in February — which nobody does, so the offer price quietly
+                becomes the price.
+
+                The codes live on the coach's own Stripe account and nowhere
+                else. The redemption count below is therefore exact: there is
+                one copy of it and Stripe keeps it.
+
+                Subscriptions only, and the reason is the platform fee rather
+                than taste — src/lib/packagePromo.ts has the argument and
+                `promoBlocker` refuses a one-off package by name so a coach
+                reads WHY rather than finding the option missing. */}
+            <Section>
+              <SectionHead title="Discount Codes" note="Typed by your client on the payment page" />
+
+              {/* An empty list and an unreadable one are different sentences.
+                  A coach who has just printed a poster must not be told they
+                  are running no offers because Stripe was unreachable — or,
+                  worse, because their account cannot carry codes at all, which
+                  is a refusal with its own explanation and its own fix. */}
+              {promos.status === 'error' ? (
+                <Flag tone={t.crit}>
+                  {promos.reason || 'Your discount codes could not be read, so this is not a list of none.'}
+                </Flag>
+              ) : promos.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Still reading your codes.</Text>
+              ) : !promos.codes.length ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  You are not running any offers. A code takes a percentage off a subscription package for
+                  anybody who types it at checkout.
+                </Text>
+              ) : (
+                <View>
+                  {promos.codes.map((p) => {
+                    const state = promoState(p, isoToday(new Date()));
+                    return (
+                      <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                          <Text style={{ ...ty.body, fontWeight: '600', color: state === 'live' ? t.ink : t.ink3, flex: 1 }}>
+                            {p.code}
+                          </Text>
+                          <Text style={{ ...ty.label, ...numeric, color: state === 'live' ? t.ink2 : t.ink3 }}>
+                            {p.percentOff}% off
+                          </Text>
+                        </View>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                          {promoStateLabel(state)} · {promoUseLine(p)}
+                        </Text>
+                        {state === 'live' ? (
+                          <Pressable onPress={() => withdrawPromo(p)} hitSlop={8} accessibilityRole="button"
+                            disabled={promoBusy} accessibilityLabel={`Withdraw the code ${p.code}`}
+                            style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
+                            <Text style={{ ...ty.label, fontWeight: '500', color: promoBusy ? t.ink3 : t.brand }}>Withdraw</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* The form, offered only where there is something to attach a
+                  code to. A coach with no recurring package is told why rather
+                  than handed a picker with nothing in it. */}
+              {promos.status !== 'error' ? (
+                promoTargets.length ? (
+                  <View style={{ marginTop: sp.lg }}>
+                    <Pick label="For which package"
+                      options={promoTargets.map((p) => ({ key: p.id, label: p.name }))}
+                      chosen={promoPkg} onPick={(k: string | null) => setPromoPkg(k)} />
+                    <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
+                      <View style={{ flex: 2 }}>
+                        <TextInput value={promoCode} onChangeText={(v) => setPromoCode(normaliseCode(v))}
+                          autoCapitalize="characters" autoCorrect={false}
+                          placeholder="NEWYEAR" placeholderTextColor={t.ink3}
+                          accessibilityLabel="The code your client types" style={input} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        {/* A whole percentage, so the NUMBER pad rather than
+                            the decimal one — there is no such thing as 12.5%
+                            off here, and check:decimals is the gate that keeps
+                            the two apart. */}
+                        <TextInput value={promoPct} onChangeText={setPromoPct} keyboardType="number-pad"
+                          maxLength={2} placeholder="20" placeholderTextColor={t.ink3}
+                          accessibilityLabel="Percentage off" style={input} />
+                      </View>
+                    </View>
+                    {promoProblems.length && (promoCode || promoPct || promoPkg) ? (
+                      <View style={{ marginTop: sp.md }}>
+                        {promoProblems.map((b) => <Flag key={b} style={{ marginTop: sp.xs }}>{b}</Flag>)}
+                      </View>
+                    ) : null}
+                    <View style={{ marginTop: sp.md }}>
+                      <Cta label={promoBusy ? 'Creating…' : 'Create a Code'} wide
+                        disabled={promoBusy || promoProblems.length > 0} onPress={() => { void addPromo(); }} />
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                    You have no subscription package on sale, so there is nothing to attach a code to yet. A code
+                    can only go on a package that renews, because Repple&apos;s share of one of those is a
+                    percentage and comes down with the price — on a one-off sale it is worked out from the full
+                    price before your client types anything, so the discount would come entirely out of your end.
+                  </Text>
+                )
+              ) : null}
+
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{PROMO_IS_A_PERCENTAGE}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PROMO_IS_TYPED_AT_CHECKOUT}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PROMO_LIVES_AT_STRIPE}</Text>
             </Section>
 
             <Rule />

@@ -49,7 +49,17 @@ import type { WorkoutEntry } from './mockData';
 import { dayKeyOf } from './entryEdit';
 import { exerciseSlug } from './exerciseId';
 import { est1RM } from './streaks';
+// The two flags that change what a stored pair MEANS. This file was left
+// unconverted when `bw` landed, which showed as a pull-up trail with no load on
+// any day of it beside a Records board that had priced the same sets — one
+// movement, two answers, both drawn from the same rows. `setLoadKg` is the only
+// thing in the app that prices a set, and `isTimedSet` is the only thing that
+// knows the first number is sometimes seconds.
+import { setLoadKg, isBodyweightSet, type BodyweightHistory } from './bodyweightSets';
+import { isTimedSet } from './timedSets';
 import { type LoadStatus } from '../ui/loadStatus';
+
+export type { BodyweightHistory } from './bodyweightSets';
 
 /** A finite number, or null. `Number.isFinite` rather than a truthiness test,
  *  because a load of 0 is a bodyweight set and must survive as a 0 to be
@@ -85,20 +95,50 @@ export interface ExerciseOuting {
   day: string | null;
   /** The newest `performed_at` of the day, for ordering and for a time. */
   at: string;
-  /** Every set with a rep count above zero, in the order it was done, as
-   *  `[reps, kg]`. The load is null for a set that carried none — a blank, not
-   *  a nought, because a chin-up is not a lift of 0 kg. */
+  /** Every REPPED set with a rep count above zero, in the order it was done,
+   *  as `[reps, kg]`.
+   *
+   *  The load is what the set actually moved: the plates on an ordinary set,
+   *  and on a bodyweight set the person's own weight on that day plus anything
+   *  added (see src/lib/bodyweightSets.ts). It is null for a set whose load
+   *  cannot be known — a blank, not a nought, because a chin-up is not a lift
+   *  of 0 kg and a chin-up done before anybody weighed this person is not a
+   *  lift of their weight today.
+   *
+   *  Holds are NOT in here. Their first number is seconds and a screen reading
+   *  this array as reps would print "45 × 10 kg" over a plank. */
   sets: [number, number | null][];
-  /** How many of those there are. */
+  /** Every HELD set, as `[seconds, kg]`, in the order it was done. The load is
+   *  what was held or added; null when a hold carried none, and null on a
+   *  bodyweight hold nobody has a weight for. */
+  holds: [number, number | null][];
+  /** How many sets were done in total — repped and held together, because that
+   *  is what "sets" means to the person who did them. */
   setCount: number;
-  /** Of those, the ones that carried no load. */
+  /** Of those, the ones performed against the person's own body: flagged as
+   *  bodyweight, or — on rows written before the flag existed — carrying no
+   *  load at all. */
   bodyweightSets: number;
-  /** Σ reps across every counted set. */
+  /** Of those, the ones that are NOT in `volumeKg`, because their load is not
+   *  knowable: a bodyweight set with no weigh-in on or before that day, or a
+   *  loadless set from before the flag existed. Zero when the day's tonnage
+   *  covers every repped set of it. */
+  unpricedSets: number;
+  /** How many of the day's sets were holds. */
+  timedSets: number;
+  /** Σ seconds held across them. Zero when nothing was held, which is not a
+   *  measurement of anything. */
+  holdSeconds: number;
+  /** Σ reps across every repped set. Holds contribute nothing: seconds are not
+   *  repetitions, and adding them here is exactly the mistake that made a
+   *  45-second plank read as forty-five of something. */
   reps: number;
-  /** Σ reps × load in kilograms, over the sets that carried a load; null, never
-   *  0, when none did. */
+  /** Σ reps × load in kilograms, over the repped sets whose load is known;
+   *  null, never 0, when none is. `unpricedSets` says what is missing from it. */
   volumeKg: number | null;
-  /** The heaviest load touched, in kilograms; null on a bodyweight day. */
+  /** The heaviest load touched, in kilograms; null on a day with no knowable
+   *  load. On a bodyweight day that IS a figure — the body plus the belt — and
+   *  it is null only when nobody has recorded what the person weighs. */
   topLoadKg: number | null;
   /** The most reps achieved AT that heaviest load. Null exactly when
    *  `topLoadKg` is. */
@@ -134,32 +174,54 @@ function entriesFor(log: readonly WorkoutEntry[], slug: string): WorkoutEntry[] 
 
 /** Fold a day's worth of entries into one outing. `entries` must already be
  *  this movement and this day, oldest first. */
-function foldOuting(slug: string, day: string | null, entries: readonly WorkoutEntry[]): ExerciseOuting | null {
+function foldOuting(
+  slug: string,
+  day: string | null,
+  entries: readonly WorkoutEntry[],
+  history: BodyweightHistory,
+): ExerciseOuting | null {
   const sets: [number, number | null][] = [];
-  let reps = 0, bodyweightSets = 0;
+  const holds: [number, number | null][] = [];
+  let reps = 0, bodyweightSets = 0, unpricedSets = 0, holdSeconds = 0;
   let volume = 0, anyVolume = false;
   let topLoad: number | null = null, topReps: number | null = null;
   let best1RM: number | null = null;
   let bestSet: { reps: number; loadKg: number } | null = null;
 
   for (const e of entries) {
-    for (const s of e.sets ?? []) {
-      const r = num(s?.[0]);
-      if (r == null || r <= 0) continue;          // a blank row somebody tabbed past
-      const w = num(s?.[1]);
-      const load = w != null && w > 0 ? w : null;
-      sets.push([r, load]);
-      reps += r;
-      if (load == null) { bodyweightSets++; continue; }
-      volume += r * load; anyVolume = true;
-      if (topLoad == null || load > topLoad) { topLoad = load; topReps = r; }
-      else if (load === topLoad && (topReps == null || r > topReps)) topReps = r;
-      const e1 = est1RM(load, r);
-      if (best1RM == null || e1 > best1RM) { best1RM = e1; bestSet = { reps: r, loadKg: load }; }
+    const list = e.sets ?? [];
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      const first = num(s?.[0]);
+      if (first == null || first <= 0) continue;          // a blank row somebody tabbed past
+      const own = isBodyweightSet(e, i);
+      // `setLoadKg` and nothing else. It is what the Records board prices a set
+      // with, and a second opinion here is how one movement comes to read two
+      // ways on two screens drawn from the same rows.
+      const load = setLoadKg(e, i, s as [number, number], history, e.t);
+      if (own) bodyweightSets++;
+      else if (load == null) bodyweightSets++;            // a loadless row from before the flag
+      if (isTimedSet(e, i)) {
+        // A hold. Counted as a set that happened, kept out of every figure
+        // that reads the first number as repetitions, and out of the tonnage
+        // for the reason src/lib/timedSets.ts gives: seconds times kilograms
+        // is not a mass moved.
+        holds.push([first, load]);
+        holdSeconds += first;
+        continue;
+      }
+      sets.push([first, load]);
+      reps += first;
+      if (load == null) { unpricedSets++; continue; }
+      volume += first * load; anyVolume = true;
+      if (topLoad == null || load > topLoad) { topLoad = load; topReps = first; }
+      else if (load === topLoad && (topReps == null || first > topReps)) topReps = first;
+      const e1 = est1RM(load, first);
+      if (best1RM == null || e1 > best1RM) { best1RM = e1; bestSet = { reps: first, loadKg: load }; }
     }
   }
 
-  if (!sets.length) return null;                  // logged, but nothing was done to it
+  if (!sets.length && !holds.length) return null;         // logged, but nothing was done to it
 
   // The newest timestamp of the day speaks for it, and the newest spelling with
   // it — a lifter who has since renamed the movement in their own log should
@@ -171,8 +233,12 @@ function foldOuting(slug: string, day: string | null, entries: readonly WorkoutE
     day,
     at: newest.t,
     sets,
-    setCount: sets.length,
+    holds,
+    setCount: sets.length + holds.length,
     bodyweightSets,
+    unpricedSets,
+    timedSets: holds.length,
+    holdSeconds,
     reps,
     volumeKg: anyVolume ? Math.round(volume) : null,
     topLoadKg: topLoad,
@@ -196,7 +262,16 @@ function foldOuting(slug: string, day: string | null, entries: readonly WorkoutE
  * not own; `sessionsOf` and `trainingDays` make the same point for the same
  * reason.
  */
-export function exerciseOutings(log: readonly WorkoutEntry[], name: string): ExerciseOuting[] {
+export function exerciseOutings(
+  log: readonly WorkoutEntry[],
+  name: string,
+  /** The member's own weight over time, which is what lets a bodyweight set
+   *  carry a load at all. Optional and defaulting to none, because plenty of
+   *  members have never been weighed and every caller that has no history must
+   *  still get the trail — their bodyweight sets simply land in
+   *  `unpricedSets` rather than being given an invented body. */
+  history: BodyweightHistory = [],
+): ExerciseOuting[] {
   const slug = exerciseSlug(name);
   if (!slug) return [];
   const mine = entriesFor(log, slug)
@@ -217,14 +292,14 @@ export function exerciseOutings(log: readonly WorkoutEntry[], name: string): Exe
 
   const dated: ExerciseOuting[] = [];
   for (const [day, group] of byDay) {
-    const o = foldOuting(slug, day, group);
+    const o = foldOuting(slug, day, group, history);
     if (o) dated.push(o);
   }
   dated.sort((a, b) => (b.day ?? '').localeCompare(a.day ?? ''));
 
   const loose: ExerciseOuting[] = [];
   for (const group of undated) {
-    const o = foldOuting(slug, null, group);
+    const o = foldOuting(slug, null, group, history);
     if (o) loose.push(o);
   }
   return [...dated, ...loose];
@@ -278,7 +353,7 @@ export interface ExerciseSummary {
  * it out of the index altogether would make the search box deny that a client
  * who has cycled fifteen times has ever cycled.
  */
-export function exerciseIndex(log: readonly WorkoutEntry[]): ExerciseSummary[] {
+export function exerciseIndex(log: readonly WorkoutEntry[], history: BodyweightHistory = []): ExerciseSummary[] {
   const bySlug = new Map<string, WorkoutEntry[]>();
   for (const e of log) {
     if (!e || typeof e.exercise !== 'string' || typeof e.t !== 'string' || !e.t) continue;
@@ -290,7 +365,7 @@ export function exerciseIndex(log: readonly WorkoutEntry[]): ExerciseSummary[] {
 
   const out: ExerciseSummary[] = [];
   for (const [slug, entries] of bySlug) {
-    const outings = exerciseOutings(entries, entries[0].exercise);
+    const outings = exerciseOutings(entries, entries[0].exercise, history);
     let best1RM: number | null = null, topLoad: number | null = null;
     for (const o of outings) {
       if (o.best1RMKg != null && (best1RM == null || o.best1RMKg > best1RM)) best1RM = o.best1RMKg;

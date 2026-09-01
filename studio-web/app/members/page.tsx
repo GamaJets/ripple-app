@@ -36,6 +36,17 @@ import { fetchSessions, type PtSession } from '@lib/gymSessions';
 import { fetchPasses, passStatus, remainingUses, type GymPass } from '@lib/gymPasses';
 import { fetchInvites, inviteState, type MemberInvite } from '@lib/memberInvites';
 import {
+  fetchMemberRecords, saveMemberRecord, byMember, parseTags, tagsText,
+  contactLine, searchableFields, isEmptyPatch,
+  type GymMemberRecord, type MemberRecordPatch,
+} from '@lib/gymMembers';
+import { searchRows, searchNote } from '@lib/consoleSearch';
+import {
+  buildSegments, segmentCsv, postToSegment, reachBlocker, deliveryNote,
+  willTruncateInbox, MAX_BODY, INBOX_BODY,
+  type Segment, type SegmentId, type SegmentMember,
+} from '@lib/gymReach';
+import {
   sliceLoading, sliceReady, sliceFailed,
   buildDossiers, retentionRead, doorLogActive, attendanceCaveat,
   partialWarning, brokenParts, completeness,
@@ -66,6 +77,21 @@ export default function Members() {
   const [ccy, setCcy] = useState<TenantCurrency>(null);
   const [rec, setRec] = useState<MemberRecord>(EMPTY);
   const [sel, setSel] = useState<string | null>(null);
+  /**
+   * What the GYM knows about each person: contact, next of kin, an operational
+   * medical note, tags and the desk's own note. Held beside `rec` rather than
+   * inside it because `MemberRecord` is `src/lib/memberView.ts`'s shape and this
+   * screen is not that module's only reader.
+   *
+   * Null is "not read or refused", never an empty Map. An owner told "no
+   * emergency contact" for a member who has one — because the query failed —
+   * will not go and ask again.
+   */
+  const [gymRecs, setGymRecs] = useState<Map<string, GymMemberRecord> | null>(null);
+  const [gymRecsErr, setGymRecsErr] = useState<string | null>(null);
+  // One search box over the roster. There was none anywhere in this console,
+  // and this is the screen the six-hundred-member roster lives on.
+  const [q, setQ] = useState('');
 
   const load = useCallback(async (tenantId: string) => {
     setRec(EMPTY);
@@ -84,6 +110,18 @@ export default function Members() {
       slice(() => fetchInvites(supabase, tenantId)),
     ]);
     setRec({ memberships, payments, visits, bookings, sessions, passes, invites });
+
+    // Read after the seven above rather than beside them, and separately, so a
+    // gym that has not applied part 197 yet — where this table does not exist —
+    // gets one stated failure on one section instead of a page that will not
+    // load. Everything else on this screen is unaffected by it.
+    try {
+      setGymRecs(byMember(await fetchMemberRecords(supabase, tenantId)));
+      setGymRecsErr(null);
+    } catch (e: any) {
+      setGymRecs(null);
+      setGymRecsErr(e?.message ?? 'The gym’s own notes on your members could not be read.');
+    }
   }, []);
 
   useEffect(() => {
@@ -115,6 +153,38 @@ export default function Members() {
 
   const dossiers = useMemo(() => buildDossiers(rec), [rec]);
   const active = doorLogActive(rec);
+
+  /**
+   * Deep-link one member.
+   *
+   * /retention names a drifting member and links to /members with no id, so the
+   * owner lands on an unselected roster and hunts by eye. There are no dynamic
+   * segments anywhere in `studio-web`, and adding `/members/[id]` would mean a
+   * second page that re-reads all seven slices for one person.
+   *
+   * A query parameter does the whole job: `?member=<uuid>` selects on arrival,
+   * and picking somebody rewrites the URL so the link in the address bar is
+   * always the link to what is on screen. `replaceState`, not `pushState` — a
+   * roster where every click adds a Back-button step is worse than one that
+   * does not.
+   *
+   * Read straight off `location` rather than through `useSearchParams`, which
+   * under Next 15 forces the whole page into a Suspense boundary for one string.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const id = new URLSearchParams(window.location.search).get('member');
+    if (id) setSel(id);
+  }, []);
+
+  const pick = useCallback((id: string | null) => {
+    setSel(id);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('member', id);
+    else url.searchParams.delete('member');
+    window.history.replaceState(null, '', url.toString());
+  }, []);
 
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
@@ -163,6 +233,9 @@ export default function Members() {
   // honest here, and the gym-wide view at /retention gates the same two
   // figures the same way.
   const doorLive = active === true;
+  // Non-null after the role gate above: this screen refuses anybody without a
+  // tenant long before it reaches a write.
+  const tenantId = me.tenantId!;
   const offTimetable = doorLive ? (reads?.filter((x) => x.r.stillTrainingOffTheTimetable) ?? null) : null;
   const absent = doorLive ? (reads?.filter((x) => x.r.absentFromLiveDoorLog) ?? null) : null;
 
@@ -221,10 +294,31 @@ export default function Members() {
         />
       </div>
 
-      <Roster rec={rec} dossiers={dossiers} reads={reads} sel={sel} onPick={setSel} ccy={ccy} />
+      {gymRecsErr ? (
+        <Banner>
+          The gym’s own notes on your members could not be read: {gymRecsErr}. Contact details, next
+          of kin and any medical note are <strong style={{ color: 'var(--ink)' }}>unknown</strong> below
+          rather than absent — do not conclude a member has no emergency contact from this screen
+          while this line is showing.
+        </Banner>
+      ) : null}
+
+      <Reach
+        dossiers={dossiers} doorLogLive={doorLive} me={me} tenantId={tenantId}
+        gymName={gymName} gymRecs={gymRecs}
+      />
+
+      <Roster
+        rec={rec} dossiers={dossiers} reads={reads} sel={sel} onPick={pick} ccy={ccy}
+        gymRecs={gymRecs} query={q} onQuery={setQ}
+      />
 
       {chosen ? (
-        <Dossier d={chosen} rec={rec} active={active} onClose={() => setSel(null)} ccy={ccy} />
+        <Dossier
+          d={chosen} rec={rec} active={active} onClose={() => pick(null)} ccy={ccy}
+          gymRec={gymRecs?.get(chosen.memberId) ?? null} gymRecsRead={gymRecs !== null}
+          tenantId={tenantId} me={me} onSaved={() => load(tenantId)}
+        />
       ) : (
         <Section title="One member" sub="Pick somebody above to open their record.">
           <p style={{ padding: '26px 20px', margin: 0, color: 'var(--ink3)', fontSize: 13.5 }}>
@@ -324,13 +418,16 @@ async function fetchBookings(tenantId: string, sinceIso: string): Promise<Member
 
 type Read = { d: MemberDossier; r: ReturnType<typeof retentionRead> };
 
-function Roster({ rec, dossiers, reads, sel, onPick, ccy }: {
+function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuery }: {
   rec: MemberRecord;
   dossiers: MemberDossier[] | null;
   reads: Read[] | null;
   sel: string | null;
   onPick: (id: string) => void;
   ccy: TenantCurrency;
+  gymRecs: Map<string, GymMemberRecord> | null;
+  query: string;
+  onQuery: (q: string) => void;
 }) {
   const readFor = useMemo(
     () => new Map((reads ?? []).map((x) => [x.d.memberId, x.r])),
@@ -399,11 +496,38 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy }: {
     },
   ];
 
+  // Searchable on everything the gym holds about a person, not only their name:
+  // a phone number, a tag, the plan, the desk's own note. That is the whole
+  // point of `gym_member_records` existing — an owner looking for "the student
+  // on Bronze who left a number" has one box to type it into.
+  const shown = useMemo(
+    () => searchRows(dossiers ?? [], query, (d) => [
+      d.name, d.planName, d.status, d.memberId,
+      ...searchableFields(gymRecs?.get(d.memberId) ?? null),
+    ]),
+    [dossiers, query, gymRecs],
+  );
+  const note = searchNote(query, shown.length, dossiers?.length ?? 0);
+
   return (
     <Section
       title="Roster"
       sub={`Everyone who holds or has held a membership. The last column is the door log answering a question the timetable cannot.`}
     >
+      <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '12px 14px 0', flexWrap: 'wrap' }}>
+        <input
+          value={query} onChange={(e) => onQuery(e.target.value)}
+          placeholder="Search a name, a plan, a tag or a phone number"
+          aria-label="Search the roster"
+          style={{ ...field, flex: 1, minWidth: 240 }}
+        />
+        {query ? <button onClick={() => onQuery('')} style={linkBtn}>clear</button> : null}
+      </div>
+      {/* Above the table, because the failure being guarded against is a
+          filtered table read as a roster with nobody on it. */}
+      {note ? (
+        <p style={{ margin: 0, padding: '8px 14px 0', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p>
+      ) : null}
       {rec.memberships.state === 'loading' ? <Loading /> : null}
       {rec.memberships.state === 'failed' ? (
         <Failed reason={(rec.memberships as { reason: string }).reason}
@@ -411,7 +535,7 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy }: {
       ) : null}
       {dossiers ? (
         <DataTable
-          rows={dossiers} columns={cols} rowKey={(d) => d.memberId}
+          rows={shown} columns={cols} rowKey={(d) => d.memberId}
           empty="No memberships recorded yet. Open one under Money and this page fills in."
         />
       ) : null}
@@ -421,9 +545,17 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy }: {
 
 /* ── one member ────────────────────────────────────────────────────────────── */
 
-function Dossier({ d, rec, active, onClose, ccy }: {
+function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, me, onSaved }: {
   d: MemberDossier; rec: MemberRecord; active: boolean | null; onClose: () => void;
   ccy: TenantCurrency;
+  gymRec: GymMemberRecord | null;
+  /** False when the gym-side records did not read. An empty form under a failed
+   *  read invites the owner to retype an emergency contact that is already
+   *  stored, over the top of one they cannot see. */
+  gymRecsRead: boolean;
+  tenantId: string;
+  me: Me;
+  onSaved: () => void;
 }) {
   const r = rec.visits.state === 'ready' && rec.bookings.state === 'ready'
     ? retentionRead(d, { doorLogActive: !!active })
@@ -655,8 +787,142 @@ function Dossier({ d, rec, active, onClose, ccy }: {
         ) : null}
       </Part>
 
+      <GymRecordEditor
+        memberId={d.memberId} name={d.name} rec={gymRec} read={gymRecsRead}
+        tenantId={tenantId} me={me} onSaved={onSaved}
+      />
+
       <Invites d={d} rec={rec} />
     </section>
+  );
+}
+
+/* ── what the gym itself knows ─────────────────────────────────────────────── */
+
+/**
+ * The gym's own record of one person: how to reach them, who to ring, what the
+ * floor needs to know, and the desk's note.
+ *
+ * ── Why this section is the first write on this screen ────────────────────
+ *
+ * /members was 786 lines with zero inserts and zero updates: its own empty
+ * state sent the owner to /money. And the columns it would have written did not
+ * exist — grep the schema for a member's phone number, their next of kin or a
+ * note the desk wrote and there is nothing at all. `memberships.note` is the
+ * closest thing, and it is attached to the CONTRACT, so it is thrown away the
+ * moment somebody upgrades from Bronze to Gold.
+ *
+ * ── Two things it is careful about ────────────────────────────────────────
+ *
+ * `read = false` disables the form rather than showing it empty. An empty form
+ * over a failed read is an invitation to retype an emergency contact that is
+ * already stored — and to overwrite it with less than was there.
+ *
+ * The whole form saves as ONE patch, and `saveMemberRecord` only sends the keys
+ * it is given. That matters because the row is shared: a note typed here must
+ * not blank a phone number somebody entered at the desk five minutes ago.
+ */
+function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
+  memberId: string; name: string | null; rec: GymMemberRecord | null; read: boolean;
+  tenantId: string; me: Me; onSaved: () => void;
+}) {
+  const [phone, setPhone] = useState(rec?.phone ?? '');
+  const [email, setEmail] = useState(rec?.email ?? '');
+  const [eName, setEName] = useState(rec?.emergencyName ?? '');
+  const [ePhone, setEPhone] = useState(rec?.emergencyPhone ?? '');
+  const [medical, setMedical] = useState(rec?.medicalNote ?? '');
+  const [note, setNote] = useState(rec?.note ?? '');
+  const [tags, setTags] = useState(tagsText(rec?.tags));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  // Re-seeded when the selected member changes. Without this, opening a second
+  // member shows the first one's phone number in the box — and saving it files
+  // one person's contact details against another.
+  useEffect(() => {
+    setPhone(rec?.phone ?? ''); setEmail(rec?.email ?? '');
+    setEName(rec?.emergencyName ?? ''); setEPhone(rec?.emergencyPhone ?? '');
+    setMedical(rec?.medicalNote ?? ''); setNote(rec?.note ?? '');
+    setTags(tagsText(rec?.tags)); setMsg(null);
+  }, [memberId, rec]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const patch: MemberRecordPatch = {
+      phone, email, emergencyName: eName, emergencyPhone: ePhone,
+      medicalNote: medical, note, tags: parseTags(tags),
+    };
+    // An all-blank form on a person with no record would write a row that says
+    // nothing and then read back as "a record exists".
+    if (!rec && isEmptyPatch(patch)) {
+      setMsg('Nothing to save yet — fill something in first.');
+      return;
+    }
+    setBusy(true); setMsg(null);
+    try {
+      await saveMemberRecord(supabase, tenantId, memberId, patch, me.id ?? null);
+      setMsg('Saved.');
+      onSaved();
+    } catch (x: any) {
+      setMsg(x?.message ?? 'That was not saved, so the record is unchanged.');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--ring)' }}>
+      <div style={{ padding: '11px 14px' }}>
+        <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>What the gym knows</h3>
+        <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
+          Kept against the PERSON rather than against a membership, so it survives a lapse and a
+          rejoin — the moment it is hardest to recollect. Staff on the floor can read it; only an
+          owner can write it. It is not {name ?? 'this member'}&rsquo;s own injury record: that is
+          theirs, is written by them, and nothing here touches it.
+        </p>
+      </div>
+
+      {!read ? (
+        <p style={{ margin: 0, padding: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          These could not be read, so the form is closed rather than shown empty. An empty form here
+          is an invitation to retype a contact that is already stored — over the top of one you
+          cannot see. Reload before entering anything.
+        </p>
+      ) : (
+        <form onSubmit={save} style={{ display: 'grid', gap: 8, padding: '0 14px 14px' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone"
+                   aria-label="Member phone" style={{ ...field, flex: 1, minWidth: 150 }} />
+            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email"
+                   aria-label="Member email" inputMode="email" style={{ ...field, flex: 2, minWidth: 190 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input value={eName} onChange={(e) => setEName(e.target.value)} placeholder="In an emergency, ring…"
+                   aria-label="Emergency contact name" style={{ ...field, flex: 2, minWidth: 190 }} />
+            <input value={ePhone} onChange={(e) => setEPhone(e.target.value)} placeholder="Their number"
+                   aria-label="Emergency contact number" style={{ ...field, flex: 1, minWidth: 150 }} />
+          </div>
+          <input value={medical} onChange={(e) => setMedical(e.target.value)}
+                 placeholder="What the floor needs to know — e.g. asthma, inhaler in their bag"
+                 aria-label="Operational medical note" style={field} />
+          <input value={note} onChange={(e) => setNote(e.target.value)}
+                 placeholder="The desk’s note about this member"
+                 aria-label="Desk note" style={field} />
+          <input value={tags} onChange={(e) => setTags(e.target.value)}
+                 placeholder="Tags — student, corporate, do not call"
+                 aria-label="Tags" style={field} />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button type="submit" disabled={busy} style={btn}>{busy ? 'Saving…' : 'Save'}</button>
+            {rec?.updatedAt ? (
+              <span style={{ fontSize: 12, color: 'var(--ink3)' }}>
+                last changed {new Date(rec.updatedAt).toLocaleDateString()}
+              </span>
+            ) : (
+              <span style={{ fontSize: 12, color: 'var(--ink3)' }}>nothing recorded yet</span>
+            )}
+          </div>
+          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+        </form>
+      )}
+    </div>
   );
 }
 
@@ -756,6 +1022,212 @@ const linkBtn = {
   background: 'none', border: 'none', padding: 0, cursor: 'pointer',
   color: 'var(--brand)', fontSize: 13, fontFamily: 'var(--sans)', textAlign: 'left' as const,
 } as const;
+
+/* The same input and button shapes as the Door and Money screens. This page had
+ * no form of any kind until now — it was 786 lines with zero writes. */
+const field = {
+  padding: '9px 11px', borderRadius: 0, fontSize: 13.5,
+  background: 'var(--surface2)', color: 'var(--ink)',
+  border: '1px solid var(--ring)', fontFamily: 'var(--sans)', minWidth: 0,
+} as const;
+
+const btn = {
+  ...field, background: 'var(--brand)', color: 'var(--brand-ink)',
+  fontWeight: 600, cursor: 'pointer', border: '1px solid transparent',
+} as const;
+
+const ghostBtn = {
+  ...field, background: 'var(--surface2)', color: 'var(--ink2)',
+  cursor: 'pointer', flex: 'none',
+} as const;
+
+/* ── reaching members as a group ───────────────────────────────────────────── */
+
+/**
+ * Say something to a group of members, from the console.
+ *
+ * ── What this replaces ────────────────────────────────────────────────────
+ *
+ * Nothing, on this surface. The only broadcast in the whole product is
+ * `app/(owner)/ops.tsx` — phone-only, members-only, no targeting — and
+ * `app/(owner)/promotions.tsx`, which pushes to `all_member_ids()`. So an owner
+ * sitting at the desk looking at eleven people who have not been in for six
+ * weeks could say nothing to those eleven people, and the tool they did have
+ * could only shout at everybody.
+ *
+ * ── Why the recipients are shown before the box ───────────────────────────
+ *
+ * Because a broadcast is irreversible and its blast radius is the one thing a
+ * sender must not have to infer. The count, the definition of the group, and
+ * the first names in it are all on screen above the text area, and the button
+ * says the number again.
+ *
+ * ── What it does not do, out loud ─────────────────────────────────────────
+ *
+ * No push — the Expo token plumbing lives in the phone app and a second, weaker
+ * copy of it here would be a switch whose promise nothing keeps. No scheduling
+ * — nothing in this repository records anybody's timezone, so "it goes out in
+ * the morning" is a promise no code here could honour. No email — that needs a
+ * list model, an unsubscribe path and consent tracking, none of which exist, so
+ * the export hands the list to whatever the gym already uses.
+ */
+function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
+  dossiers: MemberDossier[] | null;
+  doorLogLive: boolean;
+  me: Me;
+  tenantId: string;
+  gymName: string | null;
+  gymRecs: Map<string, GymMemberRecord> | null;
+}) {
+  const [segId, setSegId] = useState<SegmentId>('unseen');
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const segments: Segment[] | null = useMemo(() => {
+    if (!dossiers) return null;
+    const rows: SegmentMember[] = dossiers.map((d) => ({
+      memberId: d.memberId,
+      name: d.name,
+      status: d.status,
+      lastSeenDays: d.lastSeenDays,
+    }));
+    return buildSegments(rows, { doorLogLive });
+  }, [dossiers, doorLogLive]);
+
+  const seg = segments?.find((x) => x.id === segId) ?? null;
+  const blocker = seg ? reachBlocker(body, seg.members.length) : null;
+
+  const send = async () => {
+    if (!seg || !me.id) return;
+    const stop = reachBlocker(body, seg.members.length);
+    if (stop) { setMsg(stop); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const res = await postToSegment(supabase, {
+        tenantId,
+        authorId: me.id,
+        body,
+        memberIds: seg.members.map((m) => m.memberId),
+        gymName,
+      });
+      setMsg(deliveryNote(res, seg.members.length));
+      // Cleared only on a success. The words stay in the box after a refusal:
+      // they were written once, and a cleared field after a failed send is how
+      // a notice is lost between the owner and the server.
+      setBody('');
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Nothing was posted, so nobody has seen it. Your words are still here.');
+    } finally { setBusy(false); }
+  };
+
+  const download = () => {
+    if (!seg) return;
+    const csv = segmentCsv(seg, (id) => {
+      const r = gymRecs?.get(id) ?? null;
+      return { email: r?.email ?? null, phone: r?.phone ?? null };
+    });
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${seg.id}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (!segments) return null;
+
+  return (
+    <Section
+      title="Say something to a group"
+      sub="Posts to the gym’s notice board and drops it in the chosen members’ inboxes. No push and no scheduling — the console can send neither, and says so rather than implying otherwise."
+    >
+      {!open ? (
+        <p style={{ margin: 0, padding: '16px 14px', fontSize: 13, color: 'var(--ink3)' }}>
+          <button onClick={() => setOpen(true)} style={linkBtn}>Write to a group</button>
+          {' — '}
+          {segments.map((x) => `${x.label.toLowerCase()} (${x.members.length})`).join(' · ')}
+        </p>
+      ) : (
+        <div style={{ display: 'grid', gap: 10, padding: 14 }}>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            {segments.map((x) => (
+              <button
+                key={x.id}
+                onClick={() => setSegId(x.id)}
+                style={{
+                  ...field, cursor: 'pointer',
+                  background: x.id === segId ? 'var(--surface3)' : 'var(--surface2)',
+                  color: x.id === segId ? 'var(--ink)' : 'var(--ink2)',
+                }}
+              >
+                {x.label} · {x.members.length}
+              </button>
+            ))}
+          </div>
+
+          {seg ? (
+            <>
+              {/* The definition, always, beside the count. "Unseen: 34" without
+                  it is a number people argue with — and when the door log is
+                  silent this sentence is the only thing standing between an
+                  owner and a winback sent to their entire roster. */}
+              <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{seg.note}</p>
+              <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)' }}>
+                {seg.members.length === 0
+                  ? 'Nobody is in this group.'
+                  : <>
+                      Goes to <strong style={{ color: 'var(--ink)' }}>{seg.members.length}</strong>{' '}
+                      {seg.members.length === 1 ? 'person' : 'people'}:{' '}
+                      {seg.members.slice(0, 6).map((m) => m.name ?? 'unnamed').join(', ')}
+                      {seg.members.length > 6 ? ` and ${seg.members.length - 6} more` : ''}.
+                    </>}
+              </p>
+
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={4}
+                maxLength={MAX_BODY}
+                placeholder="What do you want to tell them?"
+                aria-label="The message"
+                style={{ ...field, resize: 'vertical' }}
+              />
+              {/* `notify_users` stores `left(v_body, 500)` and does not complain.
+                  Better said here than discovered by a member reading half a
+                  sentence. */}
+              {willTruncateInbox(body) ? (
+                <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>
+                  The inbox copy is cut at {INBOX_BODY} characters by the database and yours is{' '}
+                  {body.trim().length}. The full text stays on the notice board; the inbox line will
+                  stop mid-sentence.
+                </p>
+              ) : null}
+              {blocker ? <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
+
+              <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                <button onClick={send} disabled={busy || !!blocker} style={btn}>
+                  {busy ? 'Posting…' : `Post to ${seg.members.length}`}
+                </button>
+                <button onClick={download} disabled={seg.members.length === 0} style={ghostBtn}>
+                  Export this group
+                </button>
+                <button onClick={() => { setOpen(false); setMsg(null); }} style={ghostBtn}>Close</button>
+              </div>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--ink3)' }}>
+                Export hands the list — with whatever phone number and address the gym has recorded
+                — to the mailing tool you already use. There is no email sender in this product, and
+                no unsubscribe register, so nothing here pretends to run a campaign.
+              </p>
+              {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)' }}>{msg}</p> : null}
+            </>
+          ) : null}
+        </div>
+      )}
+    </Section>
+  );
+}
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (

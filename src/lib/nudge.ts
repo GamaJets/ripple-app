@@ -71,7 +71,7 @@ import {
   DEFAULT_WINDOWS,
   type ActivityEvent, type ActivityKind, type Drift, type DriftSummary, type DriftWindows,
 } from './clientDrift';
-import { paceOf, type Pace } from './interventions';
+import { paceOf, type Pace, type PaceBounds } from './interventions';
 import { dateParts } from './localDate';
 import { fmtPointDay } from './format';
 
@@ -202,8 +202,15 @@ export const DISMISS_FLOOR_DAYS = 30;
  * March comes back, and that is right: the coach's "no" was about the situation
  * they were shown, and by then it is a different one.
  */
-export function mutedDaysFor(action: NudgeAction, drift: Drift | null): number {
-  const p = paceOf(drift);
+export function mutedDaysFor(
+  action: NudgeAction,
+  drift: Drift | null,
+  bounds?: PaceBounds | null,
+): number {
+  const p = paceOf(drift, bounds);
+  // The dismiss floor is a MAX against the sending window, so a coach who has
+  // raised their own minimum past a month gets their number for both acts
+  // rather than having a dismissal quietly expire before a send would have.
   return action === 'sent' ? p.cooldownDays : Math.max(DISMISS_FLOOR_DAYS, p.cooldownDays);
 }
 
@@ -538,6 +545,31 @@ export interface WithheldRow {
   note: string;
 }
 
+/**
+ * A client in the `watch` band: down on their own rate, and not far down.
+ *
+ * These have never been surfaced anywhere that prompts action. `earnsNudge`
+ * refuses them and that refusal is right and stays — a suggestion per busy
+ * fortnight per client is the nagging that makes a coach stop reading the list
+ * at all. But the band itself is where a save is still cheap: by the time
+ * somebody is `at_risk` the fall is sixty per cent of their own rate and the
+ * conversation is a rescue rather than a nudge.
+ *
+ * So they are carried out of the board as a SEPARATE population with no draft
+ * and no per-client prompt attached, for a screen to render as a digest the
+ * coach reads once a week. `watchDigestDue` below is what keeps it weekly; the
+ * board itself has no memory and must not grow one.
+ */
+export interface WatchRow {
+  clientId: string;
+  name: string | null;
+  drift: Drift;
+  /** The observed fact, in clientDrift's own words — the same sentence a nudge
+   *  card would carry, so the two lists cannot come to describe one client
+   *  differently. */
+  observed: string;
+}
+
 export interface NudgeBoard {
   /** The suggestions, worst first. Never includes a muted client and never
    *  includes one whose record could not be read. */
@@ -550,6 +582,13 @@ export interface NudgeBoard {
    *  this is empty, and a screen that does not say so is claiming a calm week
    *  it has not checked. */
   withheld: WithheldRow[];
+  /**
+   * The `watch` band: a real slip, not yet a break, and not muted.
+   *
+   * Never suggestions — see `WatchRow`. A screen renders these as a weekly
+   * digest or not at all.
+   */
+  watching: WatchRow[];
   /** Bands over the clients that WERE assessed. Null when none were — which is
    *  not "nobody is drifting". */
   summary: DriftSummary | null;
@@ -563,6 +602,15 @@ export interface NudgeOptions {
   windows?: DriftWindows;
   /** Passed through to the evidence panel and to nothing else. */
   doorLogRead?: boolean;
+  /**
+   * The coach's own floor on how often the same person may be raised.
+   *
+   * Absent is the module's own numbers, which is what every caller did before
+   * this existed — so a caller that does not read the preference behaves
+   * exactly as it always did rather than silently adopting a default that is
+   * not the coach's.
+   */
+  bounds?: PaceBounds | null;
 }
 
 /**
@@ -607,6 +655,7 @@ export function buildNudgeBoard(
   const nudges: Nudge[] = [];
   const muted: MutedRow[] = [];
   const withheld: WithheldRow[] = [];
+  const watching: WatchRow[] = [];
   const assessedDrifts: Drift[] = [];
 
   for (const c of candidates) {
@@ -633,6 +682,14 @@ export function buildNudgeBoard(
       continue;
     }
 
+    // 3 · a slip rather than a break. Collected, never drafted for. The order
+    //     matters: this sits AFTER the mute check, so a client the coach has
+    //     already contacted does not reappear in the weekly digest either.
+    if (d.status === 'watch') {
+      watching.push({ clientId: c.clientId, name: c.name, drift: d, observed: observedLine(d) });
+      continue;
+    }
+
     if (!earnsNudge(d)) continue;
 
     nudges.push({
@@ -642,13 +699,16 @@ export function buildNudgeBoard(
       observed: observedLine(d),
       caveat: WHAT_IT_CANNOT_SEE,
       draft: draftMessage(c.name, d),
-      pace: paceOf(d),
-      mutedDaysIfSent: mutedDaysFor('sent', d),
-      mutedDaysIfDismissed: mutedDaysFor('dismissed', d),
+      pace: paceOf(d, opts.bounds),
+      mutedDaysIfSent: mutedDaysFor('sent', d, opts.bounds),
+      mutedDaysIfDismissed: mutedDaysFor('dismissed', d, opts.bounds),
     });
   }
 
   nudges.sort((a, b) => compareDrift(a.drift, b.drift));
+  // Worst first inside the band, on the same comparator the suggestions use, so
+  // a client does not change position by moving between the two lists.
+  watching.sort((a, b) => compareDrift(a.drift, b.drift));
   // Soonest back first: the coach's next question about this list is which of
   // them they will be asked about again, not which was set aside longest ago.
   muted.sort((a, b) => a.muted.endsMs - b.muted.endsMs || a.clientId.localeCompare(b.clientId));
@@ -657,9 +717,73 @@ export function buildNudgeBoard(
     nudges,
     muted,
     withheld,
+    watching,
     summary: assessedDrifts.length ? summariseDrift(assessedDrifts) : null,
     assessed: assessedDrifts.length,
   };
+}
+
+/* ── the watch band, once a week ───────────────────────────────────────────── */
+
+/**
+ * The week a moment falls in, as `YYYY-Www`, on a LOCAL Monday boundary.
+ *
+ * Local rather than UTC for the same reason `localDayKey` is: a coach in
+ * Auckland opening the app on Monday morning is in a new week, and a UTC key
+ * would keep them in the old one until lunchtime. Monday rather than Sunday
+ * because a coach's week starts on Monday everywhere this app ships.
+ *
+ * The exact ISO-8601 week number is deliberately NOT computed. This string is
+ * compared against itself and never displayed or parsed, so the only property
+ * it needs is that it changes exactly once per week — and the year-boundary
+ * arithmetic real ISO weeks require is a well-known source of off-by-one bugs
+ * for a value nobody reads. It is the Monday's own date instead, which has the
+ * property and cannot be wrong.
+ */
+export function weekKey(now: number = Date.now()): string {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  // getDay(): 0 = Sunday. Sunday belongs to the week that started six days ago,
+  // not to the one starting tomorrow — a coach's Sunday is the end of their
+  // week, and moving them forward would show the digest twice in two days.
+  const back = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - back);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Whether the weekly watch digest is owed.
+ *
+ * `seen` is the week key the coach last closed it on, or null if never. The
+ * comparison is inequality and not "is older than": a stored key from a future
+ * week (a handset whose clock was wrong, a restored backup) must resolve to
+ * "show it", because the alternative is a digest that never appears again.
+ *
+ * There are no rows in the argument on purpose. Whether the digest is DUE is a
+ * question about the calendar; whether it has anything IN it is a separate
+ * question the caller asks with `rows.length`. Folding them together would mean
+ * a quiet week silently consumed a coach's digest for that week.
+ */
+export function watchDigestDue(seen: string | null | undefined, now: number = Date.now()): boolean {
+  return !seen || seen !== weekKey(now);
+}
+
+/**
+ * The digest's own sentence.
+ *
+ * Says what the band IS and what it is not, because "watch" is an internal word
+ * and a coach reading it as a verdict about the person is the failure this
+ * whole module is written against. It also says out loud that nothing here is a
+ * suggestion — the absence of a Write a Message button on these rows is the
+ * design, and an absence explains nothing on its own.
+ */
+export function watchDigestNote(rows: readonly WatchRow[]): string {
+  if (rows.length === 0) {
+    return 'Nobody assessed has slipped without breaking their pattern this week.';
+  }
+  return `${plural(rows.length, 'client')} on your book ${rows.length === 1 ? 'is' : 'are'} doing less than they were, `
+    + 'and not by enough to be called quiet. There is nothing drafted for them and nothing to act on today — '
+    + 'this is the week where a word costs least.';
 }
 
 /**

@@ -58,7 +58,9 @@ import { cohorts, type Cohort, type TrainerLike } from '@lib/ownerAnalytics';
 import {
   MIN_COHORT_FOR_RATE, COHORT_MATURITY_DAYS, rateOf, pointsPerMember, monthOfDate,
 } from '@lib/gymRetention';
-import { monthWindow, recentMonths, monthEnded, type MonthWindow } from '@lib/monthEnd';
+import { monthWindow, recentMonths, monthEnded, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
+import { readAll } from '@lib/rowCap';
+import { money, sharedCurrency } from '@lib/gymRecord';
 
 const DAY = 86400000;
 
@@ -274,6 +276,16 @@ export default function Analytics() {
   // when was the last one. Without it a gym that runs no terminal is
   // indistinguishable from a gym nobody attends.
   const [door, setDoor] = useState<{ state: Unread; at: string | null }>({ state: 'loading', at: null });
+  /**
+   * The money, which this page had none of.
+   *
+   * `fetchPayments` was never imported here — so a screen whose whole subject
+   * is "which way is the gym moving" could show joiners, leavers and visits and
+   * not one figure about revenue. A gym holding its headcount while its
+   * average member spends a third less is losing, and nothing on this page
+   * could see it.
+   */
+  const [payments, setPayments] = useState<Read<MoneyRow>>(reading);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
@@ -290,16 +302,30 @@ export default function Analytics() {
     // allSettled, not all. Under one catch, a refused classes read — which
     // costs a single tile — would empty the memberships too, and this page
     // would report a gym where nobody has ever joined and nobody has ever left.
-    const [mRes, vRes, cRes, dRes] = await Promise.allSettled([
+    // Thirteen months back for the money, so the same month last year is on
+    // screen for exactly the reason MONTHS_SHOWN is thirteen: a gym with a
+    // January is not in trouble in January.
+    const moneySince = new Date(now - 400 * DAY).toISOString();
+
+    const [mRes, vRes, cRes, dRes, pRes] = await Promise.allSettled([
       fetchMemberships(supabase, tenantId),
-      fetchVisits(supabase, tenantId, { sinceIso: since }),
+      // PAGED, not capped-and-refused. `fetchVisits` asks for one row past the
+      // ceiling and THROWS on getting it, which is right for a figure and wrong
+      // for this page: thirty days of door scans crosses a thousand at about
+      // thirty-three a day, so a gym busy enough to be worth analysing was the
+      // gym whose whole analytics screen became dashes. /export already solved
+      // exactly this with `readAll`, and the honest fix is to finish the read
+      // rather than to raise a cliff nobody can see.
+      pageVisits(tenantId, since),
       fetchClasses(supabase, tenantId, since, to),
       lastVisitAt(tenantId),
+      pagePayments(tenantId, moneySince),
     ]);
 
     setMemberships(settled(mRes));
     setVisits(settled(vRes));
     setClasses(settled(cRes));
+    setPayments(settled(pRes));
     setDoor(dRes.status === 'fulfilled' ? { state: null, at: dRes.value } : { state: 'failed', at: null });
 
     const trouble = [
@@ -307,6 +333,7 @@ export default function Analytics() {
       failure(vRes, 'the door log for the last 30 days'),
       failure(cRes, 'the classes in the last 30 days'),
       failure(dRes, 'the door log’s last entry'),
+      failure(pRes, 'the payments of the last thirteen months'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length ? trouble.join(' · ') : null);
   }, []);
@@ -319,6 +346,7 @@ export default function Analytics() {
       setMe(who);
       if (!who?.tenantId) {
         setMemberships(returned([])); setVisits(returned([])); setClasses(returned([]));
+        setPayments(returned([]));
         setDoor({ state: null, at: null });
         return;
       }
@@ -405,6 +433,96 @@ export default function Analytics() {
   );
 
   const roster = useMemo(() => (spans ?? []).filter((s) => s.active), [spans]);
+
+  /* ── the money, which this page had none of ────────────────────────────── */
+
+  /**
+   * The currency the whole trend is in, or null when the rows disagree.
+   *
+   * Same rule as every other total in this product: a gym that changed its
+   * currency has two in its ledger, adding them is not a sum, and a row stating
+   * none does not agree with one that does. Null withholds the entire money
+   * section rather than drawing a trend line through two moneys.
+   */
+  const moneyCurrency = useMemo(
+    () => (payments.rows && payments.rows.length ? sharedCurrency(payments.rows) : null),
+    [payments.rows],
+  );
+  const moneyMixed = !!(payments.rows && payments.rows.length && moneyCurrency == null);
+
+  /**
+   * Thirteen months of takings, ARPU and the same month last year.
+   *
+   * ARPU's denominator is members who PAID in the month, not the roster: a
+   * revenue-per-member figure over everybody on the books answers a different
+   * question — how much of the roster is paying — and the two move in opposite
+   * directions when a gym signs a lot of people who then do not pay.
+   *
+   * The RUNNING month is marked and never compared. A part-month always looks
+   * like a collapse, and a year-on-year delta against one is the single most
+   * alarming wrong number this page could produce.
+   */
+  const moneyMonths = useMemo<MoneyMonth[] | null>(() => {
+    if (!payments.rows || moneyCurrency == null) return null;
+    const keys = recentMonths(MONTHS_SHOWN, now);
+    const by = new Map<string, { cents: number; payers: Set<string>; count: number }>();
+    for (const p of payments.rows) {
+      const k = monthKeyOf(Date.parse(p.takenAt));
+      const cur = by.get(k) ?? { cents: 0, payers: new Set<string>(), count: 0 };
+      cur.cents += p.amountCents;
+      cur.count += 1;
+      // A payment with nobody's name on it is real money and not a payer we can
+      // count, so it contributes to the total and not to the denominator.
+      if (p.memberId) cur.payers.add(p.memberId);
+      by.set(k, cur);
+    }
+    const thisMonth = monthKeyOf(now);
+    return keys.map((k) => {
+      const v = by.get(k) ?? { cents: 0, payers: new Set<string>(), count: 0 };
+      const w = monthWindow(k);
+      const running = k === thisMonth || (w != null && !monthEnded(w, now));
+      const yearAgoKey = `${Number(k.slice(0, 4)) - 1}-${k.slice(5, 7)}`;
+      const yearAgo = by.get(yearAgoKey);
+      return {
+        key: k,
+        label: w ? w.label : k,
+        running,
+        cents: v.cents,
+        payments: v.count,
+        payers: v.payers.size,
+        // Null rather than zero: nobody paid means there is no average to take,
+        // and 0.00 per member reads as a gym whose members pay nothing.
+        arpuCents: v.payers.size ? Math.round(v.cents / v.payers.size) : null,
+        // Withheld on a running month and where there is no matching month in
+        // the read at all — a gym eleven months old has no last January, and
+        // "−100%" would be the answer to a question nobody asked.
+        yoyPct: running || !yearAgo || yearAgo.cents === 0
+          ? null
+          : Math.round(((v.cents - yearAgo.cents) / yearAgo.cents) * 100),
+      };
+    });
+  }, [payments.rows, moneyCurrency, now]);
+
+  /**
+   * When the gym is actually busy, by hour of the day.
+   *
+   * `entered_at` has been read by this page all along and nothing has ever
+   * drawn an hour out of it — while "when is my gym busy" is the single most
+   * actionable staffing question an owner has. Local hours, not UTC: an owner
+   * in Dubai staffing against a UTC histogram would put people on four hours
+   * early.
+   */
+  const hours = useMemo<HourRow[] | null>(() => {
+    if (!visits.rows) return null;
+    const counts = new Array(24).fill(0) as number[];
+    for (const v of visits.rows) {
+      const t = Date.parse(v.enteredAt);
+      if (!Number.isFinite(t)) continue;
+      counts[new Date(t).getHours()] += 1;
+    }
+    const peak = Math.max(...counts);
+    return counts.map((n, h) => ({ hour: h, visits: n, share: peak > 0 ? n / peak : 0 }));
+  }, [visits.rows]);
 
   /* ── the four figures an owner watches ─────────────────────────────────── */
 
@@ -685,7 +803,165 @@ export default function Analytics() {
         seenNotOnRoster={seenNotOnRoster}
         visitsCounted={visitsCounted}
       />
+
+      <Money rows={moneyMonths} state={payments.state} currency={moneyCurrency} mixed={moneyMixed} />
+
+      <ByHour rows={hours} state={visits.state} doorState={doorState} doorNote={doorNote} />
     </Shell>
+  );
+}
+
+/* ── the money ─────────────────────────────────────────────────────────────── */
+
+interface MoneyMonth {
+  key: string;
+  label: string;
+  running: boolean;
+  cents: number;
+  payments: number;
+  payers: number;
+  /** Null when nobody paid — there is no average of nothing, and 0.00 per
+   *  member reads as a gym whose members pay nothing. */
+  arpuCents: number | null;
+  /** Null on a running month and where there is no matching month a year back. */
+  yoyPct: number | null;
+}
+
+interface HourRow { hour: number; visits: number; share: number }
+
+/**
+ * Revenue by month, per paying member, and against the same month last year.
+ *
+ * This page never imported `fetchPayments`. So a screen whose entire subject is
+ * "which way is the gym moving" could show joiners, leavers, cohorts and visit
+ * frequency, and not one figure about money — while `MONTHS_SHOWN = 13` was
+ * chosen precisely so the same month last year would be on screen, and nothing
+ * on the page had ever compared two months.
+ *
+ * The running month is shown and never compared, and the reason is worth
+ * stating: a part-month is always down, always looks like a collapse, and a
+ * year-on-year delta against one is the most alarming wrong number this page
+ * could print. Its row carries the word "running" instead of a percentage.
+ */
+function Money({ rows, state, currency, mixed }: {
+  rows: MoneyMonth[] | null; state: Unread; currency: string | null; mixed: boolean;
+}) {
+  const cols: Column<MoneyMonth>[] = [
+    { key: 'month', header: 'Month', value: (m) => m.key,
+      render: (m) => <span>{m.label}{m.running ? <span style={{ color: 'var(--ink3)' }}> · running</span> : null}</span> },
+    { key: 'taken', header: 'Taken', value: (m) => m.cents, numeric: true,
+      render: (m) => money(m.cents, currency) ?? <span className="dash">—</span> },
+    { key: 'payments', header: 'Payments', value: (m) => m.payments, numeric: true },
+    { key: 'payers', header: 'Paying members', value: (m) => m.payers, numeric: true },
+    { key: 'arpu', header: 'Per paying member', value: (m) => m.arpuCents, numeric: true,
+      render: (m) => m.arpuCents == null
+        ? <span className="dash">nobody paid</span>
+        : money(m.arpuCents, currency) ?? <span className="dash">—</span> },
+    { key: 'yoy', header: 'vs same month last year', value: (m) => m.yoyPct, numeric: true,
+      render: (m) => {
+        if (m.running) return <span className="dash">the month has not finished</span>;
+        if (m.yoyPct == null) return <span className="dash">no month to compare</span>;
+        return (
+          <span style={{ color: m.yoyPct < 0 ? 'var(--crit)' : m.yoyPct > 0 ? 'var(--good)' : undefined }}>
+            {m.yoyPct > 0 ? '+' : ''}{m.yoyPct}%
+          </span>
+        );
+      } },
+  ];
+
+  return (
+    <Section
+      title="Money, by month"
+      sub="What was recorded as received, whatever it was for. Not what was billed and not what is owed — those are on Accounting, and this is the one that moved."
+    >
+      {state === 'loading' ? <Loading /> : null}
+      {state === 'failed' ? (
+        <Unreadable what="the payments" cost="the revenue trend is unknown, not flat" />
+      ) : null}
+      {state === null && mixed ? (
+        <div style={{ padding: '16px 14px', color: 'var(--ink2)', fontSize: 13, maxWidth: '76ch' }}>
+          The payments in this window are in more than one currency, so there is no trend to draw:
+          adding dirhams to pounds is not a bigger number about the same thing. This happens to a gym
+          that changed its currency — the older rows keep the one they were written in, because a
+          payment is a historical fact.
+        </div>
+      ) : null}
+      {state === null && !mixed && rows ? (
+        <>
+          <DataTable
+            rows={rows} columns={cols} rowKey={(m) => m.key}
+            empty="No payment has been recorded in thirteen months. That is not the same as no income — it is the same as nobody having entered one."
+          />
+          <p style={{ margin: 0, padding: '11px 14px', borderTop: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '80ch' }}>
+            &ldquo;Per paying member&rdquo; divides by the members who actually paid in that month,
+            not by the roster. A figure over everybody on the books answers a different question —
+            how much of the roster is paying — and the two move in opposite directions at a gym that
+            signs a lot of people who then do not. A payment with nobody&rsquo;s name on it is in the
+            total and not in the denominator.
+          </p>
+        </>
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── when the gym is busy ──────────────────────────────────────────────────── */
+
+/**
+ * Door entries by hour of the day.
+ *
+ * `entered_at` has been read by this page since it was written and nothing has
+ * ever drawn an hour out of it, while "when is my gym busy" is the single most
+ * actionable staffing question an owner has. LOCAL hours: an owner in Dubai
+ * staffing against a UTC histogram would put people on four hours early.
+ *
+ * Hours with nobody in them are shown rather than filtered out. A gap at 3pm is
+ * the finding; a table that skipped it would draw a smooth day.
+ */
+function ByHour({ rows, state, doorState, doorNote }: {
+  rows: HourRow[] | null; state: Unread;
+  doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live'; doorNote: string;
+}) {
+  const busiest = rows ? rows.reduce((a, b) => (b.visits > a.visits ? b : a), rows[0]) : null;
+  const hour = (h: number) => `${String(h).padStart(2, '0')}:00`;
+
+  const cols: Column<HourRow>[] = [
+    { key: 'hour', header: 'Hour', value: (r) => r.hour, render: (r) => hour(r.hour) },
+    { key: 'visits', header: 'Entries', value: (r) => r.visits, numeric: true },
+    { key: 'bar', header: 'Share of the peak hour', value: (r) => r.share, numeric: true,
+      render: (r) => (
+        <span style={{ display: 'inline-block', width: 160, height: 6, background: 'var(--ring2)' }}>
+          <span style={{ display: 'block', height: 6, width: `${Math.round(r.share * 100)}%`, background: 'var(--brand)' }} />
+        </span>
+      ) },
+  ];
+
+  return (
+    <Section
+      title="When the gym is busy"
+      sub="Door entries in the last 30 days, by hour, in the gym's own time. Hours with nobody in them are shown — a gap at three is the finding, and a table that skipped it would draw a smooth day."
+    >
+      {state === 'loading' ? <Loading /> : null}
+      {state === 'failed' ? <Unreadable what="the door log" cost="when the gym is busy is unknown, not quiet" /> : null}
+      {state === null && doorState !== 'live' ? (
+        <div style={{ padding: '16px 14px', color: 'var(--ink2)', fontSize: 13, maxWidth: '76ch' }}>
+          Withheld: {doorNote}. A histogram of an unplugged terminal is a chart of the hardware
+          drawn as though it were a chart of the gym, and it would say the building is empty at
+          every hour of the day.
+        </div>
+      ) : null}
+      {state === null && doorState === 'live' && rows ? (
+        <>
+          {busiest && busiest.visits > 0 ? (
+            <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
+              Busiest hour: <strong>{hour(busiest.hour)}</strong> &mdash; {busiest.visits} entr
+              {busiest.visits === 1 ? 'y' : 'ies'} in 30 days.
+            </p>
+          ) : null}
+          <DataTable rows={rows} columns={cols} rowKey={(r) => String(r.hour)} empty="—" />
+        </>
+      ) : null}
+    </Section>
   );
 }
 
@@ -963,6 +1239,80 @@ function Frequency({ buckets, rosterSize, rosterState, anonVisits, seenNotOnRost
  * this page would suppress every attendance figure a working gym has — the
  * gentler failure of the two, but still a wrong one, and it would be silent.
  */
+/** One payment, reduced to what a trend needs. */
+interface MoneyRow { id: string; memberId: string | null; amountCents: number; currency: string; takenAt: string }
+
+/**
+ * Thirteen months of payments, PAGED.
+ *
+ * `fetchPayments` caps and refuses, which is right for a figure somebody is
+ * about to act on and wrong for a trend: a gym taking forty payments a week
+ * crosses a thousand in six months, and the whole revenue history would have
+ * become an error message on exactly the gyms that have one. Paging finishes
+ * the read instead. `readAll`'s contract needs a TOTAL order, so `id` is the
+ * final key — two payments recorded in the same second are two rows a page
+ * boundary could otherwise lose.
+ */
+async function pagePayments(tenantId: string, sinceIso: string): Promise<MoneyRow[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_payments')
+      .select('id, member_id, amount_cents, currency, taken_at')
+      .eq('tenant_id', tenantId)
+      .gte('taken_at', sinceIso)
+      .order('taken_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the payments of the last thirteen months',
+  );
+  return rows
+    .filter((r) => Number.isFinite(r.amount_cents))
+    .map((r) => ({
+      id: r.id,
+      memberId: r.member_id ?? null,
+      amountCents: r.amount_cents,
+      currency: r.currency,
+      takenAt: r.taken_at,
+    }));
+}
+
+/**
+ * Thirty days of door entries, PAGED.
+ *
+ * Same argument, sharper edge. `fetchVisits` throws past a thousand rows, and
+ * every visit figure on this page — the cohort activity, the frequency bands,
+ * the per-member counts — is made of this one read. At roughly thirty-three
+ * scans a day it stopped working, so the analytics screen went dark for the
+ * gyms with the most to analyse and stayed working for the ones with least.
+ */
+async function pageVisits(tenantId: string, sinceIso: string): Promise<Visit[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_visits')
+      .select('id, member_id, pass_id, class_id, entered_at, exited_at, source, note')
+      .eq('tenant_id', tenantId)
+      .gte('entered_at', sinceIso)
+      .order('entered_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the door log for the last 30 days',
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    memberId: r.member_id ?? null,
+    // The name is deliberately not joined here. This page counts visits and
+    // never prints one, and the embedded `profiles(full_name)` join costs a row
+    // per entry on a read that is now paged over thousands of them.
+    memberName: null,
+    passId: r.pass_id ?? null,
+    classId: r.class_id ?? null,
+    enteredAt: r.entered_at,
+    exitedAt: r.exited_at ?? null,
+    source: r.source,
+    note: r.note ?? null,
+  }));
+}
+
 async function lastVisitAt(tenantId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from('gym_visits')
@@ -1030,6 +1380,22 @@ function Failed({ what, cost }: { what: string; cost?: string }) {
     }}>
       Could not read {what}. This section is <strong>unknown</strong>, not empty
       {cost ? <> — {cost}</> : null}. The reason is in the banner at the top of the page.
+    </div>
+  );
+}
+
+/** A read that definitively failed, and what is therefore unknown rather than
+ *  empty. Same shape and same sentence as /revenue and /close, so an owner who
+ *  has seen one of these has read all of them. */
+function Unreadable({ what, cost }: { what: string; cost: string }) {
+  return (
+    <div style={{
+      padding: '16px 14px', margin: 14, borderRadius: 0,
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
+      background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
+    }}>
+      Could not read {what}. This section is <strong>unknown</strong>, not empty &mdash; {cost}.
+      Reload before acting on anything above it.
     </div>
   );
 }

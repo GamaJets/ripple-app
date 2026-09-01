@@ -270,6 +270,160 @@ export function summariseInvites(
   };
 }
 
+/* ── handing the invitation over ───────────────────────────────────────────── */
+
+/**
+ * ── Why an invitation has to be COMPOSED rather than just recorded ─────────
+ *
+ * /invites says it plainly at the top of the screen: "Nothing here sends an
+ * email." That was true and it is the whole gap. An invite is a row addressed
+ * to an email address, and until somebody actually tells that person, it does
+ * nothing at all — so the entire onboarding funnel required the owner to leave
+ * the console, open their own mail, and remember which of two hundred addresses
+ * they had already contacted.
+ *
+ * ── What this deliberately does not do ────────────────────────────────────
+ *
+ * It does not build a magic link. `member_invites.token` exists and is
+ * selected, but NOTHING in this product accepts one: `accept_member_invite`
+ * takes the invite ID and authorises on the signed-in user's own email address
+ * (`mi_invitee_read` is `lower(email) = lower(auth.jwt() ->> 'email')`), and
+ * there is no page anywhere — not in `web/`, not in the app — that reads a
+ * token out of a URL. Rendering a link that goes nowhere would be worse than
+ * rendering none: an owner would send two hundred of them.
+ *
+ * So the address IS the link. What the invitee needs to be told is exactly one
+ * thing — sign up with THIS address — and that is what these compose.
+ *
+ * The sending is done by the owner's own mail client, through a `mailto:`. That
+ * is not a placeholder for a real sender; it is the only path that works today
+ * without a transactional template, a bounce path and an unsubscribe register,
+ * and it puts the message in the gym's own sent folder where they can see what
+ * went out.
+ */
+
+/** The subject line. Named after the gym, because that is what the recipient
+ *  recognises — "Repple" means nothing to somebody who has not joined yet. */
+export function inviteSubject(gymName: string | null | undefined): string {
+  const gym = (gymName ?? '').trim();
+  return gym ? `Join ${gym} on Repple` : 'Your gym has invited you to Repple';
+}
+
+/**
+ * The body of the invitation, as plain text.
+ *
+ * Written to be sent as-is by somebody who is not going to edit it, and every
+ * line of it is load-bearing:
+ *
+ *  · the ADDRESS is repeated back, because signing up with a different one is
+ *    the single failure mode of this whole mechanism — the invite is matched on
+ *    email and an account made with a personal address never sees it;
+ *  · the EXPIRY is stated when there is one, because "it says it has lapsed" is
+ *    the support call this sentence prevents;
+ *  · the PLAN is named when the gym chose one, and left out entirely when they
+ *    did not — "we will sort the package out at the desk" is a real thing gyms
+ *    do and part 37 made `plan_id` nullable for it.
+ *
+ * `siteUrl` is the brand's own site, never a hardcoded repplefitness.com: a
+ * chain buying Repple must not be handing their own members a link to their
+ * supplier. Null leaves the line out rather than inventing one.
+ */
+export function inviteMessage(
+  invite: Pick<MemberInvite, 'email' | 'fullName' | 'planName' | 'expiresAt'>,
+  opts: { gymName?: string | null; siteUrl?: string | null } = {},
+): string {
+  const gym = (opts.gymName ?? '').trim() || 'your gym';
+  const who = (invite.fullName ?? '').trim();
+  const lines: string[] = [];
+
+  lines.push(who ? `Hi ${who},` : 'Hi,');
+  lines.push('');
+  lines.push(
+    invite.planName
+      ? `${gym} has set up a membership for you on Repple, on the ${invite.planName} plan.`
+      : `${gym} has invited you to join on Repple. We will sort your membership out at the desk.`,
+  );
+  lines.push('');
+  lines.push(`Download the Repple app and sign up with this exact address: ${invite.email}`);
+  lines.push('That is how the invitation finds you — an account made with a different address will not see it.');
+
+  const days = daysUntilExpiry(invite as MemberInvite);
+  if (days != null) {
+    lines.push('');
+    lines.push(
+      days <= 0
+        ? 'This invitation has lapsed — tell us and we will reopen it.'
+        : `The invitation is open for another ${days} day${days === 1 ? '' : 's'}.`,
+    );
+  }
+
+  const site = (opts.siteUrl ?? '').trim();
+  if (site) {
+    lines.push('');
+    lines.push(site);
+  }
+
+  lines.push('');
+  lines.push(`See you soon,\n${gym}`);
+  return lines.join('\n');
+}
+
+/**
+ * A `mailto:` that opens the owner's own mail client with the whole thing
+ * filled in.
+ *
+ * Body and subject are percent-encoded with `encodeURIComponent`, which is what
+ * RFC 6068 asks for and — the part that actually matters — is what turns the
+ * newlines above into a message with paragraphs rather than one run-on line.
+ *
+ * ── The length caveat ─────────────────────────────────────────────────────
+ *
+ * Some mail clients truncate a very long `mailto:`. The composed message is a
+ * few hundred characters and well inside every limit anybody documents, but the
+ * console offers Copy beside this rather than only the link, so an owner whose
+ * client mangles it has the text itself.
+ */
+export function inviteMailto(
+  invite: Pick<MemberInvite, 'email' | 'fullName' | 'planName' | 'expiresAt'>,
+  opts: { gymName?: string | null; siteUrl?: string | null } = {},
+): string {
+  const subject = encodeURIComponent(inviteSubject(opts.gymName));
+  const body = encodeURIComponent(inviteMessage(invite, opts));
+  return `mailto:${encodeURIComponent(invite.email)}?subject=${subject}&body=${body}`;
+}
+
+/**
+ * One `mailto:` addressed to a whole batch, over BCC.
+ *
+ * BCC and not TO, and this is not a preference. A gym that mails two hundred
+ * members with every address in the To line has disclosed its entire membership
+ * list to all of them, which is a data breach in most of the places this
+ * product sells. The To field is left empty for the same reason.
+ *
+ * The message is therefore the one written without a name, because it goes to
+ * everybody: `inviteMessage` is called with the batch's shared plan only when
+ * every invitation in it is on the same plan, and with none otherwise.
+ */
+export function bulkInviteMailto(
+  invites: Pick<MemberInvite, 'email' | 'fullName' | 'planName' | 'expiresAt'>[],
+  opts: { gymName?: string | null; siteUrl?: string | null } = {},
+): string | null {
+  const addresses = [...new Set(
+    invites.map((i) => normaliseEmail(i.email)).filter((e): e is string => !!e),
+  )];
+  if (!addresses.length) return null;
+
+  const plans = new Set(invites.map((i) => i.planName ?? ''));
+  const shared = plans.size === 1 ? invites[0] : { ...invites[0], planName: null };
+  // No name: this one message is read by everybody in the batch, and greeting
+  // two hundred people by the first one's name is worse than greeting nobody.
+  const body = encodeURIComponent(
+    inviteMessage({ ...shared, fullName: null, expiresAt: null }, opts),
+  );
+  const subject = encodeURIComponent(inviteSubject(opts.gymName));
+  return `mailto:?bcc=${addresses.map((a) => encodeURIComponent(a)).join(',')}&subject=${subject}&body=${body}`;
+}
+
 /* ── the database ──────────────────────────────────────────────────────────── */
 
 export interface NewMemberInvite {
