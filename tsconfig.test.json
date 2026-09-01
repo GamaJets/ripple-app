@@ -138,6 +138,7 @@
     "src/lib/setGroups.test.ts",
     "src/lib/setMethods.test.ts",
     "src/lib/dragReorder.test.ts",
+    "src/lib/setRows.test.ts",
     "src/lib/exerciseHistory.test.ts"
   ]
 }

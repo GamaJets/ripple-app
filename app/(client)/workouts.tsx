@@ -21,6 +21,11 @@ import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../../s
 // movements) and re-sorted (progress-photo focus areas) before it is rendered.
 import { badges as groupBadges, groupRuns } from '../../src/lib/setGroups';
 import { badgeFor, countsToVolume, methodFor, restAfter } from '../../src/lib/setMethods';
+// The sets of an exercise, one by one — a coach's ramp, a warm-up first set, a
+// drop-set last one. Read through `expandSets` rather than off the fields, so a
+// programme that never got a table still reads as `sets` copies of one spec and
+// every screen below behaves as it did. See src/lib/setRows.ts.
+import { expandSets, hasSetRows, setCount } from '../../src/lib/setRows';
 import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
@@ -518,7 +523,20 @@ export default function Train() {
   // honoured in only some of them is worse than none.
   const withEdits = (e: ProgramExercise): ProgramExercise => {
     const ed = exEdits[uid(e)];
-    return ed ? { ...e, ...(ed.sets != null ? { sets: ed.sets } : {}), ...(ed.reps != null ? { reps: ed.reps } : {}), ...(ed.loadKg !== undefined ? { loadKg: ed.loadKg } : {}) } : e;
+    if (!ed) return e;
+    // The override DROPS the coach's per-set table, and that is the only
+    // reading that keeps the edit honest. The sheet asks for one count, one rep
+    // target and one load, so saving it is the member saying "I am doing three
+    // of the same set" — and a table left underneath would go on being what the
+    // runner counted, the ring measured and the row displayed, with the numbers
+    // they just typed visible nowhere. A silent no-op is worse than a change
+    // they can see and undo.
+    return {
+      ...e, setRows: null,
+      ...(ed.sets != null ? { sets: ed.sets } : {}),
+      ...(ed.reps != null ? { reps: ed.reps } : {}),
+      ...(ed.loadKg !== undefined ? { loadKg: ed.loadKg } : {}),
+    };
   };
   const planEx = orderedExercises.filter((e) => !isRemovedEx(e)).map(withEdits);
   // The rows in the order they are rendered, and the group badge for each of
@@ -617,7 +635,10 @@ export default function Train() {
 
   const openEditFor = (e: ProgramExercise) => {
     setEditingKey(e.key);
-    setCxName(nameOf(e)); setCxSets(String(e.sets)); setCxReps(String(e.reps));
+    // `setCount` rather than `e.sets`: on a movement the coach wrote a table
+    // for, those two can differ, and the sheet must open on the number of sets
+    // the member is actually looking at.
+    setCxName(nameOf(e)); setCxSets(String(setCount(e))); setCxReps(String(e.reps));
     // Read back out in the unit the sheet is currently set to, so what is shown
     // is what would be saved.
     setCxWeight(e.loadKg == null ? '' : String(liftIn(e.loadKg, cxUnit)));
@@ -666,9 +687,13 @@ export default function Train() {
     setCxName(''); setCxSets('3'); setCxReps('10'); setCxWeight('');
     tapLight();
   };
-  const firstOpenId = (() => { for (const _e of planRows) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < _e.sets) return _u; } return null; })();
+  // `setCount` and not `e.sets`, here and below. The two agree for every
+  // exercise without a table and for every one written by this build — the
+  // builder keeps them in step — but they are one fact with two homes, and this
+  // is the reader that decides which exercise opens first. It asks the rows.
+  const firstOpenId = (() => { for (const _e of planRows) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < setCount(_e)) return _u; } return null; })();
   // Presentation only: how much of today's plan is already logged, for the hero ring.
-  const doneCount = exercises.filter((e) => (logged[uid(e)] || []).length >= e.sets).length;
+  const doneCount = exercises.filter((e) => (logged[uid(e)] || []).length >= setCount(e)).length;
   const heroNote = exercises.length === 0
     ? 'Rest day — nothing scheduled'
     : `~${estMin} min` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
@@ -966,6 +991,15 @@ export default function Train() {
                 // an id this build does not know (see badgeFor), so nothing here
                 // can put a marker on screen that nobody could read.
                 const meth = badgeFor(e.method);
+                // The sets as planned. One row per set, from the coach's table
+                // when there is one and from `sets` copies of the single spec
+                // when there is not — which is every programme already on a
+                // phone, and which draws exactly what it drew before.
+                const planned = expandSets(e);
+                // Whether those rows actually differ from each other. A ramp is
+                // worth the space; three identical lines under a row that
+                // already says "3 sets · 42.5 kg" is the same sentence twice.
+                const varied = hasSetRows(e) && planned.some((r) => r.reps !== planned[0].reps || r.loadKg !== planned[0].loadKg || r.method !== planned[0].method);
                 return (
                   <View key={e.key}>
                     {/* No hairline between two members of one run: they are
@@ -1017,7 +1051,7 @@ export default function Train() {
                               instruction and outranks the app's suggestion, so
                               it is what the row shows. Without this the weight
                               could be typed and then never appear anywhere. */}
-                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.group} · {sets.length}/{e.sets} sets{e.loadKg != null ? ' · ' + fig(liftLabel(e.loadKg, wu)) : (!open && sug ? ' · ' + fig(liftLabel(sug.weight, wu)) : '')}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.group} · {sets.length}/{planned.length} sets{e.loadKg != null && !varied ? ' · ' + fig(liftLabel(e.loadKg, wu)) : (!open && !varied && sug ? ' · ' + fig(liftLabel(sug.weight, wu)) : '')}</Text>
                         </View>
                         <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + nameOf(e)} onPress={() => removeExercise(e)} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
                         <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}><Icon name="chevron" size={16} color={t.ink3} /></View>
@@ -1042,6 +1076,35 @@ export default function Train() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
                               <Icon name="swap" size={13} color={t.brand} />
                               <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>Auto-swapped from {e.name} to protect you</Text>
+                            </View>
+                          ) : null}
+                          {/* ── what the coach actually wrote, set by set ──
+                              A single "3 × 8-10 at 42.5" cannot say that set
+                              one is a warm-up and set three is five kilos
+                              heavier, and until now that is all this row could
+                              say. Shown only where the sets DIFFER: an exercise
+                              of three identical sets is already described by
+                              the line above, and repeating it three times is
+                              noise the client has to read past.
+
+                              Loads are converted at this boundary and nowhere
+                              earlier — what is stored is kilograms. */}
+                          {varied ? (
+                            <View style={{ marginTop: sp.md }}>
+                              {planned.map((r) => {
+                                const rb = badgeFor(r.method);
+                                return (
+                                  <View key={r.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2 }}>
+                                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{r.n}</Text>
+                                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
+                                      {r.reps}{r.loadKg != null ? ' × ' + fig(liftLabel(r.loadKg, wu)) : ''}
+                                    </Text>
+                                    {rb ? (
+                                      <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
+                                    ) : null}
+                                  </View>
+                                );
+                              })}
                             </View>
                           ) : null}
                           {/* The coach's own words on this movement, in the row
@@ -2336,6 +2399,27 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
 
   const ex = exercises[idx];
   const done = results[idx] || [];
+  /**
+   * The sets of this movement, one by one — the coach's table where there is
+   * one, and `sets` copies of the single spec where there is not, which is
+   * every programme written before the table existed.
+   */
+  // Guarded, because this runs above the empty-exercises return below and a
+  // runner mounted on nothing must not crash on the way to rendering nothing.
+  const plan = ex ? expandSets(ex) : [];
+  /**
+   * How the set at `i` is performed.
+   *
+   * The METHOD is now a property of a set and not of an exercise, and every
+   * reader below had to move with it. A ramp whose first set is a warm-up and
+   * whose last is a drop set gets two different rests, two different badges,
+   * and only one of them in the volume — and reading `ex.method` for all of
+   * them would give the whole movement whichever answer the coach happened to
+   * put on the exercise. A row past the end of the table falls back to the
+   * exercise, because a client who logged a seventh set of a six-set movement
+   * did something real and it is an ordinary set unless something says else.
+   */
+  const methodAt = (i: number) => plan[i]?.method ?? ex?.method ?? null;
   const logSet = () => {
     const r = parseInt(reps, 10) || 0;
     // Said, not swallowed. This returned silently, so tapping the tick with an
@@ -2386,7 +2470,11 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     // chime is scheduled, and the member goes straight to the next drop.
     // Rest-pause and cluster return fifteen seconds, which is the pause inside
     // the method rather than the rest between sets.
-    setReps(''); startRest(restAfter(ex.method, restSecondsFor(ex))); setPendingFeel(wkg);
+    // …and it is THIS set's method that decides, not the movement's. The set
+    // just logged is the one at `done.length` — the count before this log — so
+    // finishing a warm-up rests the coach's rest and finishing the drop set
+    // that follows it rests not at all.
+    setReps(''); startRest(restAfter(methodAt(done.length), restSecondsFor(ex))); setPendingFeel(wkg);
   };
   // Kilograms, in both unit systems, and deliberately. This is the same
   // increment ladder `suggestForExercise` and the Targets screen work in, and
@@ -2514,9 +2602,19 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     // they did nothing different, which is the lie `countsToVolume` exists to
     // stop. The METHOD decides, never the name of the movement, so a method
     // added to the catalogue later cannot quietly start inflating this.
-    const counts = (i: number) => countsToVolume(exercises[i]?.method);
-    const volume = results.reduce((a, r, i) => a + (counts(i) ? r.reduce((x, s) => x + s.reps * s.kg, 0) : 0), 0);
-    const workingSets = results.reduce((a, r, i) => a + (counts(i) ? r.length : 0), 0);
+    // Per SET, and that is the change. This asked the exercise, which was the
+    // only grain there was — so a movement whose first set is a warm-up and
+    // whose next three are working sets was either entirely tonnage or entirely
+    // not, and both answers are wrong by three sets. `expandSets` gives the
+    // method of each set in turn, and a set logged past the end of the plan
+    // falls back to the exercise's own.
+    const counts = (i: number, j: number) => {
+      const e = exercises[i];
+      if (!e) return true;
+      return countsToVolume(expandSets(e)[j]?.method ?? e.method ?? null);
+    };
+    const volume = results.reduce((a, r, i) => a + r.reduce((x, st, j) => x + (counts(i, j) ? st.reps * st.kg : 0), 0), 0);
+    const workingSets = results.reduce((a, r, i) => a + r.filter((_, j) => counts(i, j)).length, 0);
     // Sets that happened and are saved, but are not part of either figure
     // above. Said out loud below rather than silently subtracted: a member who
     // logged twelve sets and reads "9" is owed the sentence explaining it.
@@ -2638,13 +2736,23 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   // How its sets are performed. Null for an ordinary set and for an id this
   // build does not recognise — see badgeFor — so no marker nobody could read
   // reaches the screen.
-  const exMethod = badgeFor(ex.method);
+  // The method of the set about to be logged — which is what the badge at the
+  // top of the screen is describing, because that is the set the client is
+  // standing in front of the bar for.
+  const exMethod = badgeFor(methodAt(done.length));
   // What the rest after a set of this movement actually is, and whose number it
   // is. A method carrying its own rest — the fifteen seconds inside a
   // rest-pause or a cluster — is not the coach's rest and must not be labelled
   // as theirs. A drop set has none, `plannedRest` is 0, and no banner opens.
-  const restIsMethods = typeof methodFor(ex.method).method.restsAfter === 'number';
-  const plannedRest = restAfter(ex.method, restSecondsFor(ex));
+  const restIsMethods = typeof methodFor(methodAt(done.length)).method.restsAfter === 'number';
+  const plannedRest = restAfter(methodAt(done.length), restSecondsFor(ex));
+  // The set about to be done, or null once the plan is finished and the client
+  // is adding sets of their own.
+  const nextSet = plan[done.length] ?? null;
+  // Whether the sets of this movement actually differ. Three identical rows
+  // under a line that already reads "3 × 8-10 × 42.5 kg" is the same sentence
+  // four times.
+  const variedPlan = !!ex && hasSetRows(ex) && plan.some((r) => r.reps !== plan[0].reps || r.loadKg !== plan[0].loadKg || r.method !== plan[0].method);
 
   const liveCols: { label: string; value: string; dot?: string }[] = [
     { label: 'Time', value: `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}` },
@@ -2715,7 +2823,35 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         ) : null}
         {/* The rest on this line is the rest that will actually run — a drop set
             says nothing here, because there is none. */}
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · {ex.sets} × {ex.reps}{ex.loadKg != null ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : ''}{plannedRest > 0 && (ex.restSec != null || restIsMethods) ? ' · ' + restClock(plannedRest) + ' rest' : ''}</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · {plan.length} × {variedPlan ? 'varied' : ex.reps}{ex.loadKg != null && !variedPlan ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : ''}{plannedRest > 0 && (ex.restSec != null || restIsMethods) ? ' · ' + restClock(plannedRest) + ' rest' : ''}</Text>
+        {/* ── the coach's table, where they wrote one ────────────────────
+            Only where the sets differ — see `variedPlan`. The set the client
+            is on is the one marked, because in the middle of a ramp "which
+            one am I on" is the question, and counting chips to find out is
+            what the row above was already failing to answer.
+
+            Every load here is stored in kilograms and converted once, at this
+            line, by `liftLabel`. */}
+        {variedPlan ? (
+          <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.md }}>
+            {plan.map((r) => {
+              const rb = badgeFor(r.method);
+              const here = r.n === done.length + 1;
+              return (
+                <View key={r.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: 3 }}>
+                  <Text style={{ ...ty.caption, ...numeric, color: here ? t.brand : t.ink3, width: 20, fontWeight: here ? '700' : '400' }}>{r.n}</Text>
+                  <Text style={{ ...ty.label, ...numeric, color: here ? t.ink : t.ink2, fontWeight: here ? '600' : '400' }}>
+                    {r.reps}{r.loadKg != null ? ' × ' + fig(liftLabel(r.loadKg, unit)) : ''}
+                  </Text>
+                  {rb ? (
+                    <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
+                  ) : null}
+                  {r.n <= done.length ? <Icon name="check" size={13} color={t.brand} /> : null}
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
         {(() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
@@ -2815,7 +2951,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
 
         {done.length > 0 ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xl }}>
-            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{fig(liftIn(s.kg || null, unit))} {unit}</Text>{/* Every set of this movement was performed the same way, so the marker rides on each chip and reads out in full. */}{exMethod ? <Text accessibilityLabel={exMethod.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{exMethod.short}</Text> : null}</View>); })}
+            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{fig(liftIn(s.kg || null, unit))} {unit}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
           </View>
         ) : null}
 
@@ -2832,7 +2968,16 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           </View>
         ) : null; })() : null}
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Log set {done.length + 1}</Text>
+        {/* The target for the set about to be logged, beside its number. It
+            used to be a bare "Log set 4" over two empty boxes, which was
+            enough while every set of a movement was the same set and the line
+            above named it. On a ramp it is not: set 4 has its own reps and its
+            own load, and the client should not have to count rows to find
+            them. Nothing is prefilled into the boxes — what goes in the log is
+            what was lifted, not what was planned. */}
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>
+          Log set {done.length + 1}{variedPlan && nextSet ? ` · ${nextSet.reps}${nextSet.loadKg != null ? ' × ' + fig(liftLabel(nextSet.loadKg, unit)) : ''}` : ''}
+        </Text>
         <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'flex-end' }}>
           <Field label="Reps">
             <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
@@ -2859,7 +3004,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         ) : null}
 
         <View style={{ marginTop: sp.xl }}>
-          {done.length >= ex.sets
+          {done.length >= plan.length
             ? <Cta label={idx < exercises.length - 1 ? 'Next Exercise →' : 'Finish Session'} wide onPress={next} />
             : <Ghost label={idx < exercises.length - 1 ? 'Next Exercise →' : 'Finish Session'} onPress={next} />}
         </View>

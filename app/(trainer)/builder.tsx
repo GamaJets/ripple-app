@@ -44,6 +44,7 @@ import { Icon } from '../../src/ui/Icon';
 import { badges as groupBadges, canJoinNext, isGrouped, joinNext, leaveGroup } from '../../src/lib/setGroups';
 import { applyMove, shifts as dragShifts, targetIndex } from '../../src/lib/dragReorder';
 import { SET_METHODS, DEFAULT_METHOD, badgeFor, methodFor } from '../../src/lib/setMethods';
+import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount, type SetRow } from '../../src/lib/setRows';
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, type WeightUnit } from '../../src/lib/units';
@@ -165,6 +166,19 @@ type BEx = {
    * the client's runner and the progress screens.
    */
   method?: string | null;
+  /**
+   * The sets written out one by one, or absent because every set is the same
+   * set — the shape every exercise in this builder had until now.
+   *
+   * The rules for reading it, and the reason it must stay optional, are in
+   * src/lib/setRows.ts. What matters here: the fields above are what an
+   * exercise WITHOUT a table says, and they are left exactly as the coach
+   * typed them when a table appears, because they are still what a build too
+   * old to read the table will show. Only `sets` is kept in step with the row
+   * count, and only because every progress reader in the app counts against
+   * it.
+   */
+  setRows?: SetRow[] | null;
 };
 type BDay = { day: string; focus: string; cardio?: string; exercises: BEx[] };
 
@@ -455,6 +469,14 @@ export default function Builder() {
    * that stripped copy as the thing they had built. Re-assigning it wrote the
    * loss back over the client's real programme.
    *
+   * `setGroupId` and `method` were dropped in exactly the same way and by the
+   * same mechanism — this list and `composeProgram`'s enumerate their fields by
+   * hand, so a field added to `ProgramExercise` has to be remembered in two
+   * places and was remembered in neither. A coach who supersetted four
+   * movements and marked a drop set, saved it as a template and opened it
+   * again, got their week back as ungrouped ordinary sets. `setRows` is added
+   * to both at once rather than becoming the fourth field to learn this.
+   *
    * `from` is the client this content belongs to, or null when it is the
    * coach's own — a template, or a blank week. It is what stops the seeding
    * effect below announcing a disagreement that does not exist.
@@ -467,6 +489,8 @@ export default function Builder() {
       exercises: d.exercises.map((e) => ({
         key: nextKey(), name: e.name, group: e.group, sets: e.sets, reps: e.reps,
         loadKg: e.loadKg ?? null, note: e.note, restSec: e.restSec ?? null,
+        setGroupId: e.setGroupId ?? null, method: e.method ?? null,
+        setRows: e.setRows && e.setRows.length ? e.setRows.map((r) => ({ ...r })) : null,
       })),
     })));
     setSeededFor(from);
@@ -652,8 +676,37 @@ export default function Builder() {
       (i === from.di ? { ...d, exercises: applyMove(d.exercises, from.ei, to) as BEx[] } : d)));
   };
 
-  /** The exercise whose method sheet is open, as `dayIndex:key`, or null. */
-  const [methodFor_, setMethodOpenFor] = useState<string | null>(null);
+
+  /**
+   * Which method sheet is open: the day, the exercise, and the ROW inside it —
+   * or `row: null` for the exercise's own default, which is what every set
+   * follows unless it says otherwise.
+   *
+   * An object rather than the `dayIndex:key` string this used to be. A third
+   * field would have meant a second parse, and the key it is parsing is minted
+   * by `nextKey` with no promise about what is in it.
+   */
+  const [methodOpen, setMethodOpenFor] = useState<{ di: number; key: string; row: number | null } | null>(null);
+
+  /**
+   * Apply a change to an exercise's set table.
+   *
+   * Both halves of the patch land in one write. `sets` and the row count are
+   * one fact — see src/lib/setRows.ts — and a table of four sitting under
+   * `sets: 3` shows the client "3 of 3 sets" with a fourth row nothing can be
+   * logged against.
+   *
+   * It takes a FUNCTION of the exercise rather than a finished patch, and reads
+   * that exercise out of the update itself. The whole table is rewritten on
+   * every keystroke, so a patch built from the render's copy would carry a
+   * stale array — and two writes landing in one batch would silently discard
+   * the earlier one's row. `patchEx` cannot do this: it merges fields, and this
+   * has to derive them.
+   */
+  const patchRows = (di: number, key: string, make: (ex: BEx) => { setRows: SetRow[]; sets: number }) =>
+    setDays((ds) => ds.map((d, i) => (i === di
+      ? { ...d, exercises: d.exercises.map((x) => (x.key === key ? { ...x, ...make(x) } : x)) }
+      : d)));
 
   /**
    * Join an exercise to the one after it, making a superset — or a tri-set, or
@@ -930,11 +983,25 @@ export default function Builder() {
     days: days.filter((d) => d.exercises.length).map((d) => ({
       day: d.day, focus: d.focus.trim() || 'Training', cardio: d.cardio,
       exercises: d.exercises.map((e, i) => ({
-        key: d.day + '-' + i, name: e.name, group: e.group || '', sets: e.sets,
+        key: d.day + '-' + i, name: e.name, group: e.group || '',
         reps: e.reps || '8-12', alternatives: [],
         loadKg: e.loadKg ?? null,
         note: e.note && e.note.trim() ? e.note.trim() : undefined,
         restSec: e.restSec ?? null,
+        setGroupId: e.setGroupId ?? null,
+        method: e.method ?? null,
+        // `undefined` and never `[]` for an exercise the coach did not open a
+        // table on: an empty array would be a claim that this movement has no
+        // sets, and it is the one value src/lib/setRows.ts has to defend
+        // against on the way back in. Absent is what "every set is the same
+        // set" looks like, and it is what a build that cannot read a table
+        // needs to find.
+        setRows: e.setRows && e.setRows.length ? e.setRows : undefined,
+        // The two numbers are one fact — see setRows.ts. Recomputed here rather
+        // than trusted, because this is the last gate before the programme
+        // leaves the screen and a client counting "2 of 3 sets" against a table
+        // of four is the failure it would produce.
+        sets: setCount(e),
       })),
     })),
   });
@@ -1520,6 +1587,10 @@ export default function Builder() {
                 const dayBadges = groupBadges(d.exercises);
                 return d.exercises.map((e, ei) => {
                 const gb = dayBadges[ei];
+                // The sets as they will be drawn, worked out once. `tabled`
+                // says whether the coach has opened a per-set table on this
+                // movement; `list` is what to render either way.
+                const rows = { tabled: hasSetRows(e), list: expandSets(e) };
                 // A run reads as one block: the rule between two exercises in
                 // the same group is dropped, because the line is what says
                 // "these are separate". The group's own tinted rail down the
@@ -1687,6 +1758,105 @@ export default function Builder() {
                       <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
                     </Pressable>
                   </View>
+                  {/* ── the sets, one at a time or all at once ─────────────
+                      An exercise is EITHER a count and one spec — three sets
+                      of 8-10 at 42.5, which is what every programme in the
+                      database says today — OR a table of rows that can each
+                      differ. Both are on screen here, never together: two
+                      places to type the weight of set one, disagreeing, is
+                      worse than either.
+
+                      The single spec is still the default, and the table is
+                      opened by adding a set. That control is the only thing in
+                      the app that writes `setRows`, which is what keeps every
+                      programme nobody has edited exactly as it was. */}
+                  {rows.tabled ? (
+                    <View style={{ marginTop: sp.md }}>
+                      {/* Column heads. ty.micro renders uppercase, so this is
+                          the SET / REPS / WEIGHT strip from the screenshot
+                          without the source having to shout. */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                        <Text style={{ ...ty.micro, color: t.ink3, width: 26 }}>Set</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, width: 74 }}>Reps</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, width: 84 }}>Weight</Text>
+                      </View>
+                      {rows.list.map((row, ri) => {
+                        // Drafts are per ROW, so typing "16." into set three
+                        // cannot disturb set one. `#` because `nextKey` mints
+                        // the exercise key and promises nothing about `:`.
+                        const rk = `${e.key}#${ri}`;
+                        const u = e.loadUnit ?? defaultUnit;
+                        const rm = methodFor(row.method).method;
+                        return (
+                          <View key={rk} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 6 }}>
+                            <Text style={{ ...value(15), color: t.ink3, width: 26 }}>{row.n}</Text>
+                            <TextInput value={row.reps}
+                              onChangeText={(v) => patchRows(di, e.key, (x) => patchSetRow(x, ri, { reps: v }))}
+                              placeholder="8-10" placeholderTextColor={t.ink3}
+                              accessibilityLabel={`Reps in set ${row.n} of ${e.name}`}
+                              style={[inp, { width: 74, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                            {/* The same text-draft as the single Weight field
+                                below, and for the same reason: re-deriving the
+                                box from the committed kilograms on every
+                                keystroke deletes the "16." on the way to
+                                "16.5". The draft holds what was typed and the
+                                commit happens behind it. */}
+                            <TextInput
+                              value={loadDraft[rk] ?? (row.loadKg == null ? '' : String(liftIn(row.loadKg, u)))}
+                              onChangeText={(v) => {
+                                setLoadDraft((prev) => ({ ...prev, [rk]: v }));
+                                if (!v.trim()) { patchRows(di, e.key, (x) => patchSetRow(x, ri, { loadKg: null })); return; }
+                                const r = readLift(v, u);
+                                if (r.ok) patchRows(di, e.key, (x) => patchSetRow(x, ri, { loadKg: r.kg }));
+                              }}
+                              onBlur={() => setLoadDraft((prev) => { const n = { ...prev }; delete n[rk]; return n; })}
+                              keyboardType="decimal-pad" placeholder="optional" placeholderTextColor={t.ink3}
+                              accessibilityLabel={`Weight for set ${row.n} of ${e.name}, in ${u === 'kg' ? 'kilograms' : 'pounds'}`}
+                              style={[inp, { width: 84, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                            {/* How THIS set is performed — the thing the
+                                per-exercise field could only say once. A
+                                warm-up first set and a drop-set last one now
+                                fit in one movement. The catalogue's short
+                                marker is what fits; the full label is what is
+                                read out, because "RP" is not a word. */}
+                            <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: ri })} accessibilityRole="button"
+                              accessibilityLabel={`How set ${row.n} of ${e.name} is performed — currently ${rm.label}`}
+                              style={{ minWidth: 34, alignItems: 'center', paddingHorizontal: sp.sm, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+                              <Text style={{ ...ty.caption, fontWeight: '600', color: badgeFor(row.method) ? t.ink : t.ink3 }}>{rm.short}</Text>
+                            </Pressable>
+                            {/* Hidden on the last row rather than disabled: an
+                                exercise of no sets is not a lighter exercise,
+                                and removing the movement has its own control. */}
+                            {rows.list.length > 1 ? (
+                              <Pressable onPress={() => patchRows(di, e.key, (x) => removeSetRow(x, ri))} accessibilityRole="button"
+                                accessibilityLabel={`Remove set ${row.n} of ${e.name}`} hitSlop={8}
+                                style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
+                                <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                        <Pressable onPress={() => patchRows(di, e.key, (x) => addSetRow(x))} accessibilityRole="button"
+                          accessibilityLabel={`Add a set to ${e.name}`}
+                          style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>Add Set</Text>
+                        </Pressable>
+                        {/* The unit the coach is typing in, for the whole
+                            table. One switch rather than one per row: a gym is
+                            plated in whatever it is plated in, and the column
+                            is one column. Kilograms are stored either way. */}
+                        <Pressable accessibilityRole="button"
+                          accessibilityLabel={`Weight unit: ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'pounds' : 'kilograms'}`}
+                          onPress={() => patchEx(di, e.key, { loadUnit: (e.loadUnit ?? defaultUnit) === 'kg' ? 'lb' : 'kg' })}
+                          style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+                          <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                  <>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>Sets</Text>
                     <Pressable onPress={() => patchEx(di, e.key, { sets: Math.max(1, e.sets - 1) })} accessibilityRole="button" accessibilityLabel="One set fewer"
@@ -1737,6 +1907,20 @@ export default function Builder() {
                       <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
                     </Pressable>
                   </View>
+                  {/* Turning three identical sets into three rows that can
+                      differ. It appends a copy of what is already there, so
+                      the fourth set of a 3 × 8-10 at 42.5 is another 8-10 at
+                      42.5 rather than a blank line the client would meet with
+                      no numbers on it. */}
+                  <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
+                    <Pressable onPress={() => patchRows(di, e.key, (x) => addSetRow(x))} accessibilityRole="button"
+                      accessibilityLabel={`Write out the sets of ${e.name} one by one, so each can have its own weight`}
+                      style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                      <Text style={{ ...ty.caption, color: t.ink2 }}>Add Set</Text>
+                    </Pressable>
+                  </View>
+                  </>
+                  )}
                   {/* ── the coach's own words, on this movement ──────────────
                       Asked for as "trainer notes attached in the exercise.
                       then they are saved for future reference". The builder
@@ -1799,8 +1983,8 @@ export default function Builder() {
                     {/* How the sets are performed. The label shown is the
                         catalogue's, never a stored string, so a method renamed
                         later reads correctly in programmes already written. */}
-                    <Pressable onPress={() => setMethodOpenFor(`${di}:${e.key}`)} accessibilityRole="button"
-                      accessibilityLabel={`How ${e.name} is performed — currently ${methodFor(e.method).method.label}`}
+                    <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: null })} accessibilityRole="button"
+                      accessibilityLabel={`How ${e.name} is performed${rows.tabled ? ', by default' : ''} — currently ${methodFor(e.method).method.label}`}
                       style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
                       <Text style={{ ...ty.caption, color: t.ink }}>{methodFor(e.method).method.label}</Text>
                     </Pressable>
@@ -2318,47 +2502,71 @@ export default function Builder() {
           A sheet rather than a cycling button: there are twelve methods and
           each needs its sentence to be choosable at all. A coach who does not
           already know what "rest-pause" means cannot pick it from a label. */}
-      <Modal visible={methodFor_ !== null} transparent animationType="slide" onRequestClose={() => setMethodOpenFor(null)}>
+      <Modal visible={methodOpen !== null} transparent animationType="slide" onRequestClose={() => setMethodOpenFor(null)}>
         <Pressable style={scrim} onPress={() => setMethodOpenFor(null)} />
         <View style={sheet}>
-          <Text style={{ ...ty.title, color: t.ink }}>How is it performed?</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
-            This is carried to the client and read at the machine. It also drives their rest timer — a drop set runs straight through with no rest.
-          </Text>
-          <ScrollView style={{ maxHeight: 380 }}>
-            {SET_METHODS.map((m) => {
-              const [mdi, ...rest] = (methodFor_ ?? '').split(':');
-              const mkey = rest.join(':');
-              const cur = days[Number(mdi)]?.exercises.find((x) => x.key === mkey);
-              const on = (cur?.method ?? DEFAULT_METHOD) === m.id;
-              return (
-                <Pressable key={m.id} accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                  accessibilityLabel={`${m.label}. ${m.blurb}`}
-                  onPress={() => {
-                    // 'normal' is stored as null rather than as the string, so
-                    // an ordinary set carries no field at all and a programme
-                    // written before methods existed reads back identically.
-                    patchEx(Number(mdi), mkey, { method: m.id === DEFAULT_METHOD ? null : m.id });
-                    setMethodOpenFor(null);
-                  }}
-                  style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md,
-                           borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                  <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-                                 backgroundColor: on ? t.brand : t.surface2 }}>
-                    <Text style={{ ...ty.caption, fontWeight: '700', color: on ? t.brandInk : t.ink3 }}>{m.short}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, color: t.ink, fontWeight: on ? '600' : '400' }}>{m.label}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{m.blurb}</Text>
-                    {!m.countsToVolume ? (
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Not counted as training volume.</Text>
-                    ) : null}
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          {(() => {
+            const cur = methodOpen ? days[methodOpen.di]?.exercises.find((x) => x.key === methodOpen.key) : undefined;
+            const forRow = methodOpen != null && methodOpen.row != null;
+            const n = methodOpen?.row == null ? 0 : methodOpen.row + 1;
+            return (
+              <>
+              {/* The sheet says which it is about. A coach who tapped set 3's
+                  marker and a coach who tapped the exercise's are looking at
+                  the same twelve rows, and only one of those choices lands on
+                  every set of the movement. */}
+              <Text style={{ ...ty.title, color: t.ink }}>{forRow ? `How is set ${n} performed?` : 'How is it performed?'}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
+                {forRow
+                  ? 'This set only. It is carried to the client and read at the machine, and it drives their rest timer — a drop set runs straight through with no rest.'
+                  : 'The default for every set of this exercise that has not been given its own. It is carried to the client and read at the machine, and it drives their rest timer — a drop set runs straight through with no rest.'}
+              </Text>
+              <ScrollView style={{ maxHeight: 380 }}>
+                {SET_METHODS.map((m) => {
+                  // What is selected is read through `expandSets` for a row, so
+                  // a row that has not said anything shows the exercise default
+                  // rather than showing 'Normal' beside an exercise that is not.
+                  const at = cur && forRow ? expandSets(cur)[methodOpen!.row as number] : undefined;
+                  const on = forRow
+                    ? ((at?.method ?? DEFAULT_METHOD) === m.id)
+                    : ((cur?.method ?? DEFAULT_METHOD) === m.id);
+                  return (
+                    <Pressable key={m.id} accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={`${m.label}. ${m.blurb}`}
+                      onPress={() => {
+                        // 'normal' is stored as null rather than as the string,
+                        // so an ordinary set carries no field at all and a
+                        // programme written before methods existed reads back
+                        // identically. On a ROW that null is still an answer —
+                        // "this set is ordinary" — which is how one set opts
+                        // out of an exercise whose default is a drop set.
+                        const chosen = m.id === DEFAULT_METHOD ? null : m.id;
+                        if (methodOpen == null) return;
+                        if (methodOpen.row != null && cur) patchRows(methodOpen.di, methodOpen.key, (x) => patchSetRow(x, methodOpen.row as number, { method: chosen }));
+                        else patchEx(methodOpen.di, methodOpen.key, { method: chosen });
+                        setMethodOpenFor(null);
+                      }}
+                      style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md,
+                               borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                      <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+                                     backgroundColor: on ? t.brand : t.surface2 }}>
+                        <Text style={{ ...ty.caption, fontWeight: '700', color: on ? t.brandInk : t.ink3 }}>{m.short}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.body, color: t.ink, fontWeight: on ? '600' : '400' }}>{m.label}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{m.blurb}</Text>
+                        {!m.countsToVolume ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Not counted as training volume.</Text>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              </>
+            );
+          })()}
         </View>
       </Modal>
 
