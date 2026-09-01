@@ -262,38 +262,6 @@ export default function Music() {
 
  <Rule />
 
- {/* ── services ───────────────────────────────────────────────────── */}
- <Section>
- <SectionHead title="Your Music" note={anyConnected ? 'Connected' : undefined} />
- {needsReconnect ? (
- <Notice kicker="Spotify" title="Reconnect to Finish This"
- note="Your Spotify sign-in predates playlist and playback permission, and Spotify cannot add permissions to a token that already exists. Disconnect and connect again — it takes one tap each." />
- ) : null}
- {SERVICES.map((s, i) => (
- <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
- <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
- <Icon name="play" size={17} color={t.brand} />
- </View>
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.name}</Text>
- <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
- </View>
- <Pressable onPress={() => toggleService(s.id)} disabled={s.id === 'spotify' && spotifyBusy}
- accessibilityRole="button" accessibilityLabel={(conn[s.id] ? 'Disconnect ' : 'Connect ') + s.name}
- style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, minWidth: 92, alignItems: 'center', backgroundColor: conn[s.id] ? t.surface2 : (s.id === 'spotify' ? t.brand : t.surface2) }}>
- {s.id === 'spotify' && spotifyBusy
- ? <ActivityIndicator color={t.brandInk} size="small" />
- : <Text numberOfLines={1} style={{ ...ty.label, fontWeight: '500', color: conn[s.id] || s.id !== 'spotify' ? t.ink : t.brandInk }}>
- {conn[s.id] ? ((s.id === 'spotify' && spotifyName) ? spotifyName : 'Connected') : (s.id === 'spotify' ? 'Connect' : 'Not yet')}
- </Text>}
- </Pressable>
- </View>
- ))}
- </Section>
-
-
- <Rule />
-
  {/* ── what to build ──────────────────────────────────────────────────
      Reported as "I'm trying to build a playlist for the work out and it is
      only showing playlists I have already made — it doesn't give me an
@@ -394,6 +362,41 @@ export default function Music() {
  </View>
  )}
  </Section>
+
+ <Rule />
+
+ {/* ── services ───────────────────────────────────────────────────── */}
+ <Section>
+ <SectionHead title="Your Music" note={anyConnected ? 'Connected' : undefined} />
+ {needsReconnect ? (
+ <Notice kicker="Spotify" title="Reconnect to Finish This"
+ note="Your Spotify sign-in predates playlist and playback permission, and Spotify cannot add permissions to a token that already exists. Disconnect and connect again — it takes one tap each." />
+ ) : null}
+ {SERVICES.map((s, i) => (
+ <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+ <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+ <Icon name="play" size={17} color={t.brand} />
+ </View>
+ <View style={{ flex: 1 }}>
+ <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.name}</Text>
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
+ </View>
+ <Pressable onPress={() => toggleService(s.id)} disabled={s.id === 'spotify' && spotifyBusy}
+ accessibilityRole="button" accessibilityLabel={(conn[s.id] ? 'Disconnect ' : 'Connect ') + s.name}
+ style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, minWidth: 92, alignItems: 'center', backgroundColor: conn[s.id] ? t.surface2 : (s.id === 'spotify' ? t.brand : t.surface2) }}>
+ {s.id === 'spotify' && spotifyBusy
+ ? <ActivityIndicator color={t.brandInk} size="small" />
+ : <Text numberOfLines={1} style={{ ...ty.label, fontWeight: '500', color: conn[s.id] || s.id !== 'spotify' ? t.ink : t.brandInk }}>
+ {conn[s.id] ? ((s.id === 'spotify' && spotifyName) ? spotifyName : 'Connected') : (s.id === 'spotify' ? 'Connect' : 'Not yet')}
+ </Text>}
+ </Pressable>
+ </View>
+ ))}
+ </Section>
+
+
+ <Rule />
+
  {/* ── the account's own playlists ────────────────────────────────── */}
  {conn.spotify && !needsReconnect ? (
  <>
