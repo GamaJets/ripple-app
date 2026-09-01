@@ -408,7 +408,11 @@ if (missing.length) {
   console.error('libraries refuse the permission outright without one (HealthKit does);');
   console.error('the rest ship a generic default, which reaches the App Store looking');
   console.error('exactly as unconsidered as it is.');
-  process.exit(1);
 }
 
-console.log('\nevery permission-requiring native module has a usage string somebody wrote.');
+if (missing.length || unguarded.length) process.exit(1);
+
+console.log(
+  `\nevery permission-requiring native module has a usage string somebody wrote, and none of the ${sourceFiles.length} files`
+  + '\nin app/ and src/ imports a throwing native module without going through the guard.',
+);
