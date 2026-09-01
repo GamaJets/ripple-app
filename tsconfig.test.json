@@ -157,6 +157,7 @@
     "src/lib/programReview.test.ts",
     "src/lib/startGate.test.ts",
     "src/lib/studioWrites.test.ts",
-    "src/lib/workoutQueue.test.ts"
+    "src/lib/workoutQueue.test.ts",
+    "src/lib/directCharges.test.ts"
   ]
 }

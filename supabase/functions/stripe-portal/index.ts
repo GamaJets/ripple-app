@@ -1,6 +1,29 @@
 // stripe-portal — returns a Stripe Billing Portal URL so a trainer can manage
 // their subscription, payment method, and invoices. Uses STRIPE_SECRET_KEY.
 // Request: { return_url? }  (caller identified by JWT)
+//
+// ── This is the PLATFORM's portal, and direct charges do not touch it ─────
+//
+// Checked when Connect moved to direct charges, and deliberately left alone.
+// This function serves a COACH paying REPPLE: it looks the caller up in
+// `billing_customers` by `trainer_id`, and that table only ever holds customers
+// created by `stripe-checkout` on the PLATFORM account. There is no client, no
+// connected account and no application fee anywhere in this path, so there is
+// no account context to add — a `stripeAccount` option here would send a
+// platform customer id to a connected account, where it does not exist, and
+// break the coach's own billing to fix a problem it does not have.
+//
+// The portal that DID have to move is the client's, and it is not in this file.
+// A client managing the subscription they pay their coach for goes through
+// `connect-checkout` with `{ action: 'portal' }`, which reads
+// `client_subscriptions.stripe_account_id` and opens the portal in the same
+// account context the customer was created in. The two are named similarly and
+// are on two different ledgers with two different customer id spaces; the
+// header of connect-checkout has said so since part 97 and it is repeated here
+// because this is the file somebody would edit by mistake.
+//
+// So: if a client cannot cancel or update their card, this function is not the
+// one to change.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 

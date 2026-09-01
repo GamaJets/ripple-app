@@ -13,11 +13,46 @@
 //                 and — since part 132 — one row per PAID invoice in
 //                 `client_subscription_payments`, which is the coach's ledger.
 //
-// Both are `customer.subscription.*` events on the platform account, and both
-// carry a trainer_id in their metadata. Told apart by `repple_kind`, which
-// connect-checkout stamps on the subscription itself. Getting that wrong in the
-// obvious direction would file every client's AED 600 coaching fee as the
-// coach's own Repple plan and count it as platform MRR.
+// Both carry a trainer_id in their metadata, and they are told apart by
+// `repple_kind`, which connect-checkout stamps on the subscription itself.
+// Getting that wrong in the obvious direction would file every client's AED 600
+// coaching fee as the coach's own Repple plan and count it as platform MRR.
+//
+// ── WHICH ACCOUNT AN EVENT CAME FROM, and why that is now the first question ──
+//
+// It used to be true that both businesses arrived as events "on the platform
+// account". Under DESTINATION charges the charge is created on the platform, so
+// every checkout, subscription and invoice event fired there.
+//
+// Direct charges break that, and they break it silently. A charge created on
+// the coach's connected account produces its events ON THAT ACCOUNT, with
+// `event.account` set to `acct_...`. Those events do not arrive at a webhook
+// endpoint that is not configured to listen to connected accounts — they are
+// simply never delivered. The failure mode is the worst one available in this
+// system: the coach is paid, Stripe is happy, and nothing is written here, so
+// the client's purchase does not exist in the app. No error, no retry, no row.
+//
+// That is a DASHBOARD setting, not a code change, and no amount of care in this
+// file substitutes for it. See the deployment note at the bottom.
+//
+// What this file must do is the other half:
+//
+//   · `event.account` is read on every event and treated as authoritative. An
+//     event that arrived from a connected account CANNOT be a platform
+//     subscription or a platform invoice, whatever its metadata says, and is
+//     never written to `subscriptions` or `invoices`.
+//   · Every Stripe API call made about a connected-account object is made in
+//     that account's context. `subscriptions.retrieve(subId)` on the platform
+//     returns "No such subscription" for a subscription that is charging
+//     somebody's card monthly — and that throw becomes a 500, and Stripe
+//     retries it forever while the payment goes unrecorded.
+//   · The account is STAMPED on the row (part 161), because it is the only way
+//     anything later — a cancel, a billing portal, a refund — can find the
+//     object again.
+//   · When metadata has been stripped in the Stripe dashboard, the account is
+//     resolved back to a coach through `connect_accounts`. Under destination
+//     charges there was no such fallback and none was needed; under direct
+//     charges the account id is often the strongest identity on the event.
 //
 // ── What is recorded as MONEY, and what is only recorded as a state ────────
 //
@@ -65,12 +100,21 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   const key = Deno.env.get('STRIPE_SECRET_KEY');
   // TWO secrets, because Stripe's event destinations are scoped and one endpoint
-  // cannot receive both scopes. Everything about a subscription or a checkout
-  // happens on the PLATFORM account — with destination charges the charge lives
-  // there, not on the coach's account — while `account.updated`, which is how we
-  // learn a coach has finished onboarding and can take money, only ever comes
-  // from a CONNECTED account. Stripe requires a separate destination for each,
-  // and issues each its own signing secret.
+  // cannot receive both scopes. `account.updated`, which is how we learn a coach
+  // has finished onboarding and can take money, only ever comes from a CONNECTED
+  // account; the platform's own subscription and invoice events come from the
+  // platform. Stripe requires a separate destination for each, and issues each
+  // its own signing secret.
+  //
+  // STRIPE_WEBHOOK_SECRET_CONNECT stopped being optional in practice the moment
+  // direct charges were switched on for a single coach. Under destination
+  // charges it only carried `account.updated`, so an unset secret cost a
+  // capability flag; under direct charges it carries every checkout, every
+  // subscription and every paid invoice for every coach on the new model, and
+  // an unset secret means their clients' money is never recorded. The code
+  // below still tolerates it being unset — a half-configured dashboard should
+  // not read like a bug in here — but the deployment note at the bottom of this
+  // file says plainly what that now costs.
   //
   // So both are tried. A signature is a cheap HMAC and there are at most two, so
   // trying the second costs nothing measurable and saves running a second copy
@@ -105,6 +149,34 @@ Deno.serve(async (req) => {
   }
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+  // WHICH ACCOUNT this event came from. Null for the platform; `acct_...` for a
+  // connected account, which under direct charges is where a coach's every sale
+  // now happens.
+  //
+  // This single field is the most reliable thing on the event. Metadata can be
+  // stripped by anyone editing a subscription in the Stripe dashboard — the
+  // comments below and in `writeConnectSub` are all about surviving that — but
+  // the account an event was delivered from is Stripe's own routing and is not
+  // editable. So it is read first and trusted furthest.
+  const eventAccount = typeof event.account === 'string' && event.account.trim() ? event.account.trim() : null;
+
+  // The coach who owns a connected account. Only ever consulted when the
+  // metadata that normally carries `trainer_id` is gone: under direct charges
+  // the account id is frequently the strongest identity left on an event, and
+  // without this a renewal with stripped metadata would be a payment filed
+  // against nobody, which is a payment no coach can ever see.
+  //
+  // A failed read returns null rather than throwing: the callers below all
+  // treat a null trainer as "identity unknown, write what we do have", which is
+  // strictly better than dropping money on the floor.
+  const trainerOfAccount = async (acctId: string | null): Promise<string | null> => {
+    if (!acctId) return null;
+    const { data, error } = await service.from('connect_accounts').select('trainer_id').eq('stripe_account_id', acctId).maybeSingle();
+    if (error) { console.error('stripe-webhook: could not resolve account ' + acctId + ' to a trainer:', error.message); return null; }
+    return data?.trainer_id ?? null;
+  };
+
   const trainerOf = async (customerId: string | null, metaId?: string | null): Promise<string | null> => {
     if (metaId) return metaId;
     if (!customerId) return null;
@@ -139,9 +211,44 @@ Deno.serve(async (req) => {
   // upsert on a unique key, so being tried again is safe.
   const fail = (what: string, why: string) => json({ error: what + ' write failed: ' + why }, 500);
 
-  /** Is this a client paying a coach, rather than a coach paying Repple? */
+  /**
+   * Is this a client paying a coach, rather than a coach paying Repple?
+   *
+   * `eventAccount` first, and on its own sufficient. An event delivered from a
+   * connected account cannot be the platform's own billing: Repple's coaches
+   * pay Repple on the PLATFORM account, and nothing about that arrangement ever
+   * touches a coach's connected account. So a connected-account event is a
+   * Connect event by construction, whatever its metadata does or does not say.
+   *
+   * That is not a shortcut, it is the repair for a hole direct charges open. A
+   * direct-charge subscription whose metadata was stripped in the dashboard
+   * would fall through the metadata test below, be read as the coach's own
+   * Repple plan, and be filed in `subscriptions` — inventing platform MRR out
+   * of a client's coaching fee, which is exactly the confusion the header of
+   * this file exists to prevent.
+   */
   const isConnect = (meta: Record<string, string> | null | undefined) =>
-    !!meta && (meta.repple_kind === 'connect_subscription' || !!meta.package_id);
+    !!eventAccount || (!!meta && (meta.repple_kind === 'connect_subscription' || !!meta.package_id));
+
+  /**
+   * Which account a Connect object should be recorded as living on.
+   *
+   * The event's own account is the truth. `repple_account`, which
+   * connect-checkout stamps into metadata, is the fallback for the one case the
+   * event cannot answer: a `checkout.session.completed` that Stripe delivers on
+   * the platform for a session that was nonetheless created on a connected
+   * account. Empty string in that metadata means the platform, deliberately —
+   * Stripe metadata values are strings and there is no null to send.
+   *
+   * Null means the platform, which is where every object created before this
+   * change lives, and null is therefore also the right answer when neither
+   * source says anything.
+   */
+  const accountForRow = (meta: Record<string, string> | null | undefined): string | null => {
+    if (eventAccount) return eventAccount;
+    const stamped = (meta?.repple_account || '').trim();
+    return stamped || null;
+  };
 
   /**
    * Mirror one Connect subscription. `at` is how current the object is — the
@@ -166,12 +273,31 @@ Deno.serve(async (req) => {
     if (meta.trainer_id) identity.trainer_id = meta.trainer_id;
     if (meta.package_id) identity.package_id = meta.package_id;
 
+    // The coach, recovered from the account when the metadata that normally
+    // names them has been stripped. Only ever fills a GAP — `meta.trainer_id`
+    // wins whenever it is there — because the account resolves to the coach who
+    // owns it, which is the right answer for a direct charge and no answer at
+    // all for a destination one.
+    if (!identity.trainer_id && eventAccount) {
+      const fromAcct = await trainerOfAccount(eventAccount);
+      if (fromAcct) identity.trainer_id = fromAcct;
+    }
+
+    // Which ledger this subscription lives on, written once and then read by
+    // every later call about it: connect-checkout's cancel, resume and billing
+    // portal all scope themselves with this column. Like the identity fields it
+    // is only ever written, never cleared — a subscription that came back from
+    // a dashboard edit with nothing on it must not lose the one field that says
+    // where to find it.
+    const onAccount = accountForRow(meta);
+
     // The amount is what Stripe bills, in minor units, taken from the price on
     // the subscription — not from trainer_packages, which the coach can edit
     // after the fact. Null when Stripe does not state one, and it stays null:
     // a subscription rendered as "AED 0.00" is a lie about somebody's money.
     const row: Record<string, unknown> = {
       ...identity,
+      ...(onAccount ? { stripe_account_id: onAccount } : {}),
       stripe_subscription_id: sub.id,
       stripe_customer_id: typeof sub.customer === 'string' ? sub.customer : (sub.customer as Stripe.Customer | null)?.id ?? null,
       status: sub.status,
@@ -211,6 +337,10 @@ Deno.serve(async (req) => {
         const why = await writeConnectSub(sub, eventAt);
         if (why) return fail('client_subscriptions', why);
       } else {
+        // The platform's own billing. Unreachable from a connected account by
+        // construction — `isConnect` returns true for any event with an
+        // `account`, so arriving here means this event came from the platform,
+        // where Repple's coaches pay Repple.
         const trainerId = await trainerOf(sub.customer as string, (sub.metadata as any)?.trainer_id);
         if (trainerId) {
           const { error } = await service.from('subscriptions').upsert({
@@ -226,11 +356,38 @@ Deno.serve(async (req) => {
         }
       }
     } else if (event.type === 'account.updated') {
-      // Stripe Connect: a trainer's Express account status changed.
+      // Stripe Connect: a trainer's connected account status changed.
+      //
+      // The capability columns part 161 added are written here as well as
+      // in connect-onboard, and this is the path that matters: a coach finishes
+      // verification on Stripe's hosted flow and never comes back through the
+      // app, so `account.updated` is the only thing that will ever tell us
+      // `card_payments` went active. connect-checkout refuses a DIRECT charge
+      // while that capability is present and not active, so a coach whose
+      // status is never written stays unable to sell.
+      //
+      // `losses_owner` is recorded because it is the answer to who pays for a
+      // chargeback, it is fixed at account creation, and it cannot be worked
+      // out later from anything else this database holds.
+      //
+      // `account_type` is recorded for the same reason and is the one
+      // connect-checkout actually gates on: a direct charge is refused on
+      // anything that is not 'standard', because on a legacy Express account
+      // Stripe still holds the PLATFORM for the fraud, the dispute and the
+      // negative balance whatever `charge_model` says. Writing it here is also
+      // how every coach onboarded before today gets 'express' filled in without
+      // opening the app — Stripe sends `account.updated` for its own reasons,
+      // and a null type is refused, so the column must not depend on the coach
+      // coming back through connect-onboard.
       const acct = event.data.object as Stripe.Account;
       const { error } = await service.from('connect_accounts').update({
         charges_enabled: !!acct.charges_enabled,
         details_submitted: !!acct.details_submitted,
+        payouts_enabled: !!acct.payouts_enabled,
+        card_payments_status: acct.capabilities?.card_payments ?? null,
+        transfers_status: acct.capabilities?.transfers ?? null,
+        losses_owner: acct.controller?.losses?.payments ?? null,
+        account_type: acct.type ?? null,
         updated_at: new Date().toISOString(),
       }).eq('stripe_account_id', acct.id);
       if (error) return fail('connect_accounts', error.message);
@@ -245,11 +402,23 @@ Deno.serve(async (req) => {
       // `customer.subscription.created` is the record of a subscription.
       if (meta.package_id && sess.mode !== 'subscription') {
         const sessions = meta.sessions ? parseInt(meta.sessions, 10) : null;
+        // The coach, recovered from the account if the metadata is gone. A
+        // one-off sale filed against a null trainer_id is a sale that never
+        // appears on the coach's payments screen, and there is no later event
+        // that would correct it — unlike a subscription, a one-off is
+        // mentioned by Stripe exactly once.
+        const trainerId = meta.trainer_id || (await trainerOfAccount(eventAccount)) || null;
         const { error } = await service.from('client_purchases').upsert({
           client_id: meta.client_id || null,
-          trainer_id: meta.trainer_id || null,
+          trainer_id: trainerId,
           package_id: meta.package_id,
           stripe_session_id: sess.id,
+          // Which ledger the charge was created on. Null is the platform, which
+          // is where every sale before this change was made. It is recorded on
+          // a one-off — which has no further Stripe calls made about it in the
+          // ordinary course — because a REFUND does, and a refund on a direct
+          // charge has to be issued in the connected account's context.
+          ...(accountForRow(meta) ? { stripe_account_id: accountForRow(meta) } : {}),
           amount_cents: sess.amount_total,
           // The unit the amount beside it is in, from the SESSION — what Stripe
           // actually charged in, not what the package row says today.
@@ -340,11 +509,13 @@ Deno.serve(async (req) => {
           // payment into a different month.
           const paidSec = inv.status_transitions?.paid_at ?? null;
           const { error: payErr } = await service.from('client_subscription_payments').upsert({
-            // Metadata first, the mirrored subscription second. Either can be
-            // the one that survives, and a payment filed against nobody is a
-            // payment no coach can ever see.
+  // Metadata first, the mirrored subscription second, the connected
+            // account last. The third is new and is what direct charges made
+            // necessary: an event on a coach's account whose metadata has been
+            // stripped and whose subscription we have somehow not mirrored
+            // still names the coach, because it arrived from their account.
             client_id: subMeta.client_id || known?.client_id || null,
-            trainer_id: subMeta.trainer_id || known?.trainer_id || null,
+            trainer_id: subMeta.trainer_id || known?.trainer_id || (await trainerOfAccount(eventAccount)) || null,
             stripe_subscription_id: subId,
             stripe_invoice_id: inv.id,
             // GROSS, in minor units — what the client was charged, which is
@@ -371,12 +542,35 @@ Deno.serve(async (req) => {
         // client is now — trialing, active, past_due, unpaid. Re-read it rather
         // than infer it, and stamp it as current-as-of-now, because that is
         // what a live re-read is. Monthly, so the round-trip is cheap.
+        //
+        // IN THE SUBSCRIPTION'S OWN ACCOUNT CONTEXT. This is the single line
+        // that direct charges break hardest. A subscription created on a
+        // coach's connected account does not exist on the platform, so this
+        // retrieve throws "No such subscription" — which the catch below turns
+        // into a 500, which asks Stripe to retry, which throws again. The
+        // renewal above IS recorded (it is written first, deliberately), but
+        // the subscription's status never updates again: a client who cancels
+        // stays "active" on screen forever, and a failed card never shows as
+        // past_due to either party.
+        //
+        // The context comes from the event itself, which is the account the
+        // invoice was delivered from — not from the mirrored row, because an
+        // invoice can arrive before the subscription has been mirrored.
         if (INVOICE_ACTIONABLE.has(event.type) && subId) {
-          const fresh = await stripe.subscriptions.retrieve(subId);
+          const fresh = await stripe.subscriptions.retrieve(subId, eventAccount ? { stripeAccount: eventAccount } : undefined);
           const why = await writeConnectSub(fresh, new Date().toISOString());
           if (why) return fail('client_subscriptions', why);
         }
       } else {
+        // The PLATFORM's invoice — a coach paying Repple. Unreachable from a
+        // connected account: `isConnect` is true for every event carrying an
+        // `account`, so this branch only runs on platform events.
+        //
+        // That guard is doing real work. A client's renewal on a coach's
+        // account whose metadata had been stripped would otherwise land here,
+        // in the table that feeds the owner's failed-payments callout — filing
+        // a client's declined card as the COACH failing to pay Repple, and
+        // recording none of the money.
         const trainerId = await trainerOf(inv.customer as string, (inv.subscription_details?.metadata as any)?.trainer_id);
         const { error } = await service.from('invoices').upsert({
           id: inv.id,
@@ -405,3 +599,41 @@ Deno.serve(async (req) => {
 
   return json({ received: true });
 });
+
+// ── DEPLOYMENT: what this file cannot do for itself ────────────────────────
+//
+// Direct charges move a coach's events onto their connected account. Nothing in
+// this function can subscribe to those. It is a Stripe dashboard setting, and
+// until it is made, the code above is correct and never runs.
+//
+// In Stripe ▸ Developers ▸ Webhooks / Event destinations, the CONNECT
+// destination — the one whose signing secret is STRIPE_WEBHOOK_SECRET_CONNECT —
+// must have "Listen to events on Connected accounts" enabled, and must be
+// subscribed to every event type this file handles, not only `account.updated`:
+//
+//     account.updated
+//     checkout.session.completed
+//     customer.subscription.created / .updated / .deleted
+//     invoice.paid
+//     invoice.payment_succeeded
+//     invoice.payment_failed
+//     invoice.payment_action_required
+//     invoice.marked_uncollectible
+//
+// The PLATFORM destination keeps the same subscription list it has today: the
+// owner's own billing still runs there, and coaches still on destination
+// charges still produce their events there. Both destinations point at this one
+// function, and the signature loop at the top tries both secrets.
+//
+// If the connected destination is not extended, the failure is silent and it is
+// the worst one in this system: a client pays, the coach is paid, Stripe
+// records it, and this database never hears about it. No error is raised
+// anywhere, because nothing was ever delivered to fail. The client's purchase,
+// their session credits and their subscription simply do not exist in the app.
+//
+// Verify with the Stripe CLI before trusting it, against a real connected
+// account rather than the platform:
+//
+//     stripe listen --forward-connect-to <function-url>
+//     stripe trigger checkout.session.completed --stripe-account acct_...
+

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payouts set up — Repple</title>
+  <link rel="canonical" href="https://www.repplefitness.com/connect-return">
+  <meta name="description" content="You have finished setting up payouts with Stripe. Open the Repple Coach app to carry on.">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="icon" href="favicon.png">
+</head>
+<body>
+
+<!--
+  WHERE STRIPE SENDS A COACH WHEN THEY FINISH ONBOARDING.
+
+  This page exists because of one line in Stripe's account-links documentation:
+  `return_url` and `refresh_url` "can only use HTTPS in live mode". The app was
+  passing `Linking.createURL('connect/return')`, which is a CUSTOM SCHEME —
+  `repplecoach://connect/return`. That is neither http nor https, so it works in
+  test and is refused the moment Connect goes live.
+
+  Nobody had hit it because live Connect had never run. It would have surfaced
+  as the very first coach failing to onboard, at the point where they are
+  handing Stripe their passport and their bank details, which is the worst
+  possible moment for the flow to break.
+
+  ── Why this page barely does anything ────────────────────────────────────
+
+  Reaching `return_url` does NOT mean onboarding succeeded. Stripe is explicit
+  that it redirects here whenever the coach finishes the hosted flow OR leaves
+  it, and that the only truthful way to know the outcome is to ask the API for
+  the account's requirements. So this page must not congratulate anybody. It
+  says the coach is back, sends them into the app, and lets the app read the
+  real state from `charges_enabled` — which is what the payouts screen already
+  does, and what `account.updated` keeps current.
+
+  The deep link is attempted automatically and also offered as a button,
+  because a custom scheme silently does nothing when the app is not installed
+  and a page that appears to hang is worse than one with a button on it.
+-->
+
+<main>
+  <div class="wrap page" style="max-width:620px">
+    <p class="eyebrow">Repple</p>
+    <h1 class="display">You're back from Stripe</h1>
+    <p class="lede">
+      Open the Repple Coach app to carry on. It will show whether Stripe has
+      everything it needs — sometimes they ask for one more document, and the
+      app is where that appears.
+    </p>
+
+    <p class="btn-row">
+      <a class="btn primary" id="open" href="repplecoach://connect/return">Open the app</a>
+      <a class="btn" href="/download">Get the app</a>
+    </p>
+  </div>
+</main>
+
+<script>
+  // Attempted once, on load, rather than on a timer that races the button. A
+  // custom scheme on a desktop browser does nothing at all and throws nothing,
+  // so there is no failure here to report — which is exactly why the button
+  // above is not hidden behind this working.
+  try { location.href = document.getElementById('open').href; } catch (e) { /* the button is the fallback */ }
+</script>
+
+</body>
+</html>

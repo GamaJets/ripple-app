@@ -459,10 +459,31 @@ one, and Connect would not have been available. New Stripe accounts ship with
 Accounts v1 **disabled**, because v1 is no longer the recommended way to create
 connected accounts.
 
-`supabase/functions/connect-onboard/index.ts:37` calls
-`stripe.accounts.create({ type: 'express' })`, which is v1. So the toggle is
-what makes the existing code work at all. It was found by triggering
-`account.updated` and reading the refusal, not by reasoning about it.
+`supabase/functions/connect-onboard/index.ts` calls `stripe.accounts.create`
+with a `type`, which is v1 whichever type it is. So the toggle is what makes the
+existing code work at all. It was found by triggering `account.updated` and
+reading the refusal, not by reasoning about it.
+
+**The type is now `standard`, not `express`.** That was the owner's decision on
+1 Sep 2026 and it is about liability, not plumbing: Stripe's account-type table
+puts fraud and dispute liability on the PLATFORM for Express accounts under
+every charge type, and on the CONNECTED ACCOUNT for Standard accounts under
+direct charges. A coach on Standard is the merchant of record — Stripe's fees,
+their refunds, their chargebacks, their full Dashboard. The type is fixed at
+creation and cannot be changed, so this has to be right before the first live
+coach, not after. `CONNECT_ACCOUNT_LIABILITY` defaults to `coach` (Standard);
+setting it to `platform` is the only way back to Express and exists to describe
+accounts that already exist rather than to make new ones.
+
+**Two more Stripe dashboard settings that Standard onboarding needs:**
+
+- **Connect → Settings → branding: name, colour and icon.** Stripe's Standard
+  guide opens with this and says "Connect Onboarding requires this
+  information." Without it the hosted onboarding form has nothing to brand
+  itself with.
+- **The platform profile** at Connect → Settings → Profile. It is what decides
+  which capabilities Stripe will grant, and an incomplete one is a documented
+  cause of a refused `accounts.create`.
 
 **This is a stay of execution, not a fix.** The recommended path is
 `POST /v2/core/accounts`. Migrating is real work and is much cheaper to do
@@ -478,3 +499,13 @@ Your account) and `STRIPE_WEBHOOK_SECRET_CONNECT` (Repple Connected Accounts,
 
 Verified working in test on 31 Aug: `checkout.session.completed` → 200,
 `account.updated` from a connected account → 200.
+
+**Not verified, and it will bite in live:** `accountLinks.create` takes a
+`return_url` and a `refresh_url`, and Stripe says "you can only use HTTPS in
+live mode". The app sends `Linking.createURL('connect/return')`, which is a
+custom scheme — `repplecoach://connect/return` — and a custom scheme is neither
+HTTP nor HTTPS. Nothing has caught this because live Connect onboarding has
+never run. It needs two real pages on the brand web origin, `/connect/return`
+and `/connect/refresh`, that hand off into the coach app; `refresh` must ask the
+server for a fresh link, because account links are single-use and expire in
+minutes. This applies to the Express path too — it is not new with Standard.

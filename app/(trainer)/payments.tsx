@@ -33,6 +33,32 @@
 // figure above it is labelled as exactly what it is — gross, taken, per
 // currency, before anybody's fee.
 //
+// ── Whose money it is, and why that is now a sentence on the screen ──────
+//
+// It used to be Repple's, in the only sense that matters to a bank. Every sale
+// was a DESTINATION charge: created on Repple's Stripe account and transferred
+// on to the coach, with Repple as the merchant of record and Repple's balance
+// debited for every refund and every chargeback. Coaches onboarded from part
+// 161 onward get a STANDARD Stripe account and sell under DIRECT charges
+// instead, which reverses all of that — the money lands in their account,
+// Stripe's processing fee comes out of their balance rather than Repple's, a
+// dispute is theirs to answer, and their dashboard is the full one rather than
+// the Express one.
+//
+// None of those three was said anywhere in this app, and all three are things a
+// person finds out at the worst possible moment otherwise: the first time a
+// client charges back. So they are said in the Payouts section, once, in two
+// sentences.
+//
+// They are chosen by `connect_accounts.account_type` — Stripe's own word, read
+// through `accountTypeOf` — and NOT by which build this is, because both
+// arrangements are live at the same time and will be for as long as the legacy
+// Express accounts exist. Those coaches get the opposite sentence, which is
+// equally true of them. When Stripe has not said what the account is, the
+// screen says nothing at all: this is the screen that refuses to print a
+// balance it was not told, and a fee sentence that might be about the other
+// arrangement is the same kind of invention.
+//
 // ── What a coach has EARNED, and why that took a new table ────────────────
 //
 // The figure above used to be one-off sales and nothing else, because one-off
@@ -158,6 +184,7 @@ import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgM
 import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
 import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, type Pot, type TakenRow } from '../../src/lib/coachMoney';
 import { readNumber } from '../../src/lib/units';
+import { accountTypeOf } from '../../src/lib/directCharges';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
   { key: null, label: 'One-off' },
@@ -333,6 +360,25 @@ export default function TrainerPayments() {
   } }]);
 
   const active = conn?.charges_enabled;
+
+  /**
+   * Whose money this is, in one word, read off Stripe rather than assumed.
+   *
+   * Two arrangements exist and they say opposite things to a coach. On a
+   * STANDARD account — what a coach onboarded from part 161 onward gets — the
+   * coach is the merchant of record: Stripe's processing fee comes out of their
+   * balance rather than Repple's, a refund or a chargeback is debited from
+   * their balance, and their dashboard is the full one at dashboard.stripe.com.
+   * On the legacy EXPRESS accounts everyone onboarded before that has, Repple
+   * is the merchant of record and the dashboard is the Express one.
+   *
+   * `null` is the third state and it is not a shrug: it means nobody has asked
+   * Stripe what this account is yet. This screen then says NOTHING about fees,
+   * chargebacks or dashboards, for the same reason it prints no balance and no
+   * payout — a sentence about somebody's money that might be about the other
+   * arrangement is worse than no sentence.
+   */
+  const kind = accountTypeOf(conn);
   const G = layout.gutter;
   const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
@@ -488,8 +534,15 @@ export default function TrainerPayments() {
             {/* ── payout status: the one decision on this screen ──────────── */}
             {!active ? (
               <View style={{ marginTop: sp.xl }}>
+                {/* The arrangement is added to the NOTE rather than dropped in
+                    as a second Text, because the kit reads kicker, title and
+                    note out as one statement and a stray line beside them is
+                    skipped by a screen reader. It is only added once Stripe has
+                    said what the account is — see `kind`. */}
                 <Notice tone={t.warn} kicker="Payouts" title="Set Up Payouts"
-                  note={conn?.stripe_account_id ? 'Finish verifying with Stripe to go live.' : 'Connect a payout account with Stripe.'}>
+                  note={conn?.stripe_account_id
+                    ? 'Finish verifying with Stripe to go live.' + (kind === 'standard' ? ' Payments land in your own Stripe account, and its fees, refunds and chargebacks come out of your balance.' : '')
+                    : 'Connect a payout account with Stripe.'}>
                   <View style={{ marginTop: sp.lg }}>
                     <Cta label={busy ? 'Opening…' : (conn?.stripe_account_id ? 'Continue Setup' : 'Set Up Payouts')} wide disabled={busy} onPress={onboard} />
                   </View>
@@ -507,6 +560,29 @@ export default function TrainerPayments() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>You can accept client payments.</Text>
                   </View>
                 </View>
+
+                {/* The three things that changed when coaches moved onto their
+                    own Stripe accounts, and that nothing in this app said until
+                    now: whose account Stripe's fee comes out of, whose balance a
+                    refund or a chargeback is taken from, and which dashboard is
+                    theirs. All three follow from being the merchant of record,
+                    and all three are the opposite on the legacy Express
+                    accounts — so the sentence is chosen by what Stripe says the
+                    account is, and there is no sentence at all when Stripe has
+                    not said. */}
+                {kind === 'standard' ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    Your clients pay your own Stripe account. Stripe&apos;s processing fee comes out of it,
+                    and so does any refund or chargeback — those are yours to answer, not Repple&apos;s.
+                    Your payouts, disputes and receipts are in the full Stripe dashboard at dashboard.stripe.com.
+                  </Text>
+                ) : kind === 'express' ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    Your clients pay Repple, which passes the money on to your Stripe account. Repple is
+                    the merchant of record on those sales, so a refund or a chargeback comes out of
+                    Repple&apos;s balance. Your payouts are in the Express Dashboard Stripe sends you to.
+                  </Text>
+                ) : null}
               </Section>
             )}
 

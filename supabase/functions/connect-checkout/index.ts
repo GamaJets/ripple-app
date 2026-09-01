@@ -3,6 +3,42 @@
 // taking an application fee. Uses STRIPE_SECRET_KEY. PLATFORM_FEE_PCT (default 10)
 // is the platform's cut. Request: { package_id, success_url?, cancel_url? }
 //
+// ── Which account the charge is created ON, and why it moved ──────────────
+//
+// Two models live in this file, and both are load-bearing.
+//
+//   DESTINATION  the Checkout Session is created on the PLATFORM account and
+//                `transfer_data.destination` sends the money on to the coach.
+//                Repple is the merchant of record; Stripe debits REPPLE's
+//                balance for every refund and every chargeback on a coach's
+//                client. Every charge this repo has ever taken is one of these.
+//   DIRECT       the Checkout Session is created ON the coach's connected
+//                account, via the `stripeAccount` request option — Stripe's
+//                `Stripe-Account` header. The coach is the merchant of record;
+//                Stripe debits the COACH's balance for refunds and disputes.
+//                There is no `transfer_data`, because the money never leaves
+//                the coach's account in the first place. The platform's cut is
+//                the application fee, which travels the other way.
+//
+// The owner's decision is that liability sits with the coach, so direct is
+// where this is going. The reason both are still here is not caution, it is
+// that Stripe will not let them be collapsed: a connected account's controller
+// and dashboard type are fixed at creation, so every coach onboarded before
+// today is on an Express account that CANNOT be converted to the arrangement
+// direct charges are supposed to deliver. They keep selling under destination
+// charges until they are deliberately re-onboarded onto a new account.
+//
+// Which one a coach is on is `connect_accounts.charge_model` (part 161), read
+// through `modelForAccount` — which answers 'destination' for anything it does
+// not recognise, so a missing or garbled column can never move a coach onto a
+// model their Stripe account is not configured for.
+//
+// The two branches share no Stripe parameters, for the same reason the one-off
+// and subscription branches below share none: `transfer_data` and a direct
+// charge are mutually exclusive, this is live money, and the way to keep the
+// working path working is to leave it as the code it was rather than thread
+// conditionals through it.
+//
 // It now also sells RECURRING packages. A trainer_packages row with a
 // billing_interval of 'month' or 'year' is a subscription; null — which is every
 // package that existed before part 97 — is the one-off it always was. The two
@@ -35,6 +71,9 @@
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { refusalFor } from '../../../src/lib/subscriptionScope.ts';
+import {
+  modelForAccount, optionsForObject, platformFeePct, applicationFeeCents, canTakeDirectCharges,
+} from '../../../src/lib/directCharges.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -67,7 +106,21 @@ Deno.serve(async (req) => {
   const key = Deno.env.get('STRIPE_SECRET_KEY');
   if (!key) return json({ error: 'Set STRIPE_SECRET_KEY as a Supabase secret.' }, 400);
   const stripe = new Stripe(key, { apiVersion: '2024-06-20' });
-  const feePct = Number(Deno.env.get('PLATFORM_FEE_PCT') ?? '10');
+
+  // The platform's cut, checked rather than coerced.
+  //
+  // This was `Number(Deno.env.get('PLATFORM_FEE_PCT') ?? '10')` and nothing
+  // looked at the answer. `Number('ten')` is NaN, and NaN travelled: the one-off
+  // path sent `application_fee_amount: NaN` and the subscription path sent
+  // `application_fee_percent: NaN` into a live recurring charge. Stripe refuses
+  // both, so a typo in one secret stopped every client of every coach from
+  // buying anything, with nothing anywhere naming the cause.
+  const feeRead = platformFeePct(Deno.env.get('PLATFORM_FEE_PCT'));
+  if (!feeRead.ok) {
+    console.error('connect-checkout: ' + feeRead.reason);
+    return json({ error: 'Payments are misconfigured on this server, so nothing has been charged. The platform fee setting is not usable.' }, 500);
+  }
+  const feePct = feeRead.pct;
 
   let body: any = {};
   try { body = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
@@ -99,7 +152,7 @@ Deno.serve(async (req) => {
     // finding the row and deciding who may touch it — and while they were one
     // query the second job could only ever have one answer.
     const { data: row, error: readErr } = await service.from('client_subscriptions')
-      .select('stripe_subscription_id, stripe_customer_id, client_id, trainer_id').eq('stripe_subscription_id', subId).maybeSingle();
+      .select('stripe_subscription_id, stripe_customer_id, stripe_account_id, client_id, trainer_id').eq('stripe_subscription_id', subId).maybeSingle();
     if (readErr) return json({ error: 'could not read your subscription: ' + readErr.message }, 500);
     if (!row) return json({ error: 'subscription not found' }, 404);
 
@@ -117,16 +170,40 @@ Deno.serve(async (req) => {
       return json({ error: refusal.error }, refusal.status);
     }
 
+    // WHICH STRIPE ACCOUNT this subscription lives on. Everything below this
+    // line is a call about an object that already exists, and an object exists
+    // on exactly one ledger: the platform for a subscription sold under
+    // destination charges, the coach's connected account for one sold under
+    // direct charges.
+    //
+    // Read off the ROW, never off the coach's current `charge_model`. A coach
+    // who moves to direct charges still has subscriptions created on the
+    // platform, and asking their account which context to use would send every
+    // cancel, resume and portal for those to the wrong ledger. Stripe answers
+    // "No such subscription" there, and this function turns that into a client
+    // being told their subscription does not exist while their card is still
+    // being charged every month.
+    //
+    // Null means the platform, and null is what every row written before part
+    // 161 holds — which is exactly right, because that is where they all are.
+    const acctOpts = optionsForObject(row);
+
     if (action === 'portal') {
-      // The card, the invoices, the receipts. The subscription lives on the
-      // PLATFORM account (destination charges), so this is the platform's
-      // portal — with the client's customer, not the coach's.
+      // The card, the invoices, the receipts.
+      //
+      // A Customer belongs to ONE account. Under destination charges the client
+      // is a customer of the PLATFORM; under direct charges Checkout created
+      // them as a customer of the COACH's connected account, and the two id
+      // spaces are unrelated — a `cus_...` from one is simply not found in the
+      // other. So the portal session is created in the same context as the
+      // subscription that named the customer, or the client cannot reach their
+      // own card to update it and cannot cancel from Stripe's side at all.
       if (!row.stripe_customer_id) return json({ error: 'no billing account on this subscription yet' }, 404);
       try {
         const portal = await stripe.billingPortal.sessions.create({
           customer: row.stripe_customer_id,
           return_url: String(body.return_url || 'repple://packages'),
-        });
+        }, acctOpts);
         return json({ url: portal.url });
       } catch (e) { return stripeError('billing portal', e); }
     }
@@ -150,7 +227,11 @@ Deno.serve(async (req) => {
     // leave somebody believing they had stopped a charge that is still running.
     let updated: Stripe.Subscription | null = null;
     try {
-      updated = await stripe.subscriptions.update(subId, { cancel_at_period_end: cancelAtPeriodEnd });
+      // In the subscription's OWN account context. A direct-charge subscription
+      // updated without it is not found, and this function would answer "Stripe
+      // did not confirm the change" to somebody who then believes their
+      // cancellation failed — while the charge carries on either way.
+      updated = await stripe.subscriptions.update(subId, { cancel_at_period_end: cancelAtPeriodEnd }, acctOpts);
     } catch (e) { return stripeError(action, e); }
     if (!updated) return json({ error: 'Stripe did not confirm the change, so nothing has changed.' }, 502);
 
@@ -203,9 +284,58 @@ Deno.serve(async (req) => {
   const { data: pkg, error: pkgErr } = await service.from('trainer_packages').select('*').eq('id', packageId).eq('active', true).maybeSingle();
   if (pkgErr) return json({ error: 'could not read the package: ' + pkgErr.message }, 500);
   if (!pkg) return json({ error: 'package not found' }, 404);
-  const { data: acct, error: acctErr } = await service.from('connect_accounts').select('stripe_account_id, charges_enabled').eq('trainer_id', pkg.trainer_id).maybeSingle();
+  const { data: acct, error: acctErr } = await service.from('connect_accounts')
+    .select('stripe_account_id, charges_enabled, charge_model, card_payments_status, account_type').eq('trainer_id', pkg.trainer_id).maybeSingle();
   if (acctErr) return json({ error: 'could not check the payout account: ' + acctErr.message }, 500);
   if (!acct?.stripe_account_id || !acct.charges_enabled) return json({ error: 'This trainer is not set up to take payments yet.' }, 400);
+
+  // Which ledger this coach's charges are created on. Anything other than the
+  // exact word 'direct' is 'destination' — the model every account used before
+  // part 161 — so a column that is null, absent or garbled cannot move a coach
+  // onto a model their Stripe account was never configured for.
+  const model = modelForAccount(acct);
+
+  // Direct charges have two preconditions destination charges do not.
+  //
+  // THE ACCOUNT MUST BE A STANDARD ONE. `charge_model` is a column, and part
+  // 161 describes the owner writing it a coach at a time. Written onto a legacy
+  // EXPRESS account it does not deliver what it promises: the charge really is
+  // created on the coach's ledger, and Stripe still holds REPPLE for the fraud,
+  // the dispute and any balance the coach cannot repay — Stripe's account-type
+  // table gives Express "Platform" liability flat, with no charge-type
+  // qualifier. Nothing would look wrong until a chargeback arrived, so the
+  // account's own type is checked and only 'standard' passes.
+  //
+  // AND STRIPE MUST HAVE FINISHED WITH THEM. Stripe requires `card_payments` to
+  // be ACTIVE on the connected account; an account halfway through onboarding
+  // has it merely requested, and `charges_enabled` alone does not distinguish
+  // those. Checked here so the coach is told they have not finished verifying,
+  // rather than the client meeting a raw Stripe refusal on a payment page.
+  //
+  // A null capability status is an ABSENCE, not a refusal — see
+  // canTakeDirectCharges. Every row written before part 161 has one. A null
+  // account TYPE is a refusal, and the difference is deliberate: no row is
+  // 'direct' until this ships, so nothing that sells today is affected, and a
+  // row that is both direct and untyped is one somebody edited by hand.
+  if (model === 'direct') {
+    const ready = canTakeDirectCharges(acct);
+    if (!ready.ok) return json({ error: ready.reason }, 400);
+  }
+
+  // The request option that makes it a direct charge: Stripe's `Stripe-Account`
+  // header. Undefined for destination charges, which are created on the
+  // platform exactly as they always have been.
+  const acctOpts = model === 'direct' ? optionsForObject(acct) : undefined;
+
+  // Stamped into the metadata of everything created below, so the webhook can
+  // write it onto the row it mirrors. That column is what every LATER Stripe
+  // call about the object reads to know which ledger to talk to, and it cannot
+  // be recovered afterwards from the coach's current setting — a coach who
+  // switches models would make every subscription sold before the switch
+  // unreachable. Empty string for destination charges rather than the account
+  // id, because Stripe metadata values are strings and the webhook turns an
+  // empty one into the null that means "the platform".
+  const acctMeta = model === 'direct' ? String(acct.stripe_account_id) : '';
 
   // No fallback currency. This was `pkg.currency || 'usd'`, and a literal here
   // does not merely mislabel a price — it CHARGES in the wrong money. Repple is
@@ -219,50 +349,90 @@ Deno.serve(async (req) => {
   if (interval) {
     if (!INTERVALS.has(interval)) return json({ error: 'This package has a billing interval this app does not sell.' }, 400);
 
-    // Destination charges on a subscription: the fee is a PERCENT, not an
-    // amount. Stripe rejects application_fee_amount in subscription_data, and
-    // recomputes the percent against every future invoice — which is the point,
-    // because a fixed amount would be wrong the moment the price changes.
+    // On a subscription the fee is a PERCENT, not an amount, under BOTH models.
+    // Stripe rejects application_fee_amount in subscription_data, and recomputes
+    // the percent against every future invoice — which is the point, because a
+    // fixed amount would be wrong the moment the price changes.
+    //
+    // What differs between the models is the `transfer_data`, and it differs by
+    // being absent. Under a direct charge the money is already the coach's; a
+    // `transfer_data.destination` pointing the coach's own account at itself is
+    // not a no-op, it is a parameter Stripe refuses.
+    //
+    // Metadata on the SUBSCRIPTION, not just on the checkout session. Session
+    // metadata is not copied onto the subscription, and every event that
+    // matters from here on — subscription.updated, .deleted, invoice.paid —
+    // carries the subscription's metadata and never the session's. Without this
+    // the webhook gets a renewal in month four with no idea whose it is. Under
+    // direct charges that is worse than it was: the event arrives on the
+    // CONNECTED account, so the metadata is not merely the easiest identity, it
+    // is most of the identity there is.
+    const subMeta = {
+      repple_kind: 'connect_subscription',
+      package_id: packageId,
+      trainer_id: pkg.trainer_id,
+      client_id: uid,
+      package_currency: currency,
+      repple_account: acctMeta,
+    };
     try {
       const session = await stripe.checkout.sessions.create({
         mode: 'subscription',
         line_items: [{ price_data: { currency, unit_amount: pkg.price_cents, recurring: { interval: interval as 'month' | 'year' }, product_data: { name: pkg.name } }, quantity: 1 }],
         subscription_data: {
           application_fee_percent: feePct,
-          transfer_data: { destination: acct.stripe_account_id },
-          // Metadata on the SUBSCRIPTION, not just on the checkout session.
-          // Session metadata is not copied onto the subscription, and every
-          // event that matters from here on — subscription.updated, .deleted,
-          // invoice.paid — carries the subscription's metadata and never the
-          // session's. Without this the webhook gets a renewal in month four
-          // with no idea whose it is.
-          metadata: {
-            repple_kind: 'connect_subscription',
-            package_id: packageId,
-            trainer_id: pkg.trainer_id,
-            client_id: uid,
-            package_currency: currency,
-          },
+          ...(model === 'direct' ? {} : { transfer_data: { destination: acct.stripe_account_id } }),
+          metadata: subMeta,
         },
         success_url: successUrl,
         cancel_url: cancelUrl,
-        metadata: { repple_kind: 'connect_subscription', package_id: packageId, trainer_id: pkg.trainer_id, client_id: uid },
-      });
+        metadata: { repple_kind: 'connect_subscription', package_id: packageId, trainer_id: pkg.trainer_id, client_id: uid, repple_account: acctMeta },
+      }, acctOpts);
       return json({ url: session.url });
     } catch (e) { return stripeError('subscription checkout', e); }
   }
 
-  // One-off. Unchanged — same fee arithmetic, same parameters, same metadata.
-  const fee = Math.round((pkg.price_cents * feePct) / 100);
+  // One-off.
+  //
+  // The fee arithmetic moved to src/lib/directCharges.ts, because it has a rule
+  // in it that this line did not obey: Stripe requires application_fee_amount
+  // to be POSITIVE and STRICTLY LESS than the charge. `Math.round((price *
+  // feePct) / 100)` produces 0 for any package cheap enough — 4 minor units at
+  // 10% — and a literal 0 is not "no fee", it is a rejected Checkout Session.
+  // The client would meet "Could not start checkout" on a package that is
+  // priced perfectly correctly, and the cause would be a rounding boundary
+  // nothing in this file mentioned.
+  //
+  // So `fee: null` means OMIT the field, and that is a different thing from
+  // zero. It is returned rather than thrown because a cheap package is not an
+  // error — Repple simply takes nothing on it.
+  const feeCalc = applicationFeeCents(pkg.price_cents, feePct);
+  if (!feeCalc.ok) {
+    console.error('connect-checkout: ' + feeCalc.reason);
+    return json({ error: 'This package cannot be charged for as priced, so nothing has been charged.' }, 400);
+  }
+  const fee = feeCalc.fee;
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       line_items: [{ price_data: { currency, unit_amount: pkg.price_cents, product_data: { name: pkg.name } }, quantity: 1 }],
-      payment_intent_data: { application_fee_amount: fee, transfer_data: { destination: acct.stripe_account_id } },
+      // Under a direct charge there is no transfer: the money lands in the
+      // coach's balance because the charge was created there, and the
+      // application fee travels the other way, to Repple. Sending
+      // `transfer_data` as well would point the coach's account at itself,
+      // which Stripe refuses.
+      payment_intent_data: {
+        ...(fee === null ? {} : { application_fee_amount: fee }),
+        ...(model === 'direct' ? {} : { transfer_data: { destination: acct.stripe_account_id } }),
+      },
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: { package_id: packageId, trainer_id: pkg.trainer_id, client_id: uid, sessions: String(pkg.sessions ?? '') },
-    });
+      // `repple_account` is how the webhook learns which ledger to stamp on
+      // `client_purchases`. It is worth carrying even on a one-off, which has
+      // no later Stripe calls made about it: a refund does, and a refund on a
+      // direct charge has to be issued in the connected account's context.
+      metadata: { package_id: packageId, trainer_id: pkg.trainer_id, client_id: uid, sessions: String(pkg.sessions ?? ''), repple_account: acctMeta },
+    }, acctOpts);
     return json({ url: session.url });
   } catch (e) { return stripeError('checkout', e); }
 });

@@ -4,7 +4,7 @@
 // Trainers manage packages directly (RLS); money flows through the connect-* edge
 // functions. Credential-ready: activates once Stripe Connect is enabled + keys set.
 import { Linking } from 'react-native';
-import { appLink } from './deepLink';
+import { appLink, WEB_ORIGIN } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
 import { capLimit, capped, TruncatedRead, ROW_CAP } from './rowCap';
@@ -12,7 +12,25 @@ import { writeFailure } from './wroteRows';
 import { packBalance, readDraw, drew, drawReason, type PackPurchase, type PackBalance } from './packDraw';
 import type { LoadStatus } from '../ui/loadStatus';
 
-export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean }
+/**
+ * What the app knows about a trainer's payout account.
+ *
+ * `account_type` is Stripe's own word for what the account IS, and it is on
+ * this type because the payments screen has to tell a coach the truth about
+ * their own money. The two arrangements say opposite things: on a STANDARD
+ * account the coach is the merchant of record, so Stripe's processing fees come
+ * out of their balance, refunds and chargebacks are theirs, and their dashboard
+ * is the full one at dashboard.stripe.com. On the legacy EXPRESS accounts every
+ * coach onboarded before part 161 has, Repple is the merchant of record and
+ * they have the Express Dashboard instead. One sentence cannot be true of both,
+ * so the screen reads this column rather than assuming.
+ *
+ * Null means nobody has asked Stripe yet — a row from before part 161 that has
+ * not been touched by `connect-onboard` or an `account.updated` since. The
+ * screen says nothing about fees or dashboards in that case rather than
+ * guessing, which is the same rule the rest of it follows about money.
+ */
+export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean; account_type: string | null }
 /**
  * A thing a trainer sells.
  *
@@ -50,10 +68,28 @@ export interface Purchase { id: string; client_id: string | null; trainer_id: st
 
 const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
 
-/** Start / resume Stripe Express onboarding for the signed-in trainer. */
+/**
+ * Start / resume Stripe Connect onboarding for the signed-in trainer.
+ *
+ * ── Why these two URLs are https and not app links ────────────────────────
+ *
+ * They used to be `appLink('connect/return')`, which is a CUSTOM SCHEME —
+ * `repplecoach://connect/return`. Stripe's account-links documentation says
+ * `return_url` and `refresh_url` "can only use HTTPS in live mode", so a custom
+ * scheme works in test and is refused the day Connect goes live. Nobody had hit
+ * it because live Connect had never run: it would have surfaced as the first
+ * real coach failing to onboard, at the moment they were handing Stripe their
+ * passport and their bank details.
+ *
+ * `WEB_ORIGIN` rather than a literal, because it is per brand — a white-label
+ * chain's coach must not be redirected onto Repple's website halfway through
+ * setting up their own payouts. web/connect-return.html and
+ * web/connect-refresh.html hand off back into the app from there, and each
+ * explains in its own header what Stripe means by landing there.
+ */
 export async function startTrainerOnboarding(): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data, error } = await supabase.functions.invoke('connect-onboard', { body: { refresh_url: appLink('connect/refresh'), return_url: appLink('connect/return') } });
+    const { data, error } = await supabase.functions.invoke('connect-onboard', { body: { refresh_url: `${WEB_ORIGIN}/connect-refresh`, return_url: `${WEB_ORIGIN}/connect-return` } });
     if (error) return { ok: false, error: error.message };
     if (data?.url) { await openUrl(data.url); return { ok: true }; }
     return { ok: false, error: data?.error || 'Could not start onboarding.' };
@@ -70,7 +106,7 @@ export async function fetchMyConnect(): Promise<ConnectStatus | null> {
     // not. null means "could not read"; the caller renders that differently.
     const { data, error } = await supabase.from('connect_accounts').select('*').eq('trainer_id', uid).maybeSingle();
     if (error) { reportError('connect.fetchMyConnect', error); return null; }
-    return (data as ConnectStatus) ?? { stripe_account_id: null, charges_enabled: false, details_submitted: false };
+    return (data as ConnectStatus) ?? { stripe_account_id: null, charges_enabled: false, details_submitted: false, account_type: null };
   } catch { return null; }
 }
 

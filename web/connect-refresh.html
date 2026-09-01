@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>That link has expired — Repple</title>
+  <link rel="canonical" href="https://www.repplefitness.com/connect-refresh">
+  <meta name="description" content="Your Stripe onboarding link expired. Open the Repple Coach app and tap Set Up Payouts again to get a fresh one.">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="icon" href="favicon.png">
+</head>
+<body>
+
+<!--
+  WHERE STRIPE SENDS A COACH WHEN THE ONBOARDING LINK IS NO LONGER USABLE.
+
+  Same HTTPS rule as connect-return.html — see the long note there for why a
+  custom scheme cannot be used for either of these in live mode.
+
+  ── What `refresh_url` actually means ─────────────────────────────────────
+
+  An account link is single-use and short-lived. Stripe sends the coach here
+  when the link has expired, when it has already been visited, or when the
+  session could not be started. In every one of those cases the ONLY remedy is
+  a brand new link — the old one cannot be revived, and there is nothing this
+  page could do with it.
+
+  So this page does not try to look like an error. Nothing has gone wrong with
+  the coach's account and nothing they entered has been lost; a link simply ran
+  out. It says that, and points at the one action that works: tap Set Up
+  Payouts again, which calls connect-onboard, which mints a fresh link against
+  the same connected account.
+
+  ── Why it does not mint the link itself ──────────────────────────────────
+
+  It could not. `connect-onboard` authenticates the caller with their Supabase
+  JWT and looks their trainer id up from it; this page is an anonymous web page
+  with no session, and giving it one would mean putting a credential on a page
+  whose whole audience is people who have just been redirected in from a third
+  party. The app already holds the session and already has the button.
+-->
+
+<main>
+  <div class="wrap page" style="max-width:620px">
+    <p class="eyebrow">Repple</p>
+    <h1 class="display">That link has expired</h1>
+    <p class="lede">
+      Stripe's setup links only last a few minutes and can be used once. Nothing
+      is wrong with your account and nothing you entered has been lost — open
+      the Repple Coach app and tap <strong>Set Up Payouts</strong> again, and
+      Stripe will pick up where you left off.
+    </p>
+
+    <p class="btn-row">
+      <a class="btn primary" id="open" href="repplecoach://connect/refresh">Open the app</a>
+      <a class="btn" href="/download">Get the app</a>
+    </p>
+  </div>
+</main>
+
+<script>
+  try { location.href = document.getElementById('open').href; } catch (e) { /* the button is the fallback */ }
+</script>
+
+</body>
+</html>
