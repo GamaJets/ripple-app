@@ -30,7 +30,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
    */
   const healthConnectReason = (): string =>
     Platform.OS === 'android'
-      ? 'Repple can’t read Health Connect yet. It needs a piece of the Android app itself, so it can’t arrive in an update — it has to come with a new version from the Play Store. WHOOP and Oura connect here on Android today and cover the same ground.'
+      ? 'Repple reads blood sugar from Health Connect, on the Blood Sugar screen. It does not read training from it — steps, heart rate and workouts still have to come from a watch, and WHOOP and Oura connect here on Android today.'
       : 'Health Connect is Android’s health store, so there is nothing on this phone for it to read. Apple Health above is the equivalent here.';
 
   return {
@@ -52,12 +52,19 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       // family exists to prevent, wearing a different vendor's name: the app
       // asking somebody to fix something only we can fix.
       //
-      // There IS no native module. `react-native-health-connect` is a native
-      // Android dependency — a new Gradle dependency, a minSdk bump and a fresh
-      // set of manifest permission declarations — so it cannot arrive in an
-      // over-the-air update at all. Until a build carries it, "can this
-      // provider run in the current binary right now?" (the contract in
-      // types.ts) has exactly one honest answer, and it is no.
+      // `react-native-health-connect` IS in the build now — it was added for
+      // blood sugar, which src/lib/wearables/healthConnect.ts reads. This still
+      // returns false, and that is not an oversight. The contract in types.ts
+      // is about DAILY METRICS: steps, heart rate, calories, workouts. Nothing
+      // reads any of those from Health Connect, and the glucose reader asks
+      // for one record type on purpose — a permission screen listing six types
+      // in order to ship one feature is a screen people stop reading, which is
+      // the same argument `permissionSet` in appleHealth.ts makes.
+      //
+      // So "can this provider run in the current binary right now?" still has
+      // one honest answer for the thing this provider is, and it is no. The
+      // reason sentence below no longer says Repple cannot read Health Connect
+      // at all, because that would now be false.
       if (isHealthConnect) return false;
       // "once configured" was doing a lot of work in the old comment, and
       // nothing in the code. This returned true for EVERY cloud vendor —

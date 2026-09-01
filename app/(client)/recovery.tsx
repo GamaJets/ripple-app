@@ -73,6 +73,10 @@ function attribution(n: MergedNight): string {
   const src = n.source;
   if (!src) return 'No device recorded this night.';
   const head = `from your ${src.sourceName}${src.basis === 'in-bed' ? ' — time in bed, which runs longer than time asleep' : ''}`;
+  // A night Repple kept from an earlier read. The figure is real and the device
+  // named it, but that device has not answered today — so this says so rather
+  // than letting a stored reading pass for a live one. See part 153.
+  if (n.kept) return `${head}, kept from an earlier read — your devices didn’t answer for this night today.`;
   const other = n.others[0];
   if (n.agreement === 'conflicting' && other) {
     return `${head}. Your ${other.sourceName} has the same night at ${formatSleepHours(other.minutesAsleep)} — ${n.spreadMin} min apart. Both are shown; neither has been averaged into a figure no device reported.`;

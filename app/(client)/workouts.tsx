@@ -353,6 +353,11 @@ export default function Train() {
   // user typed themselves — it has no catalogue alternatives to swap to.
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [cxName, setCxName] = useState(''); const [cxSets, setCxSets] = useState('3'); const [cxReps, setCxReps] = useState('10');
+  // Typed in the MEMBER's unit and converted on the way in, never stored as typed.
+  const [cxWeight, setCxWeight] = useState('');
+  // Seeded from the member's own unit but switchable per entry: a machine in a
+  // hotel gym is plated in whatever that gym uses, not in what the member reads.
+  const [cxUnit, setCxUnit] = useState<WeightUnit>(wu);
   const today0 = new Date();
   const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon); monday0.setHours(0, 0, 0, 0);
   const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
@@ -543,6 +548,8 @@ export default function Train() {
     if (isCustomEx(e)) {
       setEditingKey(e.key);
       setCxName(e.name); setCxSets(String(e.sets)); setCxReps(String(e.reps));
+      // Read back out in the member's own unit, so what they see is what they typed.
+      setCxWeight(e.loadKg == null ? '' : String(liftIn(e.loadKg, cxUnit)));
       setAddOpen(true);
     } else setSwapFor(e);
   };
@@ -554,16 +561,22 @@ export default function Train() {
     if (!name) return;
     const sets = parseInt(cxSets, 10) || 3;
     const reps = String(parseInt(cxReps, 10) || 10);
+    // Blank means "no target", which is a real answer and not zero. A typed
+    // figure goes through `readLift`, which converts from the member's unit and
+    // REFUSES a number it cannot believe — so a typo becomes no target rather
+    // than a load nobody can lift.
+    const read = cxWeight.trim() ? readLift(cxWeight, cxUnit) : null;
+    const loadKg = read && read.ok ? read.kg : null;
     if (editingKey) {
       // Same key, so sets already logged against it survive the rename.
-      setCustomEx((prev) => prev.map((x) => (x.key === editingKey ? { ...x, name, sets, reps } : x)));
+      setCustomEx((prev) => prev.map((x) => (x.key === editingKey ? { ...x, name, sets, reps, loadKg } : x)));
     } else {
       const key = 'custom-' + Date.now();
-      setCustomEx((p) => [...p, { key, name, group: 'Added', sets, reps, alternatives: [] } as ProgramExercise]);
+      setCustomEx((p) => [...p, { key, name, group: 'Added', sets, reps, loadKg, alternatives: [] } as ProgramExercise]);
       setExpanded((p) => ({ ...p, [dayIdx + ':' + key]: true }));
     }
     setAddOpen(false); setEditingKey(null);
-    setCxName(''); setCxSets('3'); setCxReps('10');
+    setCxName(''); setCxSets('3'); setCxReps('10'); setCxWeight('');
     tapLight();
   };
   const firstOpenId = (() => { for (const _e of [...planEx, ...customEx]) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < _e.sets) return _u; } return null; })();
@@ -870,7 +883,11 @@ export default function Train() {
                             ) : null}
                             {flag ? <Icon name="heart" size={13} color={t.s3} /> : null}
                           </View>
-                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.group} · {sets.length}/{e.sets} sets{!open && sug ? ' · ' + fig(liftLabel(sug.weight, wu)) : ''}</Text>
+                          {/* A target load set by hand is the member's own
+                              instruction and outranks the app's suggestion, so
+                              it is what the row shows. Without this the weight
+                              could be typed and then never appear anywhere. */}
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.group} · {sets.length}/{e.sets} sets{e.loadKg != null ? ' · ' + fig(liftLabel(e.loadKg, wu)) : (!open && sug ? ' · ' + fig(liftLabel(sug.weight, wu)) : '')}</Text>
                         </View>
                         <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + nameOf(e)} onPress={() => removeExercise(e)} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
                         <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}><Icon name="chevron" size={16} color={t.ink3} /></View>
@@ -1371,8 +1388,29 @@ export default function Train() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{editingKey ? 'Rename it, or change the sets and reps you are aiming for.' : "Log something you did that isn't in today's plan."}</Text>
           <TextInput value={cxName} onChangeText={setCxName} autoFocus returnKeyType="done" onSubmitEditing={commitCx} blurOnSubmit={false} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, marginBottom: sp.md }} />
           <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.lg }}>
-            <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target sets</Text><TextInput value={cxSets} onChangeText={setCxSets} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
+            <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target Sets</Text><TextInput value={cxSets} onChangeText={setCxSets} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
             <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target Reps</Text><TextInput value={cxReps} onChangeText={setCxReps} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
+            {/* The third number. Sets and reps were editable and the load was
+                not, so the one figure that changes week to week was the one
+                nobody could type. Blank is allowed and means no target. */}
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Weight</Text>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TextInput value={cxWeight} onChangeText={setCxWeight} keyboardType="numeric" placeholder="optional" placeholderTextColor={t.ink3}
+                  style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+                {/* Switchable per entry rather than read off the profile. A
+                    machine in another gym is plated in whatever that gym uses,
+                    and the figure typed here is the one on the machine — so the
+                    unit has to travel with the number, not with the account.
+                    What is STORED is kilograms either way. */}
+                <Pressable accessibilityRole="button"
+                  accessibilityLabel={`Weight unit: ${cxUnit === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${cxUnit === 'kg' ? 'pounds' : 'kilograms'}`}
+                  onPress={() => { setCxUnit((u) => (u === 'kg' ? 'lb' : 'kg')); tapLight(); }}
+                  style={{ backgroundColor: t.surface3, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{cxUnit.toUpperCase()}</Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
           <Pressable disabled={!cxName.trim()} onPress={commitCx} style={{ backgroundColor: cxName.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
             <Text style={{ ...ty.label, fontWeight: '600', color: cxName.trim() ? t.brandInk : t.ink3 }}>{editingKey ? 'Save changes' : 'Add to today'}</Text>
@@ -2309,7 +2347,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         ) : null}
 
         <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xl, textTransform: 'capitalize' }}>{nameOf(ex)}</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · target {ex.sets} × {ex.reps}</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · {ex.sets} × {ex.reps}{ex.loadKg != null ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : ''}</Text>
         {(() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />

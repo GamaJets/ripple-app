@@ -97,6 +97,9 @@ export default function TrainerLayout() {
       <Tabs.Screen name="client-report" options={{ href: null, title: 'Their Record' }} />
       <Tabs.Screen name="credentials" options={{ href: null, title: 'Credentials' }} />
       <Tabs.Screen name="messages" options={{ href: null, title: 'Messages' }} />
+      <Tabs.Screen name="money" options={{ href: null, title: 'Money' }} />
+      <Tabs.Screen name="brand" options={{ href: null, title: 'Branding' }} />
+      <Tabs.Screen name="statement" options={{ href: null, title: 'Statement' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>
     <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />

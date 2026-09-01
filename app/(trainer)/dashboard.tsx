@@ -33,7 +33,7 @@ import type { PtSession } from '../../src/lib/gymSessions';
 import { useAuth } from '../../src/ui/auth';
 import {
   assessDrift, fetchClientActivity, compareDrift, summariseDrift, bandTitle, bandNote,
-  DRIFT_LABEL, DEFAULT_WINDOWS, type Drift,
+  DRIFT_LABEL, DEFAULT_WINDOWS, localDayKey, type Drift,
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
@@ -62,7 +62,7 @@ import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askCoach } from '../../src/lib/coach';
 import { useRoster } from '../../src/ui/roster';
-import { isWhole } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { slotsFor, searchMeals, mealAt, type Slot } from '../../src/lib/meals';
@@ -87,8 +87,17 @@ import {
 } from '../../src/lib/codeReturn';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useClientTags } from '../../src/ui/clientTags';
-import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { useProgramTemplates, type ProgramTemplate } from '../../src/ui/programTemplates';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+import { sendCoachMessages } from '../../src/ui/messaging';
+import { guardOverwrite } from '../../src/lib/overwriteGuard';
+import {
+  overwriteBrief, bulkReport, guardRecipients, bulkThreadNote,
+  type AssignTarget, type WriteOutcome,
+} from '../../src/lib/bulkActions';
+import { listNames } from '../../src/lib/groupProgram';
+import { buildRosterExport, rosterExportBlocker, type RosterExportRow } from '../../src/lib/rosterExport';
+import { shareTextFile, fileExportAvailable, fileShareBlocker } from '../../src/lib/exportShare';
 import { fetchPhotosSharedWithMe, missingSharedFiles, SHARED_URL_TTL_S, type SharedPhoto } from '../../src/lib/photoShare';
 import { inviteMessage, joinLink } from '../../src/lib/joinCode';
 import * as Clipboard from 'expo-clipboard';
@@ -366,10 +375,21 @@ export default function TrainerClients() {
   const { addAnnouncement, mine: myNotices, status: noticeStatus } = useAnnouncements();
   const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
   const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
-  const { tagsFor, allTags, addTag, removeTag } = useClientTags();
+  const { tagsFor, allTags, addTag, removeTag, status: tagStatus } = useClientTags();
   const { templates } = useProgramTemplates();
-  const { assignProgram, getProgram } = useAssignedPrograms();
+  // `assignProgramTo` rather than `assignProgram`: this screen assigns to a
+  // whole segment at once and has to report on each write by name, which needs
+  // the sentence saying why one of them did not land.
+  const { assignProgramTo, getProgram, status: programStatus } = useAssignedPrograms();
   const [bulkTplOpen, setBulkTplOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // The segment composer. `msgBody` is the coach's own words and nothing else
+  // ever writes to it — see the note on `openBulkMessage`.
+  const [msgOpen, setMsgOpen] = useState(false);
+  const [msgBody, setMsgBody] = useState('');
+  const [msgBusy, setMsgBusy] = useState(false);
+  const [msgFailed, setMsgFailed] = useState<string[]>([]);
+  const [exportBusy, setExportBusy] = useState(false);
   const [seg, setSeg] = useState<string>('all');
   const [tagDraft, setTagDraft] = useState('');
   const acceptJoin = async (id: string, ownerName: string | null) => {
@@ -721,25 +741,180 @@ export default function TrainerClients() {
     setDraftClient(null); setDraftText('');
     Alert.alert('Sent', 'Saved to your thread with ' + client.name.split(' ')[0] + '.');
   };
-  const bulkMessage = () => {
+  /* ── acting on a whole segment at once ─────────────────────────────────
+   *
+   * The two controls above the roster used to be the least careful writes in
+   * the coach app, and both of them acted on everybody in the segment.
+   *
+   * MESSAGE. It composed the words itself — "Hey Ana — checking in! How is
+   * your week going?" — and inserted them into every thread as `sender:
+   * 'coach'`. That is a message under somebody else's name, at scale, which is
+   * the one thing this codebase refuses outright: `messages.sender` once came
+   * from the caller's own request so a client could post into their own thread
+   * as their coach, it was removed, and src/lib/nudge.ts and
+   * supabase/parts/140 are both written around never putting it back. The
+   * Quiet Clients feature drafts and will not send for exactly this reason,
+   * and it would be strange to hold that line there and break it here on a
+   * button that reaches thirty people instead of one. It is a composer now:
+   * the coach's own words, or nothing goes out.
+   *
+   * ASSIGN. It fanned a template over the segment with no confirmation, no
+   * overwrite guard and no injury gate — so the fastest way in this app to
+   * replace thirty training programmes without seeing one of them was to pick
+   * a segment here rather than open the template library, which withholds the
+   * same control until `assigned_programs` has been read whole. Both guards
+   * are consulted now, and the write is preceded by a sentence saying how many
+   * of them are on something and who.
+   *
+   * Both report per client and leave the failures where the coach can reach
+   * them. See src/lib/bulkActions.ts.
+   */
+
+  /** How the read that DEFINES the current segment went.
+   *
+   *  The roster read is asked separately (`rosterStatus`); this is about the
+   *  second read each segment needs. They are genuinely different: 'All' and
+   *  the delivery segments are decided by a column on the roster row itself and
+   *  so need nothing more, the drift segments are decided by a read of
+   *  check-ins, workouts, sessions and visits that has its own three states,
+   *  and a tag segment is decided by `client_tags` — where a failed read makes
+   *  every `tagsFor()` come back empty, so a chosen tag matches nobody and
+   *  renders identically to a tag that genuinely has nobody in it. */
+  const segStatus: LoadStatus =
+    seg === 'drifting' || seg === 'nodata'
+      ? (driftErr ? 'error' : drift ? 'ready' : 'loading')
+      : seg === 'all' || seg === 'atrisk' || (COACHED_MODES as readonly string[]).includes(seg)
+        ? 'ready'
+        : tagStatus;
+  // Reads as the object of a sentence, because it is one: the guard writes
+  // "Only part of … came back", and "all of your clients" turns that into
+  // "part of all of your clients".
+  const segLabel = seg === 'all'
+    ? 'your client list'
+    : `the “${AUTO_SEGS.find((x) => x.key === seg)?.label ?? seg}” segment`;
+  /** Whether "everybody in this segment" is a thing this screen may act on.
+   *  Refuses rather than warns, for the reason guardOverwrite does: a banner
+   *  does not stop a thumb, and neither a message nor an assign can be undone. */
+  const segClaim = guardRecipients(rosterStatus, segStatus, segLabel);
+  const nameOf = (id: string) => roster.find((c) => c.id === id)?.name.split(' ')[0] ?? 'A client';
+
+  const openBulkMessage = () => {
+    if (!shownRoster.length) return;
+    if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+    setMsgBody(''); setMsgFailed([]); setMsgOpen(true);
+  };
+  /**
+   * Send the coach's typed message into each recipient's own thread.
+   *
+   * `ids` is passed in so a retry goes to exactly the threads that failed and
+   * not to the segment again — re-sending to the people it already reached
+   * would put the same words in their thread twice, which reads from their side
+   * as their coach repeating themselves.
+   */
+  const deliverBulk = async (ids: string[]) => {
+    const b = msgBody.trim();
+    if (!b || !ids.length || msgBusy) return;
+    if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+    setMsgBusy(true);
+    try {
+      const results = await sendCoachMessages(ids, b);
+      const outcomes: WriteOutcome[] = results.map((r) => ({
+        clientId: r.clientId, name: nameOf(r.clientId), ok: r.ok, why: r.why,
+      }));
+      const report = bulkReport('message', outcomes);
+      setMsgFailed(report.retry);
+      // The composer keeps the words while anything is still unsent. Retyping
+      // them is how the second attempt ends up worded differently from the
+      // first, in the threads of the people who got both.
+      if (!report.retry.length) { setMsgBody(''); setMsgOpen(false); }
+      Alert.alert(report.title, report.body);
+    } catch {
+      Alert.alert('Not Sent', 'The message could not be written to your clients’ threads. Nothing was sent — check your connection and try again.');
+    } finally { setMsgBusy(false); }
+  };
+
+  /** One assign here is as many overwrites as there are people in the segment,
+   *  so it waits until the programmes it would replace have actually been read.
+   *  `getProgram` returns null both for a client on nothing and for a client
+   *  whose row did not come back, and this screen had no way to tell. */
+  const bulkGuard = guardOverwrite(programStatus, 'the programmes these clients are currently on');
+  const bulkAssign = async (tpl: ProgramTemplate) => {
+    if (bulkBusy) return;
+    if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+    if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
     const list = shownRoster;
     if (!list.length) return;
-    Alert.alert('Message ' + list.length + ' clients?', 'Send a check-in nudge to everyone in this segment.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Send', onPress: () => { (async () => {
-      const results = await Promise.all(list.map((c) => deliverMessage(c, 'Hey ' + c.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.', 'A nudge from your coach')));
-      const sent = results.filter((r) => r.ok).length;
-      const failed = results.length - sent;
-      Alert.alert(failed ? 'Partly sent' : 'Sent', failed ? sent + ' of ' + results.length + ' went through. ' + failed + ' could not be delivered — clients added by hand cannot receive messages until they join.' : 'Sent to all ' + sent + '.');
-    })(); } }]);
+    const targets: AssignTarget[] = list.map((c) => ({
+      clientId: c.id, name: c.name.split(' ')[0], onProgramme: !!getProgram(c.id),
+    }));
+    const brief = overwriteBrief(targets, tpl.name);
+    const go = await new Promise<boolean>((resolve) => {
+      Alert.alert(brief.title, brief.body, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: brief.confirmLabel, style: brief.replacing.length ? 'destructive' : 'default', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+    if (!go) return;
+    setBulkBusy(true);
+    const outcomes: WriteOutcome[] = await Promise.all(targets.map(async (tg) => {
+      const r = await assignProgramTo(tg.clientId, tpl.program);
+      return { clientId: tg.clientId, name: tg.name, ok: r.ok, why: r.why };
+    }));
+    setBulkBusy(false);
+    const report = bulkReport('assign', outcomes);
+    // The sheet closes only when there is nothing left to do. The failures are
+    // named in the report and the segment is unchanged behind it, so tapping
+    // the same template again retries exactly the people who need it.
+    if (!report.retry.length) setBulkTplOpen(false);
+    Alert.alert(report.title, report.body);
   };
-  const bulkAssign = async (tpl: any) => {
-    const list = shownRoster;
-    const results = await Promise.all(list.map((c) => assignProgram(c.id, tpl.program)));
-    const okCount = results.filter(Boolean).length;
-    setBulkTplOpen(false);
-    Alert.alert(okCount === list.length ? 'Assigned' : 'Partly assigned',
-      okCount === list.length
-        ? '"' + tpl.name + '" assigned to ' + list.length + ' client' + (list.length > 1 ? 's' : '') + ' in this segment.'
-        : okCount + ' of ' + list.length + ' saved. The rest are on this device only — clients you added by hand have no Train tab until they join.');
+
+  /* ── the roster, out of the app ────────────────────────────────────────
+   *
+   * The safe one of the three, and the one asked for most. Its single hazard is
+   * the claim in its own name: a file called "your clients" that holds a
+   * thousand of twelve hundred is not a smaller answer, it is a false one, and
+   * the coach has no reason to think there were more. src/lib/rosterExport.ts
+   * carries the honesty — INCOMPLETE in the filename, a sentence in cell A1 and
+   * the same sentence in the share text — and refuses outright on a read that
+   * failed, because a CSV with a header row and nothing under it is the most
+   * convincing possible statement that a coach has no clients.
+   */
+  const exportRoster = async () => {
+    if (exportBusy) return;
+    const why = rosterExportBlocker(rosterStatus, roster.length);
+    if (why) { Alert.alert('Nothing to Export', why); return; }
+    setExportBusy(true);
+    try {
+      const rows: RosterExportRow[] = roster.map((c) => ({
+        name: c.name,
+        goal: c.goal,
+        mode: c.mode,
+        joinedAt: c.joinedAt ?? null,
+        lastActive: c.lastActive,
+        adherence: c.adherence,
+        weightDeltaKg: c.weightDelta,
+        unread: c.unread,
+        // Areas only. What a client wrote about their own injury is theirs and
+        // does not travel into a spreadsheet the coach may mail on.
+        injuryAreas: (c.injuries ?? []).map((i) => areaLabel(i.area)),
+        handAdded: c.handAdded === true,
+      }));
+      // The coach's own unit, and the coach's own calendar day — `new
+      // Date().toISOString()` is UTC, which dates a file the day before for
+      // anybody west of Greenwich.
+      const file = buildRosterExport(rows, rosterStatus, coachUnit, localDayKey(Date.now()));
+      const blocked = fileShareBlocker();
+      const how = await shareTextFile(file.csv, file.filename, 'text/csv', 'Your clients');
+      // Said after, because it is about what actually left the phone. A build
+      // that cannot attach a file sends the rows as text, and the coach is
+      // entitled to know which of the two they just sent somebody.
+      if (how === 'text' && blocked) Alert.alert('Sent as Text', blocked);
+      else if (!file.complete) Alert.alert('Exported, but Not Your Whole Book', file.warning as string);
+    } catch (e) {
+      reportError('dashboard.exportRoster', e);
+      Alert.alert('Not Exported', 'The file could not be written. Try again once you have a little free space on your phone.');
+    } finally { setExportBusy(false); }
   };
   const genSummary = async (client: RosterClient) => {
     setAiBusy(true); setAiSummary('');
@@ -1049,10 +1224,38 @@ export default function TrainerClients() {
             ))}
           </ScrollView>
 
-          {seg !== 'all' && shownRoster.length > 0 ? (
+          {/* Out of the app, and only ever the whole book. `exportRoster`
+              refuses on a read that failed and marks the file INCOMPLETE on one
+              that was truncated — see src/lib/rosterExport.ts. Offered whatever
+              the segment is, because a coach exporting their clients means all
+              of them. */}
+          {roster.length > 0 || rosterStatus !== 'ready' ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Ghost icon="share" label={exportBusy ? 'Exporting…' : 'Export Roster'} onPress={exportRoster} />
+            </View>
+          ) : null}
+
+          {/* Offered on every segment including All, which is the one a coach
+              most often means by "everybody". It used to be hidden there, so
+              the two bulk controls appeared only once a filter had been chosen
+              and the most ordinary case had no control at all. */}
+          {shownRoster.length > 0 ? (
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-              <View style={{ flex: 1 }}><Ghost icon="message" label={`Message ${shownRoster.length}`} onPress={bulkMessage} /></View>
-              <View style={{ flex: 1 }}><Ghost icon="grid" label="Assign Program" onPress={() => setBulkTplOpen(true)} /></View>
+              {/* The count on this button is what the coach consents to, so
+                  it is only a number when the two reads behind the segment came
+                  back whole. Under anything else the control carries the reason
+                  instead and the handler refuses as well — belt and braces,
+                  because a message cannot be taken back. */}
+              <View style={{ flex: 1 }}><Ghost icon="message"
+                label={segClaim.allowed ? `Message ${shownRoster.length}` : 'Cannot Message This Segment'}
+                onPress={openBulkMessage} /></View>
+              <View style={{ flex: 1 }}><Ghost icon="grid"
+                label={segClaim.allowed && bulkGuard.allowed ? 'Assign Program' : 'Cannot Assign Yet'}
+                onPress={() => {
+                  if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+                  if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
+                  setBulkTplOpen(true);
+                }} /></View>
             </View>
           ) : null}
 
@@ -2181,11 +2384,85 @@ export default function TrainerClients() {
       </Modal>
 
       {/* ── bulk program assign ──────────────────────────────────────────── */}
+      {/* ── the segment composer ───────────────────────────────────────────
+          The coach's own words, in their own account, into N real threads.
+          There is no draft here and nothing writes to this box but the person
+          typing in it: the control this replaced composed a check-in itself and
+          inserted it as `sender: 'coach'`, which is a message under somebody
+          else's name — the one thing src/lib/nudge.ts and supabase/parts/140
+          refuse outright, and the reason Quiet Clients drafts and will not
+          send. */}
+      <Modal visible={msgOpen} transparent animationType="slide" onRequestClose={() => setMsgOpen(false)}>
+        <Pressable style={SCRIM} onPress={() => setMsgOpen(false)} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={sheet(t, { maxHeight: '86%' })}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.title, color: t.ink }}>Message {shownRoster.length} Clients</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
+                Everyone in {segLabel}. This goes out as you, in your words.
+              </Text>
+
+              {/* Every name, before anything is sent. The count is the alarm and
+                  the list is what a coach checks a specific person against. */}
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.lg }}>
+                {shownRoster.map((c) => c.name).join(', ')}
+              </Text>
+
+              {msgFailed.length > 0 ? (
+                <Notice tone={t.warn} kicker="Not delivered" title={`${msgFailed.length} did not get the last one`}
+                  note={`${listNames(msgFailed.map(nameOf))} — nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
+              ) : null}
+
+              <TextInput value={msgBody} onChangeText={setMsgBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginTop: sp.lg, marginBottom: sp.md }} />
+
+              {/* What the client will see, said to the coach and not added to
+                  the message. `bulkThreadNote` carries the argument: appending
+                  "sent to 12 clients" would put words the coach did not write
+                  into a message signed by the coach, and the client could not
+                  tell which sentence came from which of them. */}
+              {bulkThreadNote(shownRoster.length) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{bulkThreadNote(shownRoster.length)}</Text>
+              ) : null}
+
+              <Cta label={msgBusy ? 'Sending…' : `Send to ${shownRoster.length}`} wide
+                disabled={!msgBody.trim() || msgBusy || !shownRoster.length}
+                onPress={() => deliverBulk(shownRoster.map((c) => c.id))} />
+
+              {/* Retry reaches the threads that failed and no others. Sending to
+                  the segment again would put the same words a second time in
+                  the thread of everybody it already reached. */}
+              {msgFailed.length > 0 && !msgBusy ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Ghost label={`Try the ${msgFailed.length} That Failed Again`} onPress={() => deliverBulk(msgFailed)} />
+                </View>
+              ) : null}
+
+              <Pressable onPress={() => setMsgOpen(false)} style={{ paddingVertical: sp.md, alignItems: 'center', marginTop: 6 }}>
+                <Text style={{ ...ty.label, color: t.ink3 }}>Cancel</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <Modal visible={bulkTplOpen} transparent animationType="slide" onRequestClose={() => setBulkTplOpen(false)}>
         <Pressable style={SCRIM} onPress={() => setBulkTplOpen(false)} />
         <View style={sheet(t, { maxHeight: '78%' })}>
-          <Text style={{ ...ty.title, color: t.ink }}>Assign to {shownRoster.length} clients</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>Pick a program template for everyone in this segment.</Text>
+          <Text style={{ ...ty.title, color: t.ink }}>Assign to {shownRoster.length} Clients</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick a program template for everyone in {segLabel}.</Text>
+          {/* Said before the template is chosen as well as in the confirmation
+              after it, because this is the sheet a coach is scanning while they
+              decide — and only sayable off a whole read of assigned_programs,
+              which is what `bulkGuard` above has already established. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>
+            {(() => {
+              const on = shownRoster.filter((c) => !!getProgram(c.id));
+              return on.length === 0
+                ? 'None of them are on a coach-assigned programme, so nothing here is replaced.'
+                : `${on.length} of them are on a programme now — ${listNames(on.slice(0, 4).map((c) => c.name.split(' ')[0]))}${on.length > 4 ? ` and ${on.length - 4} more` : ''}. Whichever template you pick replaces what they are training.`;
+            })()}
+          </Text>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {templates.map((tpl) => {
               const dc = tpl.program.days.length; const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);

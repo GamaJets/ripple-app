@@ -5,6 +5,25 @@ import type { Goal } from './types';
 
 export interface ProgramExercise {
   key: string; name: string; group: string; sets: number; reps: string; alternatives: string[];
+  /**
+   * The load ACTUALLY PUT ON THE MACHINE for this exercise, in KILOGRAMS, or
+   * null when nobody has said.
+   *
+   * Not a target. The number a member wants beside sets and reps is what they
+   * loaded, because that is the one that changes week to week and the one they
+   * have to remember when they walk back to the same machine.
+   *
+   * Kilograms because the record is metric everywhere else in this app —
+   * `readLift` takes what was typed in whatever unit and returns kg, and
+   * `liftLabel` reads it back. A second convention here would be a second
+   * chance for a pounds member's 225 to be stored as 225 kg, which has happened
+   * three times in this codebase already.
+   *
+   * Optional rather than defaulted: an exercise with no load is the ordinary
+   * case — bodyweight work, a movement not loaded yet — and inventing a figure
+   * would put a number on screen nobody chose.
+   */
+  loadKg?: number | null;
 }
 export interface ProgramDay { day: string; focus: string; cardio?: string; exercises: ProgramExercise[]; }
 export interface Program { title: string; focus: string[]; note: string; days: ProgramDay[]; }

@@ -14,7 +14,7 @@ import { emptyMetrics } from './types';
 import { nightsFromIntervals, type SleepFamily, type SleepInterval, type SleepRead, type SleepReading } from '../sleepMerge';
 import { canRememberSleepAsk, hasAskedForSleep, markSleepAsked, shouldAutoAskForSleep } from './sleepAccess';
 import { canRememberGlucoseAsk, hasAskedForGlucose, markGlucoseAsked, shouldAutoAskForGlucose } from './glucoseAccess';
-import { parseHealthSamples, type GlucoseReading } from '../glucose';
+import { parseHealthSamples, type GlucoseRead, type GlucoseReading } from '../glucose';
 
 const meta: ProviderMeta = {
   id: 'apple',
@@ -556,17 +556,22 @@ export function requestGlucoseAuth(): Promise<void> {
 /**
  * How a glucose read went.
  *
- * The same three-way shape as SleepRead, and for the same reason: an empty
- * list under 'error' means "we could not ask", an empty list under 'ready'
- * means "Health holds nothing for this window", and a screen that renders
- * those identically is the recurring bug src/ui/loadStatus.ts exists to stop.
+ * The same shape as SleepRead, and for the same reason: an empty list under
+ * 'error' means "we could not ask", an empty list under 'ready' means "Health
+ * holds nothing for this window", and a screen that renders those identically
+ * is the recurring bug src/ui/loadStatus.ts exists to stop.
+ *
+ * It now lives in ../glucose so the Android reader returns the SAME type
+ * rather than a look-alike — `app/(client)/glucose.tsx` chooses a provider and
+ * then stops caring which one it got, and that only holds if there is one
+ * type. Re-exported here because this module is where it was first defined and
+ * an import of it from here must keep working.
+ *
+ * This provider never returns 'denied'. HealthKit answers a refused read with
+ * the same empty array as an unrequested one, so a decline is not a fact iOS
+ * gives us and must not be asserted.
  */
-export interface GlucoseRead {
-  status: 'ready' | 'error' | 'unsupported';
-  readings: GlucoseReading[];
-  /** Human sentence for 'error' / 'unsupported'. Never shown for 'ready'. */
-  reason?: string;
-}
+export type { GlucoseRead } from '../glucose';
 
 /** Shared across screens so two mounting together raise one sheet, not two. */
 let glucoseAskInFlight: Promise<void> | null = null;

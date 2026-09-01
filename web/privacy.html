@@ -81,7 +81,7 @@ addEventListener('DOMContentLoaded', function () {
         <li><a href="#scope">What this covers</a></li>
         <li><a href="#who-we-are">Who we are</a></li>
         <li><a href="#what-we-collect">What we collect</a></li>
-        <li><a href="#apple-health">Apple Health</a></li>
+        <li><a href="#apple-health">Apple Health &amp; Health Connect</a></li>
         <li><a href="#who-can-see">Who can see it</a></li>
         <li><a href="#processors">Services we rely on</a></li>
         <li><a href="#security">Keeping it safe</a></li>
@@ -116,6 +116,7 @@ addEventListener('DOMContentLoaded', function () {
           <tr><td><strong>Date of birth, sex, height, weight</strong></td><td>Heart-rate zones and calorie estimates are calculated from these.</td><td>If you enter them.</td></tr>
           <tr><td><strong>Workouts</strong> — exercises, sets, reps, weight, perceived effort, cardio, calories, time in heart-rate zone</td><td>Your training history, progress and personal records.</td><td>When you log a workout or import one.</td></tr>
           <tr><td><strong>Apple Health data</strong> — heart rate, active energy, steps, resting heart rate, workouts</td><td>Live heart rate and calories during a session, and importing workouts you recorded on your watch.</td><td>Only if you grant Health permission. You can revoke it at any time.</td></tr>
+          <tr><td><strong>Blood glucose</strong> &mdash; readings a continuous glucose monitor wrote into Apple Health or Health Connect</td><td>Shown beside your own food log, so you can see what happened around a meal. Repple does not interpret them and does not tell you what to eat.</td><td>Only if you ask for it on the Blood Sugar screen and grant that permission separately. Your coach sees none of it unless you turn sharing on yourself.</td></tr>
           <tr><td><strong>Body measurements and InBody scans</strong></td><td>To show change over time.</td><td>If you record them.</td></tr>
           <tr><td><strong>Food and meal logs</strong></td><td>Nutrition tracking, and sharing with your coach if you have one.</td><td>If you use the nutrition features.</td></tr>
           <tr><td><strong>Check-ins and habits</strong></td><td>Weekly progress and consistency.</td><td>If you use them.</td></tr>
@@ -130,15 +131,17 @@ addEventListener('DOMContentLoaded', function () {
 
       <p>We do not collect location, contacts, browsing history, or advertising identifiers.</p>
 
-      <h2 id="apple-health">Apple Health, specifically</h2>
-      <p>Health data gets stricter treatment than everything else, because it should:</p>
+      <h2 id="apple-health">Apple Health and Health Connect, specifically</h2>
+      <p>Health data gets stricter treatment than everything else, because it should. This applies to Apple Health on iPhone and to Health Connect on Android, which are the same arrangement on the two platforms &mdash; your monitor or watch writes into the phone&rsquo;s own health store, and Repple reads from there:</p>
       <ul>
         <li>It is read only after you grant permission, and only the types listed above.</li>
-        <li>It is used solely to show you your own training and recovery.</li>
+        <li>It is used solely to show you your own training, recovery and readings.</li>
         <li>It is <strong>never</strong> used for advertising or marketing, and never sold or shared with data brokers.</li>
         <li>It is not shared with anyone other than a coach you have deliberately linked to your account.</li>
-        <li>Revoke it whenever you like in <strong>iOS Settings → Privacy &amp; Security → Health → Repple</strong>. The app keeps working without it.</li>
+        <li>It is never transferred to any third party, and it is not used to train any model.</li>
+        <li>Revoke it whenever you like &mdash; on iPhone in <strong>Settings &rarr; Privacy &amp; Security &rarr; Health &rarr; Repple</strong>, on Android in <strong>Health Connect &rarr; App permissions &rarr; Repple</strong>. The app keeps working without it.</li>
       </ul>
+      <p><strong>Blood glucose is asked for separately.</strong> It is not part of the permission Repple asks for when you connect a watch, because most people do not wear a monitor and a permission screen listing things an app will not use is a screen nobody reads. Repple asks for it once, when you first open the Blood Sugar screen, and never again on its own. Readings are shown to you beside your own food log. They are <strong>not</strong> visible to your coach unless you switch that on yourself, and switching it off again hides the history as well as the next reading. Repple does not diagnose, does not set targets, and does not tell anybody what to eat &mdash; the range it shows is the one commonly quoted for adults, and your own targets come from your clinician.</p>
       <p>If you turn it on, Repple also writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. It is off unless you switch it on, and only sessions with a recorded length are written &mdash; we do not estimate a duration in order to fill one in.</p>
 
       <h2 id="who-can-see">Who can see your data</h2>

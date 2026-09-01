@@ -216,6 +216,11 @@ export const TRAINER_NAV: NavItem[] = [
   // code uses, and both have to find it.
   { key: 'nudges', label: 'Quiet Clients', note: 'Who has gone quiet, and a draft you send yourself', route: '/(trainer)/nudges', icon: 'bell', keywords: 'nudge nudges quiet drift lapsed inactive ghosting churn at risk reach out check in draft message' },
   { key: 'invoices', label: 'Invoices', note: 'Issue a document for what somebody paid you', route: '/(trainer)/invoices', icon: 'grid', keywords: 'invoice invoices bill receipt issue self employed paid cash transfer document statement number vat tax' },
+  // Named 'statement' and never 'tax', because the screen deliberately is not
+  // one — but 'tax', 'accountant' and 'year end' are the words a coach types
+  // when they go looking for it, so search has to land them on the thing that
+  // honestly helps rather than on nothing at all.
+  { key: 'statement', label: 'Statement of Record', note: 'What this app recorded in a year or a quarter, to hand to an accountant', route: '/(trainer)/statement', icon: 'chart', keywords: 'statement record year end year-end annual accountant accounts tax export summary period quarter earnings takings what i earned bookkeeping csv' },
   { key: 'credentials', label: 'Credentials & Reviews', note: 'Your qualifications, and replying to what clients wrote', route: '/(trainer)/credentials', icon: 'trophy', keywords: 'credential credentials qualification qualifications certification insured insurance review reviews rating reply cpd rep level' },
   { key: 'documents', label: 'Your Documents', note: 'Your own waivers and forms, and who has accepted them', route: '/(trainer)/documents', icon: 'pencil', keywords: 'document documents waiver par-q parq form consent house rules paperwork upload accepted acceptance required studio' },
   { key: 'broadcast', label: 'Broadcast', note: 'Message a whole segment of clients at once', route: '/(trainer)/broadcast', icon: 'message', keywords: 'broadcast announce message all clients bulk segment tag push' },
@@ -223,6 +228,13 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
   { key: 'ad-spend', label: 'Ad Spend', note: 'What your ads cost, and what they brought in', route: '/(trainer)/ad-spend', icon: 'trending', keywords: 'ads ad spend marketing cost cac attribution campaign meta google leads' },
   { key: 'leaderboard', label: 'Leaderboard', note: 'Rank clients by consistency', route: '/(trainer)/leaderboard', icon: 'trophy', keywords: 'ranking standings' },
+  // Searched for with the words a coach actually types when they are worried
+  // about money — "how much did I make", "profit", "income" — none of which
+  // matched anything before this screen existed. It carries 'profit' and 'net'
+  // as keywords while deliberately printing neither figure: those are the words
+  // people search with, and landing them on the screen that explains why the
+  // two halves are never subtracted is better than landing them nowhere.
+  { key: 'money', label: 'Money', note: 'What came in and what went out, kept apart', route: '/(trainer)/money', icon: 'chart', keywords: 'money earnings income takings revenue paid profit net owe owed outgoings expenses spend overview how much did i make ledger' },
   { key: 'payments', label: 'Payments & Packages', note: 'Get paid, and set what you sell', route: '/(trainer)/payments', icon: 'grid', keywords: 'payments payouts stripe connect packages packs memberships sell price get paid earnings' },
   { key: 'billing', label: 'Billing & Subscription', note: 'Your own plan and invoices', route: '/(trainer)/billing', icon: 'grid', keywords: 'billing subscription plan invoice card payment method upgrade downgrade cancel my plan' },
   // The coach's own training, food and body. Three separate screens because a

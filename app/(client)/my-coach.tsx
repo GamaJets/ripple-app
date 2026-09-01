@@ -67,6 +67,8 @@ import {
   IDENTITY_NOTE, EDIT_NOTE, WITHDRAW_NOTE, MAX_BODY, MIN_RATING, MAX_RATING,
   type MyReview,
 } from '../../src/lib/reviews';
+import { fetchClientCoachBrand, brandInputFor, type ClientCoachBrand } from '../../src/ui/coachBrand';
+import { clientBrandNote, resolveClientBrand } from '../../src/lib/coachBrand';
 
 interface CoachProfile {
   id: string;
@@ -101,6 +103,14 @@ export default function MyCoach() {
   const [gate, setGate] = useState<boolean | null>(null);
   const [gateStatus, setGateStatus] = useState<LoadStatus>('loading');
 
+  // The coach's BRANDING, which is a different question from their profile and
+  // is asked separately for the same reason the three reads below are: a failed
+  // branding read must not be able to look like "you have no coach". Null here
+  // means nothing is applied and the app keeps its own colours, which is also
+  // what a coach who has branded nothing produces — the two are the same
+  // outcome on screen, and neither is a claim about the other.
+  const [brand, setBrand] = useState<ClientCoachBrand | null>(null);
+
   const [open, setOpen] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
   const [body, setBody] = useState('');
@@ -132,6 +142,25 @@ export default function MyCoach() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Its own effect, not folded into `load`. `my_coach_brand()` answers over the
+  // same active-coaching gate as `my_coach_profile()`, so it needs no coach id
+  // and can run in parallel with the profile rather than behind it.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const b = await fetchClientCoachBrand();
+        if (!cancelled) setBrand(b);
+      } catch (e) {
+        // Left null. Nothing is drawn in a colour nobody could confirm, and the
+        // screen says nothing about branding at all rather than saying there is
+        // none.
+        reportError('myCoach.brand', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // A separate effect from the profile above, and keyed on the coach's id: the
   // three reads below are about a coach we may not have yet, and folding them
@@ -196,6 +225,17 @@ export default function MyCoach() {
 
   const go = (route: string) => router.push(route as never);
 
+  // Whose brand this client's app wears, decided in one place.
+  //
+  // THE GYM WINS where there is one, and src/lib/coachBrand.ts sets out why at
+  // length: membership is the fact the database actually holds about this
+  // person, and a coach rebranding a gym's members is a coach advertising over
+  // their employer inside the employer's own product. `inGym` is measured
+  // server-side — a client cannot count their own tenant's occupants under RLS.
+  const brandInput = brandInputFor(brand);
+  const applied = resolveClientBrand(brandInput);
+  const brandNote = clientBrandNote(brandInput);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
@@ -234,9 +274,17 @@ export default function MyCoach() {
         ) : (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+              {/* The coach's colour, where they have one and it applies. Drawn
+                  as a ring rather than as a fill: the photo inside it is the
+                  content, and a coloured plate behind a face is decoration
+                  pretending to be identity. `applied.color` has already been
+                  MEASURED — coachBrandColorOf refuses anything that could not
+                  carry a readable label, whoever wrote it and by whatever
+                  route — so nothing downstream needs to check it again. */}
               <View style={{
                 width: 62, height: 62, borderRadius: 31, backgroundColor: t.surface2,
                 alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+                borderWidth: applied.color ? 2 : 0, borderColor: applied.color ?? undefined,
               }}>
                 {coach.avatar
                   ? <Image source={{ uri: coach.avatar }} style={{ width: 62, height: 62 }} />
@@ -247,11 +295,28 @@ export default function MyCoach() {
                     replaced with "Your coach", which would look like a name and
                     is not one. */}
                 <Text style={{ ...ty.head, color: t.ink }}>{coach.name ?? '—'}</Text>
+                {/* What they trade as, where that is not their own name. Only
+                    when the coach's brand is the one in effect: a gym member's
+                    app is the gym's, and printing the coach's business name in
+                    it anyway would be the override this screen just declined to
+                    make. */}
+                {applied.source === 'coach' && applied.name && applied.name !== coach.name ? (
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{applied.name}</Text>
+                ) : null}
                 {coach.tagline ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{coach.tagline}</Text>
                 ) : null}
               </View>
             </View>
+
+            {/* One sentence, and only when there is something to say: either a
+                gym is overriding branding this coach has set, or these really
+                are the coach's colours and the client should be able to tell
+                them from the app's. Null the rest of the time — a screen that
+                explains an absence nobody noticed is noise. */}
+            {brandNote ? (
+              <Flag tone={applied.color ?? t.ink3} style={{ marginTop: sp.lg }}>{brandNote}</Flag>
+            ) : null}
 
             {coach.bio ? (
               <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, lineHeight: 22 }}>{coach.bio}</Text>

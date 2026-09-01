@@ -134,6 +134,41 @@ const present = NATIVE.filter(installed);
 console.log(`native modules (${present.length}) — none of these reach a phone without a new build:`);
 for (const m of present) console.log(`  ${m.padEnd(30)} ${deps[m]}`);
 
+/**
+ * Whether a native module has an iOS half at all.
+ *
+ * `react-native-health-connect` is Android-only — Health Connect is an Android
+ * API and the package ships `"platforms": ["android"]` with no podspec. It can
+ * therefore NEVER appear in ios/Podfile.lock, so comparing it against that file
+ * reported it "absent" every single run, under a paragraph telling the reader
+ * their next local build would red-screen. It would not.
+ *
+ * A check that cries wolf on a module that is working correctly is worse than
+ * no check: the next module that really is missing from the pods gets read as
+ * more of the same noise. So the comparison below is now scoped to the modules
+ * that could be in that file, which is decidable from disk exactly the way
+ * `derivedNative` is — a podspec, or an Expo module config that names apple.
+ */
+function hasIosHalf(name) {
+  const dir = join('node_modules', name);
+  try {
+    if (readdirSync(dir).some((f) => f.endsWith('.podspec'))) return true;
+  } catch { /* unreadable package directory; the config test below still applies */ }
+  const cfgPath = join(dir, 'expo-module.config.json');
+  if (!existsSync(cfgPath)) return false;
+  try {
+    const platforms = JSON.parse(readFileSync(cfgPath, 'utf8'))?.platforms;
+    // No `platforms` key is the older shape and means "all of them". Only an
+    // explicit list that omits apple/ios is evidence of an Android-only module.
+    if (!Array.isArray(platforms)) return true;
+    return platforms.some((p) => p === 'apple' || p === 'ios');
+  } catch {
+    // An unreadable config is not evidence of absence, and treating it as such
+    // would silently drop a module out of the very comparison this exists for.
+    return true;
+  }
+}
+
 // ── and whether THIS machine's build actually contains them ────────────────
 //
 // The list above says what a build needs. It cannot say what the build on the
@@ -145,7 +180,12 @@ const lockPath = join('ios', 'Podfile.lock');
 if (existsSync(lockPath)) {
   const lock = readFileSync(lockPath, 'utf8');
   const pod = (m) => m.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('');
-  const absent = present.filter((m) => !lock.includes(pod(m)) && !lock.includes(m));
+  const androidOnly = present.filter((m) => !hasIosHalf(m));
+  if (androidOnly.length) {
+    console.log(`\n${androidOnly.length} of them ${androidOnly.length === 1 ? 'is' : 'are'} Android-only, so not expected in Podfile.lock:`);
+    for (const m of androidOnly) console.log(`  ${m}`);
+  }
+  const absent = present.filter((m) => hasIosHalf(m) && !lock.includes(pod(m)) && !lock.includes(m));
   if (absent.length) {
     console.error(`\nthis machine's ios/Podfile.lock does not mention ${absent.length} of them:`);
     for (const m of absent) console.error(`  ${m}`);
@@ -153,7 +193,8 @@ if (existsSync(lockPath)) {
     console.error('imports one. Run `npx expo run:ios` (or pod install) before demoing.');
     console.error('EAS builds are unaffected: they install pods fresh from package.json.');
   } else {
-    console.log(`\nthis machine's Podfile.lock has all ${present.length}.`);
+    const iosSide = present.filter(hasIosHalf);
+    console.log(`\nthis machine's Podfile.lock has all ${iosSide.length} of the iOS-side modules.`);
   }
 }
 

@@ -44,7 +44,13 @@ export const PROVIDERS: WearableProvider[] = [
   // question; a missing row leaves them to guess.
   cloud({ id: 'garmin', name: 'Garmin', icon: '⌚', kind: 'cloud', blurb: 'Needs Garmin’s approval before Repple can read it — on iPhone it comes through Apple Health', metrics: [] }),
   cloud({ id: 'fitbit', name: 'Fitbit', icon: '⌚', kind: 'cloud', blurb: 'Not set up in Repple yet — nothing to connect to', metrics: [] }),
-  cloud({ id: 'googlefit', name: 'Google Fit / Health Connect', icon: '🟢', kind: 'health-connect', blurb: 'Android’s health store — Repple has no reader for it in this build', metrics: [] }),
+  // `metrics: []` even though Repple now reads blood sugar out of Health
+  // Connect, because this row is a CONNECT button for training data and
+  // connecting it supplies none. Blood sugar is read from the Blood Sugar
+  // screen, under its own separate permission, and listing it here would
+  // advertise it as something this button delivers — the exact promise this
+  // file's header says a blurb may not make.
+  cloud({ id: 'googlefit', name: 'Google Fit / Health Connect', icon: '🟢', kind: 'health-connect', blurb: 'Android’s health store — Repple reads blood sugar from it, but not training', metrics: [] }),
 ];
 
 export function providerById(id: ProviderId): WearableProvider | undefined {

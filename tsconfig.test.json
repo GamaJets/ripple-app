@@ -124,6 +124,13 @@
     "src/lib/deltaLabel.test.ts",
     "src/lib/readAll.test.ts",
     "src/lib/financialAI.test.ts",
-    "src/lib/clientRecord.test.ts"
+    "src/lib/clientRecord.test.ts",
+    "src/lib/coachLedger.test.ts",
+    "src/lib/repdbImport.test.ts",
+    "src/lib/bulkActions.test.ts",
+    "src/lib/rosterExport.test.ts",
+    "src/lib/readiness.test.ts",
+    "src/lib/coachBrand.test.ts",
+    "src/lib/coachStatement.test.ts"
   ]
 }

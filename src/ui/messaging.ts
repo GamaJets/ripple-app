@@ -568,6 +568,98 @@ export function useThread(clientId: string | null, role: ChatRole) {
   return { messages, send, ready, status, unsent };
 }
 
+/* ── the coach's words, into several threads at once ───────────────────────── */
+
+/** What became of one of the messages a bulk send fanned out into. */
+export interface CoachSendResult {
+  clientId: string;
+  ok: boolean;
+  /** Why not, in the coach's words. Null when the row is on the server. */
+  why: string | null;
+}
+
+/**
+ * Write the coach's message into N threads — one real message each.
+ *
+ * ── What this is, and the three things it deliberately is not ─────────────
+ *
+ * IT IS NOT A BROADCAST OBJECT. There is no row anywhere saying "this went to
+ * twenty people". Each client gets an ordinary `messages` row in their own
+ * thread, which they can reply to and which the coach sees in context beside
+ * everything else they have said to that person. A broadcast object would be a
+ * different thing wearing a message's clothes: a client replying to it would be
+ * replying to nobody.
+ *
+ * IT DOES NOT COMPOSE ANYTHING. `body` is the coach's typed words and nothing
+ * is added to them — see `bulkThreadNote` in src/lib/bulkActions.ts for the
+ * full argument, which is the one src/lib/nudge.ts and supabase/parts/140
+ * already make: a message that appears to come from a person who did not write
+ * it is a defect this codebase has removed once already, and appending a true
+ * sentence under the coach's name is the same falsehood with better manners.
+ *
+ * IT IS NOT A MULTI-ROW INSERT. One statement covering twelve clients is one
+ * statement: a coach's book merges linked `clients` with hand-added
+ * `coach_clients` rows whose ids have no `clients` row behind them, and
+ * `messages.client_id` is a foreign key to `clients(id)` — so a single
+ * hand-added person made Postgres reject the whole thing and nobody heard from
+ * their coach. Twelve statements fail one at a time, which is what lets the
+ * caller name the ones that did.
+ *
+ * ── Why the row is selected back ──────────────────────────────────────────
+ *
+ * `.select('id').single()` for the same reason `send` above does it: this
+ * function's answer is what a screen will turn into "sent", and it must mean
+ * the row exists rather than that the request did not raise. The write policy
+ * is `msg_coach` — `is_my_client(client_id) AND sender = 'coach'` — so the
+ * server decides both that these are the caller's clients and that the message
+ * is from the coach. Neither is taken from this request.
+ *
+ * Pushes go only to the clients whose row landed, in one call, after all of
+ * them: a push about a message that does not exist is worse than no push.
+ */
+export async function sendCoachMessages(
+  clientIds: readonly string[],
+  body: string,
+): Promise<CoachSendResult[]> {
+  const b = (body || '').trim();
+  if (!b || !clientIds.length) return [];
+  if (!USE_SUPABASE) {
+    // A local-only read is a complete answer; a local-only SEND is not a
+    // delivery. Nothing persists and the message reaches nobody, so this
+    // reports failure rather than letting a screen say it went out.
+    return clientIds.map((clientId) => ({
+      clientId, ok: false,
+      why: 'This build has no server to send to, so nothing was written to their thread.',
+    }));
+  }
+
+  const results = await Promise.all(clientIds.map(async (clientId): Promise<CoachSendResult> => {
+    try {
+      const { data, error } = await supabase.from('messages')
+        .insert({ client_id: clientId, sender: 'coach', body: b })
+        .select('id').single();
+      if (error || !data) {
+        reportError('messaging.sendCoachMessages', error ?? new Error('insert returned no row'), { clientId });
+        return {
+          clientId, ok: false,
+          why: 'That message did not reach their thread. Clients you added by hand have no account to message until they join.',
+        };
+      }
+      return { clientId, ok: true, why: null };
+    } catch (e) {
+      reportError('messaging.sendCoachMessages', e, { clientId });
+      return { clientId, ok: false, why: 'That message did not reach the server, so it has not been sent.' };
+    }
+  }));
+
+  const landed = results.filter((r) => r.ok).map((r) => r.clientId);
+  // Addressed only to the rows that exist. A failing push costs a notification,
+  // not the message, so it stays best-effort — but it can never announce one
+  // that was not written.
+  if (landed.length) sendPush(landed, 'New message from your coach', b, { route: '/(client)/messages' });
+  return results;
+}
+
 /**
  * Who the thread is with — for the header, and for nothing else.
  *

@@ -6,7 +6,8 @@
 import {
   mmolToMgdl, mgdlToMmol, plausible, formatGlucose, band,
   parseHealthSamples, pairMeals, summarise, unsaved, parseTyped,
-  MIN_FOR_PERCENT, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL,
+  mmolFromLevel, parseHealthConnectRecords,
+  MIN_FOR_PERCENT, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL, MGDL_PER_MMOL,
   type GlucoseReading, type MealRef,
 } from './glucose';
 
@@ -65,6 +66,77 @@ eq(parseHealthSamples([
   { value: 5.5, startDate: '2026-08-31T08:00:00Z' },
   { value: 5.5, startDate: '2026-08-31T08:00:00Z' },
 ]).length, 2, 'idless readings are not collapsed into each other');
+
+// ── Health Connect, whose records are the same readings in another shape ────
+//
+// The reading arrives as an object carrying BOTH units, and picking the wrong
+// one is a silent factor-of-eighteen error: 5.5 mmol/L and 99 mg/dL are the
+// same reading, and 99 mmol/L is a number no living person has ever had. Every
+// assertion in this block exists to fail if that ever swaps over.
+// `?? 0` rather than a non-null assertion: a null slipping through here must
+// fail the assertion loudly as "got 0, wanted ~5.5", not be waved past.
+near(mmolFromLevel({ inMillimolesPerLiter: 5.5, inMilligramsPerDeciliter: 99.1 }) ?? 0, 5.5,
+  'mmol/L is taken as-is when the store supplies it');
+near(mmolFromLevel({ inMilligramsPerDeciliter: 99.1 }) ?? 0, 5.5,
+  'mg/dL alone is converted, and to the mmol/L figure — not left at 99');
+near(mmolFromLevel({ inMillimolesPerLiter: 5.5 }) ?? 0, 5.5, 'mmol/L alone needs no conversion');
+// The guard that catches a swap in either direction: the two branches must
+// agree to within rounding for the same reading, and 18 apart if one is wrong.
+near(
+  (mmolFromLevel({ inMilligramsPerDeciliter: 7.3 * MGDL_PER_MMOL }) ?? 0)
+  - (mmolFromLevel({ inMillimolesPerLiter: 7.3 }) ?? 0),
+  0, 'the two units describe the same reading, whichever one survives the bridge');
+eq(mmolFromLevel(null), null, 'no level is null, never 0');
+eq(mmolFromLevel({}), null, 'an empty level is null, never 0');
+eq(mmolFromLevel({ inMillimolesPerLiter: 'five' }), null, 'a non-number level is null');
+// A NaN in one field falls back to the other, which is the point of having a
+// fallback at all — but it CONVERTS on the way, so the recovery cannot be the
+// factor-of-eighteen bug wearing a rescue's clothes.
+near(mmolFromLevel({ inMillimolesPerLiter: NaN, inMilligramsPerDeciliter: 99.1 }) ?? 0, 5.5,
+  'a NaN mmol/L falls back to mg/dL and converts it — it does not read 99.1 as mmol/L');
+eq(mmolFromLevel({ inMillimolesPerLiter: NaN, inMilligramsPerDeciliter: NaN }), null,
+  'both fields broken is null, never 0');
+
+const hcRecords = [
+  { time: '2026-08-31T08:00:00Z', level: { inMillimolesPerLiter: 5.52, inMilligramsPerDeciliter: 99.5 }, metadata: { id: 'r1', dataOrigin: 'com.dexcom.g7' } },
+  { time: '2026-08-31T08:00:00Z', level: { inMillimolesPerLiter: 5.52, inMilligramsPerDeciliter: 99.5 }, metadata: { id: 'r1', dataOrigin: 'com.dexcom.g7' } }, // read twice
+  { time: '2026-08-31T09:00:00Z', level: { inMilligramsPerDeciliter: 145.9 }, metadata: { id: 'r2' } },  // mg/dL only
+  { time: '2026-08-31T09:05:00Z', level: { inMillimolesPerLiter: 0 }, metadata: { id: 'r3' } },          // sensor garbage
+  { time: 'not a date', level: { inMillimolesPerLiter: 7 }, metadata: { id: 'r4' } },                    // unusable time
+  { level: { inMillimolesPerLiter: 7 }, metadata: { id: 'r5' } },                                        // no time at all
+  { time: '2026-08-31T10:00:00Z', metadata: { id: 'r6' } },                                              // no level at all
+  null,
+];
+const hc = parseHealthConnectRecords(hcRecords);
+eq(hc.length, 2, 'duplicates, garbage, missing levels and unusable times are all dropped');
+eq(hc[0].mmol, 8.1, 'a mg/dL-only record lands as mmol/L, newest first');
+eq(hc[1].mmol, 5.5, 'and is stored to the column scale');
+eq(hc[1].externalId, 'r1', "the record id becomes the external id, so it cannot land twice");
+eq(hc[1].sourceName, 'com.dexcom.g7', 'the writing app is carried through');
+eq(parseHealthConnectRecords(null).length, 0, 'a failed read is an empty list, not a throw');
+eq(parseHealthConnectRecords({ records: [] } as unknown).length, 0, 'the response object is not the array');
+
+// A record with no id keeps a null external id — and `unsaved` then refuses to
+// send it, which is what stops an unidentifiable reading landing on every open.
+const idless = parseHealthConnectRecords([
+  { time: '2026-08-31T08:00:00Z', level: { inMillimolesPerLiter: 5.5 }, metadata: {} },
+]);
+eq(idless[0].externalId, null, 'a record with no id has no external id');
+eq(unsaved(idless, []).length, 0, 'and is never sent for import');
+
+// The whole point of routing through parseHealthSamples rather than mapping
+// here: the two platforms drop the same garbage, in the same order, by the same
+// rule. If either side ever grows its own copy, this stops holding.
+eq(
+  JSON.stringify(parseHealthConnectRecords([
+    { time: '2026-08-31T09:00:00Z', level: { inMillimolesPerLiter: 8.1 }, metadata: { id: 'x', dataOrigin: 'w' } },
+    { time: '2026-08-31T08:00:00Z', level: { inMillimolesPerLiter: 5.5 }, metadata: { id: 'y', dataOrigin: 'w' } },
+  ])),
+  JSON.stringify(parseHealthSamples([
+    { value: 8.1, id: 'x', startDate: '2026-08-31T09:00:00Z', sourceName: 'w' },
+    { value: 5.5, id: 'y', startDate: '2026-08-31T08:00:00Z', sourceName: 'w' },
+  ])),
+  'the Android and iOS parsers produce the identical reading for the identical sample');
 
 // ── meals against readings ──────────────────────────────────────────────────
 const r = (at: string, mmol: number): GlucoseReading => ({ at, mmol, externalId: at, sourceName: null });
@@ -146,4 +218,4 @@ eq(parseTyped('abc', 'mmol/L'), null, 'words are not a reading');
 eq(parseTyped(' 6.2 ', 'mmol/L'), 6.2, 'surrounding whitespace is tolerated');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log(`glucose: ok (${parsed.length + paired.length + many.length} cases)`);
+console.log(`glucose: ok (${parsed.length + hc.length + paired.length + many.length} cases)`);

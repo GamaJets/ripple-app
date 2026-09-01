@@ -1,6 +1,14 @@
-// Client · Blood sugar. Readings a CGM wrote into Apple Health, shown against
-// the meals they surround, plus the one switch that decides whether the coach
-// sees any of it.
+// Client · Blood sugar. Readings a CGM wrote into the phone's health store —
+// Apple Health on iOS, Health Connect on Android — shown against the meals
+// they surround, plus the one switch that decides whether the coach sees any
+// of it.
+//
+// There is no `Platform.OS` on this screen. `glucoseSource()` picks the store
+// once and hands back the sentences and the reader for it, so the Android half
+// of this feature cannot drift into being a different screen from the iOS
+// half. It nearly was: while Android had no reader, the copy, the hook and the
+// provider row each apologised for it in their own wording, and two of the
+// three went on apologising after the third was fixed.
 //
 // WHAT THIS SCREEN WILL NOT DO. It does not tell anybody what to eat. Not a
 // suggestion, not a score, not a red badge that means "you did badly". Somebody
@@ -15,6 +23,14 @@
 // did not answer, and rendering the two the same way would tell somebody
 // wearing a sensor that it recorded nothing — which is the one thing on this
 // screen they would actually act on.
+//
+// The same rule governs the import, which has four outcomes and four different
+// sentences. A store this build cannot read is a fact about the app and is
+// permanent until a new version; a decline is the person's own decision and
+// the fix is in the system's settings, not here; a failed read is worth trying
+// again in a minute; and an empty window is a real answer. `importNote` below
+// is the one place that maps them, so no two of them can end up sharing a
+// wording.
 import { useState } from 'react';
 import { View, Text, ScrollView, Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,8 +42,9 @@ import { useGlucose } from '../../src/ui/glucoseData';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import {
   band, formatGlucose, parseTyped, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL,
-  type GlucoseUnit, type GlucoseBand,
+  type GlucoseUnit, type GlucoseBand, type GlucoseReadStatus,
 } from '../../src/lib/glucose';
+import { glucoseSource } from '../../src/lib/wearables/glucoseSource';
 
 const UNITS: GlucoseUnit[] = ['mmol/L', 'mg/dL'];
 
@@ -55,14 +72,51 @@ export default function Glucose() {
   const known = g.status === 'ready';
   const unreadable = g.status === 'error';
 
+  // The store this phone reads from, and every sentence that names it. Called
+  // on render because it is a handful of property lookups and no native call.
+  const src = glucoseSource();
+
+  // What the last import found, kept on screen rather than living and dying
+  // inside an alert. Somebody who declined Health Connect and then dismissed
+  // the alert would otherwise be looking at an empty list with no explanation
+  // and a button offering to fetch readings that cannot arrive.
+  const [importNote, setImportNote] = useState<{ status: GlucoseReadStatus; text: string } | null>(null);
+
+  /** The alert's title. Four outcomes, four titles, never one shared word. */
+  const importTitle = (status: GlucoseReadStatus, added: number): string => {
+    if (status === 'unsupported') return 'Nothing to read from';
+    if (status === 'denied') return 'Repple has not been given access';
+    if (status === 'error') return 'Could not be read';
+    return added > 0 ? 'Imported' : 'Up to date';
+  };
+
   const doImport = async () => {
     if (busy) return;
     setBusy(true);
     const r = await g.importFromHealth();
     setBusy(false);
-    if (r.reason) Alert.alert('Nothing imported', r.reason);
-    else if (r.added === 0) Alert.alert('Up to date', 'Health has nothing newer than what is already here.');
-    else Alert.alert('Imported', `${r.added} reading${r.added === 1 ? '' : 's'} added.`);
+
+    const text = r.reason
+      ?? (r.added === 0
+        ? `${src.storeName} has nothing newer than what is already here.`
+        : `${r.added} reading${r.added === 1 ? '' : 's'} added.`);
+    // Only the outcomes worth still reading about in a minute are kept. A
+    // successful import is evident from the list itself, and a note saying so
+    // would still be sitting there tomorrow.
+    setImportNote(r.status === 'ready' && r.added > 0 ? null : { status: r.status, text });
+
+    // A decline is the one outcome Repple cannot do anything about from here:
+    // once Health Connect has been answered, only Health Connect can change
+    // it. So that alert offers the way there instead of an OK that does
+    // nothing. `openStore` is null on iOS, where there is nowhere to send them.
+    if (r.status === 'denied' && src.openStore) {
+      Alert.alert(importTitle(r.status, r.added), text, [
+        { text: 'Not now', style: 'cancel' },
+        { text: `Open ${src.storeName}`, onPress: src.openStore },
+      ]);
+      return;
+    }
+    Alert.alert(importTitle(r.status, r.added), text);
   };
 
   const saveTyped = async () => {
@@ -139,13 +193,29 @@ export default function Glucose() {
         {/* ── Getting readings in ───────────────────────────────────────── */}
         <Section style={{ marginTop: sp.lg }}>
           <SectionHead title="Where These Come From" />
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-            {Platform.OS === 'ios'
-              ? 'A Dexcom, or a Libre through its own app, writes into Apple Health. Repple reads from there — so any monitor that reaches Health reaches Repple.'
-              : 'On Android, monitors write into Health Connect. Reading from it needs a build that includes it, which this one does not yet — you can still type readings in below.'}
-          </Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{src.whereFrom}</Text>
+          {/* The build cannot read this phone's store at all, which is neither
+              a failure nor the person's doing. Said here, once, rather than
+              behind a button — the reconnect loop on Watch & devices was built
+              out of exactly that button, offered to somebody it could only ever
+              produce an apology for. */}
+          {src.absentReason ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{src.absentReason}</Text>
+          ) : null}
+          {/* What the last import found, for the three outcomes that are not
+              simply "it worked". Each carries its own sentence from the reader
+              that produced it. */}
+          {importNote ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{importNote.text}</Text>
+          ) : null}
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
-            {Platform.OS === 'ios' ? <Cta label={busy ? 'Reading…' : 'Import from Health'} onPress={doImport} disabled={busy} /> : null}
+            {src.present ? <Cta label={busy ? 'Reading…' : `Import from ${src.storeName}`} onPress={doImport} disabled={busy} /> : null}
+            {/* Offered only where there is somewhere to go, and only once the
+                person has actually been refused — before that it is a route
+                into a settings screen about a question nobody has been asked. */}
+            {src.openStore && importNote?.status === 'denied' ? (
+              <Ghost label={`Open ${src.storeName}`} onPress={src.openStore} />
+            ) : null}
             <Ghost label="Add One By Hand" onPress={() => setTyping(true)} />
           </View>
         </Section>

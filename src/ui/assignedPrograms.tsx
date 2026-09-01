@@ -30,6 +30,12 @@ interface AssignedProgramsValue {
    *  upsert whose rejection handler was empty, and which was skipped entirely
    *  when uid was still null. */
   assignProgram: (clientId: string, program: Program) => Promise<boolean>;
+  /** The same write, with the sentence saying why it did not land.
+   *
+   *  A bulk assign is twelve of these at once and has to report on each one by
+   *  name — "8 of 12 saved" tells a coach something is wrong and nothing about
+   *  which four or what to do. See src/lib/bulkActions.ts. */
+  assignProgramTo: (clientId: string, program: Program) => Promise<{ ok: boolean; why: string | null }>;
   /** Resolves true only when the removal reached the server. A clear that was
    *  refused leaves the client still training the old program while the coach's
    *  screen shows it gone. */
@@ -88,14 +94,79 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   }, [authRev]);
 
   const getProgram = (clientId: string) => programs[clientId] ?? null;
-  const assignProgram = async (clientId: string, program: Program): Promise<boolean> => {
+  /**
+   * Put a programme on one client, and say what happened.
+   *
+   * ── Why the row count, and not `error` ─────────────────────────────────
+   *
+   * The same reasoning `clearProgram` below already carries, arriving here
+   * because a BULK assign made it matter twelve times per tap. `!error` was
+   * this function's whole test of success, and a PostgREST write that matches
+   * no rows is not an error: it comes back 204 with `error` null, and the
+   * screen above announced "they'll see it on their Train tab".
+   *
+   * The refusal is real and it is not exotic. `assigned_programs_coach_rw` is
+   * `coach_id = auth.uid() AND is_my_client(client_id)`, and `is_my_client`
+   * looks in `clients` — so a client the coach added BY HAND has no row for it
+   * to find, and every one of them fails this check. A coach whose book is
+   * half hand-added and half linked taps Assign on twelve people and gets
+   * twelve writes of which six do nothing.
+   *
+   * `writeFailure` is what turns the three outcomes — refused, matched
+   * nothing, nobody counted — into one sentence for the coach, and it treats a
+   * MISSING count as a failure rather than a pass, which is what stops a
+   * future edit dropping `{ count: 'exact' }` and silently re-admitting all of
+   * this.
+   *
+   * The local map is still written FIRST, because the screen has to respond to
+   * the tap — and it is put back if the write does not land. See below.
+   */
+  const assignProgramTo = async (clientId: string, program: Program): Promise<{ ok: boolean; why: string | null }> => {
+    // ── and why a failed write is PUT BACK ───────────────────────────────
+    //
+    // The optimistic entry is written first so the screen responds to the tap,
+    // and it used to be left there whatever happened. That was already a small
+    // lie — a coach's own device showed a client on a programme the server had
+    // refused — and a bulk assign turns it into a load-bearing one, because
+    // `getProgram` is what the overwrite confirmation counts. Leave a failed
+    // write in the map and the retry's confirmation says "9 of these 12 are on
+    // a programme now" about people whose programme never landed, which is the
+    // screen reading its own guess back to the coach as a fact.
+    const previous = programs[clientId] ?? null;
+    const putBack = () => setPrograms((p) => {
+      const n = { ...p };
+      if (previous) n[clientId] = previous; else delete n[clientId];
+      return n;
+    });
     setPrograms((p) => ({ ...p, [clientId]: program }));
-    if (!USE_SUPABASE || !uid) return false;
+    if (!USE_SUPABASE || !uid) {
+      putBack();
+      return { ok: false, why: 'This programme was not saved — the app could not confirm who you are signed in as, so nothing was sent to the server.' };
+    }
     try {
-      const { error } = await supabase.from('assigned_programs').upsert({ client_id: clientId, coach_id: uid, program }, { onConflict: 'client_id' });
-      return !error;
-    } catch { return false; }
+      const r = await supabase.from('assigned_programs')
+        .upsert({ client_id: clientId, coach_id: uid, program }, { onConflict: 'client_id', count: 'exact' });
+      const why = writeFailure('That programme', r);
+      if (why) {
+        reportError('assignedPrograms.assignProgram', new Error(why), { clientId });
+        putBack();
+        // The generic sentence names the outcome; this names the cause the
+        // coach can actually do something about. `is_my_client` looks in
+        // `clients`, so a client the coach typed into Add Client fails it every
+        // time — proved live against phgfwzpkkwdysftlgkoq, where the same
+        // fan-out wrote 1 row for the linked client and was refused 42501 for
+        // the hand-added one beside it.
+        return { ok: false, why: `${why} Clients you added by hand have no Train tab until they join.` };
+      }
+      return { ok: true, why: null };
+    } catch (e) {
+      reportError('assignedPrograms.assignProgram', e, { clientId });
+      putBack();
+      return { ok: false, why: 'That programme did not reach the server, so nothing has changed for them.' };
+    }
   };
+  const assignProgram = async (clientId: string, program: Program): Promise<boolean> =>
+    (await assignProgramTo(clientId, program)).ok;
   /**
    * Take a client off their coach-assigned programme.
    *
@@ -133,7 +204,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   };
 
   return (
-    <Ctx.Provider value={{ programs, getProgram, status, assignProgram, clearProgram }}>
+    <Ctx.Provider value={{ programs, getProgram, status, assignProgram, assignProgramTo, clearProgram }}>
       {children}
     </Ctx.Provider>
   );

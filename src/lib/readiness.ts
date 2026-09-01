@@ -4,19 +4,53 @@
 // HealthKit/wearable HRV lands it can feed in as a fourth signal.
 export type ReadinessTone = 'good' | 'moderate' | 'low';
 
+/** The signals the score is built from, named so a screen can say which of them
+ *  it actually had. */
+export type ReadinessSignal = 'sleep' | 'hydration' | 'load';
+
 export interface Readiness {
   score: number;        // 0..100
   label: string;        // short status
   tip: string;          // one-line guidance
   tone: ReadinessTone;
+  /**
+   * What the number is made of, in scale order. Always contains 'sleep' and
+   * 'load' — without either there is no score at all — and contains
+   * 'hydration' only when a hydration figure was scored.
+   *
+   * This exists because the score is the first and largest figure on the home
+   * screen, and an 83 built from sleep and training alone and an 83 built from
+   * all three are different claims. The member cannot tell them apart from the
+   * number, so the number has to be able to say.
+   */
+  from: ReadinessSignal[];
+  /**
+   * 'full' when every signal in the scale was scored, 'partial' when one was
+   * dropped and the rest rescaled.
+   *
+   * Deliberately confidence and NOT a deduction. A signal nobody recorded is
+   * not a bad reading, so it leaves the scale rather than scoring zero against
+   * it — the score keeps its meaning and this field carries the caveat.
+   */
+  confidence: 'full' | 'partial';
 }
 
 export interface ReadinessInput {
   /** Average of recent nights. **null means none logged**, which is not zero. */
   avgSleepHours: number | null;
-  /** 0..1 (cups / goal today). null means hydration is not being tracked. */
+  /** 0..1 (cups / goal today). null means there is no honest hydration figure —
+   *  either the client tracks no water, or today's count could not be read. */
   hydrationPct: number | null;
-  workoutsLast2Days: number;  // training load proxy
+  /**
+   * Sessions in the last two days, or **null when the training log could not be
+   * read**. Null is not zero, and this channel exists because it used to not:
+   * the type was a bare `number`, so every caller with an unreadable log had to
+   * pass 0 — which scores as MAXIMALLY RESTED and hands back a tip telling
+   * somebody to push. app/(client)/coach.tsx had already noticed and was
+   * gating the whole call by hand; app/(client)/dashboard.tsx had not, so the
+   * home screen's hero rose when the workout log failed to load.
+   */
+  workoutsLast2Days: number | null;
 }
 
 /**
@@ -36,19 +70,55 @@ export interface ReadinessInput {
  * Hydration is different: null there means "not tracked", so the remaining
  * signals are rescaled rather than being docked 30 points for a number nobody
  * asked the user for.
+ *
+ * ── Why an unknown training load withholds the score and an unknown hydration
+ *    figure only shrinks the scale ────────────────────────────────────────────
+ *
+ * Both are missing inputs and they get opposite treatments, so the difference
+ * has to be written down or somebody will make them consistent and reintroduce
+ * a bug.
+ *
+ * Every signal here can only ever count AGAINST the member: sleep short of
+ * eight hours, water short of the goal, sessions in the last two days. So
+ * dropping any of them from the scale can only make the score go UP. That is
+ * fine when it is honest and dangerous when it is not, and the two cases differ
+ * in whether "missing" is a fact about the member or a fact about our read.
+ *
+ *   HYDRATION. `null` here is overwhelmingly "this person tracks no water" —
+ *   they never set a goal, and part 70 forbids inventing one. That is a
+ *   permanent, true state for a large share of members, and withholding their
+ *   score forever because of it would delete the feature for them. Rescaling
+ *   puts them on the same footing as everyone else on the signals they do have,
+ *   which is exactly what this function already did and why. A hydration read
+ *   that FAILED lands in the same null and is treated the same way: it joins a
+ *   population that already exists rather than inventing a new claim, and it
+ *   beats the alternative the callers used to pass — `water / goal` with water
+ *   still at its initial 0, which scored a network blip as a day of drinking
+ *   nothing and took thirty points off.
+ *
+ *   TRAINING LOAD. There is no equivalent. Every member has a training log, and
+ *   `workoutsLast2Days` is never legitimately absent — a null there means one
+ *   thing only: the read failed. Dropping it from the scale would raise the
+ *   number of anybody who HAS trained hard for the last two days, and the tip
+ *   attached to a raised number is "Great day to push". That is a green light
+ *   computed from an absence, handed to the exact person it is most wrong for.
+ *   So the score is withheld and the screen says it does not know, which is
+ *   what app/(client)/coach.tsx had already worked out and was doing by hand.
  */
 export function readinessScore(i: ReadinessInput): Readiness | null {
   if (i.avgSleepHours == null || !(i.avgSleepHours > 0)) return null;
+  // See the header. An unread log is not a rested member.
+  if (i.workoutsLast2Days == null || !Number.isFinite(i.workoutsLast2Days)) return null;
 
   const sleep = Math.max(0, Math.min(1, i.avgSleepHours / 8)) * 50;             // up to 50
-  const rest = Math.max(0, 20 - Math.max(0, (i.workoutsLast2Days || 0) - 1) * 10); // 0–1 sessions = 20, 2 = 10, 3+ = 0
+  const rest = Math.max(0, 20 - Math.max(0, i.workoutsLast2Days - 1) * 10); // 0–1 sessions = 20, 2 = 10, 3+ = 0
 
   // Untracked hydration is not dehydration. Score the signals we have and
   // rescale to 100, rather than capping everyone who ignores the water tracker
   // at 70 and calling them under-recovered for it.
   const pct = i.hydrationPct;
-  const tracked = pct != null;
-  const hydration = pct != null ? Math.max(0, Math.min(1, pct)) * 30 : 0;
+  const tracked = pct != null && Number.isFinite(pct);
+  const hydration = tracked ? Math.max(0, Math.min(1, pct as number)) * 30 : 0;
   const raw = sleep + rest + hydration;
   const outOf = tracked ? 100 : 70;
   const score = Math.round((raw / outOf) * 100);
@@ -64,7 +134,29 @@ export function readinessScore(i: ReadinessInput): Readiness | null {
     tone = 'low'; label = 'Under-recovered';
     tip = 'Prioritise sleep, water and a lighter session or rest today.';
   }
-  return { score, label, tip, tone };
+  const from: ReadinessSignal[] = tracked ? ['sleep', 'hydration', 'load'] : ['sleep', 'load'];
+  return { score, label, tip, tone, from, confidence: tracked ? 'full' : 'partial' };
+}
+
+/**
+ * What the score is made of, as a sentence to print under it.
+ *
+ * Sentence case and no trailing full stop, because every caller appends it to a
+ * tip that already ends in one. It never names what is MISSING: "no hydration
+ * figure" invites the member to read the score as having been marked down for
+ * it, and nothing was marked down — the signal simply is not in the scale.
+ */
+export function readinessMadeOf(r: Readiness): string {
+  const words: Record<ReadinessSignal, string> = {
+    sleep: 'your sleep',
+    hydration: 'hydration',
+    load: 'recent sessions',
+  };
+  const parts = r.from.map((s) => words[s]);
+  const list = parts.length > 1
+    ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+    : parts[0];
+  return `Scored from ${list}`;
 }
 
 // ── Which sleep readiness is allowed to use ────────────────────────────────

@@ -14,14 +14,14 @@
 // CGM that their sensor recorded nothing — which is the one thing they would
 // actually act on.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import {
   pairMeals, summarise, unsaved,
-  type GlucoseReading, type GlucoseSummary, type MealGlucose, type MealRef,
+  type GlucoseReadStatus, type GlucoseReading, type GlucoseSummary, type MealGlucose, type MealRef,
 } from '../lib/glucose';
+import { glucoseSource } from '../lib/wearables/glucoseSource';
 
 /** How far back the screens look, and how far back the import reads. */
 export const WINDOW_DAYS = 14;
@@ -46,8 +46,19 @@ export interface GlucoseData {
   pairedStatus: LoadStatus;
   /** Re-read from the server. */
   refresh: () => Promise<void>;
-  /** Pull anything new out of Apple Health and store it. Own readings only. */
-  importFromHealth: () => Promise<{ added: number; reason?: string }>;
+  /**
+   * Pull anything new out of the phone's health store and save it. Own
+   * readings only.
+   *
+   * `status` is carried out alongside the count because "nothing was added" has
+   * four different causes and the screen says a different thing for each — a
+   * store this build cannot read ('unsupported'), a person who declined
+   * ('denied'), a step that did not answer ('error', whether that was the
+   * store or the save), and a window that genuinely holds nothing new
+   * ('ready'). Returning only a count and a sentence made the first three look
+   * like the fourth.
+   */
+  importFromHealth: () => Promise<{ added: number; status: GlucoseReadStatus; reason?: string }>;
   /** Store one reading somebody typed. mmol/L. */
   addManual: (mmol: number, at?: string) => Promise<boolean>;
   /** Remove one. Only the owner can, and the database agrees. */
@@ -71,9 +82,16 @@ function toReading(r: Row): GlucoseReading {
     at: r.taken_at,
     mmol: Number(r.mmol_l),
     externalId: r.external_id,
-    // The writing app's name is not stored — it is HealthKit's, not ours to
-    // keep — so a stored reading says only whether it came from Health.
-    sourceName: r.source === 'health' ? 'Apple Health' : null,
+    // The writing app's name is not stored — it is the health store's, not
+    // ours to keep — so a stored reading says only that it came from one.
+    //
+    // NOT 'Apple Health', which is what this said until Health Connect landed.
+    // The column records that a reading came from the phone's health store and
+    // not WHICH store, so naming Apple on a row a Pixel imported out of Health
+    // Connect would have been the screen inventing a provenance — and a coach
+    // reading a shared history sees these rows too, on whatever phone they
+    // happen to be holding.
+    sourceName: r.source === 'health' ? 'Health' : null,
   };
 }
 
@@ -171,26 +189,19 @@ export function useGlucose(personId?: string): GlucoseData {
   const paired = useMemo(() => pairMeals(meals, readings), [meals, readings]);
   const pairedStatus = useMemo(() => worstStatus(status, mealsStatus), [status, mealsStatus]);
 
-  const importFromHealth = useCallback(async (): Promise<{ added: number; reason?: string }> => {
-    if (readOnly) return { added: 0, reason: 'These are not your readings to import.' };
-    if (!target) return { added: 0, reason: 'Not signed in.' };
-    if (Platform.OS !== 'ios') {
-      // Said plainly rather than shown as a failure. Android reads glucose out
-      // of Health Connect, which this build has no native module for — see
-      // src/lib/wearables/cloudProvider.ts, where connect() says the same.
-      return { added: 0, reason: 'Reading glucose from Health Connect needs an Android build that includes it. Not in this one yet.' };
-    }
-    let mod: typeof import('../lib/wearables/appleHealth');
-    try {
-      mod = require('../lib/wearables/appleHealth');
-    } catch {
-      return { added: 0, reason: 'Apple Health is not available in this build.' };
-    }
-    const read = await mod.fetchGlucose(WINDOW_DAYS);
-    if (read.status !== 'ready') return { added: 0, reason: read.reason };
+  const importFromHealth = useCallback(async (): Promise<{ added: number; status: GlucoseReadStatus; reason?: string }> => {
+    if (readOnly) return { added: 0, status: 'unsupported', reason: 'These are not your readings to import.' };
+    if (!target) return { added: 0, status: 'error', reason: 'Not signed in.' };
+
+    // No platform branch here any more, and that is the change rather than a
+    // simplification: iOS reads Apple Health, Android reads Health Connect,
+    // and both hand back the same GlucoseRead. `glucoseSource()` is the one
+    // place that knows which is which — see src/lib/wearables/glucoseSource.ts.
+    const read = await glucoseSource().fetchGlucose(WINDOW_DAYS);
+    if (read.status !== 'ready') return { added: 0, status: read.status, reason: read.reason };
 
     const fresh = unsaved(read.readings, rows.map((r) => r.external_id).filter((x): x is string => !!x));
-    if (fresh.length === 0) return { added: 0 };
+    if (fresh.length === 0) return { added: 0, status: 'ready' };
 
     // `{ count: 'exact' }`, and the count is what is reported.
     //
@@ -216,17 +227,17 @@ export function useGlucose(personId?: string): GlucoseData {
       // never going to move.
       if (error.code === '23505') {
         await refresh();
-        return { added: 0, reason: 'Those readings are already in Repple, so nothing new was added.' };
+        return { added: 0, status: 'ready', reason: 'Those readings are already in Repple, so nothing new was added.' };
       }
-      return { added: 0, reason: 'Those readings could not be saved. Try again in a moment.' };
+      return { added: 0, status: 'error', reason: 'Those readings could not be saved. Try again in a moment.' };
     }
     await refresh();
     // A null count is "nobody counted", not "none" — the same rule
     // src/lib/wroteRows.ts states for updates and deletes.
     if (count == null) {
-      return { added: 0, reason: 'They were sent, but the server did not say how many it stored. Pull down to refresh and check before importing again.' };
+      return { added: 0, status: 'error', reason: 'They were sent, but the server did not say how many it stored. Pull down to refresh and check before importing again.' };
     }
-    return { added: count };
+    return { added: count, status: 'ready' };
   }, [readOnly, target, rows, refresh]);
 
   const addManual = useCallback(async (mmol: number, at?: string): Promise<boolean> => {

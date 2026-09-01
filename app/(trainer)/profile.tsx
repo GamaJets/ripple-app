@@ -438,6 +438,23 @@ export default function CoachProfile() {
 
         <Rule />
 
+        {/* ── what your clients see around your coaching ─────────────────── */}
+        {/* Its own section rather than a row under Account, because it is the
+            coach's PUBLIC face and Account is where private settings live —
+            the same split the sections above it make. Outside the
+            `p.access !== 'ok'` branch for the reason Credentials gives: the
+            Branding screen does its own three-state read and tells a coach
+            when it failed, rather than showing an empty form that would
+            silently save nothing. */}
+        <Section>
+          <SectionHead title="Your Branding" />
+          <ListRow icon="sparkle" title="Your Branding"
+            note="The name and colour your clients see around your coaching"
+            onPress={() => router.push('/(trainer)/brand')} />
+        </Section>
+
+        <Rule />
+
         {/* ── your paperwork, not Repple's ───────────────────────────────── */}
         {/* Its own section rather than a row under Account, for the reason the
             screen itself opens with: the waiver a client signs on joining is
@@ -510,6 +527,14 @@ export default function CoachProfile() {
 
         <Section>
           <SectionHead title="Money" />
+          {/* First, and above the three screens that each own a piece of it.
+              Payments, Invoices and Billing are where a coach DOES something;
+              this is the only place that answers "how did the month go" without
+              making them visit five screens and add up in their head. It writes
+              nothing and owns nothing — every section on it ends in a row that
+              opens one of the three below. */}
+          <ListRow icon="chart" title="Money" note="What came in and what went out, kept apart"
+            onPress={() => router.push('/(trainer)/money')} />
           <ListRow icon="people" title="Payments" note="Get paid by clients — memberships & packs"
             onPress={() => router.push('/(trainer)/payments')} />
           {/* Under Payments and above Billing, in that order, because the three
@@ -522,6 +547,14 @@ export default function CoachProfile() {
             onPress={() => router.push('/(trainer)/invoices')} />
           <ListRow icon="chart" title="Billing & Subscription" note="Your plan, payment method & invoices"
             onPress={() => router.push('/(trainer)/billing')} />
+          {/* Last in the section, because it is the one row that is about all
+              three of the rows above at once: it is a period summary of what
+              this app recorded, for handing to somebody else. It is deliberately
+              not called a tax export — it calculates no tax and says so on its
+              own face — and the note says what it is for so nobody has to open
+              it to find out. */}
+          <ListRow icon="grid" title="Statement of Record" note="What this app recorded in a year or a quarter, to hand to an accountant"
+            onPress={() => router.push('/(trainer)/statement')} />
         </Section>
 
         <Rule />

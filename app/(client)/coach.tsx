@@ -26,7 +26,7 @@ import { useWellness } from '../../src/ui/wellness';
 import { useHabits } from '../../src/ui/habits';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useFoodLog } from '../../src/ui/foodLog';
-import { readinessScore, readinessSleep } from '../../src/lib/readiness';
+import { readinessScore, readinessMadeOf, readinessSleep } from '../../src/lib/readiness';
 import { useDeviceSleep } from '../../src/ui/deviceSleep';
 import { suggestProgression } from '../../src/lib/progression';
 import { currentStreak } from '../../src/lib/streaks';
@@ -50,7 +50,7 @@ export default function Coach() {
     : null;
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const { sleep } = useWellness();
-  const { water, waterGoal } = useHabits();
+  const { water, waterGoal, waterStatus } = useHabits();
   // Every line of `context` below is handed to a language model as fact about
   // this person, and the model writes it back to them in the second person. So
   // an unread read here does not produce a blank screen, it produces a
@@ -81,13 +81,22 @@ export default function Coach() {
   // `: 0` was the bug the home screen already had fixed: a client with no water
   // goal set was reported to the coach as zero percent hydrated, which scores as
   // badly as a client who drank nothing all day. Unknown travels as null.
-  // Not scored at all from a log we could not read whole. `workoutsLast2Days`
-  // takes a number and has no way to say "unknown", so an unread log arrives as
-  // 0 — which scores as maximally rested and reads back to the member as a
-  // green light to train hard.
-  const _readiness = logWhole
-    ? readinessScore({ avgSleepHours: _avgSleep, hydrationPct: waterGoal ? water / waterGoal : null, workoutsLast2Days: _load2d })
-    : null;
+  //
+  // The `logWhole` gate this screen used to hold by hand is now inside
+  // `readinessScore`, which takes `number | null` for the load and withholds the
+  // score rather than scoring an unread log as maximally rested. The gate is
+  // kept here as the null it passes, so the two screens cannot drift apart
+  // again — and `logWhole` is still read below, for the streak and the last
+  // exercise, which have no such channel.
+  //
+  // `waterStatus` closes the same hole on the hydration side: `water` is 0 while
+  // the count is unread, and 0 over a goal the client did set is not "they drank
+  // nothing", it is "we do not know".
+  const _readiness = readinessScore({
+    avgSleepHours: _avgSleep,
+    hydrationPct: waterGoal && isWhole(waterStatus) ? water / waterGoal : null,
+    workoutsLast2Days: logWhole ? _load2d : null,
+  });
   const _streak = currentStreak(log);
   const _lastEx = logWhole && log.length ? log[0].exercise : '';
   const _prog = logWhole ? suggestProgression(log, wu)[0] : undefined;
@@ -111,7 +120,11 @@ export default function Coach() {
     bodyFatPct: cd.bodyFatPct, muscleKg: cd.muscleKg, mealsPerDay: cd.mealsPerDay,
     kcal: macros?.kcal ?? 'not set', protein: macros?.protein ?? 'not set', carbs: macros?.carbs ?? 'not set', fat: macros?.fat ?? 'not set',
     programTitle: program.title, programFocus: program.focus.join(', '),
-    readiness: _readiness ? `${_readiness.score}/100 (${_readiness.label})`
+    // What the score is made of travels with it. A model handed a bare 83
+    // will talk about hydration whether or not hydration was in the scale,
+    // because the number looks like it covers everything.
+    readiness: _readiness
+      ? `${_readiness.score}/100 (${_readiness.label}), ${readinessMadeOf(_readiness).toLowerCase()}`
       : logWhole ? 'not enough data' : 'their training log could not be read, so readiness is unknown — do not treat it as rested',
     // Said plainly, with where it came from. A coach that knows the watch
     // measured 5.2 hours can talk about the night; one handed only a score

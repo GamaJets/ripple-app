@@ -146,6 +146,116 @@ export function parseHealthSamples(rows: unknown): GlucoseReading[] {
   return out;
 }
 
+// ── Health Connect, which is the same job in a different shape ──────────────
+//
+// Android's store hands back a record rather than a sample: the time is `time`
+// rather than `startDate`, the id and the writing app live under `metadata`,
+// and the value is an object carrying the reading in BOTH units at once. So
+// the whole Android-specific part of the import is the reshaping below, and
+// everything that decides what counts as a reading — the plausibility floor,
+// the duplicate collapse, the newest-first order — stays in
+// `parseHealthSamples`, which is called with the reshaped rows.
+//
+// Reimplementing that here instead is the obvious shortcut and the expensive
+// one: the two platforms would then drift, and the half that drifts is the
+// half two testers are actually using.
+
+/**
+ * The reading itself, as Health Connect returns it on a READ.
+ *
+ * Both fields are always written by the native layer (see
+ * `ReactBloodGlucoseRecord.bloodGlucoseToJsMap`), which is why this is not a
+ * union — but they are optional here because a bridge payload that lost one is
+ * a thing that has to be survived rather than assumed away.
+ */
+export interface HealthConnectLevel {
+  inMillimolesPerLiter?: number;
+  inMilligramsPerDeciliter?: number;
+}
+
+/**
+ * One record's level in mmol/L, whichever unit survived the bridge.
+ *
+ * Health Connect stores glucose in a unit the WRITING app chose, and exposes
+ * it converted both ways. mmol/L is preferred because it is what the column
+ * holds, so the ordinary path performs no arithmetic at all and cannot be
+ * wrong by a factor of eighteen. mg/dL is the fallback, and it goes through
+ * `mgdlToMmol` — the same function the typed-input parser uses — rather than
+ * through a second constant written out here. There is one conversion factor
+ * in this app and this is not the place to add a second.
+ *
+ * Null rather than 0 for anything unreadable: a level this function cannot
+ * interpret must not become a reading of zero, which on a chart of somebody's
+ * sugars is a value that would mean they were dead.
+ */
+export function mmolFromLevel(level: unknown): number | null {
+  if (!level || typeof level !== 'object') return null;
+  const l = level as Record<string, unknown>;
+  const mmol = l.inMillimolesPerLiter;
+  if (typeof mmol === 'number' && Number.isFinite(mmol)) return mmol;
+  const mgdl = l.inMilligramsPerDeciliter;
+  if (typeof mgdl === 'number' && Number.isFinite(mgdl)) return mgdlToMmol(mgdl);
+  return null;
+}
+
+/**
+ * Turn `readRecords('BloodGlucose')` records into readings.
+ *
+ * A record with no `metadata.id` keeps a null `externalId`, and `unsaved()`
+ * then refuses to send it — which is the right outcome rather than a gap. An
+ * id is the only thing that stops the same reading landing again on every
+ * open, and Health Connect is re-read exactly as often as Apple Health is.
+ */
+export function parseHealthConnectRecords(records: unknown): GlucoseReading[] {
+  if (!Array.isArray(records)) return [];
+  return parseHealthSamples(records.map((rec) => {
+    const r = (rec ?? {}) as Record<string, unknown>;
+    const meta = (r.metadata ?? {}) as Record<string, unknown>;
+    return {
+      value: mmolFromLevel(r.level),
+      startDate: typeof r.time === 'string' ? r.time : null,
+      id: typeof meta.id === 'string' ? meta.id : null,
+      // The package name of the app that wrote it — 'com.dexcom.g7' and the
+      // like. Not pretty, and not shown: the table stores only that a reading
+      // came from the phone's health store, not which app put it there.
+      sourceName: typeof meta.dataOrigin === 'string' ? meta.dataOrigin : null,
+    };
+  }));
+}
+
+/**
+ * How a glucose read went, whichever store it was read from.
+ *
+ * Four outcomes, because collapsing any two of them tells somebody wearing a
+ * sensor something untrue about their own body:
+ *
+ *   ready       we asked and got an answer. An empty list here is a real
+ *               measurement of absence — the store holds nothing for the
+ *               window.
+ *   error       we asked and got no answer. An empty list here means NOTHING,
+ *               and the screen says so rather than showing a blank record.
+ *   denied      the person was asked for access and did not give it. This is
+ *               their decision and is not a fault to report as one; the fix
+ *               lives in the system's own settings, not in Repple.
+ *   unsupported there is nothing here to read from — no HealthKit in this
+ *               build, no Health Connect on this phone. A fact about the
+ *               device, and the only one of the four that manual entry is the
+ *               permanent answer to.
+ *
+ * iOS can never return 'denied': HealthKit answers a REFUSED read with the
+ * same empty array it answers an unrequested one with, so a decline there is
+ * indistinguishable from an empty window and must not be claimed. Health
+ * Connect does report its granted permissions, so Android can and does.
+ */
+export type GlucoseReadStatus = 'ready' | 'error' | 'denied' | 'unsupported';
+
+export interface GlucoseRead {
+  status: GlucoseReadStatus;
+  readings: GlucoseReading[];
+  /** Human sentence for everything except 'ready'. Never shown for 'ready'. */
+  reason?: string;
+}
+
 /** A meal as this module needs it — the food log's own row, narrowed. */
 export interface MealRef {
   id: string;

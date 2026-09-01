@@ -35,3 +35,10 @@ dist-verify/
 credentials.json
 # The Google Play submission key, if one is ever added for Android auto-submit.
 play-service-account*.json
+
+# Staged output of scripts/import-repdb.mjs. Generated, and deliberately not
+# committed: the manifest enumerates every file of a 1.8 GB licensed image
+# catalogue, and the RepDB licence forbids making that catalogue available in
+# bulk. A file listing is not the assets, but it is the shape of them, and it
+# has no reason to be in a repository either way.
+.repdb-staging/

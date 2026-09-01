@@ -98,6 +98,18 @@ export interface MergedNight {
   spreadMin: number | null;
   /** Providers whose read failed. Non-empty here means the night may be incomplete. */
   failed: ProviderId[];
+  /**
+   * True when the figure is one Repple KEPT from an earlier read rather than
+   * one a device answered with just now — see src/lib/deviceSleepStore.ts and
+   * supabase/parts/153.
+   *
+   * `mergeSleepNight` never sets it, and that is deliberate: this file only
+   * ever describes what the devices said in THIS read, and a stored night
+   * arriving here indistinguishable from a fresh one is how a screen would come
+   * to imply a device answered when it did not. `withStored()` sets it, and the
+   * Recovery screen says so out loud.
+   */
+  kept?: boolean;
 }
 
 /**

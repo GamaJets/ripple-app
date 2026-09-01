@@ -5,6 +5,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
 import { PROVIDERS, providerById } from '../lib/wearables/registry';
 import type { ConnectionState, DailyMetrics, ProviderId } from '../lib/wearables/types';
 import { WearableNotConnectedError } from '../lib/wearables/oauth';
@@ -99,6 +100,35 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     setState(id, 'disconnected');
     setMetrics((prev) => ({ ...prev, [id]: null }));
     await forgetRemembered(id);
+    // The sleep this device measured goes with it.
+    //
+    // `device_sleep_nights` (part 153) keeps measured nights so readiness
+    // survives a failed read, and the price of keeping them is that
+    // disconnecting a watch has to actually remove what it told us — otherwise
+    // "disconnect" means the readings keep feeding the home screen from a
+    // device the client believes they have unplugged.
+    //
+    // Deliberately only on an EXPLICIT disconnect. `sync()` above also sets
+    // 'disconnected' when the server has no usable token, and a WHOOP whose
+    // token expired overnight is the single case this table was built to
+    // protect; deleting there would throw away the week for the exact failure
+    // the storage exists to survive.
+    if (USE_SUPABASE) {
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        const uid = sess?.session?.user?.id;
+        if (uid) {
+          // Zero rows is success here, not silence: a member who connected a
+          // watch this morning and disconnected it before any night was stored
+          // has nothing to delete. That is the one case where the rule in
+          // src/lib/wroteRows.ts does not apply, so it is said rather than
+          // left looking like an oversight.
+          const { error } = await supabase.from('device_sleep_nights')
+            .delete().eq('user_id', uid).eq('provider', id);
+          if (error) reportError('wearables.forgetSleep', error, { provider: id });
+        }
+      } catch (e) { reportError('wearables.forgetSleep', e, { provider: id }); }
+    }
   }, []);
 
   // On launch: restore connections and sync the ones that can run here.

@@ -54,6 +54,10 @@ import { useProgramTemplates, type ProgramTemplate } from '../../src/ui/programT
 import { notifySuccess } from '../../src/ui/haptics';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { planFanOut, listNames, fanOutSubject, type FanOutMember } from '../../src/lib/groupProgram';
+import {
+  overwriteBrief, bulkReport, selectAllOffer,
+  type AssignTarget, type WriteOutcome,
+} from '../../src/lib/bulkActions';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import type { Injury } from '../../src/lib/injuries';
 
@@ -72,10 +76,11 @@ export default function Templates() {
   // silently overwrites however many of them were on something bespoke.
   const { templates, removeTemplate, status: tplStatus } = useProgramTemplates();
   const { roster, status: rosterStatus } = useRoster();
-  const { assignProgram, getProgram, status: programStatus } = useAssignedPrograms();
+  const { assignProgramTo, getProgram, status: programStatus } = useAssignedPrograms();
   const acks = useInjuryAcks();
   const [assignTpl, setAssignTpl] = useState<ProgramTemplate | null>(null);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [assignBusy, setAssignBusy] = useState(false);
   const [delFailed, setDelFailed] = useState<string | null>(null);
 
   // One assign here is many overwrites, so it is held until the programmes it
@@ -120,31 +125,91 @@ export default function Templates() {
   // could have come back short — the roster it was ticked FROM carries its own
   // banner above.
   const plan = planFanOut('ready', programStatus, pickedMembers, !!assignTpl, fanOutSubject(pickedIds.length));
+  // What the sweeping gesture is allowed to claim, given how the roster read
+  // went. See the comment beside the control itself.
+  const selAll = selectAllOffer(rosterStatus, roster.length);
 
+  /**
+   * The bulk assign, in three parts that used to be one.
+   *
+   * ── 1 · a count is not consent ─────────────────────────────────────────
+   *
+   * This used to write the moment the coach tapped. The button said "Assign to
+   * 12", which is a number, and the tap behind it replaced however many of
+   * those twelve were training something a human had written for them — with
+   * no undo, no record of what was there, and nothing telling the client their
+   * next session had changed. The row markers below say which ones, and a coach
+   * scrolling a list of twelve does not read twelve markers before a tap.
+   *
+   * So the write is preceded by a sentence that states the number and NAMES
+   * them, built in src/lib/bulkActions.ts. The names are the part that works:
+   * a coach does not recognise "9 of 12", and does recognise the person they
+   * spent an hour programming on Tuesday.
+   *
+   * ── 2 · partial failure is the normal case ────────────────────────────
+   *
+   * Twelve writes are twelve chances to be refused, and the ordinary reason is
+   * not a network: `assigned_programs_coach_rw` runs through `is_my_client`,
+   * which looks in `clients`, so every hand-added client on the book fails it.
+   * The old report said "8 of 12 saved" and closed the sheet, which leaves the
+   * coach unable to name the four or reach them without re-ticking everybody.
+   *
+   * The report now names both halves, and the FAILURES STAY TICKED so trying
+   * again is the same gesture over the set that still needs it. The sheet is
+   * only dismissed when there is nothing left in it to do.
+   *
+   * ── 3 · and the injury gate keeps its own list ────────────────────────
+   *
+   * `plan.blocked` is who this must not write to at all. They were never in
+   * `send`, they stay ticked with the retries, and they are named separately
+   * — a client held for an unread disclosure is not a failed write and the two
+   * must not be reported as one thing.
+   */
   const doAssign = async () => {
-    if (!assignTpl || !plan.allowed) return;
+    if (!assignTpl || !plan.allowed || assignBusy) return;
     const tpl = assignTpl;
-    const sending = plan.send;
-    const results = await Promise.all(sending.map((id) => assignProgram(id, tpl.program)));
-    const okCount = results.filter(Boolean).length;
-    if (okCount) notifySuccess();
-    setAssignTpl(null);
-    const parts: string[] = [];
-    parts.push(okCount
-      ? `“${tpl.name}” assigned to ${okCount} client${okCount === 1 ? '' : 's'}. They'll see it on their Train tab.`
-      : 'Nobody was assigned.');
-    if (okCount < sending.length) {
-      parts.push(`${sending.length - okCount} did not reach the server, so they are on this device only — clients you added by hand have no Train tab until they join.`);
-    }
+    // Only reachable once `guardOverwrite` has passed inside planFanOut, which
+    // is what licenses `onProgramme` being a boolean at all: under any status
+    // but a whole read, a null from getProgram means "we did not find out" and
+    // this sentence would be counting silence.
+    const targets: AssignTarget[] = plan.send.map((id) => {
+      const c = roster.find((r) => r.id === id);
+      return { clientId: id, name: c?.name.split(' ')[0] ?? 'This client', onProgramme: !!getProgram(id) };
+    });
+    const brief = overwriteBrief(targets, tpl.name);
+    const go = await new Promise<boolean>((resolve) => {
+      Alert.alert(brief.title, brief.body, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        // Destructive only when something is actually being destroyed. A red
+        // button on every assign is a red button nobody reads.
+        { text: brief.confirmLabel, style: brief.replacing.length ? 'destructive' : 'default', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+    if (!go) return;
+
+    setAssignBusy(true);
+    const outcomes: WriteOutcome[] = await Promise.all(targets.map(async (tg) => {
+      const r = await assignProgramTo(tg.clientId, tpl.program);
+      return { clientId: tg.clientId, name: tg.name, ok: r.ok, why: r.why };
+    }));
+    setAssignBusy(false);
+    const report = bulkReport('assign', outcomes);
+    if (outcomes.some((o) => o.ok)) notifySuccess();
+
+    // What is left to do: the writes that did not land, plus the people the
+    // injury gate held. Both need the coach to come back to them, so both stay
+    // ticked and the sheet stays open for exactly as long as either exists.
+    const outstanding = [...report.retry, ...plan.blocked.map((b) => b.clientId)];
+    if (outstanding.length) setPicked(Object.fromEntries(outstanding.map((id) => [id, true])));
+    else setAssignTpl(null);
+
+    const parts = [report.body];
     // Named, never silently dropped. A coach who believes twelve people got a
     // programme when eleven did is worse off than one who was refused.
     if (plan.blocked.length) {
-      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} NOT assigned — they have disclosed injuries this screen cannot confirm you have read. Open them in the builder and read what they disclosed.`);
+      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all — they have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Open them in the builder and read what they disclosed.`);
     }
-    Alert.alert(
-      !okCount ? 'Not assigned' : (okCount === pickedIds.length ? 'Assigned' : 'Partly assigned'),
-      parts.join('\n\n'),
-    );
+    Alert.alert(report.title, parts.join('\n\n'));
   };
 
   const dayCount = (tpl: ProgramTemplate) => tpl.program.days.length;
@@ -320,8 +385,31 @@ export default function Templates() {
                   </Pressable>
                 );
               })}
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
-                <Ghost label="Select All" onPress={() => setPicked(Object.fromEntries(roster.map((c) => [c.id, true])))} />
+              {/* ── selecting everybody, over a list that may be part of one ──
+                  "Select All" over a roster that came back at its row limit
+                  ticks a thousand people and calls it everybody. Nothing on
+                  screen is false — the names are real and the count is the size
+                  of what loaded — and the coach is still about to act on a set
+                  they cannot see, believing they can.
+
+                  So the gesture is not withheld and not warned about: it is
+                  RENAMED to the number actually shown, and the line under it
+                  says there are more past them. Ticking a thousand named people
+                  is a true gesture; calling it "all" is not. Under a failed or
+                  unfinished read there is no honest scoped version — there is
+                  no list — so it is withheld and says which of the two it is.
+                  Individual ticks stay available throughout: a tick is a claim
+                  about one person the coach can see and read. */}
+              {selAll.note ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{selAll.note}</Text>
+              ) : null}
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: selAll.note ? sp.sm : sp.lg }}>
+                <View style={{ opacity: selAll.allowed ? 1 : 0.4 }} pointerEvents={selAll.allowed ? 'auto' : 'none'}>
+                  <Ghost label={selAll.label} onPress={() => {
+                    if (!selAll.allowed) return;
+                    setPicked(Object.fromEntries(roster.map((c) => [c.id, true])));
+                  }} />
+                </View>
                 <View style={{ flex: 1 }}>
                   {/* Withheld, not warned about. One tap here writes over as
                       many training programmes as there are ticks, with no undo
@@ -340,10 +428,12 @@ export default function Templates() {
                       shared guard, so the guard keeps answering for every other
                       refusal (the overwrite check, a missing programme) where
                       its wording is right. */}
-                  <Cta label={pickedIds.length === 0
+                  <Cta label={assignBusy
+                    ? 'Assigning…'
+                    : pickedIds.length === 0
                     ? 'Pick Who Gets This'
                     : (plan.label ?? `Assign to ${pickedIds.length} client${pickedIds.length === 1 ? '' : 's'}`)} wide
-                    disabled={pickedIds.length === 0 || !plan.allowed} onPress={doAssign} />
+                    disabled={pickedIds.length === 0 || !plan.allowed || assignBusy} onPress={doAssign} />
                 </View>
               </View>
             </ScrollView>
