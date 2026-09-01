@@ -39,7 +39,8 @@
     "check:deltas": "node scripts/check-deltas.mjs",
     "check:caps": "node scripts/check-caps.mjs",
     "check:prose": "node scripts/check-prose.mjs",
-    "check:decimals": "node scripts/check-decimals.mjs"
+    "check:decimals": "node scripts/check-decimals.mjs",
+    "check:roundtrip": "node scripts/check-roundtrip.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

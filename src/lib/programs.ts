@@ -2,6 +2,7 @@
 // The client just logs weight/reps against the plan; every exercise has
 // alternatives if they'd rather not do it.
 import type { Goal } from './types';
+import type { WeightUnit } from './units';
 
 export interface ProgramExercise {
   key: string; name: string; group: string; sets: number; reps: string; alternatives: string[];
@@ -24,6 +25,21 @@ export interface ProgramExercise {
    * would put a number on screen nobody chose.
    */
   loadKg?: number | null;
+  /**
+   * WHICH UNIT the coach typed the load in. Not what it means — `loadKg` is
+   * kilograms and always has been, and every calculation reads that.
+   *
+   * This exists because a coach who works in pounds types 16.5, and a builder
+   * that stores 7.48 kg and reads it back in kilograms shows them a number they
+   * did not write against a machine they did not set. The figure is correct and
+   * the screen is still wrong.
+   *
+   * It lived on the builder's own `BEx` and NOT here, so it survived exactly as
+   * long as the screen was open: save a template in pounds, reopen it, and the
+   * weights came back in kilograms. Absent means "use whatever this coach
+   * usually works in", which is what every programme written before now meant.
+   */
+  loadUnit?: WeightUnit;
   /**
    * What the coach wants said about THIS movement, in their own words.
    *

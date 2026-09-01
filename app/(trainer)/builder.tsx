@@ -488,7 +488,7 @@ export default function Builder() {
       day: d.day, focus: d.focus, cardio: d.cardio,
       exercises: d.exercises.map((e) => ({
         key: nextKey(), name: e.name, group: e.group, sets: e.sets, reps: e.reps,
-        loadKg: e.loadKg ?? null, note: e.note, restSec: e.restSec ?? null,
+        loadKg: e.loadKg ?? null, loadUnit: e.loadUnit, note: e.note, restSec: e.restSec ?? null,
         setGroupId: e.setGroupId ?? null, method: e.method ?? null,
         setRows: e.setRows && e.setRows.length ? e.setRows.map((r) => ({ ...r })) : null,
       })),
@@ -986,6 +986,7 @@ export default function Builder() {
         key: d.day + '-' + i, name: e.name, group: e.group || '',
         reps: e.reps || '8-12', alternatives: [],
         loadKg: e.loadKg ?? null,
+        loadUnit: e.loadUnit,
         note: e.note && e.note.trim() ? e.note.trim() : undefined,
         restSec: e.restSec ?? null,
         setGroupId: e.setGroupId ?? null,

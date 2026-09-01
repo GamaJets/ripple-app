@@ -87,6 +87,7 @@ npx tsc -p tsconfig.json --noEmit
 npm test >/dev/null
 for c in check:tabs check:reads check:numbers check:currency check:contrast \
          check:reachable check:traps check:caps check:catalogue check:native \
+         check:roundtrip \
          db:check check:schema; do
   printf '%-20s ' "$c"
   npm run --silent "$c" >/dev/null 2>&1 && echo ok || { echo FAIL; exit 1; }
