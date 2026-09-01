@@ -241,6 +241,62 @@ export default function TrainerExercise() {
           </>
         ) : null}
 
+        {/* ── Tips, which this screen was rendering nowhere ──────────────────
+            The catalogue carries them — 597 of 604 rows have at least one —
+            and the client's own exercise screen has shown them all along. A
+            coach opening the same movement got the description and the steps
+            and then nothing, so the cues they might pass on in a session were
+            visible to everybody except the person doing the coaching. */}
+        {detail && detail.tips.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Tips" note={`${detail.tips.length}`} />
+              {detail.tips.map((tip, n) => (
+                <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.body, color: t.brand }}>·</Text>
+                  <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>{tip}</Text>
+                </View>
+              ))}
+            </Section>
+          </>
+        ) : null}
+
+        {/* What the movement is for and how it is filed — the same block the
+            client screen ends on, and useful to a coach deciding whether it
+            belongs in somebody's week. */}
+        {detail && (detail.goals.length || detail.tags.length) ? (
+          <>
+            <Rule />
+            <Section>
+              {detail.goals.length ? (
+                <>
+                  <SectionHead title="Good For" />
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: detail.tags.length ? sp.lg : 0 }}>
+                    {detail.goals.map((g) => (
+                      <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>{g}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+              {detail.tags.length ? (
+                <>
+                  <SectionHead title="Filed Under" />
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                    {detail.tags.map((g) => (
+                      <View key={g} style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>{g}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+            </Section>
+          </>
+        ) : null}
+
         <Rule />
         <Section>
           <Ghost label={clip ? 'Your Clip Library' : 'Record a clip for this movement'} icon="video"
