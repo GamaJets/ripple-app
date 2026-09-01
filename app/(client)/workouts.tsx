@@ -1306,17 +1306,41 @@ export default function Train() {
               when each screen happened to be built. Four groups, in the order
               a session actually runs:
 
+                who you train with My Coach · Coach's Documents
                 before you start   Playlists · Scan Machine · Library
                 what to do         This Week · Targets · When to Rest
                 what you did       History · Trends · Records
                 how you are        Recovery · Watch & Devices
                 settings           Tools
 
+              The coach comes FIRST, on the report that "you haven't added the
+              My Coach into the Train tab under Go To". Both screens already
+              existed and both were reachable from the Me hub, which is where
+              somebody goes to change a setting — not where they go mid-session
+              when they want to ask the person who wrote the programme a
+              question. This is the training screen, so the coach belongs on it,
+              and above the equipment rather than after the tool drawer.
+
+              Shown unconditionally, and that is a decision rather than an
+              oversight. The obvious gate is this screen's `coachId`, but its
+              own comment says "null is fine, it just means no tie-break" and
+              its read is marked no-error-ok — so a failed or slow lookup leaves
+              it null, and gating on it would make a coached client's shortcut
+              to their coach VANISH exactly when the network is bad. That is the
+              house rule about an empty read never meaning "there are none",
+              applied to navigation.
+
+              The two screens already handle having no coach, and the Me hub
+              already links to both without a gate. Consistent, and it cannot be
+              wrong in the direction that matters.
+
               Labels are title case throughout. The row previously mixed
               "This Week" with "Scan machine" and "Watch & devices", and that
               last one contradicted the screen's OWN title, which has always
               been "Watch & Devices". */}
           <ChipGrid items={([
+            ['people', 'My Coach', '/(client)/my-coach'],
+            ['grid', "Coach's Documents", '/(client)/coach-documents'],
             ['play', 'Playlists', '/(client)/music'],
             ['camera', 'Scan Machine', '/(client)/scan-machine'],
             ['video', 'Library', '/(client)/library'],
