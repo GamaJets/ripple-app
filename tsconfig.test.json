@@ -77,6 +77,7 @@
     "src/lib/joinCodes.test.ts",
     "src/lib/codeReturn.test.ts",
     "src/lib/adMatch.test.ts",
+    "src/lib/leads.test.ts",
     "src/lib/foodSearch.test.ts",
     "src/lib/waiver.test.ts",
     "src/lib/injuryExtract.test.ts",
@@ -127,10 +128,12 @@
     "src/lib/financialAI.test.ts",
     "src/lib/clientRecord.test.ts",
     "src/lib/coachLedger.test.ts",
+    "src/lib/coachChannels.test.ts",
     "src/lib/repdbImport.test.ts",
     "src/lib/bulkActions.test.ts",
     "src/lib/rosterExport.test.ts",
     "src/lib/readiness.test.ts",
+    "src/lib/readinessBreakdown.test.ts",
     "src/lib/coachBrand.test.ts",
     "src/lib/coachStatement.test.ts",
     "src/lib/assignPicker.test.ts",
@@ -141,6 +144,7 @@
     "src/lib/setRows.test.ts",
     "src/lib/exerciseHistory.test.ts",
     "src/lib/stretchRoutine.test.ts",
-    "src/lib/stretchBuilder.test.ts"
+    "src/lib/stretchBuilder.test.ts",
+    "src/lib/programReview.test.ts"
   ]
 }

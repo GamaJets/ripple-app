@@ -125,6 +125,57 @@ addEventListener('DOMContentLoaded', function () {
       <p class="compare-note" id="openhint" hidden>Already have Repple? That opens it with your coach&rsquo;s code filled in.</p>
     </div>
 
+    <!--
+      LEAVING YOUR DETAILS WITHOUT AN ACCOUNT.
+
+      Everything above this asks the reader to go and install something. Until
+      the two store listings are published that is a request most of them cannot
+      act on, and even afterwards a coach's ad reaches plenty of people who want
+      to ask a question before they install a fitness app and hand it their
+      weight. Before this section existed, the only route offered to any of them
+      was to email support@repplefitness.com by hand, and the coach who paid for
+      the click never heard about it at all.
+
+      The form is deliberately three fields and no account. It posts to
+      `leave_my_details`, which is the ONLY thing the anonymous key may execute
+      — see supabase/parts/157. That function returns void for every input it is
+      ever given and raises for none, so this page cannot be used to tell a real
+      join code from an invented one by watching what comes back. Which means
+      the "thank you" below is honest about exactly one thing: the request was
+      sent. It does not, and must not, claim the code was recognised.
+
+      A code that resolves to nobody is dropped server-side. That is stated on
+      the form rather than hidden, because the person reading it is the only one
+      who can fix a mistyped code.
+    -->
+    <div class="callout" id="askbox" hidden>
+      <p class="eyebrow">Not ready to install?</p>
+      <h2 class="hd" style="margin:6px 0 8px">Leave your details instead</h2>
+      <p>Your coach will get your name and how to reach you, along with the code above so they know
+         where you found them. You do not need an account and nothing is created for you.</p>
+
+      <form id="askform" novalidate>
+        <p style="margin:14px 0 0">
+          <label class="fl" for="askname">Your name</label>
+          <input type="text" id="askname" name="name" maxlength="80" autocomplete="name" required>
+        </p>
+        <p style="margin:12px 0 0">
+          <label class="fl" for="askcontact">Email address or phone number</label>
+          <input type="text" id="askcontact" name="contact" maxlength="120" autocomplete="email" required>
+        </p>
+        <p style="margin:12px 0 0">
+          <label class="fl" for="asknote">Anything you want to ask (optional)</label>
+          <textarea id="asknote" name="note" maxlength="500" rows="3"></textarea>
+        </p>
+        <p style="margin:14px 0 0"><button class="btn" type="submit" id="asksend">Send it to them</button></p>
+        <p class="compare-note bad" id="askerr" hidden></p>
+        <p class="compare-note" id="askdone" hidden></p>
+        <p class="compare-note" style="margin-top:10px">Repple does not email you. Your coach reads this
+           and replies themselves, in their own time. If the code above is not exactly the one they sent
+           you, there is no coach to pass this to and nobody will see it.</p>
+      </form>
+    </div>
+
     <div class="callout">
       <p><strong>Being released now.</strong> Repple is in its first release and the store listings
          are still going live. The buttons below are the real App Store and Google Play addresses
@@ -154,6 +205,20 @@ addEventListener('DOMContentLoaded', function () {
 
   </div>
 </main>
+
+<style>
+  /* Kept in step with web/signup.html, which sets a password on the same site
+     and has the same three shapes. Two pages that ask a person to type into
+     Repple must not look like two different products. */
+  .fl { display:block; font-size:13px; color:var(--ink3); margin-bottom:6px; }
+  #askform input[type=text], #askform textarea {
+    width:100%; padding:12px 13px; border-radius:8px; font-size:16px;
+    background:var(--sunk); color:var(--ink); border:1px solid var(--line);
+    font-family:var(--sans);
+  }
+  #askform textarea { resize:vertical; min-height:76px; }
+  #askform .bad { color:#d03b3b; }
+</style>
 
 <footer class="site">
   <div class="wrap">
@@ -240,17 +305,152 @@ addEventListener('DOMContentLoaded', function () {
 
   // Desktop is never redirected: neither store app exists there, and a reader on
   // a laptop needs the page, not a bounce.
-  if (REDIRECT && (isAndroid || isIOS)) {
+  //
+  // Two things guard it, and both were added with the enquiry form above,
+  // because that form is on a page that used to leave for a store 1.2 seconds
+  // after loading — and the person the form exists for is the person on a phone.
+  //
+  //   · ONCE PER SESSION. The comment above says the redirect is a link and not
+  //     a replace so that Back returns here. It does, and then this script runs
+  //     again on a full reload and sends them straight out a second time. A
+  //     sessionStorage mark makes Back work the way that comment already claims
+  //     it does.
+  //   · CANCELLED BY A TOUCH. Somebody who has reached for something on this
+  //     page is not somebody who wants to be taken off it. Any pointer or key
+  //     within the window stops the pending bounce; the store buttons are still
+  //     right there, and are now the reader's decision rather than a timer's.
+  var BOUNCED_KEY = 'repple.join.bounced';
+  var bounced = false;
+  try { bounced = sessionStorage.getItem(BOUNCED_KEY) === '1'; } catch (e) { bounced = false; }
+
+  if (REDIRECT && (isAndroid || isIOS) && !bounced) {
     var target = document.getElementById(isAndroid ? 'android' : 'ios').href;
     var note = document.getElementById('other');
     note.textContent = 'Taking you to the ' + (isAndroid ? 'Google Play Store' : 'App Store') + '…';
     // A link, not a replace: leaving this page in history means a client who
     // arrives at a store listing that is not published yet can press Back and
-    // still have the code and the email route. history.replaceState would take
-    // that away at exactly the moment they need it.
-    setTimeout(function () { location.href = target; }, REDIRECT_AFTER_MS);
+    // still have the code and the form. history.replaceState would take that
+    // away at exactly the moment they need it.
+    var timer = setTimeout(function () {
+      try { sessionStorage.setItem(BOUNCED_KEY, '1'); } catch (e) { /* private mode: it bounces once more */ }
+      location.href = target;
+    }, REDIRECT_AFTER_MS);
+    var stay = function () {
+      if (timer == null) return;
+      clearTimeout(timer);
+      timer = null;
+      note.textContent = isAndroid
+        ? 'On an iPhone instead? The App Store link is beside it.'
+        : 'On Android instead? The Google Play link is beside it.';
+    };
+    addEventListener('pointerdown', stay, { once: true });
+    addEventListener('keydown', stay, { once: true });
+    addEventListener('touchstart', stay, { once: true, passive: true });
   }
 })();
+</script>
+
+<script type="module">
+/*
+  THE ENQUIRY FORM.
+
+  One RPC, `leave_my_details`, and it is the only thing the publishable key may
+  execute out of supabase/parts/157. Read that file's header before changing
+  anything here; the three properties it holds are:
+
+    · it returns void for every input and raises for none. A good code, a
+      made-up one, a blank name and a caller over the rate cap are one outcome
+      from out here. That is deliberate — the previous version of this mistake
+      let `anon` call join_by_code and read back "no coach uses that code",
+      which is an enumeration oracle over a credential (part 141);
+    · so the message below says the details were SENT and never that they were
+      received by anybody. Claiming a coach has them would be a claim this page
+      is structurally incapable of making;
+    · every rule about what may be typed is enforced HERE, because the server
+      cannot tell anybody anything. src/lib/leads.ts holds the same rules for
+      the coach's app and states the same limits; the two are meant to agree
+      and the numbers below are its MAX_LEAD_* constants.
+
+  The code comes from the query string and is re-read here rather than shared
+  with the script above, so neither depends on the other having run.
+*/
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const sb = createClient(
+  'https://phgfwzpkkwdysftlgkoq.supabase.co',
+  'sb_publishable_Td-L1IVNMzPpQsa30hUExQ_K--w76RZ',
+);
+
+const MAX_NAME = 80;      // src/lib/leads.ts MAX_LEAD_NAME
+const MAX_CONTACT = 120;  // src/lib/leads.ts MAX_LEAD_CONTACT
+const MAX_NOTE = 500;     // src/lib/leads.ts MAX_LEAD_NOTE
+
+let code = '';
+try { code = (new URLSearchParams(location.search).get('c') || '').trim(); } catch (e) { code = ''; }
+code = code.replace(/\s+/g, '').toUpperCase();
+
+/* No code, no form. The server drops an enquiry it cannot attach to a coach, so
+   offering the form with nothing to attach it to would collect somebody's phone
+   number and throw it away while thanking them for it. */
+if (/^[A-Z0-9]{4,12}$/.test(code)) {
+  document.getElementById('askbox').hidden = false;
+}
+
+/* The same two tests as contactKind() in src/lib/leads.ts, in the same order.
+   Email is checked first on purpose: 'joe+ads@x.com' has digits and a '+' in it
+   and would read as a phone number if the order were swapped. */
+const looksLikeEmail = (s) => /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(s);
+const looksLikePhone = (s) => {
+  const digits = s.replace(/\D/g, '');
+  return /^\+?[\d\s().-]+$/.test(s) && digits.length >= 7 && digits.length <= 15;
+};
+
+const form = document.getElementById('askform');
+const send = document.getElementById('asksend');
+const err = document.getElementById('askerr');
+const done = document.getElementById('askdone');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.hidden = true;
+  done.hidden = true;
+
+  const name = document.getElementById('askname').value.trim();
+  const contact = document.getElementById('askcontact').value.trim();
+  const note = document.getElementById('asknote').value.trim();
+
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+
+  if (!name) return fail('Put in a name, so the coach knows who is asking.');
+  if (name.length > MAX_NAME) return fail('Keep the name to ' + MAX_NAME + ' characters or fewer.');
+  if (!contact) return fail('Put in an email address or a phone number, or the coach has no way to answer.');
+  if (contact.length > MAX_CONTACT) return fail('Keep that to ' + MAX_CONTACT + ' characters or fewer.');
+  if (!looksLikeEmail(contact) && !looksLikePhone(contact)) {
+    return fail('That does not look like an email address or a phone number. The coach will reply to whatever you put here, so it has to be something they can reach you on.');
+  }
+
+  send.disabled = true;
+  send.textContent = 'Sending…';
+  const { error } = await sb.rpc('leave_my_details', {
+    p_code: code,
+    p_name: name,
+    p_contact: contact,
+    p_note: note.slice(0, MAX_NOTE),
+  });
+  send.disabled = false;
+  send.textContent = 'Send it to them';
+
+  /* The only failure this can report is a failure to REACH the server — the
+     function itself has no failing branch. So the message says the send did not
+     happen, which is the one thing an error here actually establishes. */
+  if (error) {
+    return fail('That did not send — your details have not gone anywhere. Check your connection and try again, or email support@repplefitness.com with the code above.');
+  }
+
+  form.querySelectorAll('input, textarea').forEach((el) => { el.value = ''; });
+  done.textContent = 'Sent. Your coach will see this next time they open Repple — nothing is emailed to you, and the reply will come from them.';
+  done.hidden = false;
+});
 </script>
 </body>
 </html>

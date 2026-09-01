@@ -47,7 +47,7 @@ import { SET_METHODS, DEFAULT_METHOD, badgeFor, methodFor } from '../../src/lib/
 import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount, type SetRow } from '../../src/lib/setRows';
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { liftIn, liftLabel, readLift, type WeightUnit } from '../../src/lib/units';
+import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
@@ -69,6 +69,14 @@ import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
 import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
+import { CHECKS, NOT_CHECKED, checksLine, reviewProgram, type Finding } from '../../src/lib/programReview';
+import { deltaLabel } from '../../src/lib/deltaLabel';
+import { dayLabel } from '../../src/lib/adherence';
+import { capLimit, capped } from '../../src/lib/rowCap';
+import { isQueryableId } from '../../src/lib/clientDrift';
+import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import type { WorkoutEntry } from '../../src/lib/mockData';
+import { USE_SUPABASE } from '../../src/lib/config';
 import { useProgramGroups } from '../../src/ui/groupProgram';
 import { listNames, planFanOut, fanOutSubject, type FanOutMember } from '../../src/lib/groupProgram';
 import {
@@ -404,6 +412,64 @@ export default function Builder() {
     clientId ? acks.acknowledged(clientId) : null,
     client?.name.split(' ')[0] ?? 'This client',
   );
+
+  /* ── What this client has actually been doing ───────────────────────────
+     One of the seven programme checks compares the volume a coach has just
+     written against what this client has really logged for the same movement,
+     and it cannot be done from anything already on this screen. The read is
+     the same one app/(trainer)/client-training.tsx makes — same columns, same
+     cap, same `workouts_coach_read` policy — because a second way of asking
+     the same table is how two coach screens come to disagree about a client's
+     training.
+
+     `null` is "there is nobody to compare against", which is the ordinary
+     state of this screen with a template open and no client picked. It is a
+     different answer from an empty array, which would be a client who has
+     logged nothing, and src/lib/programReview.ts reads the two differently:
+     one stands the check down, the other runs it and finds nothing. */
+  const [reviewLog, setReviewLog] = useState<WorkoutEntry[] | null>(null);
+  const [reviewLogStatus, setReviewLogStatus] = useState<LoadStatus>('ready');
+  /* The client whose answer is allowed to land. Tapping down a book starts a
+     read per tap and they do not come back in order, so without this one
+     client's training can arrive under another's name — the same guard
+     client-training.tsx and client-body.tsx carry, and here it would put a
+     volume finding about the wrong person in front of the coach. */
+  const wantedLog = useRef<string | null>(null);
+  useEffect(() => {
+    wantedLog.current = clientId ?? null;
+    if (!clientId || !USE_SUPABASE) { setReviewLog(null); setReviewLogStatus('ready'); return; }
+    // A client the coach typed in by hand has no user account, so their id is
+    // not a uuid and Postgres refuses the whole statement rather than skipping
+    // the value. There is nothing to read and nothing failed: the check stands
+    // down rather than reporting a client who never trains.
+    if (!isQueryableId(clientId)) { setReviewLog(null); setReviewLogStatus('ready'); return; }
+    let live = true;
+    setReviewLog(null); setReviewLogStatus('loading');
+    void (async () => {
+      const { data, error } = await supabase.from('workouts')
+        .select('id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at')
+        .eq('user_id', clientId)
+        .order('performed_at', { ascending: false }).order('id', { ascending: false })
+        .limit(capLimit());
+      if (!live || wantedLog.current !== clientId) return;
+      if (error) {
+        reportError('builder.reviewLog', error);
+        // Null, not []. An empty list here would be read as a client with no
+        // training, and the check would then report nothing and look like it
+        // had run. The status is what makes the screen say it did not.
+        setReviewLog(null); setReviewLogStatus('error');
+        return;
+      }
+      const page = capped((data ?? []) as unknown as WorkoutRow[]);
+      setReviewLog(page.rows.map(rowToEntry));
+      // 'partial' rather than 'ready' at the cap, and the check declines to run
+      // on it: a prefix of somebody's sessions can hold none of their heavy
+      // ones, and "more than she has ever done" measured against half a record
+      // is a finding about the read rather than about the programme.
+      setReviewLogStatus(page.truncated ? 'partial' : 'ready');
+    })();
+    return () => { live = false; };
+  }, [clientId]);
   // ── This builder edits ONE person's copy ─────────────────────────────────
   //
   // A programme sent to a group is a fan-out: each member gets their own
@@ -1006,6 +1072,74 @@ export default function Builder() {
       })),
     })),
   });
+
+  /** Whether the list of what the checks look at is open. Closed by default:
+   *  a coach reading findings wants the findings, and the catalogue is what
+   *  they open when they want to know why something is NOT in the list. */
+  const [checksOpen, setChecksOpen] = useState(false);
+
+  /* ── Programme checks ───────────────────────────────────────────────────
+     Seven rules over the draft, run on what would ACTUALLY be assigned rather
+     than on the editing state behind it — `composeProgram` is where reps
+     default, blank notes are dropped and `sets` is recomputed from the rows,
+     and a check that read the state before all that would report findings a
+     coach could not see and miss ones they could.
+
+     Not called an AI review, on screen or anywhere else. The reasoning is at
+     the top of src/lib/programReview.ts and the short version is
+     src/lib/financialAI.ts, which is ninety lines of arithmetic under a
+     heading reading "AI Financial Review" and told every gym on the platform
+     it was in strong financial health.
+
+     Memoised because `reviewProgram` walks this client's whole capped training
+     log once per exercise, and this screen re-renders on every keystroke in
+     every weight, rest and note field on it. */
+  const review = useMemo(
+    () => reviewProgram({
+      program: composeProgram(),
+      // Null, not an empty list, when there is no client on this screen — a
+      // template being written for nobody in particular. An empty list would
+      // run the injury check against nobody's disclosures and report a clean
+      // programme, which is a check appearing to have passed. `null` stands it
+      // down and says why. Same shape as `log` on the line below.
+      injuries: clientId ? clientInjuries : null,
+      injuryStatus: disclosureStatus,
+      log: reviewLog,
+      logStatus: reviewLogStatus,
+      goal: autoGoal,
+    }),
+    // `composeProgram` is rebuilt every render and is a pure function of these.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [days, title, note, clientId, clientInjuries, disclosureStatus, reviewLog, reviewLogStatus, autoGoal],
+  );
+
+  /**
+   * The figures behind a volume finding, in the coach's own unit.
+   *
+   * The rules module deals in kilograms and never formats one — see its header
+   * — so this is the render boundary, and `volumeIn` is the same converter the
+   * client's History hero and the coach's client-training screen use. The
+   * percentage goes through `deltaLabel` rather than a sign written here:
+   * scripts/check-deltas.mjs exists because twenty-five screens each wrote
+   * their own, and a change of nothing took whichever arm its author reached
+   * for first.
+   */
+  const volumeLine = (f: Finding): string | null => {
+    const v = f.volume;
+    if (!v) return null;
+    const planned = volumeIn(v.plannedKg, defaultUnit);
+    const best = volumeIn(v.bestKg, defaultUnit);
+    if (planned == null || best == null) return null;
+    const on = v.bestDay ? dayLabel(v.bestDay) : null;
+    // Never a dash in the middle of a sentence — scripts/check-prose.mjs. A day
+    // that will not parse is described rather than printed as a hole.
+    const when = on && on !== '—' ? `on ${on}` : 'in the sessions compared';
+    const moved = deltaLabel(v.changePct, {
+      since: null, unit: '%', decimals: 0, noChange: 'no change', noBaseline: 'no earlier figure',
+    });
+    return `Planned ${num(planned)} ${defaultUnit} against ${num(best)} ${defaultUnit}, `
+      + `their most in one session ${when}. That is ${moved} on it.`;
+  };
   // `saveTemplateTo` resolves { ok: false } when the insert never reached
   // `program_templates`, and this used to discard that and say "Template
   // saved". The template then sat in the library for the rest of the session
@@ -2035,6 +2169,86 @@ export default function Builder() {
           <View style={{ marginTop: days.length ? sp.xl : 0 }}>
             <Ghost label="Add Training Day" icon="calendar" onPress={addDay} />
           </View>
+        </Section>
+
+        <Rule />
+
+        {/* ── programme checks ───────────────────────────────────────────
+            Named for what it is. Seven rules, no model, no score and no
+            grade — see the header of src/lib/programReview.ts, and
+            src/lib/financialAI.ts for the screen this one is written not to
+            be. Every line below is a finding that names the exercise, the
+            day or the figure it came from, because a finding a coach cannot
+            point at is an opinion and they stop reading at the first one
+            they disagree with. */}
+        <Section>
+          <SectionHead title="Programme Checks"
+            note={totalExercises && review.findings.length ? `${num(review.findings.length)} to read` : undefined} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{checksLine()}</Text>
+
+          {totalExercises === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Nothing to check yet. The checks read the training days above as you write them.
+            </Text>
+          ) : (
+            <>
+              {review.findings.length ? review.findings.map((f, i) => {
+                // The figures for a volume finding, in the coach's own unit,
+                // and null for every other rule. Computed once and then tested:
+                // it converts and rounds, and calling it in the condition and
+                // again in the body would round one number twice.
+                const figures = volumeLine(f);
+                return (
+                <View key={`${f.id}-${i}`} style={{ marginBottom: sp.md }}>
+                  <Flag tone={f.id === 'injury' ? t.crit : t.warn}>{f.detail}</Flag>
+                  {figures ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 14, marginTop: 3 }}>{figures}</Text>
+                  ) : null}
+                </View>
+                );
+              }) : (
+                <Text style={{ ...ty.label, color: t.ink2 }}>
+                  Nothing matched. That is not a verdict on the programme — it means none of these rules found
+                  anything, and they are a short list.
+                </Text>
+              )}
+
+              {/* A check that did not run must say so. Silence from one reads
+                  as a pass, and "no injury conflicts" over an injury list that
+                  never loaded is the failure guardInjuries exists to stop. */}
+              {review.skipped.length ? (
+                <View style={{ marginTop: review.findings.length ? sp.lg : sp.md }}>
+                  {review.skipped.map((sk) => (
+                    <Flag key={sk.id} tone={sk.kind === 'unread' ? t.warn : t.ink3} style={{ marginBottom: sp.sm }}>
+                      {sk.why}
+                    </Flag>
+                  ))}
+                </View>
+              ) : null}
+
+              <View style={{ marginTop: sp.lg }}>
+                <Ghost label={checksOpen ? 'Hide What Is Checked' : 'Show What Is Checked'}
+                  onPress={() => setChecksOpen((v) => !v)} />
+              </View>
+
+              {checksOpen ? (
+                <View style={{ marginTop: sp.md }}>
+                  {CHECKS.map((c) => (
+                    <Text key={c.id} style={{ ...ty.caption, color: t.ink2, marginBottom: 3 }}>{`· ${c.label}`}</Text>
+                  ))}
+                  {/* The questions a coach would expect here and will not find.
+                      A list of findings implies a list of questions asked, and
+                      the ones deliberately not asked are part of that. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    Not checked, because none of them has a settled answer this could hold you to:
+                  </Text>
+                  {NOT_CHECKED.map((n) => (
+                    <Text key={n} style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{`· ${n}`}</Text>
+                  ))}
+                </View>
+              ) : null}
+            </>
+          )}
         </Section>
 
         <Rule />

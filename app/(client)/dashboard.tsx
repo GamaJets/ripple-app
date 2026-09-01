@@ -11,7 +11,7 @@ import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, ListRow, Cta, Ghost, QuickRow, Meter, Spark, WeekDots, Notice, Card, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, ListRow, Cta, Ghost, QuickRow, Meter, Spark, WeekDots, Notice, Card, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { num } from '../../src/lib/format';
@@ -28,10 +28,8 @@ import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { useHabits } from '../../src/ui/habits';
-import { useWellness } from '../../src/ui/wellness';
-import { readinessScore, readinessMadeOf, readinessSleep } from '../../src/lib/readiness';
-import { useDeviceSleep } from '../../src/ui/deviceSleep';
-import { isWhole } from '../../src/ui/loadStatus';
+import { readinessMadeOf } from '../../src/lib/readiness';
+import { useReadiness } from '../../src/ui/readiness';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ONBOARD_KEY } from './onboarding';
 import { useSessions } from '../../src/ui/sessions';
@@ -73,50 +71,17 @@ export default function Home() {
   // the rest live in app/(client)/notices.tsx, which is what stops a notice
   // being readable for one day and then nowhere.
   const { latest: ann, latestGym: gymAnn } = useAnnouncements();
-  const { water, waterGoal, waterStatus, addWater, removeWater } = useHabits();
-  const { sleep } = useWellness();
-  // Sleep a device measured, then the wellness log for nights it did not.
-  // Readiness used to read the typed log ALONE, so a client with WHOOP
-  // connected and a week of nights recorded was told to log a night of sleep —
-  // while Recovery, one tap away, was showing them. See readinessSleep.
-  const devSleep = useDeviceSleep();
-  const _sleepFor = readinessSleep(devSleep.nights, sleep, 3);
-  // No sleep logged means no readiness score. This used to fall back to 7 hours,
-  // which awards 43.75 of the 50 sleep points - so a brand-new account with zero
-  // inputs opened on ~64/100 'Moderately recovered' and a tip telling them how to
-  // train, all of it computed from a literal.
-  const _avgSleep = _sleepFor.avgHours;
-  const _since2d = Date.now() - 2 * 86400000;
-  const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
-  // `?? 0` was the bug: no sleep logged became zero hours slept, which scored 20
-  // and read as 'Under-recovered'. Nulls now travel as nulls, and readinessScore
-  // returns null rather than a number nobody's data supports.
+  const { water, waterGoal, addWater, removeWater } = useHabits();
+  // Readiness, its inputs and its caveats, from the one shared derivation.
   //
-  // Hydration is the same shape since part 70. Null goal, null hydration input. readinessScore drops hydration from the
-  // scale entirely when it is null and rescales the rest (see its header), which
-  // is the right answer for a client who has not set a goal — the alternative,
-  // `water / 8`, scored them against a figure nobody chose, and `?? 0` would
-  // score them as having drunk nothing.
-  //
-  // `waterStatus` is the third null and it was missing. Under 'error' — and
-  // while the first read is still in flight — `water` is 0, and 0 divided by a
-  // goal the client HAS set is a hydration figure of zero per cent: thirty
-  // points off the score for a network blip, presented as a fact about their
-  // day. A count we could not read is not a day of drinking nothing, so it
-  // travels as null and leaves the scale, exactly as an untracked one does.
-  const _hydration = waterGoal && isWhole(waterStatus) ? water / waterGoal : null;
-  const readiness = readinessScore({
-    avgSleepHours: _avgSleep,
-    hydrationPct: _hydration,
-    // And the fourth. `_load2d` counts the days in `log`, which is EMPTY under
-    // 'error' — so an unreadable training log used to arrive here as "no
-    // sessions in two days", which scores as maximally rested and hands back a
-    // tip telling somebody to push. `logKnown` was already computed on this
-    // screen for the streak and the week count; readiness was the one figure
-    // that ignored it. app/(client)/coach.tsx had already gated its own call
-    // for the same reason.
-    workoutsLast2Days: logKnown ? _load2d : null,
-  });
+  // This screen used to assemble it here out of five providers, and so did
+  // app/(client)/coach.tsx, and the two drifted: the gate on an unreadable
+  // training log was written on the coach screen months before this one got it,
+  // and until then the home screen's hero ROSE whenever the log failed to load.
+  // Recovery is now a third reader — it is where this hero's own tap lands —
+  // and three hand copies of one derivation is three chances to disagree about
+  // the same number. See src/ui/readiness.ts for what moved and why.
+  const { readiness, breakdown } = useReadiness();
   const readinessColor = readiness == null ? t.ink3 : readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
   const [needsOnboard, setNeedsOnboard] = useState(false);
   useFocusEffect(useCallback(() => { let c = false; (async () => { try { const v = await AsyncStorage.getItem(ONBOARD_KEY); if (!c) setNeedsOnboard(!v); } catch { /* ignore */ } })(); return () => { c = true; }; }, []));
@@ -364,32 +329,43 @@ export default function Home() {
           figure={readiness != null ? String(readiness.score) : '—'}
           unit={readiness != null ? '/100' : undefined}
           note={readiness != null
-            // What the number is made of, said out loud. An 83 built from
-            // sleep and training alone and an 83 built from all three are
-            // different claims, and the member cannot tell them apart from the
-            // number — so a score with a signal missing from its scale says so
-            // rather than presenting itself as the whole picture.
-            ? readiness.confidence === 'partial'
-              ? `${readiness.tip} ${readinessMadeOf(readiness)}.`
-              : readiness.tip
-            // Four different reasons there is no score, and they ask the reader
-            // for four different things. "Log a night of sleep" to somebody
+            // What the number is made of, said out loud, EVERY time — not only
+            // when a signal is missing. An 83 built from sleep and training
+            // alone and an 83 built from all three are different claims, and
+            // the member cannot tell them apart from the number; but nor can
+            // they tell a full-confidence 83 apart from either, if the only
+            // score that explains itself is the incomplete one. The row-by-row
+            // account is on Recovery, which is where this hero already taps to.
+            ? `${readiness.tip} ${readinessMadeOf(readiness)}.`
+            // Six different reasons there is no score, and they ask the reader
+            // for six different things. "Log a night of sleep" to somebody
             // whose watch is connected and syncing is the complaint this fixed
-            // — it asks them to type what the device already knows.
-            : !logKnown
-              ? 'We could not read your training log, so there is no readiness to show — it does not mean you are rested.'
-              : devSleep.status === 'loading'
-                ? 'Reading last night from your devices…'
-                : devSleep.status === 'error'
-                  ? 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.'
-                  : devSleep.nights.some((n) => n.outcome === 'measured')
-                    ? 'No sleep on record for the last three nights yet.'
-                    : 'Log a night of sleep, or connect a watch, to see your readiness.'}
+            // — it asks them to type what the device already knows — and the
+            // same sentence to somebody whose LOG merely failed to load is a
+            // statement about their week made out of our failed read. Which
+            // one it is, is decided in src/lib/readinessBreakdown.ts and
+            // tested there.
+            : breakdown.absence ?? undefined}
           arc={readiness != null ? readiness.score / 100 : undefined}
           arcLabel="readiness"
           tone={readiness != null ? readinessColor : undefined}
           onPress={() => router.push('/(client)/recovery')}
         />
+
+        {/* What the score could not see, before the reader acts on it.
+
+            A source that did not answer can only ever have FLATTERED this
+            number: every signal readiness scores counts against the member —
+            sleep short of eight hours, water short of the goal, sessions in the
+            last two days — so a night a dead WHOOP token hid is a night that
+            could only have pulled the figure down. The score still stands,
+            because the nights that were recorded are real, but it is a shorter
+            set than it looks and this is where that is said. Recovery has been
+            saying it about the same devices all along, one tap away, while this
+            screen printed the number bare. */}
+        {breakdown.caveats.map((c) => (
+          <Flag key={c} tone={t.warn} style={{ marginBottom: sp.md }}>{c}</Flag>
+        ))}
 
         <Rule />
 

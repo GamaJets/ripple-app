@@ -1025,7 +1025,20 @@ export default function TrainerClients() {
                   <Icon name="sparkle" size={20} color={trial.expired ? t.ink3 : t.brand} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{trial.expired ? 'Upgrade to keep coaching your clients.' : 'Upgrade any time to unlock everything.'}</Text>
+                    {/* Two sentences replaced here, and both were claims about
+                        what the money buys that nothing in this codebase
+                        enforces. `trialInfo` (src/lib/trial.ts) is a date in
+                        AsyncStorage on this device: it gates nothing, no screen
+                        reads it but this card, and the plan features in `PLANS`
+                        ("Up to 3 clients") are not checked anywhere either.
+                        "Upgrade to keep coaching your clients" told a coach
+                        their roster stops without a payment, and "unlock
+                        everything" told them something was locked. Neither is
+                        true, and a false claim about what a subscription is for
+                        is exactly what a store reviewer opens the paid screen
+                        to check. What is left says what the trial is and offers
+                        the plans without asserting a consequence. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{trial.expired ? 'Nothing has been switched off. Subscribe when you are ready.' : 'Subscribe any time — see what each plan includes.'}</Text>
                   </View>
                   <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade ›</Text>
                 </View>

@@ -12,6 +12,38 @@
 // who wants to know how the month went has to visit five of them and hold the
 // answer in their head.
 //
+// ── The seventh place, and why it is now on this screen ────────────────────
+//
+// The best-answered money question in this app was also the least reachable.
+// src/lib/codeReturn.ts has known since part 98 what each join code cost, who
+// came in on it, what those people then paid, how many of them stayed, and —
+// the part nothing else in the app does — when the gap between two channels is
+// too small to mean anything. enoughToTell() refuses to rank until an exact
+// two-sided binomial test could distinguish the split from a coin toss, which
+// for most coaches most of the time is a refusal.
+//
+// All of it lived inside the Add a Client sheet on the Clients screen: three
+// taps from here, behind a button whose label is about adding somebody, on a
+// modal a coach opens when they have a new client rather than when they are
+// asking where their clients came from. A coach deciding next month's ad budget
+// had no reason to go there and no way to know it was there.
+//
+// So the reading half of it is here, under Which Codes Worked, drawn from those
+// same functions unchanged. The WRITING half — the field where a coach types
+// what a code cost — deliberately stays on the Clients screen and is linked to
+// rather than duplicated. app/(trainer)/ad-spend.tsx already declined to carry
+// a second copy of that field for the reason that applies twice over here: two
+// places to type the same number is how they come to disagree.
+//
+// One thing here is genuinely new, and it is a roll-up rather than a rewrite.
+// codeReturn.ts answers per code; nothing answered over the SET. That sentence
+// — what the whole of a coach's advertising cost against what the whole of it
+// returned — is one subtraction, and it is the most dangerous figure on this
+// screen, because every hole in either side moves it in the flattering
+// direction and leaves nothing on screen where the missing thing would have
+// been. src/lib/coachChannels.ts computes it and, far more often, withholds it:
+// one code with no cost recorded is enough to refuse the whole comparison.
+//
 // This screen does not replace any of them and deliberately owns nothing. It
 // reads, states, and hands off: every section ends in a row that opens the
 // screen that can actually change something. Nothing here writes.
@@ -72,7 +104,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, Flag, ListRow, PartialRead } from '../../src/ui/kit';
-import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { minorMoney, wholeMoney, sumTaken, since, monthStart, type Taken, type TakenRow } from '../../src/lib/coachMoney';
 import {
   ledger, sumMajor, sumSpend, denominate, ledgerEmptyLine,
@@ -83,6 +115,12 @@ import { fetchClientPurchases, fetchMyConnect, type CoachPurchase, type ConnectS
 import { fetchMySubscriptionPayments, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import { fetchMySubscription, fetchFailedInvoices, money as platformMoney, type Subscription, type Invoice } from '../../src/lib/billing';
 import { fetchMyCodeReturns, type CodeReturnsRead } from '../../src/ui/joinCode';
+import {
+  LAST_TOUCH_NOTE, codeFigures, enoughToTell, returnLine, stayedLine,
+} from '../../src/lib/codeReturn';
+import {
+  againstLine, channelEmptyLine, channelReachLine, channelSum, spendAgainstReturn,
+} from '../../src/lib/coachChannels';
 import { useLateCancelCharges } from '../../src/ui/sessions';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
 import type { LoadStatus } from '../../src/ui/loadStatus';
@@ -185,6 +223,20 @@ export default function CoachMoney() {
   const spend = useMemo(() => sumSpend(codes.rows), [codes.rows]);
   const owed = dues ?? [];
 
+  /* ── which channels worked, which is a different question ──────────────── */
+
+  // Two facts about the same rows, and they are not interchangeable. `spend`
+  // above is EVERY code's recorded cost, default bucket included, because that
+  // is money that left the coach's account and belongs under Going Out however
+  // it was spent. `channels` below is named codes only — the default bucket is
+  // not a channel, it has no spend to set its revenue against, and including it
+  // would flatter every comparison. src/lib/coachChannels.ts holds the
+  // reasoning; enoughToTell() has made the same exclusion since part 98.
+  const channels = useMemo(() => channelSum(codes.rows), [codes.rows]);
+  const against = useMemo(() => spendAgainstReturn(codes.status, channels), [codes.status, channels]);
+  const codeTell = useMemo(() => enoughToTell(codes.status, codes.rows), [codes.status, codes.rows]);
+  const namedCodes = useMemo(() => codes.rows.filter((r) => !r.isDefault), [codes.rows]);
+
   // The coach's session rate is the one figure in this app with no currency
   // column anywhere behind it — `trainers.session_fee` is a bare numeric — so
   // it is not shown here at all. `denominate` is used where a currency exists
@@ -193,6 +245,16 @@ export default function CoachMoney() {
   const feeDenom = denominate(feeSum.pots[0]?.currency ?? null, fees.status);
 
   const G = layout.gutter;
+
+  /** One of the four figures under a code. Its label rides `ty.micro`, so it
+   *  reads as a caption above the value rather than competing with it. */
+  const codeFig = (label: string, value: string) => (
+    <View key={label} style={{ flex: 1 }}>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+      <Text style={{ ...ty.label, ...numeric, color: t.ink, marginTop: 1 }}>{value}</Text>
+    </View>
+  );
+
   const potRow = (key: string, label: string, amount: string | null) => (
     <View key={key} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>
       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{label}</Text>
@@ -421,6 +483,109 @@ export default function CoachMoney() {
           <ListRow icon="trending" title="Ad Spend"
             note="Connect an ad account, and see the spend that matched no code"
             onPress={() => router.push('/(trainer)/ad-spend')} />
+        </Section>
+
+        <Rule />
+
+        {/* ── WHICH CHANNELS WORKED ──────────────────────────────────────── */}
+        {/* The figures above say what the coach's advertising COST. They say
+            nothing about whether any of it worked, and that is the question a
+            coach opens a money screen holding.
+
+            Every function drawn here already existed and is untouched:
+            src/lib/codeReturn.ts has answered it per code since part 98 —
+            what each cost, who came in on it, what they paid, and
+            enoughToTell(), which declines to rank two channels until the split
+            could be told from a coin toss. All of it was reachable only by
+            opening the Add a Client sheet on the Clients screen, three taps
+            from here and behind a button whose label is about adding somebody.
+            Nothing about this section is new arithmetic except the roll-up in
+            src/lib/coachChannels.ts, which is the one sentence that set could
+            not produce: what the whole of it cost against what the whole of it
+            returned, withheld the moment either side has a hole in it.
+
+            It is read-only on purpose. The spend field per code stays on the
+            Clients screen, beside the figures it feeds — app/(trainer)/ad-spend.tsx
+            gives the reason and it applies twice over here: two places to type
+            the same number is how they come to disagree. */}
+        <Section>
+          <SectionHead title="Which Codes Worked" note="Named codes only" />
+
+          {/* First, before any figure. Every number below is last touch, and a
+              coach about to move a budget on them is owed that sentence before
+              they read them rather than under them. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{LAST_TOUCH_NOTE}</Text>
+
+          {codes.status === 'error' ? (
+            <Flag>{codes.reason ?? channelEmptyLine('error')}</Flag>
+          ) : codes.status === 'partial' ? (
+            <PartialRead what="join codes" shown={codes.rows.length} onPress={load} />
+          ) : !namedCodes.length ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{channelEmptyLine(codes.status)}</Text>
+          ) : (
+            <View>
+              {/* The verdict, and it is a refusal far more often than it is a
+                  ranking. A coach with twelve clients told "Instagram is your
+                  best channel" off a four-versus-one split has been handed a
+                  coin toss dressed as a finding, and they spend real money on
+                  it. enoughToTell() is what declines to say it. */}
+              {codeTell.rankable ? (
+                <Notice tone={t.good} kicker="Enough to tell"
+                  title={`${codeTell.best.label} is ahead of ${codeTell.runnerUp.label}`}
+                  note={codeTell.note} />
+              ) : (
+                <Notice tone={t.s3} kicker="Not enough yet"
+                  title="Too early to say which is working" note={codeTell.note} />
+              )}
+
+              {/* The whole of it against the whole of it, or the reason there
+                  is no such figure. `against` refuses on an unrecorded cost
+                  before anything else, because that is the hole that makes a
+                  coach's advertising look cheaper than it was — the direction
+                  that loses them money. */}
+              <Text style={{ ...ty.label, color: against.statable ? t.ink2 : t.ink3, marginBottom: sp.sm }}>
+                {againstLine(against)}
+              </Text>
+              {channelReachLine(codes.status, channels) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                  {channelReachLine(codes.status, channels)}
+                </Text>
+              ) : null}
+              {channels.unnamed > 0 ? (
+                <Flag tone={t.ink3} style={{ marginBottom: sp.md }}>
+                  Your main code is left out of everything in this section. It is not a channel — it collects everybody no named code claims, including codes you have since replaced — so setting what it earned against what it cost would compare real money with nothing.
+                </Flag>
+              ) : null}
+
+              {namedCodes.map((c) => {
+                const fgs = codeFigures(codes.status, c);
+                const line = returnLine(codes.status, c);
+                return (
+                  <View key={c.id ?? c.code} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.label, fontWeight: '500', color: c.isLive ? t.ink : t.ink3 }}>{c.label}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{stayedLine(codes.status, c)}</Text>
+                    <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+                      {codeFig('Spent', fgs.spent)}
+                      {codeFig('Clients', fgs.clients)}
+                      {codeFig('They paid', fgs.revenue)}
+                      {codeFig('Each cost', fgs.perClient)}
+                    </View>
+                    {line ? (
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>{line}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Both ways out, because the two halves of a missing figure are
+              fixed in two different places. A cost nobody has typed is typed on
+              the Clients screen; a cost that should have arrived on its own is
+              an ad account that is not connected. */}
+          <ListRow icon="people" title="Clients"
+            note="Where you make a code, and where you record what it cost you"
+            onPress={() => router.push('/(trainer)/dashboard')} />
         </Section>
 
         <Rule />

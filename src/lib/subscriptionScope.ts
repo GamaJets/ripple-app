@@ -208,3 +208,90 @@ export function unsettledNote(status: string | null | undefined): string {
 export function canSwitchCancel(status: string | null | undefined): boolean {
   return subState(status) === 'live';
 }
+
+/* ── what a coach is told about a subscription, and when ───────────────────
+ *
+ * A coach is told about exactly three things today: a PT booking, a session
+ * cancellation, and a client message. A subscription starting, a card failing
+ * and a client churning are all silent — `client_subscriptions` is written only
+ * by `supabase/functions/stripe-webhook`, which contains no notification code
+ * at all, so the first a coach hears of a lost subscriber is the next time they
+ * open Payments & Packages and count the rows.
+ *
+ * ── Why the decision is HERE and the trigger only mirrors it ──────────────
+ *
+ * The write happens in the database (supabase/parts/158), because the only
+ * writer of that table is a webhook running as the service role with no
+ * `auth.uid()` — `notify_users()` correctly returns 0 for such a caller, and
+ * the app never sees the event at all. So the notification cannot be sent from
+ * a screen, and a trigger is the only place it can come from.
+ *
+ * That would normally mean the rule is stated in plpgsql and never tested. The
+ * rule is not arithmetic: it is a reading of Stripe's status vocabulary, the
+ * same reading `subState` above already makes, and a second copy of that
+ * vocabulary would be the copy that drifts — the exact failure the header of
+ * this file spends a paragraph on for `mayAct`. So the sets are used once,
+ * here, and the trigger mirrors this function line for line with a comment
+ * naming it. This function has no runtime caller in the app, and that is
+ * deliberate rather than dead code: it is the specification, and the truth
+ * table in subscriptionScope.test.ts is the only place the rule can be proved
+ * before it is deployed to a database nobody can run a test against.
+ *
+ * ── Why these three and not "every status change" ─────────────────────────
+ *
+ * A signup is TWO writes — `incomplete` then `active` — and a coach told twice
+ * about one subscriber learns to ignore the notification. A retry that succeeds
+ * is `past_due` then `active`, and calling that second one "started" would
+ * report a new subscriber who has been there for months. So the transitions are
+ * stated as movements between bands, not as arrivals at words:
+ *
+ *   started  reaching 'active' or 'trialing' from a status that has never
+ *            charged: nothing at all (a row Stripe has just created) or
+ *            'incomplete' (the first payment has not cleared). NOT from
+ *            'past_due', which is a card recovering; NOT from 'paused', which
+ *            is a subscriber the coach already had; and NOT from a word this
+ *            app does not recognise, because a resume and a signup are
+ *            indistinguishable from the outside and "your client has started
+ *            subscribing" is the wrong one to guess.
+ *   failed   reaching 'past_due'. Inside the live band — a failed card has not
+ *            ended anything — but it is the one a coach can act on today.
+ *   ended    reaching any of Stripe's words for over, from outside that band.
+ *
+ * `null` for everything else, including a status word Stripe invents after this
+ * was written. Silence about a state we have no sentence for is right: the
+ * coach's Payments screen already shows such a row and quotes Stripe's own word
+ * back (`unsettledNote`), and a notification cannot do that in a way anybody
+ * could act on.
+ */
+export type SubChange = 'started' | 'failed' | 'ended';
+
+/** Statuses that mean the subscription is charging in the ordinary way.
+ *  Deliberately NOT `LIVE`: that set includes 'past_due', because a failed card
+ *  has not ended anything — but arriving at 'active' from 'past_due' is a
+ *  recovery and must not be announced as a new subscriber. */
+const CHARGING = new Set(['trialing', 'active']);
+
+/** Statuses a subscription can be in having never taken a payment. The only
+ *  two a 'started' may be announced from — see above for why 'paused' and an
+ *  unrecognised word are not among them. */
+const NEVER_CHARGED = new Set(['', 'incomplete']);
+
+/**
+ * What (if anything) to tell the coach, given the status this row held before
+ * and the status it holds now.
+ *
+ * `before` is the empty string for a row that has just been inserted, which is
+ * how a subscription that arrives already active is reported as started.
+ */
+export function subChange(before: string | null | undefined, after: string | null | undefined): SubChange | null {
+  const a = String(before ?? '').trim().toLowerCase();
+  const b = String(after ?? '').trim().toLowerCase();
+  // No movement is no news. Stripe retries webhooks, and a redelivery rewrites
+  // the row with the status it already had; announcing that would tell a coach
+  // a client churned twice.
+  if (a === b) return null;
+  if (subState(b) === 'ended' && subState(a) !== 'ended') return 'ended';
+  if (b === 'past_due') return 'failed';
+  if (CHARGING.has(b) && NEVER_CHARGED.has(a)) return 'started';
+  return null;
+}

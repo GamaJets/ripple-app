@@ -26,6 +26,8 @@ import { HrZoneChart } from '../../src/ui/HrZoneChart';
 import { ageFromDob, type HrSample } from '../../src/lib/hr';
 import { useWearables } from '../../src/ui/wearables';
 import { useDeviceSleep } from '../../src/ui/deviceSleep';
+import { useReadiness } from '../../src/ui/readiness';
+import { readinessMadeOf } from '../../src/lib/readiness';
 import { connectedProviders } from '../../src/lib/wearables/sleep';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
@@ -196,6 +198,8 @@ export default function Recovery() {
  // are connected rather than the states object, and on linkRev so a reconnect
  // re-reads. See src/ui/deviceSleep.tsx.
  const deviceSleep = useDeviceSleep();
+ // The home screen's own readiness, not a second opinion about it.
+ const rv = useReadiness();
  const sleepReads: { reads: SleepRead[]; status: LoadStatus } = { reads: deviceSleep.reads, status: deviceSleep.status };
  const loadDeviceSleep = deviceSleep.refresh;
  // The read, its key, and the merge all live in DeviceSleepProvider now —
@@ -306,6 +310,59 @@ export default function Recovery() {
    </View>
    <Ghost icon="back" onPress={() => router.back()} />
   </View>
+
+  {/* ── readiness: the number the home screen leads with, taken apart ─
+
+      This is where that hero's tap lands, and until now it landed on a screen
+      that never mentioned readiness at all — so a member who wanted to know
+      what 72 meant arrived at a water counter. The score itself is not
+      recomputed here: it comes from the same useReadiness() call the home
+      screen renders, because a second derivation of one number is how this app
+      has repeatedly come to state two of them. See src/ui/readiness.ts.
+
+      The rows are the point. A signal that was SCORED says with what figure, a
+      signal that is missing says which kind of missing it is, and the two kinds
+      are never collapsed: "you have not set a water goal" and "today's count
+      could not be read" arrive at the same null inside readinessScore and mean
+      opposite things to the person reading it. */}
+  <Section>
+   <SectionHead title="Readiness" note={rv.readiness != null ? rv.readiness.label : undefined} />
+   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
+    <Text style={{ ...value(30), ...numeric, color: rv.readiness != null ? t.ink : t.ink3 }}>
+     {rv.readiness != null ? String(rv.readiness.score) : fig(null)}
+    </Text>
+    <Text style={{ ...ty.caption, color: t.ink3 }}>out of 100</Text>
+   </View>
+   {/* The tip and what the tip was computed from, together. A tip standing on
+       its own is advice with no stated basis, which is the thing a member
+       cannot argue with and therefore cannot trust. */}
+   <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>
+    {rv.readiness != null
+      ? `${rv.readiness.tip} ${readinessMadeOf(rv.readiness)}.`
+      : rv.breakdown.absence}
+   </Text>
+
+   {rv.breakdown.lines.map((l) => (
+    // "Sleep" and "7h 30m a night over 2 of the last 3 nights" are one fact
+    // and would otherwise be two stops with a swipe between them.
+    <View key={l.key} accessible accessibilityLabel={`${l.title}. ${l.detail}`}
+     style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+      gap: sp.md, paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
+     <Text style={{ ...ty.caption, color: t.ink2 }}>{l.title}</Text>
+     <Text style={{ ...ty.caption, color: l.state === 'scored' ? t.ink2 : t.ink3, flex: 1, textAlign: 'right' }}>
+      {l.detail}
+     </Text>
+    </View>
+   ))}
+
+   {/* Named devices, not "a device": the fix for a WHOOP that stopped
+       answering is on the Devices screen under the word WHOOP. */}
+   {rv.breakdown.caveats.map((c) => (
+    <Flag key={c} tone={t.warn} style={{ marginTop: sp.md }}>{c}</Flag>
+   ))}
+  </Section>
+
+  <Rule />
 
   {/* ── the hero: today's hydration ─────────────────────────────────── */}
   <Hero

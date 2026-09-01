@@ -11,7 +11,10 @@
 // obvious wrong versions of the rule — matching on nulls, dropping the party
 // test, letting a coach open a client's billing portal — actually FAILS here,
 // so that a future simplification of `partyOf` cannot pass this file.
-import { partyOf, mayAct, refusalFor, subState, unsettledNote, canSwitchCancel } from './subscriptionScope';
+import {
+  partyOf, mayAct, refusalFor, subState, unsettledNote, canSwitchCancel, subChange,
+  type SubChange,
+} from './subscriptionScope';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -179,6 +182,90 @@ for (const m of mutants) {
   const agrees = cases.every((c) => m.rule(c.r, c.uid, c.action) === mayAct(c.r, c.uid, c.action));
   ok(!agrees, `mutation "${m.name}" is indistinguishable from the real rule — the assertions above do not pin it down`);
 }
+
+/* ── what a coach is told about a subscription ─────────────────────────────
+ *
+ * These assertions are the ONLY proof this rule is right. The rule itself runs
+ * in a database trigger (supabase/parts/158), fired by a Stripe webhook that
+ * this repository's test suite cannot reach and that nobody can run locally —
+ * so if the truth table below is wrong, the first evidence will be a coach
+ * being told a client churned who did not.
+ *
+ * Stated as (before, after) → what the coach is told, one line per transition,
+ * with Stripe's own spellings.
+ */
+{
+  const table: [string, string, SubChange | null][] = [
+    // A signup. The row is inserted with no previous status at all; Stripe then
+    // writes 'incomplete' → 'active' for a card that needs confirming, and
+    // straight to 'active' or 'trialing' for one that does not.
+    ['', 'active', 'started'],
+    ['', 'trialing', 'started'],
+    ['incomplete', 'active', 'started'],
+    ['incomplete', 'trialing', 'started'],
+    // ONE notification for one signup. The insert that lands on 'incomplete' is
+    // not news — nothing has been charged and Stripe may still expire it — so
+    // the coach hears about this subscriber once, when it starts charging.
+    ['', 'incomplete', null],
+    // A trial converting is not a second signup: it was already charging in the
+    // sense that matters, and the coach was told when it began.
+    ['trialing', 'active', null],
+
+    // A card that failed. Still inside the live band — nothing has ended — and
+    // it is the one of the three a coach can do something about today.
+    ['active', 'past_due', 'failed'],
+    ['trialing', 'past_due', 'failed'],
+
+    // A retry that worked. The whole reason 'started' is keyed on the BAND and
+    // not on the word: this is a recovery, and reporting it as a new subscriber
+    // would tell a coach they had gained someone they never lost.
+    ['past_due', 'active', null],
+
+    // Over, in each of Stripe's three spellings for over.
+    ['active', 'canceled', 'ended'],
+    ['past_due', 'unpaid', 'ended'],
+    ['incomplete', 'incomplete_expired', 'ended'],
+    // Already over. A subscription that moves between two ended states has not
+    // ended twice, and 'canceled' arriving after 'unpaid' is an ordinary
+    // out-of-order webhook.
+    ['unpaid', 'canceled', null],
+
+    // A redelivered webhook rewrites the row with the status it already had.
+    // Stripe retries; a retry is not a second event.
+    ['active', 'active', null],
+    ['canceled', 'canceled', null],
+    ['', '', null],
+
+    // 'paused', and any word Stripe invents after this was written. Neither
+    // charging nor finished, and there is no sentence a coach could act on —
+    // the Payments screen shows the row and quotes the word back instead.
+    ['active', 'paused', null],
+    // A pause resuming is not a signup. The coach already had this subscriber,
+    // and 'started' is keyed on having NEVER charged for exactly this row.
+    ['paused', 'active', null],
+    ['active', 'something_new', null],
+    // And a word we do not recognise resolving to 'active' could be either a
+    // resume or a first payment. Neither is claimed.
+    ['something_new', 'active', null],
+  ];
+  for (const [before, after, want] of table) {
+    eq(subChange(before, after), want, `“${before || '(new row)'}” → “${after}”`);
+  }
+
+  // Case and whitespace come off a webhook payload and out of a text column,
+  // and 'Active' must not read as a different word from 'active' — that would
+  // report a status change on a redelivery.
+  eq(subChange(' ACTIVE ', 'active'), null, 'the same status in another case is not a change');
+  eq(subChange(null, 'active'), 'started', 'a null previous status is a new row');
+  eq(subChange('active', null), null, 'a status that vanished is not an ending we can claim');
+  eq(subChange(undefined, undefined), null, 'nothing known either side says nothing');
+
+  // The three are mutually exclusive by construction — every transition above
+  // yields at most one — and the coach is never told two things about one write.
+  const kinds = new Set(table.map(([b, a]) => subChange(b, a)).filter(Boolean));
+  eq(kinds.size, 3, 'the table exercises all three kinds and no fourth');
+}
+
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`subscriptionScope: ok (${cases.length} scope cases, ${mutants.length} mutations rejected)`);

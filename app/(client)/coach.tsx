@@ -22,12 +22,10 @@ import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { askCoach, coachAvailable, type ChatMsg } from '../../src/lib/coach';
-import { useWellness } from '../../src/ui/wellness';
-import { useHabits } from '../../src/ui/habits';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useFoodLog } from '../../src/ui/foodLog';
-import { readinessScore, readinessMadeOf, readinessSleep } from '../../src/lib/readiness';
-import { useDeviceSleep } from '../../src/ui/deviceSleep';
+import { readinessMadeOf } from '../../src/lib/readiness';
+import { useReadiness } from '../../src/ui/readiness';
 import { suggestProgression } from '../../src/lib/progression';
 import { currentStreak } from '../../src/lib/streaks';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -49,8 +47,6 @@ export default function Coach() {
     ? applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined))
     : null;
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
-  const { sleep } = useWellness();
-  const { water, waterGoal, waterStatus } = useHabits();
   // Every line of `context` below is handed to a language model as fact about
   // this person, and the model writes it back to them in the second person. So
   // an unread read here does not produce a blank screen, it produces a
@@ -67,36 +63,21 @@ export default function Coach() {
   // somebody who has never used one. Every other screen was converted for
   // TF-37; this one still said "kg" through the model's mouth.
   const wu = useSettings().weightUnit;
-  // Device sleep first, exactly as the home screen does it. This read the
-  // hand-typed wellness log alone, so a client with a watch syncing every night
-  // had a coach that was told 'readiness: not enough data' and never heard about
-  // their sleep at all — while the same client's Recovery screen listed the week.
-  const _devSleep = useDeviceSleep();
-  const _sleepFor = readinessSleep(_devSleep.nights, sleep, 3);
-  // null, not 7 - the coach was being told a readiness score derived from a
-  // sleep figure nobody recorded, and repeating it back as fact.
-  const _avgSleep = _sleepFor.avgHours;
-  const _since2d = Date.now() - 2 * 86400000;
-  const _load2d = new Set(log.filter((e) => Date.parse(e.t) >= _since2d).map((e) => e.t.slice(0, 10))).size;
-  // `: 0` was the bug the home screen already had fixed: a client with no water
-  // goal set was reported to the coach as zero percent hydrated, which scores as
-  // badly as a client who drank nothing all day. Unknown travels as null.
+  // Readiness and its inputs, from the one shared derivation the home screen
+  // and Recovery also read (src/ui/readiness.ts).
   //
-  // The `logWhole` gate this screen used to hold by hand is now inside
-  // `readinessScore`, which takes `number | null` for the load and withholds the
-  // score rather than scoring an unread log as maximally rested. The gate is
-  // kept here as the null it passes, so the two screens cannot drift apart
-  // again — and `logWhole` is still read below, for the streak and the last
-  // exercise, which have no such channel.
+  // This screen used to assemble it by hand, and so did the home screen, and
+  // the two drifted in both directions: this one gated the training log for
+  // months while the home screen's hero rose whenever that log failed to load,
+  // and the home screen read device nights while this one read the typed log
+  // alone — so a client with a watch syncing every night had a coach that was
+  // told "readiness: not enough data" and never heard about their sleep.
   //
-  // `waterStatus` closes the same hole on the hydration side: `water` is 0 while
-  // the count is unread, and 0 over a goal the client did set is not "they drank
-  // nothing", it is "we do not know".
-  const _readiness = readinessScore({
-    avgSleepHours: _avgSleep,
-    hydrationPct: waterGoal && isWhole(waterStatus) ? water / waterGoal : null,
-    workoutsLast2Days: logWhole ? _load2d : null,
-  });
+  // Every line of `context` below is handed to a language model as fact about
+  // this person and comes back to them in the second person, so a figure with
+  // an unread source behind it is not a slightly-off number here, it is a
+  // confident sentence. That is why `caveats` travels with the score.
+  const { readiness: _readiness, sleep: _sleepFor, breakdown: _made } = useReadiness();
   const _streak = currentStreak(log);
   const _lastEx = logWhole && log.length ? log[0].exercise : '';
   const _prog = logWhole ? suggestProgression(log, wu)[0] : undefined;
@@ -125,7 +106,14 @@ export default function Coach() {
     // because the number looks like it covers everything.
     readiness: _readiness
       ? `${_readiness.score}/100 (${_readiness.label}), ${readinessMadeOf(_readiness).toLowerCase()}`
-      : logWhole ? 'not enough data' : 'their training log could not be read, so readiness is unknown — do not treat it as rested',
+      : _made.absence ?? 'not enough data',
+    // What the score could NOT see. A model handed 84 with a dead WHOOP behind
+    // it will talk about how well rested they are, and every signal readiness
+    // scores counts against the member — so a night we failed to read can only
+    // have flattered the number it is about to congratulate them on.
+    readinessGaps: _made.caveats.length
+      ? `${_made.caveats.join(' ')} Do not present the score as the whole picture.`
+      : undefined,
     // Said plainly, with where it came from. A coach that knows the watch
     // measured 5.2 hours can talk about the night; one handed only a score
     // can only repeat the score back.

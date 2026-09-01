@@ -68,7 +68,7 @@ import type { LoadStatus } from '../ui/loadStatus';
  *  tsconfig.test.json or run in the web console). The UI assigns these straight
  *  into `IconName`, so a value added here that Icon does not draw fails to
  *  typecheck at the use site. */
-export type InboxIcon = 'bell' | 'calendar' | 'message' | 'sparkle' | 'heart' | 'dumbbell' | 'trophy' | 'info' | 'pencil';
+export type InboxIcon = 'bell' | 'calendar' | 'message' | 'sparkle' | 'heart' | 'dumbbell' | 'trophy' | 'info' | 'pencil' | 'people' | 'grid';
 
 export interface InboxDecision {
   /** Whether to write a `notifications` row alongside the push. */
@@ -125,6 +125,23 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   ['/(client)/classes', 'calendar'],
   ['/(client)/workouts', 'dumbbell'],
   ['/(client)/achievements', 'trophy'],
+  // ── the coach's own three ────────────────────────────────────────────────
+  //
+  // Written by database triggers rather than by a push (supabase/parts/158),
+  // and each takes the icon TRAINER_NAV already gives the screen it opens —
+  // src/lib/features.ts: Clients is 'people', Your Documents is 'pencil',
+  // Payments & Packages is 'grid'. Not a fresh choice per notification: a coach
+  // has learned those three shapes from the nav, and a row that opens Payments
+  // wearing a different icon from the Payments row is one they have to read
+  // before they know what it is about.
+  //
+  // '/(trainer)/dashboard' is the coach's client list, which is where
+  // src/ui/CoachRequests.tsx draws the accept/decline card. There is no
+  // dedicated screen for a coaching request and this is deliberately not the
+  // moment to invent one.
+  ['/(trainer)/dashboard', 'people'],
+  ['/(trainer)/documents', 'pencil'],
+  ['/(trainer)/payments', 'grid'],
 ];
 
 const startsWithAny = (route: string, prefixes: readonly string[]): boolean =>
@@ -259,6 +276,113 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   // notification is a push, and so the classification of its wording is
   // visible: it has a body, it is not chat, and it is recorded.
   { where: 'src/ui/coachInvoices.ts', title: 'An invoice from your coach', body: 'Invoice 0007 for AED 450.00 — Ten sessions. Your coach states this amount is being requested.', route: null },
+];
+
+/* ── rows nothing in this file decides about ───────────────────────────────
+ *
+ * KNOWN_PUSHES above is a catalogue of PUSHES, and every entry in it passes
+ * through recordInbox() where inboxDecision() gets a say. There is a second,
+ * entirely separate population in this table that it does not describe at all:
+ * rows written server-side, by an edge function or a trigger, which never touch
+ * this file's rules and cannot be classified by them.
+ *
+ * They were invisible here, and the cost of that was concrete. `notify-message`
+ * wrote coach-directed rows for two years whose route was '/(trainer)/messages'
+ * — a screen that exists, in a group the coach's build contains, so nothing
+ * refused it — and it is not the coach's thread: app/(trainer)/chat.tsx is, and
+ * it needs a clientId. Every one of those notifications opened a list instead of
+ * the conversation it was about. Nothing in this repository stated the
+ * relationship the bug broke, so nothing could notice.
+ *
+ * That relationship is what this catalogue exists to state, and it is a
+ * different assertion from the one KNOWN_PUSHES makes. Each row below declares
+ * WHO it is addressed to, and the test checks the two things the reader will
+ * silently get wrong:
+ *
+ *   1. the route survives `safeRoute` for the build that RECEIVES it. A route
+ *      naming another group is not an error anywhere — it is stored happily and
+ *      it renders as a readable row with "Nothing to open" under it, which is
+ *      the failure mode a coach reports as "the notification does nothing".
+ *   2. `inboxIcon` gives it the icon this catalogue names. The reader derives
+ *      the icon from the ROUTE (src/ui/notifications.tsx, `rowToItem`) and
+ *      ignores the `icon` column the trigger wrote, so a trigger that picks a
+ *      good icon and a route this table has no entry for draws the generic
+ *      bell — indistinguishable from "we have no idea what this is".
+ *
+ * Like KNOWN_PUSHES this is a hand-maintained snapshot and it is honest about
+ * that: it cannot make the SQL correct, and a trigger added without a line here
+ * costs nothing at runtime. What it does is make the route and the icon a coach
+ * will actually get visible in TypeScript, next to the rules that produce them.
+ */
+export interface ServerWritten {
+  /** The file that writes it. */
+  where: string;
+  /** The condition, in the words a reviewer needs. */
+  when: string;
+  /** The build the recipient is running, which is what the route must match. */
+  to: 'client' | 'trainer' | 'owner';
+  title: string;
+  route: string | null;
+  /** What `inboxIcon` will give the row. Not necessarily the `icon` column the
+   *  writer set — the reader recomputes it. */
+  icon: InboxIcon;
+}
+
+export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
+  // ── the edge function (part 26) ──────────────────────────────────────────
+  {
+    where: 'supabase/functions/notify-message',
+    when: 'a coach sends a chat message',
+    to: 'client', title: 'the coach’s name', route: '/(client)/messages', icon: 'message',
+  },
+  {
+    where: 'supabase/functions/notify-message',
+    when: 'a client sends a chat message',
+    to: 'trainer', title: 'the client’s name',
+    // The parameter is the whole point of this entry. Without it the row opens
+    // a coach's thread LIST and not the thread; with it, safeRoute's query
+    // string branch is the thing keeping it followable.
+    route: '/(trainer)/chat?clientId=00000000-0000-0000-0000-000000000000', icon: 'message',
+  },
+  // ── the gym's invoice (part 146) ─────────────────────────────────────────
+  {
+    where: 'supabase/parts/146 · gym_invoices_notify_member',
+    when: 'a gym invoice leaves draft',
+    // Routeless on purpose: there is no member screen for `gym_invoices` yet,
+    // and the bell is what a row with nowhere to go is drawn with.
+    to: 'client', title: 'An invoice from your gym', route: null, icon: 'bell',
+  },
+  // ── the coach's three (part 158) ─────────────────────────────────────────
+  //
+  // Everything a client does reached a coach only if the coach went looking. A
+  // coaching request sat on a dashboard card, a subscription failing or ending
+  // was a number on a screen nobody opens daily, and an accepted waiver was
+  // nothing at all. These are the three the roadmap named.
+  {
+    where: 'supabase/parts/158 · coach_request_notify',
+    when: 'a client asks to be coached — from the directory or by join code',
+    to: 'trainer', title: 'A coaching request', route: '/(trainer)/dashboard', icon: 'people',
+  },
+  {
+    where: 'supabase/parts/158 · coach_doc_acceptance_notify',
+    when: 'a client accepts one of the coach’s documents',
+    to: 'trainer', title: 'Paperwork accepted', route: '/(trainer)/documents', icon: 'pencil',
+  },
+  {
+    where: 'supabase/parts/158 · client_subscription_notify',
+    when: 'subChange() says a subscription started — see src/lib/subscriptionScope.ts',
+    to: 'trainer', title: 'A subscription has started', route: '/(trainer)/payments', icon: 'grid',
+  },
+  {
+    where: 'supabase/parts/158 · client_subscription_notify',
+    when: 'subChange() says a payment failed',
+    to: 'trainer', title: 'A subscription payment failed', route: '/(trainer)/payments', icon: 'grid',
+  },
+  {
+    where: 'supabase/parts/158 · client_subscription_notify',
+    when: 'subChange() says a subscription ended',
+    to: 'trainer', title: 'A subscription has ended', route: '/(trainer)/payments', icon: 'grid',
+  },
 ];
 
 /* ── Where a stored row is allowed to send you ─────────────────────────────

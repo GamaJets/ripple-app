@@ -16,8 +16,8 @@
 //      untrusted on the way out of the database, exactly as a route param is in
 //      src/lib/backTo.ts.
 import {
-  KNOWN_PUSHES, inboxAge, inboxDecision, inboxIcon, inboxHeading, safeRoute, unreadBadge,
-  inboxControls, clearReadPrompt, deletedNote, clearedNote, type InboxIcon,
+  KNOWN_PUSHES, SERVER_WRITTEN, inboxAge, inboxDecision, inboxIcon, inboxHeading, safeRoute,
+  unreadBadge, inboxControls, clearReadPrompt, deletedNote, clearedNote, type InboxIcon,
 } from './notifyInbox';
 import { writeFailure } from './wroteRows';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -445,6 +445,17 @@ ok(/nothing marked read/.test(clearedNote(true, 0)), 'and says why, rather than 
 eq(clearedNote(true, 1), 'One read notification deleted.', 'one row is not "1 read notifications deleted"');
 eq(clearedNote(true, 4), '4 read notifications deleted.', 'four rows are counted');
 eq(clearedNote(true, 1204), '1,204 read notifications deleted.', 'and a four-digit count carries its separator');
+// A count that is not a count. `changed` is a number the CALLER parsed off a
+// Content-Range header, so the junk cases are real: the guard in clearedNote
+// exists so a failed parse reads as "nothing was deleted" rather than as
+// "-3 read notifications deleted", which is a sentence about a deletion that
+// went backwards. Asserted because the guard is two conditions and dropping
+// either of them leaves the other looking sufficient.
+eq(clearedNote(true, -3), 'Nothing was deleted. There was nothing marked read to remove.',
+  'a negative count is not a deletion');
+eq(clearedNote(true, Number.NaN), 'Nothing was deleted. There was nothing marked read to remove.',
+  'a count that is not a number is not a deletion');
+eq(clearedNote(true, 2.7), '2 read notifications deleted.', 'a fractional count is floored, not rounded up past what was matched');
 for (const n of [0, 1, 4, 999, 1204, 99999]) {
   ok(!/\d{4,}/.test(clearedNote(true, n)), `${n}: no unseparated run of digits reaches the reader`);
 }
@@ -478,5 +489,80 @@ for (const n of [0, 1, 4, 999, 1204, 99999]) {
   eq(unreadBadge(0, 'error').kind, 'unknown', 'an empty inbox under a failed read is still not "you have none"');
 }
 
+/* ── rows written by a trigger or an edge function ─────────────────────────
+ *
+ * These never pass through inboxDecision() — nothing in TypeScript decides
+ * whether they exist — so the only thing that can be asserted about them is
+ * what the READER will do with them. Both halves of that have already been
+ * wrong in production once each:
+ *
+ *   · notify-message wrote coach rows routed at '/(trainer)/messages', which
+ *     is a real screen in the coach's own group, so nothing refused it. It is
+ *     the thread LIST. Every message notification a coach ever tapped opened
+ *     the wrong screen, and the client side was masked by a fallback that
+ *     cannot exist for a coach.
+ *   · '/(client)/intake' had been pushed since intake.ts was written and drew
+ *     the generic bell, because ICON_BY_ROUTE had no entry for it — the same
+ *     silence a new trigger gets for free.
+ */
+{
+  ok(SERVER_WRITTEN.length > 0, 'the server-written catalogue is not empty');
+
+  for (const e of SERVER_WRITTEN) {
+    // 1 · the recipient's build will actually follow it.
+    if (e.route === null) {
+      ok(e.icon === 'bell', `${e.where} writes no route, so its row can only be drawn with the bell`);
+    } else {
+      eq(safeRoute(e.route, e.to), e.route,
+        `${e.where} (${e.when}) is addressed to the ${e.to} build, so its route must survive safeRoute there`);
+    }
+
+    // 2 · the icon the reader computes is the one this catalogue names. The
+    //     `icon` column the writer set is not consulted for a row that has a
+    //     route — src/ui/notifications.tsx recomputes it — so a trigger cannot
+    //     choose its own icon and this is where the two are tied together.
+    eq(inboxIcon(e.route), e.icon, `${e.where} (${e.when}) draws the icon this catalogue claims`);
+
+    // 3 · a routeless row whose icon is 'message' is read as a PRE-part-122
+    //     chat row and silently given '/(client)/messages'. Nothing new may
+    //     look like one.
+    ok(!(e.route === null && e.icon === 'message'),
+      `${e.where} must not write a routeless 'message' row — the reader treats those as legacy chat`);
+  }
+
+  // The coach's three, named one at a time rather than counted, so that
+  // deleting one is an edit somebody has to make here.
+  for (const title of ['A coaching request', 'Paperwork accepted', 'A subscription has ended']) {
+    const e = SERVER_WRITTEN.find((x) => x.title === title);
+    ok(!!e, `“${title}” is still written to a coach somewhere`);
+    eq(e?.to, 'trainer', `“${title}” goes to the coach's build`);
+  }
+
+  // A coach's row routed into the client group is the exact failure mode this
+  // block exists for, and it has to be shown to FAIL rather than assumed to.
+  eq(safeRoute('/(client)/calendar', 'trainer'), null,
+    'a route naming another group is refused, which is why entry 1 above is worth asserting');
+  // And the coach's three routes are refused for a client build, so a
+  // mis-addressed row cannot navigate a client into a coach screen.
+  for (const r of ['/(trainer)/dashboard', '/(trainer)/documents', '/(trainer)/payments']) {
+    eq(safeRoute(r, 'client'), null, `${r} is not followable from the client app`);
+  }
+}
+
+/* ── the coach's icons ─────────────────────────────────────────────────────
+ *
+ * Stated separately from the catalogue because the catalogue would still pass
+ * if all three fell back to the bell together with their entries changed to
+ * match. These pin the actual shapes, which are TRAINER_NAV's.
+ */
+eq(inboxIcon('/(trainer)/dashboard'), 'people', 'a coaching request draws the Clients icon');
+eq(inboxIcon('/(trainer)/documents'), 'pencil', 'an acceptance draws the Your Documents icon');
+eq(inboxIcon('/(trainer)/payments'), 'grid', 'a subscription draws the Payments & Packages icon');
+// Whole-route matching, as the note over ICON_BY_ROUTE insists: a screen whose
+// name merely begins with one of those gets the bell, not the neighbour's icon.
+eq(inboxIcon('/(trainer)/payments-archive'), 'bell', 'a longer screen name is not a prefix match');
+eq(inboxIcon('/(trainer)/documents?clientId=abc'), 'pencil', 'a query string does not lose the icon');
+
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log(`notifyInbox: ok (${KNOWN_PUSHES.length} pushes classified, ${KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length} recorded)`);
+console.log(`notifyInbox: ok (${KNOWN_PUSHES.length} pushes classified, ${KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length} recorded, ${SERVER_WRITTEN.length} written server-side)`);

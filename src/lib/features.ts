@@ -234,6 +234,14 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'broadcast-session', label: 'Share a Session', note: 'Your clip and caption, into any app you post from', route: '/(trainer)/broadcast-session', icon: 'share', keywords: 'publish post social clip session caption platforms share marketing' },
   { key: 'analytics', label: 'Analytics', note: 'Adherence, revenue & at-risk clients', route: '/(trainer)/analytics', icon: 'chart', keywords: 'stats retention revenue' },
   { key: 'ad-spend', label: 'Ad Spend', note: 'What your ads cost, and what they brought in', route: '/(trainer)/ad-spend', icon: 'trending', keywords: 'ads ad spend marketing cost cac attribution campaign meta google leads' },
+  // The other half of the funnel. Ad Spend above carries 'leads' as a keyword
+  // and always has, from back when there was nothing to land on — so this row
+  // has to out-describe it for the word that used to find only the money.
+  // 'enquiry', 'enquiries' and 'inquiry' are all here because the coach who
+  // types one of them is not going to try the others, and 'form', 'contact' and
+  // 'waiting list' are what the same thing is called by the coaches who have
+  // run one on a different platform.
+  { key: 'leads', label: 'Enquiries', note: 'People who asked about coaching without joining', route: '/(trainer)/leads', icon: 'message', keywords: 'lead leads enquiry enquiries inquiry inquiries prospect prospects form contact details signup sign up waiting list interested asked about follow up followup capture funnel join link' },
   { key: 'leaderboard', label: 'Leaderboard', note: 'Rank clients by consistency', route: '/(trainer)/leaderboard', icon: 'trophy', keywords: 'ranking standings' },
   // Searched for with the words a coach actually types when they are worried
   // about money — "how much did I make", "profit", "income" — none of which
@@ -241,7 +249,16 @@ export const TRAINER_NAV: NavItem[] = [
   // as keywords while deliberately printing neither figure: those are the words
   // people search with, and landing them on the screen that explains why the
   // two halves are never subtracted is better than landing them nowhere.
-  { key: 'money', label: 'Money', note: 'What came in and what went out, kept apart', route: '/(trainer)/money', icon: 'chart', keywords: 'money earnings income takings revenue paid profit net owe owed outgoings expenses spend overview how much did i make ledger' },
+  //
+  // The channel words are here for the same reason and are not duplicates of
+  // the Ad Spend row below. That row is the CONNECTION — an ad account, and the
+  // spend that matched no code. This screen is the ANSWER: what each code cost,
+  // what the people off it paid, what each of them cost to get, and whether the
+  // gap between two channels means anything at all. A coach typing "which of my
+  // ads is working" or "cost per client" wants the second, and until this
+  // section existed the only screen that held it was a sheet inside the Clients
+  // screen that search cannot reach and no coach would think to open.
+  { key: 'money', label: 'Money', note: 'What came in and what went out, kept apart', route: '/(trainer)/money', icon: 'chart', keywords: 'money earnings income takings revenue paid profit net owe owed outgoings expenses spend overview how much did i make ledger join code codes channel channels which ads are working cost per client cac acquisition attribution last touch return on ad spend roas campaign worked' },
   { key: 'payments', label: 'Payments & Packages', note: 'Get paid, and set what you sell', route: '/(trainer)/payments', icon: 'grid', keywords: 'payments payouts stripe connect packages packs memberships sell price get paid earnings' },
   { key: 'billing', label: 'Billing & Subscription', note: 'Your own plan and invoices', route: '/(trainer)/billing', icon: 'grid', keywords: 'billing subscription plan invoice card payment method upgrade downgrade cancel my plan' },
   // The coach's own training, food and body. Three separate screens because a
@@ -254,7 +271,7 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'profile', label: 'Profile', note: 'Your bio, offers & rate', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers public profile' },
   // Sign out lives here, and it was findable from nowhere.
   { key: 'settings', label: 'Settings', note: 'Account, sign out, your data & version', route: '/(trainer)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export my data delete account version build units' },
-  { key: 'notifications', label: 'Notifications', note: 'Bookings, cancellations and anything sent to you', route: '/(trainer)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell' },
+  { key: 'notifications', label: 'Notifications', note: 'Coaching requests, bookings, subscriptions and anything sent to you', route: '/(trainer)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell request requests coaching request join code accepted document documents paperwork waiver signed subscription subscriptions payment failed past due churn cancelled ended booking cancellation' },
   // The coach's thread list. It carries 'inbox' and 'unread' as keywords even
   // though the row above does too, and that is deliberate rather than sloppy:
   // both are words a coach uses for this, and a search that returns only the

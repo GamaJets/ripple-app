@@ -57,12 +57,32 @@
 -- safe to re-run standalone at any point.
 -- ─────────────────────────────────────────────────────────────────────────
 
--- 1 ── no RPC is reachable without signing in.
+-- 1 ── no RPC is reachable without signing in, except the ones that are
+--      supposed to be, and which say so about themselves.
+--
+-- The exception was added when part 157 gave the marketing site a public lead
+-- form. That form's only write is one narrow definer function which `anon` MUST
+-- be able to execute; a standalone re-run of this file would have revoked it
+-- and switched the form off silently — the page would go on saying "thank you"
+-- and nothing would be written, which is the exact failure mode this file's
+-- header complains about elsewhere.
+--
+-- The marker is the function's own COMMENT, not a list of names kept here. A
+-- name list would have to be edited by whoever adds the next anon entry point,
+-- which is the same trap one indirection further away; a comment travels with
+-- the function and is written in the same breath as the grant. Writing it is a
+-- deliberate act and it is visible in `\df+`.
+--
+-- PUBLIC is revoked from those functions ANYWAY, and that is the half that
+-- matters: PUBLIC is every role including ones that do not exist yet, whereas
+-- `anon` is one role with one deliberate grant. So the exception narrows this
+-- sweep by exactly one privilege on exactly the functions that asked for it.
 do $$
 declare r record;
 begin
   for r in
-    select p.oid::regprocedure as sig
+    select p.oid::regprocedure as sig,
+           coalesce(obj_description(p.oid, 'pg_proc'), '') like '%[anon entry point]%' as anon_ok
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     left join pg_depend d on d.objid = p.oid and d.deptype = 'e'
@@ -72,7 +92,9 @@ begin
       and pg_get_function_result(p.oid) <> 'trigger'
   loop
     execute format('revoke execute on function %s from public', r.sig);
-    execute format('revoke execute on function %s from anon', r.sig);
+    if not r.anon_ok then
+      execute format('revoke execute on function %s from anon', r.sig);
+    end if;
   end loop;
 end $$;
 

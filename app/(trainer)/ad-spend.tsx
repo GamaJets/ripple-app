@@ -413,6 +413,23 @@ export default function TrainerAdSpend() {
           </Text>
         </Section>
 
+        {/* The other half of the same question. Everything above divides money
+            by the people who FINISHED — installed the app, made an account and
+            spent the code. An ad that produced twenty enquiries and no joins
+            reads here as a total failure, and it is not one: it is an
+            onboarding problem, and the two need opposite responses. */}
+        <Section>
+          <SectionHead title="Who asked and did not join" />
+          <Text style={{ ...ty.body, color: t.ink2 }}>
+            These figures count clients. Somebody who clicked a join link and left their details without making an account
+            is not among them and never will be, so a code with real interest behind it and nobody through the door looks
+            from this screen exactly like a code nothing happened on.
+          </Text>
+          <View style={{ marginTop: sp.lg }}>
+            <Ghost label="Your Enquiries" onPress={() => router.push('/(trainer)/leads')} />
+          </View>
+        </Section>
+
         {status === 'error' && read.status !== 'error' ? (
           <Section>
             <Flag tone={t.crit}>
