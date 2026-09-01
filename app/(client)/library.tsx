@@ -39,6 +39,7 @@
 // it does not, rather than closing on a set that exists on this phone alone.
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
@@ -51,7 +52,13 @@ import { tapLight, notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, ListRow, Notice, Cta, Ghost, PartialRead, Field } from '../../src/ui/kit';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { catalogueValue as cap, num } from '../../src/lib/format';
-import { Image as ExpoImage } from 'expo-image';
+// expo-image is required through src/ui/nativeModules.ts, never imported. Its
+// entry point resolves to `requireNativeModule('ExpoImage')`, which THROWS on a
+// binary that predates the dependency — and expo-image landed on 30 Aug, three
+// days after the version last moved to 1.1.0, so every binary built 27-29 Aug
+// takes today's bundle and has no ExpoImage in it. A bare import would take
+// this whole screen down while it loaded. React Native's own <Image> is the
+// fallback and is in every binary ever built.
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, readLift } from '../../src/lib/units';
@@ -330,7 +337,9 @@ export default function Library() {
               // the cap, so "50 of 1,000" reads as the size of the catalogue. The
               // PartialRead banner below already says the list is not all of it;
               // this is the figure it was warning about.
-              note={cat.status === 'ready' ? `${catList.length} of ${cat.rows.length}` : undefined}
+              // `cat.signedOut` is 'ready' with nought rows, so "0 of 0" would
+              // have been printed as a measurement of the catalogue.
+              note={cat.status === 'ready' && !cat.signedOut ? `${catList.length} of ${cat.rows.length}` : undefined}
      />
      {cat.status === 'loading' ? (
       <Text style={{ ...ty.label, color: t.ink3 }}>Reading the exercise catalogue…</Text>
@@ -338,6 +347,16 @@ export default function Library() {
       // Not "no exercises". We have 917 of them; we could not read them.
       <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
        note="This is our end, not yours — the movements are still there. Try again once you have signal." />
+     ) : cat.signedOut ? (
+      // The read POLICY is `to authenticated`, so a session that has not been
+      // restored yet is handed zero rows with no error at all and the hook
+      // reports 'ready'. The hook computes `signedOut` for exactly this case
+      // and this screen was not reading it, so the honest "we were not allowed
+      // to look" arrived on screen as "The catalogue is empty." over 917
+      // movements. app/(client)/exercise.tsx has said this correctly for as
+      // long as the flag has existed; this is the same sentence.
+      <Notice tone={t.warn} kicker="Catalogue" title="Sign in to see the exercise list"
+       note="The library is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed — all 900-odd movements are still there." />
      ) : catList.length === 0 ? (
       <Text style={{ ...ty.label, color: t.ink3 }}>
        {filtering ? `No movement matches ${term ? `“${q.trim()}”` : `${group}`}.` : 'The catalogue is empty.'}
@@ -367,7 +386,7 @@ export default function Library() {
          >
           <View style={{ width: 52, height: 52, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
            {thumb ? (
-            <ExpoImage source={{ uri: thumb }} contentFit="contain" cachePolicy="disk"
+            <GuardedImage source={{ uri: thumb }} contentFit="contain" cachePolicy="disk"
              style={{ width: '100%', height: '100%' }} />
            ) : (
             // No picture is said with the generic glyph rather than an empty

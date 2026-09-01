@@ -155,6 +155,14 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'appearance', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance', icon: 'palette', area: 'me', keywords: 'theme dark light colour' },
   { key: 'settings', label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings', icon: 'settings', area: 'me', keywords: 'notifications units legal about sign out signout log out logout account' },
   { key: 'feedback', label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback', icon: 'message', area: 'me', keywords: 'feedback bug idea report suggest' },
+  // Reported as "Repple Coach has a Getting Started, however Client doesn't."
+  // It is listed here and NOT excluded the way /(client)/onboarding is, because
+  // the two are different things: onboarding is a wizard that overwrites goal,
+  // stats and injuries and would do that to somebody who tapped it out of
+  // curiosity, and this is a read-only list of what has and has not been done.
+  // Opening it costs nothing. 'tutorial', 'how do i' and 'help' are all here
+  // because they are what somebody types when they are lost.
+  { key: 'getting-started', label: 'Getting Started', note: 'What is set up, and what is still worth doing', route: '/(client)/getting-started', icon: 'sparkle', area: 'me', keywords: 'getting started get started setup set up onboarding first run new tutorial guide help how do i where do i begin checklist what next lost confused' },
 ];
 
 export function searchFeatures(list: Feature[], q: string): Feature[] {

@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { exerciseSlug } from '../lib/exerciseId';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
+import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
 
 export interface ExerciseDetail {
@@ -187,6 +188,7 @@ export interface CatalogueRow {
  * expensive thing to ship.
  */
 export function useExerciseCatalogue() {
+  const authRev = useAuthRevision();
   const [rows, setRows] = useState<CatalogueRow[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
   /** True when an empty catalogue is a permissions answer rather than a real
@@ -205,8 +207,11 @@ export function useExerciseCatalogue() {
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
       const page = capped(data);
       // An empty catalogue is either a real answer or a signed-out one, and
-      // only one of those is worth telling somebody about.
-      if (!page.rows.length) setSignedOut(!(await signedIn()));
+      // only one of those is worth telling somebody about. Cleared as well as
+      // set: the re-read that follows a sign-in returns the whole catalogue,
+      // and a flag left standing from the read before it would keep the
+      // library telling a signed-in member to sign in.
+      setSignedOut(page.rows.length ? false : !(await signedIn()));
       setRows(page.rows.map((r: any) => ({
         id: r.id,
         name: r.name,
@@ -230,7 +235,14 @@ export function useExerciseCatalogue() {
       reportError('exerciseCatalogue.read', e);
       setStatus('error');
     }
-  }, []);
+    // Re-armed on sign-in, exactly as useExerciseVideos is. This read is
+    // policy-scoped (`to authenticated`), and the providers mount BEFORE the
+    // session is restored — so the one run an empty dependency array allowed
+    // happened while signed out, came back with nought rows and no error, and
+    // `load` never changed identity again. The catalogue then stayed empty for
+    // the life of the app however long the member was signed in, and the
+    // library said so in words. See src/ui/authRevision.tsx.
+  }, [authRev]);
 
   useEffect(() => { void load(); }, [load]);
   return { rows, status, signedOut, reload: load };

@@ -129,7 +129,16 @@ export default function ShareKit() {
     // read is pending rather than failed.
     if (authLoading) { setSessionsPending(true); return; }
     let live = true;
-    if (!coachId) { setRows(null); setSessionsPending(true); return; }
+    // Auth has settled and there is still nobody signed in. Nothing is pending:
+    // no request is out and none is coming, because there is no id to make one
+    // with — so leaving `sessionsPending` true left this screen saying "Still
+    // reading what you have delivered. Nothing has failed" for as long as it
+    // was open, with no read in flight and no way to reach any other state.
+    // `app/(trainer)/_layout.tsx` only checks the group and does not redirect on
+    // a lost session, so nothing else evicts the coach from that sentence
+    // either. dashboard.tsx sets `sessionsUnread` for this exact condition;
+    // this screen was the outlier, and it now agrees.
+    if (!coachId) { setRows(null); setSessionsPending(false); return; }
     setSessionsPending(true);
     (async () => {
       try {

@@ -30,7 +30,7 @@
 // leaderboard shows one person's activity to another; the note under the sheet
 // says exactly what is shared (a first name and a score) and what is not, and
 // it is the same sentence the test holds against the server's select list.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -67,14 +67,27 @@ export default function Challenges() {
   // identity on every list read, and hanging the effect below off the whole
   // context would refetch the open board each time the list refreshed.
   const fetchBoard = ch.board;
+  // Which board fetch is the one still wanted. src/ui/challenges.tsx guards its
+  // list read with exactly this `runRef`, and the sheet needed it more: open
+  // challenge A, dismiss it, open B, and B's sheet would be handed A's rows and
+  // A's rank the moment A's slower fetch resolved — a leaderboard is other
+  // people's names and places, so the wrong board under the right title is the
+  // one mistake this screen cannot make. Every result is now checked against
+  // the run that asked for it, and the effect's cleanup retires the run when
+  // the sheet changes or closes.
+  const boardRun = useRef(0);
   const loadBoard = useCallback(async (id: string) => {
+    const run = ++boardRun.current;
     setBoard(EMPTY_BOARD);
-    setBoard(await fetchBoard(id));
+    const result = await fetchBoard(id);
+    if (run !== boardRun.current) return;
+    setBoard(result);
   }, [fetchBoard]);
 
   useEffect(() => {
-    if (!open) { setBoard(EMPTY_BOARD); return; }
+    if (!open) { boardRun.current += 1; setBoard(EMPTY_BOARD); return; }
     loadBoard(open.id);
+    return () => { boardRun.current += 1; };
   }, [open, loadBoard]);
 
   const doJoin = async (c: ChallengeRow) => {
@@ -212,7 +225,18 @@ export default function Challenges() {
             <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>{cohortLabel(sheet)} · {windowLine(sheet)}</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{sheet.title}</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>{rankLine(board.status, board.rows)}</Text>
+              {/* Only a participant has a board to be ranked on. The effect
+                  above fetches one whenever a sheet opens, joined or not, and
+                  `challenge_board()` deliberately raises 42501 for everybody
+                  else — so this line, ungated, printed "The board could not be
+                  read." under every challenge the member had not joined. It is
+                  a working refusal being reported as a broken server, sitting
+                  directly above the paragraph that correctly explains joining.
+                  The error block further down was gated on `joined` for this
+                  reason; this line was missed by the same gate. */}
+              {sheet.joined ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>{rankLine(board.status, board.rows)}</Text>
+              ) : null}
 
               {/* Not on the board yet. challenge_board() refuses with 42501 and
                   its own words rather than answering with an empty list, so
@@ -240,10 +264,19 @@ export default function Challenges() {
 
               {sheet.joined && board.status === 'error' ? (
                 <View style={{ paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>The board could not be read.</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                    Nobody has been removed from it — we just could not reach it.
-                  </Text>
+                  {/* The server's own sentence when it has one. `challenge_board()`
+                      raises with words a member can act on — "join the challenge to
+                      see who else is on the board" — and this file was printing a
+                      hardcoded guess over the top of it and dropping
+                      `BoardResult.message` on the floor everywhere. Where there is
+                      no message (a network failure, a thrown fetch) the general
+                      sentence still stands. */}
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{board.message || 'The board could not be read.'}</Text>
+                  {board.message ? null : (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                      Nobody has been removed from it — we just could not reach it.
+                    </Text>
+                  )}
                   <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
                     <Ghost label="Try Again" onPress={() => loadBoard(sheet.id)} />
                   </View>

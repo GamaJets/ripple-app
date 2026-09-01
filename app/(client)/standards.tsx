@@ -25,6 +25,7 @@ import { weightIn, weightLabel } from '../../src/lib/units';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { personalRecords } from '../../src/lib/streaks';
 import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
+import { gradeLift } from '../../src/lib/strengthLevel';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
@@ -37,11 +38,10 @@ const LIFTS: { name: string; match: string[]; mult: number[] }[] = [
  { name: 'Row', match: ['row'], mult: [0.5, 0.75, 1.0, 1.25, 1.5] },
 ];
 
-function levelFor(ratio: number, mult: number[]) {
- let lvl = -1;
- for (let i = 0; i < mult.length; i++) if (ratio >= mult[i]) lvl = i;
- return lvl; // -1 = below beginner
-}
+// `levelFor` and the three-way grade it feeds live in src/lib/strengthLevel.ts,
+// where strengthLevel.test.ts holds them to the distinction this screen used to
+// lose: a lift with no bodyweight behind it is NOT a lift at the bottom of the
+// scale.
 
 export default function Standards() {
  const t = useTheme();
@@ -67,15 +67,22 @@ export default function Standards() {
  const best = prs
  .filter((p) => lift.match.some((m) => p.exercise.toLowerCase().includes(m)))
  .reduce((mx, p) => Math.max(mx, p.est1RM), 0);
- const ratio = best && bw ? best / bw : 0;
- const lvl = best ? levelFor(ratio, lift.mult) : -2;
+ // Three answers where there used to be a number that meant all three. With a
+ // null bodyweight `best / bw` fell to a ratio of 0, and a ratio of 0 grades
+ // as -1 — which the bar below draws as five empty segments under the words
+ // "Getting started". So a member with a 2× bodyweight deadlift, on a phone
+ // whose scans read had failed, was told they were below the beginner standard
+ // on the strength of a division that never happened. See
+ // src/lib/strengthLevel.ts: no bodyweight is now its own answer.
+ const grade = gradeLift(best, bw, lift.mult);
+ const lvl = grade.kind === 'graded' ? grade.level : -2;
  // The target is worked out in the kilograms the PRs and the bodyweight are
  // stored in, and only then read out in the client's unit. Multiplying a
  // converted bodyweight would give the same answer here, but the moment one of
  // these two is rounded and the other is not the ratios stop agreeing with the
  // levels they are supposed to define.
  const nextTarget = (bw != null && lvl >= 0 && lvl < LEVELS.length - 1) ? weightIn(lift.mult[lvl + 1] * bw, wu) : null;
- return { lift, best, ratio, lvl, nextTarget };
+ return { lift, best, grade, lvl, nextTarget };
  });
  const G = layout.gutter;
 
@@ -105,7 +112,7 @@ export default function Standards() {
       ? 'Nothing below is a level you are at — it is a level we could not look up. Your lifts are on your record.'
       : 'You have logged more sessions than this screen can read in one go, so a best lift set before that is not counted here and the level beside it may be under-stated.'} />
    ) : null}
-   {rows.map(({ lift, best, ratio, lvl, nextTarget }, i) => (
+   {rows.map(({ lift, best, grade, lvl, nextTarget }, i) => (
     <View key={lift.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{lift.name}</Text>
@@ -113,8 +120,13 @@ export default function Standards() {
        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
         <Text style={{ ...value(18), color: t.ink }}>{weightIn(best, wu)}</Text>
         {/* The multiple is deliberately printed raw beside the converted
-            lift: it is a ratio, so 1.75× is 1.75× in pounds too. */}
-        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: 4 }}>{wu} · {ratio.toFixed(2)}×</Text>
+            lift: it is a ratio, so 1.75× is 1.75× in pounds too. And it is
+            printed only when there was something to divide by — "0.00×" beside
+            a real lift is not a small multiple, it is a missing bodyweight
+            wearing the clothes of one. */}
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: 4 }}>
+         {wu}{grade.kind === 'graded' ? ` · ${grade.ratio.toFixed(2)}×` : ''}
+        </Text>
        </View>
       ) : (
        // "No data" is a claim that this lift is not on the member's log. Only
@@ -122,7 +134,10 @@ export default function Standards() {
        <Text style={{ ...ty.caption, color: t.ink3 }}>{liftsWhole ? 'No data' : logStatus === 'loading' ? 'Reading…' : 'Not read'}</Text>
       )}
      </View>
-     {lvl >= -1 ? (
+     {/* The bar is drawn from a ratio, so it is drawn only where there is one.
+         `lvl >= -1` was true for an ungraded lift precisely BECAUSE the missing
+         bodyweight had already been rounded down into -1. */}
+     {grade.kind === 'graded' ? (
       <View>
        <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.md }}>
         {LEVELS.map((L, li) => (
@@ -143,7 +158,15 @@ export default function Standards() {
       </View>
      ) : (
       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-       {liftsWhole ? 'Log this lift to see your level.'
+       {/* The lift is on the record and the bodyweight is not, so there is no
+           ratio to grade — which is a fact about our record, not about the
+           lifter. Said in the two ways it can be true: they have never given us
+           a weight, or the read that holds it did not come back. */}
+       {grade.kind === 'ungradable'
+        ? (bodyWhole
+           ? 'A level is this lift divided by your bodyweight, and we do not have a weight for you yet. Add one and this grades itself.'
+           : 'A level is this lift divided by your bodyweight, and your weight could not be read just now. This is not a level you are at — it is one we could not work out.')
+        : liftsWhole ? 'Log this lift to see your level.'
         : logStatus === 'loading' ? 'Reading your log…'
         : 'Nothing read for this lift, so there is no level to show. That is not the same as never having done it.'}
       </Text>

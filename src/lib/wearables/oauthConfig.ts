@@ -115,7 +115,7 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // asked for it — which did not matter until the sleep reader shipped and
     // started calling that endpoint. WHOOP answered 403, the `wearable-day`
     // edge function turns 401/403 into `connected: false`, and Recovery
-    // rendered that as "WHOOP needs reconnecting" while Watch & devices still
+    // rendered that as "WHOOP needs reconnecting" while Watch & Devices still
     // said Connected — because every other WHOOP endpoint was working fine on
     // the very same token. Reconnecting re-requested the same four scopes and
     // hit the same 403, so the loop had no exit: "Reconnected whoop and it says

@@ -105,7 +105,7 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
   });
   const mine = mayReadTrainerProfile(access);
 
-  useEffect(() => { (async () => { try { if (USE_SUPABASE) { await AsyncStorage.removeItem('repple.coachProfile'); } else { const raw = await AsyncStorage.getItem('repple.coachProfile'); if (raw) { const p = JSON.parse(raw); if (typeof p.name === 'string') setName(p.name); if (p.photo === null || typeof p.photo === 'string') setPhoto(p.photo ?? null); if (typeof p.tagline === 'string') setTagline(p.tagline); if (typeof p.bio === 'string') setBio(p.bio); if (Array.isArray(p.offers)) setOffers(p.offers); if (Array.isArray(p.specialties)) setSpecialties(p.specialties); setSessionFee(typeof p.sessionFee === 'number' ? p.sessionFee : null); if (typeof p.listed === 'boolean') setListed(p.listed); } } } catch { /* ignore */ } setHydrated(true); })(); }, []);
+  useEffect(() => { (async () => { try { if (USE_SUPABASE) { await AsyncStorage.removeItem('repple.coachProfile'); } else { const raw = await AsyncStorage.getItem('repple.coachProfile'); if (raw) { const p = JSON.parse(raw); if (typeof p.name === 'string') setName(p.name); if (p.photo === null || typeof p.photo === 'string') setPhoto(p.photo ?? null); if (typeof p.tagline === 'string') setTagline(p.tagline); if (typeof p.bio === 'string') setBio(p.bio); if (Array.isArray(p.offers)) setOffers(p.offers); if (Array.isArray(p.specialties)) setSpecialties(p.specialties); setSessionFee(typeof p.sessionFee === 'number' && p.sessionFee > 0 ? p.sessionFee : null); if (typeof p.listed === 'boolean') setListed(p.listed); } } } catch { /* ignore */ } setHydrated(true); })(); }, []);
 
   // Load the real server-side profile. Re-fetches on every auth state change (not
   // just once at hydration) — if the Supabase session hasn't finished restoring at
@@ -155,8 +155,19 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
           // Assigned in both directions. A NULL session_fee is the server saying
           // there is no rate, and leaving the previous value in place would let
           // a rate the coach had just cleared go on being quoted.
+          //
+          // A stored 0 is the same statement as NULL and is mapped the same way.
+          // It is not a coach who charges nothing — `trainers.session_fee`
+          // defaulted to 0 for rows created before the column was nullable, and
+          // three of the eight rows on production still hold one. Read as a
+          // rate, that zero came out the other end of Analytics as "AED 0.00 at
+          // your AED 0.00 session rate": the app quoting a coach a rate they
+          // never set, and calling their month's takings zero on the strength
+          // of it. Every reader downstream already branches on `null` and says
+          // "Set a session rate in your profile" — this is the one place that
+          // has to agree that an unset rate is unset.
           const fee = Number(t.session_fee);
-          setSessionFee(t.session_fee != null && Number.isFinite(fee) ? fee : null);
+          setSessionFee(t.session_fee != null && Number.isFinite(fee) && fee > 0 ? fee : null);
           if (typeof t.listed === 'boolean') setListed(t.listed);
         }
       } catch (e) { reportError('coachProfile.hydrate', e); }

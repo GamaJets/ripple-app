@@ -1,4 +1,5 @@
-// What a notification about a NOTICE or an INVOICE is allowed to say.
+// What a notification about a NOTICE, an INVOICE or a CLASS SEAT is allowed to
+// say.
 //
 // Three producers reached no inbox at all — a coach's notice, a gym's notice,
 // and every invoice this product issues — and each of them is a case where the
@@ -32,6 +33,14 @@
 // client cannot read `coach_invoices` at all, by design, and a notification
 // that implied a copy was waiting in the app would be sending them to look for
 // something that is not there.
+//
+// ── A seat in a class is the one that expires ─────────────────────────────
+//
+// The third producer arrived with supabase/parts/159: a member promoted off a
+// class waiting list, told by a trigger. It is here rather than in the SQL for
+// the reason `classStartsIn` sets out at the bottom of this file — the wording
+// has five branches, nothing in this repository can execute a plpgsql function,
+// and an unexecutable rule is an unchecked one.
 import { num } from './format';
 import { invoiceNumber, money, type CoachInvoice } from './coachInvoice';
 
@@ -243,4 +252,71 @@ export function pushConsequence(kind: NoticeKind, recipients: number | null): st
     ? `every ${who}`
     : `${num(recipients)} ${who}${recipients === 1 ? '' : 's'}`;
   return `Sends a push to ${audience} straight away, at whatever time it is where they are. Without it the notice still reaches their notices and their notifications — quietly.`;
+}
+
+/* ── a class seat that expires ─────────────────────────────────────────────
+ *
+ * ── This block is MIRRORED by supabase/parts/159 · class_promotion_notify ──
+ *
+ * A member on a class waiting list gets promoted when somebody else cancels,
+ * and until part 159 nothing told them. That notification has a deadline the
+ * other six in that file do not: a seat is worth nothing once the class has
+ * started, so it has to say WHEN.
+ *
+ * And "when" cannot be a clock time. The row is written by a database trigger
+ * inside `cancel_class()`'s transaction; `gym_classes` has no time zone column,
+ * `tenants` has none either, and the database's own zone is a server setting
+ * rather than a fact about the person who will read the row. "Thursday, 7:00pm"
+ * written there is right for whoever the server agrees with and wrong for
+ * everybody else — and a member told the wrong hour for a class they are now
+ * booked into is worse off than one told nothing.
+ *
+ * src/lib/notifyInbox.ts already refuses calendar dates in the inbox for this
+ * reason, and states the rule this follows: "a duration is the same number
+ * everywhere, which is also the honest thing to show somebody who travelled
+ * between receiving a notification and reading it."
+ *
+ * So the sentence is a duration, and the exact time is on the Classes screen,
+ * rendered by the member's own device from the same timestamptz.
+ *
+ * ── Why it lives in TypeScript when only SQL calls it ─────────────────────
+ *
+ * It has no runtime caller in this app and that is deliberate — the same
+ * arrangement part 158 made for `subChange()` in src/lib/subscriptionScope.ts.
+ * The trigger is the only thing that ever produces this sentence, no test in
+ * this repository can reach a plpgsql function, and a wording rule with five
+ * branches that nothing can execute is a wording rule nobody has checked. This
+ * is the specification; notifyCopy.test.ts is the only place it can be proved;
+ * the SQL mirrors it band for band.
+ *
+ * IF YOU CHANGE ONE, CHANGE BOTH. This is the original.
+ */
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * How long until a class starts, as one sentence.
+ *
+ * Both arguments are epoch milliseconds. The already-started branch is not
+ * defensive padding: a member cancelling as a class begins promotes somebody
+ * into a seat that is no longer worth having, and saying so is better than a
+ * countdown reading "in about 0 hours" or a cheerful line about a class they
+ * have already missed.
+ *
+ * Returns the empty string for a start time that is not a number at all, so a
+ * caller assembling a body around it gets a sentence with a gap rather than the
+ * word "NaN" in somebody's notifications.
+ */
+export function classStartsIn(startsAt: number, now: number): string {
+  if (!Number.isFinite(startsAt) || !Number.isFinite(now)) return '';
+  const ms = startsAt - now;
+  if (ms <= 0) return 'It has already started.';
+  if (ms < HOUR_MS) return 'It starts in under an hour.';
+  const hours = Math.round(ms / HOUR_MS);
+  if (hours === 1) return 'It starts in about an hour.';
+  if (hours < 24) return `It starts in about ${hours} hours.`;
+  const days = Math.round(ms / DAY_MS);
+  return days <= 1 ? 'It starts in about a day.' : `It starts in about ${days} days.`;
 }

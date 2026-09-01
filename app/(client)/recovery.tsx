@@ -37,7 +37,7 @@ import { localDate } from '../../src/lib/localDate';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { RECOVERY_ACTIVITIES, isRecoveryActivity } from '../../src/lib/recoveryActs';
-// The same connection answer Watch & devices shows. This screen used to reach
+// The same connection answer Watch & Devices shows. This screen used to reach
 // its own conclusion about whether a device was connected, from a different
 // piece of evidence, and print it in the same words — see
 // src/lib/wearableLink.ts for the four reports that came of it.
@@ -239,7 +239,7 @@ export default function Recovery() {
  //
  // The reason sentences above name the fix but this screen has no OAuth flow on
  // it, so a client reading "reconnect WHOOP" here had nowhere to go except back
- // to Watch & devices — where the same device said, in one word, Connected.
+ // to Watch & Devices — where the same device said, in one word, Connected.
  // That round trip is the first report. The link is offered only where the
  // state machine says a re-authorisation genuinely resolves it; a gap in this
  // build offers nothing, because nothing the client does closes it.

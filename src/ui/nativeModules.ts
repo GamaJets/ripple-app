@@ -38,6 +38,23 @@ const AUDIO = 'ExpoAudio';
 // made before the morning those two dependencies landed.
 const CLIPBOARD = 'ExpoClipboard';
 const DOCUMENT_PICKER = 'ExpoDocumentPicker';
+// expo-image is the fourth of these and the widest. Its entry point resolves to
+// `requireNativeModule('ExpoImage')`, which THROWS, and src/ui/ExerciseDemo.tsx
+// imported it bare — so the throw happened while that module was being
+// evaluated, taking down every screen that imports it. That is nine screens
+// across all three apps, including the client's workout player and the stretch
+// runner, which is to say the app.
+//
+// It is live, not hypothetical. expo-image entered package.json on 30 Aug; the
+// version was last moved to 1.1.0 on 27 Aug, and runtimeVersion follows the
+// version. Every binary built 27-29 Aug therefore accepts today's bundle and
+// has no ExpoImage in it.
+const IMAGE = 'ExpoImage';
+// expo-file-system landed on the same day as expo-image and is exposed the same
+// way. Only src/ui/injuryDocs.ts reads it, and only to turn a chosen PDF into
+// base64 — but that module is imported by app/(client)/injury-doc.tsx, so a
+// throw there is the whole screen.
+const FILE_SYSTEM = 'ExpoFileSystem';
 
 export const HAS_NATIVE_VIDEO = requireOptionalNativeModule(VIDEO) != null;
 /** Whether the rest timer can make a noise on THIS install. expo-audio landed
@@ -62,6 +79,20 @@ export const HAS_NATIVE_CLIPBOARD = requireOptionalNativeModule(CLIPBOARD) != nu
 export const HAS_NATIVE_DOCUMENT_PICKER = requireOptionalNativeModule(DOCUMENT_PICKER) != null;
 
 /**
+ * Whether this binary can render an animated image.
+ *
+ * The fallback is React Native's own <Image>, which is in every binary ever
+ * built. On Android it animates WebP and GIF anyway; on iOS it holds the first
+ * frame, which reads as a still photograph of the movement rather than as a
+ * fault — and a still of the right exercise is a far better answer than a
+ * screen that does not open.
+ */
+export const HAS_NATIVE_IMAGE = requireOptionalNativeModule(IMAGE) != null;
+
+/** Whether this binary can read a file off disk. */
+export const HAS_NATIVE_FILE_SYSTEM = requireOptionalNativeModule(FILE_SYSTEM) != null;
+
+/**
  * The same sentence as UPDATE_REQUIRED_NOTE, for the two modules that landed
  * after it was written. Same shape deliberately: name the missing thing, say a
  * newer build brings it back, and rule out the thing the person would otherwise
@@ -84,6 +115,34 @@ try { Clipboard = require('expo-clipboard'); } catch { /* not in this build yet 
 
 let DocumentPicker: any = null;
 try { DocumentPicker = require('expo-document-picker'); } catch { /* not in this build yet */ }
+
+// Required, not imported, for the reason given at IMAGE above. Exported as the
+// component itself so a caller can render it directly; null on a binary without
+// it, and every caller must branch on HAS_NATIVE_IMAGE rather than on this.
+let ExpoImageComponent: any = null;
+try { ExpoImageComponent = require('expo-image')?.Image ?? null; } catch { /* not in this build yet */ }
+
+/** expo-image's <Image>, or null on a binary that predates the dependency. */
+export const NativeExpoImage: any = ExpoImageComponent;
+
+let FileSystemModule: any = null;
+try { FileSystemModule = require('expo-file-system'); } catch { /* not in this build yet */ }
+
+/**
+ * A file's bytes as base64, or null when this binary cannot read files.
+ *
+ * Null rather than a throw, and separate from a read that failed, because the
+ * caller has a different sentence for each: one asks for a different file, and
+ * the other cannot be solved by choosing one.
+ */
+export async function readFileBase64(uri: string): Promise<string | null> {
+  if (!HAS_NATIVE_FILE_SYSTEM || !FileSystemModule?.readAsStringAsync) return null;
+  return FileSystemModule.readAsStringAsync(uri, { encoding: 'base64' });
+}
+
+/** What to tell somebody whose install predates expo-file-system. */
+export const FILE_READ_UNAVAILABLE_NOTE =
+  'This version of the app was installed before reading a PDF was added, so it cannot open one. Photograph the page instead, or update to the latest build.';
 
 /**
  * Put text on the clipboard, and say whether it actually landed there.

@@ -73,7 +73,7 @@ function when(iso: string): string {
 export default function TrainerCredentials() {
   const t = useTheme();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const uid = user?.id ?? null;
   const G = layout.gutter;
   const today = useMemo(() => todayKey(), []);
@@ -94,7 +94,27 @@ export default function TrainerCredentials() {
   const [replying, setReplying] = useState(false);
 
   const load = useCallback(async () => {
-    if (!uid) return;
+    // The early return used to sit ABOVE both status setters, so with no `uid`
+    // this screen kept the 'loading' it was initialised with — for good. Both
+    // sections spun, and the "Try Again" the error branch offers was
+    // unreachable, because the only way out of 'loading' is a read that this
+    // return prevented. `app/(trainer)/_layout.tsx` checks the group and does
+    // NOT redirect on a lost session, so a coach whose token expires while they
+    // are in here is left watching two spinners with no way forward.
+    //
+    // Two different answers, and the difference is `authLoading`:
+    if (!uid) {
+      // The session is still being resolved. Nothing is known yet, and
+      // 'loading' is exactly what that means — this is the honest spinner.
+      if (authLoading) { setCredStatus('loading'); setRevStatus('loading'); return; }
+      // Auth has settled and there is nobody signed in. We cannot read this
+      // coach's credentials, which is 'error' — UNKNOWN, not "you have added
+      // none" — and the error branch's Try Again then re-runs this and picks up
+      // a session that has come back.
+      setCreds(null); setCredStatus('error');
+      setReviews([]); setRevStatus('error');
+      return;
+    }
     setCredStatus('loading');
     setRevStatus('loading');
     const [c, r] = await Promise.all([fetchCoachCredentials(uid), fetchReviews(uid)]);
@@ -102,7 +122,7 @@ export default function TrainerCredentials() {
     setCredStatus(c.status);
     setReviews(r.rows);
     setRevStatus(r.status);
-  }, [uid]);
+  }, [uid, authLoading]);
 
   useEffect(() => { void load(); }, [load, attempt]);
 

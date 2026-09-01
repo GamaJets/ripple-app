@@ -10,7 +10,7 @@
 // Both screens were telling the truth. They were answering different questions
 // and printing both answers with the same word.
 //
-//   Watch & devices asked  does this app remember you connecting WHOOP?
+//   Watch & Devices asked  does this app remember you connecting WHOOP?
 //                          — a flag restored from AsyncStorage on launch, with
 //                          nothing behind it. It said Connected.
 //   Recovery asked         did WHOOP's sleep endpoint just answer?

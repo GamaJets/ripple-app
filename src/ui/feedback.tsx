@@ -75,15 +75,42 @@ export function CoachFeedbackProvider({ children }: { children: ReactNode }) {
   }, [authRev]);
 
   const getFeedback = (clientId: string) => map[clientId] ?? [];
+  /**
+   * Written to the server FIRST, and put on screen only once it is there.
+   *
+   * This used to do the opposite: `setMap` with a locally minted id, and then
+   * `return false` on all three of the paths that mean the client will never
+   * see it — no backend, no signed-in coach, refused insert. The coach was left
+   * looking at their own note in their own list, sitting under the client's
+   * name, with nothing anywhere saying it had gone nowhere. Even once the
+   * caller reads this boolean, an optimistic row would still be the wrong shape
+   * here: it would leave a note on screen bearing an id that names no row, so
+   * the list itself would go on asserting a delivery that did not happen until
+   * the next launch quietly dropped it. src/ui/coachNotes.tsx made the same
+   * change for the same reason and this now matches it.
+   */
   const addFeedback = async (clientId: string, body: string): Promise<boolean> => {
     const b = body.trim();
     if (!b) return false;
-    const item: FeedbackItem = { id: 'f' + SEQ++, at: new Date().toISOString(), body: b };
-    setMap((m) => ({ ...m, [clientId]: [item, ...(m[clientId] ?? [])] }));
-    if (!USE_SUPABASE || !uid) return false;
+    // No backend configured: this device IS the record, so an in-memory note is
+    // the whole honest answer rather than a stand-in for a write that failed.
+    if (!USE_SUPABASE) {
+      const local: FeedbackItem = { id: 'local-f' + SEQ++, at: new Date().toISOString(), body: b };
+      setMap((m) => ({ ...m, [clientId]: [local, ...(m[clientId] ?? [])] }));
+      return true;
+    }
+    if (!uid) return false;
     try {
-      const { error } = await supabase.from('coach_feedback').insert({ coach_id: uid, client_id: clientId, body: b });
-      return !error;
+      const { data, error } = await supabase.from('coach_feedback')
+        .insert({ coach_id: uid, client_id: clientId, body: b })
+        .select('id, created_at').single();
+      if (error) return false;
+      const row = data as { id: string; created_at: string } | null;
+      // An insert that hands back no row is not a success — the note's real id
+      // is what the client's copy is keyed on, and we do not have it.
+      if (!row?.id) return false;
+      setMap((m) => ({ ...m, [clientId]: [{ id: String(row.id), at: row.created_at, body: b }, ...(m[clientId] ?? [])] }));
+      return true;
     } catch { return false; }
   };
 

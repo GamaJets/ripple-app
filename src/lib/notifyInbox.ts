@@ -142,6 +142,19 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   ['/(trainer)/dashboard', 'people'],
   ['/(trainer)/documents', 'pencil'],
   ['/(trainer)/payments', 'grid'],
+  // ── and the two screens part 159 sends a coach to ────────────────────────
+  //
+  // Same rule as the three above: the icon TRAINER_NAV already gives the screen
+  // (src/lib/features.ts) — Credentials & Reviews is 'trophy'. A review
+  // notification wearing anything else would be the only 'trophy' row in the
+  // coach's inbox that is not a review, or the only review row that is not a
+  // trophy, depending on which way somebody got it wrong.
+  ['/(trainer)/credentials', 'trophy'],
+  // Not in TRAINER_NAV at all — a per-client screen, reached from a client's
+  // page and from this notification. The pencil matches '/(client)/intake'
+  // above, which is the SAME DOCUMENT seen from the other side: the ask and the
+  // answer should not be two different shapes in two inboxes.
+  ['/(trainer)/client-intake', 'pencil'],
 ];
 
 const startsWithAny = (route: string, prefixes: readonly string[]): boolean =>
@@ -382,6 +395,56 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     where: 'supabase/parts/158 · client_subscription_notify',
     when: 'subChange() says a subscription ended',
     to: 'trainer', title: 'A subscription has ended', route: '/(trainer)/payments', icon: 'grid',
+  },
+  // ── the other seven (part 159) ───────────────────────────────────────────
+  //
+  // Part 158 closed three of the silences its own sweep found. These are the
+  // rest of them, and two are addressed to the CLIENT rather than the coach —
+  // the first server-written rows in this table that are, apart from chat and
+  // the gym invoice. That is what entry 1 of the test below is for: a client's
+  // row carrying a '/(trainer)/…' route renders perfectly and opens nothing.
+  {
+    where: 'supabase/parts/159 · coaching_end_notify',
+    when: 'a client ends the coaching (ended_by = client_id)',
+    to: 'trainer', title: 'A client has ended their coaching', route: '/(trainer)/dashboard', icon: 'people',
+  },
+  {
+    where: 'supabase/parts/159 · coaching_end_notify',
+    when: 'a coach ends the coaching (ended_by = coach_id)',
+    // Routeless on purpose, and not for want of a screen: the sentence promises
+    // that this person's training history, photos and measurements are still
+    // theirs, and those are three screens. Picking one would be a coin toss.
+    to: 'client', title: 'Your coaching has ended', route: null, icon: 'bell',
+  },
+  {
+    where: 'supabase/parts/159 · client_purchase_notify',
+    when: 'a client buys a package or a session pack',
+    to: 'trainer', title: 'A package was bought', route: '/(trainer)/payments', icon: 'grid',
+  },
+  {
+    where: 'supabase/parts/159 · class_promotion_notify',
+    when: 'a waitlisted member is promoted into a class seat by somebody else',
+    to: 'client', title: 'A place has opened in a class', route: '/(client)/classes', icon: 'calendar',
+  },
+  {
+    where: 'supabase/parts/159 · client_intake_notify',
+    when: 'a client’s intake document exists for the first time',
+    // The parameter is the point, as it is for the coach's chat thread above:
+    // without it this opens a screen that says no client was named.
+    to: 'trainer', title: 'An intake has come back',
+    route: '/(trainer)/client-intake?clientId=00000000-0000-0000-0000-000000000000', icon: 'pencil',
+  },
+  {
+    where: 'supabase/parts/159 · liability_waiver_notify',
+    when: 'a client signs the platform liability release',
+    // Routeless because `liability_waivers` has no coach read policy at all and
+    // should not have one (part 84). There is no screen this could open.
+    to: 'trainer', title: 'A client has signed the release', route: null, icon: 'bell',
+  },
+  {
+    where: 'supabase/parts/159 · coach_review_notify',
+    when: 'a client leaves or revises a review — at every rating, unfiltered',
+    to: 'trainer', title: 'A client has left you a review', route: '/(trainer)/credentials', icon: 'trophy',
   },
 ];
 

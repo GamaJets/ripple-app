@@ -84,6 +84,20 @@ export default function Progression() {
             <Section>
               <Text style={{ ...ty.body, color: t.ink3 }}>Working out your targets…</Text>
             </Section>
+          ) : logStatus === 'partial' ? (
+            // 'partial' had no arm and fell into "No Targets Yet · Log a few
+            // weighted sets" — told to a lifter with years of them on file. A
+            // truncated read holds the newest thousand sessions, so a lifter
+            // whose weighted work is all older than that produces no tips at
+            // all, and the confident sentence is exactly backwards. Same shape
+            // as the arm app/(client)/records.tsx already carries.
+            <Section>
+              <SectionHead title="No Targets in This Read" />
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                You have logged more sessions than this screen can read in one go, and there were no weighted
+                sets among the ones it read. This is not a statement that you have never logged one.
+              </Text>
+            </Section>
           ) : (
           <Section>
             <SectionHead title="No Targets Yet" />

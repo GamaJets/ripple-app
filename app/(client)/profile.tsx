@@ -21,6 +21,7 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost, Field, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
@@ -465,6 +466,8 @@ export default function Profile() {
           </Pressable>
         </View>
 
+        <ScreenHelp screen="me" />
+
         <Rule />
 
         {/* ── goal ───────────────────────────────────────────────────────── */}
@@ -538,6 +541,15 @@ export default function Profile() {
         <Rule />
 
         <Section>
+          {/* First of the three, and permanent. Reported as "Repple Coach has a
+              Getting Started, however Client doesn't have this" — what that app
+              had was the first-run tour firing on a fresh install, which is
+              gone the moment it is skipped. This row is here whether the list
+              is finished or not: the HOME row leaves when there is nothing left
+              in it, and a screen nothing links to fails check:reachable and,
+              more to the point, cannot be gone back to. */}
+          <ListRow icon="sparkle" title="Getting Started" note="What is set up, and what is still worth doing"
+            onPress={() => router.push('/(client)/getting-started')} />
           <ListRow icon="search" title="User Guide" note="What each tab does, any time"
             onPress={() => router.push('/guide')} />
           <ListRow icon="search" title="Explore All Features" note="Search anything in the app"

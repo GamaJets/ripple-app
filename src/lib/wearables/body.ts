@@ -43,7 +43,7 @@ export async function readBodyFromDevices(
     const base = { provider: id, providerName: p.meta.name, weightKg: null, heightM: null, maxHeartRate: null };
 
     // Recorded as a metric-level absence rather than left silent. Unrecorded,
-    // it would be invisible to the connection state machine and Watch & devices
+    // it would be invisible to the connection state machine and Watch & Devices
     // would go on calling the device plainly "connected" while this said it
     // could not be read — the two-screens-disagree shape that keeps recurring.
     const absent = (why: string): BodyRead => {
@@ -62,7 +62,7 @@ export async function readBodyFromDevices(
     }
     // A token already known dead will refuse this too, so the round trip is
     // skipped and the sentence comes from the shared verdict — which is what
-    // stops this screen and Watch & devices printing different wording about
+    // stops this screen and Watch & Devices printing different wording about
     // the identical fact.
     const known = linkFor(id, p.meta.name, states[id] ?? 'connected', 'body');
     if (known.state === 'expired') {

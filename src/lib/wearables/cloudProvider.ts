@@ -21,7 +21,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
   /**
    * The one Health Connect sentence, so the row, the alert and the sleep list
    * cannot drift into three wordings of the same fact — which is precisely how
-   * Watch & devices and Recovery came to contradict each other about WHOOP.
+   * Watch & Devices and Recovery came to contradict each other about WHOOP.
    *
    * Both now end by naming what the person can actually use, because the real
    * question behind tapping this row is "how do I get my phone's health data
@@ -39,7 +39,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       // False on EVERY platform, Android included. It used to return true on
       // Android, and that one `true` was the whole Android health story:
       //
-      //   available → not `blocked` on Watch & devices → a primary "Connect"
+      //   available → not `blocked` on Watch & Devices → a primary "Connect"
       //   button → `onConnect` skips the reason alert because the provider says
       //   it is available → `connect()` throws "Health Connect connects on
       //   Android via the native module — added in the Android build" → the
@@ -97,7 +97,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       return null;
     },
     async connect() {
-      // Unreachable from Watch & devices now that `isAvailable()` is false —
+      // Unreachable from Watch & Devices now that `isAvailable()` is false —
       // that screen shows the reason and never calls this. Kept as the backstop
       // for any caller that skips the check, and saying the SAME sentence,
       // because the previous one here ("added in the Android build") promised a
@@ -168,7 +168,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
         // that sentence. The endpoint answered — it answered "no" — because
         // this build never asked for the scope, and the only thing that changes
         // it is the person re-authorising. The wording comes from the shared
-        // state machine so that this list, Watch & devices and Recovery all say
+        // state machine so that this list, Watch & Devices and Recovery all say
         // the same thing about the same device.
         //
         // The status stays 'error' regardless, and deliberately: whichever of

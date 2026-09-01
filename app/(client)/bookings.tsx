@@ -28,7 +28,8 @@ import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
@@ -100,7 +101,14 @@ export default function Bookings() {
   // announced as "you have nothing booked" — the member then turns up to
   // nothing, or fails to turn up to something.
   const bookingsWhole = classStatus === 'ready' && sessionStatus === 'ready';
-  const bookingsFailed = classStatus === 'error' || sessionStatus === 'error';
+  // The banner for the case these two flags had no answer for: a list with rows
+  // in it that is nonetheless SHORT. `bookingsWhole` and `bookingsFailed` were
+  // consulted only where `items.length === 0`, so a member whose classes read
+  // failed and whose sessions read succeeded got "Upcoming" listing their PT
+  // session alone — a complete-looking list, with the spin class they are
+  // booked into and the reason for its absence both missing. Null when both
+  // reads are whole. See src/lib/bookingsRead.ts, where the wording is tested.
+  const gap = bookingsGap(classStatus, sessionStatus);
   const peer = useThreadPeerName('client', null);
   const head = peerHeading(peer, 'coach');
   // A name, or null when there is none we may show. This screen has nowhere to
@@ -276,10 +284,14 @@ export default function Bookings() {
 
         {/* ── what you have booked ───────────────────────────────────────── */}
         <Section>
-          {/* `bookingsWhole` is computed above and used correctly for the
-              empty state; the count beside it was gated only on non-emptiness,
-              so under 'partial' it printed a subtotal as a total. */}
+          {/* The count was gated only on non-emptiness, so under 'partial' it
+              printed a subtotal as a total. It stays on `bookingsWhole` — a
+              figure is only a figure when both reads answered in full. */}
           <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.length} booked` : undefined} />
+          {/* Above the rows, not below them: the rows are what makes the list
+              look finished, and the reader has to be told before they scroll
+              past the one booking that did come back. */}
+          {gap ? <Notice tone={t.warn} kicker="Bookings" title={gap.title} note={gap.note} /> : null}
           {items.map((it, i) => (
             <View key={it.id}>
               {i > 0 ? <Rule /> : null}
@@ -300,13 +312,10 @@ export default function Bookings() {
             </View>
           ))}
           {items.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              {bookingsFailed
-                ? 'Your bookings could not be read, so this is not a statement that you have none. Check again when you have signal before assuming a session is not on.'
-                : !bookingsWhole
-                  ? 'Loading.'
-                  : 'No upcoming bookings. Book a class or a PT session to get started.'}
-            </Text>
+            // 'partial' used to land on the literal string "Loading." — which
+            // never stopped being displayed and was never true: both reads had
+            // finished, and one of them had come back short.
+            <Text style={{ ...ty.label, color: t.ink3 }}>{emptyBookingsLine(classStatus, sessionStatus)}</Text>
           ) : null}
         </Section>
 

@@ -43,7 +43,7 @@
 // of throwing, so a try/catch alone only catches the network dying. Every call
 // below reads `.error`.
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system';
+import { readFileBase64, FILE_READ_UNAVAILABLE_NOTE } from './nativeModules';
 import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
 import { extractFromDocument, type Extraction } from '../lib/injuryExtract';
@@ -161,7 +161,15 @@ export async function readInjuryDocument(
     // refused by the reader with a sentence saying to photograph the page
     // instead — which is a better outcome than quietly reading half of it.
     try {
-      b64 = await FileSystem.readAsStringAsync(input.uri, { encoding: 'base64' });
+      // readFileBase64, not a direct expo-file-system call: the module throws
+      // when imported on a binary that predates it, and this file is reached by
+      // app/(client)/injury-doc.tsx, so the throw would be the screen rather
+      // than the upload. Null is "this build cannot read files at all", which
+      // is a different sentence from a read that failed — choosing another file
+      // does not help.
+      const read = await readFileBase64(input.uri);
+      if (read == null) return fail(FILE_READ_UNAVAILABLE_NOTE);
+      b64 = read;
     } catch (e) {
       reportError('injuryDocs.prepare-pdf', e);
       return fail('That document could not be opened. Try another file, or photograph the page.');

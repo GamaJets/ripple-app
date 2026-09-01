@@ -36,7 +36,7 @@
 //
 // Nothing here decides what the statement says: src/lib/coachStatement.ts is
 // pure and tested, and the reads are in src/ui/coachStatement.ts.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -85,10 +85,35 @@ export default function StatementOfRecord() {
     [year, span],
   );
 
+  /* The period whose figures are allowed to land.
+   *
+   * `fetchStatementInput` is seven paged reads, so the answers do not come back
+   * in the order the taps went out — and a coach comparing quarters taps
+   * straight down the pill row. With `setInput` unconditional, tapping Q1 and
+   * then Q2 and having Q1 resolve second put Q1's takings, sessions and
+   * invoices on screen under a pill reading Q2, at full confidence, with
+   * `statement.complete` true. Everything downstream of `input` is derived, so
+   * the whole page agreed with itself while being about the wrong three months.
+   * This is somebody's tax paperwork; there is no cue on the page that would
+   * have given it away.
+   *
+   * A ref rather than a cleanup flag because the period is what identifies the
+   * answer, and a `useFocusEffect` re-entered on focus needs the current one,
+   * not one captured per run. The exports were never affected — they read the
+   * same settled `statement` — so the lie was only ever on screen. */
+  const wanted = useRef<string | null>(null);
   const load = useCallback(async () => {
+    // Keyed on what the coach actually chose rather than on the period's label,
+    // which is a display string and not the screen's identity for the period.
+    const key = `${year}:${String(span)}`;
+    wanted.current = key;
     setInput(null);
-    setInput(await fetchStatementInput(period, appName || null));
-  }, [period, appName]);
+    const next = await fetchStatementInput(period, appName || null);
+    // The coach has moved to another quarter while this one was reading. Drop
+    // it: the read for the period now selected is the one that may set state.
+    if (wanted.current !== key) return;
+    setInput(next);
+  }, [period, appName, year, span]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 

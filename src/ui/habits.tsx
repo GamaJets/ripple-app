@@ -555,11 +555,20 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // Every way the list on screen can be short of, or ahead of, what the server
   // holds. The macro and plan cases are new with the derived list: a row that
   // is missing because a read failed is not a row the client left unticked.
+  // `c.profileStatus === 'error'` was the one hole left in this roll-up, and it
+  // is the one that silently SHORTENS the list. `stepGoal`, `sleepGoalHours`
+  // and `waterGoalGlasses` come from the `clients` select and from nowhere else
+  // — there is no local cache of them under USE_SUPABASE — so when that select
+  // fails while `scans` succeeds, the water, steps and sleep rows simply are
+  // not built. The screen then drew a filled arc and "100% · 2 of 2 done" over
+  // a list missing three lines, and told a member with a 10,000-step goal on
+  // record that they had no daily goal. A shorter list read as a finished day.
   const status = worst(
     ticksStatus,
     coachStatus,
     macrosUnknown ? 'error' : 'ready',
     planUnknown ? 'error' : 'ready',
+    c.profileStatus === 'error' ? 'error' : 'ready',
     c.scansStatus === 'loading' || c.profileStatus === 'loading' ? 'loading' : 'ready',
   );
 

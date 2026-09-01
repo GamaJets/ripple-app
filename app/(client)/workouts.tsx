@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState } from 'react-native';
+import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -57,13 +58,21 @@ import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { demoCaption } from '../../src/lib/exerciseMedia';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
-import { Image as ExpoImage } from 'expo-image';
+// expo-image is required through src/ui/nativeModules.ts, never imported. Its
+// entry point resolves to `requireNativeModule('ExpoImage')`, which THROWS on a
+// binary that predates the dependency — and expo-image landed on 30 Aug, three
+// days after the version last moved to 1.1.0, so every binary built 27-29 Aug
+// takes today's bundle and has no ExpoImage in it. A bare import would take
+// this whole screen down while it loaded. React Native's own <Image> is the
+// fallback and is in every binary ever built.
 import { videoForExercise } from '../../src/lib/exerciseId';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { DidYouKnow } from '../../src/ui/DidYouKnow';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
+import { startGate } from '../../src/lib/startGate';
 import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
 import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
@@ -77,6 +86,7 @@ import { StretchRunner } from '../../src/ui/StretchRunner';
 import { attributionLine } from '../../src/lib/workoutAttribution';
 import { dayKeyOf, instantForDay, readWorkoutEdit } from '../../src/lib/entryEdit';
 import { useSettings } from '../../src/ui/settings';
+import { WeightUnitToggle } from '../../src/ui/WeightUnitToggle';
 import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, readNumber, type WeightUnit } from '../../src/lib/units';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -592,6 +602,18 @@ export default function Train() {
     };
   };
   const planEx = orderedExercises.filter((e) => !isRemovedEx(e)).map(withEdits);
+  // THE list the runner is handed, named once so that the button which opens it
+  // and the runner itself cannot be asked about different days.
+  //
+  // They were: the Start gate asked `exercises` — the raw programme day — and
+  // the runner was given this. A day emptied by the per-row Remove, or by a
+  // severe injury that every movement on it runs into with no safe alternative,
+  // left a live Start Workout in front of an empty runner, whose mount effect
+  // reads `exercises[idx].key` and threw a TypeError out of an effect, which is
+  // after the render that returns null has committed. That took the whole tab
+  // bar down to the error screen, mid session. See src/lib/startGate.ts.
+  const runnableEx = planEx.filter((e) => !isInjHidden(e));
+
   // The rows in the order they are rendered, and the group badge for each of
   // them read off THAT order.
   //
@@ -750,6 +772,19 @@ export default function Train() {
   const heroNote = exercises.length === 0
     ? 'Rest day — nothing scheduled'
     : `~${estMin} min` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
+  // Whether the session may be started, asked of the list the runner receives
+  // rather than of the programme, and what to say when it may not be. A
+  // withheld button that explains nothing is how the injury case reads
+  // otherwise: the app decides today's plan is unsafe for them and then simply
+  // has no button, which tells them nothing about a decision made on their
+  // behalf.
+  const start = startGate({
+    isStrength: mode === 'strength',
+    planned: exercises.length,
+    runnable: runnableEx.length,
+    removed: removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length,
+    injuryHidden: injHidden.filter((u) => !injRevealed.includes(u)).length,
+  });
   const logSet = (e: ProgramExercise, reps: string, kg: number | null) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg: kg == null ? '' : String(kg) }] }); tapLight(); };
   // One tap records the set the plan is asking for — TF-27, "can't tap an
   // exercise to log it". This function has existed here unreferenced: the only
@@ -957,6 +992,8 @@ export default function Train() {
         </View>
 
         {/* ── the hero: today's session, one number ───────────────────────── */}
+        <ScreenHelp screen="train" />
+
         <Hero
           label={`Today · ${workout.focus}`}
           figure={fig(exercises.length)}
@@ -966,8 +1003,14 @@ export default function Train() {
           arcLabel="of today's exercises done"
           onPress={() => router.push('/(client)/week')}
         />
-        {mode === 'strength' && exercises.length > 0 ? (
+        {start.canStart ? (
           <Cta label="Start Workout" wide onPress={() => setSession(true)} />
+        ) : start.note && start.safety ? (
+          // A heading rather than a footnote, because this one is the app
+          // having taken today's session away from them for their own safety.
+          <Notice tone={t.crit} kicker="Injury" title="Today's session is on hold" note={start.note} />
+        ) : start.note ? (
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{start.note}</Text>
         ) : null}
 
         <Rule />
@@ -1557,7 +1600,7 @@ export default function Train() {
               wrong in the direction that matters.
 
               Labels are title case throughout. The row previously mixed
-              "This Week" with "Scan machine" and "Watch & devices", and that
+              "This Week" with "Scan machine" and "Watch & Devices", and that
               last one contradicted the screen's OWN title, which has always
               been "Watch & Devices". */}
           <ChipGrid items={([
@@ -1753,7 +1796,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} unit={wu} exercises={planEx.filter((e) => !isInjHidden(e))} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onRetry={retryWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onRetry={retryWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -1862,7 +1905,11 @@ function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: 
       <Field label="Reps">
         <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
       </Field>
-      <Field label={unit.toUpperCase()} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
+      {/* The unit is switchable here, not only in Settings. Somebody who thinks
+          in kilos should not have to leave a live session to say so — see
+          src/ui/WeightUnitToggle.tsx for why it moves the account setting
+          rather than just this box. */}
+      <Field label="Load" accessory={<WeightUnitToggle />} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
         <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad" style={inp} />
       </Field>
       <Pressable accessibilityRole="button" accessibilityLabel="Log set" onPress={() => {
@@ -1985,7 +2032,7 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs }: {
       <View style={{ marginTop: sp.xl, paddingVertical: sp.md, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
         <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Heart-rate Zones</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-          Connect a watch under Train → Watch &amp; devices and your zones appear here live while you train.
+          Connect a watch under Train → Watch &amp; Devices and your zones appear here live while you train.
         </Text>
       </View>
     );
@@ -2295,7 +2342,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
     // performing it.
     return (
       <View style={{ paddingVertical: sp.sm }}>
-        <ExpoImage
+        <GuardedImage
           source={{ uri: equipmentUrl }}
           contentFit="contain"
           cachePolicy="disk"
@@ -2435,7 +2482,15 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
       const end = restEndsAt.current;
       if (end == null || end <= Date.now()) return;
       const gen = restGen.current;
-      const name = nameOf(exercises[idx]);
+      // Read before it is used, like everything else in here that indexes the
+      // plan. A runner mounted on an empty list is a bug upstream — the Start
+      // button and this component are asked about the same list now — but an
+      // effect that throws does not fail this screen, it fails the app: it runs
+      // after the render has committed, so the empty-list return below cannot
+      // catch it, and the error boundary swallows every tab.
+      const cur = exercises[idx];
+      if (!cur) return;
+      const name = nameOf(cur);
       void scheduleRestOverAlert(
         new Date(end),
         'Rest Over',
@@ -2501,7 +2556,14 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   }, [rest > 0]);
 
   useEffect(() => {
-    const sug = suggestForExercise(log, nameOf(exercises[idx]), exercises[idx].reps, 2.5, unit);
+    // The throw that took the whole app down. This effect runs on mount, and on
+    // mount `exercises` could be empty while Start was still on screen — so
+    // `exercises[idx]` was undefined and `nameOf` read `.key` off it, from an
+    // effect, which is to say after the null render below had already
+    // committed. Nothing downstream of an empty list has anything to set up.
+    const cur = exercises[idx];
+    if (!cur) return;
+    const sug = suggestForExercise(log, nameOf(cur), cur.reps, 2.5, unit);
     setLoad(sug ? showLoad(sug.weight) : '');
     setReps('');
     setPrMsg(null);
@@ -2556,7 +2618,12 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         if (typeof d.idx === 'number' && d.idx >= 0 && d.idx < exercises.length) setIdx(d.idx);
         Alert.alert(
           'Picked up where you left off',
-          `${rs.reduce((a, x) => a + (x ? x.length : 0), 0)} set${rs.reduce((a, x) => a + (x ? x.length : 0), 0) === 1 ? '' : 's'} from this session were still on this phone and are back on screen. They have not reached your log yet — finishing the session is what saves them.`,
+          // `were` was fixed while the count was not: one recovered set read
+          // "1 set from this session were still on this phone".
+          (() => {
+            const n = rs.reduce((a, x) => a + (x ? x.length : 0), 0);
+            return `${n} set${n === 1 ? ' from this session was' : 's from this session were'} still on this phone and ${n === 1 ? 'is' : 'are'} back on screen. They have not reached your log yet — finishing the session is what saves them.`;
+          })(),
         );
       } catch { /* an unreadable draft is not worth an error the member cannot act on */ }
       finally { if (live) setDraftChecked(true); }
@@ -3158,7 +3225,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           <Field label="Reps">
             <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
           </Field>
-          <Field label={unit.toUpperCase()} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
+          <Field label="Load" accessory={<WeightUnitToggle />} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
             <TextInput value={load} onChangeText={setLoad} keyboardType="decimal-pad" style={inp} />
           </Field>
           <Pressable accessibilityLabel="Log set" accessibilityRole="button" onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
@@ -3437,7 +3504,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                 <View style={{ width: 22 }} />
                 <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps</Text>
                 <Text style={{ ...ty.caption, color: 'transparent' }}>×</Text>
-                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{unit.toUpperCase()}</Text>
+                <View style={{ flex: 1 }}><WeightUnitToggle compact /></View>
                 <View style={{ width: 24 }} />
               </View>
               {rows.map((r, i) => (

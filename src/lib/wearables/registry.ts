@@ -3,7 +3,7 @@
 // ── What a blurb is allowed to say ──────────────────────────────────────────
 //
 // `blurb` and `metrics` are the app's ADVERTISEMENT for a device. They render
-// on Watch & devices under the device's name, above its button, for every
+// on Watch & Devices under the device's name, above its button, for every
 // provider in this list — including the ones that cannot be connected. So they
 // are read first and they are read by everybody, and until now four of the six
 // described a capability no build has ever had:

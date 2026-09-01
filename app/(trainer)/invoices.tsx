@@ -59,7 +59,8 @@ import {
   fetchMyInvoices, fetchInvoiceIssuer, fetchInvoiceCurrency, issueInvoice, voidInvoice,
   type InvoiceCurrency,
 } from '../../src/ui/coachInvoices';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
 
 const DASH = '—';
 
@@ -106,6 +107,15 @@ export default function Invoices() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const book = useMemo(() => invoiceBook(rows, status), [rows, status]);
+
+  /** The number the next invoice will carry, or null when we cannot say.
+   *
+   *  Knowable under 'ready' (an empty list genuinely means 0001 is next) and
+   *  under 'partial' (the read is `seq` descending, so the first page holds the
+   *  highest number even when the tail was cut). Not knowable under 'loading'
+   *  or 'error', where `rows` is empty for a reason that has nothing to do with
+   *  how many invoices the coach has issued. */
+  const nextSeq = status === 'ready' || status === 'partial' ? (rows[0]?.seq ?? 0) + 1 : null;
 
   // The date the DEVICE is on, not the server's UTC date. A coach in Auckland
   // issuing at 10am would otherwise date their document yesterday. Part 138
@@ -193,11 +203,22 @@ export default function Invoices() {
 
   // The gate. Said as a sentence a coach can act on, naming who sets it —
   // never as a silent fallback to a currency nobody chose.
-  const currencyBlocker = ccy.status === 'error'
-    ? 'Your currency could not be read just now, so nothing can be issued. This is not a setting that is missing — it is a read that failed. Pull back and open this again in a moment.'
-    : !ccy.currency
+  //
+  // Four causes, not two. This branched on 'error' and then let EVERYTHING else
+  // with no code fall through to "no currency has been set for you" — so
+  // 'partial', which `fetchInvoiceCurrency` returns when one of its two reads
+  // failed and the other had nothing to say, was reported as a settled fact
+  // about the coach's own gym, as was 'loading' for the length of the read. A
+  // coach sent to their gym owner over a query that failed is told the currency
+  // is already set, and neither of them learns anything. The amounts were
+  // always correctly withheld; only this sentence was wrong.
+  // src/lib/currencyGap.ts holds the four and their wording.
+  const curGap = currencyGapOfStatus({ currency: ccy.currency, status: ccy.status });
+  const currencyBlocker = curGap
+    ? curGap === 'unset'
       ? 'No currency has been set for you. Repple is white-labelled, so there is no default that would be right for every gym — and an invoice with the wrong currency on it is worse than no invoice. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
-      : null;
+      : currencyGapLine(curGap, 'nothing can be issued')
+    : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -277,7 +298,23 @@ export default function Invoices() {
         <Rule />
 
         <Section>
-          <SectionHead title={rows.length ? `${rows.length} issued` : 'Nothing issued yet'} />
+          {/* A count, and "nothing", are both claims about the coach's own
+              sequence — so neither may be made from a list that is not the
+              whole list. `fetchMyInvoices` returns `{rows: [], status:
+              'error'}`, which read as "Nothing issued yet" to a coach who has
+              issued thirty-one, and a capped read would have headed a page of
+              1,000 rows "1000 issued" when there were more. Nothing is wrong
+              server-side — the sequence is allocated under an advisory lock —
+              so the only thing at fault was this heading. */}
+          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} issued` : 'Nothing issued yet') : 'What is on record'} />
+          {status === 'error' ? (
+            <Flag style={{ marginTop: sp.sm }}>
+              Your invoices could not be read just now, so this is not a list of none. Nothing has
+              happened to them — the numbers you have issued are still on record.
+            </Flag>
+          ) : status === 'partial' ? (
+            <PartialRead what="your invoices" onPress={() => { void load(); }} />
+          ) : null}
           {rows.map((inv) => {
             const amount = money(inv);
             return (
@@ -339,9 +376,20 @@ export default function Invoices() {
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={{ ...ty.title, color: t.ink }}>New invoice</Text>
+              {/* The predicted number comes from `rows[0].seq`, and the rows
+                  are ordered `seq` descending — so it is right under 'ready'
+                  and right under 'partial' too, where the first page still
+                  holds the highest number. Under 'error' and while loading
+                  `rows` is empty, and `?? 0` turned that into "It will be
+                  number 0001" in front of a coach on their thirty-second
+                  invoice. The number itself was never at risk: it is allocated
+                  server-side under an advisory lock when the invoice is issued.
+                  Only the sentence was wrong, and it is the sentence a coach
+                  would have quoted to a client. */}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                It will be number {invoiceNumber((rows[0]?.seq ?? 0) + 1)} in your own sequence, dated {invoiceDayLabel(today)}
-                {ccy.currency ? `, in ${ccy.currency}` : ''}.
+                {nextSeq != null
+                  ? `It will be number ${invoiceNumber(nextSeq)} in your own sequence, dated ${invoiceDayLabel(today)}${ccy.currency ? `, in ${ccy.currency}` : ''}.`
+                  : `Your sequence could not be read, so we cannot say which number this will be. It is allocated when you issue, dated ${invoiceDayLabel(today)}${ccy.currency ? `, in ${ccy.currency}` : ''}, and it never repeats one you have used.`}
               </Text>
 
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Who it is for</Text>

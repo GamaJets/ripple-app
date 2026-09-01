@@ -28,7 +28,17 @@ export default function Consistency() {
   // falsely: a client who has trained every day for a month, shown "Current
   // streak 0 days" over twelve blank weeks, has no way to tell that the fault is
   // ours, and every reason to conclude the month did not count.
-  const known = logStatus !== 'error';
+  // 'loading' is not 'known' either, and leaving it out of this was the whole
+  // bug: `useWorkoutLog` starts at 'loading' under USE_SUPABASE, so the first
+  // frame of this screen drew "Current Streak · 0 days" over twelve blank weeks
+  // — the exact sentence the note above says is close to the worst thing this
+  // app can tell someone — and then corrected itself once the read landed. A
+  // figure that is wrong for a second is read as an answer, because it looks
+  // exactly like one.
+  const known = logStatus !== 'error' && logStatus !== 'loading';
+  // The banner is about a FAILED read specifically. A read still in flight has
+  // nothing to apologise for; it says so under the hero instead.
+  const failed = logStatus === 'error';
   // …and 'partial' is not 'error', which is why `known` alone is not enough for
   // the three figures under "Totals". A truncated read (src/lib/rowCap.ts) holds
   // the NEWEST thousand sessions — the provider orders `performed_at`
@@ -87,7 +97,7 @@ export default function Consistency() {
 
         {/* Said before the hero, because everything below it is a dash until the
             log loads and the reader needs to know why rather than guess. */}
-        {!known ? (
+        {failed ? (
           <View style={{ marginTop: sp.lg }}>
             <Notice tone={t.warn} kicker="Consistency" title="We couldn’t read your training log"
               note="Your streak and your history are intact — this screen just can't see them right now. The blank weeks below are ours, not yours.">
@@ -109,7 +119,7 @@ export default function Consistency() {
           figure={known ? fig(streak) : fig(null)}
           unit={known ? (streak === 1 ? 'day' : 'days') : undefined}
           note={!known
-            ? 'Not a broken streak — an unread one.'
+            ? (logStatus === 'loading' ? 'Reading your training log…' : 'Not a broken streak — an unread one.')
             : !countable
             ? freezes > 0
               ? `${freezes} freeze${freezes === 1 ? '' : 's'} in reserve · best run not all read`
@@ -148,7 +158,11 @@ export default function Consistency() {
         <Rule />
 
         <Section>
-          <SectionHead title="Training Days" note={`${WEEKS} weeks`} />
+          {/* The grid is drawn from `counts`, which is empty until the log
+              lands — so for the first frame every one of the twelve weeks is a
+              blank square, which is the same claim the hero was making. It
+              cannot say much in a heading, but it can say it is not finished. */}
+          <SectionHead title="Training Days" note={logStatus === 'loading' ? 'Still reading' : `${WEEKS} weeks`} />
           <View style={{ flexDirection: 'row' }}>
             <View style={{ justifyContent: 'space-between', marginRight: 6, paddingVertical: 2 }}>
               {DOW.map((d) => <Text key={d} style={{ ...ty.micro, color: t.ink3, height: 16 }}>{d[0]}</Text>)}

@@ -62,7 +62,7 @@ import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askCoach } from '../../src/lib/coach';
 import { useRoster } from '../../src/ui/roster';
-import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { slotsFor, searchMeals, mealAt, type Slot } from '../../src/lib/meals';
@@ -388,7 +388,14 @@ export default function TrainerClients() {
   const bands = summariseDrift(drift ? roster.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null);
 
   const { name: coachName } = useMyTrainerProfile();
-  const { getFeedback, addFeedback } = useCoachFeedback();
+  // `status` as well as the two functions, for the reason the notes provider
+  // below spells out: `getFeedback` returns `[]` under 'loading' AND under
+  // 'error', so the sheet was reading an unread provider as a coach who had
+  // never written to this client.
+  const { getFeedback, addFeedback, status: fbStatus } = useCoachFeedback();
+  // A note that never reached the server has to say so, the same way a private
+  // note does — `addFeedback` resolves false and the client never sees it.
+  const [fbBusy, setFbBusy] = useState(false);
   const { get: getNutri, setAdjust: setNutri, clear: clearNutri, status: nutriStatus } = useCoachNutrition();
   const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
   const [mealQuery, setMealQuery] = useState('');
@@ -660,17 +667,35 @@ export default function TrainerClients() {
   // One unknown count makes the TOTAL unknown. Summing the nulls as zero would
   // quietly report fewer waiting messages than there are, on the tile a coach
   // reads to decide whether anybody needs them.
-  const unread = roster.some((c) => c.unread == null)
-    ? null
-    : roster.reduce((a, c) => a + (c.unread ?? 0), 0);
+  //
+  // And the roster's OWN status has to come first, for the reason `rosterCount`
+  // above already gives. `roster.some(...)` and `roster.reduce(...)` over an
+  // empty array are false and 0 respectively, and the roster is empty for the
+  // whole of every normal load and permanently under 'error' — so this tile
+  // printed a confident "Unread 0" while the Hero directly above it said the
+  // roster could not be read. A coach reads that tile to decide whether anybody
+  // is waiting on them, and closes the app.
+  const unread = isWhole(rosterStatus)
+    ? (roster.some((c) => c.unread == null) ? null : roster.reduce((a, c) => a + (c.unread ?? 0), 0))
+    : null;
   // The legacy signal, kept only for the render where the drift read has not
   // landed. It cannot see the client this whole feature is about: with
   // `adherence: null` and `lastActive: 'no activity yet'` both of its clauses
   // are false, so a client nobody has heard from reads as not at risk.
   const atRisk = roster.filter(atRiskClient).length;
   /** Drifting plus unknown — the number a coach actually has to act on. Null
-   *  until the read lands, so it renders as an em-dash rather than as zero. */
-  const toContact = bands ? bands.drifting + bands.unknown : null;
+   *  until the record has been read, so it renders as an em-dash rather than as
+   *  zero.
+   *
+   *  `bands` alone is not enough, and the path that proves it is the one that
+   *  matters most: under `rosterStatus === 'error'` the roster is empty, so
+   *  `rosterKey` is '' and the drift effect takes its `if (!ids.length)` branch
+   *  and calls `setDrift({})` — a REAL, EMPTY answer about a roster we never
+   *  read. `summariseDrift([])` then returns all zeros and this tile said "To
+   *  Contact 0" under a Hero saying the roster could not be read. Nobody needs
+   *  you, computed from a list we do not have. The same holds for the whole of
+   *  a normal load, when the roster is empty for a different reason. */
+  const toContact = isWhole(rosterStatus) && bands ? bands.drifting + bands.unknown : null;
   const driftNote = (): string => {
     if (driftErr) return 'Could not work out who is drifting.';
     if (!bands) return 'Working out who is drifting…';
@@ -680,20 +705,30 @@ export default function TrainerClients() {
     if (!parts.length && bands.watch) parts.push(`${bands.watch} slipping`);
     return parts.length ? parts.join(' · ') : 'Everyone is holding their own pattern.';
   };
+  /** Every segment count is a count OF THE ROSTER, so none of them may be
+   *  quoted unless the roster read was whole — `n: null` renders as a dash.
+   *
+   *  The chips were the same "0" as the KPI tiles, in a place that reads even
+   *  more like a fact: "All 0" sits above a list, so it is not a figure a coach
+   *  has to interpret, it is a caption for what they are looking at. Under
+   *  'error' it captioned a list that failed to load, and under 'partial' it
+   *  captioned a fragment as the whole book. The segment still SELECTS in both
+   *  cases — filtering what did load is honest — it just cannot say how many.  */
+  const segN = (n: number): number | null => (isWhole(rosterStatus) ? n : null);
   const AUTO_SEGS = [
-    { key: 'all', label: 'All', n: roster.length },
+    { key: 'all', label: 'All', n: segN(roster.length) },
     // The drift segments replace the old At-risk chip rather than sitting
     // beside it: two rules for "who needs attention" on one screen is how the
     // product ended up with two status scales in the first place. Before the
     // read lands there is no honest count, so the old chip stands in.
     ...(bands
-      ? [{ key: 'drifting', label: 'Drifting', n: bands.drifting },
-         { key: 'nodata', label: 'Nothing Recorded', n: bands.unknown }]
-      : [{ key: 'atrisk', label: 'At-risk', n: atRisk }]),
+      ? [{ key: 'drifting', label: 'Drifting', n: segN(bands.drifting) },
+         { key: 'nodata', label: 'Nothing Recorded', n: segN(bands.unknown) }]
+      : [{ key: 'atrisk', label: 'At-risk', n: segN(atRisk) }]),
     // One segment per delivery, built from the vocabulary rather than listed by
     // hand — a book with no hybrid clients simply shows a zero, the same as the
     // other two, instead of quietly filing them under Online.
-    ...COACHED_MODES.map((m) => ({ key: m, label: COACHED_MODE_SHORT[m], n: roster.filter((c) => c.mode === m).length })),
+    ...COACHED_MODES.map((m) => ({ key: m, label: COACHED_MODE_SHORT[m], n: segN(roster.filter((c) => c.mode === m).length) })),
   ];
   const matchSeg = (c: RosterClient) =>
     seg === 'all' ? true
@@ -966,6 +1001,10 @@ export default function TrainerClients() {
     ...getNotes(sel.id).map((n) => ({ id: 'n' + n.id, at: n.at, body: n.body, kind: 'Note' as const })),
     ...getFeedback(sel.id).map((fb) => ({ id: 'f' + fb.id, at: fb.at, body: fb.body, kind: 'Feedback' as const })),
   ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)) : [];
+  /** Two providers feed the timeline, so it knows as little as the less-read of
+   *  them. Under 'partial' the events shown are real and there are more of
+   *  them — which is fine for a list nobody counts. */
+  const timelineStatus = worstStatus(notesStatus, fbStatus);
 
   const studio = (coachName || 'Your Studio').replace('Coach ', '');
   const G = layout.gutter;
@@ -1255,7 +1294,7 @@ export default function TrainerClients() {
             {AUTO_SEGS.map((sg) => (
               <Pressable key={sg.key} onPress={() => setSeg(sg.key)}
                 style={{ backgroundColor: seg === sg.key ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: 7 }}>
-                <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: seg === sg.key ? t.brandInk : t.ink2 }}>{sg.label} {sg.n}</Text>
+                <Text style={{ ...ty.label, fontWeight: '500', ...numeric, color: seg === sg.key ? t.brandInk : t.ink2 }}>{sg.label} {fig(sg.n)}</Text>
               </Pressable>
             ))}
             {allTags.map((tg) => (
@@ -1609,7 +1648,21 @@ export default function TrainerClients() {
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Timeline" />
-                {timeline.length === 0 ? (
+                {/* The timeline is built from the notes provider and the
+                    feedback provider, so it is only as read as the worse of the
+                    two — `worstStatus`, src/ui/loadStatus.ts. Both hand back an
+                    empty map under 'loading' and under 'error', so an empty
+                    `timeline` used to be indistinguishable from a client with
+                    no history, and this line asserted the second. The Private
+                    Notes section further down already renders these three
+                    states; this one now agrees with it. */}
+                {timelineStatus === 'error' ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    This history could not be read, so we cannot say whether there is any.
+                  </Text>
+                ) : timelineStatus === 'loading' ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>Reading their history…</Text>
+                ) : timeline.length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>No history yet — notes, feedback and check-ins appear here.</Text>
                 ) : timeline.slice(0, 8).map((ev) => (
                   <View key={ev.id} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
@@ -1720,9 +1773,23 @@ export default function TrainerClients() {
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Coach Feedback" />
-                {getFeedback(sel.id).length === 0 ? (
+                {/* Same three states as Private Notes, for the same reason.
+                    `getFeedback` returns `[]` under 'loading' and under 'error'
+                    alike (src/ui/feedback.tsx), so "No feedback yet" was being
+                    said over a provider that had not answered — to a coach who
+                    may well have written to this client last week, and who
+                    would either write it again or conclude they never did. */}
+                {fbStatus === 'error' ? (
+                  <KitFlag tone={t.crit} style={{ marginBottom: sp.sm }}>
+                    Your feedback for {sel.name.split(' ')[0]} could not be read — this is not "no feedback".
+                    Anything you send now still goes to them.
+                  </KitFlag>
+                ) : fbStatus === 'loading' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>Reading your feedback…</Text>
+                ) : getFeedback(sel.id).length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>No feedback yet. Leave {sel.name.split(' ')[0]} a note below.</Text>
-                ) : getFeedback(sel.id).map((fitem, i) => (
+                ) : null}
+                {getFeedback(sel.id).map((fitem, i) => (
                   <View key={fitem.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                     <Text style={{ ...ty.label, color: t.ink2 }}>{fitem.body}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{new Date(fitem.at).toLocaleDateString()}</Text>
@@ -1730,7 +1797,28 @@ export default function TrainerClients() {
                 ))}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
                   <TextInput value={fb} onChangeText={setFb} placeholder="Leave advice or a note…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 44), flex: 1 }} />
-                  <Cta label="Send" onPress={() => { const id = sel.id; if (fb.trim()) { addFeedback(id, fb); setFb(''); } }} />
+                  {/* The result of the send is read, and the box is cleared
+                      only once the row is on the server. This used to throw the
+                      boolean away: `addFeedback` returns false when there is no
+                      signed-in coach to attribute the note to or the insert is
+                      refused, and the old code cleared the input regardless
+                      while the provider's optimistic copy sat in the list
+                      above — so the coach saw their advice delivered and the
+                      client never received it, with nothing anywhere to find
+                      out from. Private Notes, twenty lines below, alerts on
+                      exactly this. */}
+                  <Cta label={fbBusy ? 'Sending…' : 'Send'} onPress={() => {
+                    const id = sel.id;
+                    const draft = fb;
+                    if (!draft.trim() || fbBusy) return;
+                    setFbBusy(true);
+                    void (async () => {
+                      const sent = await addFeedback(id, draft);
+                      setFbBusy(false);
+                      if (sent) setFb('');
+                      else Alert.alert('Not sent', 'That note did not reach your client, so it is still in the box. Check your connection and tap Send again.');
+                    })();
+                  }} />
                 </View>
               </View>
 

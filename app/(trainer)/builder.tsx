@@ -84,6 +84,7 @@ import {
   type AssignTarget, type WriteOutcome,
 } from '../../src/lib/bulkActions';
 import { seedDecision, stillListed, pruneSelection, assignCtaLabel } from '../../src/lib/assignPicker';
+import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDays';
 import { notifySuccess } from '../../src/ui/haptics';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -560,8 +561,11 @@ export default function Builder() {
       })),
     })));
     setSeededFor(from);
+    // Every day is a different day now, so an index that was folded names
+    // somebody else's Wednesday. Same reasoning as `removeDay`.
+    setFoldedDays(foldsForNewProgramme());
   };
-  const clearBuilder = () => { setTitle(''); setNote(''); setDays([]); setSeededFor(null); };
+  const clearBuilder = () => { setTitle(''); setNote(''); setDays([]); setSeededFor(null); setFoldedDays(foldsForNewProgramme()); };
 
   // Load the client's current program (assigned if any, else their auto plan)
   // whenever the selected client changes — but only once we actually know what
@@ -810,9 +814,13 @@ export default function Builder() {
    * screen that closes the thing you were reading because you opened another is
    * its own annoyance.
    *
-   * Keyed by INDEX, and deliberately reset when a day is removed — see
-   * `removeDay`. Indices shift when a day is deleted, so a stale key would fold
-   * the wrong day.
+   * Keyed by INDEX, so the map has to be re-keyed by every edit that MOVES a
+   * day and thrown away by every edit that replaces the list. Both are in
+   * src/lib/foldedDays.ts and both are called: `removeDay` shifts the folds
+   * past the deletion, and `loadFrom`, `clearBuilder` and the draft restore
+   * start over. This comment used to say the map was reset on removal and
+   * nothing did it — the visible cost was that deleting a day above a folded
+   * one collapsed the wrong day.
    */
   const [foldedDays, setFoldedDays] = useState<Record<number, boolean>>({});
   const toggleDay = (di: number) => setFoldedDays((p) => ({ ...p, [di]: !p[di] }));
@@ -837,6 +845,10 @@ export default function Builder() {
           // be worse than one that dropped everything: the coach would come
           // back to what looks like their week with the cues gone.
           setDays(Array.isArray(d.days) ? d.days : []);
+          // The draft carries the days; it does not carry which of them were
+          // folded, so nothing may claim to know. Reset rather than left at
+          // whatever the empty builder happened to be holding.
+          setFoldedDays(foldsForNewProgramme());
           // A restored draft is the coach's OWN work, whoever happens to be
           // selected — so it is seeded from nobody, and the builder says so
           // rather than presenting it as somebody's current programme.
@@ -886,7 +898,18 @@ export default function Builder() {
     const idx = DAYS.indexOf(d.day);
     return { ...d, day: DAYS[(idx + 1) % 7] };
   }));
-  const removeDay = (di: number) => setDays((ds) => ds.filter((_, i) => i !== di));
+  // The fold map is re-keyed with the list, not left behind. `foldedDays` is
+  // keyed by POSITION, and a `filter` shifts every day after the removed one
+  // down by an index — so deleting Monday while Tuesday was folded left index 1
+  // marked folded and Wednesday sitting at index 1, collapsed, with Tuesday
+  // open. On the one screen in this app where the standing fear is losing work,
+  // a day that has shut itself reads as a day whose exercises are gone. The
+  // comment on `foldedDays` has claimed this was handled since it was written;
+  // this is the code that does it. See src/lib/foldedDays.ts for the re-key.
+  const removeDay = (di: number) => {
+    setDays((ds) => ds.filter((_, i) => i !== di));
+    setFoldedDays((p) => foldsAfterRemoval(p, di));
+  };
 
   const totalExercises = days.reduce((a, d) => a + d.exercises.length, 0);
   /* ── who this is going to ───────────────────────────────────────────────── */

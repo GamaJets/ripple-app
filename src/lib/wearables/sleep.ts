@@ -53,7 +53,7 @@ export async function readSleepFromDevices(
     const fetchSleep = p.fetchSleep?.bind(p);
     // Both of these are gaps in Repple rather than in the person's device, so
     // they are recorded as metric-level absences. Left unrecorded they would be
-    // invisible to the connection state machine, and Watch & devices would go
+    // invisible to the connection state machine, and Watch & Devices would go
     // on describing the device as plainly "connected" while this list said it
     // could not be read — the same two-screens-disagree shape as the WHOOP bug.
     if (!fetchSleep) {
@@ -70,7 +70,7 @@ export async function readSleepFromDevices(
     }
     // A token the server has already told us is dead will refuse this read too,
     // so the round trip is skipped and the answer is given straight from the
-    // verdict. Not an optimisation: it guarantees this list and Watch & devices
+    // verdict. Not an optimisation: it guarantees this list and Watch & Devices
     // print the identical sentence from the identical fact, instead of racing
     // to discover it separately and momentarily disagreeing.
     const known = linkFor(id, p.meta.name, states[id] ?? 'connected', 'sleep');
@@ -88,7 +88,7 @@ export async function readSleepFromDevices(
       // to this file — "needs reconnecting — Repple no longer has permission to
       // read it" — which is how one screen came to contradict another about the
       // same device. `linkFor` reads the verdict that `fetchVendorSleep` has
-      // just recorded, so this list says exactly what Watch & devices says.
+      // just recorded, so this list says exactly what Watch & Devices says.
       //
       // Note what can no longer reach this branch: a sleep endpoint refusing a
       // token that is otherwise working. That now returns a refusal rather than

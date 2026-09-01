@@ -271,7 +271,13 @@ export default function CoachProfile() {
               // they never made.
               if (!v.trim()) { p.setSessionFee(null); return; }
               const n = readNumber(v);
-              if (n != null && n >= 0) p.setSessionFee(n);
+              // A typed 0 clears the rate rather than storing one, because a
+              // rate of nothing is not a rate — and the reader in
+              // src/ui/coachProfile.tsx maps a stored 0 back to null on the
+              // next load anyway. Accepting it here made the two disagree: the
+              // box said 0 until the app was reopened and then said nothing.
+              if (n != null && n > 0) p.setSessionFee(n);
+              else if (n === 0) p.setSessionFee(null);
             }}
             placeholder="75" keyboardType="decimal-pad" />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>

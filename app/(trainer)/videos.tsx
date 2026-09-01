@@ -553,8 +553,16 @@ export default function TrainerVideos() {
           note={
             status === 'loading' ? 'Reading your library…'
               : status === 'error' ? 'Your library could not be read, so we cannot tell you what is in it.'
-                : vids.length ? `${done} of ${vids.length} recorded · shared with whoever you chose`
-                  : 'Record a clip or paste a link, then choose who gets to watch it.'
+                // 'partial' had no branch, so it fell through to the counting
+                // one — "8 of 12 recorded" over a page of a longer library,
+                // with the hero figure beside it already showing a dash for the
+                // same reason. Both halves of that sentence are counts, and a
+                // count over a prefix is not a smaller number, it is a wrong
+                // one: a coach reading it concludes four clips are missing that
+                // they have already filmed. src/ui/loadStatus.ts.
+                : status === 'partial' ? 'Your library came back at the row limit, so these are some of your clips rather than all of them, and they cannot be counted.'
+                  : vids.length ? `${done} of ${vids.length} recorded · shared with whoever you chose`
+                    : 'Record a clip or paste a link, then choose who gets to watch it.'
           }
         />
 

@@ -262,6 +262,17 @@ const SETTLED_IN_EVERY_BINARY = new Set([
   'expo-linking',      // 25b8ef35 — deep links have shipped since the first build
   'expo-updates',      // bc5656a4 — it is what DELIVERS the over-the-air update
   'expo-web-browser',  // f0b0e2fb
+  // d53c9a2, the initial commit — every binary ever built for this app has it.
+  // It only appears in this list at all because the walker above could not
+  // previously see its throw; nothing about the dependency changed.
+  'expo-image-picker',
+  // cf64e9d, 26 Aug — one day BEFORE the version moved to 1.1.0, so every
+  // binary that accepts today's bundle was built with it. The guards written
+  // around it (HAS_NATIVE_VIDEO) stay: the version will move again, and the
+  // day it does this entry has to be re-argued rather than assumed.
+  'expo-video',
+  // c4c6299, 17 July.
+  'expo-image-manipulator',
 ]);
 
 /** The file that owns every native handle, and the only place a require of one
@@ -290,8 +301,13 @@ function entryOf(name) {
  * at the start of a line so a call inside an indented function body — which
  * runs only if somebody calls it, and is therefore catchable — is not counted.
  */
+// `requireNativeModule<ImageNativeModule>('ExpoImage')` is the same call with a
+// type argument in front of the bracket, and the pattern used to require the
+// bracket immediately. expo-image writes it that way, which is half of why this
+// check declared the app safe while src/ui/ExerciseDemo.tsx imported it bare —
+// nine screens across all three apps, the client's workout player among them.
 const MODULE_SCOPE_REQUIRE =
-  /^(?:export\s+default\s+|export\s+const\s+[\w$]+\s*=\s*|const\s+[\w$]+\s*=\s*|let\s+[\w$]+\s*=\s*)requireNativeModule\s*\(/m;
+  /^(?:export\s+default\s+|export\s+const\s+[\w$]+\s*=\s*|const\s+[\w$]+\s*=\s*|let\s+[\w$]+\s*=\s*)requireNativeModule\s*(?:<[^>]*>\s*)?\(/m;
 
 /** The file within `name` that throws, or false. Follows the package's own
  *  relative imports, because the throw is almost never in index.js itself. */
@@ -301,11 +317,27 @@ function throwsOnImport(file, seen = new Set()) {
   let src;
   try { src = readFileSync(file, 'utf8'); } catch { return false; }
   if (MODULE_SCOPE_REQUIRE.test(src)) return file;
-  const re = /(?:^|\n)\s*(?:import\s[^'"]*from\s*|export\s+\*\s+from\s*|import\s*)['"](\.[^'"]+)['"]/g;
+  // `export { Image } from './Image'` counts too. It was the third reason
+  // expo-image slipped through: the entry re-exports the throwing module by
+  // name, and only `import … from` and `export * from` were followed — so the
+  // one line that reaches the throw was the one shape not looked for.
+  const re = /(?:^|\n)\s*(?:import\s[^'"]*from\s*|export\s+\*\s+from\s*|export\s*\{[^}]*\}\s*from\s*|import\s*)['"](\.[^'"]+)['"]/g;
   let m;
   while ((m = re.exec(src))) {
     const base = join(dirname(file), m[1]);
-    for (const cand of [base, `${base}.js`, join(base, 'index.js'), `${base.replace(/\.js$/, '')}.native.js`]) {
+    // TypeScript shapes as well as JavaScript ones. A package whose `main` is
+    // its own TS source — expo-image's is `src/index.ts` — was followed as far
+    // as the entry file and no further, because every candidate below ended in
+    // .js and the next hop was `Image.tsx`. The walk stopped one file short of
+    // the throw and reported nothing, which is the worst way for a check to
+    // fail: it does not go quiet, it says the app is safe.
+    const stem = base.replace(/\.(?:js|ts|tsx)$/, '');
+    for (const cand of [
+      base,
+      `${base}.js`, `${base}.ts`, `${base}.tsx`,
+      join(base, 'index.js'), join(base, 'index.ts'), join(base, 'index.tsx'),
+      `${stem}.native.js`, `${stem}.native.ts`, `${stem}.native.tsx`,
+    ]) {
       let isFile = false;
       try { isFile = statSync(cand).isFile(); } catch { /* try the next shape */ }
       if (!isFile) continue;

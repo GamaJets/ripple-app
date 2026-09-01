@@ -273,6 +273,19 @@ const LIFT_STORED_DP = 2;
 
 /** Half a pound: the grain imperial fractional plates actually produce. */
 const LB_LIFT_STEP = 0.5;
+// There is deliberately NO matching KG_LIFT_STEP.
+//
+// A set logged in pounds and read back with the unit switched prints
+// "6×102.06 kg", which looks like a precision nobody typed — and rounding it to
+// the nearest half kilo to tidy it up was tried and reverted, because kilos are
+// the unit people enter in the finest increments. Micro-plates make 6.25 kg an
+// ordinary working load, and src/lib/units.test.ts caught the change turning it
+// into 6.5 kg on the way back out: 581 such loads, every one of them a number
+// somebody had typed and the app had silently moved.
+//
+// So the pound figure snaps to the half a plate actually comes in, and the kilo
+// figure is reported as measured. 102.06 kg IS what 225 lb weighs; the two
+// decimal places are the conversion being honest, not the app inventing detail.
 
 /**
  * Above any lift a human has recorded, stated separately in each unit rather

@@ -227,6 +227,11 @@ for (const label of sameEverywhere) {
 // 'ready' is the only status that may print a figure, and it is exact.
 eq(unreadBadge(0, 'ready').kind, 'none', 'nothing unread and the server answered — no mark');
 eq(unreadBadge(3, 'ready').kind, 'count', 'three unread over a whole read is a figure');
+// One. The boundary between "draw nothing" and "draw a number", and the only
+// count in the range where an off-by-one is invisible in every other assertion
+// here — a bell that stays bare over a single unread notification is the whole
+// defect this function was written for.
+eq((unreadBadge(1, 'ready') as { label: string }).label, '1', 'a single unread is a badge, not a bare bell');
 eq((unreadBadge(3, 'ready') as { label: string }).label, '3', 'the figure is the count');
 eq((unreadBadge(11, 'ready') as { a11y: string }).a11y, 'Notifications. 11 unread.',
   'a screen reader is told the number, not just that there is a badge');
@@ -248,6 +253,7 @@ eq((unreadBadge(0, 'error') as { a11y: string }).a11y, 'Notifications. Unread co
 // newest is not zero unread. Neither branch prints a figure — a count over an
 // unknown fraction of the set is what src/ui/loadStatus.ts forbids.
 eq(unreadBadge(3, 'partial').kind, 'some', 'a truncated read shows a mark, not a number');
+eq(unreadBadge(1, 'partial').kind, 'some', 'and one unread in the newest rows is still a mark');
 eq(unreadBadge(0, 'partial').kind, 'unknown', 'no unread in the newest rows is not no unread');
 ok(!Object.prototype.hasOwnProperty.call(unreadBadge(3, 'partial'), 'label'),
   'nothing under partial carries a figure to render');
@@ -530,13 +536,35 @@ for (const n of [0, 1, 4, 999, 1204, 99999]) {
       `${e.where} must not write a routeless 'message' row — the reader treats those as legacy chat`);
   }
 
-  // The coach's three, named one at a time rather than counted, so that
+  // The coach's rows, named one at a time rather than counted, so that
   // deleting one is an edit somebody has to make here.
-  for (const title of ['A coaching request', 'Paperwork accepted', 'A subscription has ended']) {
+  for (const title of [
+    'A coaching request', 'Paperwork accepted', 'A subscription has ended',
+    // part 159
+    'A client has ended their coaching', 'A package was bought', 'An intake has come back',
+    'A client has signed the release', 'A client has left you a review',
+  ]) {
     const e = SERVER_WRITTEN.find((x) => x.title === title);
     ok(!!e, `“${title}” is still written to a coach somewhere`);
     eq(e?.to, 'trainer', `“${title}” goes to the coach's build`);
   }
+
+  // And part 159's two client-directed rows, which are the ones most likely to
+  // be given a coach route by somebody editing the block above them.
+  for (const title of ['Your coaching has ended', 'A place has opened in a class']) {
+    const e = SERVER_WRITTEN.find((x) => x.title === title);
+    ok(!!e, `“${title}” is still written to a client somewhere`);
+    eq(e?.to, 'client', `“${title}” goes to the client's build`);
+  }
+
+  // The two sides of an ending are DIFFERENT rows. One trigger function writes
+  // both (coaching_end_notify), branching on `ended_by`, and the cheapest way to
+  // get that wrong is to send one message to both people.
+  const ends = SERVER_WRITTEN.filter((x) => x.where.includes('coaching_end_notify'));
+  eq(ends.length, 2, 'an ending is told to both parties, in two different rows');
+  eq(new Set(ends.map((x) => x.to)).size, 2, 'and the two rows go to two different builds');
+  eq(new Set(ends.map((x) => x.title)).size, 2,
+    'with two different headings — a client leaving is not a coach letting go');
 
   // A coach's row routed into the client group is the exact failure mode this
   // block exists for, and it has to be shown to FAIL rather than assumed to.
@@ -544,9 +572,14 @@ for (const n of [0, 1, 4, 999, 1204, 99999]) {
     'a route naming another group is refused, which is why entry 1 above is worth asserting');
   // And the coach's three routes are refused for a client build, so a
   // mis-addressed row cannot navigate a client into a coach screen.
-  for (const r of ['/(trainer)/dashboard', '/(trainer)/documents', '/(trainer)/payments']) {
+  for (const r of ['/(trainer)/dashboard', '/(trainer)/documents', '/(trainer)/payments',
+                   '/(trainer)/credentials', '/(trainer)/client-intake?clientId=abc']) {
     eq(safeRoute(r, 'client'), null, `${r} is not followable from the client app`);
   }
+  // The mirror of that, for part 159's two client-directed rows: a coach build
+  // must not be navigated into the client app by a mis-addressed ending or
+  // promotion.
+  eq(safeRoute('/(client)/classes', 'trainer'), null, 'a class seat is not followable from the coach app');
 }
 
 /* ── the coach's icons ─────────────────────────────────────────────────────
@@ -562,6 +595,16 @@ eq(inboxIcon('/(trainer)/payments'), 'grid', 'a subscription draws the Payments 
 // name merely begins with one of those gets the bell, not the neighbour's icon.
 eq(inboxIcon('/(trainer)/payments-archive'), 'bell', 'a longer screen name is not a prefix match');
 eq(inboxIcon('/(trainer)/documents?clientId=abc'), 'pencil', 'a query string does not lose the icon');
+eq(inboxIcon('/(trainer)/credentials'), 'trophy', 'a review draws the Credentials & Reviews icon');
+// The ask and the answer are the same document from two sides, so they are the
+// same shape in two different inboxes. A reader who has seen one recognises the
+// other, which is the whole reason ICON_BY_ROUTE is a table and not a guess.
+eq(inboxIcon('/(trainer)/client-intake?clientId=abc'), inboxIcon('/(client)/intake'),
+  'an intake coming back wears the same icon as the ask that went out');
+eq(inboxIcon('/(trainer)/client-intake?clientId=abc'), 'pencil', 'and that icon is the pencil');
+// Without its clientId the coach's intake screen says no client was named, so
+// the query string is load-bearing and must not cost the row its icon.
+eq(inboxIcon('/(trainer)/client-intake'), 'pencil', 'the bare route keeps it too');
 
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

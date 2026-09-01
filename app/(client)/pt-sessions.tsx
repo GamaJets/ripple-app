@@ -144,7 +144,13 @@ export default function PtSessions() {
         {/* ── awaiting approval: the only actionable thing here ───────────── */}
         <Section>
           <SectionHead title="Awaiting Your Approval" note={sessionsWhole && pending.length > 0 ? String(pending.length) : undefined} />
-          {sessionStatus === 'partial' ? <PartialRead what="delivered sessions" shown={sessions.length} /> : null}
+          {/* `mine`, not `sessions`. The provider holds every session it could
+              read — both parties, every status, cancelled and upcoming included
+              — and this screen is about the ones delivered to THIS client
+              (`mine`, above). Quoting the provider's count said "Showing the
+              first 1,000" to a member with eleven sessions on the screen, which
+              reads as a truncation of the eleven. */}
+          {sessionStatus === 'partial' ? <PartialRead what="delivered sessions" shown={mine.length} /> : null}
           {pending.map((s) => (
             <Card key={s.id} style={{ marginBottom: sp.md }}>
               <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fmt(s.startsAt)}</Text>

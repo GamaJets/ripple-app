@@ -474,12 +474,17 @@ const ICON_NAMES: Partial<Record<IconName, string>> = {
  * say the word twice. Pass `a11y` only where the visible label is too terse to
  * stand alone as a spoken sentence.
  */
-export function Field({ label, hint, children, style, a11y }: {
+export function Field({ label, hint, children, style, a11y, accessory }: {
   label: string;
   hint?: string;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   a11y?: string;
+  /** A control that belongs ON the label line rather than under it — the
+   *  weight-unit toggle beside a load box. Sits after the label and before the
+   *  hint, so a field can carry both. Nothing about the box below moves: the
+   *  row it joins is already `alignItems: 'baseline'`. */
+  accessory?: ReactNode;
 }) {
   const t = useTheme();
   return (
@@ -492,6 +497,7 @@ export function Field({ label, hint, children, style, a11y }: {
         >
           {label}
         </Text>
+        {accessory}
         {/* Not `ty.micro`: that face is uppercased, and an uppercased aside
             reads as loudly as the label it is qualifying — "CALORIES KCAL ·
             LEAVE BLANK IF UNKNOWN" is one shout where it should be a word and

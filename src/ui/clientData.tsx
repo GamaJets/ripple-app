@@ -219,7 +219,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setNameSynced(false);
     setProfileStatus('loading');
-    (async () => {
+    // One pass at both halves of the profile read, reporting back whether
+    // either half failed. Split out of the effect body because that answer now
+    // decides more than a status line — see the loop underneath it.
+    const readOnce = async (): Promise<boolean> => {
       // Either read failing means the profile on screen is partly or wholly
       // defaults. Tracked rather than swallowed, because the push effect below
       // is about to publish whatever is on screen back to the server.
@@ -340,7 +343,44 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) { reportError('clientData.hydrate.clients', e); failed = true; }
 
-      if (!cancelled) { setProfileStatus(failed ? 'error' : 'ready'); setNameSynced(true); }
+      return failed;
+    };
+
+    (async () => {
+      // `setNameSynced(true)` is what ARMS the push effect below, and it used
+      // to fire on the failure path too — the status went to 'error' and the
+      // write was armed anyway, in the same statement. What that armed is not a
+      // retry of the read: it is an UPDATE of the whole `clients` row, 600ms
+      // later, from whatever is in state. Under USE_SUPABASE the local cache is
+      // cleared at launch, so after a failed read that state is the DEFAULTS.
+      // A transient timeout on the SELECT followed by a healthy UPDATE — an
+      // ordinary way for one request in a pair to go — therefore overwrote
+      // goal, diet, avoid, mode, focus_areas, the four goal columns, the manual
+      // measurements and `injuries` with blanks, server-side, silently, and the
+      // screen said nothing because the write itself succeeded. `injuries` is
+      // the field in this app with a safety meaning: it is what makes the plan
+      // avoid a movement, and it would have been erased by a read that failed.
+      //
+      // So the push is armed only by a read that actually landed. A failure is
+      // retried a couple of times first, because a session that never arms the
+      // push is a session whose profile edits never reach the server and whose
+      // owner is not told that — the far smaller loss of the two, but still a
+      // loss, and a timeout that clears on the second attempt costs nothing.
+      // If every attempt fails the status stays 'error' and the write stays
+      // disarmed: leaving the server's copy alone is the only safe answer when
+      // we do not know what the server's copy says.
+      const attempts = 3;
+      for (let attempt = 1; attempt <= attempts && !cancelled; attempt++) {
+        const failed = await readOnce();
+        if (cancelled) return;
+        if (!failed) { setProfileStatus('ready'); setNameSynced(true); return; }
+        // 'error' is published only once there is nothing left to try. An
+        // attempt with another one behind it is still a read in flight, and
+        // saying 'error' in between would flash "we couldn't read your profile"
+        // across every screen that reads this status and then take it back.
+        if (attempt === attempts) { setProfileStatus('error'); return; }
+        await new Promise((r) => setTimeout(r, attempt * 2000));
+      }
     })();
     return () => { cancelled = true; };
   }, [sbUid]);
@@ -348,9 +388,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // Publish the profile to the shared backend: it is the durable store (the local
   // cache is cleared on launch when USE_SUPABASE is on) and a LINKED trainer reads
   // it to see the real client instead of a placeholder. Update-only, so it no-ops
-  // rather than inventing rows. Gated on nameSynced, which is now set only after
-  // BOTH the profiles and clients rows have been read back — otherwise this fires
-  // while state is still at its defaults and overwrites the user's real settings.
+  // rather than inventing rows. Gated on nameSynced, which is set only once BOTH
+  // the profiles and clients rows have been read back SUCCESSFULLY — otherwise
+  // this fires while state is still at its defaults and overwrites the user's
+  // real settings, a read that failed leaving state at those defaults just as
+  // surely as a read that has not come back yet.
   // Debounced so typing doesn't fire a write per keystroke; one round-trip per table.
   useEffect(() => {
     if (!USE_SUPABASE || !sbUid || !hydrated || !nameSynced) return;
@@ -361,7 +403,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // fires as soon as the DEVICE has hydrated — before the server read has
         // come back — and would overwrite this with a default while the
         // reconcile above was still reading it. This effect is gated on
-        // nameSynced, so both reads have already landed.
+        // nameSynced, so both reads have already landed and both succeeded.
         try { await AsyncStorage.setItem(MODE_KEY, coachingMode); } catch { /* the mode still applies this session; only the restore across launches is lost */ }
         // Both results are now inspected. Refusing to look was what let a
         // client's edited goal, diet or allergen list disappear at the next

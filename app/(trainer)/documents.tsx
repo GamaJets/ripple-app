@@ -29,7 +29,7 @@
 // Every sentence on this screen comes from src/lib/coachDocs.ts, which holds
 // those rules and has a test that fails if the wording drifts from what the
 // database will actually keep.
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { View, Text, ScrollView, Alert, Pressable, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -90,6 +90,13 @@ export default function CoachDocumentsScreen() {
   // questions, and a coach opening the second one has not stopped wanting the
   // answer to the first.
   const [sendId, setSendId] = useState<string | null>(null);
+  /* The document each panel's answer is allowed to land for. Both panels are
+   * single-slot — one `standing` list, one `audience` list — and a coach checks
+   * two documents in a row without waiting for the first. Closing a panel sets
+   * these to null, so a response that arrives after the close is dropped rather
+   * than re-populating a panel the coach has dismissed. */
+  const wantStanding = useRef<string | null>(null);
+  const wantAudience = useRef<string | null>(null);
   const [audience, setAudience] = useState<AudienceMember[] | null>(null);
   const [audienceStatus, setAudienceStatus] = useState<LoadStatus>('ready');
   /** True when `coach_document_audience` is not on this server — part 156 has
@@ -101,12 +108,20 @@ export default function CoachDocumentsScreen() {
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
+      // Both of these used to be 'ready', and 'ready' is the one status this
+      // screen's render treats as a licence to say "You haven't added any
+      // paperwork yet." A coach whose session has dropped while they are on
+      // this screen — app/(trainer)/_layout.tsx checks the group and does not
+      // redirect, so nothing evicts them — was told their waivers and
+      // agreements were not on file. They are; we simply had nobody to ask as.
+      // 'error' means UNKNOWN (src/ui/loadStatus.ts), which is exactly what
+      // this is, and the render already draws it as "could not be read".
       const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setStatus('ready'); return; }
+      if (!sess?.session) { setStatus('error'); return; }
       const { data: auth, error: authErr } = await supabase.auth.getUser();
       if (authErr) { setStatus('error'); return; }
       const id = auth?.user?.id ?? null;
-      if (!id) { setStatus('ready'); return; }
+      if (!id) { setStatus('error'); return; }
       setUid(id);
       const { data, error } = await supabase.from('coach_documents')
         .select('id, coach_id, title, path, mime, bytes, required, retired_at, created_at')
@@ -224,11 +239,18 @@ export default function CoachDocumentsScreen() {
   /* ── Who has accepted ──────────────────────────────────────────────────── */
 
   async function showStanding(d: CoachDoc) {
-    if (openId === d.id) { setOpenId(null); return; }
+    if (openId === d.id) { setOpenId(null); wantStanding.current = null; return; }
     setOpenId(d.id);
+    wantStanding.current = d.id;
     setStanding(null);
     setStandingStatus('loading');
     const { data, error } = await supabase.rpc('coach_document_standing', { p_document: d.id });
+    // The coach has closed this panel or opened another document's. There is
+    // one `standing` list on this screen and one `standingStatus` beside it, so
+    // without this check a slower answer for the waiver lands under the
+    // agreement and states, by name and date, who has accepted a document they
+    // have never been shown.
+    if (wantStanding.current !== d.id) return;
     if (error) { setStandingStatus('error'); return; }
     setStanding((data ?? []).map((r: any) => ({
       clientId: String(r.client_id),
@@ -253,12 +275,19 @@ export default function CoachDocumentsScreen() {
   // and every document is still readable by everyone this coach coaches.
 
   async function openSend(d: CoachDoc) {
-    if (sendId === d.id) { setSendId(null); return; }
+    if (sendId === d.id) { setSendId(null); wantAudience.current = null; return; }
     setSendId(d.id);
+    wantAudience.current = d.id;
     setAudience(null);
     setSendOff(false);
     setAudienceStatus('loading');
     const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id });
+    // As in `showStanding`: one audience list, one status, and the panel above
+    // is headed by whichever document is open now. A stale answer landing here
+    // would show who has and has not been sent the OTHER document, and every
+    // name in that list is a live Send control — so acting on it would put the
+    // wrong paperwork in front of somebody, irreversibly (SEND_IS_ONE_WAY).
+    if (wantAudience.current !== d.id) return;
     if (error) {
       // `returned: true` because this is a READ — there is no boolean to judge,
       // only whether the function is there at all and whether the wire held.

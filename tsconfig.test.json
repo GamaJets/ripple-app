@@ -28,6 +28,10 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/firstRun.test.ts",
+    "src/lib/screenHelp.test.ts",
+    "src/lib/strengthLevel.test.ts",
+    "src/lib/bookingsRead.test.ts",
     "src/lib/keyboardLift.test.ts",
     "src/lib/mealPlan.test.ts",
     "src/lib/types.ts",
@@ -69,6 +73,10 @@
     "src/lib/bodyFigures.test.ts",
     "src/lib/wearableLink.test.ts",
     "src/lib/backTo.test.ts",
+    "src/lib/foldedDays.ts",
+    "src/lib/foldedDays.test.ts",
+    "src/lib/currencyGap.ts",
+    "src/lib/currencyGap.test.ts",
     "src/lib/injuryGate.test.ts",
     "src/lib/intake.test.ts",
     "src/lib/videoCoverage.test.ts",
@@ -145,6 +153,7 @@
     "src/lib/exerciseHistory.test.ts",
     "src/lib/stretchRoutine.test.ts",
     "src/lib/stretchBuilder.test.ts",
-    "src/lib/programReview.test.ts"
+    "src/lib/programReview.test.ts",
+    "src/lib/startGate.test.ts"
   ]
 }

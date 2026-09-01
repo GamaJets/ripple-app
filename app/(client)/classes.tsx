@@ -148,7 +148,16 @@ export default function Classes() {
           <View key={g.key}>
             <Rule />
             <Section>
-              <SectionHead title={g.label} note={`${g.items.length} class${g.items.length === 1 ? '' : 'es'}`} />
+              {/* A count of what came back, printed as a count of what is on.
+                  Under 'partial' the timetable stops at the row cap without
+                  saying so, and "Tuesday · 4 classes" over nine running classes
+                  is the same wrong answer as any other subtotal wearing the
+                  name of a total — with the difference that a member reads this
+                  one and decides there is nothing worth booking. */}
+              <SectionHead title={g.label}
+                note={classStatus === 'ready'
+                  ? `${g.items.length} class${g.items.length === 1 ? '' : 'es'}`
+                  : classStatus === 'partial' ? 'Not all read' : undefined} />
               {g.items.map((c, i) => {
                 const mine = myStatus[c.id];
                 // `booked` is 0 for every class until the count RPC fills it

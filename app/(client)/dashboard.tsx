@@ -41,6 +41,13 @@ import { severeSummary } from '../../src/lib/injuries';
 import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
 import { NotificationBell } from '../../src/ui/notifications';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { GUIDE_SEEN_KEY } from '../guide';
+import { isWhole } from '../../src/ui/loadStatus';
+import {
+  showBody, showFuel, showWeek,
+  checklist, checklistDone, checklistLeft, nextTodo, showChecklist,
+} from '../../src/lib/firstRun';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -83,9 +90,32 @@ export default function Home() {
   // the same number. See src/ui/readiness.ts for what moved and why.
   const { readiness, breakdown } = useReadiness();
   const readinessColor = readiness == null ? t.ink3 : readiness.tone === 'good' ? t.brand : readiness.tone === 'moderate' ? t.warn : t.crit;
-  const [needsOnboard, setNeedsOnboard] = useState(false);
-  useFocusEffect(useCallback(() => { let c = false; (async () => { try { const v = await AsyncStorage.getItem(ONBOARD_KEY); if (!c) setNeedsOnboard(!v); } catch { /* ignore */ } })(); return () => { c = true; }; }, []));
-  const { sessions } = useSessions();
+  // Two device-local marks. `null` on either is "we could not read it", which
+  // the Getting Started list below draws as a dash rather than as undone —
+  // see src/lib/firstRun.ts.
+  const [setupDone, setSetupDone] = useState<boolean | null>(null);
+  const [guideSeen, setGuideSeen] = useState<boolean | null>(null);
+  useFocusEffect(useCallback(() => {
+    let gone = false;
+    (async () => {
+      try {
+        const [a, b] = await Promise.all([AsyncStorage.getItem(ONBOARD_KEY), AsyncStorage.getItem(GUIDE_SEEN_KEY)]);
+        if (!gone) { setSetupDone(!!a); setGuideSeen(!!b); }
+      } catch { if (!gone) { setSetupDone(null); setGuideSeen(null); } }
+    })();
+    return () => { gone = true; };
+  }, []));
+  // Only when we KNOW it is unfinished. A failed read must not put a
+  // "personalise your plan" banner in front of somebody who did it last week.
+  const needsOnboard = setupDone === false;
+  // `status`, not just the rows. SessionsProvider returns 'error' with
+  // `sessions` still `[]` (src/ui/sessions.tsx), and this row is the only read
+  // on the whole screen that was taking that empty list at face value — the
+  // log, the programs, the invites and readiness are all status-gated a few
+  // lines from here. "No Sessions Booked" said to somebody expected in the room
+  // on Thursday is the sentence this app pays most dearly for.
+  const { sessions, status: sessionStatus } = useSessions();
+  const sessionsKnown = sessionStatus === 'ready' || sessionStatus === 'partial';
   // `status` is read, not discarded. useInvites documents that under 'error' an
   // empty `received` means the check did not happen — not that nobody invited
   // you — and this screen used to take the empty list at face value. A coach
@@ -96,8 +126,15 @@ export default function Home() {
     received: myInvites, status: invitesStatus,
     acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite,
   } = useInvites();
-  const foodToday = useFoodLog().consumed;
-  const wToday = useWearables().today;
+  const foodLog = useFoodLog();
+  const foodToday = foodLog.consumed;
+  const wearables = useWearables();
+  const wToday = wearables.today;
+  // `states` is empty until the provider has looked, and an empty map is not
+  // the claim "no watch is connected" — src/ui/wearables.tsx told a client with
+  // a live WHOOP token exactly that, for exactly this reason.
+  const wearableKnown = Object.keys(wearables.states).length > 0;
+  const wearableConnected = Object.values(wearables.states).some((v) => v === 'connected');
 
   const solo = c.coachingMode === 'solo';
   // Whether to offer a way to FIND a coach. Deliberately not `solo`: that is
@@ -153,12 +190,54 @@ export default function Home() {
   const prs = personalRecords(log);
   const goalDays = program.days.length || 4;
 
+  // ── Getting Started, while it has anything to say ────────────────────────
+  //
+  // Reported as "Repple Coach has a Getting Started, however Client doesn't."
+  // What the coach app had was the first-run tour firing on a fresh install —
+  // a one-shot carousel, gone once consumed. This row is the persistent
+  // version, and it is HERE rather than only in the Me hub because being
+  // buried in Profile is the whole of what was reported. It leaves the screen
+  // when the list is finished; app/(client)/getting-started.tsx keeps it.
+  const started = checklist({
+    setup: setupDone,
+    guide: guideSeen,
+    coach: c.coachLinked,
+    workout: isWhole(logStatus) ? log.length > 0 : (log.length > 0 ? true : null),
+    meal: isWhole(foodLog.status) ? foodLog.entries.length > 0 : (foodLog.entries.length > 0 ? true : null),
+    device: wearableKnown ? wearableConnected : null,
+    solo,
+  });
+  const startedLeft = checklistLeft(started);
+  const startedNext = nextTodo(started);
+
   // null until there is a body to scale to. This used to run on the 70 kg /
   // 20% placeholder from clientData and present the result as the client's
   // own daily targets.
   const macros = (c.weightKg != null && c.bodyFatPct != null)
     ? applyCoachAdjust(macrosFor({ weightKg: c.weightKg, bodyFatPct: c.bodyFatPct, activity: c.activity, goal: c.goal, diet: c.diet }), solo ? undefined : (nutriAdjust || undefined))
     : null;
+  // ── What this screen draws before there is anything to draw ──────────────
+  //
+  // On a brand-new account three of the sections below were entirely em
+  // dashes: a Body row of three unmeasured figures, a Fuel heading standing
+  // over no meters at all (there is no target without a weight), and This Week
+  // reading 0 sessions, 0 lifted and 0 PRs over seven empty dots. Nine dashes
+  // is not nine answers, it is a screen that looks broken — and "too much
+  // information" was the report.
+  //
+  // Hidden only on a SETTLED read. Under 'error' an empty log means unknown,
+  // and hiding This Week on one would tell somebody who has trained for a year
+  // that they never have. The rules and that gate are in src/lib/firstRun.ts
+  // and tested; the two Notices further down already say when a read failed.
+  const facts = {
+    bodyStatus: c.status,
+    measured: c.weightKg != null || c.bodyFatPct != null || c.muscleKg != null,
+    logStatus,
+    loggedEver: log.length,
+    hasTargets: macros != null,
+  };
+
+
   // Real logged intake (shared with the Meals tab + Food Log); reflects what was actually eaten today.
   const consumed = { kcal: foodToday.kcal, p: foodToday.protein, cbs: foodToday.carbs, f: foodToday.fat };
   const burn = macros ? dayBurn(macros, wToday) : null;
@@ -255,6 +334,12 @@ export default function Home() {
             <NotificationBell group="client" />
           </View>
         </View>
+
+        {/* ── what you are looking at ─────────────────────────────────────
+            One row, shut, and gone for good once it is read. See
+            src/ui/ScreenHelp.tsx: the tour explained these tabs before the
+            reader had seen one, which is why nobody remembered it. */}
+        <ScreenHelp screen="home" />
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
@@ -411,9 +496,13 @@ export default function Home() {
           />
         </Section>
 
+        {/* ── body ─────────────────────────────────────────────────────────
+            Withheld while nothing has been measured AND the read settled —
+            three dashes under three labels on the first screen of a new app is
+            what "too complicated" looks like. Progress is a tab and the quick
+            actions still point at it, so nothing becomes unreachable. */}
+        {showBody(facts) ? (<>
         <Rule />
-
-        {/* ── body ───────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Body" note="Scans" onPress={() => router.push('/(client)/scans')} />
           <KpiRow
@@ -435,6 +524,7 @@ export default function Home() {
             ]}
           />
         </Section>
+        </>) : null}
 
         {/* ── weight trend ───────────────────────────────────────────────── */}
         {ws.length > 1 ? (<>
@@ -449,17 +539,20 @@ export default function Home() {
           </Section>
         </>) : null}
 
+        {/* ── fuel ─────────────────────────────────────────────────────────
+            `macros` is null for want of a weight, and this section then drew a
+            heading, a note explaining its own emptiness, and no meters. The
+            ask belongs on the body step of setup and on the Meals tab, not as
+            a section that exists to say why it has nothing in it. */}
+        {showFuel(facts) && macros ? (<>
         <Rule />
-
-        {/* ── fuel ───────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Fuel Today" note={kcalNote} onPress={() => router.push('/(client)/nutrition')} />
-          {macros ? (<>
-            <Meter label="Protein" val={consumed.p} target={macros.protein} />
-            <Meter label="Carbs" val={consumed.cbs} target={macros.carbs} dim />
-            <Meter label="Fat" val={consumed.f} target={macros.fat} dim />
-          </>) : null}
+          <Meter label="Protein" val={consumed.p} target={macros.protein} />
+          <Meter label="Carbs" val={consumed.cbs} target={macros.carbs} dim />
+          <Meter label="Fat" val={consumed.f} target={macros.fat} dim />
         </Section>
+        </>) : null}
 
         <Rule />
 
@@ -498,9 +591,13 @@ export default function Home() {
           </View>
         </Section>
 
+        {/* ── this week ────────────────────────────────────────────────────
+            Gated on the log ever holding anything, not on THIS week: somebody
+            who trains Monday and Tuesday and opens the app on a Sunday has an
+            empty week and eleven months behind it. Under an unsettled read it
+            stays, dashes and all, beside the warning printed above. */}
+        {showWeek(facts) ? (<>
         <Rule />
-
-        {/* ── this week ──────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="This Week" note="All activity" onPress={() => router.push('/(client)/trends')} />
           <KpiRow items={[
@@ -516,11 +613,41 @@ export default function Home() {
           ]} />
           <WeekDots done={logKnown ? wk.days : 0} />
         </Section>
+        </>) : null}
 
         <Rule />
 
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
+          {/* ── Getting Started ────────────────────────────────────────────
+              Reported as "Repple Coach has a Getting Started, however Client
+              doesn't have this." What the coach app had was the first-run tour
+              firing on a fresh install — a carousel, gone once consumed, and
+              findable afterwards only through a User Guide row buried in
+              Profile. This row is the persistent answer and it is on the HOME
+              screen, because being buried in Profile is the whole of what was
+              reported.
+
+              It leaves when the list is finished — a checklist stuck at 6 of 6
+              is clutter, and clutter is the complaint. It does NOT leave
+              because a read failed: an unknown row keeps it here, which is the
+              LoadStatus rule applied to a list of ticks. The screen itself
+              stays in the Me hub either way.
+
+              Held back while the "personalise your plan" card is up. That card
+              goes straight into setup in one tap and this row's first item is
+              the same errand — two prompts for one thing on the first screen a
+              new member ever sees is the disease, not the cure. */}
+          {showChecklist(started) && !needsOnboard ? (
+            <ListRow icon="sparkle" title="Getting Started"
+              note={startedNext
+                ? `${checklistDone(started)} of ${started.length} done · next, ${startedNext.title.toLowerCase()}`
+                : startedLeft === 0
+                  ? 'some of this could not be read just now'
+                  : `${checklistDone(started)} of ${started.length} done`}
+              onPress={() => router.push('/(client)/getting-started')} />
+          ) : null}
+
           {/* `|| nextSession` because a booking is a fact, not a preference: a
               client who switches to online after booking is still expected in
               the room on Thursday, and hiding the row would be how they miss
@@ -528,12 +655,24 @@ export default function Home() {
               to book more is gated. */}
           {(booksSessions || nextSession) ? (
             <ListRow icon="calendar"
+              // "No Sessions Booked" is a statement about the member's calendar
+              // and only a read that answered may make it. Under a failed or
+              // in-flight read the row still appears — the way to the calendar
+              // must not disappear when the calendar cannot be read — but it
+              // says which of the two it is looking at. 'partial' counts as
+              // known here: the provider reads `starts_at` descending before
+              // capping, so a truncated page holds the future and drops the
+              // ancient history.
               title={nextSession
                 ? `Next session · ${new Date(nextSession.startsAt).toLocaleDateString(undefined, { weekday: 'short' })} ${(() => { let h = new Date(nextSession.startsAt).getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${ap}`; })()}`
-                : 'No Sessions Booked'}
+                : sessionsKnown ? 'No Sessions Booked'
+                : sessionStatus === 'loading' ? 'Checking Your Sessions'
+                : 'Your Sessions Could Not Be Read'}
               note={nextSession
                 ? `In person · ${nextSession.durationMin} min with your coach`
-                : 'Tap to book an in-person session'}
+                : sessionsKnown ? 'Tap to book an in-person session'
+                : sessionStatus === 'loading' ? 'Reading your calendar…'
+                : 'This is not a statement that you have none booked. Open your calendar to check before assuming a session is not on.'}
               onPress={() => router.push('/(client)/calendar')} />
           ) : null}
 

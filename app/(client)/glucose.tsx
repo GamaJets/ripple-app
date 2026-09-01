@@ -196,7 +196,7 @@ export default function Glucose() {
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{src.whereFrom}</Text>
           {/* The build cannot read this phone's store at all, which is neither
               a failure nor the person's doing. Said here, once, rather than
-              behind a button — the reconnect loop on Watch & devices was built
+              behind a button — the reconnect loop on Watch & Devices was built
               out of exactly that button, offered to somebody it could only ever
               produce an apology for. */}
           {src.absentReason ? (

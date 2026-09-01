@@ -127,11 +127,37 @@ export default function Goal() {
   const seriesFor = (k: MeasuredKind): Point[] =>
     k === 'weight' ? c.weightSeries : k === 'bodyfat' ? c.bodyFatSeries : c.muscleSeries;
 
+  // The goals and the READINGS they are measured against are two different
+  // reads against two different policies, and this screen only ever consulted
+  // the first. `goal_targets` succeeding says nothing about `scans`: when the
+  // scans read fails, every series above is `[]`, `progressOf` returns null for
+  // every measured goal, the hero silently disappears and each row says "no
+  // weigh-ins and scans on record yet" — to a member with a year of them.
+  //
+  // `c.status` is the worst of the profile and scans reads, which is the right
+  // one to ask: the manual weight lives on the profile and the scans on their
+  // own table, and either failing leaves a hole where a reading should be.
+  const readingsWhole = c.status === 'ready';
+  /** Why a measured goal has no progress, in the reader's terms. */
+  const noReadingLine = (k: MeasuredKind) =>
+    readingsWhole
+      ? `No ${GOAL_METRIC[k].source} on record yet, so there’s nothing to measure this against.`
+      : c.status === 'loading'
+        ? `Reading your ${GOAL_METRIC[k].source}…`
+        : c.status === 'partial'
+          ? `You have more ${GOAL_METRIC[k].source} on record than we can read in one go, so how far along this is cannot be worked out from what came back.`
+          : `Your ${GOAL_METRIC[k].source} could not be read, so we can’t say how far along this is. This is not a statement that you have none on record.`;
+
   const goals = sortGoals(g.goals);
   const open = goals.filter((x) => !x.achievedAtISO);
   // The one to put at the top: the nearest-due open goal that actually has
   // readings behind it. A goal we cannot measure makes a poor hero.
   const lead = open.find((x) => isMeasured(x) && progressOf(x, seriesFor(x.kind as MeasuredKind)) !== null);
+  // Whether there was anything for the hero to have been about. Without this,
+  // a member whose only goals are unmeasurable ("squat without my knee
+  // complaining") would be shown a banner about readings that could not be read
+  // for a goal no reading was ever going to measure.
+  const measuredOpen = open.some((x) => isMeasured(x));
   const leadProgress = lead ? progressOf(lead, seriesFor(lead.kind as MeasuredKind)) : null;
 
   const save = async () => {
@@ -232,6 +258,22 @@ export default function Goal() {
                 ) : null}
                 <Rule />
               </View>
+            ) : measuredOpen && !readingsWhole ? (
+              // The hero is chosen as the nearest-due open goal that HAS
+              // readings behind it, so a failed scans read simply deleted it
+              // from the screen — the one place a member looks to see how a
+              // goal is going went blank with no explanation anywhere on the
+              // page. The goals themselves read fine; the readings did not, and
+              // that is a different sentence from "you have not started".
+              <Section>
+                <Notice tone={t.warn} kicker="Progress"
+                  title={c.status === 'loading' ? 'Reading your measurements' : c.status === 'partial' ? 'Not all of your measurements could be read' : 'Your measurements could not be read'}
+                  note={c.status === 'loading'
+                    ? 'How far along your goals are is worked out from your weigh-ins and scans, and they are still loading.'
+                    : c.status === 'partial'
+                      ? 'You have more weigh-ins and scans on record than we can read in one go, so how far along your goals are cannot be worked out from what came back.'
+                      : 'How far along your goals are is worked out from your weigh-ins and scans, and those could not be read just now. Your goals and your readings are both intact — this screen simply cannot see them to measure one against the other.'} />
+              </Section>
             ) : null}
 
             <Section>
@@ -274,7 +316,7 @@ export default function Goal() {
                           <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>
                             {prog
                               ? `${prog.pct}% · ${Math.abs(goalDelta(prog.remaining, x.kind as MeasuredKind, wu))} ${unit} to go`
-                              : `No ${GOAL_METRIC[x.kind as MeasuredKind].source} on record yet, so there’s nothing to measure this against.`}
+                              : noReadingLine(x.kind as MeasuredKind)}
                           </Text>
                         ) : (
                           <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>

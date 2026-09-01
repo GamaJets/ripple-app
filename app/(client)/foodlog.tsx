@@ -257,6 +257,14 @@ export default function FoodLog() {
  // of their day against. The provider has said this in its own doc comment
  // since `status` was added; this screen was not listening.
  const dayWhole = isWhole(fl.status);
+ // `isWhole` is false for 'loading' as well as for 'partial' and 'error', which
+ // is right for WITHHOLDING a figure and wrong for explaining one. Three
+ // sentences below were written for the failure and printed on the wait too, so
+ // for the first second of every visit this screen said "We couldn't read
+ // today's log" about a read that was proceeding perfectly well — and a member
+ // who read that and re-logged their breakfast has now eaten it twice on paper.
+ // app/(client)/nutrition.tsx splits the same three states; this is that split.
+ const dayReading = fl.status === 'loading';
  const wToday = useWearables().today;
  const burn = target ? dayBurn(target, wToday) : null;
  const burned = burn?.burned ?? 0;
@@ -341,7 +349,11 @@ export default function FoodLog() {
  figure={!dayWhole ? fig(null) : remK == null ? fig(tot.k) : fig(Math.abs(remK))}
  unit="kcal"
  note={!dayWhole
-  ? "We couldn't read all of today's log, so anything already eaten may be missing from this. What is listed below is real; the number left in the day is not something we can work out yet."
+  ? (dayReading
+   ? 'Reading today’s food log…'
+   : fl.status === 'partial'
+   ? 'You have logged more today than this screen can read in one go, so what is left in the day cannot be worked out from it. What is listed below is real.'
+   : "We couldn't read all of today's log, so anything already eaten may be missing from this. What is listed below is real; the number left in the day is not something we can work out yet.")
   : (target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}` : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`)}
  arc={dayWhole && target && target.kcal ? tot.k / target.kcal : undefined}
  arcLabel="of today's calories eaten"
@@ -360,7 +372,11 @@ export default function FoodLog() {
  {target && dayWhole ? macroRow('Carbs', tot.c, target.carbs, true) : null}
  {target && dayWhole ? macroRow('Fat', tot.f, target.fat, true) : null}
  {target && !dayWhole ? (
-  <Text style={{ ...ty.label, color: t.ink3 }}>Today’s log didn’t load in full, so we can’t say how much of your protein, carbs and fat you have had.</Text>
+  <Text style={{ ...ty.label, color: t.ink3 }}>
+   {dayReading
+    ? 'Today’s log is still loading, so we can’t yet say how much of your protein, carbs and fat you have had.'
+    : 'Today’s log didn’t load in full, so we can’t say how much of your protein, carbs and fat you have had.'}
+  </Text>
  ) : null}
  </Section>
 
@@ -481,7 +497,11 @@ export default function FoodLog() {
  // An empty list under 'error' means we could not ask, never that nobody
  // ate anything — and "Nothing logged yet today" is exactly the sentence
  // that sends somebody to log their breakfast a second time.
- <Text style={{ ...ty.label, color: t.ink3 }}>{dayWhole ? 'Nothing logged yet today.' : 'We couldn’t read today’s log just now, so we don’t know what is in it. Anything you add here is kept and goes up when you have signal.'}</Text>
+ <Text style={{ ...ty.label, color: t.ink3 }}>
+ {dayWhole ? 'Nothing logged yet today.'
+  : dayReading ? 'Reading today’s log…'
+  : 'We couldn’t read today’s log just now, so we don’t know what is in it. Anything you add here is kept and goes up when you have signal.'}
+ </Text>
  ) : (<>
  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap a meal to correct what it was worth.</Text>
  {fl.entries.map((fe, i) => (

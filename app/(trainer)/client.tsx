@@ -95,6 +95,7 @@ import { askToRecordInjury } from '../../src/ui/injuryAsk';
 import { askToCompleteIntake, useClientIntake } from '../../src/ui/intake';
 import { intakeLine, intakePrompt } from '../../src/lib/intake';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
+import { useAuthRevision } from '../../src/ui/authRevision';
 import {
   assessDrift, fetchClientActivity, DEFAULT_WINDOWS, DRIFT_LABEL,
   type Drift,
@@ -163,7 +164,16 @@ export default function ClientScreen() {
   // An injury recorded a minute ago should be on this page when the coach opens
   // it, not after they next restart the app — this screen is where they check
   // before deciding what to put somebody through.
-  useFocusEffect(useCallback(() => { r.refresh(); }, [r]));
+  //
+  // Keyed on `r.refresh` and NOT on `r`. `r` changes identity whenever the
+  // roster does, and refreshing changes the roster, so `[r]` made this effect
+  // its own trigger: `useFocusEffect` re-runs on a new callback, the refresh
+  // re-reads, the provider re-renders with a new array, the callback is new
+  // again. That was nine Supabase round trips per lap running back-to-back for
+  // as long as this screen was open — see the note in client-training.tsx,
+  // which avoided it, and the ref-backed wrappers in src/ui/roster.tsx, which
+  // now guarantee `refresh` keeps one identity for the life of the provider.
+  useFocusEffect(useCallback(() => { void r.refresh(); }, [r.refresh]));
 
   const ap = useAssignedPrograms();
   const { tenant } = useTenant();
@@ -355,24 +365,58 @@ export default function ClientScreen() {
   /* ── their list, and the days they were in the app ──────────────────────── */
 
   const [uid, setUid] = useState<string | null>(null);
+  /** Whether we have finished asking who the coach is, and whether we got an
+   *  answer. `uid === null` alone could not tell "still asking" from "asked and
+   *  there is nobody", and the checklist effect below gates on `uid` — so the
+   *  second case masqueraded as the first for the life of the screen. */
+  const [uidStatus, setUidStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Re-run when the session changes. This was a `[]`-dep effect with no retry
+  // of any kind, so a single failed `getUser()` — a dropped connection on the
+  // tick this screen mounted — was permanent for as long as the coach stayed
+  // on the page, and nothing in app/(trainer)/_layout.tsx would have moved them
+  // off it.
+  const authRev = useAuthRevision();
   useEffect(() => {
     if (!USE_SUPABASE) return;
     let live = true;
+    setUidStatus('loading');
     (async () => {
       try {
-        const { data } = await supabase.auth.getUser();
-        if (live) setUid(data?.user?.id ?? null);
-      } catch { if (live) setUid(null); }
+        const { data, error } = await supabase.auth.getUser();
+        if (!live) return;
+        const who = data?.user?.id ?? null;
+        setUid(who);
+        // Not knowing who the coach is is a failed read, not a coach with no
+        // lines set. `getUser()` also REJECTS when nobody is signed in, which
+        // the catch below treats the same way — either is "we cannot ask".
+        setUidStatus(error || !who ? 'error' : 'ready');
+      } catch { if (live) { setUid(null); setUidStatus('error'); } }
     })();
     return () => { live = false; };
-  }, []);
+  }, [authRev]);
 
   const [items, setItems] = useState<ChecklistRow[] | null>(null);
   const [itemStatus, setItemStatus] = useState<LoadStatus>('loading');
   const [ticks, setTicks] = useState<{ rows: TickRow[]; windowDays: number; start: string; end: string } | null>(null);
   const [tickStatus, setTickStatus] = useState<LoadStatus>('loading');
   useEffect(() => {
-    if (!canRead || !id || !uid) return;
+    if (!canRead || !id) return;
+    // `!uid` used to sit in the guard above, which returned with both statuses
+    // still at their initial 'loading'. That is the right state while the id is
+    // being resolved and a lie once resolving has failed: the section printed
+    // "Reading the lines you have set for them…" for good, and carried no warn
+    // tone either, because `worstStatus('loading', 'loading')` is 'loading'. So
+    // the one visual cue that something was wrong was suppressed by the same
+    // bug that caused it.
+    if (uidStatus === 'loading') { setItems(null); setItemStatus('loading'); setTicks(null); setTickStatus('loading'); return; }
+    if (!uid) {
+      // We could not establish who is asking, so neither read can be made.
+      // 'error' — `listLine` then says the lines could not be read, which is
+      // not the same as this coach having set none.
+      setItems(null); setItemStatus('error');
+      setTicks(null); setTickStatus('error');
+      return;
+    }
     let live = true;
     setItems(null); setItemStatus('loading');
     setTicks(null); setTickStatus('loading');
@@ -407,7 +451,7 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id, uid]);
+  }, [canRead, id, uid, uidStatus]);
 
   /**
    * Days the client ticked ANYTHING, out of the window.

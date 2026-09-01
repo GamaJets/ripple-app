@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, Image, ActivityIndicator, Animated, Easing, AccessibilityInfo, StyleSheet } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from './nativeModules';
-import { Image as ExpoImage } from 'expo-image';
+import { GuardedImage } from './GuardedImage';
 import { useTheme } from './components';
 import type { Theme } from '../theme/tokens';
 import { Icon } from './Icon';
@@ -140,7 +140,11 @@ export function DemoAnimation({ uri, label, stillUrls = [], cacheKey }: {
   return (
     <View style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2, overflow: 'hidden' }}>
       {showStill ? <View style={StyleSheet.absoluteFill}><FrameLoop urls={stillUrls} label={label} /></View> : null}
-      <ExpoImage
+      {/* GuardedImage, not expo-image directly: an install that predates the
+          dependency gets React Native's own <Image>, which holds frame one
+          rather than taking this screen down as it loads. `loaded` still fires
+          either way, so the still underneath still gets out of the way. */}
+      <GuardedImage
         // ── cacheKey, or the bytes are fetched again every hour ───────────
         //
         // The bucket is private, so this URL carries a signature that expires;
@@ -282,7 +286,7 @@ export function ExerciseThumb({ uri, t, size = 52 }: { uri: string | null; t: Th
   return (
     <View style={{ width: size, height: size, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
       {uri
-        ? <ExpoImage source={{ uri }} contentFit="contain" cachePolicy="disk" style={{ width: '100%', height: '100%' }} />
+        ? <GuardedImage source={{ uri }} contentFit="contain" cachePolicy="disk" style={{ width: '100%', height: '100%' }} />
         : <Icon name="dumbbell" size={Math.round(size * 0.42)} color={t.ink3} />}
     </View>
   );

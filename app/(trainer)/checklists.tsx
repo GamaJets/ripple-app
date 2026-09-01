@@ -48,7 +48,7 @@
 // verdict on the person. So the figures here are fractions with their
 // denominator visible, the days nobody can account for are counted out loud,
 // and there is no score anywhere.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -116,6 +116,18 @@ export default function CoachChecklists() {
     return () => { cancelled = true; };
   }, []);
 
+  /* The client whose answers are allowed to land, in both reads.
+   *
+   * A coach tapping down the chip row starts a pair of reads per tap and they
+   * do not come back in the order they went out. Without this guard, tapping A
+   * and then B a second later and having A's response resolve second left the
+   * header on B, the lines from A, and — much worse — `summariseAdherence`
+   * running A's items as the denominators against B's ticks as the numerators,
+   * under `adhStatus === 'ready'`, so "3 of 21 days" was drawn at full
+   * confidence about a fortnight that never happened to either of them. The
+   * same guard builder.tsx, client-training.tsx and client-body.tsx carry. */
+  const wanted = useRef<string | null>(null);
+
   const load = useCallback(async (coachId: string, clientId: string) => {
     setStatus('loading');
     const { data, error } = await supabase
@@ -129,6 +141,10 @@ export default function CoachChecklists() {
       // a page: a truncated list of items would produce a page of figures for
       // some of a coach's lines while silently omitting the rest.
       .limit(capLimit());
+    // The coach has moved on to somebody else. Dropping the response is the
+    // whole of it: whichever read is for the client now selected will set the
+    // state, and a stale one must not touch it on the way past.
+    if (wanted.current !== clientId) return;
     if (error) {
       // Null, not []. An empty list under a failed read tells the coach they
       // have set nothing for this person, which is a claim about them.
@@ -163,6 +179,9 @@ export default function CoachChecklists() {
       // came back at the limit is a prefix, and a fraction of a fraction is not
       // a figure — so it produces no figures at all rather than smaller ones.
       .limit(capLimit());
+    // As above: somebody else's ticks are not this client's, and pairing them
+    // with this client's items is the arithmetic this guard exists to stop.
+    if (wanted.current !== clientId) return;
     if (error) {
       // A failed read is not a record of somebody ticking nothing, and this is
       // the exact shape of read that has been turned into "they did nothing"
@@ -176,8 +195,18 @@ export default function CoachChecklists() {
   }, []);
 
   useEffect(() => {
-    if (uid && picked) { void load(uid, picked); void loadTicks(picked); }
-    else { setItems(null); setTicks(null); setTickStatus('ready'); }
+    // Set before either read starts, so a response from the previous client
+    // that is still in flight fails its check on arrival.
+    wanted.current = picked ?? null;
+    if (uid && picked) {
+      // Cleared as well as re-read. The previous client's items and ticks stay
+      // in state until their replacements land, and while they do the header
+      // has already changed to the new client — so the screen would show one
+      // person's lines under another's name for the length of the round trip.
+      setItems(null); setTicks(null);
+      void load(uid, picked); void loadTicks(picked);
+    }
+    else { setItems(null); setTicks(null); setStatus('ready'); setTickStatus('ready'); }
   }, [uid, picked, load, loadTicks]);
 
   const shown = useMemo(() => (items ? [...items].sort((a, b) => a.sort - b.sort) : null), [items]);

@@ -18,6 +18,7 @@ import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn } from '../../src/lib/units';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { useRoster } from '../../src/ui/roster';
+import { isWhole } from '../../src/ui/loadStatus';
 
 export default function Leaderboard() {
   // The COACH's unit, not the client's. This screen is read by the coach.
@@ -96,9 +97,18 @@ export default function Leaderboard() {
           ) : status === 'partial' ? (
             <Notice tone={t.warn} kicker="Roster" title="This board is built from part of your book"
               note="Your roster came back short, so the ranking below leaves people out and the order is not final." />
+          ) : status === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : null}
 
-          {scored.length === 0 && unplaced.length === 0 && status !== 'error' ? (
+          {/* `isWhole`, not `!== 'error'`. `useRoster` starts as `[]` under
+              'loading' and stays there through five-plus sequential round
+              trips, so for the whole of every normal open this screen greeted a
+              coach with "No clients yet" before it had asked — and under
+              'partial' it would have said the same about a book that came back
+              short. analytics.tsx gates the identical sentence on the identical
+              provider with `rosterWhole`; this is that. */}
+          {scored.length === 0 && unplaced.length === 0 && isWhole(status) ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No clients yet — your leaderboard fills in as clients join and log their workouts.
             </Text>

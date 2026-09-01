@@ -21,7 +21,7 @@
 // loaded — but `status` now says whether the list on screen is the server's
 // answer or the absence of one, so the Clients tab can stop asserting "no
 // clients yet" over a failure.
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RosterClient } from '../lib/trainerMock';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
@@ -486,8 +486,51 @@ export function RosterProvider({ children }: { children: ReactNode }) {
 
   // Apply overrides on top of whatever mode the roster came with. What is left
   // here is only ever an answer the server has not taken yet.
-  const shown = Object.keys(modeOverrides).length ? roster.map((c) => (modeOverrides[c.id] ? { ...c, mode: modeOverrides[c.id] } : c)) : roster;
-  return <Ctx.Provider value={{ roster: shown, status, addClient, removeClient, setClientMode, refresh: () => hydrate() }}>{children}</Ctx.Provider>;
+  //
+  // Memoised for the same reason the value below is: a coach with even one
+  // local override got a freshly-mapped array on every render, which would have
+  // defeated the memo entirely.
+  const shown = useMemo(
+    () => (Object.keys(modeOverrides).length ? roster.map((c) => (modeOverrides[c.id] ? { ...c, mode: modeOverrides[c.id] } : c)) : roster),
+    [roster, modeOverrides],
+  );
+
+  // ── Why the four functions below are handed out through a ref ─────────────
+  //
+  // This provider used to hand out an inline object literal, so `useRoster()`
+  // returned a different value on every single render of the provider — and
+  // every one of the four members with it. A consumer that wrote the obvious
+  // thing, `useFocusEffect(useCallback(() => { r.refresh(); }, [r]))`, built a
+  // machine that could not stop: `useFocusEffect` re-runs when its callback's
+  // identity changes, `refresh` re-runs `hydrate`, `hydrate` ends in
+  // `setRoster(withUnread)` with a freshly-built array, the provider re-renders,
+  // `r` is new again, and the callback is new again. app/(trainer)/client.tsx
+  // did exactly that and fired nine Supabase reads per lap, back to back, for
+  // as long as any coach had a client's page open — on every client page, for
+  // every coach. client-training.tsx documents the same hazard and sidesteps it
+  // per-screen; this is the same fix made once, here, where it holds for every
+  // screen that has not been written yet.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's `roster` and `uid` — `removeClient` needs the current
+  // roster to put a client back after a refused delete, and `addClient` needs
+  // the resolved `uid`, so freezing the functions themselves in a `useCallback`
+  // would have frozen those too.
+  const impl = useRef({ addClient, removeClient, setClientMode, hydrate });
+  impl.current = { addClient, removeClient, setClientMode, hydrate };
+  const addClientStable = useCallback((name: string, goal: string, mode: CoachedMode = 'online') => impl.current.addClient(name, goal, mode), []);
+  const removeClientStable = useCallback((id: string) => impl.current.removeClient(id), []);
+  const setClientModeStable = useCallback((id: string, mode: CoachedMode) => impl.current.setClientMode(id, mode), []);
+  const refreshStable = useCallback(() => impl.current.hydrate(), []);
+
+  // Now the value changes identity only when something a consumer can actually
+  // see has changed: the list, or how much of it we trust.
+  const value = useMemo<RosterValue>(
+    () => ({ roster: shown, status, addClient: addClientStable, removeClient: removeClientStable, setClientMode: setClientModeStable, refresh: refreshStable }),
+    [shown, status, addClientStable, removeClientStable, setClientModeStable, refreshStable],
+  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useRoster(): RosterValue {

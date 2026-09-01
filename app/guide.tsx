@@ -19,17 +19,36 @@
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../src/ui/components';
 import { Rule, Section, SectionHead, Ghost } from '../src/ui/kit';
 import { sp, layout, type as ty } from '../src/theme/scale';
 import { VARIANT, VARIANT_LABEL } from '../src/lib/variant';
 import { tabsFor, topicsFor, GUIDE_INTRO, type GuideSection } from '../src/lib/guideContent';
 
+/**
+ * That this screen has been opened. Read by app/(client)/getting-started.tsx,
+ * which lists reading the guide as one of the things worth doing and has to be
+ * able to tick it off.
+ *
+ * Device-local, like every other mark in that list that is not on the account.
+ * A member who reads the guide on their phone and then signs in on a tablet is
+ * offered it again there, which costs one row and is the right way round: the
+ * alternative is a column on `clients` for whether somebody read a help screen.
+ */
+export const GUIDE_SEEN_KEY = 'repple.guide.seen';
+
 export default function Guide() {
   const t = useTheme();
   const router = useRouter();
   const tabs = tabsFor(VARIANT);
   const topics = topicsFor(VARIANT);
+
+  // Opening it is reading it, as far as the checklist is concerned. Anything
+  // finer — scrolled to the end, spent thirty seconds — would be measuring
+  // attention, which this app has no business doing and no way to do honestly.
+  useEffect(() => { AsyncStorage.setItem(GUIDE_SEEN_KEY, '1').catch(() => {}); }, []);
 
   // One section, whichever list it came from. The two are rendered identically
   // on purpose — the difference between them is where they sit and what the

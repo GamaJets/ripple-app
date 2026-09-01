@@ -46,6 +46,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { useTheme } from '../../src/ui/components';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -839,6 +840,8 @@ export default function Scans() {
         </View>
 
         {/* ── the hero: one number leads the screen ───────────────────────── */}
+        <ScreenHelp screen="progress" />
+
         <Hero
           label="Body Fat"
           figure={bfNow ? String(bfNow.value) : '—'}

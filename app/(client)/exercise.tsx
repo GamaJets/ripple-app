@@ -20,8 +20,15 @@
 // that must never be dressed up as rule 3: a placeholder silhouette shown where
 // we have no picture is a lie a client acts on under load.
 import { useEffect, useMemo, useState } from 'react';
-import { Image as ExpoImage } from 'expo-image';
+// expo-image is required through src/ui/nativeModules.ts, never imported. Its
+// entry point resolves to `requireNativeModule('ExpoImage')`, which THROWS on a
+// binary that predates the dependency — and expo-image landed on 30 Aug, three
+// days after the version last moved to 1.1.0, so every binary built 27-29 Aug
+// takes today's bundle and has no ExpoImage in it. A bare import would take
+// this whole screen down while it loaded. React Native's own <Image> is the
+// fallback and is in every binary ever built.
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useBackTo } from '../../src/ui/backTo';
@@ -140,7 +147,7 @@ export default function ExerciseScreen() {
           // the kit is the useful thing to show, kept visibly apart from a
           // demonstration: still, not cross-faded, and captioned as equipment.
           <>
-            <ExpoImage
+            <GuardedImage
               source={{ uri: equipmentUrl }}
               contentFit="contain"
               cachePolicy="disk"

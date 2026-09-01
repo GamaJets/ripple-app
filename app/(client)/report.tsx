@@ -128,6 +128,11 @@ export default function WeeklyReport() {
     comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '',
     comp.balance.length ? comp.balance.join(' ') : '',
   ].filter(Boolean);
+  // One string, so the effect below can depend on the FACTS rather than on a
+  // hand-picked five of the values behind them. An array literal is a new
+  // object on every render and would re-ask the model on every render; the
+  // joined text only changes when something it says has changed.
+  const factText = factLines.join('\n');
   const fallbackNarrative = (() => {
     const bits: string[] = [];
     // "No logged workouts this week" was printed for a failed read as readily
@@ -153,21 +158,45 @@ export default function WeeklyReport() {
     if (isWhole(ciStatus) && checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
     return bits.join(' ');
   })();
+  // Whether any of the five reads behind this page is still in flight. Not the
+  // same question as `reportWhole`: a read that FAILED has finished, and the
+  // report is written from what did land plus the lines above that tell the
+  // model in as many words what it must not claim.
+  const stillReading = logStatus === 'loading' || c.status === 'loading' || mStatus === 'loading'
+    || ciStatus === 'loading' || c.scansStatus === 'loading';
+
   const [narrative, setNarrative] = useState(fallbackNarrative);
+  // The deps used to be `[wk.workouts, wk.days, streak, wDelta, range]`, and
+  // `narrative` is seeded from the FIRST render's `fallbackNarrative` — which,
+  // while the training log is loading, is the literal string "Reading your
+  // week…". For a member with nothing logged in the trailing seven days and
+  // fewer than two points in their weight series, all five of those deps are 0
+  // and stay 0 as the reads land: nothing in the list changes, so the effect
+  // never runs a second time and that sentence is the whole report, for the
+  // whole session. The same silence swallowed the failure wording underneath
+  // it, and `askCoach` was asked once, from the loading-state facts, and never
+  // asked again once the real ones arrived.
+  //
+  // So the effect now depends on the two strings it actually renders and sends
+  // — both plain strings, compared by value, so a render that changes nothing
+  // re-asks nothing — plus the loading flag, because the last read to settle
+  // may leave both strings identical and the model still has to be asked.
   useEffect(() => {
     let alive = true;
     setNarrative(fallbackNarrative);
-    if (!coachAvailable()) return;
+    // Nothing is asked of the model while a read is still in flight: it would
+    // be answering about a week it has only been told half of, and the reply
+    // is written back to the member in the second person as fact.
+    if (stillReading || !coachAvailable()) return;
     (async () => {
       const reply = await askCoach(
-        [{ role: 'user', content: 'Write a warm, concise 2-3 sentence weekly summary for this client from the facts below. Speak directly to them ("you"), name the biggest win and one focus for next week. No preamble, no lists.\n\n' + factLines.join('\n') }],
+        [{ role: 'user', content: 'Write a warm, concise 2-3 sentence weekly summary for this client from the facts below. Speak directly to them ("you"), name the biggest win and one focus for next week. No preamble, no lists.\n\n' + factText }],
         { week: range, name: c.name }
       );
       if (alive && reply && reply.trim()) setNarrative(reply.trim());
     })();
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wk.workouts, wk.days, streak, wDelta, range]);
+  }, [fallbackNarrative, factText, stillReading, range, c.name]);
 
   const bodyItems = [
     // `good: wDelta <= 0` said that down is better whoever is reading it. A

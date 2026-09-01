@@ -44,6 +44,7 @@ import { goalsEmptyLine, parseGoal, goalText } from '../../src/lib/coachPrefs';
 import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
 import { useSessions } from '../../src/ui/sessions';
 import { myTenantCurrency } from '../../src/lib/subscriptions';
+import { currencyGapLine, currencyGapOf } from '../../src/lib/currencyGap';
 import { deltaSign } from '../../src/lib/deltaLabel';
 import { wholeMoney } from '../../src/lib/coachMoney';
 
@@ -135,11 +136,33 @@ export default function TrainerAnalytics() {
   // with none set the amounts are withheld, because "$4,000" invented for a
   // London gym reads as a considered figure rather than as a missing setting.
   const [gymCur, setGymCur] = useState<string | null>(null);
+  // The `error` field, which this screen used to throw away — and throwing it
+  // away is the whole of the second bug on this line.
+  //
+  // `myTenantCurrency` fails on four different things and says which: no gym on
+  // the profile, a gym with no currency set, a refused `profiles` read, a
+  // refused `tenants` read. Only the middle one is "your gym has not set a
+  // currency", and only that one is fixed by a gym owner. Collapsing all four
+  // onto that sentence — at four places on this screen — sent a coach whose
+  // read was refused for thirty seconds to chase an owner over a setting that
+  // was already right. The money figures were correctly withheld throughout;
+  // it was only ever the explanation that was wrong. See src/lib/currencyGap.ts.
+  const [curErr, setCurErr] = useState<string | null>(null);
+  const [curLoading, setCurLoading] = useState(true);
   useEffect(() => {
     let alive = true;
-    myTenantCurrency().then((r) => { if (alive) setGymCur(r.currency); });
+    myTenantCurrency().then((r) => {
+      if (!alive) return;
+      setGymCur(r.currency); setCurErr(r.error); setCurLoading(false);
+    });
     return () => { alive = false; };
   }, []);
+  /** Why there is no code to print, or null when there is one. */
+  const curGap = currencyGapOf({ currency: gymCur, error: curErr, loading: curLoading });
+  /** The sentence that goes where a priced figure would have gone. Takes the
+   *  clause continuing "…, so ___", so each of the six sites below says what IT
+   *  loses rather than something general about amounts. */
+  const noCur = (consequence: string) => currencyGapLine(curGap ?? 'unset', consequence);
   /** A whole-unit figure in the gym's currency, or null — never a bare number
    *  and never a dollar. `fig()` renders the null as a dash. */
   const priced = (n: number | null | undefined) => wholeMoney(n, gymCur);
@@ -235,7 +258,7 @@ export default function TrainerAnalytics() {
             : revenue != null && sessionFee != null
               ? (gymCur
                   ? `${fig(priced(revenue))} at your ${fig(priced(sessionFee))} session rate — Repple does not process this, so it is your own arithmetic, not a payout. What Stripe actually took is on Payments.`
-                  : 'Your gym has not set a currency, so there is no unit to price these sessions in. An owner sets it in the gym settings.')
+                  : noCur('there is no unit to price these sessions in'))
               : 'Set a session rate in your profile to see what that is worth.'}
           arc={revenue != null && goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
           arcLabel="of the revenue goal"
@@ -292,7 +315,7 @@ export default function TrainerAnalytics() {
           {goals.revenue > 0 && revenue == null ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
               {priced(goals.revenue) == null
-                ? 'Your gym has not set a currency, so your monthly revenue target cannot be shown as an amount. An owner sets it in the gym settings.'
+                ? noCur('your monthly revenue target cannot be shown as an amount')
                 : `Monthly revenue target ${priced(goals.revenue)} — progress needs ${sessionsMo == null ? (sessionsStatus === 'loading' ? 'a session count that is still being read' : 'a session count that did not come back whole') : 'a session rate in your profile'}.`}
             </Text>
           ) : null}
@@ -424,11 +447,15 @@ export default function TrainerAnalytics() {
 
               Withheld the way every other amount on this screen is withheld,
               and the reason named rather than left as a dash — the coach can
-              act on "no currency set", and an owner is the one who sets it. */}
+              act on "no currency set", and an owner is the one who sets it —
+              but only when that is what happened. A refused read is labelled as
+              one, because "No currency set" over a query that failed is the
+              same wrong sentence the four longer ones on this screen used to
+              carry. See src/lib/currencyGap.ts. */}
           <SectionHead title="Revenue Trend"
             note={revenue == null ? 'This month not recorded'
               : revHist.delta === 0 ? 'Tracking started'
-              : priced(Math.abs(revHist.delta)) == null ? 'No currency set'
+              : priced(Math.abs(revHist.delta)) == null ? (curGap === 'unset' ? 'No currency set' : 'Currency not read')
               : `${deltaSign(revHist.delta, 0)}${priced(Math.abs(revHist.delta))} vs last mo`}
             onPress={() => router.push('/(trainer)/payments')} />
           {/* This drew the wrong months, not merely undated ones. The
@@ -562,7 +589,7 @@ export default function TrainerAnalytics() {
               ? 'Set a session rate in your profile to see what a new client is worth.'
               : gymCur
                 ? `Every new client at ${fig(priced(sessionFee))}/session adds about ${fig(priced(sessionFee * 4))}/mo.`
-                : 'Your gym has not set a currency, so what a new client is worth cannot be priced here.'}
+                : noCur('what a new client is worth cannot be priced here')}
           </Text>
         </Section>
 
@@ -590,7 +617,7 @@ export default function TrainerAnalytics() {
               amount anywhere on the screen above. */}
           {!gymCur ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-              Your gym has not set a currency, so this target is saved as a plain number and shown as a dash rather than an amount. An owner sets one in the gym settings.
+              {noCur('this target is saved as a plain number and shown as a dash rather than an amount')}
             </Text>
           ) : null}
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Client target</Text>

@@ -1,30 +1,58 @@
-// Client onboarding — a short first-run intake that seeds the plan (goal, stats,
-// diet, allergens). Writes straight into clientData so Meals, Train and targets
-// are personalised from day one, then marks onboarding complete. Reachable from
-// the dashboard "personalise" banner; skippable.
+// Client setup — the ONLY one, now.
 //
-// Re-skinned onto the scale (`src/theme/scale`) and the kit's controls: three
-// weights, no raw type sizes and no serif display face. Steps, order, writes and both routes
-// are unchanged.
+// ── What this was ──────────────────────────────────────────────────────────
 //
-// Honesty fix (same class as the one already fixed in app/onboarding.tsx): the
-// stats step used to arrive pre-filled with weight / height / body-fat read
-// back out of ClientDataProvider — which, for a brand-new account, are the
-// provider's placeholder fallbacks (70 kg, 170 cm, 20%), plus a hardcoded
-// `|| 175` for height. Tapping straight through wrote that invented body to
-// the profile, and every calorie and macro target downstream was computed from
-// it. The three fields now start empty and are only written when the user
-// actually types a plausible figure.
+// Two wizards. app/onboarding.tsx ran straight after sign-up and asked photo,
+// goal, diet, weight, height and coaching mode; then the dashboard's
+// "personalise" banner sent the same person here, and this screen asked name,
+// goal, weight, height, body fat, diet, allergens and injuries. Eight steps,
+// four of the questions asked twice, and the first wizard asked for weight in a
+// box hard-labelled "kg" whatever unit the account reads in — so a member who
+// thinks in pounds answered the same question twice and got two different
+// bodies out of it, the wrong one written first.
 //
-// TF-37: those fields were also labelled "kg" and "cm" and stored what was
-// typed unchanged. This is the first thing a new client ever types, so a client
-// who thinks in pounds began their account with a body that was never theirs —
-// and unlike a display bug it is the stored record that was wrong, which every
-// calorie target, every goal and every coach view is then built from. Weight
-// and height now go through src/lib/units.ts in the unit the account reads in.
-// Body fat stays exactly as it was: a percentage is a percentage in every unit
-// system and there is nothing to convert.
-import { useState } from 'react';
+// Reported as: "There is a lot of information being presented and if users
+// don't know what they are looking at or how to understand it, they will simply
+// find it too complicated and not use the app." The instinct is to add a longer
+// intake. The answer was to delete one of them. app/onboarding.tsx now sends
+// every client here without asking anything, and this is the whole of setup.
+//
+// ── Four questions, and what each one is for ───────────────────────────────
+//
+// The list, the order and the sentence justifying each are in
+// src/lib/firstRun.ts, so a question added later has to say in writing what
+// breaks without it before it can be asked. Dropped from here and asked in
+// context instead — name and photo (the profile header already says "Add your
+// name"), diet and allergens (on Meals, in the collapsible directly above the
+// plan they change), body fat (optional on the body step, and a scan fills it
+// in by itself).
+//
+// ── Shorter still, for somebody the app already knows ──────────────────────
+//
+// `questionsToAsk` drops a question the account can already answer. A member
+// whose coach invited them is not asked how they are coached — two people
+// settled that between them and this screen is one of them. A member who stood
+// on an InBody scan on the way in is not asked for their weight; the app is
+// holding a measured one, and the figure they would type is likelier to be
+// wrong. Both together is a two-question setup.
+//
+// ── Where the progress lives ───────────────────────────────────────────────
+//
+// The ANSWERS go through clientData as each step is left, so they are on the
+// account and on every handset the moment they are given. Only the POSITION is
+// device-local (AsyncStorage, `repple.setup.at`) — losing a position costs a
+// tap and losing an answer costs the answer, so that is the right way round.
+// Force-quitting halfway and relaunching reopens the step you were on.
+//
+// ── The unit question, kept ────────────────────────────────────────────────
+//
+// It is not a settings control that wandered onto a first run. On every other
+// screen the unit decides how a figure is DRAWN; on this step it decides what
+// gets STORED, permanently, before a single calorie target is computed from it.
+// `clients.weight_unit` is NULL until somebody taps a unit, so without this the
+// first thing a new American member ever types is recorded against a unit
+// nobody asked them about.
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,14 +62,19 @@ import { Cta, Ghost, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
+import { peekJoinCode } from '../../src/ui/pendingJoinCode';
 import { weightToKg, heightToCm, heightIn, weightIn, heightParts, kgToLb, cmToIn,
   type WeightUnit, type LengthUnit } from '../../src/lib/units';
 import { dayLabel } from '../../src/lib/bodyFigures';
-import { ALLERGENS, type Allergen } from '../../src/lib/meals';
-import type { Goal, Diet } from '../../src/lib/types';
+import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type CoachingMode, type Goal } from '../../src/lib/types';
 import { INJURY_AREAS, newInjuryId } from '../../src/lib/injuries';
+import {
+  SETUP_QUESTIONS, EMPTY_DRAFT, questionsToAsk, readDraft, resumeAt, type SetupStep,
+} from '../../src/lib/firstRun';
 
 export const ONBOARD_KEY = 'repple.onboarded';
+/** Where setup got to, on this device. See the header. */
+export const SETUP_AT_KEY = 'repple.setup.at';
 
 // The plausible range for a human, in the metric this app stores. Each bound is
 // converted into whichever unit the client is typing in before it is applied,
@@ -58,10 +91,8 @@ const GOALS: { id: Goal; label: string; sub: string }[] = [
   { id: 'tone', label: 'Tone Up', sub: 'Recomp — a bit of both' },
   { id: 'muscle', label: 'Build Muscle', sub: 'Add size and strength' },
 ];
-const DIETS: { id: Diet; label: string }[] = [
-  { id: 'meat', label: 'Meat' }, { id: 'vegetarian', label: 'Vegetarian' }, { id: 'vegan', label: 'Vegan' },
-  { id: 'paleo', label: 'Paleo' }, { id: 'keto', label: 'Keto' },
-];
+
+const MODES: CoachingMode[] = ['online', 'inperson', 'hybrid', 'solo'];
 
 export default function Onboarding() {
   const t = useTheme();
@@ -84,8 +115,7 @@ export default function Onboarding() {
     return { whole: String(Math.round(c.heightCm)), inches: '' };
   })();
 
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState(c.name);
+  const [cmode, setCmode] = useState<CoachingMode>(c.coachingMode);
   const [goal, setGoal] = useState<Goal>(c.goal);
   // Pre-filled from a MEASUREMENT, and blank otherwise.
   //
@@ -98,18 +128,14 @@ export default function Onboarding() {
   // What changed is the provider, not the argument. It no longer invents a
   // body: weight and body fat are the most recent of {InBody scan, hand-typed
   // weigh-in} and are NULL when neither exists. So a figure here is now either
-  // something somebody measured or nothing at all — and asking a client to
-  // re-type a number off a scan the app already holds is its own small insult.
-  //
-  // Still blank when there is nothing. The rule this screen exists to protect
-  // is that a value only ever reaches the profile because a person put it
-  // there, and a prefill from a scan they stood on satisfies that.
+  // something somebody measured or nothing at all.
   const scanW = fromScan.weightKg == null ? '' : String(Math.round((weightIn(fromScan.weightKg, wuInit) ?? 0) * 10) / 10);
   const scanBf = fromScan.bodyFatPct == null ? '' : String(Math.round(fromScan.bodyFatPct * 10) / 10);
   const [weight, setWeight] = useState(scanW);
   const [height, setHeight] = useState(scanHeight.whole);    // centimetres, or whole feet
   const [heightInVal, setHeightInVal] = useState(scanHeight.inches); // inches, imperial only
   const [bf, setBf] = useState(scanBf);
+  const [injAreas, setInjAreas] = useState<string[]>([]);
 
   // Whether the boxes arrived with anything in them, and what to call the
   // source. `scans` is oldest-first, so the newest is the last element.
@@ -119,29 +145,42 @@ export default function Onboarding() {
     ? `${latestScan.source || 'scan'}, ${dayLabel(latestScan.takenAt)}`
     : null;
 
-  // ── The units this account reads in, and where the app asks for them ─────
+  // ── Which questions this account gets, decided once ───────────────────────
   //
-  // This screen used to say the opposite: "Nothing on this screen offers to
-  // change them — a first run is not the place for a settings control, and
-  // Settings and the profile sheet both already own that toggle." That is right
-  // for a preference that only decides how a figure is DRAWN, and it is wrong
-  // for this one, because on this step the unit is not a display preference at
-  // all — it is half of the value being written down. The member types 180 into
-  // a box and this preference is what decides whether the record receives
-  // 81.6 kg or 180 kg, permanently, before a single calorie target is computed
-  // from it. `clients.weight_unit` is NULL until somebody taps a unit, so
-  // without this the first thing a new American member ever types is stored
-  // against a unit nobody asked them about.
-  //
-  // So it is asked here, once, beside the field it governs — not as a banner on
-  // every screen that happens to print a weight, which is a nag that answers
-  // nothing, and not left to Settings, which a member who is about to give the
-  // app their body weight has no reason to visit first. Answering it writes to
-  // the account through `st.set`, so it is answered for good and on every
-  // handset, and Settings shows it as chosen from then on.
-  //
-  // These are read LIVE rather than from the captured `stInit` values: the
-  // whole point is that a tap on this step changes what the boxes below mean.
+  // Latched behind `status`, and null until it is. clientData hydrates from the
+  // device and then from the server, so at the first frame `coachLinked` and
+  // `weightKg` are both empty for everybody — deciding on them would ask a
+  // coached, measured member all four questions and then pull two of them out
+  // from under their thumb a moment later.
+  const [steps, setSteps] = useState<SetupStep[] | null>(null);
+  useEffect(() => {
+    if (steps != null || c.status === 'loading') return;
+    setSteps(questionsToAsk({ coachingAgreed: c.coachLinked === true, weighed: c.weightKg != null }));
+  }, [steps, c.status, c.coachLinked, c.weightKg]);
+
+  // ── Where it reopens ──────────────────────────────────────────────────────
+  const [step, setStep] = useState(0);
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    if (steps == null || restored) return;
+    let gone = false;
+    (async () => {
+      let d = EMPTY_DRAFT;
+      try { const raw = await AsyncStorage.getItem(SETUP_AT_KEY); if (raw) d = readDraft(JSON.parse(raw)); } catch { /* start at the beginning */ }
+      if (gone) return;
+      setStep(resumeAt(steps, d));
+      setRestored(true);
+    })();
+    return () => { gone = true; };
+  }, [steps, restored]);
+
+  // Written on every move, so a force-quit halfway reopens where it was. Best
+  // effort: a position we could not store costs taps, never answers.
+  useEffect(() => {
+    if (steps == null || !restored) return;
+    AsyncStorage.setItem(SETUP_AT_KEY, JSON.stringify({ at: steps[step] })).catch(() => {});
+  }, [steps, step, restored]);
+
   const st = stInit;
   const wu = st.weightUnit;
   const lu = st.lengthUnit;
@@ -156,9 +195,6 @@ export default function Onboarding() {
   const maxWeight = wu === 'lb' ? Math.round(kgToLb(MAX_KG)) : MAX_KG;
   const minHeight = lu === 'in' ? Math.round(cmToIn(MIN_CM)) : MIN_CM;
   const maxHeight = lu === 'in' ? Math.round(cmToIn(MAX_CM)) : MAX_CM;
-  const [diet, setDiet] = useState<Diet>(c.diet);
-  const [avoid, setAvoid] = useState<Allergen[]>(c.avoid || []);
-  const [injAreas, setInjAreas] = useState<string[]>([]);
 
   /**
    * Switch the unit the weight box is being typed in, and carry what is already
@@ -171,8 +207,6 @@ export default function Onboarding() {
    * preference. The value goes out to kilograms and back through the same
    * functions the record uses, and units.test.ts sweeps that trip for
    * losslessness at these grains, so nothing is shaved off by switching twice.
-   *
-   * An unreadable or empty box stays empty rather than becoming a 0.
    */
   const changeWeightUnit = (u: WeightUnit) => {
     if (u === wu) return;
@@ -200,58 +234,111 @@ export default function Onboarding() {
     st.set({ lengthUnit: u });
   };
 
-  const finish = async () => {
-    if (name.trim()) c.setName(name.trim());
-    c.setGoal(goal);
-    // Judge the figure the client actually typed against a bound on the same
-    // scale, then store the metric it converts to. Both steps matter: the check
-    // has to see pounds as pounds, and the record has to receive kilograms.
-    const w = parseFloat(weight);
-    if (w > minWeight && w < maxWeight) { const kg = weightToKg(weight, wu); if (kg != null) c.setWeightKg(kg); }
-    // Height comes from one box in metric and two in imperial, so the typed
-    // magnitude is recovered from the centimetres rather than re-parsed: feet
-    // and inches are only a plausible height taken together.
-    const cm = heightToCm(height, lu, heightInVal);
-    const h = heightIn(cm, lu);
-    if (cm != null && h != null && h > minHeight && h < maxHeight) c.setHeightCm(cm);
-    // Body fat is a percentage and is stored exactly as typed. There is no such
-    // thing as an imperial percentage, and converting one would be nonsense.
-    const b = parseFloat(bf); if (b > 3 && b < 70) c.setBodyFat(b);
-    c.setDiet(diet);
-    c.setAvoid(avoid);
-    injAreas.forEach((area) => c.addInjury({ id: newInjuryId(), area, severity: 'moderate', status: 'active', at: new Date().toISOString() }));
-    try { await AsyncStorage.setItem(ONBOARD_KEY, '1'); } catch { /* ignore */ }
-    router.replace('/(client)/dashboard');
+  /**
+   * Write down the step being left.
+   *
+   * Committed as each step is left rather than all at the end, so a setup
+   * abandoned halfway keeps what it was told. Every one of these is idempotent:
+   * going Back and forward again re-writes the same value.
+   */
+  const commit = (id: SetupStep) => {
+    if (id === 'coaching') c.setCoachingMode(cmode);
+    if (id === 'goal') c.setGoal(goal);
+    if (id === 'body') {
+      // Judge the figure the client actually typed against a bound on the same
+      // scale, then store the metric it converts to. Both steps matter: the
+      // check has to see pounds as pounds, and the record has to receive
+      // kilograms.
+      const w = parseFloat(weight);
+      if (w > minWeight && w < maxWeight) { const kg = weightToKg(weight, wu); if (kg != null) c.setWeightKg(kg); }
+      // Height comes from one box in metric and two in imperial, so the typed
+      // magnitude is recovered from the centimetres rather than re-parsed: feet
+      // and inches are only a plausible height taken together.
+      const cm = heightToCm(height, lu, heightInVal);
+      const h = heightIn(cm, lu);
+      if (cm != null && h != null && h > minHeight && h < maxHeight) c.setHeightCm(cm);
+      // Body fat is a percentage and is stored exactly as typed. There is no
+      // such thing as an imperial percentage.
+      const b = parseFloat(bf); if (b > 3 && b < 70) c.setBodyFat(b);
+    }
+    if (id === 'injuries') {
+      // Only areas that are not already recorded as active. This screen can be
+      // reopened from the dashboard's banner and from Getting Started, and a
+      // second pass over the same pills used to file the same knee twice.
+      const already = new Set(c.injuries.filter((i) => i.status === 'active').map((i) => i.area));
+      injAreas
+        .filter((area) => !already.has(area))
+        .forEach((area) => c.addInjury({ id: newInjuryId(), area, severity: 'moderate', status: 'active', at: new Date().toISOString() }));
+    }
   };
-  const skip = async () => { try { await AsyncStorage.setItem(ONBOARD_KEY, '1'); } catch { /* ignore */ } router.replace('/(client)/dashboard'); };
+
+  /** Setup is over. Mark it, forget the position, and go somewhere useful. */
+  const leave = async (mode: CoachingMode) => {
+    try { await AsyncStorage.setItem(ONBOARD_KEY, '1'); } catch { /* ignore */ }
+    try { await AsyncStorage.removeItem(SETUP_AT_KEY); } catch { /* ignore */ }
+    // A code is waiting when this account was created off the back of a coach's
+    // invite link: app/join.tsx stored it before sending them to sign up, and
+    // /(client)/trainers is the only screen that spends it. Routing on the
+    // coaching answer alone dropped it — somebody who tapped their coach's link
+    // and then answered "On my own" (the honest answer for a client with no
+    // coach YET) landed on the dashboard with their coach's code sitting unspent
+    // in storage and nothing on screen mentioning it.
+    //
+    // A failed read is treated as no code: it costs the prefill, never the
+    // account. And somebody already linked to a coach goes home — Find a
+    // Trainer is a directory of coaches they do not need.
+    let pending: string | null = null;
+    try { pending = await peekJoinCode(); } catch { pending = null; }
+    const needsCoach = mode !== 'solo' && c.coachLinked !== true;
+    router.replace(needsCoach || pending ? '/(client)/trainers' : '/(client)/dashboard');
+  };
+
+  const finish = async () => {
+    if (steps) steps.forEach(commit);
+    await leave(steps && steps.includes('coaching') ? cmode : c.coachingMode);
+  };
+
+  // Available on every step, not only the first. Everything here is skippable
+  // by construction — the app runs on defaults and each of these screens is
+  // reachable again from Getting Started — and a wizard you can only escape
+  // from its first card is the complaint this work exists to answer.
+  const skip = async () => { await leave(c.coachingMode); };
 
   const Chip = ({ on, label, sub, onPress }: { on: boolean; label: string; sub?: string; onPress: () => void }) => (
-    <Pressable onPress={onPress} style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.sm, padding: sp.lg, marginBottom: sp.sm }}>
+    <Pressable onPress={onPress} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={sub ? `${label}. ${sub}` : label}
+      style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.sm, padding: sp.lg, marginBottom: sp.sm }}>
       <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>{label}</Text>
       {sub ? <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3, marginTop: 2, opacity: on ? 0.85 : 1 }}>{sub}</Text> : null}
     </Pressable>
   );
   const Pill = ({ on, label, onPress }: { on: boolean; label: string; onPress: () => void }) => (
-    <Pressable onPress={onPress} style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={label}
+      style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
       <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
   const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md } as const;
 
-  const steps = [
-    // 0 — welcome + name + goal
-    (
+  const CARDS: Record<SetupStep, React.ReactNode> = {
+    coaching: (
       <View>
-        <Text style={{ ...ty.title, color: t.ink }}>Let's Personalise Repple</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>A minute now tailors your workouts and meals to you.</Text>
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Your name</Text>
-        <TextInput value={name} onChangeText={setName} placeholder="First name" placeholderTextColor={t.ink3} autoCapitalize="words" style={[inp, { marginBottom: sp.xl }]} />
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Your main goal</Text>
+        <Text style={{ ...ty.title, color: t.ink }}>How Are You Training?</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>
+          This decides what the rest of the app offers you. You can change it later under Me.
+        </Text>
+        {MODES.map((m) => (
+          <Chip key={m} on={cmode === m} label={COACHING_MODE_LABEL[m]} sub={COACHING_MODE_NOTE[m]} onPress={() => setCmode(m)} />
+        ))}
+      </View>
+    ),
+    goal: (
+      <View>
+        <Text style={{ ...ty.title, color: t.ink }}>What Are You After?</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>Your training plan and your macro split are both built from this.</Text>
         {GOALS.map((g) => <Chip key={g.id} on={goal === g.id} label={g.label} sub={g.sub} onPress={() => setGoal(g.id)} />)}
       </View>
     ),
-    // 1 — stats
-    (
+    body: (
       <View>
         <Text style={{ ...ty.title, color: t.ink }}>Your Stats</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: prefilled ? sp.md : sp.xl }}>Used to set your calorie and macro targets. Leave anything you don't know blank — you can add it later.</Text>
@@ -269,9 +356,7 @@ export default function Onboarding() {
             Not a settings control that has wandered onto a first run. On every
             other screen the unit decides how a figure is drawn; here it decides
             what gets STORED, so it belongs directly above the two boxes it
-            governs. Whichever pill is lit is what the boxes below are read as,
-            and the line under it says whether that was a person's answer or the
-            app's reading of the phone. */}
+            governs. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginBottom: unitsGuessed ? sp.sm : sp.lg }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Weight in</Text>
           <Pill on={wu === 'kg'} label="kg" onPress={() => changeWeightUnit('kg')} />
@@ -286,10 +371,6 @@ export default function Onboarding() {
             in the wrong unit it is out by more than double.
           </Text>
         ) : null}
-        {/* The units were placeholders, and `prefilled` above is the case that
-            makes that fatal: the boxes arrive holding the last scan's figures,
-            so the one screen that decides every calorie target the client ever
-            sees showed three bare numerals with no unit on any of them. */}
         <Field label="Weight" hint={wu} style={{ marginBottom: sp.lg }} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
           <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" style={inp} />
         </Field>
@@ -312,55 +393,51 @@ export default function Onboarding() {
         </Field>
       </View>
     ),
-    // 2 — diet + allergens
-    (
+    injuries: (
       <View>
-        <Text style={{ ...ty.title, color: t.ink }}>How You Eat</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.xl }}>Your meal plan is built around this.</Text>
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet style</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
-          {DIETS.map((d) => <Pill key={d.id} on={diet === d.id} label={d.label} onPress={() => setDiet(d.id)} />)}
-        </View>
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Anything to avoid?</Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-          {ALLERGENS.map((al) => { const on = avoid.includes(al.id); return (
-            <Pill key={al.id} on={on} label={al.label} onPress={() => setAvoid(on ? avoid.filter((x) => x !== al.id) : [...avoid, al.id])} />); })}
-        </View>
-      </View>
-    ),
-    // 3 — injuries / limitations
-    (
-      <View>
-        <Text style={{ ...ty.title, color: t.ink }}>Any Injuries?</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.sm }}>Tell us what to train around. Your coach and your plan will avoid loading these areas and offer safer swaps.</Text>
+        <Text style={{ ...ty.title, color: t.ink }}>Anything to Train Around?</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.sm }}>Your plan and your coach will avoid loading these areas and offer safer swaps.</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Guidance only, not medical advice — see a professional for pain or a diagnosis.</Text>
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Tap any that apply</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
           {INJURY_AREAS.filter((a) => a.id !== 'other').map((a) => { const on = injAreas.includes(a.id); return (
             <Pill key={a.id} on={on} label={a.label} onPress={() => setInjAreas((prev) => (on ? prev.filter((x) => x !== a.id) : [...prev, a.id]))} />); })}
         </View>
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{injAreas.length > 0 ? 'You can add severity, notes, and mark these recovered anytime in Me › Injuries & Limitations.' : 'No injuries? Leave this blank — you can add them later in Me › Injuries.'}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{injAreas.length > 0 ? 'You can add severity, notes, and mark these recovered anytime in Me › Injuries & Limitations.' : 'Nothing to declare? Leave this blank — you can add them later in Me › Injuries.'}</Text>
       </View>
     ),
-  ];
+  };
 
+  // Nothing at all until the question list is settled. A frame of the wrong
+  // wizard is worse than a frame of the background: see the latch above.
+  if (steps == null || !restored) return <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} />;
+
+  const id = steps[step];
   const last = step === steps.length - 1;
+  const q = SETUP_QUESTIONS.find((x) => x.id === id);
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <View style={{ flexDirection: 'row', gap: 5, paddingHorizontal: layout.gutter, paddingTop: sp.md }}>
-        {steps.map((_, i) => <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= step ? t.brand : t.surface3 }} />)}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingTop: sp.md }}>
+        <View style={{ flexDirection: 'row', gap: 5, flex: 1 }}>
+          {steps.map((_, i) => <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= step ? t.brand : t.surface3 }} />)}
+        </View>
+        {/* On every card, not only the first. */}
+        <Ghost label="Skip" onPress={skip} />
       </View>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: sp.xl }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
-        {steps[step]}
+        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Step {step + 1} of {steps.length}</Text>
+        {CARDS[id]}
+        {/* The reason this question is being asked, in the same words the
+            module justifies it with. A setup that says what each answer is FOR
+            is shorter to read than one of the same length that does not. */}
+        {q ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xl }}>Skip this and {q.breaks}.</Text>
+        ) : null}
       </ScrollView>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingBottom: sp.lg }}>
-        {step > 0 ? (
-          <Ghost label="Back" onPress={() => setStep(step - 1)} />
-        ) : (
-          <Ghost label="Skip" onPress={skip} />
-        )}
+        {step > 0 ? <Ghost label="Back" onPress={() => { commit(id); setStep(step - 1); }} /> : null}
         <View style={{ flex: 1 }}>
-          <Cta label={last ? 'Start Training' : 'Continue'} onPress={() => (last ? finish() : setStep(step + 1))} wide />
+          <Cta label={last ? 'Start Training' : 'Continue'} onPress={() => { if (last) { void finish(); } else { commit(id); setStep(step + 1); } }} wide />
         </View>
       </View>
     </SafeAreaView>

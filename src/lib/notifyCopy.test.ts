@@ -1,7 +1,7 @@
 // What a notification about a notice or an invoice is allowed to say.
 // Compile with tsc, run with node.
 //
-// The three defects these assertions are aimed at:
+// The four defects these assertions are aimed at:
 //
 //   1. A NOTICE THAT BECOMES THE APP'S WORDS. The body of a notice
 //      notification is the author's own text and nothing may be appended to
@@ -22,9 +22,17 @@
 //      swallowed every failure. Nothing in the summary below may state a
 //      figure that was not measured, and "could not be read" may never be
 //      rendered as zero.
+//
+//   4. A CLOCK TIME WRITTEN BY A SERVER. `classStartsIn` is the wording a
+//      database trigger uses to tell a member a class seat has opened
+//      (supabase/parts/159). It is a duration and never a time of day, because
+//      the trigger has no time zone to render one in, and a member told the
+//      wrong hour for a class they are now booked into is worse off than one
+//      told nothing. Nothing in this repository can run that plpgsql, so these
+//      assertions are the only proof its five branches are right.
 import {
   NOTICE_BODY_MAX, NOTICE_ROUTE, NOTICE_TITLE_MAX,
-  clip, deliverySummary, invoiceNotification, noticeNotification, pushConsequence,
+  classStartsIn, clip, deliverySummary, invoiceNotification, noticeNotification, pushConsequence,
 } from './notifyCopy';
 import { safeRoute } from './notifyInbox';
 import type { CoachInvoice } from './coachInvoice';
@@ -38,6 +46,11 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
 eq(clip('short', 20), 'short', 'text inside the cap is untouched');
 eq(clip('  padded  ', 20), 'padded', 'the text is trimmed before it is measured');
 ok(clip('x'.repeat(40), 10).length <= 10, 'a clipped string honours the cap it was given');
+// The boundary itself, which `<=` and `<` disagree about and nothing else here
+// distinguishes: a string EXACTLY the length of the cap is inside it and must
+// come back whole, not cut to nine characters and an ellipsis.
+eq(clip('abcdefghij', 10), 'abcdefghij', 'text exactly the length of the cap is untouched');
+eq(clip('abcdefghijk', 10).length, 10, 'and one character over is cut to the cap');
 ok(clip('x'.repeat(40), 10).endsWith('…'), 'a clipped string says it was clipped');
 // A hard cut mid-word reads as a bug; a cut at the last space reads as an
 // abbreviation. But only when the space is late enough to leave most of it —
@@ -103,6 +116,16 @@ ok(asked.body.includes('0007'), 'the number is stated, so two invoices are two t
 ok(asked.body.includes('AED 450.00'), 'the amount names the currency it is charged in');
 ok(asked.body.includes('states'), 'the coach’s claim is worded as their claim');
 ok(/ask them/i.test(asked.body), 'the client is told where the document comes from');
+// What the invoice was FOR. It is the coach's own line and it is the only thing
+// in the body that says which piece of work this is about — an invoice
+// notification without it is a number and an amount and no subject.
+ok(asked.body.includes('Ten personal training sessions'),
+  'the coach’s own description of the work reaches the body intact');
+// And it is capped on the way in, because `description` is free text and the
+// whole body has to fit `left(body, 500)`.
+const wordy = invoiceNotification({ ...base, description: 'session '.repeat(60).trim() });
+ok(wordy.body.length <= NOTICE_BODY_MAX, 'a description nobody stopped typing cannot overflow the column');
+ok(wordy.body.includes('…'), 'and the reader can tell it was cut');
 
 const paid = invoiceNotification({ ...base, kind: 'received' });
 eq(paid.title, 'Your coach recorded a payment', 'a received invoice says who recorded what');
@@ -183,6 +206,63 @@ eq(pushConsequence('coach', 1), 'Sends a push to 1 client straight away, at what
   'one client is a client');
 ok(/every member/.test(pushConsequence('gym', null)),
   'an uncounted audience is "every member", never a figure nobody counted');
+
+/* ── how long until a class starts ─────────────────────────────────────────
+ *
+ * Mirrored band for band by supabase/parts/159 · class_promotion_notify. Every
+ * boundary below is a line in that plpgsql too.
+ */
+
+const T0 = Date.UTC(2026, 8, 1, 12, 0, 0);
+const MIN = 60_000, HR = 60 * MIN, DAY = 24 * HR;
+
+eq(classStartsIn(T0 - 1, T0), 'It has already started.', 'a class one millisecond into the past has started');
+eq(classStartsIn(T0, T0), 'It has already started.', 'and so has one starting exactly now');
+eq(classStartsIn(T0 - 3 * HR, T0), 'It has already started.',
+  'a promotion into a class three hours gone says so rather than counting down');
+
+eq(classStartsIn(T0 + 1, T0), 'It starts in under an hour.', 'a millisecond away is under an hour');
+eq(classStartsIn(T0 + 59 * MIN, T0), 'It starts in under an hour.', 'fifty-nine minutes is still under an hour');
+// The boundary the naive version gets wrong: rounding 30 minutes to the nearest
+// hour gives 1, so "about an hour" would swallow the whole first hour and
+// "under an hour" would be unreachable.
+eq(classStartsIn(T0 + 30 * MIN, T0), 'It starts in under an hour.', 'half an hour is under an hour and not "about an hour"');
+
+eq(classStartsIn(T0 + HR, T0), 'It starts in about an hour.', 'exactly an hour is an hour');
+eq(classStartsIn(T0 + 89 * MIN, T0), 'It starts in about an hour.',
+  'an hour and a half rounds down to one — singular, never "1 hours"');
+eq(classStartsIn(T0 + 91 * MIN, T0), 'It starts in about 2 hours.', 'and just over rounds up to two');
+eq(classStartsIn(T0 + 6 * HR, T0), 'It starts in about 6 hours.', 'six hours');
+eq(classStartsIn(T0 + 23 * HR, T0), 'It starts in about 23 hours.', 'twenty-three hours is still counted in hours');
+
+// 23h40m rounds to 24 hours, which must NOT render as "about 24 hours": it falls
+// through to the day band and comes back as a day.
+eq(classStartsIn(T0 + 23 * HR + 40 * MIN, T0), 'It starts in about a day.', 'twenty-four hours is a day, not "24 hours"');
+eq(classStartsIn(T0 + DAY, T0), 'It starts in about a day.', 'exactly a day');
+eq(classStartsIn(T0 + 30 * HR, T0), 'It starts in about a day.',
+  'thirty hours rounds down to one day — singular, never "1 days"');
+// And the far side of that boundary, so the day band is pinned at both ends.
+eq(classStartsIn(T0 + 36 * HR, T0), 'It starts in about 2 days.', 'a day and a half rounds up to two');
+eq(classStartsIn(T0 + 2 * DAY, T0), 'It starts in about 2 days.', 'two days');
+eq(classStartsIn(T0 + 13 * DAY, T0), 'It starts in about 13 days.', 'a fortnight away is still answerable');
+
+// Nothing here may ever produce a date, a weekday or a time of day: the trigger
+// that writes it has no time zone to be right about. Swept over the whole range
+// rather than checked on one value, because a single new branch is how one would
+// get in.
+for (const ms of [-DAY, -1, 0, 1, 30 * MIN, HR, 5 * HR, 23 * HR, DAY, 9 * DAY]) {
+  const said = classStartsIn(T0 + ms, T0);
+  ok(!/\d{1,2}[:.]\d{2}/.test(said), `“${said}” states no clock time`);
+  ok(!/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/.test(said),
+    `“${said}” names no day and no month`);
+  ok(said.endsWith('.'), `“${said}” is a sentence — the body is concatenated either side of it`);
+}
+
+// A gap in a sentence rather than the word NaN in somebody's notifications.
+eq(classStartsIn(NaN, T0), '', 'an unreadable start time produces nothing at all');
+eq(classStartsIn(T0, NaN), '', 'and so does an unreadable now');
+eq(classStartsIn(Infinity, T0), '', 'infinity is not a start time');
+
 
 if (errors.length) {
   console.error(`notifyCopy: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);

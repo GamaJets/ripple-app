@@ -35,6 +35,7 @@ import { markOutcome } from '../../src/lib/gymSessions';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
+import { isWhole } from '../../src/ui/loadStatus';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -206,7 +207,19 @@ export default function TrainerSchedule() {
     setAddClient(bookFor);
     setAddOpen(true);
   }, [bookFor]);
-  const { slots: availSlots, addSlot: addAvail, removeSlot: removeAvail } = useAvailability();
+  // `status` as well as the slots, and this screen is the ONLY consumer of this
+  // provider — so it was the one provider on the page whose status was
+  // destructured away, on a screen that already refuses to act on an unread
+  // CALENDAR (see `generateSlots` below). `useAvailability` sets 'error' on
+  // three separate paths (src/ui/availability.ts), and under every one of them
+  // `slots` is empty for want of a read. The sheet then said "No weekly slots
+  // yet" and the row beneath the calendar said "Set the times you offer every
+  // week" — to a coach whose week is set and whose clients can still book it.
+  const { slots: availSlots, status: availStatus, addSlot: addAvail, removeSlot: removeAvail } = useAvailability();
+  /** Whether `availSlots` is the whole of this coach's week. Under 'partial'
+   *  the slots listed are real but there are more, so it is still not a set
+   *  anything may be counted from or declared empty. */
+  const availKnown = isWhole(availStatus);
   const [availOpen, setAvailOpen] = useState(false);
   const [blockOpen, setBlockOpen] = useState(false);
   const [blkFrom, setBlkFrom] = useState(9);
@@ -267,6 +280,22 @@ export default function TrainerSchedule() {
   // refused used to be counted in "12 open slots added" and then be bookable by
   // nobody. The count now says how many are actually open.
   const generateSlots = async () => {
+    // The asymmetry this fixes was the giveaway. Twelve lines below, an unread
+    // CALENDAR stops this function with an explicit "could not be read" — but
+    // an unread AVAILABILITY fell straight through to a flat "No availability
+    // set. Add at least one weekly slot first", which is an instruction to
+    // re-enter a week that is already on the server. Following it walks the
+    // coach into the unique index: the duplicate check in `addSlot` runs
+    // against the empty local list, so every re-added slot is refused
+    // server-side and reported as saved-on-this-phone-only.
+    if (!availKnown) {
+      Alert.alert(
+        'Can’t generate slots yet',
+        'Your weekly availability could not be read, so Repple does not know which times you offer — and an empty list here does not mean you have none set.\n\nNothing has been changed and nothing has been lost. Pull down to refresh and try again once you are connected.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
     if (!availSlots.length) { Alert.alert('No availability set', 'Add at least one weekly slot first.'); return; }
     // Generating against a calendar we could not read would open slots on top of
     // sessions that are already there: `addSession`'s overlap check runs against
@@ -324,6 +353,20 @@ export default function TrainerSchedule() {
     if (res === 'saved') return;
     if (res === 'duplicate') {
       Alert.alert('Already on your week', `You already offer ${when} every week, so nothing was added.`, [{ text: 'OK' }]);
+      return;
+    }
+    // "Remove and re-add it" is the right advice for a slot the server never
+    // saw, and exactly the wrong advice for one it already has. When the week
+    // could not be read, `addSlot`'s duplicate check ran against an empty local
+    // list, so a time the coach genuinely already offers sails past it and is
+    // refused by the unique index instead — reported here as 'local'. Telling
+    // them to remove it would delete a slot their clients can book.
+    if (!availKnown) {
+      Alert.alert(
+        'Not added',
+        `${when} was not added, and this may be because you already offer it — your weekly times could not be read, so Repple could not check first.\n\nNothing has been lost and nothing on your week has changed. Try again once you are connected, and do not remove anything on the strength of this.`,
+        [{ text: 'OK' }],
+      );
       return;
     }
     Alert.alert(
@@ -993,10 +1036,16 @@ export default function TrainerSchedule() {
           <ListRow icon="plus" title="Add a Session"
             note={`Book a client or open a slot on ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}`}
             onPress={() => { setAddClient(null); setAddOpen(true); }} />
+          {/* Three notes, not two. "Set the times you offer every week" is an
+              instruction, and giving it to a coach whose week we simply could
+              not read sends them to re-enter times that are already on the
+              server — where the unique index refuses each one. */}
           <ListRow icon="clock" title="Weekly Availability"
-            note={availSlots.length
-              ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
-              : 'Set the times you offer every week'}
+            note={!availKnown
+              ? (availStatus === 'loading' ? 'Reading the times you offer…' : 'Your weekly times could not be read in full — this is not "none set"')
+              : availSlots.length
+                ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
+                : 'Set the times you offer every week'}
             onPress={() => setAvailOpen(true)} />
           <ListRow icon="clock" title="Block Out Time"
             note={`Mark ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)} as unavailable so nobody can book it`}
@@ -1231,9 +1280,22 @@ export default function TrainerSchedule() {
           <Text style={{ ...ty.head, color: t.ink }}>Weekly Availability</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>Set the times you offer every week, then generate open slots.</Text>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {availSlots.length === 0 ? (
+            {/* An empty list under 'error' is UNKNOWN, never "there are none" —
+                src/ui/loadStatus.ts. Said here rather than only in the row that
+                opens this sheet, because this is the screen a coach acts on:
+                the Add control below is right underneath it. */}
+            {availStatus === 'error' ? (
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+                Your weekly times could not be read, so we cannot say which ones you offer. This is
+                not "none set" — anything already on your week is still there and still bookable, so
+                adding a time you already offer will be refused.
+              </Text>
+            ) : availStatus === 'loading' ? (
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>Reading the times you offer…</Text>
+            ) : availSlots.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>No weekly slots yet.</Text>
-            ) : availSlots.map((sl, i) => (
+            ) : null}
+            {availSlots.map((sl, i) => (
               <View key={sl.id}>
                 {i > 0 ? <Rule /> : null}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>

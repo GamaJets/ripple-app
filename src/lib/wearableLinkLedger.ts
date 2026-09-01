@@ -4,7 +4,7 @@
 // the evidence that decision is made from, and it lives outside React state on
 // purpose, for two reasons the reports demanded:
 //
-//   1. THE TWO SCREENS MUST NOT HOLD SEPARATE OPINIONS. Watch & devices and
+//   1. THE TWO SCREENS MUST NOT HOLD SEPARATE OPINIONS. Watch & Devices and
 //      Recovery each ran their own read and each kept its own conclusion in
 //      component state, so one could be showing a verdict the other had already
 //      superseded. The evidence is written here, by the layer that talks to the
@@ -154,7 +154,7 @@ const snapshot = () => revision;
  * Re-render, and re-read, whenever any verdict changes.
  *
  * Screens use the returned number as an effect dependency as well as a render
- * trigger — that is what makes a reconnect on Watch & devices re-run Recovery's
+ * trigger — that is what makes a reconnect on Watch & Devices re-run Recovery's
  * sleep read, rather than leaving it pinned to a key that a re-auth cannot move.
  */
 export function useLinkRevision(): number {

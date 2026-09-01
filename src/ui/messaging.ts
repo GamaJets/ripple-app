@@ -381,6 +381,33 @@ export function useThread(clientId: string | null, role: ChatRole) {
 
   useEffect(() => {
     if (!USE_SUPABASE) { setReady(true); setStatus('ready'); return; }
+    // EVERY piece of thread state is dropped before the new key is read, and
+    // this is the whole of the fix for the worst bug this hook has had.
+    //
+    // The coach's chat screen is a `Tabs.Screen` with `href: null` and no
+    // `unmountOnBlur`, so `router.push('/(trainer)/chat?clientId=…')` for a
+    // second client does not mount a second screen — it re-runs this effect on
+    // the SAME mounted component, with `messages` still holding the first
+    // client's conversation. The read below used to write the state back only
+    // `if (rows.length)`, and the error path did not write it at all, so the
+    // two cases where the new thread contributes no rows — it is empty, or the
+    // read was refused — both left the previous client's private messages on
+    // screen, under the new client's name and avatar, with the composer
+    // addressed to the new client. A coach reviewing their roster one client at
+    // a time would have read one client's messages attributed to another and
+    // could have replied into that misattribution. Clearing here means the
+    // worst case is now an empty thread, which is a thing we are allowed to be
+    // wrong about, rather than a disclosure, which is not.
+    //
+    // `seen` and `unsent` go with it: both are keyed by message id from the
+    // previous thread and would otherwise suppress or annotate bubbles that no
+    // longer exist. `status` returns to 'loading' so chat.tsx does not draw its
+    // empty state over a thread that has not been read yet.
+    setMessages([]);
+    setUnsent({});
+    seen.current = new Set();
+    setReady(false);
+    setStatus('loading');
     let cancelled = false;
     let channel: any = null;
     (async () => {
@@ -426,7 +453,12 @@ export function useThread(clientId: string | null, role: ChatRole) {
           // built from the trimmed page — seeding it with the probe row would
           // have made the realtime handler drop a message we never rendered.
           seen.current = new Set(rows.map((r: any) => String(r.id)));
-          if (rows.length) setMessages(rows.map(rowToMsg));
+          // Unconditional. `rows` IS the thread for this key, and an empty one
+          // means this pair has never written to each other — a fact the screen
+          // is entitled to state. Guarding on `rows.length` only ever preserved
+          // whatever happened to be in state, which after a client switch is
+          // somebody else's conversation.
+          setMessages(rows.map(rowToMsg));
           setStatus(page.truncated ? 'partial' : 'ready');
         }
       } catch { if (!cancelled) setStatus('error'); }

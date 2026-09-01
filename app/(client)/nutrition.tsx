@@ -42,6 +42,7 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, Hero, Card, Cta, Ghost, Meter, QuickRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { weightLabel, kgToLb, type WeightUnit } from '../../src/lib/units';
 
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
@@ -180,8 +181,9 @@ export default function Nutrition() {
   // loading, weightKg is null for the same reason it is null for somebody who
   // has never been scanned, and the screen was telling a client with five
   // scans behind them that they had no measurements and should go and add
-  // some. Not knowing yet is not the same answer as none.
-  const bodyKnown = c.status === 'ready' || c.status === 'partial';
+  // some. Not knowing yet is not the same answer as none — and neither is
+  // knowing that the read failed, which is a third answer the prompt below
+  // reads `c.status` for directly.
   const hasBody = c.weightKg != null && c.bodyFatPct != null;
   const w = c.weightKg ?? 0;
   const bf = c.bodyFatPct ?? 0;
@@ -391,9 +393,9 @@ export default function Nutrition() {
   // failed read did not make this screen blank, it made it generous — a member
   // whose log could not be read was shown their entire day's allowance as
   // "Calories Left", with three empty macro bars and the words "Nothing logged
-  // today" underneath, and ate to it. `bodyKnown` three hundred lines up does
-  // exactly this for the profile read; the food read, which is the one that
-  // moves every day, had nothing.
+  // today" underneath, and ate to it. The prompt below does exactly this for
+  // the profile read; the food read, which is the one that moves every day,
+  // had nothing.
   const dayWhole = isWhole(fl.status);
   // One sum, shared with the Food Log, so the two cannot drift apart again.
   // The budget argument is what stops a day's movement being counted twice:
@@ -408,7 +410,16 @@ export default function Nutrition() {
   const cycleNote = dayType === 'training' ? `+${CYCLE_KCAL} kcal, more carbs` : dayType === 'rest' ? `−${CYCLE_KCAL} kcal, fewer carbs` : undefined;
 
   if (!hasBody) {
-    const looking = !bodyKnown;
+    // 'loading' is the ONLY status that means "still reading". Written as
+    // `!bodyKnown` this was also true under 'error', and 'error' is where this
+    // screen sat: clientData clears the local cache at launch under
+    // USE_SUPABASE, its hydrate effect is keyed on the signed-in uid and does
+    // not re-run on its own, and there is no pull-to-refresh here. So a single
+    // refused measurements read left the Meals tab spinning under "Reading your
+    // latest measurements…" for the whole session, with the two `c.status ===
+    // 'error'` arms below it — one of which is the sentence written for exactly
+    // this case — unreachable, because `looking` had already answered.
+    const looking = c.status === 'loading';
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
         <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -472,6 +483,12 @@ export default function Nutrition() {
             allowance. The label goes neutral with it: "Calories Left" over a
             dash still names the thing being withheld, "Calories Over" would be
             a claim in itself. */}
+        {/* The sentence under the hero is the densest in the app —
+            "0 of 2,350 kcal eaten · 2,648 kcal burned all day, rest included,
+            97 more than your activity level assumes" — and every clause of it
+            is true and load-bearing. This row decodes it, once. */}
+        <ScreenHelp screen="meals" />
+
         <Hero
           label={!dayWhole ? 'Calories' : cal.net >= 0 ? 'Calories Left' : 'Calories Over'}
           figure={dayWhole ? Math.abs(cal.net).toLocaleString() : fig(null)}
@@ -631,15 +648,38 @@ export default function Nutrition() {
 
         <Rule />
 
-        {/* ── allergen / intolerance filter (collapsible) ────────────────── */}
+        {/* ── how you eat, and what to leave out (collapsible) ────────────
+            Diet style used to be asked twice on a first run — once in the
+            post-sign-up wizard and once in the client one — and it is now asked
+            in neither. It is not a question the app breaks without: macrosFor()
+            only reads it to shift the fat share for keto and paleo, and
+            everything else it decides is WHICH MEALS get suggested. So it is
+            asked here, directly above the plan it changes, at the moment
+            somebody first looks at a plan and thinks "I don't eat that".
+
+            Allergens moved in beside it for the same reason and were already
+            here. Fourteen pills is a wall on a first run and a reasonable
+            control on the screen they filter. */}
         <Section>
-          <Pressable onPress={() => setShowAvoid((v) => !v)} accessibilityRole="button" accessibilityLabel="Toggle dietary filters"
+          <Pressable onPress={() => setShowAvoid((v) => !v)} accessibilityRole="button" accessibilityLabel="Toggle diet and dietary filters"
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Avoiding{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to set'}</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>{DIET_LABEL[diet]}{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to change'}</Text>
             <View style={{ transform: [{ rotate: showAvoid ? '90deg' : '0deg' }] }}><Icon name="chevron" size={14} color={t.ink3} /></View>
           </Pressable>
           {showAvoid ? (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.lg }}>
+            <View style={{ marginTop: sp.lg }}>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet style</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.xl }}>
+                {DIETS.map((d) => { const on = diet === d; return (
+                  <Pressable key={d} onPress={() => c.setDiet(d)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={DIET_LABEL[d]}
+                    style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '400', color: on ? t.brandInk : t.ink2 }}>{DIET_LABEL[d]}</Text>
+                  </Pressable>
+                ); })}
+              </View>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Anything to avoid</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {ALLERGENS.map((al) => { const on = c.avoid.includes(al.id); return (
                 <Pressable key={al.id} onPress={() => c.setAvoid(on ? c.avoid.filter((x) => x !== al.id) : [...c.avoid, al.id])}
                   accessibilityRole="button" accessibilityState={{ selected: on }}
@@ -648,6 +688,7 @@ export default function Nutrition() {
                   <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.ink : t.ink2 }}>{al.label}</Text>
                 </Pressable>
               ); })}
+            </View>
             </View>
           ) : null}
         </Section>

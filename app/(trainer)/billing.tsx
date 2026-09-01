@@ -13,10 +13,10 @@
 // The plan names, prices and features come from `PLANS` — the platform's real
 // pricing config — and every Subscribe button is gated on a Stripe price id
 // actually existing, so no plan is offered that cannot be bought.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
@@ -39,7 +39,19 @@ export default function TrainerBilling() {
   // read', so a failed read showed the subscribe screen to somebody already
   // paying — and the obvious thing to do on that screen is pay again.
   const load = useCallback(async () => { setLoading(true); const r = await fetchMySubscription(); setSub(r.sub); setSubErr(r.error); setLoading(false); }, []);
-  useEffect(() => { load(); }, [load]);
+  // On focus, not on mount, and the comment directly above is the reason.
+  //
+  // `subscribe` and `manage` both hand off to `Linking.openURL` — Stripe
+  // Checkout and the Billing Portal are hosted pages in the system browser —
+  // and this screen is never unmounted while the coach is over there. A
+  // mount-only effect therefore read the subscription exactly once, BEFORE the
+  // payment: a coach who completed Checkout came back to the "Choose a Plan"
+  // branch with a live Subscribe button under the plan they had just bought,
+  // and the obvious thing to do on that screen is pay again. The reverse is as
+  // bad in its own way — cancel in the portal, come back, and the screen still
+  // shows an active plan with a renewal date. Every other money screen in this
+  // folder re-reads on focus; this one was the outlier.
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const subscribe = async (plan: string) => {
     setBusy(plan);

@@ -109,11 +109,47 @@ export function useGlucose(personId?: string): GlucoseData {
 
   const readOnly = !!personId;
 
+  // Who "their own readings" means, settled before any read is attempted.
+  //
+  // This was a bare `supabase.auth.getUser()`. That call goes to the NETWORK to
+  // revalidate the token, and with no signal it does not throw — it resolves
+  // with `user: null` behind an AuthRetryableFetchError. So `uid` stayed null,
+  // `target` stayed null, and all three refreshers below returned at their
+  // `if (!target)` guard without ever writing a status. Both statuses start at
+  // 'loading', this effect has no retry, and the screen has no pull-to-refresh,
+  // so Blood Sugar sat on "Still loading." for the entire session — on the one
+  // screen where "we could not read this" and "your sensor recorded nothing"
+  // must never look the same, shown to somebody wearing a CGM.
+  //
+  // getSession() reads the session already stored on the device and answers
+  // offline, which is why every other provider in this folder fronts getUser()
+  // with it — see foodLog.tsx, habits.tsx and coachNutrition.tsx. foodLog takes
+  // the id straight off that session rather than round-tripping for it, and so
+  // does this: the id only ever picks which rows to ask for, and which rows the
+  // account may actually have is decided by row-level security, not here.
+  //
+  // A coach reading a client (personId set) never needed this — `target` is the
+  // id they were handed — so the effect leaves their statuses to the reads.
   useEffect(() => {
+    if (personId) return;
     let alive = true;
-    supabase.auth.getUser().then(({ data }) => { if (alive) setUid(data?.user?.id ?? null); }).catch(() => {});
+    (async () => {
+      let session: { user?: { id?: string } } | null = null;
+      try {
+        const { data } = await supabase.auth.getSession();
+        session = (data?.session as { user?: { id?: string } } | null) ?? null;
+      } catch { /* no session on this device; handled as signed out below */ }
+      if (!alive) return;
+      const id = session?.user?.id ?? null;
+      setUid(id);
+      // Nobody is signed in, or the backend is off. There is no account whose
+      // readings could have been withheld, so an empty list here is the whole
+      // truth rather than a read that failed — and a status left on 'loading'
+      // is a screen that spins for ever, which is the failure this replaces.
+      if (!id || !USE_SUPABASE) { setStatus('ready'); setMealsStatus('ready'); }
+    })();
     return () => { alive = false; };
-  }, []);
+  }, [personId]);
 
   const target = personId ?? uid;
 

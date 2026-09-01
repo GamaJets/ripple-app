@@ -65,6 +65,14 @@ export default function Habits() {
   // read behind it is whole, and withheld otherwise.
   const doneKnown = isWhole(h.status);
   const c = useClientData();
+  // The three targets below live on `clients` and are read once, with no local
+  // copy under USE_SUPABASE. A null one therefore has two meanings — "you have
+  // not set this" and "the row that holds it could not be read" — and this
+  // screen stated the first in both cases, on a screen whose whole purpose is
+  // to show a member the goals they set. `hint` is what each field says under
+  // its own box, so it is where the difference belongs.
+  const goalsRead = c.profileStatus === 'ready' || c.profileStatus === 'partial';
+  const unsetHint = c.profileStatus === 'loading' ? 'reading' : goalsRead ? 'not set' : 'not read';
   const [stepDraft, setStepDraft] = useState('');
   const [sleepDraft, setSleepDraft] = useState('');
   const [waterDraft, setWaterDraft] = useState('');
@@ -111,9 +119,19 @@ export default function Habits() {
               <View key={i} style={{ width: 24, height: 32, borderRadius: radius.sm, borderWidth: hairline, borderColor: i < h.water ? t.brand : t.ring, backgroundColor: i < h.water ? t.brand : 'transparent', opacity: i < h.water ? 0.9 : 1 }} />
             ))}
           </View>
+          {/* `waterGoal` is `clients.water_goal_glasses` and nothing else, with
+              no local copy under USE_SUPABASE — so a null one is "you have not
+              set a goal" only when the row it lives on was actually read. Said
+              flatly, it told a member with a goal on record that they had none,
+              and pointed them at a box below that would have shown them their
+              own number if the same read had worked. */}
           {h.waterGoal == null ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              No daily goal yet — set one under Your daily targets below and these glasses count towards it.
+              {goalsRead
+                ? 'No daily goal yet — set one under Your daily targets below and these glasses count towards it.'
+                : c.profileStatus === 'loading'
+                  ? 'Reading your daily goal…'
+                  : 'Your daily goal could not be read, so there is nothing here to count these glasses towards. It has not been cleared — we just cannot see it right now.'}
             </Text>
           ) : null}
           <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
@@ -248,7 +266,7 @@ export default function Habits() {
               that. So the unit is in the label, not in a placeholder that a
               typed digit erases. */}
           <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
-            <Field label="Steps a day" hint={c.stepGoal != null ? `now ${c.stepGoal}` : 'not set'}>
+            <Field label="Steps a day" hint={c.stepGoal != null ? `now ${c.stepGoal}` : unsetHint}>
             <TextInput
               value={stepDraft} onChangeText={setStepDraft} keyboardType="number-pad"
               placeholder={c.stepGoal != null ? String(c.stepGoal) : 'e.g. 8000'} placeholderTextColor={t.ink3}
@@ -272,7 +290,7 @@ export default function Habits() {
           </View>
 
           <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end', marginTop: sp.lg }}>
-            <Field label="Sleep a night" hint={c.sleepGoalHours != null ? `hours · now ${c.sleepGoalHours}h` : 'hours · not set'}>
+            <Field label="Sleep a night" hint={c.sleepGoalHours != null ? `hours · now ${c.sleepGoalHours}h` : `hours · ${unsetHint}`}>
             <TextInput
               value={sleepDraft} onChangeText={setSleepDraft} keyboardType="decimal-pad"
               placeholder={c.sleepGoalHours != null ? String(c.sleepGoalHours) : 'e.g. 7.5'} placeholderTextColor={t.ink3}
@@ -306,7 +324,7 @@ export default function Habits() {
           </View>
 
           <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end', marginTop: sp.lg }}>
-            <Field label="Water a day" hint={c.waterGoalGlasses != null ? `glasses · now ${c.waterGoalGlasses}` : 'glasses · not set'}>
+            <Field label="Water a day" hint={c.waterGoalGlasses != null ? `glasses · now ${c.waterGoalGlasses}` : `glasses · ${unsetHint}`}>
             <TextInput
               value={waterDraft} onChangeText={setWaterDraft} keyboardType="number-pad"
               placeholder={c.waterGoalGlasses != null ? String(c.waterGoalGlasses) : 'e.g. 8'} placeholderTextColor={t.ink3}
