@@ -1089,13 +1089,23 @@ export default function ClientScreen() {
             note={`${who}'s calorie and macro targets, and the week of meals you write them.`}
             onPress={go('/(trainer)/client-nutrition')} />
 
-          {/* `checklists.tsx` starts on its own client picker and does not read
-              `clientId` off the route — the row this replaced on the dashboard
-              sheet pushed it without one for the same reason. So the summary
-              below is about this client and the screen it opens still asks the
-              coach to pick them. That belongs in checklists.tsx, which is not
-              this change's to edit; the param is passed so it works the moment
-              that screen starts reading it. */}
+          {/* This carried a comment saying `checklists.tsx` "starts on its own
+              client picker and does not read `clientId` off the route", so the
+              summary was about this client and the screen it opened still asked
+              the coach to pick them.
+
+              Both halves were false, and had been since that screen was
+              rewritten. `checklists.tsx:93` reads `clientId` with
+              `useLocalSearchParams` and seeds `picked` from it, and `go()` at
+              line 603 has always pushed `{ clientId: id, name: fullName }`. So
+              the row opened on the right client the whole time.
+
+              Corrected rather than deleted, because a stale comment is worse
+              than none: this one described a gap that was already closed, and
+              the next person to read it would either have "fixed" a working
+              screen or left the row alone believing it was broken. Half the
+              defects in this codebase's own roadmap are comments that outlived
+              the code they described. */}
           <ListRow icon="check" title="Their Daily Checklist"
             note={unasked ?? listLine(itemStatus, activeLines, seen, who)}
             tone={worstStatus(itemStatus, tickStatus) === 'error' ? t.warn : undefined}
