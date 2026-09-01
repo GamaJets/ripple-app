@@ -166,7 +166,7 @@ export default function Library() {
  const rowNote = (v: VideoItem) => `${v.group} · ${v.uploaded ? source(v) : 'No clip yet'}`;
 
  // ── logging what you just did, from the list you are already looking at ──
- const { addWorkout } = useWorkoutLog();
+ const { logWorkouts } = useWorkoutLog();
  const [reps, setReps] = useState('');
  const [kg, setKg] = useState('');
  // Sets banked in the sheet but not yet written. Held here rather than sent one
@@ -215,10 +215,19 @@ export default function Library() {
   // one set logged on its own has no session around it to derive from, and the
   // log renders an absent figure as a dash rather than as a zero somebody could
   // read as "this burned nothing".
-  const saved = await addWorkout({ t: new Date().toISOString(), exercise: open.name, sets: pending });
+  const out = await logWorkouts([{ t: new Date().toISOString(), exercise: open.name, sets: pending }]);
   setSaving(false);
-  if (!saved) {
-   Alert.alert('Not logged', `${open.name} did not reach your training log. It is showing on this phone, but it has not been recorded and will be gone when you next open the app.`);
+  if (out === 'unsent') {
+   // Kept rather than lost, so the sheet closes and the banked sets are
+   // cleared exactly as they are on a real save — leaving them in the form as
+   // well is how one set becomes two.
+   Alert.alert('Saved on this phone', `${open.name} has not reached your training log yet — there is no connection. Nothing is lost: it is saved on this phone and goes up on its own next time you have signal.`);
+   setBanked([]); setReps(''); setKg('');
+   close();
+   return;
+  }
+  if (out === 'refused') {
+   Alert.alert('Not logged', `${open.name} was rejected by your training log, so it has not been recorded and it is not waiting to send. Logging it again as it is will be rejected again.`);
    return;
   }
   notifySuccess();

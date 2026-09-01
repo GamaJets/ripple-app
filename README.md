@@ -1,32 +1,221 @@
-# Repple (production scaffold)
+# Repple
 
-White-label fitness platform — Expo (iOS + Android) + Supabase + Stripe.
-Ported from the validated prototype. See **README-PHASE-0.md** to set up accounts.
+A white-label fitness platform: **three phone apps and a web console, built from
+one codebase against one Supabase project.**
 
-## Runs standalone right now (no accounts needed)
-The app boots on **mock data**, so you can see it in Expo Go before any backend:
-```
-npm install
-npx expo start   # scan the QR with Expo Go on your phone
-```
-It opens a home menu → tap into Dashboard, Workouts, Meal Plan, InBody Scans,
-Book Sessions, My Profile, and the Coach Overview. Every screen is driven by the
-real ported logic (nutrition engine, booking rules, age-from-DOB).
+Everything here runs against a real backend. There is no demo mode, no mock
+dataset and no way to open a screen without signing in — the "Explore the demo"
+entry point and the sample data behind it were both deleted on 30 Aug 2026 so
+that no screen could ever show an invented number (`docs/LAUNCH-CHECKLIST.md`
+§10). If you are looking for the version of this README that said the app
+"boots on mock data" in Expo Go, it described a product that stopped existing
+two releases ago.
 
-Verify the logic with no accounts:
-```
-npm run test:logic     # ALL PRODUCTION-LOGIC TESTS PASSED
-```
+## The three apps
+
+One binary is a point on two axes, both set by environment variables that Metro
+inlines at build time and that `app.config.ts` also reads when it resolves the
+native identity — so the runtime routing and the store record cannot disagree.
+
+| | |
+| --- | --- |
+| **`EXPO_PUBLIC_APP_VARIANT`** | `client` \| `trainer` \| `owner`. Which of the three products this binary is. Unset means `client`. `src/lib/variant.ts` |
+| **`EXPO_PUBLIC_BRAND`** | Whose name is on it. Unset means `repple`. `src/lib/brands.ts`, and `docs/WHITE-LABEL.md` for what shipping a second brand actually costs |
+
+The variant decides which route group under `app/` is reachable. All three
+share `src/lib` (pure logic), `src/ui` (providers and components) and the same
+database.
 
 ## Layout
-- `src/lib/` — tested pure logic: nutrition (+ meal-plan generator), booking, age, format
-- `src/lib/mockData.ts` — demo dataset (swap for Supabase queries)
-- `src/ui/components.tsx` — shared Screen/Card/Tile/Btn primitives
-- `src/theme/tokens.ts` — dark/light design tokens
-- `app/` — Expo Router screens: home + client (dashboard, workouts, nutrition,
-  scans, calendar, profile) + trainer (dashboard)
-- `supabase/` — database. Start with `supabase/README.md`; schema is `supabase/setup.sql`, generated from `supabase/parts/`
 
-## Going live (Phase 1)
-Fill `.env` from `.env.example` after creating the Supabase/Stripe accounts, then
-replace the `MOCK_*` imports with Supabase queries. Checklist in README-PHASE-0.md.
+```
+app/                 Expo Router screens, one group per variant
+  (client)/          the member's app
+  (trainer)/         the coach's app
+  (owner)/           the gym owner's app
+  _layout.tsx        picks the group from EXPO_PUBLIC_APP_VARIANT
+src/lib/             the tested core: logic, formatting, and data access
+src/ui/              providers, shared components, the design kit (src/ui/kit.tsx)
+src/theme/           tokens and the type/space scale
+studio-web/          Next.js owner console; imports src/lib from this repo
+supabase/            database and edge functions — start at supabase/README.md
+web/                 the marketing site, /join and /reset-password
+scripts/             the check:* gates, the SQL bundler, submit and publish
+docs/                the long-form ones; read these before changing behaviour
+```
+
+`src/lib` is the part with tests: 118 suites, all of them plain TypeScript so
+they compile with `tsc` and run in node with no test framework. Most of it is
+React-free and node-runnable, which is what makes that possible; the modules
+that do reach for AsyncStorage or `expo-*` are exactly the ones `check:portal`
+stops the web console from importing.
+
+## Prerequisites
+
+- Node 20.19 or newer (`package.json` `engines`). CI and every EAS profile pin
+  **26**, so that is the version that decides when they disagree.
+- Xcode or Android Studio, for a native dev build.
+- A `.env` with `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`.
+  Without them the app builds and then crashes on launch with
+  `supabaseUrl is required`.
+
+```
+npm install
+```
+
+`postinstall` runs `patch-package`, which is load-bearing: `react-native-health`
+1.19.0 does not compile against React Native 0.86 and `patches/` removes the one
+offending line. Skipping it breaks every iOS build.
+
+## Running the phone apps
+
+**Expo Go cannot run this app.** `expo-video` is in the tree and is native, so a
+development build is required from here on. The note in `package.json` under
+`//native-deps-in-tree` is the full reason.
+
+```
+npm run ios          # expo run:ios     — builds and launches the client app
+npm run android      # expo run:android
+npm start            # expo start       — Metro against an existing dev build
+```
+
+To run one of the other two, set the variant. It reaches `app.config.ts` and the
+bundle from the same place:
+
+```
+EXPO_PUBLIC_APP_VARIANT=trainer npm run ios
+EXPO_PUBLIC_APP_VARIANT=owner   npm run ios
+```
+
+## Running the console
+
+```
+npm run studio       # next dev on http://localhost:3100
+```
+
+`studio-web/` reads `src/lib` from the parent directory through Next's
+`experimental.externalDir`. That is why CI builds it as a separate job: a shared
+module that reaches for `react-native`, AsyncStorage or `expo-*` compiles fine
+for the phone and dies at import in the browser. `npm run check:portal` is the
+gate on that boundary and it runs on every push.
+
+## The database
+
+There are **no CLI migrations.** Schema is applied by pasting SQL into the
+Supabase dashboard; the CLI is used only to deploy the 16 edge functions.
+`supabase/README.md` is the authority and is short.
+
+- `supabase/parts/` — 147 numbered files, one concern each. The number prefix is
+  the dependency order and is load-bearing. **This is the source.**
+- `supabase/setup.sql` — GENERATED by concatenating every part in order, and
+  committed so a fresh project can be built from one paste. Never hand-edited.
+
+```
+npm run db:build     # regenerate setup.sql from parts/
+npm run db:check     # fail if setup.sql is stale — this one is in check:all
+```
+
+The bundle once drifted 101 statements ahead of its parts, which is why the
+check exists.
+
+## Checks and gates
+
+`npm run check:all` is **the** list. Every gate is in it, and the three entry
+points that run gates all run that one script:
+
+| | |
+| --- | --- |
+| `npm run preflight` | `check:all` plus the tests under three timezones and the LIVE schema probe |
+| `.github/workflows/ci.yml` | `check:all` on every push and pull request, plus the console build |
+| `scripts/publish.sh` | `check:all` plus the live schema probe, before any OTA |
+
+The only permitted difference is upward and it is about credentials: everything
+inside `check:all` is a source read or a local build and needs no key, so it
+behaves identically on a laptop, on a CI worker and immediately before a
+release. `check:schema` in its live form asks the real database what its columns
+are and needs the Supabase URL and publishable key, so preflight and publish add
+it on top while CI runs the `--offline` form that compares the app against
+`setup.sql`.
+
+This used to be three hand-copied lists that disagreed in both directions, and
+`check:prose` and `check:decimals` were in none of them — they existed as
+scripts that nothing ran. The `//check:all` note in `package.json` is the
+write-up. **Add a new gate to that list, not to one of the three callers.**
+
+What the gates are for is written at the top of each script in `scripts/`, at
+length, naming the bug that produced it. They are not style rules:
+
+| | |
+| --- | --- |
+| `check:reads` | a Supabase read can tell failure from emptiness, so a refused query never renders as "you have no clients" |
+| `check:reachable` | no screen exists that nothing in the app links to |
+| `check:attribution` | the RepDB credit the exercise catalogue's licence requires is actually rendered |
+| `check:prose` | no sentence begins with an em dash left by a missing value |
+| `check:decimals` | a field that can hold 16.5 has a decimal point on its keyboard |
+| `check:caps` | labels sitting next to each other are capitalised the same way |
+| `check:deltas` | a movement of zero is not signed `+` or `−` |
+| `check:currency` | no screen assumes a currency; `money()` requires one |
+| `check:native` | the native modules and iOS permission strings a store build needs |
+| `check:traps` | runtime traps a compiler cannot see, such as an env var read in a form Babel cannot inline |
+| `check:roundtrip` | every field a coach can edit survives being saved and reopened |
+| `check:bundle` | Metro resolves the whole tree for both platforms — the slowest, and last |
+
+Each also runs on its own, which is what you want while fixing one:
+
+```
+npm run check:caps
+```
+
+## Tests
+
+```
+npm test             # every suite, once
+npm run test:logic   # the core logic suite alone, for a fast loop
+npm run test:zones   # the whole suite three times, in three timezones
+npm run typecheck    # tsc --noEmit
+npm run mutate       # breaks assertions on purpose to prove they can fail
+```
+
+Suites are plain scripts: they push failures into an `errors` array and
+`process.exit(1)`. No test framework, and deliberately not `node:assert`. A new
+suite must be registered in **both** `tsconfig.test.json`'s `files` and the
+`test` script, or it compiles and never runs.
+
+`mutate` takes minutes rather than seconds, so it is deliberately outside
+`preflight`.
+
+## Shipping
+
+Builds are EAS, one profile per app per stage — `production`,
+`production-coach`, `production-owner`, and the matching `preview` and
+`development` profiles. Each sets its own `EXPO_PUBLIC_APP_VARIANT`.
+
+```
+node scripts/submit.mjs --profile production-coach --platform ios
+scripts/publish.sh "what changed"        # OTA to all six channels
+```
+
+Do not run `eas submit --latest`: `--latest` picks the newest build for the
+*platform*, not for the profile, and one repo builds three apps. On 27 Aug 2026
+that sent three submissions to the wrong listing. `scripts/submit.mjs` reads the
+bundle identifier off the build and refuses a mismatch; `docs/LAUNCH-CHECKLIST.md`
+§7 is the story.
+
+`scripts/publish.sh` refuses to publish a working tree that is not a commit, and
+bundles from a detached worktree at HEAD, because `eas update` bundles the
+working tree and several agents write to this one at once. Six channels, not
+three: the Android `preview*` APKs are the only installable Android artifacts
+and they listen on their own channels.
+
+## Where to read next
+
+| | |
+| --- | --- |
+| `docs/LAUNCH-CHECKLIST.md` | things deliberately wrong until the apps are live, and what breaks when they are |
+| `docs/WHITE-LABEL.md` | what a second brand actually costs, section by section |
+| `docs/OWNER-PORTAL.md` | the owner app's data model and what is still guesswork |
+| `docs/DESIGN.md` | the kit, the scale, and the rules the screens are built to |
+| `docs/UNIVERSAL-LINKS.md` | AASA, assetlinks, and why a link opens the browser |
+| `docs/UNBLOCK-RUNBOOK.md` | when a build or a submission is stuck |
+| `supabase/README.md` | applying schema, and which half the CLI is for |
+| `docs/history/` | superseded documents, kept for the reasoning in them |

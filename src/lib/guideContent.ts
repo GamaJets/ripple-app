@@ -324,7 +324,7 @@ const OWNER_TABS: GuideSection[] = [
       'How many of your trainers are flagged, and how many clients are with them.',
       'Trainer Health ranks your coaches worst first. Tap one for the detail behind the score.',
       'A sessions trend sits above that ranking, and client load per trainer below it.',
-      'Revenue Analytics, Financial Health, Promotions and Classes & Payroll open from the foot of the screen.',
+      'Revenue Analytics, Financial Checks, Promotions and Classes & Payroll open from the foot of the screen.',
     ],
   },
   {

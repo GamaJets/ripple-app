@@ -135,12 +135,6 @@ export default function Welcome() {
     await flushPendingReferral();
     router.replace('/onboarding');
   };
-  const provider = async (p: 'apple' | 'google') => {
-    setNotice(null);
-    try { await auth.signInWithProvider(p); router.replace('/'); }
-    catch (e: any) { setNotice(e?.message || 'Sign-in failed.'); }
-  };
-
   // One field style, shared with <PasswordField> (which lifts the marginBottom
   // onto its wrapper so the eye toggle stays centred on the input itself).
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md } as const;
@@ -279,18 +273,33 @@ export default function Welcome() {
               label={busy ? 'Please Wait…' : mode === 'up' ? 'Create Account' : 'Sign In'} />
           </View>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginVertical: sp.xl }}>
-            <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
-            <Text style={{ ...ty.caption, color: t.ink3 }}>or</Text>
-            <View style={{ flex: 1, height: hairline, backgroundColor: t.ring }} />
-          </View>
+          {/* There is no "Continue with Apple" or "Continue with Google" here,
+              and their absence is the fix rather than an oversight.
 
-          <Pressable onPress={() => provider('apple')} accessibilityRole="button" accessibilityLabel="Continue with Apple" style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', marginBottom: sp.sm, flexDirection: 'row', justifyContent: 'center', gap: sp.sm }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Continue with Apple</Text>
-          </Pressable>
-          <Pressable onPress={() => provider('google')} accessibilityRole="button" accessibilityLabel="Continue with Google" style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Continue with Google</Text>
-          </Pressable>
+              Both buttons shipped on this screen — the FIRST screen of all
+              three apps — wired to auth.signInWithProvider, which is one line:
+              `throw new Error('Social sign-in is not set up yet…')`. So the two
+              most prominent controls under the sign-in button were guaranteed
+              to fail, on every install, for everybody, including the App Store
+              and Play reviewers who tap exactly these first. Apple rejects
+              builds whose sign-in options do not work, and a person who tries
+              Apple, then Google, then gives up has not reached the email form
+              that would have worked.
+
+              They are gone rather than disabled or relabelled "coming soon",
+              because a greyed-out button is the same dead end with a nicer
+              face: it still advertises a way in that does not exist, and it
+              still costs the reader the seconds they spend deciding whether it
+              is their phone that is broken. Email above and the phone code
+              above that are the two doors, both of them real.
+
+              What it would take to actually offer these is written out in full
+              at signInWithProvider in src/ui/auth.tsx, next to the throw. It is
+              not one afternoon: none of the per-brand OAuth client ids exist
+              yet, and Sign in with Apple needs a native dependency that is not
+              in package.json, which means a new binary and not an
+              over-the-air update. Put the buttons back in the same commit that
+              finishes that, and not before. */}
 
           <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>{USE_SUPABASE ? 'Your account is securely stored. By continuing you agree to the Terms & Privacy Policy.' : 'Not connected to Repple — any email/password works and stays on this device. Real accounts activate when the backend is connected.'}</Text>
           </>

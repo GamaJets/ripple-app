@@ -294,7 +294,7 @@ export const OWNER_NAV: NavItem[] = [
   // be: "Platform health" and "Trainers & Billing — Roster, invites, plans &
   // MRR", when what a trainer pays Repple was removed from that screen on the
   // grounds that it is not a gym owner's business. Members, Rota, Equipment,
-  // Deletion Requests, Revenue, Financial Health, Promotions, Classes, the
+  // Deletion Requests, Revenue, Financial Checks, Promotions, Classes, the
   // Library and Settings were all unreachable from search.
   //
   // Ops carries the session-fee keyword deliberately: three screens tell an
@@ -305,7 +305,7 @@ export const OWNER_NAV: NavItem[] = [
   { key: 'trainers', label: 'Trainers', note: 'Your coaching staff, what they delivered, and invites', route: '/(owner)/trainers', icon: 'people', keywords: 'roster invite staff coach delivered sessions health' },
   { key: 'members', label: 'Members', note: 'Memberships, freezes, cancellations and taking a payment', route: '/(owner)/members', icon: 'people', keywords: 'member membership freeze cancel payment plan renew desk' },
   { key: 'revenue', label: 'Revenue', note: 'Sessions delivered, the trend and value per client', route: '/(owner)/revenue', icon: 'trending', keywords: 'revenue forecast unit economics value per client sessions trend' },
-  { key: 'financials', label: 'Financial Health', note: 'KPIs and a review of the figures you enter', route: '/(owner)/financials', icon: 'chart', keywords: 'financial health kpi retention margin expenses review' },
+  { key: 'financials', label: 'Financial Checks', note: 'KPIs and a rule-based read of the figures you enter', route: '/(owner)/financials', icon: 'chart', keywords: 'financial health kpi retention margin expenses review' },
   { key: 'classes', label: 'Classes & Payroll', note: 'Class fill rates, and trainer pay from check-ins', route: '/(owner)/class-analytics', icon: 'calendar', keywords: 'class attendance fill rate payroll pay per attendee analytics' },
   { key: 'brand', label: 'Brand Studio', note: "Your gym's name and colour, saved to the gym", route: '/(owner)/brand', icon: 'palette', keywords: 'white label brand name colour theme palette rename' },
   { key: 'growth', label: 'Growth', note: 'Signups, funnel & promos', route: '/(owner)/growth', icon: 'trending', keywords: 'marketing funnel promos' },

@@ -81,7 +81,7 @@ function dayLabel(day: string): string {
 export default function MyTraining() {
   const t = useTheme();
   const router = useRouter();
-  const { log, status, addWorkout, addWorkouts, removeWorkout, reload } = useWorkoutLog();
+  const { log, status, logWorkouts, removeWorkout, reload } = useWorkoutLog();
   const settings = useSettings();
   const wu: WeightUnit = settings.weightUnit;
   const loadNote = convertedNote(wu);
@@ -128,10 +128,12 @@ export default function MyTraining() {
     // No `kcal`. A strength session records reps and weight; nobody measured
     // the energy, and an absent figure reads as a dash rather than as a number
     // this screen made up.
-    const saved = await addWorkouts(lifts.map((l) => ({ t: at, exercise: l.exercise, sets: l.sets })));
+    const out = await logWorkouts(lifts.map((l) => ({ t: at, exercise: l.exercise, sets: l.sets })));
     setBusy(false);
-    setText('');
-    if (saved) {
+    // Cleared for the two outcomes that KEPT what was typed. A refusal throws
+    // the entries away, and the text box is then the only copy of them.
+    if (out !== 'refused') setText('');
+    if (out === 'stored') {
       notifySuccess();
       // Only AFTER the log landed. Minting a catalogue row for a movement whose
       // workout was refused would put a name in the library that nothing
@@ -140,12 +142,20 @@ export default function MyTraining() {
       Alert.alert('Logged',
         `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to your own training for today.`
         + (minted.length ? `\n\n${listNames(minted)} ${minted.length === 1 ? 'was' : 'were'} not in the exercise library, so ${minted.length === 1 ? 'it has' : 'they have'} been added to it.` : ''));
+    } else if (out === 'unsent') {
+      // Nobody answered, so the entries were kept — on this phone, in the log,
+      // counted, and sent on the next launch that reaches a server. They are
+      // still not IN the log, so no exercise is minted: the library is shared,
+      // and its rows are earned by a workout the server has accepted.
+      Alert.alert('Saved on this phone',
+        `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet — nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and go up on their own the next time you have signal.`);
     } else {
-      // `addWorkouts` resolves false when the row never reached the server. The
-      // entry is on screen and on this phone only, and saying "logged" here
-      // would be the same event as a real save.
+      // The server read this and declined it, so it is not recorded and it is
+      // not waiting either. Saying "logged" here would be the same event as a
+      // real save; saying "it will be gone at the next launch" would be the
+      // same event as the one above.
       Alert.alert('Not saved',
-        'We could not reach your training log. What you typed is showing on this phone, but it has not been recorded and will be gone when you next open the app.');
+        'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box — sending it again as it is will be rejected again.');
     }
   };
 
@@ -215,19 +225,27 @@ export default function MyTraining() {
       sets: Array.from({ length: s }, () => [r, kg] as [number, number]),
     };
     setBusy(true);
-    const saved = await addWorkout(entry);
+    const out = await logWorkouts([entry]);
     setBusy(false);
-    if (saved) {
+    if (out === 'stored') {
       notifySuccess();
       setExercise(''); setSetCount(''); setReps(''); setLoad('');
       const minted = await mintAll([name]);
       Alert.alert('Logged', `${name} added to your own training for today.`
         + (minted.length ? '\n\nIt was not in the exercise library, so it has been added to it.' : ''));
+    } else if (out === 'unsent') {
+      // Kept. The boxes are cleared here and not below, because the lift is on
+      // this phone and in the list — leaving it in the form as well is how the
+      // same set gets logged twice. No mint: the library's rows are earned by a
+      // workout the server has accepted.
+      setExercise(''); setSetCount(''); setReps(''); setLoad('');
+      Alert.alert('Saved on this phone',
+        `No connection, so ${name} has not reached your training log yet — nothing is lost. It is saved here and goes up on its own the next time you have signal.`);
     } else {
       // The boxes are deliberately NOT cleared. What was typed is the only copy
       // of it that exists, and emptying the form would take that away on the
       // one path where the coach may want to try again.
-      setProblem('Not saved — we could not reach your training log. This lift is showing on this phone only and will be gone when you next open the app.');
+      setProblem('Not saved — your training log rejected this lift, so it is not recorded and it is not waiting to send. Saving it again as it is will be rejected again.');
     }
   };
 

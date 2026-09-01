@@ -44,6 +44,12 @@ import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { est1RM } from '../../src/lib/streaks';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+// Three outcomes, not two. Since src/ui/workoutLog.tsx was brought onto the
+// offline queue a write that nobody answered is KEPT — on this phone, in the
+// log, counted, and sent on the next launch that reaches a server — so every
+// "it will be gone when you next open the app" on this screen had become false
+// in the one direction that makes somebody retype an hour of training.
+import { unsentNote, type WriteOutcome } from '../../src/lib/offlineQueue';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos, type VideoItem, type LibraryStatus } from '../../src/ui/exerciseVideos';
@@ -229,7 +235,7 @@ export default function Train() {
   const _cp = useAssignedPrograms().getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
-  const { log: workoutLog, status: workoutLogStatus, addWorkouts, retryWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
+  const { log: workoutLog, status: workoutLogStatus, unsent: unsentWorkouts, logWorkouts, flushWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
   // The unit the member reads a LOAD in. Deliberately left out of TF-37 —
   // barbell plates are metric hardware and tools.tsx does its plate maths
   // against a metric rack — and asked for since: "Need to be able to select kg
@@ -270,13 +276,19 @@ export default function Train() {
     // No kcal — see `buildEntries` in the session runner. The figure this
     // used to carry was `volume / 60 + sets * 8`, which knows nothing about
     // the person doing the lifting.
-    const saved = await addWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets })));
-    setNlw('');
-    // "Logged" was said before anybody had asked the server. `addWorkouts`
-    // resolves false on a refused write, and this is the sentence that stops it
-    // being the same event as a successful one.
-    if (saved) Alert.alert('Logged', `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
-    else Alert.alert('Not saved', 'We could not reach your training log. What you typed is showing on this phone, but it has not been recorded and will be gone when you next open the app.');
+    const out = await logWorkouts(lifts.map((l) => ({ t: nowISO, exercise: l.exercise, sets: l.sets })));
+    // The box is emptied for the two outcomes that KEPT what was typed, and not
+    // for the one that threw it away. A refused write leaves the text where it
+    // is, which is the only copy of it that exists — the same reasoning
+    // my-training.tsx gives for not clearing its boxes.
+    if (out !== 'refused') setNlw('');
+    // "Logged" was said before anybody had asked the server. This is the
+    // sentence that stops a write nobody answered being the same event as a
+    // successful one — in both directions, since it is also no longer the same
+    // event as a lost one.
+    if (out === 'stored') Alert.alert('Logged', `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
+    else if (out === 'unsent') Alert.alert('Saved on this phone', `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet — nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and ${lifts.length === 1 ? 'goes' : 'go'} up on their own the next time you have signal.`);
+    else Alert.alert('Not saved', 'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box — sending it again as it is will be rejected again.');
   };
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
@@ -405,13 +417,25 @@ export default function Train() {
     if (!pending.length || importing) return;
     setImporting(true);
     try {
-      const saved = await addWorkouts(await Promise.all(pending.map(withHr)));
+      const out = await logWorkouts(await Promise.all(pending.map(withHr)));
       // Marked imported ONLY once the rows are on the server. This used to mark
       // them regardless, so a refused write both lost the session and struck it
       // off the list of things still worth offering — the watch would never
       // suggest it again, and nothing said why.
-      if (!saved) {
-        Alert.alert('Not imported', 'We could not reach your training log, so nothing was imported. Your watch still has these — try again when you have signal.');
+      //
+      // A QUEUED import is deliberately not marked either, and that is the
+      // conservative side of the one place this screen can be wrong twice. The
+      // mark is permanent and it is the only record that a session was ever
+      // brought across, so retiring the row against a write that has not landed
+      // would strike it off for good if the queue never drains. Offering it
+      // again is survivable: `isLogged` already matches the queued entries in
+      // `workoutLog`, so the row disappears on its own once they are in.
+      if (out !== 'stored') {
+        Alert.alert(
+          out === 'unsent' ? 'Saved on this phone' : 'Not imported',
+          out === 'unsent'
+            ? 'No connection, so these have not reached your training log yet — they are saved on this phone and go up on their own next time you have signal. Your watch still has them either way.'
+            : 'Your training log rejected these, so nothing was imported and nothing is waiting to send. Your watch still has them.');
         return;
       }
       markImported(pending.map((sm) => sm.id));
@@ -820,7 +844,7 @@ export default function Train() {
     const kIn = extra.kcal ?? 0;
     const kcal = rec ? null : (kIn > 0 ? kIn : cardioKcal(activity, m, cd.weightKg));
     setCardioLog([{ type: activity, mins: m, dist: d, unit: u, kcal }, ...cardioLog]);
-    const saved = await addWorkouts([{
+    const out = await logWorkouts([{
       t: new Date().toISOString(),
       exercise: activity,
       cardio: { mins: m, dist: d, unit: u, ...(wt > 0 ? { watts: wt } : {}) },
@@ -831,11 +855,22 @@ export default function Train() {
       ...(extra.zones && zoneSecondsTotal(extra.zones) > 0 ? { zones: extra.zones } : {}),
     }]);
     // A timed session is the one write in this app that cannot be redone from
-    // memory — nobody can retype forty minutes of heart-rate zones — so a
-    // refused write has to be said rather than swallowed.
-    if (!saved) {
+    // memory — nobody can retype forty minutes of heart-rate zones — so the
+    // outcome has to be said rather than swallowed. It is also the write that
+    // gained the most from the queue: 'unsent' used to mean those zones were
+    // gone at the next launch, and now means they are on the phone waiting.
+    const zoned = !!extra.zones && zoneSecondsTotal(extra.zones) > 0;
+    if (out === 'unsent') {
+      Alert.alert('Saved on this phone',
+        `No connection, so your ${KIND_LABEL[kind].toLowerCase()} session has not reached your training log yet${zoned ? ' — heart-rate zones and all' : ''}. Nothing is lost: it is saved here and goes up on its own next time you have signal.`);
+      // True, and the reason this is not `false`: the session is kept, so the
+      // caller may clear its form. Nothing here says it was recorded.
+      tapLight();
+      return true;
+    }
+    if (out === 'refused') {
       Alert.alert('Not saved',
-        `Your ${KIND_LABEL[kind].toLowerCase()} session did not reach the server. It is showing below on this phone, but it has not been recorded${extra.zones && zoneSecondsTotal(extra.zones) > 0 ? ', and the heart-rate zones go with it' : ''}.`);
+        `Your training log rejected this ${KIND_LABEL[kind].toLowerCase()} session, so it has not been recorded${zoned ? ', and the heart-rate zones go with it' : ''}. It is not waiting to send either — logging it again as it is will be rejected again.`);
       return false;
     }
     tapLight();
@@ -888,14 +923,22 @@ export default function Train() {
       return { t: nowISO, exercise: nameOf(e), sets: setPairs };
     }).filter(Boolean) as WorkoutEntry[];
     if (!entries.length) return;
-    const saved = await addWorkouts(entries);
-    // The draft is cleared only when the session is really on the server. It is
-    // the only other copy of what was typed, and throwing it away on a refused
-    // write is how an hour's training disappears — the exact complaint the
-    // draft was added for.
-    if (!saved) {
+    const out = await logWorkouts(entries);
+    // The typed sets are cleared only when something durable is holding them.
+    // They are the only other copy of what was entered, and throwing them away
+    // on a refused write is how an hour's training disappears — the exact
+    // complaint this screen was changed for. A QUEUED write is durable: the
+    // provider has written the entries to this device and will send them.
+    if (out === 'refused') {
       Alert.alert('Not saved',
-        'We could not reach your training log, so this session has not been recorded. Your sets are still here — leave the screen and come back when you have signal, and save again.',
+        'Your training log rejected this session, so it has not been recorded and it is not waiting to send. Your sets are still here — but saving them again as they are will be rejected again.',
+        [{ text: 'OK' }]);
+      return;
+    }
+    if (out === 'unsent') {
+      setLogged({}); setCustomEx([]);
+      Alert.alert('Saved on this phone',
+        `No connection, so ${entries.length === 1 ? 'this exercise has' : `these ${entries.length} exercises have`} not reached your training log yet — nothing is lost. They are saved here, they are listed below, and they go up on their own next time you have signal. Your streak, records and your coach's dashboard will not know about them until then.`,
         [{ text: 'OK' }]);
       return;
     }
@@ -1003,6 +1046,21 @@ export default function Train() {
           arcLabel="of today's exercises done"
           onPress={() => router.push('/(client)/week')}
         />
+        {/* What is on this phone and nowhere else.
+            Standing here, above the Start button, for the reason the food log
+            and the check-in put theirs at the top of their screens: it is the
+            answer to "did that actually send?", and somebody who cannot find
+            the answer logs the session a second time. `unsentNote` is the one
+            wording for it across all four stores — see the note on it in
+            src/lib/offlineQueue.ts, which is careful that the work reads as
+            SAFE without reading as delivered.
+            Counted in exercises, which is what an entry is: one row per
+            movement, holding all of its sets. */}
+        {unsentNote(unsentWorkouts, 'exercise') ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+            {unsentNote(unsentWorkouts, 'exercise')} Until then your streak, your records and your coach's dashboard are short of them.
+          </Flag>
+        ) : null}
         {start.canStart ? (
           <Cta label="Start Workout" wide onPress={() => setSession(true)} />
         ) : start.note && start.safety ? (
@@ -1796,7 +1854,7 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={addWorkouts} onRetry={retryWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -2379,7 +2437,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, injuries, videos, videoStatus, preferTrainerId, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<boolean>; onRetry: (entries: WorkoutEntry[]) => Promise<boolean>; onClose: () => void }) {
+function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, injuries, videos, videoStatus, preferTrainerId, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin);
@@ -2409,7 +2467,13 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   // What happened when the session was written. 'saving' is a real state on a
   // gym's wifi and the Done button must not be tappable through it; 'failed'
   // is the one this screen used to have no word for at all.
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  // Four outcomes, because there are four. 'queued' is the one the offline
+  // queue added and it is a genuinely different thing to be told: the session
+  // is NOT in the log, and it is NOT lost either, and collapsing it into either
+  // neighbour is a lie in one direction or the other — "Logged to your history"
+  // over sets no server has seen, or "Close and Lose These Sets" over sets that
+  // are safely on the phone and would have gone up on their own.
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'queued' | 'failed'>('idle');
   // The entries built at the finish, kept so a refused write can be retried
   // with exactly what was logged rather than rebuilt from state that has since
   // been re-rendered. Also what the draft below is cleared against.
@@ -2622,7 +2686,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           // "1 set from this session were still on this phone".
           (() => {
             const n = rs.reduce((a, x) => a + (x ? x.length : 0), 0);
-            return `${n} set${n === 1 ? ' from this session was' : 's from this session were'} still on this phone and ${n === 1 ? 'is' : 'are'} back on screen. They have not reached your log yet — finishing the session is what saves them.`;
+            return `${n} set${n === 1 ? ' from this session was' : 's from this session were'} still on this phone and ${n === 1 ? 'is' : 'are'} back on screen. ${n === 1 ? 'It has' : 'They have'} not reached your log yet — finishing the session is what ${n === 1 ? 'saves it' : 'saves them'}.`;
           })(),
         );
       } catch { /* an unreadable draft is not worth an error the member cannot act on */ }
@@ -2772,14 +2836,26 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
    * one place it fires is a gym, which is where the signal is worst.
    *
    * So the finish screen is not reached until the server has answered, and it
-   * says which answer it got. On a refusal the sets stay on screen, the draft
-   * stays on disk, and there is a button that tries again.
+   * says which of the three answers it got. On a refusal the sets stay on
+   * screen, the draft stays on disk, and there is a button that tries again.
+   *
+   * The draft is removed for 'queued' as well as for 'saved', and that is not a
+   * shortcut. The provider has written those entries to this device under
+   * `local:` ids and holds them until a server takes them, so the draft is now a
+   * SECOND copy of the same sets — and a second copy that this screen would
+   * restore into an empty runner, where finishing again would log the session
+   * twice under a new timestamp. One durable copy, held by the thing that knows
+   * whether it has been sent.
    */
   const save = async (entries: WorkoutEntry[]) => {
     setSaveState('saving');
-    const ok = await onComplete(entries);
-    setSaveState(ok ? 'saved' : 'failed');
-    if (ok) { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); setConfetti(true); }
+    const out = await onComplete(entries);
+    setSaveState(out === 'stored' ? 'saved' : out === 'unsent' ? 'queued' : 'failed');
+    if (out !== 'refused') AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {});
+    // Confetti for a session that is in the log. A queued one has not reached
+    // anybody yet, and celebrating it is the far side of the line this screen's
+    // own draft wording draws.
+    if (out === 'stored') setConfetti(true);
   };
   const finish = () => {
     if (saveState === 'saving') return;
@@ -2804,9 +2880,10 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   const retry = async () => {
     if (saveState === 'saving' || !pendingEntries.length) return;
     setSaveState('saving');
-    const ok = await onRetry(pendingEntries);
-    setSaveState(ok ? 'saved' : 'failed');
-    if (ok) { AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {}); setConfetti(true); tapLight(); }
+    const out = await onRetry(pendingEntries);
+    setSaveState(out === 'stored' ? 'saved' : out === 'unsent' ? 'queued' : 'failed');
+    if (out !== 'refused') AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {});
+    if (out === 'stored') { setConfetti(true); tapLight(); }
   };
   const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); startRest(0); } else finish(); };
   const loggedSets = results.reduce((a, r) => a + r.length, 0);
@@ -2876,18 +2953,42 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
               refused write gets the same figures — they are true, the training
               happened — under a heading that does not congratulate anybody. */}
           <View style={{ alignItems: 'center', marginTop: sp.xl }}>
-            <Icon name={saveState === 'failed' ? 'info' : 'trophy'} size={40} color={saveState === 'failed' ? t.crit : t.brand} />
+            <Icon name={saveState === 'saved' || saveState === 'idle' ? 'trophy' : saveState === 'saving' ? 'trophy' : 'info'} size={40}
+              color={saveState === 'failed' ? t.crit : saveState === 'queued' ? t.warn : t.brand} />
           </View>
           <Text style={{ ...ty.title, color: t.ink, textAlign: 'center', marginTop: sp.md }}>
-            {saveState === 'saving' ? 'Saving…' : saveState === 'failed' ? 'Not Saved Yet' : 'Session Complete'}
+            {saveState === 'saving' ? 'Saving…'
+              : saveState === 'failed' ? 'Not Saved Yet'
+              : saveState === 'queued' ? 'Waiting To Send'
+              : 'Session Complete'}
           </Text>
           <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs, textTransform: 'capitalize' }}>{focus}</Text>
           {saveState === 'failed' ? (
             <View style={{ marginTop: sp.lg }}>
-              <Notice tone={t.crit} kicker="Your training log" title="This session has not reached the server"
-                note={`${num(totalSets)} set${totalSets === 1 ? '' : 's'} are still on this phone and are listed below, but they are not recorded yet and will not survive closing the app. Stay on this screen, find signal, and try again.`}>
+              {/* A refusal, not a silence. The server read these sets and
+                  declined them, so they are NOT queued — the provider drops a
+                  refused row rather than retrying it on every launch forever —
+                  and closing this screen really does lose them. */}
+              <Notice tone={t.crit} kicker="Your training log" title="Your log refused this session"
+                note={`${num(totalSets)} set${totalSets === 1 ? '' : 's'} are still on this phone and are listed below, but they were rejected rather than lost on the way, so they are not recorded and they are not waiting to send. Closing this screen loses them.`}>
                 <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                   <Ghost label="Try Saving Again" onPress={() => { void retry(); }} />
+                </View>
+              </Notice>
+            </View>
+          ) : null}
+          {saveState === 'queued' ? (
+            <View style={{ marginTop: sp.lg }}>
+              {/* The wording the runner's own draft notice already uses, on the
+                  other side of the same line: the sets are safe on this phone,
+                  they have not reached the log, and finishing is no longer what
+                  saves them — signal is. Nothing here asks the member to stay on
+                  the screen or to do anything at all, because there is nothing
+                  they need to do. */}
+              <Notice tone={t.warn} kicker="Your training log" title="Saved on this phone, not in your log yet"
+                note={`${num(totalSets)} set${totalSets === 1 ? '' : 's'} are saved on this phone and listed below. They have not reached your log yet — they go up on their own the next time the app has signal, and it is safe to close this. Until then your streak, your records and your coach's dashboard do not know about them.`}>
+                <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                  <Ghost label="Try Sending Now" onPress={() => { void retry(); }} />
                 </View>
               </Notice>
             </View>
@@ -2941,12 +3042,17 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
               ? "Logged to your history — strength trends and your coach's dashboard update automatically."
               : saveState === 'saving'
               ? 'Writing this session to your log…'
+              : saveState === 'queued'
+              ? 'Kept on this phone and waiting to send, so your trends and your coach’s dashboard do not know about it yet.'
               : saveState === 'failed'
               ? 'Nothing here has reached your history yet, so your trends and your coach’s dashboard do not know about it.'
               : 'Nothing was logged, so there is nothing to save.'}
           </Text>
-          {/* Closing on a refused write is what throws the session away, so the
-              button says what it does and asks again. */}
+          {/* Closing on a REFUSED write is what throws the session away, so the
+              button says what it does and asks again. Closing on a queued one
+              does not, and must not say it does: a member frightened off the
+              Done button by a warning that does not apply to them is a member
+              standing in a gym waiting for signal they may not get. */}
           <Cta
             label={saveState === 'saving' ? 'Saving…' : saveState === 'failed' ? 'Close and Lose These Sets' : 'Done'}
             wide

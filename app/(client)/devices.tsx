@@ -25,6 +25,7 @@ import { useWearables } from '../../src/ui/wearables';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { isWhole } from '../../src/ui/loadStatus';
+import type { WriteOutcome } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { requestHealthAuth, writeAuthStatus, type WriteAuth } from '../../src/lib/wearables/appleHealth';
@@ -43,6 +44,29 @@ import { formatSleepHours, recentNights, type SleepRead } from '../../src/lib/sl
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
 type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
+
+/**
+ * What to say about an import that did not land in the log.
+ *
+ * Two failures wearing one sentence is what this replaces. "Check your
+ * connection and tap Import again" was printed for both, and for the commoner
+ * of the two — no signal — it is now false in the direction that matters: the
+ * session IS on this phone, it is in the log the member can see, and it goes up
+ * on its own. Telling somebody to keep tapping a button for work that is
+ * already safe is how a screen teaches people to distrust it.
+ *
+ * 'refused' keeps the honest half: the log read those rows and declined them,
+ * so nothing is waiting and tapping Import again gets the same answer.
+ *
+ * `many` is passed rather than guessed off the subject's last letter. Half the
+ * activity names a watch reports are singular nouns ending in 's' — Pilates,
+ * Gymnastics, Crunches — and a sentence that reads "Pilates have not reached
+ * your log" is the kind of thing a member screenshots.
+ */
+const importNote = (what: string, out: WriteOutcome, many: boolean): string =>
+  out === 'unsent'
+    ? `${what} ${many ? 'have' : 'has'} not reached your log yet — there is no connection. Nothing is lost: ${many ? 'they are' : 'it is'} saved on this phone and ${many ? 'go' : 'goes'} up on ${many ? 'their' : 'its'} own next time you have signal.`
+    : `${what} ${many ? 'were' : 'was'} rejected by your log, so nothing was imported and nothing is waiting to send. Your watch still has ${many ? 'them' : 'it'}.`;
 
 function ago(ts?: number): string {
  if (!ts) return '';
@@ -87,7 +111,7 @@ export default function Devices() {
  //     said "Your training log has no sessions yet, so there is nothing to
  //     write" — a flat claim about the member's whole log, from a read that had
  //     failed.
- const { log, status: logStatus, addWorkouts, setSessionMins } = useWorkoutLog();
+ const { log, status: logStatus, logWorkouts, setSessionMins } = useWorkoutLog();
  const logWhole = isWhole(logStatus);
  const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
  const appleReady = !!apple && apple.isAvailable();
@@ -124,24 +148,29 @@ export default function Devices() {
      setWkBusy(false);
    }
  };
- // `addWorkouts` resolves false when the insert never reached the server, and
- // its answer was being dropped on the floor. `markImported` is what flips the
- // row to "In log" — permanently, and it is the only record that the workout was
- // ever brought across — so marking it after a failed write retires the row for
- // good: the session is still on the watch, it is not in the log, and the one
- // control that would have fetched it again is gone from the screen.
+ // The write's answer was being dropped on the floor. `markImported` is what
+ // flips the row to "In log" — permanently, and it is the only record that the
+ // workout was ever brought across — so marking it after a failed write retires
+ // the row for good: the session is still on the watch, it is not in the log,
+ // and the one control that would have fetched it again is gone from the screen.
+ //
+ // A QUEUED import is not marked either, and that is the conservative side of
+ // the only choice here that cannot be undone. The mark is permanent; the queue
+ // is not yet delivered. Offering the row again costs nothing, because
+ // `alreadyLogged` matches the queued entries sitting in `log` and the row
+ // disappears on its own the moment they go up.
  const importOne = async (sm: WorkoutSample) => {
   if (alreadyLogged(sm)) return;
-  const saved = await addWorkouts([await withHr(sm)]);
-  if (!saved) { Alert.alert('Import workouts', `${sm.activity} couldn't be added to your log. Check your connection and tap Import again.`); return; }
+  const out = await logWorkouts([await withHr(sm)]);
+  if (out !== 'stored') { Alert.alert('Import workouts', importNote(sm.activity, out, false)); return; }
   markImported([sm.id]);
   tapLight();
  };
  const importAll = async () => {
   const fresh = (wk || []).filter((sm) => !alreadyLogged(sm));
   if (!fresh.length) return;
-  const saved = await addWorkouts(await Promise.all(fresh.map(withHr)));
-  if (!saved) { Alert.alert('Import workouts', `Those ${fresh.length} workout${fresh.length === 1 ? '' : 's'} couldn't be added to your log. Check your connection and tap Import all again.`); return; }
+  const out = await logWorkouts(await Promise.all(fresh.map(withHr)));
+  if (out !== 'stored') { Alert.alert('Import workouts', importNote(`Those ${fresh.length} workout${fresh.length === 1 ? '' : 's'}`, out, fresh.length !== 1)); return; }
   markImported(fresh.map((sm) => sm.id));
   tapLight();
  };

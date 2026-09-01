@@ -83,15 +83,31 @@ echo "at $(git rev-parse --short HEAD)"
 
 echo
 echo "── gates ──"
+#
+# `npm run check:all` and NOT a list of check:* names typed out here.
+#
+# There used to be a list here, and it was a different list from preflight's
+# and a different list again from .github/workflows/ci.yml's. Nobody chose
+# that. Each was extended by whoever added a check and happened to be looking
+# at that file, so check:reachable and check:caps ran only at publish,
+# check:attribution and check:deltas ran only in preflight, and check:prose and
+# check:decimals ran in none of the three despite both existing as scripts.
+# Publishing is the last place a divergence like that can be caught and the
+# most expensive place to discover one, so this script no longer holds an
+# opinion about which gates exist: package.json's `check:all` is the list, and
+# the note above it in that file is why.
+#
+# check:schema is run on top, live rather than --offline. It is the one gate
+# that needs credentials — it asks the real database what its columns are — so
+# it cannot live in check:all, which CI runs with no keys at all. Publishing is
+# exactly when the app and the deployed database must agree: PostgREST rejects
+# a whole row for one unknown column, and an OTA carrying a write to a column
+# production does not have loses every other field on that row, silently.
 npx tsc -p tsconfig.json --noEmit
 npm test >/dev/null
-for c in check:tabs check:reads check:numbers check:currency check:contrast \
-         check:reachable check:traps check:caps check:catalogue check:native \
-         check:roundtrip \
-         db:check check:schema; do
-  printf '%-20s ' "$c"
-  npm run --silent "$c" >/dev/null 2>&1 && echo ok || { echo FAIL; exit 1; }
-done
+npm run check:all
+printf '%-20s ' "check:schema"
+npm run --silent check:schema >/dev/null 2>&1 && echo ok || { echo FAIL; exit 1; }
 
 echo
 echo "── publish ──"

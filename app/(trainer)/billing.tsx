@@ -11,8 +11,9 @@
 // text (`statusTone` now marks, it no longer inks).
 //
 // The plan names, prices and features come from `PLANS` — the platform's real
-// pricing config — and every Subscribe button is gated on a Stripe price id
-// actually existing, so no plan is offered that cannot be bought.
+// pricing config — and `planOffer` (src/lib/planOffer.ts) decides which of them
+// this screen is allowed to put a Subscribe button under, so no plan is ever
+// offered that cannot be bought and no button here is ever dead.
 import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,7 +23,8 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { PLANS } from '../../src/lib/ownerMock';
-import { billingAvailable, subscribeToPlan, openBillingPortal, fetchMySubscription, PRICE_IDS, type Subscription } from '../../src/lib/billing';
+import { planOffer } from '../../src/lib/planOffer';
+import { subscribeToPlan, openBillingPortal, fetchMySubscription, PRICE_IDS, type Subscription } from '../../src/lib/billing';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Active', trialing: 'Trial', past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete' };
 
@@ -33,7 +35,13 @@ export default function TrainerBilling() {
   const [subErr, setSubErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const available = billingAvailable();
+  // What this screen is allowed to put in front of a coach, and whether any of
+  // it is for sale. The rule and the reasoning are in src/lib/planOffer.ts;
+  // the short version is that a plan with no Stripe price id is not rendered
+  // with a dead button, it is not rendered at all. See the note at the plan
+  // list below for what was there before.
+  const offer = planOffer(PLANS, PRICE_IDS);
+  const available = offer.buyable;
 
   // fetchMySubscription used to answer null for both 'no plan' and 'could not
   // read', so a failed read showed the subscribe screen to somebody already
@@ -121,10 +129,38 @@ export default function TrainerBilling() {
           </Section>
         ) : (
           <Section>
-            <SectionHead title="Choose a Plan" />
-            {PLANS.map((pl, i) => {
-              const priced = !!PRICE_IDS[pl.name];
-              return (
+            {/* ── the plan list, and the developer's note it used to show a
+                customer ────────────────────────────────────────────────────
+                This mapped every entry in `PLANS` and put a Subscribe button
+                under each, disabled and relabelled "Coming Soon" when that
+                plan had no Stripe price id. Pressing it alerted "This plan
+                needs a Stripe price id configured." — a sentence about our
+                deployment, shown to the coach who was trying to give us money.
+                It told them nothing they could act on and named an internal
+                concept to explain why they could not buy the thing they had
+                just tapped.
+
+                It was also inconsistent on its face: with one tier priced and
+                two not, the same list carried a live Subscribe above a dead
+                button, so the price list was half a real offer.
+
+                Now `planOffer` decides. When anything is for sale, only the
+                plans that are for sale are listed and every button works. When
+                nothing is — which is where this project is today, no
+                EXPO_PUBLIC_STRIPE_PRICE_* is set in any eas.json profile — the
+                heading below changes and the same plans render as a plain
+                price list with no buttons at all, under the "Billing is not
+                switched on" notice at the top of the screen. A coach can still
+                read what the tiers cost, which is the one useful thing this
+                screen can do in that state, and there is nothing to press
+                because there is nothing to press. */}
+            <SectionHead title={available ? 'Choose a Plan' : 'Plans'} />
+            {!available ? (
+              <Text style={{ ...ty.label, color: t.ink3, paddingBottom: sp.sm }}>
+                What the tiers cost, for reference. Subscribing opens here once billing is switched on.
+              </Text>
+            ) : null}
+            {offer.plans.map((pl, i) => (
                 <View key={pl.name} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <Text style={{ ...ty.head, color: t.ink }}>{pl.name}</Text>
@@ -145,13 +181,20 @@ export default function TrainerBilling() {
                       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{f}</Text>
                     </View>
                   ))}
-                  <View style={{ height: sp.md }} />
-                  <Cta label={busy === pl.name ? 'Opening…' : (available && priced ? 'Subscribe' : 'Coming Soon')} wide
-                    disabled={!available || !priced || busy === pl.name}
-                    onPress={() => (available && priced ? subscribe(pl.name) : Alert.alert('Not available yet', 'This plan needs a Stripe price id configured.'))} />
+                  {/* No button at all when nothing is for sale. Every plan
+                      `offer.plans` hands back in the buyable state has a price
+                      id by construction, so this button is never dead — the
+                      only thing that can disable it is the tap in flight. */}
+                  {available ? (
+                    <>
+                      <View style={{ height: sp.md }} />
+                      <Cta label={busy === pl.name ? 'Opening…' : 'Subscribe'} wide
+                        disabled={busy === pl.name}
+                        onPress={() => subscribe(pl.name)} />
+                    </>
+                  ) : null}
                 </View>
-              );
-            })}
+            ))}
           </Section>
         )}
 

@@ -19,8 +19,8 @@ import {
   isAwaitingOutcome, payrollByTrainer, payrollTotal, settlementBlocker,
   settleableSessions, settlementAmount, settleBlocker, recordSettlement, fetchSettlements,
   type Settlement,
-  PAY_DELIVERED_ONLY,
-  type PtSession, type SessionOutcome, type PayPolicy,
+  PAY_DELIVERED_ONLY, SETTLEMENT_METHODS, SETTLEMENT_METHOD_LABEL,
+  type PtSession, type SessionOutcome, type PayPolicy, type SettlementMethod,
 } from '@lib/gymSessions';
 import { money } from '@lib/gymRecord';
 
@@ -57,6 +57,17 @@ export default function Sessions() {
   const [settlements, setSettlements] = useState<Settlement[] | null>(null);
   const [settlementsError, setSettlementsError] = useState<string | null>(null);
   const [settling, setSettling] = useState<string | null>(null);
+  /**
+   * How the money is actually moving, for the settlement about to be recorded.
+   *
+   * Neither this screen nor /payroll used to pass one, and `recordSettlement`
+   * defaulted to 'transfer' into a column that also defaults to 'transfer' — so
+   * every settlement the console has written says bank transfer, including the
+   * cash handed over at the desk, and /accounting shows that under a column
+   * headed Method as the gym's own answer. The person pressing the button is
+   * the only one who knows, so they are asked.
+   */
+  const [method, setMethod] = useState<SettlementMethod>('transfer');
 
   /**
    * The two reads this screen stands on: what happened on the floor, and what
@@ -283,6 +294,8 @@ export default function Sessions() {
         periodTo: dates[dates.length - 1],
         amountCents: t.cents,
         sessionIds: t.rows.map((s) => s.id),
+        // Said, never defaulted — see the note on `method` above.
+        method,
         // Stated, never defaulted. gymSessions USED TO write `currency ?? 'AED'`
         // into payroll_settlements, stamping the wrong money onto a permanent
         // payment record that /accounting and /close later read back as fact.
@@ -377,7 +390,8 @@ export default function Sessions() {
 
       <Awaiting sessions={awaiting} unread={unread} onMark={mark} />
       <Payroll lines={lines} unread={unread} ccy={ccy} />
-      <Settle owed={owed} unread={unread} settling={settling} onSettle={settle} ccy={ccy} />
+      <Settle owed={owed} unread={unread} settling={settling} onSettle={settle}
+              method={method} onMethod={setMethod} ccy={ccy} />
       <Settled runs={settlements} error={settlementsError} />
       <Marked sessions={settled} unread={unread} onClear={undo} ccy={ccy} />
     </Shell>
@@ -469,11 +483,13 @@ function Payroll({ lines, unread, ccy }: {
 
 /* ── settling: handing the money over, exactly once ────────────────────────── */
 
-function Settle({ owed, unread, settling, onSettle, ccy }: {
+function Settle({ owed, unread, settling, onSettle, method, onMethod, ccy }: {
   owed: { trainerId: string; name: string | null; rows: PtSession[]; unmarked: number; cents: number; blocker: string | null }[] | null;
   unread: boolean;
   settling: string | null;
   onSettle: (t: any) => void;
+  method: SettlementMethod;
+  onMethod: (m: SettlementMethod) => void;
   ccy: TenantCurrency;
 }) {
   return (
@@ -492,7 +508,36 @@ function Settle({ owed, unread, settling, onSettle, ccy }: {
         <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--ink3)' }}>
           Nothing outstanding. Every marked session in this window has been settled.
         </p>
-      ) : owed.map((t) => (
+      ) : (
+        <>
+          {/* Beside the buttons it describes. Whoever hands the money over is
+              the only person who knows how it went, and the answer is read back
+              months later by somebody reconciling a bank statement. */}
+          <div style={{
+            display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+            padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink2)',
+          }}>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              Paid by
+              <select
+                value={method}
+                onChange={(e) => onMethod(e.target.value as SettlementMethod)}
+                style={{
+                  padding: '6px 9px', borderRadius: 0, fontSize: 12.5,
+                  background: 'var(--surface2)', color: 'var(--ink)',
+                  border: '1px solid var(--ring)', fontFamily: 'var(--sans)',
+                }}
+              >
+                {SETTLEMENT_METHODS.map((m) => (
+                  <option key={m} value={m}>{SETTLEMENT_METHOD_LABEL[m]}</option>
+                ))}
+              </select>
+            </label>
+            <span style={{ color: 'var(--ink3)' }}>
+              recorded against whichever trainer you settle next.
+            </span>
+          </div>
+          {owed.map((t) => (
         <div key={t.trainerId} style={{
           display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
           padding: '12px 14px', borderTop: '1px solid var(--ring)',
@@ -529,7 +574,9 @@ function Settle({ owed, unread, settling, onSettle, ccy }: {
             {settling === t.trainerId ? 'Recording…' : 'Mark as paid'}
           </button>
         </div>
-      ))}
+          ))}
+        </>
+      )}
     </Section>
   );
 }
@@ -550,6 +597,10 @@ function Settled({ runs, error }: { runs: Settlement[] | null; error: string | n
     { key: 'period', header: 'Covering', value: (r) => r.periodFrom,
       render: (r) => `${r.periodFrom} → ${r.periodTo}` },
     { key: 'n', header: 'Sessions', value: (r) => r.sessionsCount, numeric: true },
+    // How the money went. Worth a column now that it is something the person
+    // settling actually said rather than the same word on every row.
+    { key: 'method', header: 'How', value: (r) => r.method,
+      render: (r) => SETTLEMENT_METHOD_LABEL[r.method] ?? r.method },
     { key: 'amount', header: 'Amount', value: (r) => r.amountCents, numeric: true,
       // Snapshotted at the time, never recomputed — a later fee change must not
       // rewrite what was actually handed over. The row snapshots its CURRENCY

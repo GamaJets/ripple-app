@@ -917,7 +917,7 @@ export default function Scans() {
               though they disagreed. */}
           <View style={{ marginTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Weight · {measuredNote(wNow, today)}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Muscle · {mNow ? measuredNote(mNow, today) : 'no scan has recorded skeletal muscle yet.'}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Muscle · {mNow ? measuredNote(mNow, today) : 'No scan has recorded skeletal muscle yet.'}</Text>
             {bodyMixNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{bodyMixNote}</Text> : null}
             {stalenessNote(wNow, today) ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{stalenessNote(wNow, today)}</Text> : null}
           </View>

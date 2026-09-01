@@ -18,6 +18,10 @@ import {
   type MembershipPlan, type Membership, type GymPayment,
   type PlanInterval, type PaymentMethod,
 } from '@lib/gymRecord';
+import {
+  fetchPassTypes, createPassType, setPassTypeActive, passTypeBlocker,
+  type PassType, type PassKind,
+} from '@lib/gymPasses';
 
 const DAY = 86400000;
 
@@ -40,6 +44,12 @@ export default function Money() {
   const [membersErr, setMembersErr] = useState<string | null>(null);
   const [payments, setPayments] = useState<GymPayment[] | null>(null);
   const [paymentsErr, setPaymentsErr] = useState<string | null>(null);
+  // The desk's half of the price book. /door sells from this list and has never
+  // been able to add to it: `createPassType` had no caller anywhere, so a gym
+  // that had not had rows inserted by hand in the Supabase dashboard saw an
+  // empty "issue a pass" dropdown and a screen telling them to come here.
+  const [passTypes, setPassTypes] = useState<PassType[] | null>(null);
+  const [passTypesErr, setPassTypesErr] = useState<string | null>(null);
 
   /**
    * Read the price book, the memberships and the payments taken.
@@ -52,10 +62,11 @@ export default function Money() {
    * that failed stays null, and every figure drawn from it shows a dash.
    */
   const load = useCallback(async (tenantId: string) => {
-    const [pRes, mRes, payRes] = await Promise.allSettled([
+    const [pRes, mRes, payRes, ptRes] = await Promise.allSettled([
       fetchPlans(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
       fetchPayments(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
+      fetchPassTypes(supabase, tenantId),
     ]);
 
     if (pRes.status === 'fulfilled') { setPlans(pRes.value); setPlansErr(null); }
@@ -66,6 +77,9 @@ export default function Money() {
 
     if (payRes.status === 'fulfilled') { setPayments(payRes.value); setPaymentsErr(null); }
     else { setPayments(null); setPaymentsErr(why(payRes.reason, 'Could not read the payments.')); }
+
+    if (ptRes.status === 'fulfilled') { setPassTypes(ptRes.value); setPassTypesErr(null); }
+    else { setPassTypes(null); setPassTypesErr(why(ptRes.reason, 'Could not read the pass price book.')); }
   }, []);
 
   useEffect(() => {
@@ -74,7 +88,7 @@ export default function Money() {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
-      if (!who?.tenantId) { setPlans([]); setMembers([]); setPayments([]); return; }
+      if (!who?.tenantId) { setPlans([]); setMembers([]); setPayments([]); setPassTypes([]); return; }
       // supabase-js resolves with { data, error } on a database error rather
       // than rejecting, so the error has to be read off the result, not caught.
       // Destructuring only `data` turned an RLS refusal into t === null, and
@@ -196,6 +210,7 @@ export default function Money() {
       </div>
 
       <Plans plans={plans} readErr={plansErr} tenantId={tenantId} ccy={ccy} onChange={refresh} />
+      <PassTypes types={passTypes} readErr={passTypesErr} tenantId={tenantId} ccy={ccy} onChange={refresh} />
       <Members members={members} readErr={membersErr} plans={plans} tenantId={tenantId} onChange={refresh} />
       <Payments payments={payments} readErr={paymentsErr} members={members} tenantId={tenantId} me={me} ccy={ccy} onChange={refresh} />
     </Shell>
@@ -297,6 +312,178 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
       ) : (
         <DataTable rows={plans} columns={cols} rowKey={(p) => p.id}
           empty="No plans yet. A gym cannot record a membership until it has something to sell." />
+      )}
+    </Section>
+  );
+}
+
+/* ── what the desk sells ───────────────────────────────────────────────────── */
+
+/** How each kind reads, and what it is for. The words are the desk's, not the
+ *  column's: `drop_in` means nothing to whoever is standing at the counter. */
+const KIND_LABEL: Record<PassKind, string> = {
+  drop_in: 'drop-in',
+  guest: 'guest pass',
+  pack: 'pack of visits',
+};
+
+const KIND_NOTE: Record<PassKind, string> = {
+  drop_in: 'one visit, bought by anyone who walks in',
+  guest: 'one visit, brought by a member — /door asks who the host is',
+  pack: 'a block of visits used over time',
+};
+
+/**
+ * The pass price book — drop-ins, guest passes and packs.
+ *
+ * This sits under Money rather than on /door because it is a price book, and it
+ * is the list /door already tells the desk to come here for. The desk sells from
+ * it; nobody at the desk decides what a day pass costs.
+ *
+ * A pack's visits and a pass's expiry are copied onto each pass AT THE MOMENT
+ * OF SALE (`issuePass`), so editing this list later cannot rewrite a pass
+ * somebody is already holding. That is why retiring is the only change offered
+ * here and there is no edit: a price that changed under the passes sold on it
+ * is exactly the fiction this whole console is written against.
+ */
+function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
+  types: PassType[] | null; readErr: string | null; tenantId: string;
+  ccy: TenantCurrency; onChange: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState<PassKind>('drop_in');
+  const [price, setPrice] = useState('');
+  const [uses, setUses] = useState('1');
+  const [validDays, setValidDays] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [writeErr, setWriteErr] = useState<string | null>(null);
+
+  // The draft as the library will see it, so the sentence the owner reads before
+  // pressing anything is the one `createPassType` would have thrown.
+  const major = parseFloat(price);
+  const draft = {
+    name,
+    kind,
+    priceCents: Number.isFinite(major) ? Math.round(major * 100) : null,
+    currency: ccy,
+    uses: uses.trim() === '' ? 1 : parseInt(uses, 10),
+    validDays: validDays.trim() === '' ? null : parseInt(validDays, 10),
+  };
+  // Only nag once there is something to nag about, and never about the currency
+  // before they have typed a price — the banner below already says that.
+  const blocker = (name.trim() || price.trim()) ? passTypeBlocker(draft) : null;
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const stop = passTypeBlocker(draft);
+    if (stop) { setWriteErr(stop); return; }
+    setBusy(true); setWriteErr(null);
+    try {
+      await createPassType(supabase, tenantId, {
+        name: draft.name.trim(),
+        kind: draft.kind,
+        priceCents: draft.priceCents!,
+        // Non-null by the blocker above. `gym_pass_types.currency` is NOT NULL
+        // with no default since supabase/parts/150, so a pass priced in a
+        // currency nobody chose is refused by the database rather than filed as
+        // dirhams — and this form refuses it before that, with a sentence.
+        currency: ccy!,
+        uses: draft.uses,
+        validDays: draft.validDays,
+      });
+      setName(''); setPrice('');
+      onChange();
+    } catch (x: any) {
+      setWriteErr(`That pass was not added: ${x?.message ?? 'the write was refused'}. Nothing has changed at the desk.`);
+    } finally { setBusy(false); }
+  };
+
+  const cols: Column<PassType>[] = [
+    { key: 'name', header: 'Pass', value: (t) => t.name },
+    { key: 'kind', header: 'Kind', value: (t) => t.kind, render: (t) => KIND_LABEL[t.kind] ?? t.kind },
+    { key: 'price', header: 'Price', value: (t) => t.priceCents, numeric: true,
+      // The ROW's currency, not the gym's: a pass priced before the gym changed
+      // its currency still states the money it was priced in.
+      render: (t) => money(t.priceCents, t.currency) ?? <span className="dash">no currency on this pass</span> },
+    { key: 'uses', header: 'Visits', value: (t) => t.uses, numeric: true },
+    { key: 'valid', header: 'Expires after', value: (t) => t.validDays, numeric: true,
+      // Null is a decision — this pass does not expire — and not a gap, so it
+      // gets words rather than a bare dash.
+      render: (t) => t.validDays == null
+        ? <span className="dash">does not expire</span>
+        : `${t.validDays} days` },
+    { key: 'state', header: 'Status', value: (t) => (t.active ? 1 : 0),
+      render: (t) => t.active
+        ? <span style={{ color: 'var(--good)' }}>on sale</span>
+        : <span style={{ color: 'var(--ink3)' }}>retired</span> },
+    { key: 'act', header: '', value: (t) => (t.active ? 1 : 0), align: 'right',
+      render: (t) => (
+        <button
+          onClick={() => setPassTypeActive(supabase, t.id, !t.active)
+            .then(() => { setWriteErr(null); onChange(); })
+            .catch((x: any) => setWriteErr(
+              `Could not ${t.active ? 'retire' : 'put back on sale'} ${t.name}: ${x?.message ?? 'the change was refused'}. It is still ${t.active ? 'on sale' : 'retired'} at the desk.`))}
+          style={linkBtn}
+        >
+          {t.active ? 'Retire' : 'Back on sale'}
+        </button>
+      ) },
+  ];
+
+  return (
+    <Section
+      title="Pass price book"
+      sub="Drop-ins, guest passes and packs — what the desk can sell on the Door screen. Retiring one keeps every pass already sold on it valid."
+    >
+      <form onSubmit={add} style={formRow}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Pass name" style={{ ...field, flex: 2, minWidth: 140 }} />
+        <select value={kind} onChange={(e) => setKind(e.target.value as PassKind)} style={{ ...field, flex: 1, minWidth: 130 }}>
+          {(Object.keys(KIND_LABEL) as PassKind[]).map((k) => (
+            <option key={k} value={k}>{KIND_LABEL[k]}</option>
+          ))}
+        </select>
+        {/* The placeholder names the currency the number will be STORED in. A
+            bare "Price" is the gap that let a GBP gym type 50 into a field whose
+            write said dirhams. */}
+        <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder={ccy ? `Price (${ccy})` : 'Price'} inputMode="decimal" style={{ ...field, width: 120 }} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink3)', fontSize: 12.5 }}>
+          <input value={uses} onChange={(e) => setUses(e.target.value)} inputMode="numeric" style={{ ...field, width: 58 }} />
+          visits
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink3)', fontSize: 12.5 }}>
+          expires after
+          <input value={validDays} onChange={(e) => setValidDays(e.target.value)} inputMode="numeric" placeholder="never" style={{ ...field, width: 72 }} />
+          days
+        </label>
+        <button type="submit" disabled={busy || !ccy} style={primaryBtn}>Add pass</button>
+      </form>
+      <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>
+        {KIND_LABEL[kind]}: {KIND_NOTE[kind]}. Leave the days blank for a pass
+        that does not expire — that is a decision a gym makes, and it is not the
+        same as nought days.
+      </p>
+      {ccy ? null : (
+        <Banner>
+          Passes cannot be priced until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. Every
+          pass sold on a type carries that type&rsquo;s currency onto the sale, so a guess here would
+          be copied onto every pass the desk ever sells from it.
+        </Banner>
+      )}
+      {blocker && !writeErr ? (
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p>
+      ) : null}
+      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {types === null ? (
+        readErr ? (
+          <Banner tone="crit">
+            The pass price book could not be read: {readErr}. This is not a gym that sells no passes
+            — it is a query that did not come back, and adding one now could duplicate a pass that
+            is already on sale. Reload the page.
+          </Banner>
+        ) : <Loading />
+      ) : (
+        <DataTable rows={types} columns={cols} rowKey={(t) => t.id}
+          empty="No pass types yet. Until there is one, the Door screen's “issue a pass” list is empty and the desk cannot sell a drop-in." />
       )}
     </Section>
   );

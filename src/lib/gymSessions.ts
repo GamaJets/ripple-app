@@ -26,6 +26,27 @@ type Queryable = { from: (table: string) => any };
 /** What happened to a booked session. Null means nobody has said yet. */
 export type SessionOutcome = 'completed' | 'no_show' | 'cancelled' | 'late_cancelled';
 
+/**
+ * How a trainer was actually paid. The four `payroll_settlements.method` allows
+ * (36-payroll-settlements.sql).
+ *
+ * Exported as a list as well as a type so the two screens that settle and the
+ * two that read the settlements back cannot word them four ways.
+ */
+export type SettlementMethod = 'transfer' | 'cash' | 'payroll' | 'other';
+
+export const SETTLEMENT_METHODS: readonly SettlementMethod[] =
+  ['transfer', 'cash', 'payroll', 'other'] as const;
+
+/** How each reads on screen. 'payroll' is the gym's own payroll run, which is
+ *  not the same statement as "we paid them" and should not read as one. */
+export const SETTLEMENT_METHOD_LABEL: Record<SettlementMethod, string> = {
+  transfer: 'bank transfer',
+  cash: 'cash',
+  payroll: 'through payroll',
+  other: 'some other way',
+};
+
 export interface PtSession {
   id: string;
   trainerId: string;
@@ -229,7 +250,7 @@ export interface Settlement {
    *  figure. One row, shown two ways, and only the other two were honest. */
   currency: string | null;
   sessionsCount: number;
-  method: 'transfer' | 'cash' | 'payroll' | 'other';
+  method: SettlementMethod;
   note: string | null;
   settledAt: string;
 }
@@ -483,7 +504,23 @@ export async function recordSettlement(
     periodTo: string;
     amountCents: number;
     sessionIds: string[];
-    method?: 'transfer' | 'cash' | 'payroll' | 'other';
+    /**
+     * REQUIRED, for the same reason `currency` below is.
+     *
+     * This was `method?:` written through as `run.method ?? 'transfer'`, into a
+     * column that is itself `not null default 'transfer'` — and neither caller
+     * passed one. So every settlement this console has ever recorded says the
+     * trainer was paid by bank transfer, including the ones handed over in cash
+     * at the desk, and /accounting prints that as the gym's own answer under a
+     * column headed Method. A default that renders cleanly looks considered;
+     * nobody reading "transfer" goes and checks. The gym's own reconciliation
+     * against a bank statement is exactly the job that then fails.
+     *
+     * Optional is what let both call sites forget. Required is the fix: whoever
+     * presses Settle says how the money moved, because they are the only person
+     * who knows.
+     */
+    method: SettlementMethod;
     note?: string | null;
     /**
      * REQUIRED, and required is the fix.
@@ -510,7 +547,7 @@ export async function recordSettlement(
     period_to: run.periodTo,
     amount_cents: run.amountCents,
     sessions_count: run.sessionIds.length,
-    method: run.method ?? 'transfer',
+    method: run.method,
     note: run.note ?? null,
     currency: run.currency,
   }).select('id').single();
@@ -569,7 +606,12 @@ export async function fetchSettlements(
     // required argument; coercing here defeated that before it was ever called.
     currency: r.currency ?? null,
     sessionsCount: r.sessions_count ?? 0,
-    method: r.method ?? 'transfer',
+    // 'other', not 'transfer'. The column is NOT NULL with a four-way check, so
+    // this branch does not fire against a healthy database — but a value this
+    // module does not recognise must not be read back as the specific claim
+    // "paid by bank transfer" on /accounting. 'other' says the row was settled
+    // and does not say how, which is exactly what is known here.
+    method: (SETTLEMENT_METHODS as readonly string[]).includes(r.method) ? r.method : 'other',
     note: r.note ?? null,
     settledAt: r.settled_at,
   }));

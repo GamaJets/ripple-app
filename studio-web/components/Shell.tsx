@@ -42,6 +42,12 @@ export const NAV: NavItem[] = [
   // worse than one that offers nothing.
   { href: '/', label: 'Overview', roles: ['owner'], context: 'gym' , group: 'Floor' },
   { href: '/members', label: 'Members', roles: ['owner'], context: 'gym' , group: 'Floor' },
+  // Directly after Members because it is where members come from. A membership
+  // needs a Repple account behind it (memberships.member_id references
+  // profiles), so every person on the roster arrived through an invitation —
+  // and until this entry existed the write that issues one was reachable from
+  // no screen in the product.
+  { href: '/invites', label: 'Invites', roles: ['owner'], context: 'gym' , group: 'Floor' },
   // Beside Members because it is the same record asked as a gym-wide
   // question: Members answers "how is Sara doing?", this answers
   // "are we keeping people?".
@@ -95,7 +101,14 @@ export const NAV: NavItem[] = [
   { href: '/coach/earnings', label: 'My earnings', roles: ['owner', 'trainer'], context: 'mine' , group: 'My book' },
   // Beside Door because both are about the building rather than the books:
   // what is in the room, and who is coming through it.
-  { href: '/equipment', label: 'Equipment', roles: ['owner'], context: 'gym' , group: 'System' },
+  //
+  // Owner AND trainer, matching app/equipment/page.tsx, which admits both and
+  // says why in its header: taking a machine out of action is a job for whoever
+  // is standing next to the machine, and a register only staff can read but not
+  // write goes stale in a week. This entry said owner alone, so a trainer could
+  // reach the page by typing the URL and was never offered the link — the same
+  // disagreement, in the opposite direction, as the Overview entry above.
+  { href: '/equipment', label: 'Equipment', roles: ['owner', 'trainer'], context: 'gym' , group: 'System' },
   { href: '/import', label: 'Import', roles: ['owner'], context: 'gym' , group: 'System' },
   // Beside Import deliberately: a gym that can be imported into and not
   // exported out of is a gym that cannot leave.

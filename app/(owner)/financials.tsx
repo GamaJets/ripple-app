@@ -1,11 +1,35 @@
-// Owner · Financial health. KPIs, retention and an AI-style review of the gym's
-// numbers with concrete improvement recommendations.
+// Owner · Financial checks. KPIs, retention and a RULE-BASED read of the
+// figures the owner has typed in, with the thresholds each finding crossed.
+//
+// ── Not an AI review, on this screen or anywhere else ─────────────────────
+//
+// This screen was headed "AI Financial Review" over a subtitle promising "an
+// AI review of where to improve", and the module behind it was called
+// `financialAI.ts`. There is no model call anywhere in it and there never was:
+// src/lib/finReview.ts is an if/else chain over eight typed numbers and a
+// fixed set of thresholds. The header of that file is the long version of why
+// the name mattered — the short version is that `grade >= 'A'` compared
+// strings, every gym was told it was in strong financial health, and an owner
+// who thinks a model read their books has no way to catch that. Rules they can
+// read, they can argue with.
 //
 // The review runs ONLY on figures the owner has entered. This screen previously
 // rendered `sampleFinances()` — an invented AED 214,000/mo, 1,940-member gym —
 // behind a one-line footnote, so a real owner opened it and was told, with a
-// grade and an AI verdict, that their business was in strong financial health.
+// grade and a verdict, that their business was in strong financial health.
 // Until figures are entered it now shows an entry form and no analysis at all.
+//
+// ── The figures never leave this phone, and the screen says so three times ─
+//
+// They are one AsyncStorage key under `KEY`. No row, no sync, no backup. An
+// owner typing a real P&L into a phone is entitled to know that before they
+// treat it as a record, so `storageNote()` is said in the empty state, in the
+// entry form and under the review — the three places somebody can be standing
+// when they decide whether this is somewhere their numbers live.
+// docs/OWNER-PORTAL.md:89 offers two ways out of this: connect real accounting,
+// or rename the screen to what it is. Accounting is a Xero/QuickBooks OAuth
+// app, a token store, a sync worker and a chart-of-accounts mapping, none of
+// which exists. So this is the other one, done honestly.
 //
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Every provider, conditional, handler, route and the
@@ -22,7 +46,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
-import { emptyFinances, hasFigures, anyEntered, reviewFinances, type FinInputs, type FinFlag } from '../../src/lib/financialAI';
+import { emptyFinances, hasFigures, anyEntered, reviewFinances, reviewBasis, storageNote, type FinInputs, type FinFlag } from '../../src/lib/finReview';
 import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../src/lib/gymRecord';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
@@ -233,20 +257,24 @@ export default function Financials() {
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Health</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Checks</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
+        {/* Says what this is before it says anything about the gym. The
+            sentence comes from src/lib/finReview.ts rather than being typed
+            here, so a rewrite of this screen cannot quietly drop the one line
+            that stops the grade below being read as a verdict from a model. */}
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          How the gym is doing — with an AI review of where to improve.
+          {reviewBasis()}
         </Text>
 
         {!hydrated ? null : editing ? (
           /* ── entry form ───────────────────────────────────────────────── */
           <Section>
-            <SectionHead title="Your Monthly Figures" note="This device only" />
+            <SectionHead title="Your Monthly Figures" note="This phone only" />
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              Leave a field blank if you don't track it. Stored on this device only.
+              Leave a field blank if you don't track it. {storageNote()}
             </Text>
             {FIELDS.map((f) => (
               <View key={f.key} style={{ marginBottom: sp.md }}>
@@ -305,6 +333,12 @@ export default function Financials() {
                 ? 'Your figures are saved. The review still needs your total revenue for the month — margin, the health score and every recommendation below are a share of it, and without it there is nothing honest to work them out from.'
                 : "Enter this month's revenue, expenses and membership numbers. Nothing is shown until it comes from you."}
             </Text>
+            {/* Before they type, not after. Somebody deciding whether to keep
+                their P&L here needs to know it is kept nowhere else while the
+                decision is still theirs to make. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {storageNote()}
+            </Text>
             <View style={{ height: sp.lg }} />
             <Cta label={anyEntered(fin) ? 'Add My Revenue' : 'Enter My Figures'} wide onPress={openEditor} />
           </Section>
@@ -340,7 +374,7 @@ export default function Financials() {
             <Rule />
 
             <Section>
-              <SectionHead title="AI Financial Review" note={`Grade ${r.grade}`} />
+              <SectionHead title="What These Figures Say" note={`Grade ${r.grade}`} />
               <Text style={{ ...ty.body, color: t.ink2 }}>{r.summary}</Text>
             </Section>
 
@@ -385,8 +419,15 @@ export default function Financials() {
               <Cta label="Create a Promotion" wide onPress={() => router.push('/(owner)/promotions')} />
               <View style={{ height: sp.sm }} />
               <Ghost label="Update My Figures" onPress={openEditor} />
+              {/* Two separate things an owner has to be told, and neither
+                  substitutes for the other: what produced the grade above, and
+                  where the numbers behind it are kept. */}
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>
-                Review is generated from the figures you entered — not financial advice.
+                Worked out by fixed rules from the figures you entered. No accounting is connected,
+                and this is not financial advice.
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
+                {storageNote()}
               </Text>
             </Section>
           </>

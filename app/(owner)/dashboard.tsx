@@ -325,7 +325,15 @@ export default function OwnerOverview() {
         <Section>
           <ListRow icon="trending" title="Revenue Analytics" note="Forecast, plan mix, LTV & revenue at risk"
             onPress={() => router.push('/(owner)/revenue')} />
-          <ListRow icon="sparkle" title="Financial Health · AI Review" note="KPIs, retention & where to improve · connect accounting"
+          {/* Was `icon="sparkle"` over "Financial Health · AI Review", noting
+              "connect accounting". Three claims, none of them true: the screen
+              behind this row is an if/else chain in src/lib/finReview.ts, no
+              model is called, and there is no accounting integration to
+              connect — the control that offered one was removed from that
+              screen for describing a feature nobody has written. A sparkle is
+              the icon this product uses for model-backed things, so it was
+              making the claim on its own even for somebody who read no words. */}
+          <ListRow icon="chart" title="Financial Checks" note="Margin, retention & growth against fixed thresholds, from figures you enter"
             onPress={() => router.push('/(owner)/financials')} />
           <ListRow icon="share" title="Promotions" note="Create an offer & push it to members"
             onPress={() => router.push('/(owner)/promotions')} />

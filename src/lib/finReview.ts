@@ -1,15 +1,39 @@
-// Owner financial-health review. Deterministic analysis of the gym's numbers
-// (margin, retention, growth, concentration) that reads like an advisor and
-// always works offline.
+// FINANCIAL CHECKS — a rule engine that reads the figures the owner typed.
 //
-// It analyses ONLY figures the owner has entered (or that a connected
-// accounting integration supplied). There is no sample/illustrative snapshot:
-// this module previously exported `sampleFinances()` returning an invented
-// AED 214,000/mo, 1,940-member gym, which the Financial health screen rendered
-// as if it were the owner's real business — complete with a grade and an AI
-// verdict saying the gym was in strong financial health. Nothing here
-// fabricates numbers; `emptyFinances()` is all zeros and `hasFigures()` gates
-// the review so an un-filled screen shows an empty state instead of fiction.
+// ── What it is called, and why that is the first thing in this file ────────
+//
+// This file was `financialAI.ts` and the screen over it was headed "AI
+// Financial Review". Neither was true. There is no model call here and there
+// never was one: everything below is arithmetic over eight typed numbers and a
+// fixed set of thresholds — margin at 20 and 8 percent, churn at 3 and 6, net
+// growth at 1.5, recurring share at 70, ancillary revenue at a sixth of the
+// total — plus a weighted score out of a hundred. Run it twice on the same
+// figures and it says the same words, because it is an if/else chain.
+//
+// The name did real damage rather than merely being loose. `grade >= 'A'` was
+// a string comparison, so every grade from A to E took that arm and every gym
+// on the platform read "your gym is in strong financial health" — and an owner
+// who believes a MODEL looked at their books has nothing to check that verdict
+// against. An owner told "these are the rules, and here is the threshold this
+// figure crossed" would have seen "margin 4%, churn 9%/mo, strong financial
+// health" for the contradiction it was, in a second. Naming a rule engine
+// honestly does not make it weaker; it hands the reader the one thing that
+// lets them disagree with it. src/lib/programReview.ts made the same argument
+// first and pointed at this file while making it.
+//
+// The calculation is worth having and is unchanged. Only the framing moved.
+//
+// ── What it will not do ───────────────────────────────────────────────────
+//
+// It analyses ONLY figures the owner has entered. There is no accounting
+// connection behind it — Xero and QuickBooks are each an OAuth app, a token
+// store, a sync worker and a chart-of-accounts mapping, and none of that
+// exists — and there is no sample/illustrative snapshot either: this module
+// previously exported `sampleFinances()` returning an invented AED 214,000/mo,
+// 1,940-member gym, which the screen rendered as if it were the owner's real
+// business, complete with a grade and a verdict. Nothing here fabricates
+// numbers; `emptyFinances()` is all zeros and `hasFigures()` gates the review
+// so an un-filled screen shows an empty state instead of fiction.
 import { deltaLabel } from './deltaLabel';
 
 export interface FinInputs {
@@ -115,6 +139,41 @@ export function anyEntered(f: FinInputs): boolean {
  * currency-free and are unaffected either way, so the review still works —
  * it just stops quoting amounts it cannot denominate.
  */
+/**
+ * The one line the screen puts under its title, saying what this is.
+ *
+ * Built here rather than typed into the screen, for the same reason
+ * `checksLine()` is built inside src/lib/programReview.ts: the sentence that
+ * refuses the word "AI" belongs next to the rules it is refusing it on behalf
+ * of. A disclaimer typed into a `<Text>` on a screen is one refactor away from
+ * being deleted by somebody who has never read this file, and the failure that
+ * follows is silent — the arithmetic goes on working under a name that has
+ * started lying again.
+ */
+export function reviewBasis(): string {
+  return 'Fixed rules over the figures you enter, not a model. '
+    + 'Every finding names the threshold it crossed, so you can disagree with it.';
+}
+
+/**
+ * Where the entered figures actually live, in the words the owner needs.
+ *
+ * Three places on the screen say this and they must not drift apart, because
+ * the cost being disclosed is asymmetric: an owner who believes their P&L is
+ * backed up types a year of it into a phone, changes phone, and discovers on
+ * the new one that a screen they treated as a record kept nothing. Saying "this
+ * device only" states where the data is; it does not state what that costs, and
+ * the second half is the half somebody acts on.
+ *
+ * It is a sentence about AsyncStorage under the key in `KEY` on
+ * app/(owner)/financials.tsx, and it stops being true the day those figures are
+ * written to a table. Change it then, in this one place.
+ */
+export function storageNote(): string {
+  return 'These figures are saved on this phone and nowhere else. '
+    + 'They are not backed up, they do not reach your other devices, and deleting the app deletes them.';
+}
+
 export function reviewFinances(f: FinInputs, currency: string | null): FinReview {
   // One local so the sentences below read as sentences. `m()` returns null when
   // the currency is unknown and each call site picks its wording from that,

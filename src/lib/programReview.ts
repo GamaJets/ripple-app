@@ -10,15 +10,17 @@
  * matched, each carrying the day, the movement and the figure it matched on.
  * The screen says "Programme checks" and lists them.
  *
- * src/lib/financialAI.ts is why that sentence is at the top. It is ninety
+ * src/lib/finReview.ts is why that sentence is at the top. It is ninety
  * lines of arithmetic — margin, churn, growth, a weighted score out of a
- * hundred — rendered under a heading reading "AI Financial Review", and the
- * label did real damage: a `grade >= 'A'` string comparison meant every gym on
+ * hundred — that was called financialAI.ts and rendered under a heading
+ * reading "AI Financial Review", and the label did real damage: a `grade >= 'A'` string comparison meant every gym on
  * the platform read "your gym is in strong financial health", and an owner
  * reading a *verdict from an AI* has nothing to check it against. An owner
  * reading "margin 4%, churn 9%/mo" would have seen the contradiction in a
  * second. Calling a rule engine what it is does not make it weaker; it hands
- * the reader the only thing that lets them disagree with it.
+ * the reader the only thing that lets them disagree with it. That screen has
+ * since been renamed to Financial Checks and its module to finReview.ts, on
+ * this argument.
  *
  * ── Every finding names its evidence, and none of them is an opinion ───────
  *

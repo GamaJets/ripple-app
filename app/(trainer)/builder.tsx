@@ -1110,9 +1110,11 @@ export default function Builder() {
 
      Not called an AI review, on screen or anywhere else. The reasoning is at
      the top of src/lib/programReview.ts and the short version is
-     src/lib/financialAI.ts, which is ninety lines of arithmetic under a
-     heading reading "AI Financial Review" and told every gym on the platform
-     it was in strong financial health.
+     src/lib/finReview.ts, which is ninety lines of arithmetic that shipped
+     under a heading reading "AI Financial Review" and told every gym on the
+     platform it was in strong financial health. That file was called
+     financialAI.ts and its screen has since been renamed to Financial Checks;
+     this one was written not to need renaming.
 
      Memoised because `reviewProgram` walks this client's whole capped training
      log once per exercise, and this screen re-renders on every keystroke in
@@ -2199,8 +2201,8 @@ export default function Builder() {
         {/* ── programme checks ───────────────────────────────────────────
             Named for what it is. Seven rules, no model, no score and no
             grade — see the header of src/lib/programReview.ts, and
-            src/lib/financialAI.ts for the screen this one is written not to
-            be. Every line below is a finding that names the exercise, the
+            src/lib/finReview.ts for the screen this one was written not to
+            be, back when it was called an AI review. Every line below is a finding that names the exercise, the
             day or the figure it came from, because a finding a coach cannot
             point at is an opinion and they stop reading at the first one
             they disagree with. */}

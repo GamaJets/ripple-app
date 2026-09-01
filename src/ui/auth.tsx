@@ -406,6 +406,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Native OAuth needs provider config in Supabase + a deep-link handler.
     // Not wired for Phase 1 — surface a clear message; email sign-in is the path.
     //
+    // ── NOTHING CALLS THIS, AND THAT IS THE POINT ─────────────────────────
+    //
+    // app/welcome.tsx used to. It rendered "Continue with Apple" and "Continue
+    // with Google" directly under the sign-in button on the first screen of all
+    // three apps, and both of them landed on the throw below. Two dead controls
+    // in the most-tapped position in the product, and the first thing a store
+    // reviewer tries. They were removed rather than disabled, because a button
+    // that says "coming soon" advertises the same door that is not there.
+    //
+    // This function stays, throwing, so the wiring below has somewhere to go
+    // and so the context's shape does not have to change twice. Anything that
+    // calls it must render a real, working control — which today means the list
+    // that follows has to be finished FIRST.
+    //
+    // ── WHAT IS ACTUALLY MISSING, AS OF THIS COMMIT ───────────────────────
+    //
+    //  · expo-apple-authentication is NOT in package.json. Supabase's Apple
+    //    path on iOS wants the native credential (signInWithIdToken), and Apple
+    //    itself wants the native sheet. It is a native dependency, so adding it
+    //    means a new binary — see src/ui/nativeModules.ts for what happens when
+    //    a native module arrives by over-the-air update instead. If it is added,
+    //    it must be probed through that file, never imported bare.
+    //  · No Google OAuth client ids anywhere. Every eas.json profile carries
+    //    Spotify, Oura and Whoop ids and no Google one, and all three
+    //    oauth_client arrays in google-services.json are empty.
+    //  · Repple is white-labelled and each brand is its own bundle id, its own
+    //    Android package and its own URL scheme (see app.config.ts). So this is
+    //    not one Google client and one Apple Services ID, it is one PER BRAND
+    //    PER APP, each with its own redirect allow-listed in the single shared
+    //    Supabase project. That matrix does not exist yet in any form.
+    //  · The Supabase dashboard's Apple and Google providers must be enabled
+    //    and hold those ids and secrets. Auth → Providers, and Auth → URL
+    //    Configuration for the redirect list.
+    //
+    // expo-auth-session and expo-web-browser ARE present, so the browser half
+    // of a Google flow has its library already — src/lib/wearables/oauth.ts is
+    // a working example of the shape, lazy-required exactly as this would have
+    // to be.
+    //
     // WHEN IT IS WIRED, the brand needs two lines and neither is optional.
     // signInWithOAuth takes no user-metadata argument — the account is created
     // by the provider callback, with nothing of ours in it — so unlike email

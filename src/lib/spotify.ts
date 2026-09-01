@@ -30,12 +30,31 @@ import {
   classifySpotifyResponse, networkFailure, nowPlayingFrom, playlistsFrom,
   type SpotifyFailure, type SpotifyFailureKind, type NowPlaying, type PlaylistRef,
 } from './spotifyPlayback';
+import { BRAND } from './brands';
 
 const STORE = 'repple.spotify.token';
 
-// Deliberately fixed, not built with appLink(): Spotify matches this against
-// the redirect URI registered in its dashboard, so it cannot vary per app.
-// Music is a client-app feature, so `repple` is the right scheme for it.
+// Fixed per BUILD, not built with appLink(): Spotify matches this against the
+// redirect URI registered in its dashboard, so it must be a value known before
+// the app runs and cannot vary with which of the three apps is running. Music
+// is a client-app feature, so the CLIENT variant's scheme is the right one and
+// is named explicitly rather than taken from the running binary.
+//
+// The brand it comes from is the axis this used to get wrong. This was the
+// literal 'repple://spotify/callback', and Repple is white-labelled: every
+// brand ships its own schemes (see src/lib/brands.ts, and docs/WHITE-LABEL.md
+// §6, which lists this exact line). A chain's member connecting Spotify from
+// THEIR app was sent to `repple://` — the Repple client app, which they do not
+// have installed — so the browser closed on an unhandled scheme and the
+// connection simply never came back, with nothing to say why. Reading
+// `BRAND.apps.client.scheme` resolves to exactly 'repple' when
+// EXPO_PUBLIC_BRAND is unset, so the string below is byte-identical for every
+// build that exists today and no registered redirect URI moves.
+//
+// What this does NOT do, and cannot: a new brand still needs its new redirect
+// URI added in the Spotify dashboard, and possibly its own client id. eas.json
+// already supplies the id per profile. This makes the app ASK for the right
+// address; only Spotify can agree to it.
 //
 // Custom schemes are still accepted — Spotify's Feb 2025 security post says so
 // explicitly ("Redirects using a custom scheme will still be supported") while
@@ -43,7 +62,7 @@ const STORE = 'repple.spotify.token';
 // refuses this one it does NOT redirect back; it renders an error page in the
 // browser and the person closes it, which arrives here as a "dismiss". That is
 // why a dismiss no longer just says "cancelled" — see connectSpotify.
-export const SPOTIFY_REDIRECT = 'repple://spotify/callback';
+export const SPOTIFY_REDIRECT = `${BRAND.apps.client.scheme}://spotify/callback`;
 
 // Scopes. The first four were all the old build asked for, which is why real
 // playlists and in-session control were impossible: reading the person's own

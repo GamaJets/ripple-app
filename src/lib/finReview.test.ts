@@ -1,7 +1,7 @@
 // The owner's financial review says things out loud. Compile with tsc, run with node.
 //
 // Every string this module returns is rendered as prose on app/(owner)/financials.tsx
-// — a summary paragraph under an "AI Financial Review" heading, and a titled
+// — a summary paragraph under a "What These Figures Say" heading, and a titled
 // flag per finding — and an owner reads it as advice about their own business.
 // That makes three failure modes worth asserting against, all of which were
 // live:
@@ -26,7 +26,7 @@
 //     at 0%" and the advice to raise membership prices, over a revenue figure
 //     that had never been supplied. Forty of the hundred points were scored
 //     against it.
-import { emptyFinances, hasFigures, anyEntered, reviewFinances, type FinInputs } from './financialAI';
+import { emptyFinances, hasFigures, anyEntered, reviewFinances, type FinInputs } from './finReview';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -143,4 +143,4 @@ for (const [label, f] of cases) {
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('financialAI.test.ts OK');
+console.log('finReview.test.ts OK');

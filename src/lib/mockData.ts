@@ -1,14 +1,28 @@
-// Shapes for the no-backend repo (`mockRepo`), used when the app runs standalone
-// in Expo Go before Supabase is wired.
+// The shape of a logged workout, and nothing else any more.
 //
-// The *data* here is empty. These constants previously carried a full fake
-// client — a 6-point weight/body-fat history, two InBody scans, five logged
-// workouts, a coach/client message thread, and a trainer named "Coach Daniel
-// Reyes" — and although `mockRepo` is not used when USE_SUPABASE is on, the
-// literals still shipped inside the production Hermes bundle, and this exact
-// workout log is the seed that ended up written into real users' Supabase rows.
-// Types stay; invented people and numbers do not.
-import type { Goal, Diet, Sex, TrainingSession, Scan, Message, FoodEntry } from './types';
+// ── What this file used to be ──────────────────────────────────────────────
+//
+// It was the shapes for a no-backend repo (`mockRepo`), used when the app ran
+// standalone in Expo Go before Supabase was wired. It carried a full fake
+// client — a 6-point weight and body-fat history, two InBody scans, five
+// logged workouts, a coach/client message thread, and a trainer named "Coach
+// Daniel Reyes". Although `mockRepo` was not used once USE_SUPABASE was on,
+// the literals still shipped inside the production Hermes bundle, and that
+// exact workout log is the seed that ended up written into real users'
+// Supabase rows. The people and numbers were emptied out then.
+//
+// ── Why the husks are gone too ─────────────────────────────────────────────
+//
+// `src/data/repo.ts` was the only thing that read MOCK_CLIENT, MOCK_MESSAGES,
+// MOCK_FOOD, MOCK_TRAINER and MOCK_SESSIONS, and nothing at all read
+// `repo.ts` — `USE_SUPABASE` is a hardcoded `true` in src/lib/config.ts, so
+// the branch that reached for a mock repo cannot be taken. A live module full
+// of plausible-shaped fake gym rows is the exact ingredient the incident above
+// was made of, so both are deleted rather than left emptied.
+//
+// The file keeps its name because `WorkoutEntry` is imported by name from a
+// dozen screens and renaming it is a separate change from removing dead data.
+import type { Goal, Diet, Sex, Scan } from './types';
 
 export interface MockClient {
   id: string;
@@ -65,33 +79,3 @@ export interface WorkoutEntry {
    *  which is why it is not in PERSISTED_FIELDS. */
   amendedAt?: string;
 }
-
-export const MOCK_CLIENT: MockClient = {
-  id: 'c1',
-  name: '',
-  sex: 'f',
-  dob: '',
-  heightCm: 0,
-  goal: 'fatloss',
-  diet: 'meat',
-  activity: 1.45,
-  mealsPerDay: 3,
-  weight: [],
-  bodyFat: [],
-  muscle: [],
-  scans: [],
-  log: [],
-};
-
-export const MOCK_MESSAGES: Message[] = [];
-
-export const MOCK_FOOD: FoodEntry[] = [];
-
-export const MOCK_TRAINER = {
-  id: 't1',
-  name: '',
-  sessionFee: 0,
-  clients: [] as { id: string; name: string; goal: Goal; weightDelta: number }[],
-};
-
-export const MOCK_SESSIONS: TrainingSession[] = [];

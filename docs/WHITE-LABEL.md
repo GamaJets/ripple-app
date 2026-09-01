@@ -205,16 +205,23 @@ therefore cannot disagree with `app.config.ts`. Four categories escaped it, and
 all four send a non-Repple brand's users into **Repple's client app, or
 nowhere**:
 
-- `src/lib/spotify.ts:46` — `SPOTIFY_REDIRECT = 'repple://spotify/callback'`
-- `src/lib/wearables/oauthConfig.ts:48` — `OAUTH_REDIRECT = 'repple://wearables/callback'`
+- `src/lib/spotify.ts` — `SPOTIFY_REDIRECT` — **done.**
+- `src/lib/wearables/oauthConfig.ts` — `OAUTH_REDIRECT` — **done.**
 
-  These two are correctly hardcoded *for the variant axis* (`deepLink.ts:15-19`
-  explains why: the vendor matches the redirect against a dashboard value). For
-  the brand axis they are a genuine problem — a new brand means new schemes,
-  which means **registering new redirect URIs in the Spotify, Oura and WHOOP
-  dashboards per brand**, and possibly separate developer apps and client ids.
-  `eas.json` supplies the client ids per profile already, so the ids can vary;
-  the redirect constants cannot.
+  Both were the literal `repple://…`. Both now compose the scheme from
+  `BRAND.apps.client.scheme`, which resolves to `repple` whenever
+  `EXPO_PUBLIC_BRAND` is unset, so both strings are byte-identical for every
+  build that exists today and no registered redirect URI moves. They stay
+  build-time constants rather than `appLink()` calls, which is correct *for the
+  variant axis* (`deepLink.ts` explains: the vendor matches the redirect against
+  a dashboard value, so it must be knowable before the app runs) — they are
+  client-app features, so the client variant's scheme is named explicitly.
+
+  **The app half only.** A new brand still means **registering new redirect URIs
+  in the Spotify, Oura and WHOOP dashboards per brand**, and possibly separate
+  developer apps and client ids — see checklist step 10. `eas.json` supplies the
+  client ids per profile already. What changed is that the app now asks for the
+  right address; only the vendor can agree to it.
 
 - Stripe returns, all defaults inside edge functions the app cannot override
   unless it passes an explicit URL:
@@ -232,9 +239,18 @@ nowhere**:
   `deepLink.ts` was out of scope. Note the `www` asymmetry when it is done:
   `deepLink.ts` uses the apex, `joinCode.ts` uses `www`.
 
-- `src/lib/ics.ts:18` — calendar UIDs are minted at `@repple.app`, a domain that
-  appears nowhere else in the repo. Cosmetic, but it lands in the user's
-  calendar file.
+- `src/lib/ics.ts` — **done.** Calendar UIDs were minted at `@repple.app`, a
+  domain that appears nowhere else in this repo and that nothing here owns; the
+  `PRODID` and the default `calName` were the literal `Repple`. All three now
+  come from the brand — the UID host from `BRAND.webOrigin`, the other two from
+  `BRAND.label`. Not cosmetic: an .ics file outlives the app on the phone and
+  gets forwarded, and RFC 5545 asks for a UID domain the generator actually
+  holds. Note this changes Repple's own UIDs from `@repple.app` to
+  `@repplefitness.com`, so a session exported before and after imports twice.
+
+  Two callers still pass a literal: `app/(trainer)/calendar.tsx` passes
+  `'Repple — Coaching schedule'` and `app/(client)/bookings.tsx` passes the
+  device-local app name. Those are §11 strings, not this file's.
 
 ## 7. Stripe
 
@@ -420,9 +436,10 @@ migration for zero user-visible benefit.
 8. Supabase dashboard: redirect allow-list entries; the confirmation email
    template (currently shared, currently Repple's).
 9. Resend: verified sending domain.
-10. Spotify / Oura / WHOOP dashboards: new redirect URIs for the new schemes —
-    and `SPOTIFY_REDIRECT` / `OAUTH_REDIRECT` still need making brand-aware
-    before this works at all.
+10. Spotify / Oura / WHOOP dashboards: new redirect URIs for the new schemes.
+    `SPOTIFY_REDIRECT` and `OAUTH_REDIRECT` are brand-aware now, so the app
+    sends the right address; registering it is still manual, per vendor, per
+    brand, and possibly needs that brand's own developer app and client id.
 11. Three store review accounts with that brand's data, emails confirmed.
 12. Store listings: screenshots, copy, privacy and data-safety, support URL.
 13. Re-run the before/after config comparison and confirm Repple's nine profiles

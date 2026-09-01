@@ -26,11 +26,12 @@ import {
   type GymClass, type RosterEntry,
 } from '@lib/gymSchedule';
 import {
-  fetchPtSlots, fetchTrainerOptions, createPtSlot, removePtSlot,
+  fetchPtSlots, fetchTrainerOptions, createPtSlot, removePtSlot, updatePtSlot,
   mergeTimetable, summariseBoard, clashes, floorByHour, floorAt,
   slotBlocker,
   type PtSlot, type TimetableEntry, type FloorSlice,
 } from '@lib/gymPtSchedule';
+import { fetchMemberships, type Membership } from '@lib/gymRecord';
 
 const DAY = 86400000;
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -53,6 +54,11 @@ export default function Timetable() {
   const [err, setErr] = useState<string | null>(null);
   const [loadFail, setLoadFail] = useState<string | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
+  // Who the gym can book a one-to-one to. Read once rather than per week — the
+  // roster does not change when the board does — and kept null on a failed read
+  // so an empty picker never reads as a gym with no members.
+  const [members, setMembers] = useState<Membership[] | null>(null);
+  const [membersErr, setMembersErr] = useState<string | null>(null);
 
   const range = useCallback(() => {
     const now = new Date();
@@ -98,6 +104,11 @@ export default function Timetable() {
         setGymName(tErr ? null : (t?.name ?? null));
         setGymNameErr(tErr ? (tErr.message ?? 'Could not read which gym this account is linked to.') : null);
       }
+      // The roster, independently of the board: it is not week-scoped, and a
+      // membership read that fails must not empty the timetable with it.
+      fetchMemberships(supabase, who.tenantId)
+        .then((rows) => { if (live) { setMembers(rows); setMembersErr(null); } })
+        .catch((e: any) => { if (live) { setMembers(null); setMembersErr(e?.message ?? 'Could not read the member list.'); } });
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -183,7 +194,7 @@ export default function Timetable() {
       } },
     { key: 'act', header: '', value: () => '', align: 'right',
       render: (e) => (
-        <span style={{ display: 'inline-flex', gap: 12 }}>
+        <span style={{ display: 'inline-flex', gap: 12, alignItems: 'center' }}>
           {e.kind === 'class' ? (
             <button
               onClick={() => {
@@ -192,6 +203,13 @@ export default function Timetable() {
               }}
               style={linkBtn}
             >Check in</button>
+          ) : null}
+          {e.kind === 'one_to_one' ? (
+            <BookTo
+              slot={raw?.slots.find((s) => s.id === e.sourceId) ?? null}
+              members={members} membersErr={membersErr}
+              onDone={(m) => { setErr(m); if (!m) refresh(); }}
+            />
           ) : null}
           <button onClick={() => remove(e)} style={{ ...linkBtn, color: 'var(--crit)' }}>Remove</button>
         </span>
@@ -253,14 +271,17 @@ export default function Timetable() {
 
       <div style={{ display: 'grid', gap: 22, gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', marginBottom: 22 }}>
         <AddClass tenantId={tenantId} onChange={refresh} />
-        <AddOneToOne tenantId={tenantId} onChange={refresh} />
+        <AddOneToOne tenantId={tenantId} members={members} membersErr={membersErr} onChange={refresh} />
       </div>
 
       <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)' }}>
         <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
           <h2>This week</h2>
           <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-            Every class and every one-to-one, in the order they happen.
+            Every class and every one-to-one, in the order they happen. A one-to-one can be booked
+            to a member here — for the one who rang up — and freeing one opens the hour to anybody
+            rather than to whoever is first on its waitlist in the app; only the trainer&rsquo;s own
+            screen hands it to them.
           </p>
         </div>
         {loadFail ? (
@@ -481,9 +502,113 @@ function Tag({ kind }: { kind: TimetableEntry['kind'] }) {
   );
 }
 
+/* ── booking a slot to a named member ──────────────────────────────────────── */
+
+/** The gym's own members, one option each, newest membership first. A person
+ *  with two memberships is one person and one option. */
+function memberOptions(members: Membership[] | null): { id: string; name: string }[] {
+  const seen = new Map<string, string>();
+  for (const m of members ?? []) {
+    if (m.status !== 'active') continue;
+    if (!seen.has(m.memberId)) seen.set(m.memberId, m.memberName ?? m.memberId);
+  }
+  return [...seen.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Put a named member on an open slot, or take them off it.
+ *
+ * The gym books people in over the phone. Until now the board said "Members
+ * book an open slot from the Repple app", which is a reasonable default and not
+ * a complete product: the hour was taken, the trainer knew, and nothing in the
+ * record did — so the slot still counted as spare PT capacity and the member's
+ * own app showed them nothing.
+ *
+ * It writes what the app's own booking writes — `bookingFields` in
+ * gymPtSchedule.ts holds that in one place — so a slot booked here is the same
+ * row `book_session` would have produced, and the no-double-booking constraint,
+ * payroll and the member's calendar all see it as one.
+ *
+ * Not offered once a session has an outcome or has been paid for. That is no
+ * longer a plan, it is the record: `sessions_block_delete_of_record` refuses to
+ * let one be removed for exactly this reason, and moving whose session it was
+ * after the fact would rewrite who a trainer was paid for.
+ *
+ * ONE THING IT DELIBERATELY DOES NOT DO, and the section below says so out loud:
+ * it does not promote the waitlist. Promotion is not a trigger — it rides inside
+ * `cancel_my_session` and `promote_session_waitlist`
+ * (126-the-late-fee-and-the-waitlist.sql), and the second is authorised on
+ * `trainer_id = auth.uid()`, so an owner cannot call it. Freeing an hour here
+ * therefore opens it for anyone rather than handing it to whoever was first in
+ * the queue. Claiming otherwise would be worse than saying it.
+ */
+function BookTo({ slot, members, membersErr, onDone }: {
+  slot: PtSlot | null;
+  members: Membership[] | null;
+  membersErr: string | null;
+  onDone: (err: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  if (!slot) return null;
+
+  if (slot.outcome !== null || slot.settlementId !== null) {
+    return (
+      <span style={{ fontSize: 11.5, color: 'var(--ink3)' }}>
+        {slot.settlementId ? 'paid' : 'marked'}
+      </span>
+    );
+  }
+
+  const options = memberOptions(members);
+
+  const change = async (next: string) => {
+    setBusy(true);
+    try {
+      await updatePtSlot(supabase, slot.id, { clientId: next || null });
+      onDone(null);
+    } catch (e: any) {
+      const who = options.find((o) => o.id === next)?.name ?? 'that member';
+      onDone(next
+        ? `${who} was not booked in: ${e?.message ?? 'the change was refused'}. The slot is unchanged.`
+        : `That slot was not freed: ${e?.message ?? 'the change was refused'}. It is still booked.`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <select
+      value={slot.clientId ?? ''}
+      disabled={busy}
+      onChange={(e) => change(e.target.value)}
+      aria-label="Book this one-to-one to a member"
+      style={{ ...field, padding: '3px 6px', fontSize: 11.5, maxWidth: 170 }}
+    >
+      {/* Three different sentences, because they are three different facts: the
+          slot is open, the roster failed to read, or the gym has nobody active. */}
+      <option value="">
+        {members === null
+          ? (membersErr ? 'Open — roster unread' : 'Open — reading the roster')
+          : 'Open — nobody booked'}
+      </option>
+      {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      {/* A slot booked to somebody who is no longer on the active roster still
+          shows who holds it, rather than silently reading as open. */}
+      {slot.clientId && !options.some((o) => o.id === slot.clientId) ? (
+        <option value={slot.clientId}>{slot.clientName ?? 'booked — not on the roster'}</option>
+      ) : null}
+    </select>
+  );
+}
+
 /* ── adding a one-to-one ───────────────────────────────────────────────────── */
 
-function AddOneToOne({ tenantId, onChange }: { tenantId: string; onChange: () => void }) {
+function AddOneToOne({ tenantId, members, membersErr, onChange }: {
+  tenantId: string;
+  members: Membership[] | null;
+  membersErr: string | null;
+  onChange: () => void;
+}) {
   const [trainers, setTrainers] = useState<{ id: string; name: string | null }[] | null>(null);
   const [trainersErr, setTrainersErr] = useState<string | null>(null);
   const [trainerId, setTrainerId] = useState('');
@@ -491,6 +616,9 @@ function AddOneToOne({ tenantId, onChange }: { tenantId: string; onChange: () =>
   const [duration, setDuration] = useState('60');
   const [room, setRoom] = useState('');
   const [hold, setHold] = useState(false);
+  // Empty is the default and stays the default: a slot goes up open unless the
+  // gym says who is already in it.
+  const [clientId, setClientId] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -510,7 +638,9 @@ function AddOneToOne({ tenantId, onChange }: { tenantId: string; onChange: () =>
     durationMin: parseInt(duration, 10),
     room,
     blocked: hold,
+    clientId: clientId || null,
   };
+  const options = memberOptions(members);
   // Only nag once there is something to nag about.
   const blocker = (trainerId || when) ? slotBlocker(draft) : null;
 
@@ -521,8 +651,13 @@ function AddOneToOne({ tenantId, onChange }: { tenantId: string; onChange: () =>
     setBusy(true); setMsg(null);
     try {
       await createPtSlot(supabase, tenantId, draft);
-      setMsg(hold ? 'Held on the timetable.' : 'On the timetable, open for a member to book.');
-      setWhen('');
+      const who = options.find((o) => o.id === clientId)?.name;
+      setMsg(hold
+        ? 'Held on the timetable.'
+        : who
+          ? `On the timetable, booked to ${who}. It shows in their app as a session with the trainer.`
+          : 'On the timetable, open for a member to book.');
+      setWhen(''); setClientId('');
       onChange();
     } catch (x: any) {
       setMsg(x?.message ?? 'Could not add that slot.');
@@ -535,7 +670,8 @@ function AddOneToOne({ tenantId, onChange }: { tenantId: string; onChange: () =>
         <h2>Add a one-to-one</h2>
         <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
           Puts a PT slot on the gym&apos;s board rather than only in the trainer&apos;s calendar.
-          Members book an open slot from the Repple app; hold it instead to keep the hour off sale.
+          Members book an open slot from the Repple app — or name one here, for the member who
+          rang up. Hold it instead to keep the hour off sale entirely.
         </p>
       </div>
       <form onSubmit={add} style={{ display: 'flex', gap: 8, padding: '12px 14px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -558,13 +694,34 @@ function AddOneToOne({ tenantId, onChange }: { tenantId: string; onChange: () =>
         <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} style={{ ...field, flex: 2, minWidth: 190 }} />
         <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
+        {/* Disabled rather than hidden while the hour is held: the two are a
+            real either/or (slotBlocker refuses both together) and a control
+            that disappears reads as one that was never there. */}
+        <select
+          value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={hold}
+          style={{ ...field, minWidth: 170, opacity: hold ? 0.5 : 1 }}
+          aria-label="Book this one-to-one to a member"
+        >
+          <option value="">
+            {members === null
+              ? (membersErr ? 'Open — roster unread' : 'Open — reading the roster')
+              : 'Open — members book it'}
+          </option>
+          {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink3)', fontSize: 12.5 }}>
-          <input type="checkbox" checked={hold} onChange={(e) => setHold(e.target.checked)} />
+          <input type="checkbox" checked={hold} onChange={(e) => { setHold(e.target.checked); if (e.target.checked) setClientId(''); }} />
           hold the hour
         </label>
         <button type="submit" disabled={busy || !trainers?.length} style={primaryBtn}>Add</button>
       </form>
       {blocker ? <div style={{ padding: '0 14px 12px', color: '#f0c04e', fontSize: 12.5 }}>{blocker}</div> : null}
+      {membersErr ? (
+        <div style={{ padding: '0 14px 12px', color: '#f0c04e', fontSize: 12.5 }}>
+          The member list could not be read, so this slot can only go up open: {membersErr}. That is
+          a failed query, not a gym with no members — book it to somebody once the page reloads.
+        </div>
+      ) : null}
       {msg ? <div style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
     </section>
   );

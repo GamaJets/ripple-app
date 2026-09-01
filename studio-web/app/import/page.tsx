@@ -23,11 +23,16 @@
 //    member cannot be matched is still recorded — unattributed, which is true,
 //    rather than dropped, which loses money the gym actually took.
 //
-//  · Members do NOT import. memberships.member_id is `not null references
-//    profiles(id)`, so a membership needs a real account behind it, and
-//    creating an account is an invite flow rather than an insert. The preview
-//    still runs, because validating and cleaning the file is most of the work
-//    and worth having before the invite path exists.
+//  · Members are INVITED, not inserted. memberships.member_id is `not null
+//    references profiles(id)`, so a membership needs a real account behind it
+//    and no amount of spreadsheet makes one. What the file can do is issue the
+//    invitations — one per row that carries an address — which is the actual
+//    path from "person the gym knows about" to "member", and until /invites
+//    existed there was no way to walk it two hundred times.
+//
+//    A row with no email address cannot be invited at all and is counted out
+//    loud rather than dropped: an invitation is addressed to an address, and
+//    a name is not one.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
@@ -41,6 +46,10 @@ import {
   type Membership, type MembershipPlan,
 } from '@lib/gymRecord';
 import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import {
+  fetchInvites, createInvites, screenInvites, inviteState, planIdFor, normaliseEmail,
+  DEFAULT_VALID_DAYS, type MemberInvite,
+} from '@lib/memberInvites';
 
 type Kind = 'payments' | 'members' | 'plans';
 
@@ -80,6 +89,13 @@ export default function ImportPage() {
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [priceBook, setPriceBook] = useState<MembershipPlan[] | null>(null);
   const [priceBookError, setPriceBookError] = useState<string | null>(null);
+  // The invitations this gym already has open. Null on a failed read, and that
+  // matters more here than anywhere else on the page: [] would tell the screen
+  // there are no open invitations, and a second run over the same sheet would
+  // then be refused row by row by the partial unique index — after the owner
+  // had been told two hundred were about to go out.
+  const [invites, setInvites] = useState<MemberInvite[] | null>(null);
+  const [invitesError, setInvitesError] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ text: string; outcome: Outcome } | null>(null);
@@ -107,6 +123,13 @@ export default function ImportPage() {
     } catch (e: any) {
       setPriceBook(null);
       setPriceBookError(e?.message ?? 'Could not read the price book.');
+    }
+    try {
+      setInvites(await fetchInvites(supabase, tenant));
+      setInvitesError(null);
+    } catch (e: any) {
+      setInvites(null);
+      setInvitesError(e?.message ?? 'Could not read the invitations already sent.');
     }
   }, []);
 
@@ -181,6 +204,64 @@ export default function ImportPage() {
       .filter((r) => r.errors.length === 0)
       .map((r) => ({ line: r.line, payment: r.value as PaymentRow }));
   }, [preview, kind]);
+
+  /**
+   * The invitations this member file would issue, each still carrying its line
+   * number, and everything it CANNOT issue, said separately.
+   *
+   * Three different reasons a row does not become an invitation, and none of
+   * them may be folded into the others:
+   *
+   *  · it has no email address. An invitation is addressed to an address; a
+   *    name is not one, and there is nothing to send to.
+   *  · this gym already has an invitation open for that address. The partial
+   *    unique index in 37-member-invites.sql enforces it, and `screenInvites`
+   *    is the readable half of the same rule — checked here so the second run
+   *    over the same sheet reports it rather than failing the whole batch.
+   *  · the same address appears twice in this file. Row-by-row validation would
+   *    pass both and the single insert would then fail halfway.
+   *
+   * The rows the preview already rejected — bad dates, unreadable statuses —
+   * are not here at all: they are listed in "rows need attention" above, and
+   * inviting somebody off a row this screen has just called broken would be the
+   * opposite of a dry run.
+   */
+  const inviteDrafts = useMemo(() => {
+    if (!preview || kind !== 'members' || preview.missingRequired.length) return null;
+    const rows = (preview.rows as RowResult<MemberRow>[]).filter((r) => r.errors.length === 0);
+    const noAddress = rows.filter((r) => !r.value?.email);
+    const drafts = rows
+      .filter((r) => r.value?.email)
+      .map((r) => ({
+        line: r.line,
+        email: r.value!.email as string,
+        fullName: r.value!.name || null,
+        // Matched by name against the price book, and null when the sheet named
+        // no plan, named one this gym does not sell, or named one it sells
+        // twice. The invite then carries no plan — which the schema allows on
+        // purpose — rather than a price nobody agreed to.
+        planId: planIdFor(r.value!.plan, priceBook ?? []),
+        planName: r.value!.plan,
+        validDays: DEFAULT_VALID_DAYS as number | null,
+      }));
+    // Only screened against the open invitations when that read actually came
+    // back. Passing [] from a failed read would say "none of these is a
+    // duplicate", which is a claim, not a silence.
+    const openTo = invites === null
+      ? []
+      : invites.filter((i) => inviteState(i) === 'pending').map((i) => i.email);
+    const { send, rejected } = screenInvites(drafts, openTo);
+    return {
+      send,
+      rejected,
+      noAddress,
+      // How many rows named a plan that this gym could actually match. Null
+      // while the price book is unread — 0 would read as "none of these plans
+      // exists here", which is a different and much more alarming answer.
+      planned: priceBook === null ? null : send.filter((d) => d.planId !== null).length,
+      named: send.filter((d) => (d.planName ?? '').trim() !== '').length,
+    };
+  }, [preview, kind, invites, priceBook]);
 
   /**
    * Plan names in the file that the gym already sells.
@@ -299,6 +380,52 @@ export default function ImportPage() {
     if (ok > 0) await loadGym(tenantId);
   };
 
+  /**
+   * Issue the invitations. The only write the members tab makes, and it makes
+   * no membership at all — that row appears when the person accepts, through
+   * accept_member_invite, with their own account behind it.
+   *
+   * One statement for the whole batch, unlike the payment and plan imports.
+   * That is `createInvites`' shape and it is the right one here: an invitation
+   * list is not money, a partial batch has no rows the gym has to reconcile,
+   * and all-or-nothing means the obvious retry — run the file again — is safe.
+   * The failure message says exactly that, because "some may have gone out"
+   * would stop an owner retrying at all.
+   */
+  const runInviteImport = async () => {
+    if (!tenantId || !inviteDrafts || !inviteDrafts.send.length) return;
+    setBusy(true); setDone(null); setFailed([]);
+    try {
+      const out = await createInvites(
+        supabase,
+        tenantId,
+        inviteDrafts.send.map(({ email, fullName, planId, validDays }) => ({
+          email, fullName, planId, validDays,
+        })),
+        me?.id ?? null,
+      );
+      // Reported by the line in the spreadsheet, never by position in a
+      // filtered array — the rejects come back as rows, so they are matched
+      // back to their line by address.
+      const byEmail = new Map(inviteDrafts.send.map((d) => [normaliseEmail(d.email), d.line]));
+      const bad = out.rejected.map((r) => ({
+        line: byEmail.get(normaliseEmail(r.row.email)) ?? 0,
+        why: r.reason,
+      }));
+      setFailed(bad);
+      setDone(report(out.sent, bad.length, 'invitation', 'recorded'));
+      if (out.sent > 0) await loadGym(tenantId);
+    } catch (e: any) {
+      setFailed([]);
+      setDone({
+        text: `Nothing was recorded: ${e?.message ?? 'the write was refused'}. The whole list is `
+          + 'written in one statement, so not one invitation went out — the file is still to run, '
+          + 'and running it again will not send anything twice.',
+        outcome: 'none',
+      });
+    } finally { setBusy(false); }
+  };
+
   // Null, not 0, when the member list has not been read: "none of these match a
   // member" and "we could not check" are different answers and only one of them
   // is safe to act on.
@@ -378,12 +505,13 @@ export default function ImportPage() {
       </Section>
 
       {kind === 'members' ? (
-        <Note tone="warn">
-          <strong style={{ color: 'var(--ink)' }}>Members can be checked here but not imported yet.</strong>{' '}
-          A membership must point at a real Repple account, and creating an account is an invite
-          rather than a row we can insert. The check below is still worth running — it finds the
-          bad dates, the unreadable amounts and the columns nobody will recognise, which is most
-          of the work of cleaning an export.
+        <Note tone="info">
+          <strong style={{ color: 'var(--ink)' }}>Members are invited, not imported.</strong>{' '}
+          A membership must point at a real Repple account, and no spreadsheet makes one — so a
+          checked file issues an <a href="/invites" style={{ color: 'var(--brand)' }}>invitation</a>{' '}
+          per row instead, and the membership opens when the person accepts it. Nothing on this
+          page writes a membership. Rows with no email address cannot be invited at all and are
+          counted below rather than dropped.
         </Note>
       ) : null}
 
@@ -402,6 +530,15 @@ export default function ImportPage() {
           <strong style={{ color: 'var(--ink)' }}>The member list could not be read</strong>, so no
           payment can be matched to anybody: {rosterError}. Importing now would record every
           payment unattributed. Reload the page first.
+        </Note>
+      ) : null}
+
+      {kind === 'members' && invitesError ? (
+        <Note tone="warn">
+          <strong style={{ color: 'var(--ink)' }}>The invitations already sent could not be read</strong>,
+          so this cannot say which of these people you have already invited: {invitesError}. Running
+          the file anyway is refused by the database one row at a time rather than reported here, so
+          reload before sending a list you may have sent before.
         </Note>
       ) : null}
 
@@ -427,6 +564,29 @@ export default function ImportPage() {
                   note={matched === null
                     ? (rosterError ? 'member list could not be read' : 'member list not read yet')
                     : (preview.ready.length ? `${preview.ready.length - matched} will be unattributed` : undefined)}
+                />
+              ) : null}
+              {kind === 'members' ? (
+                <Kpi
+                  label="Can be invited"
+                  text={inviteDrafts ? String(inviteDrafts.send.length) : null}
+                  note={inviteDrafts && inviteDrafts.noAddress.length
+                    ? `${inviteDrafts.noAddress.length} row${inviteDrafts.noAddress.length === 1 ? ' has' : 's have'} no email address`
+                    : undefined}
+                />
+              ) : null}
+              {kind === 'members' ? (
+                <Kpi
+                  label="Plan matched"
+                  // Null while the price book is unread. A 0 here reads as "this
+                  // gym sells none of these plans", which is a finding rather
+                  // than a missing query.
+                  text={inviteDrafts?.planned == null ? null : String(inviteDrafts.planned)}
+                  note={inviteDrafts?.planned == null
+                    ? (priceBookError ? 'price book could not be read' : 'price book not read yet')
+                    : inviteDrafts.named === 0
+                      ? 'this file names no plans'
+                      : `of ${inviteDrafts.named} row${inviteDrafts.named === 1 ? '' : 's'} naming one — the rest join with no plan`}
                 />
               ) : null}
               {kind === 'plans' ? (
@@ -511,6 +671,92 @@ export default function ImportPage() {
                 <Result done={done} />
               </div>
               <Failures failed={failed} />
+            </Section>
+          ) : null}
+
+          {/*
+            The confirm step for members, and it is a different verb from the
+            two below it: nothing here writes a membership. It records an
+            invitation per row, which the person accepts with their own account,
+            at which point accept_member_invite opens the membership on the plan
+            named here.
+
+            The list is shown by name, address and plan before the button, so
+            pressing it is a decision about known content rather than a count.
+          */}
+          {kind === 'members' && inviteDrafts && inviteDrafts.send.length > 0 ? (
+            <Section
+              title="Invite"
+              sub={`${inviteDrafts.send.length} invitation${inviteDrafts.send.length === 1 ? '' : 's'} will be recorded. This writes to your gym; it does not create anybody an account.`}
+            >
+              <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                {inviteDrafts.send.slice(0, 60).map((d) => (
+                  <div key={d.line} style={{
+                    display: 'flex', gap: 12, padding: '8px 14px',
+                    borderTop: '1px solid var(--ring)', fontSize: 12.5, alignItems: 'baseline',
+                  }}>
+                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink3)', minWidth: 44 }}>line {d.line}</span>
+                    <span style={{ color: 'var(--ink)', flex: 1 }}>{d.fullName ?? <span className="dash">no name in the file</span>}</span>
+                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink2)', flex: 1 }}>{d.email}</span>
+                    <span style={{ color: 'var(--ink3)', minWidth: 130 }}>
+                      {/* What this row WILL carry, not what the sheet said: a
+                          plan name the gym does not sell becomes no plan, and
+                          the invitation says so here rather than at the desk. */}
+                      {d.planId
+                        ? d.planName
+                        : (d.planName ?? '').trim()
+                          ? <span className="dash">“{d.planName}” — not a plan you sell</span>
+                          : <span className="dash">no plan</span>}
+                    </span>
+                    <span style={{ color: 'var(--ink3)', minWidth: 74 }}>{DEFAULT_VALID_DAYS} days</span>
+                  </div>
+                ))}
+                {inviteDrafts.send.length > 60 ? (
+                  <p style={{ margin: '10px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+                    …and {inviteDrafts.send.length - 60} more, all of which will be invited. Showing
+                    the first 60 so the page stays readable.
+                  </p>
+                ) : null}
+              </div>
+              <div style={{ ...formRow, borderBottom: 'none', borderTop: '1px solid var(--ring)' }}>
+                <button onClick={runInviteImport} disabled={busy || !tenantId} style={primaryBtn}>
+                  {busy ? 'Inviting…' : `Invite ${inviteDrafts.send.length} ${inviteDrafts.send.length === 1 ? 'person' : 'people'}`}
+                </button>
+                {!tenantId ? <span style={{ fontSize: 13, color: '#ef8080' }}>{NO_TENANT}</span> : null}
+                <Result done={done} />
+              </div>
+              <Failures failed={failed} />
+            </Section>
+          ) : null}
+
+          {/* What this file cannot invite, and why — one line per row, by the
+              line number down the side of their spreadsheet. Skipped rows are
+              never silently dropped: a gym that pastes two hundred members and
+              is told about a hundred and ninety would go looking for the ten. */}
+          {kind === 'members' && inviteDrafts
+            && (inviteDrafts.noAddress.length > 0 || inviteDrafts.rejected.length > 0) ? (
+            <Section
+              title={`${inviteDrafts.noAddress.length + inviteDrafts.rejected.length} cannot be invited`}
+              sub="These rows are fine as spreadsheet — they simply cannot become an invitation. Nothing here is written."
+            >
+              <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+                {inviteDrafts.noAddress.slice(0, 40).map((r) => (
+                  <div key={`n${r.line}`} style={{ display: 'flex', gap: 12, padding: '8px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5 }}>
+                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink3)', minWidth: 44 }}>line {r.line}</span>
+                    <span style={{ color: 'var(--ink2)' }}>
+                      {r.value?.name ? `${r.value.name} — ` : ''}no email address in this row, and an
+                      invitation is addressed to one. Add the address to your sheet, or invite them
+                      by hand once you have it.
+                    </span>
+                  </div>
+                ))}
+                {inviteDrafts.rejected.slice(0, 40).map(({ row, reason }) => (
+                  <div key={`r${row.line}`} style={{ display: 'flex', gap: 12, padding: '8px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5 }}>
+                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink3)', minWidth: 44 }}>line {row.line}</span>
+                    <span style={{ color: 'var(--ink2)' }}>{row.email} — {reason}</span>
+                  </div>
+                ))}
+              </div>
             </Section>
           ) : null}
 

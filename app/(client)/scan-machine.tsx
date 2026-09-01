@@ -58,7 +58,7 @@ export default function ScanMachine() {
   const wu = useSettings().weightUnit;
   const t = useTheme();
   const router = useRouter();
-  const { addWorkouts } = useWorkoutLog();
+  const { logWorkouts } = useWorkoutLog();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
@@ -184,17 +184,21 @@ export default function ScanMachine() {
       // a fabricated one when there was no load to estimate from.
       entry = { t: new Date().toISOString(), exercise: exercise.trim(), sets: sets.map((s) => [s.reps, s.kg] as [number, number]), kcal: strengthKcalOf(sets) };
     }
-    // `addWorkouts` resolves false only when the row never reached the server:
-    // the set lives in this session's memory and is gone at the next launch.
-    // The result was thrown away, so "saved to your workout log" was announced
-    // either way — with a button that opens that log — and a client walked away
-    // from the machine believing a set was recorded that nothing outside this
-    // screen had ever seen.
-    const saved = await addWorkouts([entry]);
+    // The result used to be thrown away, so "saved to your workout log" was
+    // announced either way — with a button that opens that log — and a client
+    // walked away from the machine believing a set was recorded that nothing
+    // outside this screen had ever seen. Three outcomes now, and a member
+    // standing at a machine in a basement is the reason the middle one exists:
+    // a set nobody answered is kept on the phone and sent later.
+    const out = await logWorkouts([entry]);
     // Remember this machine's setup so the next scan of the same code auto-fills.
     if (rawCode) rememberMachine(rawCode, { name: exercise.trim(), group, cardio, unit });
-    if (!saved) {
-      Alert.alert('Not saved', exercise.trim() + ' could not be saved to your workout log — it is on this phone only and will not survive a restart. Check your connection, then log it again from Train.', [{ text: 'OK' }]);
+    if (out === 'unsent') {
+      Alert.alert('Saved on this phone', exercise.trim() + ' has not reached your workout log yet — there is no connection here. Nothing is lost: it is saved on this phone and goes up on its own the next time you have signal.', [{ text: 'OK' }]);
+      return;
+    }
+    if (out === 'refused') {
+      Alert.alert('Not saved', exercise.trim() + ' was rejected by your workout log, so it is not recorded and it is not waiting to send. Logging it again as it is will be rejected again.', [{ text: 'OK' }]);
       return;
     }
     Alert.alert('Logged', exercise.trim() + ' saved to your workout log.', [

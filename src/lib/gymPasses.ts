@@ -13,6 +13,7 @@
 // cash all week will make a worse decision than one reading a dash.
 
 import { assertWhole, capLimit } from './rowCap';
+import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
 
@@ -235,11 +236,56 @@ export interface NewPassType {
  * same consequence as `createPlan` and `recordPayment` in src/lib/gymRecord.ts;
  * see the notes there. A price somebody is charged has no honest default.
  */
+/**
+ * Why this pass type cannot go in the price book, or null when it can.
+ *
+ * Pure, so the form can say it before the round trip and a test can prove it
+ * without a database — the same shape as `slotBlocker` in gymPtSchedule.ts and
+ * `inviteBlocker` in memberInvites.ts: null means go.
+ *
+ * Every rule here is one `gym_pass_types` also enforces (31-drop-ins-and-
+ * passes.sql: `price_cents >= 0`, `uses >= 1`, `valid_days is null or > 0`).
+ * Duplicating them buys a sentence instead of a raw constraint violation, and
+ * it refuses rather than repairs: a blank number is an unfinished form, and
+ * defaulting a price to nought would put a free day pass on sale.
+ *
+ * The currency is checked here as well as required by the type, because this is
+ * the sentence the owner reads. A price with no currency is not a price — see
+ * the note on createPassType below for what that once cost.
+ */
+export function passTypeBlocker(t: {
+  name?: string | null;
+  priceCents?: number | null;
+  currency?: string | null;
+  uses?: number | null;
+  validDays?: number | null;
+}): string | null {
+  if (!(t.name ?? '').trim()) return 'Give the pass a name — it is what the desk picks from.';
+  if (t.priceCents == null || !Number.isFinite(t.priceCents)) {
+    return 'What does it cost? A pass with no price recorded is not a free pass.';
+  }
+  if (!Number.isInteger(t.priceCents) || t.priceCents < 0) {
+    return 'That price cannot be sold — it has to be a whole amount and not less than nothing.';
+  }
+  if (!(t.currency ?? '').trim()) {
+    return 'A price with no currency is not a price. Set the gym’s currency first.';
+  }
+  if (t.uses != null && (!Number.isInteger(t.uses) || t.uses < 1)) {
+    return 'How many visits is it worth? A pass has to be good for at least one.';
+  }
+  if (t.validDays != null && (!Number.isInteger(t.validDays) || t.validDays < 1)) {
+    return 'How many days does it last? Leave it blank for a pass that does not expire — 0 is not the same thing.';
+  }
+  return null;
+}
+
 export async function createPassType(
   sb: Queryable,
   tenantId: string,
   t: NewPassType,
 ): Promise<void> {
+  const blocked = passTypeBlocker(t);
+  if (blocked) throw new Error(blocked);
   const { error } = await sb.from('gym_pass_types').insert({
     tenant_id: tenantId,
     name: t.name,
@@ -250,6 +296,32 @@ export async function createPassType(
     valid_days: t.validDays ?? null,
   });
   if (error) throw error;
+}
+
+/**
+ * Take a pass type off sale, or put it back on.
+ *
+ * Retired, never deleted, exactly as `setPlanActive` retires a plan: passes
+ * already in somebody's hand keep pointing at their type, and `fetchPasses`
+ * reads the name through that pointer. Deleting the row nulls it (the foreign
+ * key is `on delete set null`) and every pass sold on it starts rendering as
+ * "retired type" with no name at all — a gym cannot then say what it sold.
+ *
+ * Counted, because an UPDATE matching zero rows is not an error — see
+ * src/lib/wroteRows.ts. `gym_pass_types_owner` is the only policy granting
+ * UPDATE and it is `is_owner_of(tenant_id)`, so anybody else retires nothing
+ * and, without this, is told a pass is off sale while the desk is still
+ * selling it.
+ */
+export async function setPassTypeActive(
+  sb: Queryable, passTypeId: string, active: boolean,
+): Promise<void> {
+  const r = await sb
+    .from('gym_pass_types')
+    .update({ active }, { count: 'exact' })
+    .eq('id', passTypeId);
+  if (r.error) throw r.error;
+  assertWrote(active ? 'Putting that pass back on sale' : 'Retiring that pass', r);
 }
 
 /* ── issued passes ─────────────────────────────────────────────────────────── */

@@ -366,6 +366,45 @@ export interface NewPtSlot {
   /** Hold the hour without offering it — the trainer is on the floor but not
    *  bookable. */
   blocked?: boolean;
+  /**
+   * The member this hour is already taken by — the gym booking somebody in over
+   * the phone rather than waiting for them to book it in the app.
+   *
+   * Null or absent means the slot goes up open, which is the default and stays
+   * the default. What this must NOT become is a second kind of booked session:
+   * see `bookingFields` below.
+   */
+  clientId?: string | null;
+}
+
+/**
+ * The columns that make a session booked to somebody — or open again.
+ *
+ * There is exactly one notion of a booked one-to-one in this product and this
+ * is it, stated once so the console cannot invent a second. `book_session` in
+ * 09-sessions-access.sql writes
+ *
+ *     client_id = auth.uid(), status = 'booked', released = false
+ *
+ * and `cancel_session` writes the inverse. The trainer's own calendar
+ * (src/ui/sessions.tsx) writes the same three. A gym booking a member in from
+ * Studio therefore writes the same three, and a slot booked at the desk is
+ * indistinguishable from one the member booked themselves — which is the point:
+ * payroll, the member's app, the waitlist promotion and the no-double-booking
+ * constraint (86-no-double-booking.sql, `where status = 'booked'`) all key off
+ * that status, and a slot that carried a client id while still saying
+ * 'available' would be invisible to every one of them.
+ *
+ * `released` is set rather than left alone in both directions. It means "this
+ * hour was given back", and a slot re-booked to somebody else while it still
+ * said released would show as free capacity that is not free.
+ */
+export function bookingFields(clientId: string | null): {
+  client_id: string | null; status: 'booked' | 'available'; released: boolean;
+} {
+  return clientId
+    ? { client_id: clientId, status: 'booked', released: false }
+    : { client_id: null, status: 'available', released: true };
 }
 
 /**
@@ -385,6 +424,52 @@ export function slotBlocker(s: NewPtSlot): string | null {
     return 'How long is it? A slot needs a length in minutes.';
   }
   if (s.durationMin > 8 * 60) return 'That is longer than eight hours — check the minutes.';
+  // A held hour is one nobody may take; a booked one is an hour somebody has.
+  // Asking for both is not a slot with a preference, it is two different
+  // decisions, and picking either would put an hour on the board that the owner
+  // did not describe. `ptEntry` reads a blocked slot as holding no place at all,
+  // so the member booked into one would vanish from the board's own headcount.
+  if (s.blocked && s.clientId) {
+    return 'A held hour cannot also be booked to somebody. Book it, or hold it — not both.';
+  }
+  return null;
+}
+
+/**
+ * The reason a booking write was refused, in words, or null when it is not one
+ * of the two worth translating.
+ *
+ * Both rules belong to the database and both stay there. This renames them; it
+ * does not re-implement them, because a copy of a rule held in one screen is a
+ * rule two devices can defeat.
+ *
+ *  · 23P01. 86-no-double-booking.sql puts an exclusion constraint over BOOKED
+ *    sessions per trainer, so booking a member into an hour their trainer is
+ *    already taken for comes back as "conflicting key value violates exclusion
+ *    constraint sessions_no_double_booking" — true, and unusable at a desk.
+ *
+ *  · 23503 on the client. `sessions.client_id` references `clients(id)`, not
+ *    `profiles(id)`, so a person who holds a membership but has never been
+ *    anybody's client here cannot be booked in. That is the schema's answer and
+ *    it is a reasonable one; what it must not do is arrive as a foreign-key
+ *    constraint name in front of somebody holding a telephone. The trainer's own
+ *    foreign key produces the same code, so the message is checked before this
+ *    claims to know which one it was.
+ */
+export function bookingRefusalNote(error: unknown): string | null {
+  const e = (error ?? null) as { code?: string; message?: string; details?: string } | null;
+  if (!e) return null;
+  if (e.code === '23P01') {
+    return 'That trainer already has a booked session overlapping this time. '
+      + 'Two people cannot have the same hour with them — move one of the two first.';
+  }
+  if (e.code === '23503') {
+    const where = `${e.message ?? ''} ${e.details ?? ''}`;
+    if (/client/i.test(where)) {
+      return 'That member has no client record at this gym yet, so a one-to-one cannot be booked '
+        + 'to them. They get one when they accept a gym invitation or a coach adds them.';
+    }
+  }
   return null;
 }
 
@@ -406,15 +491,28 @@ export async function createPtSlot(
   const blocker = slotBlocker(s);
   if (blocker) throw new Error(blocker);
 
+  // A held hour is blocked and holds nobody; everything else is decided by
+  // `bookingFields`, so a slot created with a member on it is the same row the
+  // app's own booking would have written.
+  const booking = bookingFields(s.clientId ?? null);
   const { data, error } = await sb.from('sessions').insert({
     tenant_id: tenantId,
     trainer_id: s.trainerId,
     starts_at: s.startsAt,
     duration_min: s.durationMin,
     room: s.room?.trim() ? s.room.trim() : null,
-    status: s.blocked ? 'blocked' : 'available',
+    ...(s.blocked
+      ? { status: 'blocked' }
+      : { status: booking.status, client_id: booking.client_id, released: booking.released }),
   }).select('id').single();
-  if (error) throw error;
+  // The original error is rethrown untouched unless it is the double-booking
+  // one, whose own message is unreadable at a desk. Nothing else is reworded:
+  // a message this file invented over a fault it did not recognise is how a
+  // real reason stops reaching the person who could act on it.
+  if (error) {
+    const note = bookingRefusalNote(error);
+    throw note ? new Error(note) : error;
+  }
 
   const id = (data as any)?.id as string | undefined;
   if (!id) throw new Error('The slot was not written — nothing came back from the insert.');
@@ -439,21 +537,40 @@ export async function removePtSlot(sb: Queryable, sessionId: string): Promise<vo
   }
 }
 
-/** Move a slot, or put it in a room. Only the fields given are touched. */
+/**
+ * Move a slot, put it in a room, or book it to a member. Only the fields given
+ * are touched.
+ *
+ * `clientId` is the after-the-fact half of the same thing `createPtSlot` does
+ * up front — the member who rang up on Tuesday for Thursday's open hour, and
+ * the member who rang back to cancel. Passing an id books it; passing null
+ * opens it again. Both go through `bookingFields`, so the status and the
+ * `released` flag move with the client id rather than being set by whichever
+ * caller remembered to, and an unpassed `clientId` leaves all three alone.
+ */
 export async function updatePtSlot(
   sb: Queryable, sessionId: string,
-  patch: { startsAt?: string; durationMin?: number; room?: string | null },
+  patch: {
+    startsAt?: string;
+    durationMin?: number;
+    room?: string | null;
+    clientId?: string | null;
+  },
 ): Promise<void> {
   const row: Record<string, unknown> = {};
   if (patch.startsAt !== undefined) row.starts_at = patch.startsAt;
   if (patch.durationMin !== undefined) row.duration_min = patch.durationMin;
   if (patch.room !== undefined) row.room = patch.room?.trim() ? patch.room.trim() : null;
+  if (patch.clientId !== undefined) Object.assign(row, bookingFields(patch.clientId));
   if (!Object.keys(row).length) return;
 
   const { data, error } = await sb.from('sessions').update(row).eq('id', sessionId).select('id');
-  if (error) throw error;
+  if (error) {
+    const note = bookingRefusalNote(error);
+    throw note ? new Error(note) : error;
+  }
   if (!data || (data as any[]).length === 0) {
-    throw new Error('Nothing was changed — that slot may no longer exist.');
+    throw new Error('Nothing was changed — that slot may no longer exist, or it may not be yours to change.');
   }
 }
 

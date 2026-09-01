@@ -20,6 +20,7 @@
 // a support ticket, so there is one implementation and the SQL mirrors it.
 
 import { assertWhole, capLimit } from './rowCap';
+import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
 
@@ -209,6 +210,27 @@ export function screenInvites<T extends { email: string | null }>(
   return { send, rejected };
 }
 
+/**
+ * The plan a spreadsheet's plan column refers to, as an id the invite can hold.
+ *
+ * Matched on the name after trimming and lower-casing, and no more cleverly
+ * than that. Null for three different situations that must all stay null:
+ * the sheet named no plan, the sheet named one this gym does not sell, and the
+ * gym sells two plans by that name so the file does not say which. The invite
+ * then carries no plan — which 37-member-invites.sql explicitly allows, and
+ * which the desk sorts out at signup — rather than one nobody chose. A closest
+ * match would enrol somebody on a price they never agreed to.
+ */
+export function planIdFor(
+  name: string | null | undefined,
+  plans: { id: string; name: string }[],
+): string | null {
+  const want = (name ?? '').trim().toLowerCase();
+  if (!want) return null;
+  const hits = plans.filter((p) => p.name.trim().toLowerCase() === want);
+  return hits.length === 1 ? hits[0].id : null;
+}
+
 export interface InviteSummary {
   total: number;
   /** Still open and still redeemable. */
@@ -357,12 +379,19 @@ export async function createInvites(
  * at the desk, and only one of them is true.
  */
 export async function revokeInvite(sb: Queryable, inviteId: string): Promise<void> {
-  const { error } = await sb
+  // Counted, not merely unerrored — see src/lib/wroteRows.ts. Both filters below
+  // can legitimately match nothing: `mi_owner` is `is_owner_of(tenant_id)`, so
+  // another gym's owner withdraws nothing, and `.eq('status','pending')` matches
+  // nothing once somebody has already accepted. PostgREST answers both with 204
+  // and no error, so without the count the screen tells an owner an invitation
+  // has been withdrawn while it is still open and still redeemable.
+  const r = await sb
     .from('member_invites')
-    .update({ status: 'revoked' })
+    .update({ status: 'revoked' }, { count: 'exact' })
     .eq('id', inviteId)
     .eq('status', 'pending'); // never reopen a decision by overwriting 'accepted'
-  if (error) throw error;
+  if (r.error) throw r.error;
+  assertWrote('That invitation', r);
 }
 
 /** Push an invite's expiry out — the "they were away, send it again" case.
@@ -373,12 +402,17 @@ export async function extendInvite(
 ): Promise<void> {
   const expiresAt = expiryFor(new Date().toISOString(), validDays);
   if (!expiresAt) throw new Error('An invite extension needs a number of days.');
-  const { error } = await sb
+  // Counted for the same reason revokeInvite is, and it matters more here: the
+  // owner extends an invite precisely because somebody is about to lose it, and
+  // an extension that matched no row leaves the invite lapsing on its original
+  // date under a screen that has just said it was extended.
+  const r = await sb
     .from('member_invites')
-    .update({ expires_at: expiresAt })
+    .update({ expires_at: expiresAt }, { count: 'exact' })
     .eq('id', inviteId)
     .eq('status', 'pending');
-  if (error) throw error;
+  if (r.error) throw r.error;
+  assertWrote('That extension', r);
 }
 
 /**

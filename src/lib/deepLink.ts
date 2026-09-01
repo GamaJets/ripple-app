@@ -14,9 +14,17 @@
 //
 // NOT for third-party OAuth redirects. Spotify, WHOOP and Oura match the
 // redirect against a value registered in their dashboards, so it has to stay a
-// fixed, known string — see `oauthConfig.ts` and `spotify.ts`, which keep
-// `repple://` deliberately. Those features are client-app only, so that scheme
-// is the correct one for them.
+// string that is fixed and knowable before the app runs — `Linking.createURL`
+// reads the running binary and is therefore exactly the wrong tool. See
+// `oauthConfig.ts` and `spotify.ts`.
+//
+// Those two used to hold the literal `repple://`, and this comment used to call
+// that deliberate. It was deliberate on the VARIANT axis and wrong on the BRAND
+// one: they are client-app features, so the client scheme is right, but the
+// client scheme of WHICH brand is not something a literal can answer. They now
+// compose theirs from `BRAND.apps.client.scheme` — the same registry this file
+// reads `webOrigin` from — which is still a build-time constant a dashboard can
+// be told about, and still resolves to 'repple' for every build that exists.
 import * as Linking from 'expo-linking';
 import { BRAND } from './brands';
 

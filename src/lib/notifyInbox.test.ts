@@ -549,12 +549,38 @@ for (const n of [0, 1, 4, 999, 1204, 99999]) {
     eq(e?.to, 'trainer', `“${title}” goes to the coach's build`);
   }
 
-  // And part 159's two client-directed rows, which are the ones most likely to
-  // be given a coach route by somebody editing the block above them.
-  for (const title of ['Your coaching has ended', 'A place has opened in a class']) {
+  // And the client-directed rows, which are the ones most likely to be given a
+  // coach route by somebody editing the block above them.
+  for (const title of [
+    // part 159
+    'Your coaching has ended', 'A place has opened in a class',
+    // part 160
+    'Your payment did not go through',
+  ]) {
     const e = SERVER_WRITTEN.find((x) => x.title === title);
     ok(!!e, `“${title}” is still written to a client somewhere`);
     eq(e?.to, 'client', `“${title}” goes to the client's build`);
+  }
+
+  // A declined card is TWO rows about one status transition, and they are the
+  // pair this catalogue is most likely to be edited into one of. Part 158 tells
+  // the coach, who can do nothing about somebody else's card; part 160 tells the
+  // client, who is the only person who can fix it. Losing either half is a
+  // regression with a name: before 160 the coach was told and the client found
+  // out when their coaching stopped.
+  const declined = SERVER_WRITTEN.filter((x) => /payment (failed|did not go through)/.test(x.title));
+  eq(declined.length, 2, 'a declined card is told to both parties, in two different rows');
+  eq(new Set(declined.map((x) => x.to)).size, 2, 'and the two rows go to two different builds');
+  eq(new Set(declined.map((x) => x.title)).size, 2,
+    'with two different headings — "a client of yours" is not "your card"');
+  // Neither half may be followable from the other's build, which is the whole
+  // reason they are two rows and not one reused route.
+  for (const d of declined) {
+    for (const other of (['client', 'trainer'] as const)) {
+      if (other === d.to) continue;
+      eq(safeRoute(d.route, other), null,
+        `${d.where} is addressed to the ${d.to} build, so the ${other} build must not follow it`);
+    }
   }
 
   // The two sides of an ending are DIFFERENT rows. One trigger function writes
@@ -605,6 +631,12 @@ eq(inboxIcon('/(trainer)/client-intake?clientId=abc'), 'pencil', 'and that icon 
 // Without its clientId the coach's intake screen says no client was named, so
 // the query string is load-bearing and must not cost the row its icon.
 eq(inboxIcon('/(trainer)/client-intake'), 'pencil', 'the bare route keeps it too');
+// Part 160's route. Asserted here as well as through the catalogue because the
+// catalogue would still pass with both sides changed to 'bell' together — and
+// 'bell' is what a route with no ICON_BY_ROUTE entry silently becomes, which is
+// exactly how '/(client)/intake' shipped unrecognised for a year.
+eq(inboxIcon('/(client)/packages'), 'trophy', 'a declined card draws the Memberships & Packs icon');
+eq(inboxIcon('/(client)/packages?from=inbox'), 'trophy', 'a query string does not lose it either');
 
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

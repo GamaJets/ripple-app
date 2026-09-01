@@ -29,8 +29,9 @@ import {
   isDelivered, isAwaitingOutcome, isPayable,
   payrollByTrainer, payrollTotal, settlementBlocker,
   settleableSessions, settlementAmount, settleBlocker, sessionProfileIds,
-  PAY_DELIVERED_ONLY,
+  PAY_DELIVERED_ONLY, SETTLEMENT_METHODS, SETTLEMENT_METHOD_LABEL,
   type PtSession, type PayPolicy, type PayrollLine, type Settlement,
+  type SettlementMethod,
 } from '@lib/gymSessions';
 import { fetchGymTrainers, payroll30For, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
 import { money } from '@lib/gymRecord';
@@ -130,6 +131,21 @@ export default function Payroll() {
   const [runsErr, setRunsErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [settling, setSettling] = useState<string | null>(null);
+  /**
+   * How the money is actually moving, for the settlement about to be recorded.
+   *
+   * Neither this screen nor /sessions used to pass one, and `recordSettlement`
+   * defaulted to 'transfer' into a column that also defaults to 'transfer' — so
+   * every settlement the console has ever written says bank transfer, including
+   * the cash handed over at the desk, and /accounting prints that under a column
+   * headed Method as the gym's own answer. It is the owner pressing the button
+   * who knows, so they are the one asked.
+   *
+   * 'transfer' is the initial value of the CONTROL, which is a different thing
+   * from a default in the write: it is on screen, beside the button, and it
+   * changes when they change it.
+   */
+  const [method, setMethod] = useState<SettlementMethod>('transfer');
 
   /**
    * Read the run.
@@ -402,6 +418,8 @@ export default function Payroll() {
         periodTo: period.toDate,
         amountCents: settlementAmount(r.outstanding),
         sessionIds: r.outstanding.map((s) => s.id),
+        // Said, never defaulted — see the note on `method` above.
+        method,
         note: `Payroll run — ${period.label}`,
         // Stated, never defaulted. Left out, gymSessions writes 'AED', and a
         // London gym's payroll history quietly becomes dirhams. `r.blocker`
@@ -540,6 +558,8 @@ export default function Payroll() {
         rosterUnread={unread(trainers, trainersErr)}
         settling={settling}
         onSettle={settle}
+        method={method}
+        onMethod={setMethod}
         ccy={ccy}
       />
 
@@ -623,9 +643,11 @@ function Blocking({ sessions, unread, ccy }: {
 
 /* ── the run ───────────────────────────────────────────────────────────────── */
 
-function Run({ rows, unread, rosterUnread, settling, onSettle, ccy }: {
+function Run({ rows, unread, rosterUnread, settling, onSettle, method, onMethod, ccy }: {
   rows: RunRow[] | null; unread: Unread; rosterUnread: Unread;
-  settling: string | null; onSettle: (r: RunRow) => void; ccy: TenantCurrency;
+  settling: string | null; onSettle: (r: RunRow) => void;
+  method: SettlementMethod; onMethod: (m: SettlementMethod) => void;
+  ccy: TenantCurrency;
 }) {
   const cols: Column<RunRow>[] = [
     { key: 'name', header: 'Trainer', value: (r) => r.name ?? '',
@@ -714,6 +736,31 @@ function Run({ rows, unread, rosterUnread, settling, onSettle, ccy }: {
                 : 'The roster did not come back, so this run covers only trainers who appear in the period’s own sessions. A trainer who delivered nothing this month is missing from the list rather than shown with nothing owed.'}
             </p>
           ) : null}
+          {/* Beside the buttons it describes, not buried in a dialog: whoever
+              presses Mark as paid is the only person who knows how the money
+              moved, and the record is read back months later by somebody
+              reconciling a bank statement against it. */}
+          <div style={{
+            display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+            padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink2)',
+          }}>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              Paid by
+              <select
+                value={method}
+                onChange={(e) => onMethod(e.target.value as SettlementMethod)}
+                style={field}
+              >
+                {SETTLEMENT_METHODS.map((m) => (
+                  <option key={m} value={m}>{SETTLEMENT_METHOD_LABEL[m]}</option>
+                ))}
+              </select>
+            </label>
+            <span style={{ color: 'var(--ink3)' }}>
+              recorded against whichever run you settle next, and shown on Accounting as how this
+              money left the gym.
+            </span>
+          </div>
           <DataTable rows={rows} columns={cols} rowKey={(r) => r.trainerId} empty="Nobody delivered anything in this period." />
         </>
       )}
@@ -877,7 +924,10 @@ function Paid({ runs, unread, sessionsUnread, period }: {
     { key: 'period', header: 'Covering', value: (r) => r.periodFrom,
       render: (r) => `${r.periodFrom} → ${r.periodTo}` },
     { key: 'n', header: 'Sessions', value: (r) => r.sessionsCount, numeric: true },
-    { key: 'method', header: 'How', value: (r) => r.method },
+    // The label, not the column value: "payroll" and "transfer" are the words
+    // the table stores, and "through payroll" is what the owner said.
+    { key: 'method', header: 'How', value: (r) => r.method,
+      render: (r) => SETTLEMENT_METHOD_LABEL[r.method] ?? r.method },
     { key: 'amount', header: 'Amount', value: (r) => r.amountCents, numeric: true,
       // Snapshotted at the time, never recomputed — a later fee change must not
       // rewrite what actually left the account. The CURRENCY is snapshotted on

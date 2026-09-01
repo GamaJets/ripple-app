@@ -32,6 +32,7 @@
     "src/lib/screenHelp.test.ts",
     "src/lib/strengthLevel.test.ts",
     "src/lib/bookingsRead.test.ts",
+    "src/lib/planOffer.test.ts",
     "src/lib/keyboardLift.test.ts",
     "src/lib/mealPlan.test.ts",
     "src/lib/types.ts",
@@ -133,7 +134,7 @@
     "src/lib/coachThreads.test.ts",
     "src/lib/deltaLabel.test.ts",
     "src/lib/readAll.test.ts",
-    "src/lib/financialAI.test.ts",
+    "src/lib/finReview.test.ts",
     "src/lib/clientRecord.test.ts",
     "src/lib/coachLedger.test.ts",
     "src/lib/coachChannels.test.ts",
@@ -154,6 +155,8 @@
     "src/lib/stretchRoutine.test.ts",
     "src/lib/stretchBuilder.test.ts",
     "src/lib/programReview.test.ts",
-    "src/lib/startGate.test.ts"
+    "src/lib/startGate.test.ts",
+    "src/lib/studioWrites.test.ts",
+    "src/lib/workoutQueue.test.ts"
   ]
 }

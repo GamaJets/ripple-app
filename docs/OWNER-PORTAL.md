@@ -86,12 +86,26 @@ in a `useState` that resets.
    is already fixed — months with no snapshot render blank rather than repeating
    today's figure.)
 
-5. **`financials.tsx` needs a real source.** It currently takes typed inputs and
-   grades them. That is defensible as a calculator, but it is titled "AI financial
-   review" and carries a `sparkle` icon while being an if/else chain over four
-   thresholds. Either connect accounting (the screen already says "connect
-   accounting") or rename it to what it is. The always-grade-A bug in it is fixed;
-   the framing is not.
+5. **`financials.tsx` needs a real source. — RENAMED, not sourced.** It takes
+   typed inputs and grades them. That is defensible as a calculator, but it was
+   titled "AI financial review" and carried a `sparkle` icon while being an
+   if/else chain over a handful of thresholds. Of the two ways out named here —
+   connect accounting, or rename it to what it is — the second was taken, because
+   the first is a Xero/QuickBooks OAuth app, a token store, a sync worker and a
+   chart-of-accounts mapping that nobody has started.
+
+   The screen is now **Financial Checks**, its subtitle and section heading say
+   the review is fixed rules rather than a model, the `sparkle` on the dashboard
+   row is a `chart`, and `financialAI.ts` is `finReview.ts`. The one line that
+   states the basis is built in that module (`reviewBasis()`) rather than typed
+   into the screen, so a rewrite cannot silently drop it — the same trick
+   `checksLine()` uses in `src/lib/programReview.ts`.
+
+   It also now says where the numbers live. They are one AsyncStorage key on one
+   phone: no row, no sync, no backup, gone with the app. `storageNote()` says so
+   in the empty state, in the entry form and under the review. **Everything above
+   about needing a real source still stands** — this closed the framing, not the
+   gap. Point 4's `platform_metrics` argument applies here word for word.
 
 ## Two things not to repeat
 

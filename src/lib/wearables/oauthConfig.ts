@@ -5,6 +5,7 @@
 // only used server-side during the code→token exchange.
 import type { ProviderId } from './types';
 import Constants from 'expo-constants';
+import { BRAND } from '../brands';
 
 export interface OAuthVendor {
   id: ProviderId;
@@ -67,11 +68,29 @@ const env = (k: string): string => {
 };
 
 // The redirect must exactly match what you register with each vendor.
-// Scheme comes from app.json ("repple"); path is stable.
-// Deliberately fixed, not built with appLink(): WHOOP, Oura and the rest match
-// this against a redirect URI registered in their dashboards, so it cannot vary
-// per app. Wearables are a client-app feature, so `repple` is the right scheme.
-export const OAUTH_REDIRECT = 'repple://wearables/callback';
+//
+// Fixed per BUILD, not built with appLink(): WHOOP, Oura and the rest match
+// this against a redirect URI registered in their dashboards, so it must be
+// knowable before the app runs and cannot vary with which of the three apps is
+// running. Wearables are a client-app feature, so the CLIENT variant's scheme
+// is named explicitly rather than read off the running binary.
+//
+// The brand is the axis that was wrong. This was the literal
+// 'repple://wearables/callback' — the line docs/WHITE-LABEL.md §6 names — and
+// each brand ships its own schemes (src/lib/brands.ts). A chain's member
+// connecting their Oura ring from THEIR app was returned to `repple://`, the
+// Repple client app, which is not installed on their phone: the browser closes
+// on an unhandled scheme and the connection never completes, with no error
+// anywhere. Given how this file already treats an unconnectable vendor — see
+// `clientNote` above, which exists because somebody blames their own ring — a
+// silent dead end was the worst available outcome. `BRAND.apps.client.scheme`
+// resolves to 'repple' whenever EXPO_PUBLIC_BRAND is unset, so this string is
+// byte-identical for every build that exists today.
+//
+// It does not register anything. A new brand still needs its new redirect URI
+// added in each vendor's dashboard, per docs/WHITE-LABEL.md's checklist step
+// 10; this is the half of that the app is responsible for.
+export const OAUTH_REDIRECT = `${BRAND.apps.client.scheme}://wearables/callback`;
 
 export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
   fitbit: {

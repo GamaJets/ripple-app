@@ -125,6 +125,13 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   ['/(client)/classes', 'calendar'],
   ['/(client)/workouts', 'dumbbell'],
   ['/(client)/achievements', 'trophy'],
+  // Memberships & Packs, which part 160 sends a client to when their card is
+  // declined. The icon CLIENT_NAV already gives that screen (src/lib/features.ts,
+  // key 'packages') and not a fresh choice: without an entry here the row falls
+  // to the generic bell, which is the icon that means "we have no idea what this
+  // is" — on the one notification in a client's inbox that costs them their
+  // coaching if they scroll past it.
+  ['/(client)/packages', 'trophy'],
   // ── the coach's own three ────────────────────────────────────────────────
   //
   // Written by database triggers rather than by a push (supabase/parts/158),
@@ -445,6 +452,19 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     where: 'supabase/parts/159 · coach_review_notify',
     when: 'a client leaves or revises a review — at every rating, unfiltered',
     to: 'trainer', title: 'A client has left you a review', route: '/(trainer)/credentials', icon: 'trophy',
+  },
+  // ── the client's half of a failed card (part 160) ────────────────────────
+  //
+  // Part 158 writes three subscription rows and all three go to the COACH,
+  // including the one about a declined card — which the coach cannot fix. This
+  // is the same transition told to the person whose card it is. Two rows, two
+  // recipients, two routes, and the pair below is why the `to` field on this
+  // table earns its place: they are one line apart and one of them is refused
+  // by the other's build.
+  {
+    where: 'supabase/parts/160 · client_subscription_notify_client',
+    when: 'subChange() says a payment failed — the client’s half of part 158’s middle band',
+    to: 'client', title: 'Your payment did not go through', route: '/(client)/packages', icon: 'trophy',
   },
 ];
 
