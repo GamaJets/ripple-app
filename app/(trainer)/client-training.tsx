@@ -76,6 +76,7 @@ import {
   sessionsOf, attributionOf, attributionLabel, trainingBoard, unitFor,
   type LoggedSession, type TrainingDay, type Attribution,
 } from '../../src/lib/clientTraining';
+import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHistory';
 
 // Written out here, on one line, rather than imported from the library beside
 // the logic that consumes them. scripts/check-schema.mjs resolves a select list
@@ -217,6 +218,12 @@ export default function ClientTraining() {
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const fullName = client?.name ?? (typeof params.name === 'string' ? params.name : '') ?? '';
   const who = (fullName || 'They').split(' ')[0];
+  // A name we do not have must not become "They's". The fallback voice is
+  // third-person plural throughout rather than a possessive built out of a
+  // placeholder, which is the shape that puts "They's training" on a screen.
+  const voice: HistoryVoice = fullName
+    ? { they: who, their: `${who}'s`, have: 'has' }
+    : { they: 'They', their: 'their', have: 'have' };
 
   const sessions = useMemo(() => (log ? sessionsOf(log) : null), [log]);
   // 'error' hands the board a null, which is the only way it can answer
@@ -527,6 +534,19 @@ export default function ClientTraining() {
                         </View>
                       </Section>
                     ) : null}
+
+                    {/* ── the same record, read by movement ──────────────── */}
+                    {/* At the bottom, under the sessions, because the sessions
+                        answer "what did she do last Tuesday" and this answers
+                        "where is she on bench press" — the second question is
+                        the one a coach asks with a client standing in front of
+                        them, and it needs the first one's context above it.
+                        Both are drawn from the SAME `log` this screen already
+                        read, so nothing here can disagree with the days above
+                        it, and the panel is shared with the member's own
+                        history screen so the two apps cannot disagree either. */}
+                    <Rule />
+                    <ExerciseHistoryPanel log={log} status={status} unit={unit} voice={voice} />
                   </>
                 )}
 

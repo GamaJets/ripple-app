@@ -89,6 +89,7 @@ import {
   prTimeline, volumeArc, MAX_MONTHS, MONTH_LABELS,
   type MonthCell, type YearRow,
 } from '../../src/lib/longView';
+import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
 
 /* ── the read ─────────────────────────────────────────────────────────────
  * Three states, never two. See the header.
@@ -606,5 +607,24 @@ export default function History() {
         </View>
       ))}
     </Section>
+
+    {/* ── one movement, followed ─────────────────────────────────────────── */}
+    {/* The charts above answer "how far have I come"; this answers "where am I
+        on bench press", which is the question that actually decides what goes
+        on the bar tonight. Same panel the coach reads on
+        app/(trainer)/client-training.tsx and the same pure module behind it, so
+        the two of you cannot be shown different numbers for the same lift.
+
+        `log` is what the read left after `wholeMonths` dropped a part-month,
+        and the status passed with it says so: under a truncated read nothing
+        below claims to be a first or a lifetime, only the earliest day on this
+        page. The notice at the top of the screen names the month. */}
+    <Rule />
+    <ExerciseHistoryPanel
+      log={log}
+      status={whole ? 'ready' : 'partial'}
+      unit={wu}
+      voice={{ they: 'You', their: 'your', have: 'have' }}
+    />
   </>);
 }

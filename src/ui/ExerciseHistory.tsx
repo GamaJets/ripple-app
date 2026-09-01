@@ -171,10 +171,18 @@ function OutingRow({ o, unit, first }: { o: ExerciseOuting; unit: WeightUnit; fi
   );
 }
 
-/** A single movement, stated and not judged. `from` is the day it is measured
- *  from; without one there is no sentence to write, so nothing is drawn. */
-function MovementLine({ label, value, unit, from }: {
-  label: string; value: number | null; unit: string | null; from: string | null;
+/**
+ * A single movement, stated and not judged. `from` is the day it is measured
+ * from; without one there is no sentence to write, so nothing is drawn.
+ *
+ * `decimals` is the grain the figure was converted at and therefore the
+ * precision at which "nothing moved" is judged — one for a load, because
+ * `liftDeltaIn` reads a 2.5 kg step out at the half-pound the plates justify
+ * and rounding that to a whole would report "+3 kg" for a plate pair; none for
+ * an estimated max, a tonnage or a rep count, which are whole by construction.
+ */
+function MovementLine({ label, value, unit, from, decimals }: {
+  label: string; value: number | null; unit: string | null; from: string | null; decimals: number;
 }) {
   const t = useTheme();
   if (from == null) return null;
@@ -182,7 +190,7 @@ function MovementLine({ label, value, unit, from }: {
     <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingVertical: 3 }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>{label}</Text>
       <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
-        {deltaLabel(value, { since: from, unit, decimals: unit === '%' ? 1 : 0 })}
+        {deltaLabel(value, { since: from, unit, decimals })}
       </Text>
     </View>
   );
@@ -212,6 +220,11 @@ export function ExerciseHistoryPanel({ log, status, unit, voice }: {
 
   const whole = status === 'ready';
   const shown = matches.slice(0, LIST_CAP);
+  // The day a movement is measured FROM, already formatted. Null where that
+  // outing's timestamp could not be read: "+5 kg since —" is a hole in a
+  // sentence rather than a fact, so the line is not drawn at all.
+  const lastFrom = trend.sinceLast.from?.day ? dayLabel(trend.sinceLast.from.day) : null;
+  const firstFrom = trend.sinceFirst.from?.day ? dayLabel(trend.sinceFirst.from.day) : null;
 
   if (status === 'loading') {
     return (
@@ -345,15 +358,15 @@ export function ExerciseHistoryPanel({ log, status, unit, voice }: {
               load is the right direction depends on the block being run, and
               this screen does not know what that is. */}
           <View style={{ marginTop: sp.lg }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>SINCE THE SESSION BEFORE</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Since the Day Before</Text>
             <View style={{ marginTop: sp.xs }}>
-              <MovementLine label="Top load" unit={unit} from={trend.sinceLast.from?.day ? dayLabel(trend.sinceLast.from.day) : null}
+              <MovementLine label="Top load" unit={unit} decimals={1} from={lastFrom}
                 value={liftDeltaIn(trend.sinceLast.topLoadKg, unit)} />
-              <MovementLine label="Estimated 1RM" unit={unit} from={trend.sinceLast.from?.day ? dayLabel(trend.sinceLast.from.day) : null}
+              <MovementLine label="Estimated 1RM" unit={unit} decimals={0} from={lastFrom}
                 value={est1RMIn(trend.sinceLast.est1RMKg, unit)} />
-              <MovementLine label="Volume" unit={unit} from={trend.sinceLast.from?.day ? dayLabel(trend.sinceLast.from.day) : null}
+              <MovementLine label="Volume" unit={unit} decimals={0} from={lastFrom}
                 value={volumeIn(trend.sinceLast.volumeKg, unit)} />
-              <MovementLine label="Reps" unit={null} from={trend.sinceLast.from?.day ? dayLabel(trend.sinceLast.from.day) : null}
+              <MovementLine label="Reps" unit={null} decimals={0} from={lastFrom}
                 value={trend.sinceLast.reps} />
             </View>
             {trend.sinceLast.from == null ? (
@@ -367,12 +380,12 @@ export function ExerciseHistoryPanel({ log, status, unit, voice }: {
           {trend.sinceFirst.from ? (
             <View style={{ marginTop: sp.lg }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>
-                {whole ? 'SINCE THE FIRST DAY ON RECORD' : 'SINCE THE FIRST DAY ON THIS PAGE'}
+                {whole ? 'Since the First Day on Record' : 'Since the First Day on This Page'}
               </Text>
               <View style={{ marginTop: sp.xs }}>
-                <MovementLine label="Top load" unit={unit} from={trend.sinceFirst.from.day ? dayLabel(trend.sinceFirst.from.day) : null}
+                <MovementLine label="Top load" unit={unit} decimals={1} from={firstFrom}
                   value={liftDeltaIn(trend.sinceFirst.topLoadKg, unit)} />
-                <MovementLine label="Estimated 1RM" unit={unit} from={trend.sinceFirst.from.day ? dayLabel(trend.sinceFirst.from.day) : null}
+                <MovementLine label="Estimated 1RM" unit={unit} decimals={0} from={firstFrom}
                   value={est1RMIn(trend.sinceFirst.est1RMKg, unit)} />
               </View>
             </View>
