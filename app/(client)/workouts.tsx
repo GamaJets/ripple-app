@@ -28,6 +28,20 @@ import { badgeFor, countsToVolume, methodFor, restAfter } from '../../src/lib/se
 // programme that never got a table still reads as `sets` copies of one spec and
 // every screen below behaves as it did. See src/lib/setRows.ts.
 import { expandSets, hasSetRows, setCount } from '../../src/lib/setRows';
+// ── the block, the week of it this client is on, and the three fields a set
+//    prescribes beyond reps and load ─────────────────────────────────────────
+// `weekLabel` is imported under another name because this screen already has a
+// `weekLabel` of its own: the CALENDAR week the day strip is scrolled to, which
+// is a different week from the week of a training block and must not be
+// confused with it on a screen that now shows both.
+import { weekLabel as blockWeekLabel } from '../../src/lib/programBlock';
+import { clientWeekLine } from '../../src/lib/clientBlock';
+import { useClientWeek } from '../../src/ui/clientWeek';
+// Effort, share of a max and rep speed. `intensityLine` is the notation beside
+// the set; `intensityMeaning` is the same thing in words, which is what a
+// client reading "@8" for the first time needs. Neither turns a percentage into
+// a weight — see the header of src/lib/setIntensity.ts.
+import { intensityLine, intensityMeaning, intensityOf } from '../../src/lib/setIntensity';
 import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
@@ -283,6 +297,33 @@ export default function Train() {
   const wu = useSettings().weightUnit;
   const loadNote = convertedNote(wu);
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
+  /**
+   * WHICH WEEK OF THE BLOCK THEY ARE ON.
+   *
+   * This screen rendered `program.days` — week one — so a client on a twelve
+   * week block trained week one twelve times and the other eleven weeks their
+   * coach wrote existed only on the coach's phone. `useClientWeek` resolves the
+   * block against the start date the coach set, and none of its answers is an
+   * empty screen: a block dated to start next Monday is week one today, and a
+   * block whose last week has passed stays on its last week. See the header of
+   * src/lib/clientBlock.ts.
+   */
+  const blk = useClientWeek(program, cd.id);
+  /**
+   * The week whose days are on screen, when the client has tapped along the
+   * block to read ahead. Null is "the one that is mine", which is what it goes
+   * back to.
+   *
+   * Reading ahead is allowed on purpose. A start date now decides which week is
+   * shown, and the only thing that stops that reading as a gate is that
+   * everything is still reachable: a client can see week eight in week one, and
+   * the line under the strip says which week is theirs so that looking ahead is
+   * never mistaken for having been moved on.
+   */
+  const [weekPick, setWeekPick] = useState<number | null>(null);
+  const viewWeek = weekPick != null && weekPick >= 0 && weekPick < blk.weeks.length ? weekPick : blk.week.index;
+  const weekOnScreen = blk.weeks[viewWeek] ?? null;
+  const blockLine = clientWeekLine(blk.week, viewWeek);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
   // Which week the strip is on, counted back from this one. 0 is this week; -1
@@ -648,10 +689,32 @@ export default function Train() {
   const dayHeadline = volumeHeadline(dayVolume, wu);
   const prettyDay = (ds: string) => { const [y, m, d] = ds.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); };
 
-  const programDays = Array.isArray(program && program.days) ? program.days : [];
+  // The days of the week they are ON, not `program.days`. Identical for every
+  // one-week programme, which is every programme written before blocks existed
+  // and every programme this app generates itself.
+  const programDays = Array.isArray(blk.days) ? blk.days : [];
   const workout = programDays[dayIdx % (programDays.length || 1)] || programDays[0] || { day: '', focus: 'Rest Day', exercises: [] };
   const exercises = Array.isArray(workout && workout.exercises) ? workout.exercises : [];
   const estMin = Math.max(20, exercises.length * 9);
+  /**
+   * The key everything on this screen is held under: what has been logged, what
+   * has been removed, which row is open, which was edited.
+   *
+   * DELIBERATELY NOT week-scoped, and this is worth a note now that the screen
+   * can show more than one week. `addWeek` copies a week, so week two's bench
+   * press carries the same `key` as week one's, and the tempting fix is to put
+   * `viewWeek` in front. It cannot go here: this shape is PERSISTED and it is
+   * read back by things that parse it. The workout draft above is stored under
+   * these keys and `workedDates` reads the day index straight out of the first
+   * segment; `removedEx`, `swaps` and `exEdits` are written under it to the
+   * device AND sent to the coach's console by src/ui/planEdits.tsx. Prefixing
+   * would orphan every stored edit on every phone and mis-date every draft.
+   *
+   * What it costs is small and visible: a client who has typed sets against
+   * today's session and then taps forward to read week six sees those chips
+   * against week six's identically-keyed movement. The line under the week
+   * strip says which week they are looking at, and nothing is written from it.
+   */
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
   // Severe active injuries auto-manage the plan: swap to a safe alternative, or
   // hide the movement entirely when no alternative avoids the injured area.
@@ -693,7 +756,7 @@ export default function Train() {
   })();
   const deload = deloadCheck(workoutLog);
   // Default: expand the first not-yet-finished exercise, collapse the rest (until the user taps).
-  const isRemovedEx = (e: ProgramExercise) => removedEx.indexOf(`${dayIdx}:${e.key}`) >= 0;
+  const isRemovedEx = (e: ProgramExercise) => removedEx.indexOf(uid(e)) >= 0;
   // Applied here rather than at each render site: the ring, the set counter,
   // the runner and the suggestion all read `e.sets`/`e.reps`, and an override
   // honoured in only some of them is worse than none.
@@ -891,7 +954,7 @@ export default function Train() {
   // exercise without a table and for every one written by this build — the
   // builder keeps them in step — but they are one fact with two homes, and this
   // is the reader that decides which exercise opens first. It asks the rows.
-  const firstOpenId = (() => { for (const _e of planRows) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < setCount(_e)) return _u; } return null; })();
+  const firstOpenId = (() => { for (const _e of planRows) { const _u = uid(_e); if ((logged[_u] || []).length < setCount(_e)) return _u; } return null; })();
   // Presentation only: how much of today's plan is already logged, for the hero ring.
   const doneCount = exercises.filter((e) => (logged[uid(e)] || []).length >= setCount(e)).length;
   const heroNote = exercises.length === 0
@@ -1207,6 +1270,70 @@ export default function Train() {
           </View>
         ) : null}
 
+        {/* ── the block ──────────────────────────────────────────────────── */}
+        {/* Drawn only for a programme of more than one week, so a plan written
+            before blocks existed looks exactly as it did, with no week number
+            anywhere on the screen.
+
+            Every week is TAPPABLE, and that is the whole answer to the question
+            a start date now raises. The date decides which week opens; it does
+            not lock the others away. A client can read week eight in week one,
+            and the line underneath says which week is theirs so that looking
+            ahead can never be mistaken for having been moved on. */}
+        {blk.weeks.length > 1 ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Your block</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.sm, paddingRight: sp.md }}>
+              {blk.weeks.map((w, i) => {
+                const on = i === viewWeek;
+                const mine = i === blk.week.index;
+                // The coach's own name for the week where they wrote one, and
+                // the position where they did not. A deload is named in the
+                // label rather than tinted, because colour is never the only
+                // channel carrying meaning here.
+                const label = blockWeekLabel(w, i + 1);
+                return (
+                  <Pressable key={`${i}-${label}`} onPress={() => { setWeekPick(i === blk.week.index ? null : i); tapLight(); }}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${label}${mine ? ', the week you are on' : ''}`}
+                    // The chip is around 35pt tall at the default text size and
+                    // grows with it. The slop is what carries it past 44 at the
+                    // smallest, without a row of pills tall enough to push the
+                    // day strip off the first screen.
+                    hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: 9,
+                             borderRadius: radius.pill, borderWidth: hairline,
+                             borderColor: on ? t.ring : 'transparent', backgroundColor: on ? t.surface2 : 'transparent' }}>
+                    {/* A dot, not a colour on the word: the week that is theirs
+                        has to be findable without reading a tint. */}
+                    {mine ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} /> : null}
+                    <Text style={{ ...ty.label, fontWeight: on ? '600' : '400', color: on ? t.ink : t.ink3 }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            {blockLine ? <Text style={{ ...ty.caption, color: t.ink3 }}>{blockLine}</Text> : null}
+            {/* What the coach wanted said about THIS week. A different thing
+                from the note at the top of the programme, which is read once:
+                this one is read on the Monday of week four, which is why it
+                lives on the week. Attributed, for the reason the exercise note
+                is: rendered bare it would read as the app telling somebody how
+                to train. */}
+            {weekOnScreen?.note ? (
+              <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>From your coach</Text>
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{weekOnScreen.note}</Text>
+              </View>
+            ) : null}
+            {viewWeek !== blk.week.index ? (
+              <View style={{ alignItems: 'flex-start', marginTop: sp.sm }}>
+                <Ghost label="Back to Your Week" onPress={() => { setWeekPick(null); tapLight(); }} />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* ── the hero: today's session, one number ───────────────────────── */}
         <ScreenHelp screen="train" />
 
@@ -1336,7 +1463,43 @@ export default function Train() {
                 // Whether those rows actually differ from each other. A ramp is
                 // worth the space; three identical lines under a row that
                 // already says "3 sets · 42.5 kg" is the same sentence twice.
-                const varied = hasSetRows(e) && planned.some((r) => r.reps !== planned[0].reps || r.loadKg !== planned[0].loadKg || r.method !== planned[0].method);
+                // Whether those rows actually differ. The intensity is part of
+                // that test now: a coach who writes 4 × 6 at one load and ramps
+                // the effort from @7 to @9 across the four has written a real
+                // ramp, and without this the table stayed shut and the three
+                // different targets rendered nowhere.
+                const varied = hasSetRows(e) && planned.some((r) => r.reps !== planned[0].reps || r.loadKg !== planned[0].loadKg || r.method !== planned[0].method
+                  || intensityLine(r.intensity) !== intensityLine(planned[0].intensity));
+                /**
+                 * Effort, share of a max and rep speed, grouped by the sets
+                 * that share them.
+                 *
+                 * One entry for the ordinary case, where the movement carries
+                 * the prescription and every set inherits it; more where the
+                 * coach wrote different targets on different rows. Grouping
+                 * rather than one line per set is what keeps "RPE 8 means about
+                 * 2 reps left" from being printed four times under one
+                 * movement.
+                 *
+                 * `intensityOf` has already resolved absent-inherits-present
+                 * inside `expandSets`, so nothing here re-implements that rule.
+                 */
+                const intGroups = (() => {
+                  const out: { key: string; sets: number[]; words: string[] }[] = [];
+                  for (const r of planned) {
+                    const key = intensityLine(r.intensity);
+                    if (!key) continue;
+                    const hit = out.find((g) => g.key === key);
+                    if (hit) hit.sets.push(r.n);
+                    else out.push({ key, sets: [r.n], words: intensityMeaning(r.intensity) });
+                  }
+                  return out;
+                })();
+                // The one notation that describes the whole movement, or null
+                // where the sets disagree — in which case the table above
+                // carries them row by row and a single line here would be a
+                // summary that is wrong for three sets out of four.
+                const intOne = intGroups.length === 1 ? intGroups[0].key : null;
                 return (
                   <View key={e.key}>
                     {/* No hairline between two members of one run: they are
@@ -1389,6 +1552,16 @@ export default function Train() {
                               it is what the row shows. Without this the weight
                               could be typed and then never appear anywhere. */}
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{e.group} · {sets.length}/{planned.length} sets{e.loadKg != null && !varied ? ' · ' + fig(liftLabel(e.loadKg, wu)) : (!open && !varied && sug ? ' · ' + fig(liftLabel(sug.weight, wu)) : '')}</Text>
+                          {/* How hard, at what share of a max, at what speed.
+                              The coach could write all three and none of them
+                              reached this screen — they went in the exercise
+                              note as prose, for all four sets at once, or
+                              nowhere. On its own line rather than appended to
+                              the one above, because it is a prescription and
+                              not a description of the row. */}
+                          {intOne ? (
+                            <Text style={{ ...ty.caption, ...numeric, color: t.ink2, marginTop: 2 }}>{intOne}</Text>
+                          ) : null}
                         </View>
                         <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + nameOf(e)} onPress={() => removeExercise(e)} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
                         <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}><Icon name="chevron" size={16} color={t.ink3} /></View>
@@ -1446,9 +1619,48 @@ export default function Train() {
                                     {rb ? (
                                       <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
                                     ) : null}
+                                    {/* This set's own effort, share and tempo.
+                                        A warm-up single at @6 and a top set at
+                                        @9 are two different instructions and
+                                        this is the only row that can hold
+                                        both. */}
+                                    {intensityLine(r.intensity) ? (
+                                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{intensityLine(r.intensity)}</Text>
+                                    ) : null}
                                   </View>
                                 );
                               })}
+                            </View>
+                          ) : null}
+                          {/* ── the notations, in words ────────────────────
+                              "@8" and "3-1-1-0" are a coach's shorthand and
+                              this may be the first time the person reading it
+                              has seen either. `intensityMeaning` spells them
+                              out: RPE as reps in reserve, which is the only
+                              phrasing somebody under a bar can act on, and the
+                              tempo in the order this app stores it, which is
+                              the whole defence against the minority convention
+                              that writes the lifting phase first.
+
+                              The percentage stays a percentage. It says so, and
+                              it says why: nothing in this app holds a tested
+                              one rep max, so a figure in kilograms here would
+                              be weight on a bar derived from an estimate
+                              nobody made. */}
+                          {intGroups.length ? (
+                            <View style={{ marginTop: sp.md }}>
+                              {intGroups.map((g) => (
+                                <View key={g.key} style={{ marginTop: sp.xs }}>
+                                  {intGroups.length > 1 ? (
+                                    <Text style={{ ...ty.micro, color: t.ink3 }}>
+                                      {`Set${g.sets.length === 1 ? '' : 's'} ${g.sets.join(', ')} · ${g.key}`}
+                                    </Text>
+                                  ) : null}
+                                  {g.words.map((line) => (
+                                    <Text key={line} style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{line}</Text>
+                                  ))}
+                                </View>
+                              ))}
                             </View>
                           ) : null}
                           {/* The coach's own words on this movement, in the row
@@ -3432,7 +3644,23 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   // Whether the sets of this movement actually differ. Three identical rows
   // under a line that already reads "3 × 8-10 × 42.5 kg" is the same sentence
   // four times.
-  const variedPlan = !!ex && hasSetRows(ex) && plan.some((r) => r.reps !== plan[0].reps || r.loadKg !== plan[0].loadKg || r.method !== plan[0].method);
+  const variedPlan = !!ex && hasSetRows(ex) && plan.some((r) => r.reps !== plan[0].reps || r.loadKg !== plan[0].loadKg || r.method !== plan[0].method
+    || intensityLine(r.intensity) !== intensityLine(plan[0].intensity));
+  /**
+   * The effort, share of a max and rep speed of THE SET ABOUT TO BE DONE.
+   *
+   * Read off `nextSet` rather than off the movement, for the same reason the
+   * method badge above it is: set one can be a warm-up at @6 inside an exercise
+   * whose top set is @9, and a screen that showed the movement's own figure
+   * would be showing the wrong instruction to somebody standing at the bar.
+   * Once the plan is finished and the client is adding sets of their own there
+   * is no prescription left to show, and `nextSet` is null, so the movement's
+   * own is used rather than nothing: a client doing a fifth set of a four set
+   * plan is still doing this movement.
+   */
+  const nextIntensity = nextSet ? nextSet.intensity : intensityOf(ex, null);
+  const nextIntensityLine = intensityLine(nextIntensity);
+  const nextIntensityWords = intensityMeaning(nextIntensity);
 
   const liveCols: { label: string; value: string; dot?: string }[] = [
     { label: 'Time', value: `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}` },
@@ -3512,6 +3740,25 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
 
             Every load here is stored in kilograms and converted once, at this
             line, by `liftLabel`. */}
+        {/* ── what this set asks for, beyond reps and load ─────────────────
+            Drawn for the set that is next, and in words underneath. A client
+            reading "@8" for the first time is being asked for something they
+            cannot act on until somebody says it means two reps left; a tempo is
+            worse, because the four digits are read in two different orders in
+            the wild and only one of them is what their coach meant.
+
+            The percentage is never converted into a weight here. See
+            `intensityMeaning` in src/lib/setIntensity.ts: the only maxima this
+            app holds are Epley estimates off logged sets, and a bar loaded off
+            an estimate is the one thing this feature is not allowed to do. */}
+        {nextIntensityLine ? (
+          <View style={{ marginTop: sp.md }}>
+            <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink }}>{nextIntensityLine}</Text>
+            {nextIntensityWords.map((line) => (
+              <Text key={line} style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{line}</Text>
+            ))}
+          </View>
+        ) : null}
         {variedPlan ? (
           <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.md }}>
             {plan.map((r) => {
@@ -3525,6 +3772,12 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
                   </Text>
                   {rb ? (
                     <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
+                  ) : null}
+                  {/* Each row's own effort, share and tempo — the reason this
+                      table can now be open on an exercise whose reps and load
+                      never change. */}
+                  {intensityLine(r.intensity) ? (
+                    <Text style={{ ...ty.caption, ...numeric, color: here ? t.ink2 : t.ink3 }}>{intensityLine(r.intensity)}</Text>
                   ) : null}
                   {r.n <= done.length ? <Icon name="check" size={13} color={t.brand} /> : null}
                 </View>

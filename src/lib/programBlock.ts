@@ -21,7 +21,11 @@
  * the coach's AsyncStorage draft are all jsonb-or-JSON blobs with no migration
  * that reaches all three — and the fourth reader is the CLIENT APP ALREADY ON
  * A PHONE, which draws `program.days` and has never heard of a week index. Move
- * the days and every un-updated handset shows an empty Train tab.
+ * the days and every un-updated handset shows an empty Train tab. That fourth
+ * reader does not go away when the client app is updated: it is whatever build
+ * somebody has not installed yet, and it renders `days`. So `days` is week one
+ * for ever, and the current client app reads the block THROUGH this file — see
+ * src/lib/clientBlock.ts and src/ui/clientWeek.ts.
  *
  * So: `days` is week one, `weeks` is the whole block including week one, and
  * this file is the ONE place that resolves the two or writes them together.
@@ -227,8 +231,10 @@ export function withWeeks(p: Program, weeks: ProgramWeek[]): Program {
  * The builder edits one week at a time — that is what the week strip is for —
  * and this is how the edit lands. Week one's edit also moves `days`, which
  * `withWeeks` does; an edit to week four does not touch `days` at all, which is
- * correct and is the whole point: the client goes on training week one until
- * the coach says otherwise.
+ * correct and is the whole point. `days` is the copy every un-updated handset
+ * renders, so it must go on being week one; a client on a current build is
+ * shown week four by src/lib/clientBlock.ts, which reads the block rather than
+ * `days`.
  *
  * An index outside the block changes nothing and returns the programme it was
  * given. No bounds guard of its own — `map` simply matches no week — for the

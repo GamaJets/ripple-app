@@ -8,9 +8,9 @@
 // kilograms off an estimated maximum is the app putting weight on a bar on the
 // strength of arithmetic it cannot cite.
 import {
-  RPE_MIN, RPE_MAX, PCT_MIN, PCT_MAX, CLIENT_CANNOT_SEE_INTENSITY,
+  RPE_MIN, RPE_MAX, PCT_MIN, PCT_MAX,
   readRpe, rpeLabel, rpeMeaning, readPercent1RM, percentLabel, percentLoadKg,
-  readTempo, tempoPhases, tempoMeaning, intensityOf, intensityLine,
+  readTempo, tempoPhases, tempoMeaning, intensityOf, intensityLine, intensityMeaning,
 } from './setIntensity';
 
 const errors: string[] = [];
@@ -141,17 +141,44 @@ eq(intensityLine({ rpe: 8, pct1rm: null, tempo: null }), '@8', 'and one reads as
 eq(intensityLine({ rpe: null, pct1rm: null, tempo: null }), null,
   'none of them renders NOTHING rather than an empty line under every set of every programme ever written');
 
-/* ── the promise this feature must not make ─────────────────────────────── */
+/* ── what the client is told, in words ──────────────────────────────────── */
 
-// A coach who types a tempo believes they have told somebody to lower the bar
-// over three seconds. Today they have not: the client's Train tab draws reps,
-// load and the method badge and knows nothing about these fields. Letting that
-// belief stand is worse than not shipping them, because the coach stops writing
-// it in the note as well — and then it reaches the client through nothing.
-ok(/do not appear on the client/i.test(CLIENT_CANNOT_SEE_INTENSITY),
-  'the sentence says plainly that the client does not see these yet');
-ok(/exercise note/.test(CLIENT_CANNOT_SEE_INTENSITY),
-  'and says where to put what the client does need at the machine');
+// The client's Train tab and the guided runner draw these three now, so the
+// notations have to survive being read by somebody who has never seen them
+// before. "@8" and "3-1-1-0" are a coach's shorthand; these are the sentences
+// that go with them.
+eq(intensityMeaning({ rpe: null, pct1rm: null, tempo: null }), [],
+  'an exercise prescribing none of the three says nothing at all');
+
+{
+  const m = intensityMeaning({ rpe: 8, pct1rm: null, tempo: null });
+  eq(m.length, 1, 'one field is one sentence');
+  ok(/reps left/.test(m[0]), 'and RPE is spelled out as reps in reserve, which is what somebody under a bar can act on');
+}
+{
+  const m = intensityMeaning({ rpe: null, pct1rm: null, tempo: '3-0-X-1' });
+  ok(/as fast as you can/.test(m[0]), 'an X concentric is words rather than a letter');
+  ok(/3 sec down/.test(m[0]), 'and the order this app stores is stated rather than assumed');
+}
+
+// THE assertion this file exists to keep. `percentLoadKg` takes a maximum as an
+// argument and nothing in this app fetches one, because nothing in this app has
+// one: `priorBest1RM` and `est1RM` are Epley estimates off logged sets. So the
+// client is shown the percentage, told whose share it is, and told why no
+// weight is worked out from it.
+{
+  const m = intensityMeaning({ rpe: null, pct1rm: 75, tempo: null });
+  eq(m.length, 1, 'a percentage is one sentence');
+  ok(/75%/.test(m[0]), 'which names the share the coach wrote');
+  ok(/no tested maximum/i.test(m[0]), 'says there is no tested maximum behind it');
+  ok(!/\bkg\b/.test(m[0]), 'and never turns it into a weight for the bar');
+}
+{
+  // All three, in the order they are read: how hard, what share, how fast.
+  const m = intensityMeaning({ rpe: 8.5, pct1rm: 80, tempo: '3-1-1-0' });
+  eq(m.length, 3, 'three fields are three separate lines rather than one paragraph');
+  ok(/8\.5/.test(m[0]) && /80%/.test(m[1]) && /3-1-1-0/.test(m[2]), 'each line carries its own notation');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('setIntensity: ok — halves, whole percents, one tempo order, and a client renderer that is honest about not showing any of it');
+console.log('setIntensity: ok — halves, whole percents, one tempo order, and a percentage that stays a percentage on the client\u2019s screen');

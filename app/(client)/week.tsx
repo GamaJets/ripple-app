@@ -18,6 +18,13 @@ import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { buildProgram } from '../../src/lib/programs';
 import { scheduledDay } from '../../src/lib/checklist';
+// Which week of the block this is. The seven rows below are a WEEK of a
+// programme, and until now they were always week one of it — so a member on a
+// twelve week block read the same seven rows for twelve weeks while their coach
+// looked at eleven more they had written. See src/lib/clientBlock.ts.
+import { useClientWeek } from '../../src/ui/clientWeek';
+import { clientWeekLine } from '../../src/lib/clientBlock';
+import { weekLabel } from '../../src/lib/programBlock';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 /** WEEK is Monday-first; `Date.getDay()` is Sunday-first. */
@@ -39,6 +46,12 @@ export default function ThisWeek() {
   // one, with nothing on the screen to prompt a second look.
   const programUnknown = programStatus === 'error' && coachProgram == null;
   const program = coachProgram ?? buildProgram(c.goal, c.bodyFatPct);
+  // The week they are on, and its days. Identical to `program.days` for every
+  // one-week programme, which is every programme this app generates and every
+  // one written before blocks existed.
+  const blk = useClientWeek(program, c.id);
+  const blockLine = clientWeekLine(blk.week, blk.week.index);
+  const thisWeek = blk.weeks[blk.week.index] ?? null;
 
   const jsToMon = (new Date().getDay() + 6) % 7;
   const monday = new Date(); monday.setDate(monday.getDate() - jsToMon); monday.setHours(0, 0, 0, 0);
@@ -60,7 +73,7 @@ export default function ThisWeek() {
   // for the daily checklist, for the reason written on it there: a plan day
   // that lands nowhere near the real day is a line telling somebody they owe a
   // leg session on a day their plan gives them off.
-  const rows = WEEK.map((label, i) => ({ label, i, day: scheduledDay(program.days, jsWeekday(i)) }));
+  const rows = WEEK.map((label, i) => ({ label, i, day: scheduledDay(blk.days, jsWeekday(i)) }));
   // The number of days the member will actually see a session on — not
   // `program.days.length`, which counts days the plan names but this week does
   // not place (a coach program whose day fell outside Mon–Sun would be counted
@@ -99,6 +112,22 @@ export default function ThisWeek() {
 
         <Section>
           <SectionHead title="The Plan" note={trainingDays === 0 ? 'No days scheduled' : `${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />
+
+          {/* Which week of the block these seven days are, and the sentence
+              saying why that one. Nothing at all for a one-week programme, so a
+              plan written before blocks existed reads exactly as it did. The
+              week is not tappable here: Train is where a member moves through
+              the block, and two screens offering the same control is two places
+              for them to disagree about which week is open. */}
+          {blk.weeks.length > 1 ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{weekLabel(thisWeek, blk.week.index + 1)}</Text>
+              {blockLine ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{blockLine}</Text> : null}
+              {thisWeek?.note ? (
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.xs }}>{thisWeek.note}</Text>
+              ) : null}
+            </View>
+          ) : null}
 
           {rows.map(({ label, i, day: workout }) => {
             const date = new Date(monday); date.setDate(monday.getDate() + i);

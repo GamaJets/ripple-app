@@ -85,6 +85,8 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import { workoutKind, KIND_LABEL, WORKOUT_KINDS, type WorkoutKind } from '../../src/lib/workoutKind';
 import { dateParts } from '../../src/lib/localDate';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+// Which week of the block a date belongs to. See src/lib/clientBlock.ts.
+import { useClientWeek } from '../../src/ui/clientWeek';
 import { useRecurringSeries } from '../../src/ui/availability';
 import { buildProgram } from '../../src/lib/programs';
 import { scheduledFocus } from '../../src/lib/checklist';
@@ -401,10 +403,15 @@ export default function Calendar() {
   const coachProgram = assigned.getProgram(cd.id);
   const planUnknown = !solo && assigned.status === 'error' && coachProgram == null;
   const program = planUnknown ? null : ((solo ? null : coachProgram) ?? buildProgram(cd.goal, cd.bodyFatPct));
+  const blk = useClientWeek(program, cd.id);
   const selWeekday = weekdayOfIso(selISO);
   // undefined means "we do not know what the program says", which planConflict
   // treats as no conflict rather than as an empty schedule.
-  const selScheduled = program && selWeekday != null ? scheduledFocus(program.days, selWeekday) : undefined;
+  // The days of the week of the BLOCK they are on. `program.days` is week one
+  // for ever, so on a twelve week block this screen named week one's focus
+  // against every date in the month. `useClientWeek` is the same rule Train and
+  // This Week read, so the three cannot name different sessions for one day.
+  const selScheduled = program && selWeekday != null ? scheduledFocus(blk.days, selWeekday) : undefined;
   const selConflict = planConflict(selPlan?.type ?? null, selScheduled);
   const coming = upcomingPlans(plans, todayISO);
   const selOutcome = selPlan ? planOutcome(selPlan.type, selISO, todayISO, logKnown ? selDayLog.length > 0 : null) : null;

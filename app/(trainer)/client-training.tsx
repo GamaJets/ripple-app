@@ -91,6 +91,10 @@ import { useProgramHistory } from '../../src/ui/programHistory';
 import { goalToEnum } from '../../src/lib/rosterMerge';
 import { type Injury } from '../../src/lib/injuries';
 import { programWeeks, weekCount, weekLabel } from '../../src/lib/programBlock';
+// Which week of the block the client is being shown. The one rule, read by the
+// client's Train tab and by this screen, so a coach cannot be comparing a
+// record against a week their client never saw. See src/lib/clientBlock.ts.
+import { clientWeek } from '../../src/lib/clientBlock';
 import {
   CLIENT_STARTS_NOW, blockPosition, blockPositionLine,
 } from '../../src/lib/programStart';
@@ -291,18 +295,21 @@ export default function ClientTraining() {
   /**
    * The week of the block the comparison runs against.
    *
-   * The week they are IN when the date says so, and week one otherwise —
-   * because week one is what the client's Train tab is rendering. That is not a
-   * fallback, it is the truth: `app/(client)/workouts.tsx` picks a day out of
-   * `program.days` and has never heard of a week index, so a coach comparing
-   * against week four would be comparing the record against a week nobody has
-   * been shown.
+   * THE WEEK THE CLIENT'S TRAIN TAB IS ACTUALLY SHOWING THEM, and it is read
+   * from `clientWeek` — the same function `app/(client)/workouts.tsx` reads —
+   * rather than worked out again here. This used to be "the week they are in
+   * when the date says so, and week one otherwise", which was correct while the
+   * client renderer drew `program.days` and knew nothing about a week index. It
+   * does know now, and the two rules differ: a block whose last week has passed
+   * stays on its LAST week on the client's phone, not week one. A coach
+   * comparing a record against a week nobody was shown is the exact failure
+   * this screen exists to prevent, so there is one rule and both sides read it.
    */
   const compareWeek = useMemo(() => {
     const weeks = programWeeks(program);
     if (!weeks.length) return null;
-    const n = position.phase === 'during' && position.week ? position.week : 1;
-    return weeks[Math.min(n, weeks.length) - 1] ?? weeks[0];
+    const w = clientWeek(position, weeks.length);
+    return weeks[w.index] ?? weeks[0];
   }, [program, position]);
 
   /**
@@ -644,8 +651,8 @@ export default function ClientTraining() {
                     ) : null}
                     {weekCount(program) > 1 && compareWeek ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                        Compared against {weekLabel(compareWeek, position.week ?? 1).toLowerCase()}, which is the week
-                        their Train tab is showing them.
+                        Compared against {weekLabel(compareWeek, clientWeek(position, weekCount(program)).index + 1).toLowerCase()}, which is
+                        the week their Train tab is showing them.
                       </Text>
                     ) : null}
 

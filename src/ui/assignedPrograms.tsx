@@ -45,12 +45,18 @@ interface AssignedProgramsValue {
    * without choosing a date — that stays the default, because "assign it now"
    * is what the control has always meant.
    *
-   * IT DOES NOT GATE ANYTHING. The client's Train tab renders whatever is on
-   * their row from the moment it is written; this is the coach's own record of
-   * when the block starts, and `CLIENT_STARTS_NOW` in src/lib/programStart.ts
-   * is the sentence every screen showing it has to carry. A provider that
-   * withheld a programme until its start date would empty a Train tab, because
-   * the shipped client app has no branch for "exists and is not due yet".
+   * IT DOES NOT GATE ANYTHING, and this provider is where that is enforced.
+   * The client's Train tab renders whatever is on their row from the moment it
+   * is written; a provider that withheld a programme until its start date would
+   * empty a Train tab, and an empty Train tab is indistinguishable from having
+   * no coach.
+   *
+   * What the date DOES decide, since src/lib/clientBlock.ts, is which week of a
+   * multi-week block is on screen. That is a week number moving, never a
+   * programme being withheld: a block dated for next Monday shows week one
+   * today, and a block that has run out stays on its last week.
+   * `CLIENT_STARTS_NOW` in src/lib/programStart.ts is the sentence every screen
+   * showing a start date has to carry, and it says both halves.
    */
   startsOn: Record<string, string>;
   /** Resolves true only when the removal reached the server. A clear that was

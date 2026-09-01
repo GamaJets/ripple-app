@@ -25,6 +25,8 @@ import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaL
 import { shortDayLabel } from '../../src/lib/bodyFigures';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+// Which week of the block today belongs to. See src/lib/clientBlock.ts.
+import { useClientWeek } from '../../src/ui/clientWeek';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useAnnouncements } from '../../src/ui/announcements';
@@ -173,8 +175,16 @@ export default function Home() {
   // the client trains the wrong session and has no reason to look twice.
   const programUnknown = !solo && programStatus === 'error' && coachProgram == null;
   const program = (solo ? null : coachProgram) ?? buildProgram(c.goal, c.bodyFatPct);
+  // The days of the WEEK OF THE BLOCK they are on, not `program.days`, which is
+  // week one for ever. Identical for a one-week programme, which is every
+  // programme this app generates itself. `useClientWeek` is the one rule, and
+  // Train, This Week and this screen all ask it rather than each deciding —
+  // three screens naming three different sessions for the same Tuesday is worse
+  // than all three naming week one.
+  const blk = useClientWeek(program, c.id);
+  const planDays = blk.days;
   const jsToMon = (new Date().getDay() + 6) % 7;
-  const workout = program.days[jsToMon % program.days.length] || program.days[0] || { focus: 'Rest Day', exercises: [] };
+  const workout = planDays[jsToMon % (planDays.length || 1)] || planDays[0] || { focus: 'Rest Day', exercises: [] };
 
   const freezes = freezeBudget(log);
   const frz = currentStreakFrozen(log, freezes);
@@ -197,7 +207,7 @@ export default function Home() {
   // reported as unpriced rather than silently counted as zero.
   const wk = weekStats(log, Date.now(), c.weightSeries);
   const prs = personalRecords(log, c.weightSeries);
-  const goalDays = program.days.length || 4;
+  const goalDays = planDays.length || 4;
 
   // ── Getting Started, while it has anything to say ────────────────────────
   //

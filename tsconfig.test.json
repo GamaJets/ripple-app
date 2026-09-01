@@ -46,6 +46,7 @@
     "src/lib/statementPeriod.test.ts",
     "src/lib/coachReceipts.test.ts",
     "src/lib/programBlock.test.ts",
+    "src/lib/clientBlock.test.ts",
     "src/lib/programStart.test.ts",
     "src/lib/programHistory.test.ts",
     "src/lib/planVsActual.test.ts",

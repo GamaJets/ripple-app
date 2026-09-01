@@ -68,10 +68,10 @@ import { buildProgram, type Program, type ProgramDay } from '../../src/lib/progr
 import { canAddWeek, isBlock, programWeeks, weekLabel, withWeeks } from '../../src/lib/programBlock';
 // Effort, share of a max and rep speed — three columns a coach was writing into
 // a free-text note because there was nowhere else for them. src/lib/setIntensity.ts
-// owns every parse and every bound, and the sentence saying the CLIENT does not
-// see them yet.
+// owns every parse and every bound, and now also the words the CLIENT reads
+// them in: `intensityMeaning` is drawn on their Train tab and in their session.
 import {
-  CLIENT_CANNOT_SEE_INTENSITY, readPercent1RM, readRpe, readTempo, tempoMeaning,
+  readPercent1RM, readRpe, readTempo, tempoMeaning,
 } from '../../src/lib/setIntensity';
 // The day the coach said the block begins, and the sentence that stops it
 // becoming a promise this app does not keep.
@@ -320,8 +320,10 @@ export default function Builder() {
    * and which destroyed the previous week every time.
    *
    * The obvious change is to make `days` a list of weeks. It cannot be done
-   * that way: `Program.days` is what the SHIPPED CLIENT APP renders, and it has
-   * never heard of a week index. So `days` stays week one on the way out (see
+   * that way: `Program.days` is what a phone that has not been updated renders,
+   * and it has never heard of a week index. So `days` stays week one on the way
+   * out — a current client build reads the whole block through
+   * src/lib/clientBlock.ts and is shown the week its start date counts to (see
    * `composeProgram`, and the argument in full on `ProgramWeek` in
    * src/lib/programs.ts) and `blockWeeks` is the whole block in here.
    *
@@ -351,6 +353,12 @@ export default function Builder() {
    * assigns a block "starting Monday" on a Thursday, has just replaced their
    * client's Friday session while believing they did not — which is strictly
    * worse than the Sunday-night alarm this field exists to end.
+   *
+   * What it DOES do, on a multi-week block, is count the week number the client
+   * is shown once it has passed: week three of eight opens on week three rather
+   * than on week one. That is the date moving a week number, never withholding
+   * a session, and src/lib/clientBlock.ts is where all five of its states are
+   * resolved to a week somebody can train today.
    */
   const [startsOn, setStartsOn] = useState('');
   const days: BDay[] = blockWeeks[weekIdx]?.days ?? [];
@@ -1965,16 +1973,21 @@ export default function Builder() {
           ) : null}
 
           {/* Said once, at the top, and only when the coach has actually
-              written one of the three. A coach who types a tempo believes they
-              have told somebody to lower the bar over three seconds; today they
-              have not, because the client's Train tab draws reps, load and the
-              method badge and nothing else. Letting that belief stand is worse
-              than not shipping the fields, because the coach then stops writing
-              it in the note as well — and the instruction reaches the client
-              through nothing at all. */}
+              written one of the three. This line used to be an apology —
+              `CLIENT_CANNOT_SEE_INTENSITY`, saying the client's Train tab drew
+              reps, load and the method badge and nothing else. It does draw
+              them now, so the constant is deleted and this says what reaches
+              the client instead. The percentage half is the part worth a
+              coach's attention: it is shown as a percentage and never converted,
+              because nothing in this app has a tested maximum to convert it
+              against. */}
           {days.some((d) => d.exercises.some((e) => e.rpe != null || e.pct1rm != null || e.tempo)) ? (
             <View style={{ marginBottom: sp.lg }}>
-              <Flag tone={t.ink3}>{CLIENT_CANNOT_SEE_INTENSITY}</Flag>
+              <Flag tone={t.ink3}>
+                Effort, percentage and tempo reach the client. Their Train tab and their session both show these
+                beside the set, with the RPE and the tempo spelled out in words. A percentage stays a percentage:
+                this app holds no tested one rep max, so it never works out a weight for the bar from one.
+              </Flag>
             </View>
           ) : null}
 

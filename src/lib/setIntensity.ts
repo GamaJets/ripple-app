@@ -52,16 +52,22 @@
  * `program_templates`, on each client's `assigned_programs` row, and in the
  * coach's on-device AsyncStorage draft, and no migration reaches all three.
  *
- * ── The one thing this file cannot fix, said out loud ─────────────────────
+ * ── Who sees them ─────────────────────────────────────────────────────────
  *
- * THE CLIENT'S RENDERER DOES NOT SHOW THESE YET. `app/(client)/workouts.tsx`
- * and the guided runner draw sets from `expandSets` and print reps, load and
- * the method badge. A coach who types an RPE today is writing it into a
- * programme the client's Train tab does not display, and the builder says so on
- * screen rather than letting a coach believe they have communicated something.
- * The fields are stored, they are readable, and they are in the coach's own
- * view of the plan — that is the whole of what has shipped, and pretending
- * otherwise is how a coach ends up thinking they prescribed a tempo nobody saw.
+ * BOTH SIDES, now. `app/(client)/workouts.tsx` draws `intensityLine` beside the
+ * movement and beside each set of a table, and the guided runner draws it for
+ * the set the client is standing in front of the bar for. `intensityMeaning`
+ * below is what goes with it: RPE and tempo spelled out in words, because "@8"
+ * and "3-1-1-0" are notations a coach knows and a client may be reading for the
+ * first time.
+ *
+ * There WAS a constant here — `CLIENT_CANNOT_SEE_INTENSITY` — printed in the
+ * builder the moment a coach typed one of the three, saying the client's Train
+ * tab would not show it. It is deleted rather than softened, because the thing
+ * it described is no longer true. A warning that is no longer true is worse
+ * than no warning: it tells a coach to go on writing the tempo into the
+ * exercise note as well, which is the duplication these three fields exist to
+ * end.
  *
  * Everything here is pure and framework-free so a test can hold all of it
  * without a database or a device.
@@ -444,21 +450,43 @@ export function intensityLine(i: Intensity): string | null {
 }
 
 /**
- * WHAT THE CLIENT WILL AND WILL NOT SEE, said to the coach.
+ * The three notations spelled out for the person doing the lifting.
  *
- * Not a nicety. A coach who types a tempo believes they have told somebody to
- * lower the bar over three seconds, and today they have not: the client's Train
- * tab renders reps, load and the method badge and knows nothing about these
- * three fields. Letting that belief stand is worse than not shipping the
- * fields, because the coach stops writing it in the note as well — so the
- * instruction that used to reach the client through prose stops reaching them
- * at all.
+ * One sentence per field that is actually set, so a caller renders a line each
+ * and an exercise carrying none of the three renders nothing at all. An empty
+ * array rather than a joined paragraph: three of these on one line is a wall of
+ * prose under a movement name, and the client is reading it standing up.
  *
- * Returned as a constant rather than composed at the call site so that the day
- * the client renderer is updated, there is exactly one string to delete and one
- * grep that finds every screen making the promise.
+ * ── Why the percentage does not become a weight ───────────────────────────
+ *
+ * `percentLoadKg` exists, takes a maximum as an argument, and is called from
+ * NOWHERE. That is deliberate and this sentence is where it is defended to the
+ * client rather than only in a comment: there is no tested one-rep max anywhere
+ * in this app. `priorBest1RM` in src/lib/progression.ts and `est1RM` in
+ * src/lib/streaks.ts are both Epley estimates off logged sets, and turning
+ * "@75%" into "82.5 kg" off an estimate is the app putting a weight on a bar
+ * that nobody chose, in a number the client will then load. So the percentage
+ * is shown as a percentage and the line says why. If a real recorded maximum
+ * ever exists here, the figure derived from it must say what it was derived
+ * from, on the same line, in the same breath.
+ *
+ * The RPE sentence is reps in reserve, from `rpeMeaning`, because that is the
+ * only phrasing somebody under a bar can act on. The tempo sentence is
+ * `tempoMeaning`, which is the whole defence against the minority convention
+ * that writes the concentric first: a client whose coach reads that convention
+ * sees this one disagreeing in words before they lower anything.
  */
-export const CLIENT_CANNOT_SEE_INTENSITY =
-  'Effort, percentage and tempo are saved on the plan and are shown to you here. '
-  + "They do not appear on the client's Train tab yet — that screen still shows reps, load and the set method only, "
-  + 'so anything they need at the machine should also go in the exercise note.';
+export function intensityMeaning(i: Intensity): string[] {
+  const out: string[] = [];
+  const rpe = rpeMeaning(i.rpe);
+  if (i.rpe != null && rpe) out.push(`RPE ${i.rpe} means ${rpe}.`);
+  if (i.pct1rm != null) {
+    out.push(
+      `${i.pct1rm}% is the share of a one rep max your coach wrote. It stays a percentage here: `
+      + 'this app has no tested maximum for you, so it will not work out a weight for the bar from it.',
+    );
+  }
+  const tempo = tempoMeaning(i.tempo);
+  if (tempo) out.push(`Tempo ${i.tempo} is ${tempo}.`);
+  return out;
+}

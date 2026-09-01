@@ -93,6 +93,7 @@ import { useAuthRevision } from './authRevision';
 import { useClientData } from './clientData';
 import { useCoachNutrition } from './coachNutrition';
 import { useAssignedPrograms } from './assignedPrograms';
+import { useClientWeek } from './clientWeek';
 
 export interface Habit { id: string; label: string; icon: string; done: boolean; source: ChecklistSource }
 
@@ -532,7 +533,12 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // checklist would name a session their coach never wrote.
   const planUnknown = !solo && assigned.status === 'error' && coachProgram == null;
   const program = planUnknown ? null : ((solo ? null : coachProgram) ?? buildProgram(c.goal, c.bodyFatPct));
-  const trainingFocus = program ? scheduledFocus(program.days, new Date().getDay()) : null;
+  // The week of the block they are on, not week one for ever. The checklist
+  // names today's session, and one naming week one's session while the Train
+  // tab shows week five's is the app disagreeing with itself about what
+  // somebody owes today. `useClientWeek` is the one rule all of them read.
+  const blk = useClientWeek(program, c.id);
+  const trainingFocus = program ? scheduledFocus(blk.days, new Date().getDay()) : null;
 
   const { items, gaps } = useMemo(() => buildChecklist({
     waterGoalGlasses: waterGoal,
