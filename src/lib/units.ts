@@ -79,12 +79,44 @@ export function plain(n: number): string {
   return String(roundTo(n, 3));
 }
 
-/** What the client typed, as a number — or null if they typed nothing usable. */
-function parse(text: string | number | null | undefined): number | null {
+/**
+ * What a person typed, as a number — or null if they typed nothing usable.
+ *
+ * ── Why this is exported, and why every typed figure should come through it ──
+ *
+ * The reported bug was `keyboardType="numeric"`: iOS raises a number pad with
+ * no decimal point at all, so a member looking at a 16.5 kg dumbbell could not
+ * type what they were holding. The fix is `decimal-pad` on every field that can
+ * carry a fraction — and the moment that keyboard appears, a SECOND number key
+ * appears with it, and on a German, French, Spanish or Italian phone that key
+ * is a COMMA. `parseFloat('16,5')` is 16. So changing the keyboard without
+ * changing the reader would have swapped a member who cannot type 16.5 for a
+ * member who types 16,5 and silently records 16 — the same defect, quieter,
+ * and only for the people whose phone is not set to English.
+ *
+ * Worse is available. A field that sanitises with `replace(/[^0-9]/g, '')`
+ * before parsing turns "16,5" into "165": a tenfold error, in the member's
+ * favour on a PR list and against them on an invoice. Two screens were doing
+ * exactly that — see app/(trainer)/profile.tsx.
+ *
+ * So the decimal comma is read as a decimal point, here, once, and this is the
+ * function the screens call rather than reaching for `parseFloat` each time.
+ * `scripts/check-decimals.mjs` is what stops the next fractional field being
+ * added with the number pad on it.
+ *
+ * Deliberately lenient about trailing text, because it is called on a
+ * half-typed field: `parseFloat('16.')` is 16, and a stricter reader would make
+ * a controlled input drop the decimal point the instant it was typed.
+ * `readLift` below is where a load is judged; this only reads.
+ */
+export function readNumber(text: string | number | null | undefined): number | null {
   if (text == null) return null;
   const n = typeof text === 'number' ? text : parseFloat(String(text).trim().replace(',', '.'));
   return Number.isFinite(n) ? n : null;
 }
+
+/** The in-module name this file has always used for the reader above. */
+const parse = readNumber;
 
 // ── the conversions themselves ─────────────────────────────────────────────
 export const kgToLb = (kg: number) => kg / KG_PER_LB;

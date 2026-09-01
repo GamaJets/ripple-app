@@ -52,6 +52,8 @@ import { deviceUnitNote } from '../../src/lib/unitPreference';
 import { useAuth } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
+import { restSoundNote } from '../../src/lib/restTimer';
+import { SOUNDS_AVAILABLE } from '../../src/ui/sounds';
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
@@ -360,6 +362,20 @@ export default function Settings() {
           <SectionHead title="Notifications" />
           <Row t={t} first label="Push Notifications" sub="Session reminders, class reminders, coach messages"
             right={<Toggle t={t} on={st.notifPush} label="Push Notifications" onPress={() => { void togglePush(); }} />} />
+          {/* The rest-timer sound.
+              Not folded into the push switch, and not a coach setting. It is a
+              noise this handset makes in whatever room it is in, so it belongs
+              to the person holding it — the same reasoning that keeps push
+              device-local rather than on the account.
+              It gates the sound for real: `set` publishes the answer to
+              src/lib/restTimer.ts's latch in the same statement it stores it,
+              and src/ui/sounds.ts will not play anything the latch has not said
+              yes to. This screen has shipped a switch that was read by nothing
+              before — see the long note above togglePush — and this one is
+              wired at the speaker rather than at each call site so there is no
+              second place to forget it. */}
+          <Row t={t} label="Rest Timer Sound" sub={restSoundNote(SOUNDS_AVAILABLE)}
+            right={<Toggle t={t} on={st.restSound} label="Rest Timer Sound" onPress={() => st.set({ restSound: !st.restSound })} />} />
         </Section>
 
         <Rule />

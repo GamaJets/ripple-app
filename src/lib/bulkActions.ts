@@ -194,6 +194,56 @@ export function overwriteBrief(
   };
 }
 
+/**
+ * What the coach must read before taking clients OFF their programmes.
+ *
+ * ── Why this is not `overwriteBrief` with a different verb ────────────────
+ *
+ * Asked for as "assign and un-assign templates meanwhile keeping the data for
+ * the history of the workouts done in those templates so you can add it back in
+ * at a later stage" — and the second half of that sentence is a FEAR, not a
+ * feature request. A coach who believes un-assigning might take their client's
+ * training record with it will never press the button, which is its own kind of
+ * broken; and one who half-believes it will press it and then spend an evening
+ * checking. Either way the sentence they need is the one that settles it.
+ *
+ * It is settled, and checked rather than assumed: NO foreign key anywhere in
+ * this database points at `assigned_programs` or `program_templates`, and
+ * `workouts` is keyed by `user_id` and `performed_at` with no reference to a
+ * plan at all. Verified live against phgfwzpkkwdysftlgkoq by reading
+ * `pg_constraint` for every FK whose target is either table: there are none, so
+ * nothing can cascade from either. Re-assigning the template later therefore
+ * needs nothing special to "add it back" — the history was never gone.
+ *
+ * The clients passed here are only the ones ON a programme. Somebody who is
+ * already on their auto plan has nothing to be taken off, and including them
+ * would make the count wrong in the direction that raises a false alarm.
+ */
+export function unassignBrief(targets: readonly AssignTarget[]): OverwriteBrief {
+  const on = targets.filter((x) => x.onProgramme);
+  const n = on.length;
+  const who = namesWithRest(on.map((x) => x.name));
+
+  if (n === 0) {
+    return {
+      title: 'Nobody To Take Off',
+      body: 'None of the clients you have ticked is on a coach-assigned programme, so there is nothing to remove. They are already on an auto-generated plan.',
+      confirmLabel: 'OK',
+      replacing: [],
+    };
+  }
+
+  return {
+    title: n === 1 ? 'Take Them Off This Programme?' : `Take ${num(n)} Clients Off Their Programmes?`,
+    body:
+      `${who} ${n === 1 ? 'goes' : 'go'} back to an auto-generated plan built from ${n === 1 ? 'their' : 'their own'} goal. `
+      + `Every session ${n === 1 ? 'they have' : 'they have'} already logged stays exactly where it is — a programme is a plan, and the sets somebody did are their record, not the plan's. `
+      + `Put the same programme back later and that history is still underneath it.`,
+    confirmLabel: n === 1 ? 'Take Them Off' : `Take ${num(n)} Off`,
+    replacing: on,
+  };
+}
+
 /* ── what actually happened, per client ────────────────────────────────────── */
 
 /** The outcome of ONE of the writes a bulk action fanned out into. */
@@ -210,7 +260,7 @@ export interface WriteOutcome {
 
 /** What a bulk action was doing, which is the only thing the report's wording
  *  needs to differ on. */
-export type BulkKind = 'assign' | 'message';
+export type BulkKind = 'assign' | 'unassign' | 'message';
 
 export interface BulkReport {
   title: string;
@@ -255,6 +305,13 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
 
   const landed = kind === 'assign'
     ? (c: number) => `${c === 1 ? 'It is' : 'They are'} on ${c === 1 ? 'their' : `${num(c)} clients’`} Train tab${c === 1 ? '' : 's'} now.`
+    // Said every time, because it is the fact a coach is most likely to be
+    // wrong about and the one that decides whether they ever use the control.
+    // Nothing in this database points at `assigned_programs`, so a client's
+    // logged sets cannot be reached by removing a plan — see the header of
+    // `clearProgramFrom` in src/ui/assignedPrograms.tsx.
+    : kind === 'unassign'
+    ? (c: number) => `${c === 1 ? 'They are' : `All ${num(c)} are`} back on an auto-generated plan. Every session ${c === 1 ? 'they have' : 'they have'} logged is untouched.`
     : (c: number) => `Your message is in ${c === 1 ? 'their thread' : `${num(c)} threads`} now.`;
 
   if (n === 0) {
@@ -263,10 +320,13 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
     return { title: 'Nobody Selected', body: 'Nothing was written, because nobody was ticked.', retry: [] };
   }
 
+  const verbTitle = kind === 'assign' ? 'Assigned' : kind === 'unassign' ? 'Taken Off' : 'Sent';
+  const verbBody = kind === 'assign' ? 'Assigned to' : kind === 'unassign' ? 'Took the programme off' : 'Sent to';
+
   if (!bad.length) {
     return {
-      title: kind === 'assign' ? 'Assigned' : 'Sent',
-      body: `${kind === 'assign' ? 'Assigned to' : 'Sent to'} ${num(n)} ${n === 1 ? 'client' : 'clients'} — ${namesWithRest(ok.map((r) => r.name))}. ${landed(n)}`,
+      title: verbTitle,
+      body: `${verbBody} ${num(n)} ${n === 1 ? 'client' : 'clients'} — ${namesWithRest(ok.map((r) => r.name))}. ${landed(n)}`,
       retry: [],
     };
   }
@@ -277,7 +337,7 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
 
   if (!ok.length) {
     return {
-      title: kind === 'assign' ? 'Not Assigned' : 'Not Sent',
+      title: kind === 'assign' ? 'Not Assigned' : kind === 'unassign' ? 'Not Taken Off' : 'Not Sent',
       body:
         `${n === 1 ? 'The write' : `None of the ${num(n)} writes`} landed, so nothing has changed for ${n === 1 ? 'them' : 'any of them'}. `
         + `${n === 1 ? 'They are' : 'They are all'} still selected, so you can try again without finding ${n === 1 ? 'them' : 'them all'} again.\n\n`
@@ -287,7 +347,7 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
   }
 
   return {
-    title: kind === 'assign' ? 'Partly Assigned' : 'Partly Sent',
+    title: kind === 'assign' ? 'Partly Assigned' : kind === 'unassign' ? 'Partly Taken Off' : 'Partly Sent',
     body:
       `${num(ok.length)} of ${num(n)} landed — ${namesWithRest(ok.map((r) => r.name))}. ${landed(ok.length)}\n\n`
       + `${num(bad.length)} did not, and ${bad.length === 1 ? 'is' : 'are'} still selected so you can try again:\n\n`

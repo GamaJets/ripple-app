@@ -23,7 +23,7 @@
 //
 // Compile with tsc then run with node, like wroteRows.test.ts.
 import {
-  overwriteBrief, bulkReport, selectAllOffer, guardRecipients, namesWithRest, bulkThreadNote,
+  overwriteBrief, unassignBrief, bulkReport, selectAllOffer, guardRecipients, namesWithRest, bulkThreadNote,
   NAMES_IN_BRIEF, type AssignTarget, type WriteOutcome,
 } from './bulkActions';
 
@@ -261,6 +261,52 @@ eq(bulkThreadNote(1), null,
     'and says these are N real messages in N real threads rather than one broadcast object');
   ok(/nothing marks it|read as though you wrote it/i.test(n),
     'AND IT TELLS THE COACH WHAT THE CLIENT WILL SEE — nothing is appended to the body under the coach’s name, so the decision to say "this went to everyone" is theirs to type');
+}
+
+/* ── taking clients OFF a programme ───────────────────────────────────────── */
+//
+// The user's request carried the fear inside it: "un-assign templates meanwhile
+// keeping the data for the history of the workouts done in those templates so
+// you can add it back in at a later stage". A coach who believes un-assigning
+// might take their client's training record with it will never press the
+// button, so the sentence that settles it is the feature.
+//
+// It is settled by the schema and not by reassurance: no foreign key anywhere
+// in the live database points at `assigned_programs` or `program_templates`,
+// and `workouts` is keyed by user and date with no reference to a plan.
+
+{
+  const b = unassignBrief([target('Ana', true), target('Ben', true), target('Cara', false)]);
+  ok(b.body.includes('Ana') && b.body.includes('Ben'),
+    'the clients actually coming off are NAMED — a coach recognises the person, not the count');
+  ok(!b.body.includes('Cara'),
+    'and somebody already on their auto plan is not counted as being taken off anything');
+  eq(b.replacing.length, 2, 'only the ones on a programme are acted on');
+  ok(/already logged/i.test(b.body) && /still/i.test(b.body),
+    'THE HISTORY IS PROMISED IN WORDS — that what is already logged stays, and is STILL there if the programme goes back on. This is the whole reason the dialog exists: a coach who is unsure will never press the button');
+  ok(/2/.test(b.confirmLabel), 'and the button carries the number, like every other destructive one here');
+}
+{
+  const b = unassignBrief([target('Ana', false)]);
+  eq(b.replacing.length, 0, 'nobody on a programme is nobody to take off');
+  ok(/nothing to remove|already/i.test(b.body),
+    'and that is said plainly rather than raising an alarm about a write that would do nothing');
+}
+
+{
+  const r = bulkReport('unassign', [
+    { clientId: 'a', name: 'Ana', ok: true, why: null },
+    { clientId: 'b', name: 'Ben', ok: false, why: 'the server refused it.' },
+  ]);
+  ok(/off/i.test(r.title), 'a partial un-assign is titled as an un-assign, not as an assign');
+  ok(r.body.includes('Ana') && r.body.includes('Ben'), 'both halves are named');
+  eq(r.retry.join(','), 'b', 'and the one that did not land stays selected');
+}
+{
+  const r = bulkReport('unassign', [{ clientId: 'a', name: 'Ana', ok: true, why: null }]);
+  ok(/logged|untouched/i.test(r.body),
+    'and the success says the logged sessions are untouched — the coach is told the thing they were most likely to be wrong about');
+  eq(r.retry.length, 0, 'nothing to retry when it all landed');
 }
 
 if (errors.length) {

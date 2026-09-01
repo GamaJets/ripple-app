@@ -216,6 +216,12 @@ eq(parseTyped('0', 'mmol/L'), null, 'zero is not a reading');
 eq(parseTyped('-5', 'mmol/L'), null, 'negative is not a reading');
 eq(parseTyped('abc', 'mmol/L'), null, 'words are not a reading');
 eq(parseTyped(' 6.2 ', 'mmol/L'), 6.2, 'surrounding whitespace is tolerated');
+// The decimal pad on this screen offers a COMMA on a European keyboard, and
+// `Number('5,5')` is NaN — so without this a member in Berlin is told their own
+// reading is not a number, every time, forever.
+eq(parseTyped('5,5', 'mmol/L'), 5.5, 'a decimal comma is a decimal point');
+eq(parseTyped('12,7', 'mmol/L'), 12.7, 'including on a high reading');
+eq(parseTyped('5,5,5', 'mmol/L'), null, 'two commas are a slip or a separator, and are not guessed at');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`glucose: ok (${parsed.length + hc.length + paired.length + many.length} cases)`);

@@ -397,9 +397,18 @@ export function unsaved(readings: GlucoseReading[], storedExternalIds: Iterable<
  * that is plausible in the OTHER unit — 99 typed under mmol/L is a mg/dL
  * reading in the wrong box, and storing it as 99 mmol/L would put a point four
  * times off the top of every chart they ever look at.
+ *
+ * A single comma is a decimal point. The box on app/(client)/glucose.tsx is a
+ * decimal pad, and the decimal key on that pad is a comma on a German, French,
+ * Spanish or Italian phone — `Number('5,5')` is NaN, so a member in Berlin was
+ * told their own reading was not a number every time they typed one. Read the
+ * same way as every other typed figure in the app; see readNumber in
+ * src/lib/units.ts. Two commas stay unreadable: that is a separator or a slip,
+ * and guessing which would be inventing a blood-sugar reading.
  */
 export function parseTyped(text: string, unit: GlucoseUnit): number | null {
-  const n = Number(String(text).trim());
+  const raw = String(text).trim();
+  const n = (raw.match(/,/g) || []).length === 1 ? Number(raw.replace(',', '.')) : Number(raw);
   if (!Number.isFinite(n) || n <= 0) return null;
   const mmol = unit === 'mg/dL' ? mgdlToMmol(n) : n;
   if (!plausible(mmol)) return null;

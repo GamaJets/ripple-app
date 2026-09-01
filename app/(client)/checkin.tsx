@@ -31,7 +31,7 @@ import { Rule, Section, SectionHead, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, weightToKg, kgToLb, plain, convertedNote } from '../../src/lib/units';
+import { weightIn, weightLabel, weightToKg, kgToLb, plain, convertedNote, readNumber } from '../../src/lib/units';
 import { useCheckIns } from '../../src/ui/checkins';
 import { isPending } from '../../src/lib/wellnessSync';
 import { unsentNote } from '../../src/lib/offlineQueue';
@@ -103,8 +103,12 @@ export default function CheckIn() {
     // converted number against a metric range would reject 900 lb by quoting
     // kilograms, and — far worse in the other direction — used to accept 180 lb
     // as 180 kg without either number ever leaving the range.
-    const w = parseFloat(weight);
-    if (!(w > minShown && w < maxShown)) { Alert.alert('Add your weight', `Enter this week's weight in ${wu} so your coach sees the real number.`); return; }
+    // Through `readNumber`, not `parseFloat`. This box is now a decimal pad,
+    // and on a German or French phone the decimal key on it is a COMMA:
+    // `parseFloat('73,5')` is 73, so the figure being range-checked would not
+    // be the figure `weightToKg` stores two lines below. One reader, one number.
+    const w = readNumber(weight);
+    if (w == null || !(w > minShown && w < maxShown)) { Alert.alert('Add your weight', `Enter this week's weight in ${wu} so your coach sees the real number.`); return; }
     if (!energy || !sleep || !mood || !adherence) { Alert.alert('Rate your week', 'Tap a score for energy, sleep, mood and adherence — we won\'t guess them for you.'); return; }
     // Storage is metric everywhere, so the pounds a client typed become the
     // kilograms the coach's console, the macro calculator and the goal tracker
@@ -164,7 +168,7 @@ export default function CheckIn() {
 
         <Section>
           <SectionHead title="Current Weight" note={wu} />
-          <TextInput value={weight} onChangeText={setTyped} keyboardType="numeric" placeholder={wu} placeholderTextColor={t.ink3}
+          <TextInput value={weight} onChangeText={setTyped} keyboardType="decimal-pad" placeholder={wu} placeholderTextColor={t.ink3}
             accessibilityLabel={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}
             style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
           {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{weightNote}</Text> : null}

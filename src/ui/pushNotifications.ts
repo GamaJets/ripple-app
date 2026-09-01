@@ -279,6 +279,51 @@ export async function scheduleDailyReminder(title: string, body: string, hour: n
   } catch { return null; }
 }
 
+/**
+ * Tell somebody their rest is over when the app is not on screen.
+ *
+ * ── Why this exists next to the sound ──────────────────────────────────────
+ *
+ * src/ui/sounds.ts makes a noise when the runner is in front of the member. It
+ * cannot make one from a pocket: the audio session is deliberately `.ambient`
+ * so it obeys the mute switch, which rules out background playback, and iOS
+ * suspends a backgrounded app's JavaScript anyway — the interval that would
+ * call playSound() is not running. A rest timer whose whole reason for storing
+ * a wall-clock end instant is that the phone goes in a pocket cannot then be
+ * silent in exactly that case, so the OS is asked to say it instead.
+ *
+ * ── What it will NOT do ────────────────────────────────────────────────────
+ *
+ * It never requests the notification permission. scheduleDailyReminder above
+ * does, because a member setting a daily reminder has asked for notifications
+ * by doing so; a member logging a set has not, and raising the system prompt
+ * over a live workout — a prompt iOS shows once per install, ever — to deliver
+ * a rest cue would spend the app's one chance on the least important
+ * notification it sends. If permission is not already granted this returns null
+ * and the rest timer is simply visual and haptic, which is what it was before.
+ *
+ * Returns the id so the caller can cancel it with `cancelReminders` — a member
+ * who skips the rest, moves to the next exercise or ends the session must not
+ * get an alert about a rest that is no longer happening.
+ */
+export async function scheduleRestOverAlert(date: Date, title: string, body: string): Promise<string | null> {
+  if (!Notifications) return null;
+  try {
+    if (date.getTime() <= Date.now()) return null;
+    // Asked, never requested. See above.
+    const status = (await Notifications.getPermissionsAsync?.())?.status;
+    if (status !== 'granted') return null;
+    return await Notifications.scheduleNotificationAsync({
+      // No `data.route`. Every other notification in this app routes somewhere
+      // on tap; this one is about the screen the member is already on, and
+      // pushing the runner's own route on top of a live session is how the
+      // component holding an hour of unsaved sets gets remounted.
+      content: { title, body, sound: true },
+      trigger: { type: 'date', date },
+    });
+  } catch { return null; }
+}
+
 /** Cancel specific scheduled reminders by id (from scheduleDailyReminder). */
 export async function cancelReminders(ids: string[]): Promise<void> {
   if (!Notifications || !ids || !ids.length) return;

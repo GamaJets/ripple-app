@@ -481,12 +481,12 @@ export default function OwnerRota() {
             <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
               <View style={{ flex: 1 }}>
                 <Text style={lab}>Starts (hour)</Text>
-                <TextInput value={from} onChangeText={setFrom} keyboardType="numeric" maxLength={2}
+                <TextInput value={from} onChangeText={setFrom} keyboardType="number-pad" maxLength={2}
                   style={inp} accessibilityLabel="Start hour" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={lab}>Finishes (hour)</Text>
-                <TextInput value={to} onChangeText={setTo} keyboardType="numeric" maxLength={2}
+                <TextInput value={to} onChangeText={setTo} keyboardType="number-pad" maxLength={2}
                   returnKeyType="done" onSubmitEditing={() => { void commitAdd(); }}
                   style={inp} accessibilityLabel="Finish hour" />
               </View>

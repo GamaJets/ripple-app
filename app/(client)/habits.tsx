@@ -32,6 +32,7 @@ import { unsentNote } from '../../src/lib/offlineQueue';
 import { donePercent } from '../../src/lib/checklist';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
+import { readNumber } from '../../src/lib/units';
 
 // The same bounds clients_step_goal_check, clients_sleep_goal_hours_check
 // (supabase/parts/60) and clients_water_goal_glasses_check (part 70) enforce.
@@ -282,7 +283,14 @@ export default function Habits() {
               // One decimal, matching numeric(3,1) on the column. Postgres would
               // round it anyway; doing it here means the number the client sees
               // afterwards is the number that was stored.
-              const n = Math.round(parseFloat(sleepDraft) * 10) / 10;
+              // `readNumber`, not `parseFloat`. This box has always been a
+              // decimal pad and its placeholder says "e.g. 7.5" — but on a
+              // German keyboard that pad's decimal key is a comma, and
+              // `parseFloat('7,5')` is 7. The goal stored was half an hour
+              // short of the goal typed, for every client outside the
+              // English-speaking world.
+              const typed = readNumber(sleepDraft);
+              const n = typed == null ? NaN : Math.round(typed * 10) / 10;
               if (!Number.isFinite(n) || n < SLEEP_MIN || n > SLEEP_MAX) {
                 Alert.alert('Check that number', `A sleep goal needs to be between ${SLEEP_MIN} and ${SLEEP_MAX} hours. If you meant minutes, use hours here — 450 minutes is 7.5.`);
                 return;

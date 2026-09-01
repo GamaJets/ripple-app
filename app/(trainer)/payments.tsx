@@ -157,6 +157,7 @@ import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage,
 import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
 import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, type Pot, type TakenRow } from '../../src/lib/coachMoney';
+import { readNumber } from '../../src/lib/units';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
   { key: null, label: 'One-off' },
@@ -234,7 +235,10 @@ export default function TrainerPayments() {
   const onboard = async () => { setBusy(true); const r = await startTrainerOnboarding(); setBusy(false); if (!r.ok) Alert.alert('Payouts setup', r.error || 'Could not start setup. Make sure Stripe Connect is enabled.'); };
 
   const addPkg = async () => {
-    const nm = name.trim(); const amount = parseFloat(price);
+    // `readNumber`: the price box is a decimal pad, and a decimal comma is
+    // what it offers on a European phone. 49,50 read by `parseFloat` is 49,
+    // and the package would be sold for fifty cents less than it says.
+    const nm = name.trim(); const amount = readNumber(price) ?? 0;
     if (!nm) { Alert.alert('Name it', 'Give the package a name.'); return; }
     if (!(amount > 0)) { Alert.alert('Set a price', 'Enter a price greater than 0.'); return; }
     // Nothing is priced in a currency nobody chose. There is no sensible
@@ -459,7 +463,9 @@ export default function TrainerPayments() {
   );
   // The typed price read back in the gym's currency, or null when either half
   // is missing. Never a number with a unit put on it for the look of the thing.
-  const typed = parseFloat(price);
+  // The same reader `addPkg` uses, so the price echoed under the box is the
+  // price the button is about to charge.
+  const typed = readNumber(price) ?? 0;
   const priceEcho = currency && typed > 0 ? pkgMoney(Math.round(typed * 100), currency) : null;
 
   return (

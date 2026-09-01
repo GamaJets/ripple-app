@@ -15,6 +15,7 @@ import {
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, weightDeltaIn,
   kgToLb, lbToKg, cmToIn, inToCm, convertedNote, plain,
   liftIn, liftLabel, liftToKg, liftDeltaIn, est1RMIn, volumeIn, volumeHeadline, readLift,
+  readNumber,
 } from './units';
 // The documents a client SHARES are the last thing TF-37 reached, and they are
 // asserted here rather than in a file of their own because what is being
@@ -379,6 +380,74 @@ ok(!readLift('1000', 'kg').ok, 'while 1,000 kg is not, and is refused');
   ok(!refusedLb.ok && refusedLb.reason.includes('lb'),
     `and a pounds reader is refused in pounds, got "${refusedLb.ok ? '' : refusedLb.reason}"`);
 }
+
+/* ── the fraction itself, and the comma that carries it ─────────────────────
+ *
+ * The reported bug: "when entering the weights you do not have the ability use
+ * a decimal. ie. 16.5kg or 16.5lb". The keyboard is fixed on the screens; what
+ * is asserted here is that the fraction SURVIVES once it has been typed — a
+ * decimal keyboard is useless if the reader behind it throws the half away.
+ *
+ * Both spellings of the same load. A member in Berlin gets a comma on the
+ * decimal pad, not a point, and `parseFloat('16,5')` is 16 — so without the
+ * comma rule in `readNumber` the two members below would record different
+ * dumbbells off the same hand.
+ */
+for (const typed of ['16.5', '16,5']) {
+  const r = readLift(typed, 'kg');
+  ok(r.ok && r.kg === 16.5, `"${typed}" kg must store as 16.5, got ${r.ok ? r.kg : r.reason}`);
+  ok(liftIn(r.ok ? r.kg : null, 'kg') === 16.5, `and read back out as 16.5 kg, not ${liftIn(r.ok ? r.kg : null, 'kg')}`);
+  ok(liftLabel(r.ok ? r.kg : null, 'kg') === '16.5 kg',
+    `and print as "16.5 kg", got "${liftLabel(r.ok ? r.kg : null, 'kg')}"`);
+  // The named failure, spelled out rather than left implied by the equality
+  // above: 165 is what a field that strips the comma before parsing produces,
+  // and 16 is what parseFloat produces. Neither is a dumbbell anybody picked up.
+  ok(!(r.ok && (r.kg === 165 || r.kg === 16)),
+    `"${typed}" must not silently become 165 or 16 — got ${r.ok ? r.kg : r.reason}`);
+}
+{
+  // And the same load typed in pounds, where the half-pound is the grain the
+  // fractional plates actually produce.
+  const lb = readLift('16,5', 'lb');
+  ok(lb.ok && lb.kg === 7.48, `16,5 lb stores as 7.48 kg, got ${lb.ok ? lb.kg : lb.reason}`);
+  ok(liftIn(lb.ok ? lb.kg : null, 'lb') === 16.5, 'and reads straight back out as 16.5 lb');
+}
+// The other fractional loads a rack actually makes, swept rather than sampled:
+// every half kilogram to 200, in both spellings, must come back as itself.
+for (let halves = 1; halves <= 400; halves++) {
+  const kg = halves / 2;
+  for (const typed of [String(kg), String(kg).replace('.', ',')]) {
+    const r = readLift(typed, 'kg');
+    ok(r.ok && liftIn(r.kg, 'kg') === kg, `"${typed}" kg came back as ${r.ok ? liftIn(r.kg, 'kg') : r.reason}`);
+  }
+}
+
+/* ── readNumber: the reader every typed figure in the app now goes through ── */
+
+ok(readNumber('16.5') === 16.5, 'a decimal point is a decimal point');
+ok(readNumber('16,5') === 16.5, 'and so is a decimal comma — that is the whole reason this is exported');
+ok(readNumber('2.5') === 2.5, 'a pair of change plates');
+ok(readNumber('12,7') === 12.7, 'a distance in kilometres, typed in France');
+ok(readNumber('16.2') === 16.2, 'a body-fat percentage');
+ok(readNumber('73,5') === 73.5, 'a bodyweight, typed in Germany');
+ok(readNumber('5,5') === 5.5, 'a glucose reading in mmol/L');
+ok(readNumber(16.5) === 16.5, 'a number in is that number out — the field may already hold one');
+// Absence is not zero, on every shape of nothing a text field can be in.
+ok(readNumber('') === null, 'an empty field is nothing, not 0');
+ok(readNumber('   ') === null, 'and neither is whitespace a figure');
+ok(readNumber(null) === null, 'null in, null out');
+ok(readNumber(undefined) === null, 'and undefined the same');
+ok(readNumber('abc') === null, 'a word is not a number');
+ok(readNumber(NaN) === null, 'and neither is NaN, which is what a caller\'s own parseFloat hands over');
+// Negative is READ, not refused. `readLift` needs the sign to say "a load
+// cannot be negative" rather than "that is not a number", and the two
+// sentences send somebody to different parts of the keyboard.
+ok(readNumber('-5') === -5, 'a minus sign is read, so the caller can refuse it in its own words');
+// Half-typed, and deliberately readable. A controlled input that re-derives its
+// own text from this would otherwise drop the decimal point the moment it was
+// typed, which is the reported bug arriving through the back door.
+ok(readNumber('16.') === 16, 'a field mid-keystroke still reads, so the point does not vanish as it is typed');
+ok(readNumber('16,') === 16, 'including on a comma keyboard');
 
 if (errors.length) {
   console.error(`units.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);

@@ -79,6 +79,7 @@ import { notifySuccess } from '../../src/ui/haptics';
 import {
   weightIn, weightLabel, weightToKg, weightDeltaIn, kgToLb,
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote,
+  readNumber,
 } from '../../src/lib/units';
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
@@ -324,8 +325,11 @@ export default function MyProgress() {
       setScanProblem(`That weight is outside the range this records — ${minShown} to ${maxShown} ${wu}.`);
       return;
     }
-    const bf = Number(scanBf.trim());
-    if (!scanBf.trim() || !Number.isFinite(bf)) { setScanProblem('Enter your body fat as a percentage.'); return; }
+    // `Number('18,5')` is NaN, so a coach on a German phone was told to enter
+    // a percentage they had already entered, forever. `readNumber` takes the
+    // decimal comma this decimal pad offers.
+    const bf = readNumber(scanBf);
+    if (!scanBf.trim() || bf == null) { setScanProblem('Enter your body fat as a percentage.'); return; }
     if (bf < MIN_BF || bf > MAX_BF) {
       setScanProblem(`That body-fat percentage is outside the range this records — ${MIN_BF} to ${MAX_BF}%.`);
       return;
@@ -487,7 +491,7 @@ export default function MyProgress() {
               Your weight and how the week has gone. Stored against your own account — no client and no
               other coach can read it.
             </Text>
-            <TextInput value={typed} onChangeText={setTyped} keyboardType="numeric" placeholder={wu}
+            <TextInput value={typed} onChangeText={setTyped} keyboardType="decimal-pad" placeholder={wu}
               placeholderTextColor={t.ink3}
               accessibilityLabel={wu === 'kg' ? 'Your weight in kilograms' : 'Your weight in pounds'}
               style={[inp, { ...numeric, marginBottom: sp.lg }]} />
@@ -571,7 +575,7 @@ export default function MyProgress() {
             {METRICS.map(({ key, label }) => (
               <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>{label}</Text>
-                <TextInput value={tape[key] ?? ''} onChangeText={(v) => setTapeVal(key, v)} keyboardType="numeric"
+                <TextInput value={tape[key] ?? ''} onChangeText={(v) => setTapeVal(key, v)} keyboardType="decimal-pad"
                   accessibilityLabel={`${label} in ${lu === 'cm' ? 'centimetres' : 'inches'}`}
                   placeholder={lastTape(key) ?? lu} placeholderTextColor={t.ink3} style={tapeInp} />
               </View>
@@ -712,7 +716,7 @@ export default function MyProgress() {
                       like it wants three numbers gets a guess for the third. */}
                   <Text style={{ ...ty.caption, color: t.ink3 }}>  {f.unit}{f.key === 'sm' ? ' · optional' : ''}</Text>
                 </Text>
-                <TextInput value={f.value} onChangeText={f.set} keyboardType="numeric"
+                <TextInput value={f.value} onChangeText={f.set} keyboardType="decimal-pad"
                   accessibilityLabel={f.a11y} style={tapeInp} />
               </View>
             ))}

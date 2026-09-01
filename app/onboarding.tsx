@@ -28,6 +28,7 @@ import { sp, layout, radius, type as ty } from '../src/theme/scale';
 import { VARIANT } from '../src/lib/variant';
 import { useTenant } from '../src/ui/tenant';
 import { peekJoinCode } from '../src/ui/pendingJoinCode';
+import { readNumber } from '../src/lib/units';
 
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat Loss' },
@@ -74,10 +75,16 @@ export default function Onboarding() {
   // tapping through must not write "Tim's space" as though it were chosen.
   const saveGym = async () => {
     const name = gymName.trim();
-    const f = parseFloat(fee);
+    // `readNumber`, so a decimal comma is a decimal point — this box is a
+    // decimal pad and a session fee of 62,50 must not be recorded as 62.
+    const f = readNumber(fee) ?? NaN;
     const patch: { name?: string; sessionFee?: number } = {};
     if (name) patch.name = name;
-    if (Number.isFinite(f) && f > 0) patch.sessionFee = Math.round(f);
+    // Not `Math.round(f)`. `tenants.session_fee` is `numeric(8,2)`, so a gym
+    // charging 62.50 a session can be recorded as one — and rounding it here
+    // handed the owner back a fee fifty cents different from the one they had
+    // just typed, on the screen where they type it for the first time.
+    if (Number.isFinite(f) && f > 0) patch.sessionFee = Math.round(f * 100) / 100;
     if (!Object.keys(patch).length) { router.replace('/(owner)/dashboard'); return; }
     setSaving(true);
     const okWrite = await updateTenant(patch);
@@ -93,8 +100,12 @@ export default function Onboarding() {
   };
 
   const finish = async () => {
-    const w = parseFloat(weight); if (w > 20 && w < 400) cd.setWeightKg(w);
-    const h = parseFloat(height); if (h > 80 && h < 260) cd.setHeightCm(h);
+    // Weight is a decimal pad and a European keyboard's decimal key on it is a
+    // comma, so 73,5 must not arrive as 73. Height is a whole-number pad —
+    // `heightIn` rounds centimetres to the nearest one — so there is no
+    // fraction there to lose.
+    const w = readNumber(weight); if (w != null && w > 20 && w < 400) cd.setWeightKg(w);
+    const h = readNumber(height); if (h != null && h > 80 && h < 260) cd.setHeightCm(h);
     cd.setCoachingMode(cmode);
     // A code is waiting when this account was created off the back of a coach's
     // invite link: app/join.tsx stored it before sending them to sign up, and
@@ -187,7 +198,7 @@ export default function Onboarding() {
               onChangeText={setFee}
               placeholder="Optional — leave blank if it varies"
               placeholderTextColor={t.ink3}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               returnKeyType="done"
               onSubmitEditing={() => { void saveGym(); }}
               style={inp}
@@ -248,9 +259,9 @@ export default function Onboarding() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Starting Stats</Text>
             <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>So we can set your calorie & macro targets.</Text>
             <Text style={lab}>Weight (kg)</Text>
-            <TextInput value={weight} onChangeText={setWeight} keyboardType="numeric" placeholder="kg" placeholderTextColor={t.ink3} accessibilityLabel="Weight in kilograms" style={{ ...inp, marginBottom: sp.lg }} />
+            <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" placeholder="kg" placeholderTextColor={t.ink3} accessibilityLabel="Weight in kilograms" style={{ ...inp, marginBottom: sp.lg }} />
             <Text style={lab}>Height (cm)</Text>
-            <TextInput value={height} onChangeText={setHeight} keyboardType="numeric" placeholder="cm" placeholderTextColor={t.ink3} accessibilityLabel="Height in centimetres" style={inp} />
+            <TextInput value={height} onChangeText={setHeight} keyboardType="number-pad" placeholder="cm" placeholderTextColor={t.ink3} accessibilityLabel="Height in centimetres" style={inp} />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>You can add or refine these any time in your profile, and an InBody scan updates them automatically.</Text>
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>How are you coaching?</Text>
             {/* The same four answers, in the same words, as the profile screen

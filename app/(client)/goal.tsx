@@ -29,7 +29,7 @@ import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../..
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightToKg, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
+import { weightIn, weightToKg, weightDeltaIn, kgToLb, readNumber, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import {
@@ -144,8 +144,11 @@ export default function Goal() {
       ok = await g.addCustomGoal(title, targetDateISO);
     } else {
       const mk = kind as MeasuredKind;
-      const n = parseFloat(amount);
-      if (!Number.isFinite(n) || n <= 0) {
+      // `readNumber` and not `parseFloat`: this box is a decimal pad, and a
+      // decimal comma is what it offers on a European keyboard. A body-fat
+      // target of 16,2 stored as 16 is a target the client did not set.
+      const n = readNumber(amount);
+      if (n == null || n <= 0) {
         setSaving(false);
         Alert.alert('Enter a number', `Type your ${GOAL_METRIC[mk].label.toLowerCase()} in ${goalUnit(mk, wu)}.`);
         return;
@@ -317,7 +320,7 @@ export default function Goal() {
                            borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64 }} />
               ) : (
                 <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
-                  <TextInput value={amount} onChangeText={setAmount} keyboardType="numeric"
+                  <TextInput value={amount} onChangeText={setAmount} keyboardType="decimal-pad"
                     placeholder={goalUnit(kind as MeasuredKind, wu)} placeholderTextColor={t.ink3}
                     accessibilityLabel={`${GOAL_METRIC[kind as MeasuredKind].label} in ${goalUnit(kind as MeasuredKind, wu)}`}
                     style={{ flex: 1, ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring,

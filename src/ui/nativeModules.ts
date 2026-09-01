@@ -23,8 +23,17 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 
 /** Native module names, as registered on the native side. */
 const VIDEO = 'ExpoVideo';
+// expo-audio's own entry point does `requireNativeModule('ExpoAudio')`, which
+// THROWS on a binary that predates the dependency rather than returning null.
+// Asking here instead means src/ui/sounds.ts can decide it has no audio without
+// the question taking the workouts screen down with it.
+const AUDIO = 'ExpoAudio';
 
 export const HAS_NATIVE_VIDEO = requireOptionalNativeModule(VIDEO) != null;
+/** Whether the rest timer can make a noise on THIS install. expo-audio landed
+ *  after several builds shipped, and on those the sound is simply absent — the
+ *  haptic at zero is not, so the timer still announces itself. */
+export const HAS_NATIVE_AUDIO = requireOptionalNativeModule(AUDIO) != null;
 
 /**
  * What to tell somebody whose install predates a native module.

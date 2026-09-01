@@ -49,6 +49,7 @@ import { requestHealthAuth } from '../../src/lib/wearables/appleHealth';
 import { formatSleepHours, markNightsUnread, type MergedNight, type SleepRead } from '../../src/lib/sleepMerge';
 import type { ProviderId } from '../../src/lib/wearables/types';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { readNumber } from '../../src/lib/units';
 
 const MOBILITY = [
  { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
@@ -472,7 +473,7 @@ export default function Recovery() {
    <View style={{ height: sp.xl }} />
    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Logged by you</Text>
    <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
-    <TextInput value={hrs} onChangeText={setHrs} keyboardType="numeric" accessibilityLabel="Hours slept"
+    <TextInput value={hrs} onChangeText={setHrs} keyboardType="decimal-pad" accessibilityLabel="Hours slept"
      style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10, width: 78, textAlign: 'center' }} />
     <Text style={{ ...ty.caption, color: t.ink3 }}>hrs · quality</Text>
     {[1, 2, 3, 4, 5].map((n) => (
@@ -482,7 +483,11 @@ export default function Recovery() {
     ))}
    </View>
    <View style={{ height: sp.md }} />
-   <Cta label="Log Sleep" wide disabled={!(parseFloat(hrs) > 0) || q < 1} onPress={() => { addSleep(parseFloat(hrs) || 0, q); setHrs(''); setQ(0); }} />
+   {/* Hours slept is a fraction — 7.5 is the commonest answer there is — so
+       the box is a decimal pad and the reader has to take the decimal comma
+       a European keyboard puts on it. `parseFloat('7,5')` is 7, and half an
+       hour a night is the whole of what this screen is being asked. */}
+   <Cta label="Log Sleep" wide disabled={!((readNumber(hrs) ?? 0) > 0) || q < 1} onPress={() => { addSleep(readNumber(hrs) ?? 0, q); setHrs(''); setQ(0); }} />
    {/* An empty list is three different sentences, and it used to be one.
        "No nights logged yet" is a claim about the client's own history, and
        under a failed read it is a claim nobody can make — the nights may be

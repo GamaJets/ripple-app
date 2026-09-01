@@ -40,6 +40,12 @@ interface AssignedProgramsValue {
    *  refused leaves the client still training the old program while the coach's
    *  screen shows it gone. */
   clearProgram: (clientId: string) => Promise<boolean>;
+  /** The same removal, with the sentence saying why it did not land.
+   *
+   *  A coach taking several clients off a programme at once has to be told
+   *  which of them it worked for, by name — the same rule the assign side
+   *  already follows. See src/lib/bulkActions.ts. */
+  clearProgramFrom: (clientId: string) => Promise<{ ok: boolean; why: string | null }>;
 }
 
 const Ctx = createContext<AssignedProgramsValue | null>(null);
@@ -192,19 +198,57 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * respond to the tap. `false` is what stops the screen ANNOUNCING it, and
    * builder.tsx already handles it correctly.
    */
-  const clearProgram = async (clientId: string): Promise<boolean> => {
+  /**
+   * ── And why taking somebody OFF a programme does not touch their history ──
+   *
+   * Asked for as "assign and un-assign templates meanwhile keeping the data for
+   * the history of the workouts done in those templates so you can add it back
+   * in at a later stage". The second half of that is a fear rather than a
+   * feature, and it is worth answering with the schema rather than with
+   * reassurance.
+   *
+   * Checked live against phgfwzpkkwdysftlgkoq by reading `pg_constraint` for
+   * every foreign key whose target is `assigned_programs` or
+   * `program_templates`: THERE ARE NONE. Nothing in the database points at
+   * either table, so nothing can cascade from either. `workouts` is keyed by
+   * `user_id`, `performed_at` and `exercise`, and carries no reference to a
+   * plan at all — a logged set belongs to the person who did it, not to the
+   * programme it was done under. So this DELETE removes a plan and can reach
+   * nothing else, and re-assigning the same template later needs nothing
+   * special to "add the history back": it was never gone.
+   */
+  const clearProgramFrom = async (clientId: string): Promise<{ ok: boolean; why: string | null }> => {
+    // Put back on failure, for the reason `assignProgramTo` gives above: the
+    // local map is what the overwrite confirmation counts, and a client left
+    // out of it because a delete was refused makes the next dialog say they are
+    // on nothing while they are still training it.
+    const previous = programs[clientId] ?? null;
+    const putBack = () => setPrograms((p) => (previous ? { ...p, [clientId]: previous } : p));
     setPrograms((p) => { const n = { ...p }; delete n[clientId]; return n; });
-    if (!USE_SUPABASE || !uid) return false;
+    if (!USE_SUPABASE || !uid) {
+      putBack();
+      return { ok: false, why: 'The app could not confirm who you are signed in as, so nothing was sent to the server.' };
+    }
     try {
       const r = await supabase.from('assigned_programs').delete({ count: 'exact' }).eq('client_id', clientId);
       const why = writeFailure('That programme', r);
-      if (why) { reportError('assignedPrograms.clearProgram', new Error(why), { clientId }); return false; }
-      return true;
-    } catch { return false; }
+      if (why) {
+        reportError('assignedPrograms.clearProgram', new Error(why), { clientId });
+        putBack();
+        return { ok: false, why: `${why} Clients you added by hand have no Train tab until they join.` };
+      }
+      return { ok: true, why: null };
+    } catch (e) {
+      reportError('assignedPrograms.clearProgram', e, { clientId });
+      putBack();
+      return { ok: false, why: 'That removal did not reach the server, so nothing has changed for them.' };
+    }
   };
+  const clearProgram = async (clientId: string): Promise<boolean> =>
+    (await clearProgramFrom(clientId)).ok;
 
   return (
-    <Ctx.Provider value={{ programs, getProgram, status, assignProgram, assignProgramTo, clearProgram }}>
+    <Ctx.Provider value={{ programs, getProgram, status, assignProgram, assignProgramTo, clearProgram, clearProgramFrom }}>
       {children}
     </Ctx.Provider>
   );

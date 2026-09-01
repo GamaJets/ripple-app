@@ -58,6 +58,7 @@ import {
   overwriteBrief, bulkReport, selectAllOffer,
   type AssignTarget, type WriteOutcome,
 } from '../../src/lib/bulkActions';
+import { assignCtaLabel } from '../../src/lib/assignPicker';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import type { Injury } from '../../src/lib/injuries';
 
@@ -74,7 +75,7 @@ export default function Templates() {
   // returns null both for a client who has none and for a client whose row did
   // not come back. Ticking twelve names against an unread `assigned_programs`
   // silently overwrites however many of them were on something bespoke.
-  const { templates, removeTemplate, status: tplStatus } = useProgramTemplates();
+  const { templates, removeTemplateFrom, isStarter, status: tplStatus } = useProgramTemplates();
   const { roster, status: rosterStatus } = useRoster();
   const { assignProgramTo, getProgram, status: programStatus } = useAssignedPrograms();
   const acks = useInjuryAcks();
@@ -275,22 +276,31 @@ export default function Templates() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{tpl.id.startsWith('seed_') ? ' · starter' : ''}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{isStarter(tpl.id) ? ' · starter' : ''}</Text>
                 </View>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
                 <View style={{ flex: 1 }}><Cta label="Assign to Clients" wide onPress={() => openAssign(tpl)} /></View>
                 <Ghost label="Edit" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id } })} />
-                {/* `removeTemplate` resolves false when the delete never
-                    reached the server, and the row disappears from this list
-                    either way. Without saying so, a refused delete looks
-                    exactly like a successful one until the template reappears
-                    at the next launch. */}
-                {!tpl.id.startsWith('seed_') ? (
-                  <Pressable onPress={() => Alert.alert('Delete template?', `Remove “${tpl.name}”?`, [{ text: 'Keep', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => {
-                    const gone = await removeTemplate(tpl.id);
-                    setDelFailed(gone ? null : `“${tpl.name}” is off this list but the server did not confirm the delete, so it is still in your library and will be back when you reopen the app.`);
-                  } }])}
+                {/* The row no longer leaves this list before the server has
+                    counted it. It used to disappear on the tap and be reported
+                    as a failure afterwards, which reads as a successful delete
+                    with a glitch — and the template was back at the next
+                    launch with no explanation. See `removeTemplateFrom`.
+
+                    The confirmation NAMES the template and says what a delete
+                    does not touch: a client training a programme assigned from
+                    it keeps that programme, because an assignment is a jsonb
+                    copy and no foreign key in the database points at
+                    `program_templates` at all. */}
+                {!isStarter(tpl.id) ? (
+                  <Pressable onPress={() => Alert.alert(
+                    'Delete This Template?',
+                    `“${tpl.name}” is removed from your library for good — there is no undo. Anybody already training it keeps their programme, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
+                    [{ text: 'Keep', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => {
+                      const gone = await removeTemplateFrom(tpl.id);
+                      setDelFailed(gone.ok ? null : `“${tpl.name}” is still in your library. ${gone.why ?? 'The server did not say why.'}`);
+                    } }])}
                     hitSlop={8} accessibilityRole="button" accessibilityLabel={'Delete ' + tpl.name} style={{ padding: 8 }}>
                     <Icon name="minus" size={17} color={t.ink3} />
                   </Pressable>
@@ -428,11 +438,17 @@ export default function Templates() {
                       shared guard, so the guard keeps answering for every other
                       refusal (the overwrite check, a missing programme) where
                       its wording is right. */}
-                  <Cta label={assignBusy
-                    ? 'Assigning…'
-                    : pickedIds.length === 0
-                    ? 'Pick Who Gets This'
-                    : (plan.label ?? `Assign to ${pickedIds.length} client${pickedIds.length === 1 ? '' : 's'}`)} wide
+                  {/* The same label the builder puts on the same gesture, from
+                      src/lib/assignPicker.ts — the two were the same expression
+                      written twice, and this screen already carries a comment
+                      about the one place they had drifted. */}
+                  <Cta label={assignCtaLabel({
+                    busy: assignBusy,
+                    picked: pickedIds.length,
+                    exercises: exCount(assignTpl),
+                    planLabel: plan.label,
+                    soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
+                  })} wide
                     disabled={pickedIds.length === 0 || !plan.allowed || assignBusy} onPress={doAssign} />
                 </View>
               </View>

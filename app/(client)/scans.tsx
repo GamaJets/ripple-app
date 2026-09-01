@@ -50,7 +50,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote } from '../../src/lib/units';
+import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote, readNumber } from '../../src/lib/units';
 import { readBodyFromDevices, hasBodyFigure, type BodyRead } from '../../src/lib/wearables/body';
 import { useWearables } from '../../src/ui/wearables';
 import { macrosFor } from '../../src/lib/nutrition';
@@ -493,7 +493,11 @@ export default function Scans() {
     // 180 lb as 180 kg — and because the newest scan re-tunes the meal plan,
     // the wrong body was in their calorie target before they left the sheet.
     // Body fat is read as typed: it is a percentage in every unit system.
-    const w = weightToKg(wt, wu) ?? 0, f = parseFloat(bf) || 0;
+    // Body fat through `readNumber` for the same reason the two weights go
+    // through `weightToKg`: the box is a decimal pad and a decimal comma is a
+    // decimal point. 16,2% read by `parseFloat` is 16%, which is a different
+    // body and a different calorie target.
+    const w = weightToKg(wt, wu) ?? 0, f = readNumber(bf) ?? 0;
     // Blank means the report did not give one, NOT zero. `parseFloat(sm) || 0`
     // wrote a 0 kg muscle reading for every client who filled in only the two
     // figures the form insists on.
@@ -1300,13 +1304,13 @@ export default function Scans() {
                 numerals cannot be told apart. */}
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg, alignItems: 'flex-end' }}>
               <Field label="Weight" hint={wu} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
-                <TextInput value={wt} onChangeText={setWt} keyboardType="numeric" style={input} />
+                <TextInput value={wt} onChangeText={setWt} keyboardType="decimal-pad" style={input} />
               </Field>
               <Field label="Body fat" hint="%" a11y="Body fat percentage">
-                <TextInput value={bf} onChangeText={setBf} keyboardType="numeric" style={input} />
+                <TextInput value={bf} onChangeText={setBf} keyboardType="decimal-pad" style={input} />
               </Field>
               <Field label="Muscle" hint={wu} a11y={wu === 'kg' ? 'Skeletal muscle in kilograms' : 'Skeletal muscle in pounds'}>
-                <TextInput value={sm} onChangeText={setSm} keyboardType="numeric" style={input} />
+                <TextInput value={sm} onChangeText={setSm} keyboardType="decimal-pad" style={input} />
               </Field>
             </View>
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{weightNote}</Text> : null}

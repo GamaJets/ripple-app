@@ -94,6 +94,11 @@ export default function StatementOfRecord() {
 
   const statement: Statement | null = useMemo(() => (input ? coachStatement(input) : null), [input]);
 
+  // Only when EVERY read landed whole. A "nothing here" reassurance drawn over
+  // a refused read is the one sentence this screen must never say to a
+  // self-employed person about their own year.
+  const nothingRecorded = !!statement && statement.complete && statement.sections.every((s) => s.count === 0);
+
   const share = async () => {
     if (!statement || busy) return;
     setBusy(true);
@@ -204,6 +209,23 @@ export default function StatementOfRecord() {
                     <Flag key={i} style={{ marginTop: sp.sm }}>{c}</Flag>
                   ))}
                 </Section>
+                <Rule />
+              </>
+            ) : null}
+
+            {/* ── nothing recorded, and every read landed ────────────────
+                Every money table in this database is empty today, so this is
+                the screen almost every coach opens on. It has to be the true
+                answer and a useful one — not a wall of zeros that reads like a
+                broken screen, and not a reassurance that hides a failed read,
+                which is why it is drawn ONLY when every read came back whole. */}
+            {nothingRecorded ? (
+              <>
+                <Notice
+                  kicker="Nothing recorded"
+                  title="This Period Has Nothing In It"
+                  note="Every read came back in full, so this is your record rather than a failure. This app only holds what went through it — money a client handed you in cash, sent by transfer, or paid at a gym's front desk was never here to list. You can put those on the record yourself by issuing an invoice for them, and they will be on next year's statement."
+                />
                 <Rule />
               </>
             ) : null}

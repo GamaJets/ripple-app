@@ -22,7 +22,7 @@ import {
   coachStatement, statementDoc, statementCsv, statementItemsCsv,
   statementFileStem, statementShareBlurb, statementCaveats, payoutFacts, withheldReason,
   STATEMENT_NOT, STATEMENT_IS, STATEMENT_NOT_THE_WHOLE_BOOK, STATEMENT_STRIPE_IS_THE_RECORD,
-  PERIOD_IS_YOURS, SESSIONS_NOT_MONEY, INVOICES_NOT_ADDED, LATE_FEES_NOT_TAKINGS,
+  PERIOD_IS_YOURS, SESSIONS_NOT_MONEY, INVOICES_NOT_ADDED, LATE_FEES_NOT_TAKINGS, LATE_FEES_ONLY_CURRENT_CLIENTS,
   type StatementInput, type StatementInvoice, type StatementCharge,
 } from './coachStatement';
 import { escapeHtml } from './coachInvoice';
@@ -89,6 +89,11 @@ eq(calendarMonth(2026, 2).to, '2026-02-28', 'February in a common year ends on t
 eq(calendarMonth(2024, 2).to, '2024-02-29', 'and on the 29th in a leap year');
 eq(calendarMonth(2026, 11).to, '2026-11-30', 'a thirty-day month ends on the 30th');
 eq(calendarMonth(2026, 1).label, 'Jan 2026', 'a month is labelled by its short name and year');
+eq(calendarMonth(2026, 3).from, '2026-03-01', 'a month opens on its first day, never on a day zero');
+eq(calendarQuarter(2026, 0).from, '2026-01-01', 'a quarter number below one is clamped to Q1 rather than building a negative month');
+eq(calendarQuarter(2026, 9).to, '2026-12-31', 'and one above four is clamped to Q4');
+eq(calendarMonth(2026, 0).from, '2026-01-01', 'a month number below one is clamped to January');
+eq(calendarMonth(2026, 13).to, '2026-12-31', 'and one above twelve to December');
 
 // No label anywhere in this module offers a split year. A "2025/26" would be a
 // jurisdiction chosen on the coach's behalf.
@@ -117,6 +122,23 @@ for (const p of [calendarYear(2026), calendarQuarter(2026, 3), calendarMonth(202
 
   eq(periodRange({ from: 'not a date', to: '2026-12-31', label: 'x' }), null, 'an unreadable start is no range at all');
   eq(periodRange({ from: '2026-12-31', to: '2026-01-01', label: 'x' }), null, 'and a period that ends before it starts is refused rather than inverted');
+  // `to` is the day AFTER the last day, so a period whose last day is the day
+  // before its first collapses to nothing. A zero-length range would render as
+  // a period with a name and no rows in it, which reads as a quiet year.
+  eq(periodRange({ from: '2026-01-01', to: '2025-12-31', label: 'x' }), null, 'and one that collapses to no length at all is refused too');
+
+  // The boundary INSTANTS, not merely times near them. `>=` at the open end and
+  // `<` at the close are what put a sale made at midnight on the first day in
+  // the period and keep one made at midnight on the next new year out of it.
+  const rows = [
+    { created_at: new Date(r.fromMs).toISOString() },
+    { created_at: new Date(r.toMs - 1).toISOString() },
+    { created_at: new Date(r.toMs).toISOString() },
+  ];
+  const split = splitByPeriod(rows, (x) => x.created_at, r);
+  eq(split.inside.length, 2, 'the opening instant is in the period and the closing instant is not');
+  ok(split.inside[0].created_at === rows[0].created_at, 'the sale made at the very start of the period is in it');
+  ok(!split.inside.some((x) => x.created_at === rows[2].created_at), 'and the one made at the very start of the next is not');
 }
 
 {
@@ -128,6 +150,8 @@ for (const p of [calendarYear(2026), calendarQuarter(2026, 3), calendarMonth(202
 
 eq(dayLabel('2026-08-01'), '1 Aug 2026', 'a date-only value reads as its own day, west of Greenwich included');
 eq(dayLabel('not a date'), '—', 'and an unreadable one is a dash');
+eq(dayLabel('2026-13-01'), '—', 'a month number past December is a dash, not an undefined month name');
+eq(dayLabel('2026-00-01'), '—', 'and so is a month number below January');
 eq(periodSentence(Y26), '1 Jan 2026 to 31 Dec 2026 inclusive', 'the period is spelled out at both ends and says inclusive');
 
 /* ── 3. an undated row is in NO period, and is counted ────────────────────
@@ -233,6 +257,15 @@ eq(majorToPlain(null, 'GBP'), null, 'and a missing fee amount is null, never zer
   const t = sumCharges([fee(), fee({ currency: 'AED', amount: 100 })]);
   eq(t.pots.length, 2, 'two currencies stay two pots');
   ok(!t.pots.some((p) => p.wholeUnits === 125), 'and 25 sterling plus 100 dirhams is never 125 of anything');
+}
+
+{
+  // Biggest first, then by code. The tie-break is what stops two pots of the
+  // same size swapping places between one build of the document and the next,
+  // which on a statement somebody is comparing against last year's reads as a
+  // change that did not happen.
+  const t = sumCharges([fee({ currency: 'GBP', amount: 25 }), fee({ currency: 'AED', amount: 25 }), fee({ currency: 'USD', amount: 100 })]);
+  eq(t.pots.map((p) => p.currency).join(','), 'USD,AED,GBP', 'pots come out biggest first, and equal ones in code order');
 }
 
 {
@@ -358,6 +391,25 @@ for (const shape of [
 
 eq(withheldReason('ready', 'sales'), null, 'a whole read withholds nothing');
 ok((withheldReason('error', 'sales') ?? '').includes('could not be read'), 'a failed one says so');
+ok((withheldReason('partial', 'sales') ?? '').includes('not all of it'), 'a truncated one says the rows shown are not all of them');
+ok((withheldReason('loading', 'sales') ?? '').includes('had not finished loading'), 'and a read still in flight says that, and not that it failed');
+ok(!(withheldReason('error', 'sales') ?? '').includes('had not finished loading'), 'the four are four different sentences and are not interchangeable');
+
+/* ── 8b. a section with nothing to admit to says nothing extra ────────────
+   Every note here is a warning. One that appears when there is nothing wrong
+   is a note nobody reads by the third statement, and by then it is carrying the
+   real ones with it. */
+
+{
+  const clean = coachStatement(input({ packs: { status: 'ready', rows: [packRow()] } }));
+  eq(sec(clean, 'packs').notes.length, 0, 'one currency, nothing missing, nothing said');
+}
+
+{
+  const one = coachStatement(input({ packs: { status: 'ready', rows: [packRow(), packRow({ amount_cents: null })] } }));
+  eq(sec(one, 'packs').notes.length, 1, 'exactly one sale with no amount produces exactly one note');
+  ok(sec(one, 'packs').notes[0].includes('no amount recorded at all'), 'and it is the one about the missing amount');
+}
 
 /* ── 9. the one combination, and only when both halves are whole ──────────*/
 
@@ -421,9 +473,32 @@ ok((withheldReason('error', 'sales') ?? '').includes('could not be read'), 'a fa
     },
   }));
   eq(sec(s, 'sessions').count, 3, 'only the sessions inside the period are counted');
+  eq(sec(s, 'sessions').countLabel, 'sessions', 'and more than one is plural');
   eq(sec(s, 'sessions').lines.length, 0, 'and a session carries no amount on this statement');
   ok(sec(s, 'sessions').notes.some((n) => n === SESSIONS_NOT_MONEY), 'the reason is printed rather than left to a comment');
-  ok(sec(s, 'sessions').notes.some((n) => n.includes('no outcome recorded')), 'an unmarked session is named, not folded into a category');
+  // The breakdown itself, not merely the total. Each of the four counts is a
+  // separate filter, and a wrong one reads as a coach who no-showed a third of
+  // their clients.
+  ok(sec(s, 'sessions').notes.some((n) => n === 'Marked completed: 1. No-show: 1. Late-cancelled: 0. Cancelled: 0.'),
+    'the four outcomes are counted separately and each one is its own number');
+  ok(sec(s, 'sessions').notes.some((n) => n.includes('1 session in this period has no outcome recorded')),
+    'an unmarked session is named, not folded into a category');
+}
+
+{
+  const one = coachStatement(input({ sessions: { status: 'ready', rows: [{ startsAt: at(2026, 6, 10), outcome: 'completed' }] } }));
+  eq(sec(one, 'sessions').countLabel, 'session', 'exactly one is singular');
+  eq(sec(one, 'sessions').notes.length, 2, 'and a fully-marked, fully-dated period says only what it must');
+}
+
+{
+  // Exactly one undated row must produce the note. A threshold of "more than
+  // one" would hide the single lost session, which is the case that actually
+  // happens.
+  const s = coachStatement(input({
+    sessions: { status: 'ready', rows: [{ startsAt: at(2026, 6, 10), outcome: 'completed' }, { startsAt: 'nonsense', outcome: 'completed' }] },
+  }));
+  ok(sec(s, 'sessions').notes.some((n) => n.includes('1 session could not be dated')), 'one undated session is one named session');
 }
 
 /* ── 12. invoices are listed apart and never added to the sales ───────────
@@ -514,6 +589,58 @@ ok((withheldReason('error', 'sales') ?? '').includes('could not be read'), 'a fa
     'and says which of the two an empty section means');
   eq(statementCaveats(input()).length, 0, 'a whole set of reads leaves nothing to say');
   eq(coachStatement(input()).complete, true, 'and the statement is complete');
+
+  // The three failures are three different sentences in the caveat too, not
+  // only in the section. "Could not be read" told about a read still in flight
+  // sends a coach looking for a fault that is not there.
+  ok(statementCaveats(input({ packs: { status: 'partial', rows: [] } }))[0].includes('more rows than one request returns'),
+    'a truncated read is named as truncated');
+  ok(statementCaveats(input({ packs: { status: 'loading', rows: [] } }))[0].includes('had not finished loading'),
+    'a read still in flight is named as that');
+  ok(statementCaveats(input({ packs: { status: 'error', rows: [] } }))[0].includes('could not be read'),
+    'and a refused one as refused');
+}
+
+/* ── 16b. the hole that is a permission, not a gap ────────────────────────
+   `charges_trainer_rw` scopes fees through the LIVE client relationship, and
+   ending coaching nulls `clients.trainer_id`. Nine of the ten client rows in
+   the live database already have a null trainer, so this is the common case
+   rather than an edge one. */
+
+{
+  const s = coachStatement(input());
+  ok(sec(s, 'lateCancellations').notes.some((n) => n === LATE_FEES_ONLY_CURRENT_CLIENTS),
+    'the fees section says which fees it cannot see');
+  ok(statementDoc(s).text.includes(LATE_FEES_ONLY_CURRENT_CLIENTS), 'and the document carries it');
+  ok(statementItemsCsv(s, [], []).includes(LATE_FEES_ONLY_CURRENT_CLIENTS), 'and so does the line-item file');
+}
+
+/* ── 16c. the line items are filtered here, not by whoever calls it ───────
+   A caller that filtered differently would produce a file whose lines do not
+   add up to the totals printed beside them, and nobody holding both could tell
+   which one was wrong. */
+
+{
+  const s = coachStatement(input());
+  const csv = statementItemsCsv(
+    s,
+    [invoice({ seq: 1, issuedOn: '2026-05-02' }), invoice({ seq: 2, issuedOn: '2024-05-02', description: 'out of period' })],
+    [fee(), fee({ createdAt: at(2024, 6, 11), amount: 999 })],
+  );
+  ok(!csv.includes('out of period'), 'an invoice outside the period never reaches the file');
+  ok(!csv.includes('999.00'), 'nor does a fee outside it');
+  ok(csv.includes('2026-05-02'), 'and the ones inside it do');
+}
+
+/* ── 16d. the payout account has three states and they are three sentences ─*/
+
+{
+  ok(payoutFacts({ status: 'ready', hasAccount: true, chargesEnabled: false, detailsSubmitted: true })
+    .lines[0].includes('has not finished verifying'), 'a submitted but unverified account says so');
+  ok(payoutFacts({ status: 'ready', hasAccount: true, chargesEnabled: false, detailsSubmitted: false })
+    .lines[0].includes('setup was never finished'), 'an abandoned setup says that instead');
+  ok(payoutFacts({ status: 'ready', hasAccount: true, chargesEnabled: true, detailsSubmitted: true })
+    .lines[0].includes('connected and clients can check out'), 'and a live one says clients can pay');
 }
 
 /* ── 17. the filename, which outlives every covering note ─────────────────*/

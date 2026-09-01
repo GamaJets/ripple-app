@@ -212,7 +212,7 @@ export default function Measurements() {
    {METRICS.map(({ key, label }) => (
     <View key={key} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.sm }}>
      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>{label}</Text>
-     <TextInput value={vals[key] ?? ''} onChangeText={(v) => set(key, v)} keyboardType="numeric"
+     <TextInput value={vals[key] ?? ''} onChangeText={(v) => set(key, v)} keyboardType="decimal-pad"
       accessibilityLabel={`${label} in ${lu === 'cm' ? 'centimetres' : 'inches'}`}
       placeholder={lastEntered(key) ?? lu} placeholderTextColor={t.ink3} style={inp} />
     </View>

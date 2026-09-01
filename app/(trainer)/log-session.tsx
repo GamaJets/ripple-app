@@ -231,7 +231,7 @@ export default function LogSession() {
                       keyboardType="numeric"
                       accessibilityLabel={`${r.name} set ${i + 1} reps`} style={[inp, { flex: 1 }]} />
                     <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
-                      keyboardType="numeric"
+                      keyboardType="decimal-pad"
                       accessibilityLabel={`${r.name} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
                   </View>
                 ))}

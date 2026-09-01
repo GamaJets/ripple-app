@@ -25,9 +25,10 @@ import { sp, layout, radius, hairline, elevation, type as ty, value } from '../.
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { useMyCancellationPolicy } from '../../src/ui/sessions';
 import { feeAmountLine, noticeLabel } from '../../src/lib/booking';
+import { readNumber } from '../../src/lib/units';
 import { RepdbAttribution } from '../../src/ui/Attribution';
 
-function Field({ t, label, value: val, onChangeText, placeholder, multiline, keyboardType }: { t: Theme; label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'numeric' }) {
+function Field({ t, label, value: val, onChangeText, placeholder, multiline, keyboardType }: { t: Theme; label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'numeric' | 'decimal-pad' }) {
   return (
     <View style={{ marginBottom: sp.lg }}>
       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{label}</Text>
@@ -88,6 +89,23 @@ export default function CoachProfile() {
   const lc = useMyCancellationPolicy();
   const [newOffer, setNewOffer] = useState('');
   const [newSpec, setNewSpec] = useState('');
+  /**
+   * The two money boxes are held as TEXT while they are being typed, and only
+   * as a number once the text reads as one.
+   *
+   * Both were controlled by the stored figure alone — `value={String(fee)}` —
+   * which meant the decimal point vanished the instant it was typed: "62."
+   * reads back as 62, the box re-renders as "62", and the coach can never reach
+   * the "5" of 62.50. `trainers.session_fee` is `numeric` and
+   * `trainers.late_cancel_fee` is `numeric(8,2)`, so the record was always able
+   * to hold the halves this screen would not let anybody type.
+   *
+   * Null means "not being edited": the box shows the record. The draft is not
+   * cleared on blur because nothing else on this screen writes these two
+   * columns, and re-deriving the text would put the point back where it started.
+   */
+  const [feeDraft, setFeeDraft] = useState<string | null>(null);
+  const [lcFeeDraft, setLcFeeDraft] = useState<string | null>(null);
   const initials = p.name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
 
   const pickPhoto = async (fromCamera: boolean) => {
@@ -237,14 +255,25 @@ export default function CoachProfile() {
               box. And `|| 0` meant clearing the field set a real rate of zero
               rather than clearing it, so a coach could not un-set a rate once
               they had typed one. */}
+          {/* `replace(/[^0-9]/g, '')` was here, and it did two things nobody
+              asked for. It deleted the decimal point, so a coach charging 62.50
+              could only ever record 6250 — and it turned a European coach's
+              "16,5" into "165" by deleting the comma and closing the gap, which
+              is a tenfold error on the one figure a client is quoted. Read the
+              same way every typed figure in the app is now read. */}
           <Field t={t} label="Session Rate, per session"
-            value={p.sessionFee == null ? '' : String(p.sessionFee)}
+            value={feeDraft ?? (p.sessionFee == null ? '' : String(p.sessionFee))}
             onChangeText={(v) => {
-              const digits = v.replace(/[^0-9]/g, '');
-              const n = parseInt(digits, 10);
-              p.setSessionFee(digits === '' || !Number.isFinite(n) ? null : n);
+              setFeeDraft(v);
+              // An emptied box clears the rate — that is an instruction. Text
+              // that will not read is NOT: it is somebody mid-keystroke, and
+              // wiping their stored rate on the way past would be a change
+              // they never made.
+              if (!v.trim()) { p.setSessionFee(null); return; }
+              const n = readNumber(v);
+              if (n != null && n >= 0) p.setSessionFee(n);
             }}
-            placeholder="75" keyboardType="numeric" />
+            placeholder="75" keyboardType="decimal-pad" />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {p.sessionFee == null
               ? 'Leave this empty and nothing quotes a rate for you — your figures show a dash rather than a zero.'
@@ -327,13 +356,19 @@ export default function CoachProfile() {
                 the unit matters most. `lc.currency` is the gym's own ISO code
                 and may be null; nothing is invented in its place. */}
             <Field t={t} label={`Late-Cancellation Fee${lc.currency ? ` · ${lc.currency}` : ''}`}
-              value={lc.fee == null ? '' : String(lc.fee)}
+              value={lcFeeDraft ?? (lc.fee == null ? '' : String(lc.fee))}
               onChangeText={(v) => {
-                const digits = v.replace(/[^0-9.]/g, '');
-                const n = parseFloat(digits);
-                lc.setFee(digits === '' || !Number.isFinite(n) ? null : n);
+                setLcFeeDraft(v);
+                // `replace(/[^0-9.]/g, '')` kept the point and deleted the
+                // COMMA, so a coach in Berlin typing "25,50" had it closed up
+                // into "2550" and billed a client fifty-one times the fee they
+                // meant. The comma is a decimal point here, as it is
+                // everywhere else a figure is typed.
+                if (!v.trim()) { lc.setFee(null); return; }
+                const n = readNumber(v);
+                if (n != null && n >= 0) lc.setFee(n);
               }}
-              placeholder="25" keyboardType="numeric" />
+              placeholder="25" keyboardType="decimal-pad" />
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               {/* The currency is the GYM's (tenants.currency), never a symbol
                   this app picked. A coach with no gym sees the bare figure and

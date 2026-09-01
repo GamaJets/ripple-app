@@ -352,11 +352,11 @@ export default function OwnerEquipment() {
             <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
               <View style={{ flex: 1 }}>
                 <Text style={lab}>Quantity</Text>
-                <TextInput value={qty} onChangeText={setQty} keyboardType="numeric" style={inp} accessibilityLabel="Quantity" />
+                <TextInput value={qty} onChangeText={setQty} keyboardType="number-pad" style={inp} accessibilityLabel="Quantity" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={lab}>Service every (days)</Text>
-                <TextInput value={interval} onChangeText={setInterval} keyboardType="numeric"
+                <TextInput value={interval} onChangeText={setInterval} keyboardType="number-pad"
                   placeholder="Optional" placeholderTextColor={t.ink3} returnKeyType="done"
                   onSubmitEditing={() => { void commitAdd(); }} style={inp} accessibilityLabel="Service interval in days" />
               </View>

@@ -221,7 +221,7 @@ export default function ClassCheckin() {
           <SectionHead title="Pay Estimate" />
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>Rate per attendee</Text>
           <TextInput value={rate} onChangeText={onRateChange} onEndEditing={() => persistRate(rate)} onBlur={() => persistRate(rate)}
-            keyboardType="numeric" placeholder="Your rate" placeholderTextColor={t.ink3}
+            keyboardType="decimal-pad" placeholder="Your rate" placeholderTextColor={t.ink3}
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
           {/* An empty box means two entirely different things and they must not
               read the same: a coach who has not set a rate, and a read that was

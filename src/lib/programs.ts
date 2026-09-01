@@ -24,6 +24,99 @@ export interface ProgramExercise {
    * would put a number on screen nobody chose.
    */
   loadKg?: number | null;
+  /**
+   * What the coach wants said about THIS movement, in their own words.
+   *
+   * "Keep the elbows tucked", "3-1-1 tempo", "stop two reps short", "the
+   * machine by the window, seat on 4". Asked for as "trainer notes attached in
+   * the exercise. then they are saved for future reference".
+   *
+   * A different field from `Program.note`, and deliberately not a reuse of it.
+   * That one is the letter at the top of the week — why this block exists, what
+   * to watch for overall — and it is read once, on the way in. This is read at
+   * the machine, by somebody who has already forgotten the letter. Collapsing
+   * the two would lose whichever was written second, and a tempo cue is useless
+   * attached to a Tuesday.
+   *
+   * Optional rather than defaulted to '', for the same reason `loadKg` is: an
+   * exercise with nothing to say about it is the ordinary case, and an empty
+   * string stored as a note renders an empty bubble under the movement on the
+   * client's screen — a coach appearing to have written something and left it
+   * blank. The builder therefore writes `undefined` for a blank field rather
+   * than trimming to ''.
+   *
+   * It is the COACH'S VOICE and is attributed as such wherever it is shown. A
+   * cue rendered as the app's own instruction is the app telling somebody how
+   * to lift, which is not a thing this app is entitled to do.
+   */
+  note?: string;
+  /**
+   * How long to rest after each set of THIS movement, in SECONDS, or absent
+   * because nobody has said.
+   *
+   * Asked for as "there should a rest timer in between sets" — the timer itself
+   * already existed in the guided runner, hardcoded to 90 seconds for every
+   * exercise in every programme. That number is right for accessory work and
+   * wrong at both ends of a session: a coach who programmes heavy triples wants
+   * three minutes, and the same coach wants forty seconds on a finisher. One
+   * constant cannot say either, and a client following a 90 second rest through
+   * a set of heavy singles is training something the coach did not write.
+   *
+   * SECONDS, not minutes, because that is what the runner counts in and what
+   * `startRest` takes. A second unit here would be a second chance for "3"
+   * meaning three minutes to be stored as three seconds, which is the same
+   * class of mistake `loadKg` documents above and which has bitten this
+   * codebase repeatedly.
+   *
+   * Optional rather than defaulted to 90, for the same reason `loadKg` and
+   * `note` are optional: an exercise with no rest set is the ordinary case, and
+   * writing 90 into every row would make a number nobody chose indistinguishable
+   * from one a coach typed. `restSecondsFor` in src/lib/restTimer.ts is the one
+   * place that turns an absent value into a usable one, and the runner labels
+   * the result so the client can see which they are looking at.
+   */
+  restSec?: number | null;
+  /**
+   * Which superset / tri-set / giant set this movement belongs to, or absent
+   * because it stands on its own.
+   *
+   * An OPAQUE ID, and nothing else. It does not say "superset" and it does not
+   * say how many movements are in the group, because neither is a fact about
+   * this exercise — the name is derived from the size of the run of ADJACENT
+   * exercises sharing this id, by `groupLabel`/`badges` in src/lib/setGroups.ts.
+   * That file carries the reasoning; the short version is that a stored label
+   * and a stored membership can disagree, and then the badge on the client's
+   * screen is wrong while they are holding a dumbbell.
+   *
+   * Adjacency is the model, so reordering, removing and swapping need no
+   * handling here: a tri-set that loses a movement is a run of two and is
+   * relabelled a superset by the renderer that reads it.
+   *
+   * Optional, and absent is the ordinary case. Every programme already on a
+   * phone has no groups at all, and a `null` or a missing field both mean the
+   * same thing to `groupRuns` — which is why nothing here defaults it.
+   */
+  setGroupId?: string | null;
+  /**
+   * HOW the sets of this movement are performed — one of the ids in
+   * `SET_METHODS` in src/lib/setMethods.ts: 'warmup', 'failure', 'drop',
+   * 'amrap', 'restpause', 'cluster', 'tempo', 'eccentric', 'isometric',
+   * 'backoff', 'cooldown'. Absent means a straight working set.
+   *
+   * Two things downstream read it rather than the name, and both would be
+   * wrong without it: the rest timer (a drop set has no rest inside it, and
+   * `restAfter` returns 0 so no countdown starts), and any total of training
+   * volume (a warm-up is real work and is NOT tonnage, and `countsToVolume`
+   * is what keeps somebody's numbers from jumping when they did nothing
+   * different).
+   *
+   * A STRING rather than a union, so a programme written by a newer build and
+   * opened on an older one still loads: `methodFor` resolves an id it does not
+   * know to the default instead of dropping the set. Optional for the same
+   * reason `loadKg` and `note` are — most sets are ordinary, and writing
+   * 'normal' into every row would be a value nobody chose.
+   */
+  method?: string | null;
 }
 export interface ProgramDay { day: string; focus: string; cardio?: string; exercises: ProgramExercise[]; }
 export interface Program { title: string; focus: string[]; note: string; days: ProgramDay[]; }

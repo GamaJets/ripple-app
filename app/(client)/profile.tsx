@@ -28,7 +28,7 @@ import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, weightToKg, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, type WeightUnit, type LengthUnit } from '../../src/lib/units';
+import { weightIn, weightLabel, weightToKg, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, readNumber, type WeightUnit, type LengthUnit } from '../../src/lib/units';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
@@ -338,8 +338,10 @@ export default function Profile() {
     // a manual override, every time this sheet was opened for any reason.
     if (enteredKg != null && weightVal !== asText(shownWeight)) cd.setWeightKg(enteredKg);
     if (enteredCm != null && (heightVal !== heightFieldOfRecord || heightInVal !== heightInchFieldOfRecord)) cd.setHeightCm(enteredCm);
-    const bf = parseFloat(bfVal);
-    if (!isNaN(bf) && bf > 3 && bf < 70) cd.setBodyFat(round1(bf));
+    // `readNumber`, so a decimal comma reads as a decimal point — this box is
+    // a decimal pad now, and 22,5 through `parseFloat` is 22.
+    const bf = readNumber(bfVal);
+    if (bf != null && bf > 3 && bf < 70) cd.setBodyFat(round1(bf));
     // "Saved — plan updated" was a 900 ms timer and nothing else. It fired
     // whether or not anything reached the server: these four setters are local,
     // and the write behind them is a debounced push in clientData.tsx that
@@ -364,8 +366,10 @@ export default function Profile() {
   const macros = (cd.weightKg != null && cd.bodyFatPct != null)
     ? applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined))
     : null;
-  const _bfPrev = parseFloat(bfVal);
-  const _bfForPreview = isNaN(_bfPrev) ? cd.bodyFatPct : _bfPrev;
+  // The same reader as `save` above uses, so the macro preview on screen is
+  // built from the same number the button is about to store.
+  const _bfPrev = readNumber(bfVal);
+  const _bfForPreview = _bfPrev == null ? cd.bodyFatPct : _bfPrev;
   // `enteredKg` is null for an empty field where the old expression produced 0,
   // so the preview no longer quietly computes a day of food for a 0 kg client.
   const previewMacros = (enteredKg != null && enteredKg > 0 && _bfForPreview != null)
@@ -589,12 +593,12 @@ export default function Profile() {
                   a height "in inches" is a box nobody who thinks in feet knows
                   how to fill in — they would type 5.10 and mean 5' 10". */}
               <Field label="Height" hint={lu === 'cm' ? 'cm' : 'ft'} a11y={lu === 'cm' ? 'Height in centimetres' : 'Height, feet'}>
-                <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="numeric"
+                <TextInput value={heightVal} onChangeText={setHeightVal} keyboardType="number-pad"
                   style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
               </Field>
               {lu === 'in' ? (
                 <Field label="Inches" a11y="Height, inches">
-                  <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="numeric"
+                  <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="number-pad"
                     style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
                 </Field>
               ) : null}
@@ -606,7 +610,7 @@ export default function Profile() {
 
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: weightNote ? sp.sm : sp.lg, alignItems: 'flex-end' }}>
               <Field label="Current weight" hint={wu} a11y={wu === 'kg' ? 'Current weight in kilograms' : 'Current weight in pounds'}>
-                <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="numeric"
+                <TextInput value={weightVal} onChangeText={setWeightVal} keyboardType="decimal-pad"
                   style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
               </Field>
               <View style={{ paddingBottom: 4 }}>
@@ -616,7 +620,7 @@ export default function Profile() {
             {weightNote ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{weightNote}</Text> : null}
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Body fat %</Text>
-            <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="numeric" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.sm }} />
+            <TextInput value={bfVal} onChangeText={setBfVal} keyboardType="decimal-pad" placeholder="e.g. 22" placeholderTextColor={t.ink3} style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, marginBottom: sp.sm }} />
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>From your latest scan, or type it in. Changes recalculate your plan.</Text>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet</Text>

@@ -8,11 +8,21 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
+import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
+// Supersets and set methods. Both are pure and both are read POSITIONALLY here
+// — `badges` returns one entry per exercise in the order it was handed them, so
+// the labels on screen describe the list on screen rather than the programme as
+// it was written. That matters on this file's list, which is filtered (removed
+// movements) and re-sorted (progress-photo focus areas) before it is rendered.
+import { badges as groupBadges, groupRuns } from '../../src/lib/setGroups';
+import { badgeFor, countsToVolume, methodFor, restAfter } from '../../src/lib/setMethods';
+import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
+import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, Field, fig, ChipGrid } from '../../src/ui/kit';
@@ -59,7 +69,7 @@ import { HIIT_ACTIVITIES, MOBILITY_ACTIVITIES } from '../../src/lib/workoutKind'
 import { attributionLine } from '../../src/lib/workoutAttribution';
 import { dayKeyOf, instantForDay, readWorkoutEdit } from '../../src/lib/entryEdit';
 import { useSettings } from '../../src/ui/settings';
-import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, type WeightUnit } from '../../src/lib/units';
+import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, readNumber, type WeightUnit } from '../../src/lib/units';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -479,7 +489,27 @@ export default function Train() {
   const isInjHidden = (e: ProgramExercise) => injHiddenSet.has(uid(e)) && !injRevealed.includes(uid(e));
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || injAutoMap[uid(e)] || e.name;
   // Progress-photo focus areas bubble matching muscle groups to the top of today.
-  const orderedExercises = cd.focusAreas.length ? [...exercises].sort((a, b) => (cd.focusAreas.includes(b.group) ? 1 : 0) - (cd.focusAreas.includes(a.group) ? 1 : 0)) : exercises;
+  //
+  // Sorted in BLOCKS, not in exercises. A superset is a run of neighbours
+  // performed back to back (src/lib/setGroups.ts), so a sort that moves one
+  // member and leaves the other behind does not reorder the group — it destroys
+  // it, and the two halves would then render as ungrouped movements with the
+  // coach's pairing silently gone. A block is a whole run or a single exercise,
+  // and a run comes forward if ANY of its movements is a focus area, because
+  // there is no way to bring half of one forward.
+  const orderedExercises = (() => {
+    if (!cd.focusAreas.length) return exercises;
+    const runs = groupRuns(exercises);
+    const blocks: ProgramExercise[][] = [];
+    for (let i = 0; i < exercises.length;) {
+      const run = runs.find((r) => r.start === i);
+      if (run) { blocks.push(exercises.slice(i, i + run.size)); i += run.size; }
+      else { blocks.push([exercises[i]]); i += 1; }
+    }
+    // Stable, like the sort it replaces: blocks that are neither in focus nor
+    // out of it keep the order the coach wrote them in.
+    return blocks.sort((a, b) => (b.some((e) => cd.focusAreas.includes(e.group)) ? 1 : 0) - (a.some((e) => cd.focusAreas.includes(e.group)) ? 1 : 0)).flat();
+  })();
   const deload = deloadCheck(workoutLog);
   // Default: expand the first not-yet-finished exercise, collapse the rest (until the user taps).
   const isRemovedEx = (e: ProgramExercise) => removedEx.indexOf(`${dayIdx}:${e.key}`) >= 0;
@@ -491,6 +521,17 @@ export default function Train() {
     return ed ? { ...e, ...(ed.sets != null ? { sets: ed.sets } : {}), ...(ed.reps != null ? { reps: ed.reps } : {}), ...(ed.loadKg !== undefined ? { loadKg: ed.loadKg } : {}) } : e;
   };
   const planEx = orderedExercises.filter((e) => !isRemovedEx(e)).map(withEdits);
+  // The rows in the order they are rendered, and the group badge for each of
+  // them read off THAT order.
+  //
+  // One array, used for both, because a badge computed from a different list
+  // than the one on screen is the failure this whole model is designed to
+  // prevent: `planEx` is already filtered by `removedEx` and re-sorted by focus
+  // area, so a client who removes the middle movement of a tri-set is looking
+  // at a run of two and must be told "superset". Exercises the member typed in
+  // themselves are appended and carry no group id, so they cannot extend a run.
+  const planRows = [...planEx, ...customEx];
+  const rowGroups = groupBadges(planRows);
 
   const isCustomEx = (e: ProgramExercise) => e.key.indexOf('custom-') === 0;
 
@@ -625,7 +666,7 @@ export default function Train() {
     setCxName(''); setCxSets('3'); setCxReps('10'); setCxWeight('');
     tapLight();
   };
-  const firstOpenId = (() => { for (const _e of [...planEx, ...customEx]) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < _e.sets) return _u; } return null; })();
+  const firstOpenId = (() => { for (const _e of planRows) { const _u = `${dayIdx}:${_e.key}`; if ((logged[_u] || []).length < _e.sets) return _u; } return null; })();
   // Presentation only: how much of today's plan is already logged, for the hero ring.
   const doneCount = exercises.filter((e) => (logged[uid(e)] || []).length >= e.sets).length;
   const heroNote = exercises.length === 0
@@ -691,7 +732,11 @@ export default function Train() {
   const logCardio = () => {
     const m = parseInt(mins, 10) || 0; if (!m) return;
     void commitSession(mode === 'strength' ? 'cardio' : mode, ctype, m, {
-      dist: parseFloat(dist) || 0,
+      // `readNumber`, not `parseFloat`. Distance is the one cardio figure that is
+      // genuinely fractional — 12.7 km is an ordinary run — so its box is a decimal
+      // pad, and the decimal key on that pad is a comma in most of Europe.
+      // `parseFloat('12,7')` is 12, and 700 metres would vanish from the record.
+      dist: readNumber(dist) ?? 0,
       unit,
       watts: parseInt(watts, 10) || 0,
       kcal: parseInt(kcalIn, 10) || 0,
@@ -888,7 +933,7 @@ export default function Train() {
                 </Notice>
               ) : null}
 
-              {[...planEx, ...customEx].map((e, ei) => {
+              {planRows.map((e, ei) => {
                 const _id = uid(e);
                 if (isInjHidden(e)) {
                   const inj = injuryFlag(e.name, e.group, cd.injuries);
@@ -912,15 +957,53 @@ export default function Train() {
                 const autoFrom = injAutoMap[_id];
                 const open = expanded[_id] ?? (_id === firstOpenId);
                 const isCustom = e.key.indexOf('custom-') === 0;
+                // Which run this row is in, read positionally off the list being
+                // rendered, and null when the movement stands on its own — an
+                // ungrouped exercise shows nothing.
+                const grp = rowGroups[ei];
+                const sameRunAbove = ei > 0 && !!grp && rowGroups[ei - 1]?.id === grp.id;
+                // How the sets are performed. Null for an ordinary set AND for
+                // an id this build does not know (see badgeFor), so nothing here
+                // can put a marker on screen that nobody could read.
+                const meth = badgeFor(e.method);
                 return (
                   <View key={e.key}>
-                    {ei > 0 ? <Rule /> : null}
-                    <View style={{ paddingVertical: sp.lg }}>
-                      <Pressable accessibilityRole="button" accessibilityLabel={(open ? 'Collapse ' : 'Expand ') + nameOf(e)} onPress={() => setExpanded((p) => ({ ...p, [_id]: !open }))} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    {/* No hairline between two members of one run: they are
+                        performed back to back, and a rule across them would cut
+                        in half the one thing their badges are saying. */}
+                    {ei > 0 && !sameRunAbove ? <Rule /> : null}
+                    <View style={grp
+                      ? { paddingVertical: sp.lg, borderLeftWidth: 2, borderLeftColor: t.brand, paddingLeft: sp.md, marginLeft: 1 }
+                      : { paddingVertical: sp.lg }}>
+                      {/* The badge, above the movement it labels and only on a
+                          row that is really in a run. The words are DERIVED from
+                          the size of that run — two is a superset, three a
+                          tri-set, four or more a giant set — so it cannot
+                          disagree with the movements underneath it. ty.caption
+                          rather than ty.micro, which renders uppercase: this is
+                          a sentence about two exercises, not a column heading. */}
+                      {grp ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+                          <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} />
+                          <Text style={{ ...ty.caption, fontWeight: '500', color: t.brand }}>{grp.label} · {grp.position} of {grp.size}</Text>
+                        </View>
+                      ) : null}
+                      {/* The whole row is one button, so anything rendered
+                          inside it is read out as part of its label rather than
+                          on its own — which is why the group and the method are
+                          spelled out here in full. The short marker below is for
+                          the eye; this is the only version a screen reader
+                          gets. */}
+                      <Pressable accessibilityRole="button" accessibilityLabel={(open ? 'Collapse ' : 'Expand ') + nameOf(e) + (grp ? `, ${grp.label.toLowerCase()}, ${grp.position} of ${grp.size}` : '') + (meth ? `, ${meth.label.toLowerCase()}` : '')} onPress={() => setExpanded((p) => ({ ...p, [_id]: !open }))} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                         <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             {done ? <Icon name="check" size={15} color={t.brand} /> : null}
                             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{nameOf(e)}</Text>
+                            {meth ? (
+                              <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                <Text style={{ ...ty.caption, fontWeight: '600', color: t.ink2 }}>{meth.short}</Text>
+                              </View>
+                            ) : null}
                             {cd.focusAreas.includes(e.group) ? (
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                 <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} />
@@ -958,6 +1041,19 @@ export default function Train() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
                               <Icon name="swap" size={13} color={t.brand} />
                               <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>Auto-swapped from {e.name} to protect you</Text>
+                            </View>
+                          ) : null}
+                          {/* The coach's own words on this movement, in the row
+                              as well as in the session — a client planning
+                              their day reads it here, and a client at the
+                              machine reads it in SessionRunner. Attributed for
+                              the reason given there, and withheld once the
+                              movement has been swapped: a cue about a back
+                              squat is not advice about the leg press. */}
+                          {e.note && nameOf(e) === e.name ? (
+                            <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
+                              <Text style={{ ...ty.micro, color: t.ink3 }}>From your coach</Text>
+                              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{e.note}</Text>
                             </View>
                           ) : null}
                           {flag ? (
@@ -1073,7 +1169,7 @@ export default function Train() {
                 {mode !== 'recovery' ? (
                   <Field label="Distance" hint={unit}>
                     <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                      <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" style={inp} />
+                      <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
                       <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${unit === 'km' ? 'kilometres' : 'miles'}. Switch to ${unit === 'km' ? 'miles' : 'kilometres'}`}
                         onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
                         <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
@@ -1452,7 +1548,7 @@ export default function Train() {
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Weight</Text>
               <View style={{ flexDirection: 'row', gap: 6 }}>
-                <TextInput value={cxWeight} onChangeText={setCxWeight} keyboardType="numeric" placeholder="optional" placeholderTextColor={t.ink3}
+                <TextInput value={cxWeight} onChangeText={setCxWeight} keyboardType="decimal-pad" placeholder="optional" placeholderTextColor={t.ink3}
                   style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
                 {/* Switchable per entry rather than read off the profile. A
                     machine in another gym is plated in whatever that gym uses,
@@ -1503,7 +1599,7 @@ function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: 
         <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
       </Field>
       <Field label={unit.toUpperCase()} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
-        <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" style={inp} />
+        <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad" style={inp} />
       </Field>
       <Pressable accessibilityRole="button" accessibilityLabel="Log set" onPress={() => {
         // The reps are checked HERE and said out loud. `logSet` guarded with a
@@ -1742,7 +1838,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
               <SectionHead title="Anything to Add" />
               <Field label="Distance" hint={unit}>
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" style={inp} />
+                  <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
                   <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${unit === 'km' ? 'kilometres' : 'miles'}. Switch to ${unit === 'km' ? 'miles' : 'kilometres'}`}
                     onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
                     <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
@@ -1774,7 +1870,11 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
               setSaving(true);
               void onSave({
                 mins: finalMins,
-                dist: parseFloat(dist) || 0,
+                // `readNumber`, not `parseFloat`. Distance is the one cardio figure that is
+                // genuinely fractional — 12.7 km is an ordinary run — so its box is a decimal
+                // pad, and the decimal key on that pad is a comma in most of Europe.
+                // `parseFloat('12,7')` is 12, and 700 metres would vanish from the record.
+                dist: readNumber(dist) ?? 0,
                 unit,
                 watts: parseInt(watts, 10) || 0,
                 kcal: parseInt(kcalIn, 10) || 0,
@@ -2014,13 +2114,94 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   // to work. Same reasoning as `startedAtRef` in useLiveVitals: the clock is the
   // wall, the interval only decides how often we look at it.
   const restEndsAt = useRef<number | null>(null);
+  // How many seconds the interval saw last time it looked, so a countdown tick
+  // fires on the TRANSITION into a second rather than every time that second is
+  // observed. The interval runs at 500 ms against a wall clock and therefore
+  // reads each second twice; `shouldTick` in src/lib/restTimer.ts owns the rule
+  // and this ref is the only state it needs. Reset to null by startRest so a
+  // fresh rest never ticks on its first reading.
+  const prevLeft = useRef<number | null>(null);
+  // Which rest period is currently running, as a number that only goes up.
+  //
+  // The local notification below is asked for asynchronously, and a member can
+  // skip the rest, log another set or end the session before the OS answers. The
+  // id that comes back is then cancelled on arrival unless the rest it belongs
+  // to is still the one running — without this, a skipped rest still buzzes at
+  // somebody ninety seconds later about a set they already did.
+  const restGen = useRef(0);
+  const restAlertId = useRef<string | null>(null);
+  const cancelRestAlert = () => {
+    const id = restAlertId.current;
+    restAlertId.current = null;
+    if (id) void cancelReminders([id]);
+  };
   const startRest = (secs: number) => {
+    restGen.current += 1;
+    cancelRestAlert();
+    prevLeft.current = null;
     restEndsAt.current = secs > 0 ? Date.now() + secs * 1000 : null;
     setRest(secs);
   };
 
+  // ── Making a noise from a pocket ──────────────────────────────────────────
+  //
+  // src/ui/sounds.ts plays the chime while this screen is in front of somebody.
+  // It cannot play one from a pocket: the audio session is deliberately
+  // `.ambient` so the phone's mute switch is obeyed, which rules out background
+  // playback, and iOS suspends a backgrounded app's JavaScript anyway — the
+  // interval above is not running to call it. Storing the wall-clock end instant
+  // is what keeps the DISPLAY right across a backgrounding; it cannot make a
+  // sound while nothing is executing.
+  //
+  // So the OS is asked instead, and only while the app is actually away. A
+  // notification scheduled unconditionally would arrive alongside the chime for
+  // a member watching the screen — a banner and two sounds for one event — so it
+  // is scheduled when the app leaves and cancelled the moment it comes back.
+  // 'inactive' counts as away: it is the state a phone passes through on the way
+  // to the lock screen, and a rest that ends during a transient inactive simply
+  // has its alert cancelled a second later when 'active' returns.
+  //
+  // It never asks for the notification permission — scheduleRestOverAlert
+  // refuses unless it is already granted. Raising the system prompt over a live
+  // workout would spend the app's single per-install chance on the least
+  // important thing it sends.
   useEffect(() => {
-    if (rest <= 0) { if (rid.current) clearInterval(rid.current); restEndsAt.current = null; return; }
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') { cancelRestAlert(); return; }
+      const end = restEndsAt.current;
+      if (end == null || end <= Date.now()) return;
+      const gen = restGen.current;
+      const name = nameOf(exercises[idx]);
+      void scheduleRestOverAlert(
+        new Date(end),
+        'Rest Over',
+        `Time for your next set of ${name}.`,
+      ).then((id) => {
+        if (!id) return;
+        // The rest that asked for this alert may have been skipped while the OS
+        // was answering. Cancel rather than store, or the member gets an alert
+        // about a rest that is no longer running.
+        if (restGen.current !== gen || restEndsAt.current == null) { void cancelReminders([id]); return; }
+        restAlertId.current = id;
+      });
+    });
+    return () => { sub.remove(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idx, exercises]);
+
+  // Decode the tones and set the audio session when the session opens, not when
+  // the first rest ends. Decoding a file at the instant a cue is due makes the
+  // cue late, and a late cue is a wrong one. Released on the way out because
+  // each player holds a native object and a decoded buffer, and this is the only
+  // screen in the app that makes a sound.
+  useEffect(() => {
+    primeSounds();
+    return () => { releaseSounds(); cancelRestAlert(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (rest <= 0) { if (rid.current) clearInterval(rid.current); restEndsAt.current = null; prevLeft.current = null; return; }
     rid.current = setInterval(() => {
       const end = restEndsAt.current;
       if (end == null) { setRest(0); return; }
@@ -2030,7 +2211,26 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
       // the TRANSITION, tracked in a ref rather than inside the state updater —
       // React may run an updater more than once, and a haptic is a side effect
       // that must happen exactly as often as the thing it announces.
-      if (left === 0 && restEndsAt.current != null) { restEndsAt.current = null; tapLight(); }
+      //
+      // The chime rides on exactly that transition, for exactly that reason: a
+      // sound is a louder version of the same mistake, and playing it twice is
+      // the difference between a cue and a fault. playSound refuses on its own
+      // if the member has the sound switched off, so this line does not read the
+      // preference — there is one way to make a noise in this app and it asks.
+      if (left === 0 && restEndsAt.current != null) {
+        restEndsAt.current = null;
+        tapLight();
+        playSound('restOver');
+        // The alert was for this rest, and this rest has just ended on screen.
+        // Leaving it scheduled would buzz a second later at somebody already
+        // holding the phone.
+        cancelRestAlert();
+      } else if (shouldTick(left, prevLeft.current)) {
+        // Three, two, one. A quieter, lower tick than the chime, so the two are
+        // not four sounds that all mean the same thing.
+        playSound('countdown');
+      }
+      prevLeft.current = left;
       setRest(left);
     }, 500);
     return () => { if (rid.current) clearInterval(rid.current); };
@@ -2148,7 +2348,20 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     // Only after the first set of an exercise. By set three they have done the
     // movement three times and do not need it offered again.
     if (done.length === 0) setDemoOpen(true);
-    setReps(''); startRest(90); setPendingFeel(wkg);
+    // The coach's rest for THIS movement, or the app's fallback when they did
+    // not set one. It used to be 90 for every exercise in every programme,
+    // which is right for accessory work and wrong for a heavy triple and wrong
+    // again for a finisher. `restSecondsFor` is the one place an absent value
+    // becomes a usable one — a stored 0 must not be honoured here, because
+    // startRest(0) is how the timer is CLEARED.
+    // …and then HOW this movement is performed decides whether there is a rest
+    // at all. Inside a drop set there is deliberately none — that is what makes
+    // it a drop set — and `restAfter` returns 0, which is the same argument
+    // `startRest` already takes for "clear the timer": no countdown opens, no
+    // chime is scheduled, and the member goes straight to the next drop.
+    // Rest-pause and cluster return fifteen seconds, which is the pause inside
+    // the method rather than the rest between sets.
+    setReps(''); startRest(restAfter(ex.method, restSecondsFor(ex))); setPendingFeel(wkg);
   };
   // Kilograms, in both unit systems, and deliberately. This is the same
   // increment ladder `suggestForExercise` and the Targets screen work in, and
@@ -2214,6 +2427,12 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   };
   const finish = () => {
     if (saveState === 'saving') return;
+    // Stop the rest timer before the finish screen goes up. The component stays
+    // mounted behind it, so an unstopped interval went on running and fired the
+    // zero-transition haptic after the session had ended — with a chime on that
+    // transition it would now also make a noise at somebody who is already
+    // reading their results.
+    startRest(0);
     const entries = buildEntries();
     setFinalElapsed(elapsed);
     setPendingEntries(entries);
@@ -2262,7 +2481,21 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   if (!exercises || exercises.length === 0) return null;
   if (finished) {
     const totalSets = results.reduce((a, r) => a + r.length, 0);
-    const volume = results.reduce((a, r) => a + r.reduce((x, s) => x + s.reps * s.kg, 0), 0);
+    // ── what counts as training volume, and what only counts as work ────────
+    //
+    // A warm-up is real: it was performed, it was typed in, and it is in the
+    // log. It is NOT tonnage, and neither is a cool-down. Counting them makes a
+    // member's session total — and the weekly figure it feeds — jump on a day
+    // they did nothing different, which is the lie `countsToVolume` exists to
+    // stop. The METHOD decides, never the name of the movement, so a method
+    // added to the catalogue later cannot quietly start inflating this.
+    const counts = (i: number) => countsToVolume(exercises[i]?.method);
+    const volume = results.reduce((a, r, i) => a + (counts(i) ? r.reduce((x, s) => x + s.reps * s.kg, 0) : 0), 0);
+    const workingSets = results.reduce((a, r, i) => a + (counts(i) ? r.length : 0), 0);
+    // Sets that happened and are saved, but are not part of either figure
+    // above. Said out loud below rather than silently subtracted: a member who
+    // logged twelve sets and reads "9" is owed the sentence explaining it.
+    const uncountedSets = totalSets - workingSets;
     const exDone = results.filter((r) => r.length > 0).length;
     const strip: { label: string; value: string; dot?: string }[] = [
       { label: 'Time', value: `${Math.floor(finalElapsed / 60)}:${String(finalElapsed % 60).padStart(2, '0')}` },
@@ -2302,12 +2535,24 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           <Section>
             <KpiRow items={[
               { label: 'Exercises', value: `${exDone}/${exercises.length}` },
-              { label: 'Sets', value: fig(totalSets) },
+              // The column names what it counts. With no warm-up or cool-down in
+              // the session the two figures are the same and the old label is
+              // the right one; where they differ, "Sets" over a number that is
+              // not the number of sets logged is the lie.
+              { label: uncountedSets > 0 ? 'Working sets' : 'Sets', value: fig(uncountedSets > 0 ? workingSets : totalSets) },
               // See volumeHeadline: tonnes for a metric reader, pounds for an imperial
       // one, because a short ton is 10% off a tonne and would read as the same
       // unit to anybody comparing this with a coach's console.
       { label: 'Volume', value: `${volumeHeadline(volume, unit)!.figure.toLocaleString()}${unit === 'kg' ? 't' : ''}`, unit: unit === 'lb' ? 'lb' : undefined },
             ]} />
+            {/* Only when there is something to explain. A member who warmed up
+                did the work and it is saved; this says where it went rather
+                than leaving them to find the arithmetic themselves. */}
+            {uncountedSets > 0 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {uncountedSets === 1 ? 'One more set was logged' : `${num(uncountedSets)} more sets were logged`} as warm-up or cool-down. They are saved with the session and left out of the figures above, which are your working sets.
+              </Text>
+            ) : null}
           </Section>
           <Rule />
           <Section>
@@ -2358,6 +2603,24 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     );
   }
 
+  // ── the two things this movement is, beyond its name ──────────────────────
+  //
+  // Which run it belongs to, read positionally off the very list the runner is
+  // stepping through, so a badge here cannot describe an order other than the
+  // one being trained. Null for a movement that stands alone, and then nothing
+  // is drawn at all.
+  const exGroup = groupBadges(exercises)[idx];
+  // How its sets are performed. Null for an ordinary set and for an id this
+  // build does not recognise — see badgeFor — so no marker nobody could read
+  // reaches the screen.
+  const exMethod = badgeFor(ex.method);
+  // What the rest after a set of this movement actually is, and whose number it
+  // is. A method carrying its own rest — the fifteen seconds inside a
+  // rest-pause or a cluster — is not the coach's rest and must not be labelled
+  // as theirs. A drop set has none, `plannedRest` is 0, and no banner opens.
+  const restIsMethods = typeof methodFor(ex.method).method.restsAfter === 'number';
+  const plannedRest = restAfter(ex.method, restSecondsFor(ex));
+
   const liveCols: { label: string; value: string; dot?: string }[] = [
     { label: 'Time', value: `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}` },
     { label: 'bpm', value: fig(liveHr ?? '–'), dot: liveHr ? hrColor(liveHr, age) : undefined },
@@ -2403,7 +2666,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         ) : null}
 
         <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xl, textTransform: 'capitalize' }}>{nameOf(ex)}</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · {ex.sets} × {ex.reps}{ex.loadKg != null ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : ''}</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · {ex.sets} × {ex.reps}{ex.loadKg != null ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : ''}{ex.restSec != null ? ' · ' + restClock(restSecondsFor(ex)) + ' rest' : ''}</Text>
         {(() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
@@ -2411,10 +2674,40 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           </View>
         ) : null; })()}
 
+        {/* ── what the coach wrote about THIS movement ──────────────────────
+            Their words, on the screen somebody is looking at while standing at
+            the machine — which is the whole reason the note is attached to the
+            exercise and not to the week.
+
+            ATTRIBUTED, and that is not decoration. Rendered bare it would read
+            as the app telling somebody how to lift, which is not a thing this
+            app is entitled to do; "From your coach" is a description rather
+            than a name, so it is true whether or not the name could be read.
+
+            Withheld once the movement has been SWAPPED. A cue written about a
+            back squat is not advice about the leg press the client chose
+            instead, and carrying it across would put the coach's name on
+            guidance they never gave. */}
+        {ex.note && nameOf(ex) === ex.name ? (
+          <View style={{ marginTop: sp.lg, backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>From your coach</Text>
+            <Text style={{ ...ty.body, color: t.ink, marginTop: sp.xs }}>{ex.note}</Text>
+          </View>
+        ) : null}
+
         {rest > 0 ? (
           <View style={{ backgroundColor: t.brand, borderRadius: radius.md, padding: sp.xl, alignItems: 'center', marginTop: sp.xl }}>
             <Text style={{ ...ty.micro, color: t.brandInk }}>Rest</Text>
-            <Text style={{ ...value(40), color: t.brandInk, marginTop: sp.xs }}>{Math.floor(rest / 60)}:{String(rest % 60).padStart(2, '0')}</Text>
+            {/* The same clock the coach reads while setting the rest, built by
+                the same function, so the two cannot start disagreeing about
+                what 90 seconds looks like. */}
+            <Text style={{ ...value(40), color: t.brandInk, marginTop: sp.xs }}>{restClock(rest)}</Text>
+            {/* Whose number this is. A client resting three minutes because
+                their coach said so and a client resting because nobody set
+                anything are looking at the same digits, and only one of them is
+                following a programme — so the fallback names itself rather than
+                borrowing the coach's authority. */}
+            <Text style={{ ...ty.micro, color: t.brandInk, marginTop: sp.xs, opacity: 0.8 }}>{ex.restSec != null ? 'Set by your coach' : `App default of ${DEFAULT_REST_SEC} seconds`}</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={() => startRest(0)} hitSlop={8} style={{ marginTop: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.brandInk }}>Skip rest</Text></Pressable>
           </View>
         ) : null}
@@ -2467,7 +2760,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
             <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
           </Field>
           <Field label={unit.toUpperCase()} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
-            <TextInput value={load} onChangeText={setLoad} keyboardType="numeric" style={inp} />
+            <TextInput value={load} onChangeText={setLoad} keyboardType="decimal-pad" style={inp} />
           </Field>
           <Pressable accessibilityLabel="Log set" accessibilityRole="button" onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
         </View>
@@ -2725,7 +3018,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                   <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" style={inp} />
                 </Field>
                 <Field label={`Distance · ${entry.cardio!.unit}`} a11y={`Distance in ${entry.cardio!.unit === 'mi' ? 'miles' : 'kilometres'}`}>
-                  <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" style={inp} />
+                  <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
                 </Field>
               </View>
               <Field label="Avg watts" hint="optional" style={{ marginTop: sp.md }}>
@@ -2753,7 +3046,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                   <Text style={{ ...ty.caption, color: t.ink3, width: 22 }}>{i + 1}</Text>
                   <TextInput value={r.reps} onChangeText={(v) => setAt(i, 'reps', v)} keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
                   <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
-                  <TextInput value={r.load} onChangeText={(v) => setAt(i, 'load', v)} keyboardType="numeric" placeholder={unit} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                  <TextInput value={r.load} onChangeText={(v) => setAt(i, 'load', v)} keyboardType="decimal-pad" placeholder={unit} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
                   <Pressable accessibilityLabel={`Remove set ${i + 1}`} hitSlop={8} onPress={() => setRows((p) => p.filter((_, k) => k !== i))} style={{ padding: 4 }}>
                     <Icon name="minus" size={16} color={t.crit} />
                   </Pressable>

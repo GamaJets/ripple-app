@@ -393,6 +393,25 @@ export const INVOICES_NOT_ADDED =
 export const LATE_FEES_NOT_TAKINGS =
   'These are fees recorded in this app against your clients. This app does not charge them, is not told whether they were paid, and does not add them to anything above.';
 
+/**
+ * The one hole in this statement that is a permission rather than a gap.
+ *
+ * `charges` is readable by a coach through `charges_trainer_rw`, which is
+ * `exists (select 1 from clients c where c.id = charges.client_id and
+ * c.trainer_id = auth.uid())` — the LIVE relationship, not a coach id stored on
+ * the row. Ending coaching sets `clients.trainer_id` to null (see
+ * src/lib/endCoaching.ts), so from that moment the fee is invisible to the
+ * person who recorded it, in this period and in every past one. Nine of the ten
+ * client rows in the live database already have a null trainer.
+ *
+ * That cannot be fixed from here — it is somebody's row-level security policy,
+ * not a query — so it is stated. A year-end figure that is quietly short by
+ * every client who has since moved on is exactly the kind of number this app
+ * refuses to print without saying so.
+ */
+export const LATE_FEES_ONLY_CURRENT_CLIENTS =
+  'Only fees recorded against clients you are still coaching are on here. A fee recorded against somebody whose coaching has since ended is no longer readable by this app under your account, so it is missing from this section — in this period and in every earlier one.';
+
 /* ── late-cancellation fees, in whole units ───────────────────────────────── */
 
 /** Fees recorded in one currency. Never merged with another, and never merged
@@ -691,7 +710,7 @@ export function coachStatement(input: StatementInput): Statement {
   const feeSplit = splitByPeriod(input.lateCancellations.rows, (r) => r.createdAt, range);
   const fees = sumCharges(feeSplit.inside);
   const feesReady = input.lateCancellations.status === 'ready';
-  const feeNotes = [LATE_FEES_NOT_TAKINGS];
+  const feeNotes = [LATE_FEES_NOT_TAKINGS, LATE_FEES_ONLY_CURRENT_CLIENTS];
   if (feesReady) {
     if (fees.pots.length > 1) feeNotes.push('These are separate amounts of money in different currencies and are deliberately not added together.');
     if (fees.waived > 0) feeNotes.push(`${fees.waived} fee${fees.waived === 1 ? ' was' : 's were'} waived by you and ${fees.waived === 1 ? 'is' : 'are'} left out of the figures above.`);
@@ -982,14 +1001,24 @@ export function statementCsv(s: Statement): string {
  * Stripe's rows, Stripe's record is the artefact, and re-typing them into a
  * spreadsheet under this app's name would invite somebody to reconcile against
  * a copy rather than against the original.
+ *
+ * The rows are filtered to the period HERE, by the same two functions the
+ * summary uses, rather than trusting the caller to hand over a set that already
+ * matches. A caller that filtered slightly differently — or not at all — would
+ * produce a file whose lines do not add up to the totals printed beside them,
+ * and the person holding both would have no way to tell which one was wrong.
  */
 export function statementItemsCsv(s: Statement, invoices: readonly StatementInvoice[], fees: readonly StatementCharge[]): string {
   const rows: (string | number | null)[][] = [];
   rows.push(['about', '', '', 'What this is NOT', '', '', '', STATEMENT_NOT]);
   rows.push(['about', '', '', 'The period', '', '', '', periodSentence(s.period)]);
+  rows.push(['about', '', '', 'Late-cancellation fees', '', '', '', LATE_FEES_ONLY_CURRENT_CLIENTS]);
   for (const c of s.caveats) rows.push(['not read', '', '', 'A part of this record is missing from this file', '', '', '', c]);
 
-  for (const i of invoices) {
+  const inPeriodInvoices = splitByDay(invoices, (i) => i.issuedOn, s.period).inside;
+  const inPeriodFees = splitByPeriod(fees, (f) => f.createdAt, periodRange(s.period)).inside;
+
+  for (const i of inPeriodInvoices) {
     rows.push([
       'invoice',
       i.issuedOn,
@@ -1001,7 +1030,7 @@ export function statementItemsCsv(s: Statement, invoices: readonly StatementInvo
       i.currency ? '' : 'No currency is recorded on this one, so no amount is written. Do not read the empty cell as nothing charged.',
     ]);
   }
-  for (const f of fees) {
+  for (const f of inPeriodFees) {
     rows.push([
       'late cancellation',
       String(f.createdAt ?? '').slice(0, 10),

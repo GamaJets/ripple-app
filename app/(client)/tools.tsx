@@ -102,7 +102,7 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
      reading kilograms whatever the client had chosen. Field's label stays. */}
  <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
  <Field label="Weight" hint={wu} a11y={`Weight in ${wu === 'lb' ? 'pounds' : 'kilograms'}`}>
- <TextInput value={w} onChangeText={setW} keyboardType="numeric" style={inp} placeholder={wu} placeholderTextColor={t.ink3} />
+ <TextInput value={w} onChangeText={setW} keyboardType="decimal-pad" style={inp} placeholder={wu} placeholderTextColor={t.ink3} />
  </Field>
  <Text style={{ ...ty.label, color: t.ink3, paddingBottom: 13 }}>×</Text>
  <Field label="Reps">
@@ -169,7 +169,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
      next to them read like a third one. Both now name the client's own unit. */}
  <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
  <Field label="Target total" hint={wu}>
- <TextInput value={target} onChangeText={setTarget} keyboardType="numeric" style={inp} placeholder={wu} placeholderTextColor={t.ink3} />
+ <TextInput value={target} onChangeText={setTarget} keyboardType="decimal-pad" style={inp} placeholder={wu} placeholderTextColor={t.ink3} />
  </Field>
  <Text style={{ ...ty.label, color: t.ink3, paddingBottom: 13 }}>bar</Text>
  {bars.map((b, i) => {

@@ -501,7 +501,7 @@ export default function OwnerMembers() {
             {cur ? (
               <>
                 <Text style={lab}>Amount ({cur})</Text>
-                <TextInput value={amount} onChangeText={setAmount} autoFocus keyboardType="numeric"
+                <TextInput value={amount} onChangeText={setAmount} autoFocus keyboardType="decimal-pad"
                   placeholder="0.00" placeholderTextColor={t.ink3} returnKeyType="done"
                   onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel={`Amount in ${cur}`} />
               </>

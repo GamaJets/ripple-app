@@ -22,6 +22,7 @@ import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/the
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
+import { readNumber } from '../../src/lib/units';
 
 type Range = 'week' | 'month' | 'season';
 const RANGES: [Range, string, number][] = [['week', 'This week', 7], ['month', 'This month', 30], ['season', 'Season', 90]];
@@ -92,7 +93,10 @@ export default function OwnerClassAnalytics() {
     return () => { on = false; };
   }, [range]);
 
-  const rate$ = parseFloat(rate) || 0;
+  // `readNumber`, so the decimal comma this decimal pad offers on a European
+  // phone is read as a decimal point. A rate of 12,50 per head taken as 12
+  // understates the whole class by four percent, silently.
+  const rate$ = readNumber(rate) ?? 0;
   const loaded = rows !== null;
   const list = rows ?? [];
   const totals = useMemo(() => {
@@ -139,7 +143,7 @@ export default function OwnerClassAnalytics() {
       <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>Pay per attendee</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
         <Text style={{ ...ty.label, color: t.ink3 }}>{cur}</Text>
-        <TextInput value={rate} onChangeText={setRate} keyboardType="numeric" accessibilityLabel={`Pay per attendee in ${cur}`}
+        <TextInput value={rate} onChangeText={setRate} keyboardType="decimal-pad" accessibilityLabel={`Pay per attendee in ${cur}`}
           style={{ ...ty.body, ...numeric, color: t.ink, paddingVertical: 9, minWidth: 44 }} />
       </View>
     </View>

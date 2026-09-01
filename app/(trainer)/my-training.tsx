@@ -433,7 +433,7 @@ export default function MyTraining() {
                 <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
               </Field>
               <Field label={wu.toUpperCase()} a11y={wu === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
-                <TextInput value={load} onChangeText={setLoad} keyboardType="numeric" style={inp} />
+                <TextInput value={load} onChangeText={setLoad} keyboardType="decimal-pad" style={inp} />
               </Field>
             </View>
             {problem ? (

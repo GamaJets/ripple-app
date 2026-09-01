@@ -476,7 +476,7 @@ export default function Library() {
        {/* The member's own unit, not a fixed "KG" — the label and the
            conversion move together, and this is the box where they did not. */}
        <Field label={wu.toUpperCase()} a11y={`Load in ${wu === 'kg' ? 'kilograms' : 'pounds'}, blank for a bodyweight set`}>
-        <TextInput value={kg} onChangeText={setKg} keyboardType="numeric"
+        <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad"
          style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
        </Field>
        <Pressable onPress={addSet} accessibilityRole="button" accessibilityLabel="Add another set"

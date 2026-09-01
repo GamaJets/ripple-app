@@ -29,6 +29,7 @@ import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { deltaLabel } from '../../src/lib/deltaLabel';
+import { readNumber } from '../../src/lib/units';
 
 const KEY = 'repple.owner.financials';
 // One formatter for the whole owner app, rather than 'AED ' typed here and '$'
@@ -159,8 +160,12 @@ export default function Financials() {
   const save = useCallback(async () => {
     const next = emptyFinances();
     for (const f of FIELDS) {
-      const n = Number(String(draft[f.key] ?? '').replace(/[^0-9.]/g, ''));
-      next[f.key] = Number.isFinite(n) ? n : 0;
+      // `replace(/[^0-9.]/g, '')` deleted the decimal COMMA and closed the gap,
+      // so an owner in Berlin typing 16,5 had 165 filed — and every ratio the
+      // review below draws was then built on it. These boxes are decimal pads;
+      // the comma on them is a decimal point, not a separator to throw away.
+      const n = readNumber(draft[f.key] ?? '');
+      next[f.key] = n ?? 0;
     }
     setFin(next);
     setEditing(false);
@@ -251,7 +256,7 @@ export default function Financials() {
                 <TextInput
                   value={draft[f.key] ?? ''}
                   onChangeText={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                   placeholder="0"
                   placeholderTextColor={t.ink3}
                   style={input}

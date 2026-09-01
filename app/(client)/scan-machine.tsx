@@ -35,7 +35,7 @@ import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Field } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
-import { liftLabel, readLift } from '../../src/lib/units';
+import { liftLabel, readLift, readNumber } from '../../src/lib/units';
 
 // "km", "m" and "mi" are three glyphs a screen reader says as themselves — and
 // "mi" spoken aloud is not a word. The distance toggle says the whole thing.
@@ -176,7 +176,7 @@ export default function ScanMachine() {
       const m = parseFloat(mins) || 0;
       if (m <= 0) { Alert.alert('Add your time', 'Enter how many minutes you did.'); return; }
       const w = parseFloat(watts) || 0;
-      entry = { t: new Date().toISOString(), exercise: exercise.trim(), cardio: { mins: m, dist: parseFloat(dist) || 0, unit, watts: w || undefined }, kcal: estKcal() };
+      entry = { t: new Date().toISOString(), exercise: exercise.trim(), cardio: { mins: m, dist: readNumber(dist) ?? 0, unit, watts: w || undefined }, kcal: estKcal() };
     } else {
       if (!sets.length) { Alert.alert('Log a set first', 'Enter reps (and weight) and tap Add set.'); return; }
       // The same `strengthKcalOf` the caption above renders, so the log and
@@ -336,7 +336,7 @@ export default function ScanMachine() {
                     <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" style={inp} />
                   </Field>
                   <Field label="Distance" hint={unit}>
-                    <TextInput value={dist} onChangeText={setDist} keyboardType="numeric" style={inp} />
+                    <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
                   </Field>
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
@@ -374,7 +374,7 @@ export default function ScanMachine() {
                       "Amount (GBP)" and 50 dirhams went into the ledger — see
                       the header of scripts/check-currency.mjs. */}
                   <Field label={wu.toUpperCase()} a11y={`Load in ${wu === 'kg' ? 'kilograms' : 'pounds'}`}>
-                    <TextInput value={kg} onChangeText={setKg} keyboardType="numeric" style={inp} />
+                    <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad" style={inp} />
                   </Field>
                   <Ghost label="Add Set" onPress={addSet} />
                 </View>

@@ -73,6 +73,7 @@ import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
 import { registerForPush, pushAvailable, handsetPushTokens, forgetRegisteredToken } from './pushNotifications';
 import { consentFromStored, recordPushConsent } from '../lib/pushConsent';
+import { soundFromStored, recordRestSoundConsent } from '../lib/restTimer';
 import { assertWrote, writeFailure } from '../lib/wroteRows';
 import type { WeightUnit, LengthUnit } from '../lib/units';
 import { resolveUnits, deviceRegion, type UnitSource } from '../lib/unitPreference';
@@ -93,7 +94,7 @@ export type { UnitSource };
  * the confidence of a real answer, and nothing on any of them admitted that
  * nobody had asked. See src/lib/unitPreference.ts.
  */
-interface Settings { notifPush: boolean; weightUnit: WeightUnit | null; lengthUnit: LengthUnit | null }
+interface Settings { notifPush: boolean; restSound: boolean; weightUnit: WeightUnit | null; lengthUnit: LengthUnit | null }
 
 /**
  * What may be WRITTEN. Narrower than `Settings` on purpose: null is a state the
@@ -101,7 +102,7 @@ interface Settings { notifPush: boolean; weightUnit: WeightUnit | null; lengthUn
  * null })` would have to mean "un-choose", which no control offers and which
  * would race the read that is forbidden from overwriting a device's value.
  */
-type SettingsPatch = { notifPush?: boolean; weightUnit?: WeightUnit; lengthUnit?: LengthUnit };
+type SettingsPatch = { notifPush?: boolean; restSound?: boolean; weightUnit?: WeightUnit; lengthUnit?: LengthUnit };
 
 /** What happened when somebody asked for push to be turned ON.
  *   · 'on'          — a token was obtained and this handset is registered.
@@ -139,6 +140,23 @@ export type PushResult = 'on' | 'no-build' | 'os-refused' | 'off' | 'off-pending
  */
 interface SettingsValue {
   notifPush: boolean;
+  /**
+   * Whether the rest timer between sets may make a noise.
+   *
+   * Device-local, like `notifPush` and unlike the units: which handset is
+   * allowed to make a sound in a room is a property of the handset and of the
+   * room it is in, not of the account. The same member's phone at 6am in a
+   * shared flat and their phone in a gym at lunchtime are entitled to different
+   * answers, and syncing this to the account would take that away.
+   *
+   * READ BY src/lib/restTimer.ts's latch, not by the screens. `set` publishes
+   * it synchronously to `recordRestSoundConsent`, and src/ui/sounds.ts refuses
+   * to play anything the latch has not said yes to — so there is no call site
+   * that can forget to check it. This field is what the SWITCH renders from;
+   * the latch is what the speaker obeys, and they are written in the same
+   * statement so they cannot drift apart.
+   */
+  restSound: boolean;
   /** The unit to render in — chosen if there is a choice, otherwise read off
    *  the handset's region. Always a real unit. */
   weightUnit: WeightUnit;
@@ -182,7 +200,13 @@ interface SettingsValue {
 // region, separately, and carries a source so it can be labelled — see
 // src/lib/unitPreference.ts for why that is the side of the trade-off this
 // takes. The push default is unchanged: a boolean has no third state to lose.
-const DEFAULTS: Settings = { notifPush: true, weightUnit: null, lengthUnit: null };
+// `restSound` defaults ON because the owner asked for the noise — "should be
+// have a noise with it" — and because a boolean has no third state to lose, the
+// same reasoning the push default already carries. src/lib/restTimer.ts's
+// soundFromStored applies the identical default to an absent or unreadable
+// blob, so the switch on the settings screen and the speaker cannot disagree
+// about what a fresh install said.
+const DEFAULTS: Settings = { notifPush: true, restSound: true, weightUnit: null, lengthUnit: null };
 
 /**
  * The handset's region, read once for the life of the process.
@@ -351,6 +375,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         const c = JSON.parse(raw) as Record<string, unknown>;
         const patch: Partial<Settings> = {};
         if (typeof c.notifPush === 'boolean') patch.notifPush = c.notifPush;
+        if (typeof c.restSound === 'boolean') patch.restSound = c.restSound;
         if (isWeightUnit(c.weightUnit)) patch.weightUnit = c.weightUnit;
         if (isLengthUnit(c.lengthUnit)) patch.lengthUnit = c.lengthUnit;
         if (Object.keys(patch).length) setS((prev) => ({ ...prev, ...patch }));
@@ -366,6 +391,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       // parse, so the switch on the settings screen and the token store cannot
       // disagree about what an unreadable device is assumed to have said.
       recordPushConsent(consentFromStored(raw));
+      // Published from the same raw blob and in the same breath as the push
+      // answer, for the same reason: until this line runs the latch says
+      // 'unknown' and src/ui/sounds.ts refuses outright, so nothing can make a
+      // noise at somebody whose stored answer is no while their phone is still
+      // reading it.
+      recordRestSoundConsent(soundFromStored(raw));
       setCacheLoaded(true);
     }
   })(); }, []);
@@ -499,6 +530,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // to register the member who just asked for it. The latch is the answer;
     // storage is only where it survives a relaunch.
     if (patch.notifPush !== undefined) recordPushConsent(patch.notifPush ? 'yes' : 'no');
+    // Synchronously too, and for a sharper reason than push: the member may be
+    // mid-session with a rest running when they change this, and a gate that
+    // read the answer back out of AsyncStorage would let the very next chime
+    // through after they turned it off.
+    if (patch.restSound !== undefined) recordRestSoundConsent(patch.restSound ? 'yes' : 'no');
     AsyncStorage.setItem('repple.settings', JSON.stringify(next)).catch(() => {});
     // Only the unit columns go up. The notification preference now reaches the server: it is applied to `push_tokens`, so a handset that opted out receives nothing whatever a sending screen believes
     // because push permission genuinely is a property of this handset.
@@ -555,7 +591,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // something the member said.
   const units = resolveUnits(s.weightUnit, s.lengthUnit, DEVICE_REGION);
   return (
-    <Ctx.Provider value={{ notifPush: s.notifPush, ...units, set, setPushEnabled, unitsLoaded }}>
+    <Ctx.Provider value={{ notifPush: s.notifPush, restSound: s.restSound, ...units, set, setPushEnabled, unitsLoaded }}>
       {children}
     </Ctx.Provider>
   );

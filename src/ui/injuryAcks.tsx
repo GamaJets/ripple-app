@@ -21,6 +21,16 @@ import { sendPush } from './pushNotifications';
 
 interface Value {
   status: LoadStatus;
+  /** Read the acknowledgements again.
+   *
+   *  The effect below runs on `authRev` and on nothing else, so a read that
+   *  failed once stayed failed for the life of the session — and what it gates
+   *  is the coach's Assign button, which then reads "Injuries Could Not Be
+   *  Read" with no way out of it but to quit the app. A refusal a coach cannot
+   *  retry is a dead end, and this guard is meant to be a wall they can get
+   *  past by doing the right thing rather than one they have to leave the
+   *  screen to escape. */
+  refresh: () => Promise<void>;
   /** The keys acknowledged for a client, or null if this coach has never
    *  acknowledged anything for them. Null and [] are different answers. */
   acknowledged: (clientId: string) => string[] | null;
@@ -37,32 +47,37 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<LoadStatus>('loading');
   const authRev = useAuthRevision();
 
-  useEffect(() => {
+  // Split out of the effect so a screen can run it again. See `refresh`.
+  const hydrate = useCallback(async (alive: () => boolean = () => true) => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
+    setStatus('loading');
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth?.user?.id;
+      if (!uid) { if (alive()) { setRows({}); setStatus('ready'); } return; }
+      const { data, error } = await supabase
+        .from('injury_acknowledgements')
+        .select('client_id, acknowledged_injuries')
+        .eq('trainer_id', uid)
+        .limit(capLimit());
+      if (!alive()) return;
+      if (error) { reportError('injuryAcks.read', error); setRows({}); setStatus('error'); return; }
+      const next: Record<string, string[]> = {};
+      for (const r of data ?? []) {
+        next[(r as any).client_id] = Array.isArray((r as any).acknowledged_injuries) ? (r as any).acknowledged_injuries : [];
+      }
+      setRows(next);
+      setStatus('ready');
+    } catch (e) { if (alive()) { reportError('injuryAcks.read', e); setStatus('error'); } }
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
-    (async () => {
-      setStatus('loading');
-      try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth?.user?.id;
-        if (!uid) { if (!cancelled) { setRows({}); setStatus('ready'); } return; }
-        const { data, error } = await supabase
-          .from('injury_acknowledgements')
-          .select('client_id, acknowledged_injuries')
-          .eq('trainer_id', uid)
-          .limit(capLimit());
-        if (cancelled) return;
-        if (error) { reportError('injuryAcks.read', error); setRows({}); setStatus('error'); return; }
-        const next: Record<string, string[]> = {};
-        for (const r of data ?? []) {
-          next[(r as any).client_id] = Array.isArray((r as any).acknowledged_injuries) ? (r as any).acknowledged_injuries : [];
-        }
-        setRows(next);
-        setStatus('ready');
-      } catch (e) { if (!cancelled) { reportError('injuryAcks.read', e); setStatus('error'); } }
-    })();
+    void hydrate(() => !cancelled);
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, hydrate]);
+
+  const refresh = useCallback(() => hydrate(), [hydrate]);
 
   const acknowledge = useCallback(async (clientId: string, injuries: Injury[]) => {
     const keys = [...new Set(injuries.map(injuryKey))].sort();
@@ -105,7 +120,7 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const acknowledged = useCallback((clientId: string) => rows[clientId] ?? null, [rows]);
-  const value = useMemo(() => ({ status, acknowledged, acknowledge }), [status, acknowledged, acknowledge]);
+  const value = useMemo(() => ({ status, refresh, acknowledged, acknowledge }), [status, refresh, acknowledged, acknowledge]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

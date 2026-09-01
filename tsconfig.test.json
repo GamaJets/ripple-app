@@ -131,6 +131,11 @@
     "src/lib/rosterExport.test.ts",
     "src/lib/readiness.test.ts",
     "src/lib/coachBrand.test.ts",
-    "src/lib/coachStatement.test.ts"
+    "src/lib/coachStatement.test.ts",
+    "src/lib/assignPicker.test.ts",
+    "src/lib/restTimer.test.ts",
+    "src/lib/setGroups.test.ts",
+    "src/lib/setMethods.test.ts",
+    "src/lib/exerciseHistory.test.ts"
   ]
 }

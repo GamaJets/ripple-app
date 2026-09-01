@@ -41,6 +41,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import { badges as groupBadges, canJoinNext, isGrouped, joinNext, leaveGroup } from '../../src/lib/setGroups';
+import { SET_METHODS, DEFAULT_METHOD, badgeFor, methodFor } from '../../src/lib/setMethods';
+import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, type WeightUnit } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
@@ -49,6 +52,7 @@ import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
+import { useSettings } from '../../src/ui/settings';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
@@ -66,7 +70,7 @@ import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
 import { useProgramGroups } from '../../src/ui/groupProgram';
 import { listNames, planFanOut, fanOutSubject, type FanOutMember } from '../../src/lib/groupProgram';
 import {
-  overwriteBrief, bulkReport, selectAllOffer,
+  overwriteBrief, unassignBrief, bulkReport, selectAllOffer,
   type AssignTarget, type WriteOutcome,
 } from '../../src/lib/bulkActions';
 import { seedDecision, stillListed, pruneSelection, assignCtaLabel } from '../../src/lib/assignPicker';
@@ -128,6 +132,38 @@ type BEx = {
    * left it blank.
    */
   note?: string;
+  /**
+   * Carried through, not yet edited here.
+   *
+   * `ProgramExercise.restSec` arrived while this screen was being rewritten. It
+   * has no control in the builder yet, and this field exists so that a
+   * programme LOADED into the builder and assigned back out keeps whatever rest
+   * a coach set elsewhere — the exact loss `loadKg` and `note` suffered, where
+   * `loadFrom` and `composeProgram` enumerate fields by hand and a new one
+   * dropped out of both. Whoever adds the control writes to this field and the
+   * round trip already works.
+   */
+  restSec?: number | null;
+  /**
+   * The group this exercise is performed BACK TO BACK with, or null when it
+   * stands alone. Adjacent exercises sharing an id form a superset, a tri-set
+   * or a giant set — and which of those it is called is DERIVED FROM HOW MANY
+   * there are, in `src/lib/setGroups.ts`, rather than chosen. A coach who
+   * could pick the word and separately pick the members would eventually
+   * produce a "superset" of four, and nothing could tell it was wrong.
+   */
+  setGroupId?: string | null;
+  /**
+   * How the sets are performed — warm-up, drop set, to failure, AMRAP and the
+   * rest of `src/lib/setMethods.ts`. Null and 'normal' both mean an ordinary
+   * working set; the catalogue is consulted rather than the string compared,
+   * so a method added later behaves without this screen changing.
+   *
+   * This matters past the label: a drop set has NO rest inside it, and a
+   * warm-up is not training volume. Both of those are read off the method by
+   * the client's runner and the progress screens.
+   */
+  method?: string | null;
 };
 type BDay = { day: string; focus: string; cardio?: string; exercises: BEx[] };
 
@@ -182,8 +218,8 @@ export default function Builder() {
   // one BY NAME. "8 of 12 saved" tells a coach something is wrong and nothing
   // about which four or what to do — see src/lib/bulkActions.ts, which is where
   // that arithmetic already lives and is not re-implemented here.
-  const { getProgram, assignProgramTo, clearProgram, status: programStatus } = useAssignedPrograms();
-  const { templates, saveTemplateTo, status: tplStatus } = useProgramTemplates();
+  const { getProgram, assignProgramTo, clearProgram, clearProgramFrom, status: programStatus } = useAssignedPrograms();
+  const { templates, saveTemplateTo, removeTemplateFrom, isStarter, status: tplStatus } = useProgramTemplates();
   const router = useRouter();
 
   const params = useLocalSearchParams();
@@ -208,6 +244,21 @@ export default function Builder() {
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [pickerDay, setPickerDay] = useState<number | null>(null);
   const coachEx = useCoachExercises();
+  /**
+   * The unit the KG/LB toggle opens on for an exercise nobody has typed a
+   * weight into yet.
+   *
+   * It used to be the literal 'kg', which is the shape src/ui/settings.tsx
+   * spent a paragraph removing from the rest of the app: a coach in a gym
+   * plated in pounds saw KG beside an empty field, typed 225 meaning pounds,
+   * and the record stored 225 kilograms — said back to their client with the
+   * confidence of a number somebody chose. `useSettings().weightUnit` is the
+   * unit this coach has picked, or the one their handset's region uses when
+   * they have never been asked; either way it is an answer about them rather
+   * than a constant. Once they touch the toggle, `loadUnit` on the exercise is
+   * what wins, because that is what they actually said about this lift.
+   */
+  const defaultUnit = useSettings().weightUnit;
   // The whole catalogue, names and groups only — the hook is explicit that it
   // does NOT pull instructions or descriptions, so this is a list of names to
   // search rather than the megabyte behind them. The detail screen fetches the
@@ -353,6 +404,33 @@ export default function Builder() {
   const clientGroups = useProgramGroups();
   const inGroups = clientId && clientGroups.status === 'ready' ? clientGroups.groupsForClient(clientId) : [];
 
+  /**
+   * ── The retry the injury gate never had ───────────────────────────────────
+   *
+   * The user photographed this screen with its primary button reading
+   * "Injuries Could Not Be Read". The guard is right and stays — a programme
+   * built around a disclosure nobody read is exactly what it exists to stop —
+   * but it was a wall with no door. `injury_acknowledgements` is read once per
+   * session, on `authRev` and on nothing else, so one bad connection latched
+   * the refusal for as long as the app stayed open and the only escape was to
+   * quit it.
+   *
+   * Both reads the gate depends on are re-run: the roster carries the
+   * disclosures themselves, and the acknowledgements say whether they have been
+   * read. Offered only when one of them actually failed — a gate held because
+   * the coach has genuinely not confirmed an injury is not a read to retry, and
+   * a Try Again there would be a button that changes nothing.
+   */
+  const readFailed = rosterStatus === 'error' || rosterStatus === 'partial'
+    || acks.status === 'error' || acks.status === 'partial';
+  const [retryBusy, setRetryBusy] = useState(false);
+  const retryReads = async () => {
+    if (retryBusy) return;
+    setRetryBusy(true);
+    await Promise.all([refreshRoster(), acks.refresh()]);
+    setRetryBusy(false);
+  };
+
   const [ackBusy, setAckBusy] = useState(false);
   const [ackFailed, setAckFailed] = useState(false);
   const confirmInjuries = async () => {
@@ -387,7 +465,7 @@ export default function Builder() {
       day: d.day, focus: d.focus, cardio: d.cardio,
       exercises: d.exercises.map((e) => ({
         key: nextKey(), name: e.name, group: e.group, sets: e.sets, reps: e.reps,
-        loadKg: e.loadKg ?? null, note: e.note,
+        loadKg: e.loadKg ?? null, note: e.note, restSec: e.restSec ?? null,
       })),
     })));
     setSeededFor(from);
@@ -461,6 +539,101 @@ export default function Builder() {
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: [...d.exercises, { key: nextKey(), name, group, sets: 3, reps: '10-12' }] } : d)));
   const removeExercise = (di: number, key: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.filter((e) => e.key !== key) } : d)));
+
+  /**
+   * Move one exercise up or down within its day.
+   *
+   * Order is not decoration in a programme — it is the order somebody trains
+   * in, and a compound put after an isolation is a different session. Until
+   * this, the only way to fix a movement in the wrong place was to delete it
+   * and add it again at the end, which also threw away the sets, reps and
+   * weight already typed against it.
+   *
+   * Arrows rather than drag-and-drop, deliberately and for now: a hold-and-drag
+   * list needs `react-native-gesture-handler` and `react-native-reanimated`,
+   * neither of which is in this build, so it cannot reach anybody over the air.
+   * These work today and are also the accessible form of the same action —
+   * a drag is unreachable with a screen reader, so the arrows earn their place
+   * whatever gets added later.
+   */
+  const moveExercise = (di: number, key: string, dir: -1 | 1) =>
+    setDays((ds) => ds.map((d, i) => {
+      if (i !== di) return d;
+      const at = d.exercises.findIndex((e) => e.key === key);
+      const to = at + dir;
+      // Silently doing nothing at the ends is right: the control is hidden
+      // there, and a wrap-around would move the top exercise to the bottom for
+      // somebody who tapped up expecting nothing to happen.
+      if (at < 0 || to < 0 || to >= d.exercises.length) return d;
+      const next = [...d.exercises];
+      const [moved] = next.splice(at, 1);
+      next.splice(to, 0, moved);
+      return { ...d, exercises: next };
+    }));
+  /**
+   * What the coach has TYPED in each weight box, keyed by exercise.
+   *
+   * The field used to render `String(liftIn(e.loadKg, …))` — its own parsed
+   * value, re-derived on every keystroke. So typing "16." parsed to 16,
+   * re-rendered as "16", and ate the decimal point as it was being typed:
+   * 16.5 was unreachable no matter what keyboard was on screen. The stored
+   * number stays the source of truth; this is only what is under the cursor
+   * until the box is left.
+   */
+  const [loadDraft, setLoadDraft] = useState<Record<string, string>>({});
+  /**
+   * Raw rest text per exercise, for the same reason `loadDraft` exists. A coach
+   * part way through typing "9" on the way to "90" has momentarily typed a
+   * number this app refuses; re-deriving the field from the committed value
+   * would delete the keystroke.
+   */
+  const [restDraft, setRestDraft] = useState<Record<string, string>>({});
+  /** The exercise whose method sheet is open, as `dayIndex:key`, or null. */
+  const [methodFor_, setMethodOpenFor] = useState<string | null>(null);
+
+  /**
+   * Join an exercise to the one after it, making a superset — or a tri-set, or
+   * a giant set, depending on how many end up adjacent. The id is minted here
+   * and the NAME is never stored: `setGroups.badges()` derives it from the run
+   * length every render, so it cannot go stale when the run changes size.
+   */
+  const groupWithNext = (di: number, at: number) =>
+    setDays((ds) => ds.map((d, i) => {
+      if (i !== di) return d;
+      const ids = joinNext(d.exercises, at, () => `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`);
+      return { ...d, exercises: d.exercises.map((e, k) => ({ ...e, setGroupId: ids[k] })) };
+    }));
+
+  /**
+   * Take one exercise out of its group. Only that one leaves — the rest of the
+   * run stays together and is relabelled for its new size, so a tri-set that
+   * loses a movement becomes a superset and says so.
+   */
+  const ungroup = (di: number, at: number) =>
+    setDays((ds) => ds.map((d, i) => {
+      if (i !== di) return d;
+      const ids = leaveGroup(d.exercises, at);
+      return { ...d, exercises: d.exercises.map((e, k) => ({ ...e, setGroupId: ids[k] })) };
+    }));
+
+
+  /**
+   * Days the coach has folded away, by index.
+   *
+   * A five-day programme is fifteen or twenty exercises, each with its own
+   * sets, reps and weight row — so reaching Friday means scrolling past all of
+   * Monday to Thursday. Folding is per day rather than an accordion that opens
+   * one at a time: a coach comparing Push against Pull wants both open, and a
+   * screen that closes the thing you were reading because you opened another is
+   * its own annoyance.
+   *
+   * Keyed by INDEX, and deliberately reset when a day is removed — see
+   * `removeDay`. Indices shift when a day is deleted, so a stale key would fold
+   * the wrong day.
+   */
+  const [foldedDays, setFoldedDays] = useState<Record<number, boolean>>({});
+  const toggleDay = (di: number) => setFoldedDays((p) => ({ ...p, [di]: !p[di] }));
+
   const DRAFT_KEY = 'repple.builder.draft.v1';
 
   useEffect(() => {
@@ -475,7 +648,16 @@ export default function Builder() {
         if ((Array.isArray(d.days) && d.days.length) || (typeof d.title === 'string' && d.title.trim())) {
           setTitle(typeof d.title === 'string' ? d.title : '');
           setNote(typeof d.note === 'string' ? d.note : '');
+          // Whole `BDay[]`, so every field on the exercise comes back with it —
+          // the weight, the unit the coach typed it in, and the note they wrote
+          // on the movement. A draft that silently dropped one of those would
+          // be worse than one that dropped everything: the coach would come
+          // back to what looks like their week with the cues gone.
           setDays(Array.isArray(d.days) ? d.days : []);
+          // A restored draft is the coach's OWN work, whoever happens to be
+          // selected — so it is seeded from nobody, and the builder says so
+          // rather than presenting it as somebody's current programme.
+          setSeededFor(null);
         }
       } catch { /* a draft that cannot be parsed is not a draft */ }
       finally { if (live) setDraftLoaded(true); }
@@ -503,9 +685,11 @@ export default function Builder() {
     AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ title, note, days })).catch(() => {});
   }, [title, note, days, draftLoaded]);
 
-  /** Called once the work is somewhere durable, and only then. */
+  /** Called once the work is somewhere durable, and only then — a saved
+   *  template that the server counted, or an assignment that landed on every
+   *  client it was sent to. Never on a partial one: the draft is the only copy
+   *  of anything that did not make it. */
   const clearDraft = () => { AsyncStorage.removeItem(DRAFT_KEY).catch(() => {}); };
-  void clearDraft;
 
   const patchEx = (di: number, key: string, patch: Partial<BEx>) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.map((e) => (e.key === key ? { ...e, ...patch } : e)) } : d)));
@@ -522,13 +706,6 @@ export default function Builder() {
   const removeDay = (di: number) => setDays((ds) => ds.filter((_, i) => i !== di));
 
   const totalExercises = days.reduce((a, d) => a + d.exercises.length, 0);
-  // Per-exercise flags are easy to scroll past on a six-day programme, and the
-  // decision that matters is the one taken at the Assign button. This counts
-  // what is actually in the plan so that button can be preceded by the fact
-  // rather than by silence.
-  const loadsInjury = days.flatMap((d) => d.exercises)
-    .filter((e) => injuryFlag(e.name, e.group || '', clientInjuries) !== null);
-
   /* ── who this is going to ───────────────────────────────────────────────── */
 
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
@@ -599,6 +776,15 @@ export default function Builder() {
   }).filter((x) => x.movements.length);
 
   const canAssign = pickedIds.length > 0 && totalExercises > 0 && plan.allowed;
+  /** The ticked clients who are actually ON something to be taken off.
+   *
+   *  Only off a whole read: under any other status a null from `getProgram`
+   *  means "we did not find out", and offering to remove a programme this
+   *  screen has not seen is the mirror of writing over one. */
+  const unassignable = programStatus === 'ready'
+    ? pickedIds.filter((id) => !!getProgram(id))
+        .map((id) => ({ clientId: id, name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client' }))
+    : [];
 
   // ── what the picker searches ────────────────────────────────────────────
   //
@@ -684,6 +870,7 @@ export default function Builder() {
         reps: e.reps || '8-12', alternatives: [],
         loadKg: e.loadKg ?? null,
         note: e.note && e.note.trim() ? e.note.trim() : undefined,
+        restSec: e.restSec ?? null,
       })),
     })),
   });
@@ -701,6 +888,9 @@ export default function Builder() {
     const nm = tplName.trim() || title.trim() || 'Untitled template';
     const saved = await saveTemplateTo(nm, composeProgram());
     setSaveOpen(false); setTplName('');
+    // The work is on the server now, so the on-device draft has nothing left
+    // to protect. Only on a counted save — see clearDraft.
+    if (saved.ok) clearDraft();
     setTplSaveFailed(saved.ok ? null : `“${nm}” is not in your library. ${saved.why ?? 'The server did not say why.'} Nothing has been lost from the builder — try saving it again.`);
     Alert.alert(
       saved.ok ? 'Template saved' : 'Not saved',
@@ -858,6 +1048,11 @@ export default function Builder() {
     // needs it.
     const outstanding = [...report.retry, ...plan.blocked.map((b) => b.clientId)];
     setPicked(Object.fromEntries(outstanding.map((id) => [id, true])));
+    // Everybody it was sent to has it, and nobody is being held — so the
+    // programme is durable somewhere other than this phone and the draft has
+    // nothing left to protect. Kept on any partial outcome, because the draft
+    // is then the only copy of what did not land.
+    if (!outstanding.length) clearDraft();
 
     const parts = [report.body];
     // Named, never silently dropped. A coach who believes four people got a
@@ -866,6 +1061,57 @@ export default function Builder() {
       parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all — they have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Select them above and read what they disclosed.`);
     }
     Alert.alert(report.title, parts.join('\n\n'));
+  };
+
+  /**
+   * Take the ticked clients OFF whatever they are on.
+   *
+   * Asked for as "assign and un-assign templates meanwhile keeping the data for
+   * the history of the workouts done in those templates so you can add it back
+   * in at a later stage". Un-assign was reachable only as `revert`, below,
+   * which acts on the one client the builder is looking at — so a coach who had
+   * put a block on eight people had to open eight builders to end it.
+   *
+   * The overwrite guard is asked FIRST and for the same reason as on the assign
+   * side: under anything but a whole read of `assigned_programs` this screen
+   * cannot tell a client who is on nothing from one whose row did not come
+   * back, so the count in the confirmation would be counting silence. The
+   * injury gate is NOT asked, and deliberately: it exists to stop a programme
+   * being BUILT around a disclosure nobody read, and removing a programme is
+   * the one action that cannot do that.
+   */
+  const unassign = async () => {
+    if (!pickedIds.length || assignBusy) return;
+    const guard = guardOverwrite(programStatus, fanOutSubject(pickedIds.length));
+    if (!guard.allowed) { Alert.alert('Held', guard.reason as string); return; }
+
+    const targets: AssignTarget[] = pickedIds.map((id) => ({
+      clientId: id,
+      name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
+      onProgramme: !!getProgram(id),
+    }));
+    const brief = unassignBrief(targets);
+    if (!brief.replacing.length) { Alert.alert(brief.title, brief.body); return; }
+    const go = await new Promise<boolean>((resolve) => {
+      Alert.alert(brief.title, brief.body, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: brief.confirmLabel, style: 'destructive', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+    if (!go) return;
+
+    setAssignBusy(true);
+    const outcomes: WriteOutcome[] = await Promise.all(brief.replacing.map(async (tg) => {
+      const r = await clearProgramFrom(tg.clientId);
+      return { clientId: tg.clientId, name: tg.name, ok: r.ok, why: r.why };
+    }));
+    setAssignBusy(false);
+    const report = bulkReport('unassign', outcomes);
+    if (outcomes.some((o) => o.ok)) notifySuccess();
+    // The ones it did not work for stay ticked, so trying again is the same
+    // gesture over the set that still needs it.
+    if (report.retry.length) setPicked(Object.fromEntries(report.retry.map((id) => [id, true])));
+    Alert.alert(report.title, report.body);
   };
 
   // `clearProgram` resolves false when the delete never reached the server, and
@@ -888,6 +1134,34 @@ export default function Builder() {
     Alert.alert('Reverted to auto', `${client?.name ?? 'Your client'} is back on their auto-generated program.`);
   };
 
+  /**
+   * Delete a saved template.
+   *
+   * Confirmed and NAMED first, because a template is the coach's own work and
+   * there is no undo — a mis-tap on the wrong row has to be visible before it
+   * is irreversible. The row does not leave the list until the server counts
+   * it; see `removeTemplateFrom`.
+   *
+   * Deleting a stencil cannot reach a client training from it: an assignment is
+   * a jsonb copy in `assigned_programs` with no reference back, and no foreign
+   * key in the database points at `program_templates` at all. That is said in
+   * the confirmation rather than left for the coach to worry about.
+   */
+  const [tplDelFailed, setTplDelFailed] = useState<string | null>(null);
+  const deleteTemplate = (id: string, name: string) => {
+    Alert.alert(
+      'Delete This Template?',
+      `“${name}” is removed from your library for good — there is no undo. Anybody already training it keeps their programme, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          const gone = await removeTemplateFrom(id);
+          setTplDelFailed(gone.ok ? null : `“${name}” is still in your library. ${gone.why ?? 'The server did not say why.'}`);
+        } },
+      ],
+    );
+  };
+
   // One field treatment for the whole screen: surface2 fill, no border.
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const sheet = { backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 };
@@ -902,7 +1176,7 @@ export default function Builder() {
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Programs</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Builder</Text>
-          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Build a weekly plan and assign it to a client.</Text>
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Build a weekly plan, save it as a template, and assign it to as many clients as you like.</Text>
         </View>
 
         {/* ── client ─────────────────────────────────────────────────────── */}
@@ -910,13 +1184,28 @@ export default function Builder() {
           {/* The roster count is a count, so it waits for a whole read. Under
               'partial' `roster.length` is the size of the page that came back,
               not the size of the book. */}
-          <SectionHead title="Client" note={rosterStatus === 'ready' && roster.length ? `${roster.length} in roster` : undefined} />
+          <SectionHead title="Building For" note={rosterStatus === 'ready' && roster.length ? `${num(roster.length)} in roster` : undefined} />
+          {/* Two different questions, and they used to be one control. This one
+              is whose current programme and disclosures the builder shows; who
+              it gets SENT to is the tick-list further down, and it can be
+              several people. Saying so here is what stops a coach reading this
+              row as the recipient. */}
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+            Whose current programme and injuries to work from. Who it goes to is further down, and can be more than one person.
+          </Text>
 
           {/* An unread roster is not an empty one. Without this a coach with a
-              full book is told they have no clients and sent to add one. */}
+              full book is told they have no clients and sent to add one — and
+              "add a client from your dashboard" is then advice about a problem
+              they do not have. The empty state below is therefore said only
+              under a WHOLE read. */}
           {rosterStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Nobody is listed below because the roster did not come back — it does not mean you have no clients. Reopen this screen once you have signal." />
+              note="Nobody is listed below because the roster did not come back — it does not mean you have no clients, and nothing you have built here is affected.">
+              <View style={{ marginTop: sp.md }}>
+                <Ghost label={retryBusy ? 'Trying Again…' : 'Try Reading Again'} onPress={retryReads} />
+              </View>
+            </Notice>
           ) : rosterStatus === 'partial' ? (
             <PartialRead what="clients on your book" shown={roster.length} />
           ) : null}
@@ -932,7 +1221,8 @@ export default function Builder() {
               {roster.map((c) => {
                 const on = c.id === clientId;
                 return (
-                  <Pressable key={c.id} onPress={() => setClientId(c.id)}
+                  <Pressable key={c.id} onPress={() => setClientId(on ? '' : c.id)}
+                    accessibilityRole="button" accessibilityLabel={on ? `Stop building for ${c.name}` : `Build for ${c.name}`}
                     style={{ paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
                     <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
                   </Pressable>
@@ -1116,14 +1406,46 @@ export default function Builder() {
                 </Pressable>
                 <TextInput value={d.focus} onChangeText={(v) => setDayFocus(di, v)} placeholder="Focus (e.g. Push)" placeholderTextColor={t.ink3}
                   style={[inp, { flex: 1 }]} />
+                {/* Fold. The count travels with it, so a folded day still says
+                    how much is in it — a row that collapses to just "Wed" makes
+                    a coach open it again to find out whether it is the empty
+                    one. */}
+                <Pressable onPress={() => toggleDay(di)} accessibilityRole="button"
+                  accessibilityState={{ expanded: !foldedDays[di] }}
+                  accessibilityLabel={`${foldedDays[di] ? 'Show' : 'Hide'} the ${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'} on ${d.day}`}
+                  hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: sp.sm, paddingVertical: sp.sm }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{d.exercises.length}</Text>
+                  {/* A triangle rather than an Icon: the set has no chevron up
+                      or down, and `app/(client)/workouts.tsx` already uses
+                      exactly these two characters for the same gesture. */}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{foldedDays[di] ? '▾' : '▴'}</Text>
+                </Pressable>
                 <Pressable onPress={() => removeDay(di)} accessibilityRole="button" accessibilityLabel="Remove day" hitSlop={8}
                   style={{ paddingHorizontal: sp.sm, paddingVertical: sp.sm }}>
                   <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
                 </Pressable>
               </View>
 
-              {d.exercises.map((e) => (
-                <View key={e.key} style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+              {foldedDays[di] ? null : (() => {
+                // Computed ONCE per day rather than per row: the badge for any
+                // exercise depends on its neighbours, so a per-row call would
+                // walk the whole day for every exercise in it.
+                const dayBadges = groupBadges(d.exercises);
+                return d.exercises.map((e, ei) => {
+                const gb = dayBadges[ei];
+                // A run reads as one block: the rule between two exercises in
+                // the same group is dropped, because the line is what says
+                // "these are separate". The group's own tinted rail down the
+                // left is what says they are not.
+                const joinedAbove = ei > 0 && gb != null && dayBadges[ei - 1]?.id === gb.id;
+                return (
+                <View key={e.key} style={{
+                  marginTop: joinedAbove ? 0 : sp.md,
+                  paddingTop: sp.md,
+                  borderTopWidth: joinedAbove ? 0 : hairline,
+                  borderTopColor: t.ring,
+                  ...(gb ? { borderLeftWidth: 2, borderLeftColor: t.brand, paddingLeft: sp.md, marginLeft: -sp.md } : null),
+                }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     {/* The whole name and picture open the movement, so a coach
                         can check what they have written down without hunting
@@ -1136,7 +1458,29 @@ export default function Builder() {
                       <ExerciseThumb uri={thumbFor(rowFor(e.name) ?? { thumbPath: null })} t={t} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
-                        {e.group ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{e.group}</Text> : null}
+                        {/* The muscle group, and — separately — the set group.
+                            Two different meanings of the word "group" that
+                            happened to collide in this file, kept apart on
+                            screen because a coach reading "Chest · Superset 1
+                            of 2" needs both and would be misled by either
+                            alone. */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.xs, flexWrap: 'wrap', marginTop: 2 }}>
+                          {e.group ? <Text style={{ ...ty.caption, color: t.ink3 }}>{e.group}</Text> : null}
+                          {gb ? (
+                            <Text style={{ ...ty.caption, color: t.brand, fontWeight: '600' }}>
+                              {e.group ? '· ' : ''}{gb.label} · {gb.position} of {gb.size}
+                            </Text>
+                          ) : null}
+                          {(() => {
+                            const mb = badgeFor(e.method);
+                            if (!mb) return null;
+                            return (
+                              <Text style={{ ...ty.caption, color: t.ink3 }} accessibilityLabel={mb.label}>
+                                {e.group || gb ? '· ' : ''}{mb.label}
+                              </Text>
+                            );
+                          })()}
+                        </View>
                         {/* The gate makes a coach READ what a client cannot do.
                             It did nothing to help them act on it: they could
                             acknowledge a moderate knee, then put squats, lunges
@@ -1160,7 +1504,23 @@ export default function Builder() {
                         })()}
                       </View>
                     </Pressable>
-                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button" accessibilityLabel="Remove exercise" hitSlop={8}
+                    {/* Hidden at the ends rather than disabled: a control that
+                        cannot do anything is still something to aim at. */}
+                    {d.exercises.findIndex((x) => x.key === e.key) > 0 ? (
+                      <Pressable onPress={() => moveExercise(di, e.key, -1)} accessibilityRole="button"
+                        accessibilityLabel={`Move ${e.name} earlier in ${d.day}`} hitSlop={8}
+                        style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
+                        <Text style={{ ...ty.body, color: t.ink3 }}>▲</Text>
+                      </Pressable>
+                    ) : null}
+                    {d.exercises.findIndex((x) => x.key === e.key) < d.exercises.length - 1 ? (
+                      <Pressable onPress={() => moveExercise(di, e.key, 1)} accessibilityRole="button"
+                        accessibilityLabel={`Move ${e.name} later in ${d.day}`} hitSlop={8}
+                        style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
+                        <Text style={{ ...ty.body, color: t.ink3 }}>▼</Text>
+                      </Pressable>
+                    ) : null}
+                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button" accessibilityLabel={`Remove ${e.name} from ${d.day}`} hitSlop={8}
                       style={{ paddingHorizontal: sp.sm, paddingVertical: sp.xs }}>
                       <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
                     </Pressable>
@@ -1189,24 +1549,135 @@ export default function Builder() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>Weight</Text>
                     <TextInput
-                      value={e.loadKg == null ? '' : String(liftIn(e.loadKg, e.loadUnit ?? 'kg'))}
+                      value={loadDraft[e.key] ?? (e.loadKg == null ? '' : String(liftIn(e.loadKg, e.loadUnit ?? defaultUnit)))}
                       onChangeText={(v) => {
-                        const u = e.loadUnit ?? 'kg';
+                        const u = e.loadUnit ?? defaultUnit;
+                        // Keep the raw text as well as the parsed number. "16."
+                        // and "16,5" are both valid things to be part-way
+                        // through typing, and neither survives a round trip
+                        // through readLift and back — which is what deleted the
+                        // decimal point mid-keystroke.
+                        setLoadDraft((p) => ({ ...p, [e.key]: v }));
                         if (!v.trim()) { patchEx(di, e.key, { loadKg: null }); return; }
                         const r = readLift(v, u);
-                        patchEx(di, e.key, { loadKg: r.ok ? r.kg : null, loadUnit: u });
+                        // A number that is not yet valid ("16.") leaves the last
+                        // good value alone rather than clearing it, so pausing
+                        // mid-decimal does not wipe what was already there.
+                        if (r.ok) patchEx(di, e.key, { loadKg: r.kg, loadUnit: u });
                       }}
-                      keyboardType="numeric" placeholder="optional" placeholderTextColor={t.ink3}
+                      onBlur={() => setLoadDraft((p) => { const n = { ...p }; delete n[e.key]; return n; })}
+                      keyboardType="decimal-pad" placeholder="optional" placeholderTextColor={t.ink3}
                       style={[inp, { width: 84, paddingVertical: 7, paddingHorizontal: 10 }]} />
                     <Pressable accessibilityRole="button"
-                      accessibilityLabel={`Weight unit: ${(e.loadUnit ?? 'kg') === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${(e.loadUnit ?? 'kg') === 'kg' ? 'pounds' : 'kilograms'}`}
-                      onPress={() => patchEx(di, e.key, { loadUnit: (e.loadUnit ?? 'kg') === 'kg' ? 'lb' : 'kg' })}
+                      accessibilityLabel={`Weight unit: ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${(e.loadUnit ?? defaultUnit) === 'kg' ? 'pounds' : 'kilograms'}`}
+                      onPress={() => patchEx(di, e.key, { loadUnit: (e.loadUnit ?? defaultUnit) === 'kg' ? 'lb' : 'kg' })}
                       style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? 'kg').toUpperCase()}</Text>
+                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
                     </Pressable>
                   </View>
+                  {/* ── the coach's own words, on this movement ──────────────
+                      Asked for as "trainer notes attached in the exercise.
+                      then they are saved for future reference". The builder
+                      had one note for the whole programme, which is the wrong
+                      grain for what coaches actually write down: "keep the
+                      elbows tucked", "3-1-1 tempo", "stop two reps short",
+                      "the machine by the window, seat on 4". Those are about
+                      one movement and are useless attached to a week.
+
+                      It travels on the exercise, so it survives every path out
+                      of this screen — saved into a template, written onto the
+                      assignment, and carried in the on-device draft — and the
+                      client reads it at the machine, attributed to the coach
+                      who wrote it. */}
+                  {/* ── Rest, method, and grouping ────────────────────────
+                      Three things a coach could not say before, on one row
+                      because they are all answers to "how is this performed"
+                      rather than "what is it". */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+                    {/* The rest between sets, in SECONDS. The client's guided
+                        runner already had a timer — hardcoded to the same
+                        default for every exercise in every programme, which is
+                        right for accessory work and wrong for a heavy triple.
+                        Blank is a real answer and the common one: the client
+                        falls back to the app default and their rest card says
+                        so, rather than presenting a number nobody chose as the
+                        coach's instruction. */}
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Rest</Text>
+                    <TextInput
+                      value={restDraft[e.key] ?? (e.restSec == null ? '' : String(e.restSec))}
+                      onChangeText={(v) => {
+                        setRestDraft((prev) => ({ ...prev, [e.key]: v }));
+                        if (!v.trim()) { patchEx(di, e.key, { restSec: null }); return; }
+                        const r = readRestSeconds(v);
+                        // A number not yet valid ("9" on the way to "90")
+                        // leaves the last good value alone rather than
+                        // clearing it. The refusal is said on blur, not on
+                        // every keystroke.
+                        if (r.ok && r.seconds != null) patchEx(di, e.key, { restSec: r.seconds });
+                      }}
+                      onBlur={() => {
+                        const typed = restDraft[e.key];
+                        setRestDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readRestSeconds(typed);
+                        // Said, not swallowed. A rest that silently stayed at
+                        // its old value while the coach believes they changed
+                        // it is a programme that does not say what they think.
+                        if (!r.ok) Alert.alert('Check that rest', r.reason);
+                      }}
+                      keyboardType="number-pad"
+                      placeholder={String(DEFAULT_REST_SEC)}
+                      placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Rest between sets of ${e.name}, in seconds`}
+                      style={[inp, { width: 68, paddingVertical: 7, paddingHorizontal: 10 }]} />
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      {e.restSec != null ? `sec · ${restClock(e.restSec)}` : `sec · default ${restClock(DEFAULT_REST_SEC)}`}
+                    </Text>
+
+                    {/* How the sets are performed. The label shown is the
+                        catalogue's, never a stored string, so a method renamed
+                        later reads correctly in programmes already written. */}
+                    <Pressable onPress={() => setMethodOpenFor(`${di}:${e.key}`)} accessibilityRole="button"
+                      accessibilityLabel={`How ${e.name} is performed — currently ${methodFor(e.method).method.label}`}
+                      style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
+                      <Text style={{ ...ty.caption, color: t.ink }}>{methodFor(e.method).method.label}</Text>
+                    </Pressable>
+
+                    {/* Grouping is an act on a PAIR, so the control lives on
+                        the upper exercise and names the lower one. Hidden
+                        rather than disabled where there is nothing below to
+                        join, and where the two are already in one run. */}
+                    {canJoinNext(d.exercises, ei) ? (
+                      <Pressable onPress={() => groupWithNext(di, ei)} accessibilityRole="button"
+                        accessibilityLabel={`Perform ${e.name} back to back with ${d.exercises[ei + 1]?.name}`}
+                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>Group with next</Text>
+                      </Pressable>
+                    ) : null}
+                    {isGrouped(d.exercises, ei) ? (
+                      <Pressable onPress={() => ungroup(di, ei)} accessibilityRole="button"
+                        accessibilityLabel={`Take ${e.name} out of the ${gb?.label.toLowerCase() ?? 'group'}`}
+                        style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>Ungroup</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+
+                  <View style={{ marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 4 }}>Notes for this exercise</Text>
+                    <TextInput
+                      value={e.note ?? ''}
+                      onChangeText={(v) => patchEx(di, e.key, { note: v })}
+                      placeholder="Cue, tempo, setup — they see this at the machine…"
+                      placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Your notes on ${e.name}`}
+                      multiline
+                      style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
+                  </View>
                 </View>
-              ))}
+                );
+              });
+              })()}
 
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Add Exercise" icon="plus" onPress={() => { setCustom(''); setPickerDay(di); }} />
@@ -1223,14 +1694,101 @@ export default function Builder() {
 
         {/* ── assign ─────────────────────────────────────────────────────── */}
         <Section>
-          {/* The control itself is withheld, not merely annotated. A banner
-              over a live Assign button does not stop a thumb, and what is on
-              the other side of that thumb is an irreversible write over a
-              training programme this screen never read — no undo, no history
-              row, and nothing that tells the client their sessions changed. */}
+          {/* ── who gets this ──────────────────────────────────────────────
+              Asked for as "need to save all built templates and be able to
+              choose which client(s) they are assigned to". It used to be one
+              client, and that client was also whoever happened to be selected
+              at the top of the screen — so a coach writing one week for four
+              people built it four times, and a mis-tapped chip wrote over the
+              wrong person's training with nothing on screen counting them.
+
+              The fan-out, the confirmation and the report are all the ones the
+              template library already uses (src/lib/groupProgram.ts and
+              src/lib/bulkActions.ts). A second copy of any of them is how two
+              screens come to disagree about who a bulk assign wrote to. */}
+          <SectionHead title="Assign To" note={rosterStatus === 'ready' && pickedIds.length ? `${num(pickedIds.length)} of ${num(roster.length)}` : undefined} />
+
+          {rosterStatus === 'error' ? (
+            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+              note="Nobody is listed here because the roster did not come back — it does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
+          ) : rosterStatus === 'partial' ? (
+            <PartialRead what="clients on your book" shown={roster.length} />
+          ) : null}
+
+          {roster.length === 0 && rosterStatus === 'ready' ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+              No clients yet — add or invite a client and they will appear here to assign to.
+            </Text>
+          ) : roster.length === 0 && rosterStatus === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Reading your roster…</Text>
+          ) : null}
+
+          {roster.map((c, i) => {
+            const on = !!picked[c.id];
+            // Only sayable off a whole read. Under any other status the absence
+            // of a programme means nothing was found out, and marking somebody
+            // "no program yet" on that basis is how a coach comes to overwrite
+            // one without realising.
+            const replaces = programStatus === 'ready' && !!getProgram(c.id);
+            const held = plan.blocked.find((b) => b.clientId === c.id);
+            return (
+              <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
+                accessibilityRole="button" accessibilityLabel={`${on ? 'Do not assign to' : 'Assign to'} ${c.name}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
+                  {/* The warning is a DOT, not the ink: warn as caption text
+                      measures under AA on the three light palettes, so the one
+                      sentence the coach most needs was the hardest to read.
+                      The words carry the meaning; the dot carries the tone. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                    <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
+                      {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                    </Text>
+                  </View>
+                  {/* Their own sentence, on their own row. A count of how many
+                      are held tells the coach nothing about whose knee it is. */}
+                  {held ? <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+
+          {/* "Select All" over a roster that came back at its row limit ticks a
+              page of people and calls it everybody. Nothing on screen is false
+              and the coach is still acting on a set they cannot see, so the
+              gesture is renamed to the number actually shown rather than
+              withheld or warned about. See src/lib/bulkActions.ts. */}
+          {selAll.note ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{selAll.note}</Text>
+          ) : null}
+          {roster.length ? (
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+              <View style={{ opacity: selAll.allowed ? 1 : 0.4 }} pointerEvents={selAll.allowed ? 'auto' : 'none'}>
+                <Ghost label={selAll.label} onPress={() => {
+                  if (!selAll.allowed) return;
+                  setPicked(Object.fromEntries(roster.map((c) => [c.id, true])));
+                }} />
+              </View>
+              {pickedIds.length ? (
+                <Ghost label="Clear Selection" onPress={() => setPicked({})} />
+              ) : null}
+            </View>
+          ) : null}
+        </Section>
+
+        <Rule />
+
+        <Section>
           {/* The disclosures themselves, above the button that is being held.
               Telling a coach to read something without showing it to them is
-              a wall, not a check. */}
+              a wall, not a check. Shown for the client the builder is focused
+              on; every OTHER held recipient is named on their own row above,
+              with their own reason. */}
           {!injuryGate.allowed && injuryGate.outstanding.length ? (
             <View style={{ marginBottom: sp.lg }}>
               <Notice tone={t.s3} kicker={`${client?.name.split(' ')[0] ?? 'This client'} has disclosed`} title="Injuries & Limitations">
@@ -1255,36 +1813,93 @@ export default function Builder() {
               </Notice>
             </View>
           ) : null}
-          <View style={{ opacity: canAssign && planGuard.allowed && injuryGate.allowed ? 1 : 0.4 }} pointerEvents={canAssign && planGuard.allowed && injuryGate.allowed ? 'auto' : 'none'}>
-            <Cta wide label={injuryGate.label ?? planGuard.label ?? `Assign to ${client?.name ?? 'This Client'} · ${num(totalExercises)} exercise${s(totalExercises)}`} onPress={assign} />
-          </View>
+
+          {/* ── a refusal the coach can act on ─────────────────────────────
+              The guard is right and stays: a programme built around an injury
+              nobody read is what it exists to stop. What it did not have was a
+              way out. `injury_acknowledgements` is read once per session, on
+              `authRev` and nothing else, so a read that failed on a bad
+              connection left the button reading "Injuries Could Not Be Read"
+              for as long as the app stayed open — a wall with no door, which
+              the coach could only escape by force-quitting. This re-runs both
+              reads the gate depends on. */}
+          {!plan.allowed && plan.reason ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Notice tone={t.warn} kicker="Held" title={plan.label ?? 'This cannot go out yet'} note={plan.reason}>
+                {readFailed ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <Ghost label={retryBusy ? 'Trying Again…' : 'Try Reading Again'} onPress={retryReads} />
+                  </View>
+                ) : null}
+              </Notice>
+            </View>
+          ) : null}
+          {plan.allowed && plan.heldNote ? (
+            <Notice tone={t.warn} kicker="Not everybody" title="Some of these are held" note={plan.heldNote} />
+          ) : null}
+
           {/* Not a gate. A coach may have every reason to programme around a
               knee deliberately — that is their judgement and their client. It
-              is only refusing to let them do it without noticing. */}
-          {injuryGate.allowed && loadsInjury.length ? (
+              is only refusing to let them do it without noticing. Counted
+              across every recipient, because a programme fanned out to four
+              people used to be checked against one of them. */}
+          {injuryLoads.length ? (
             <View style={{ marginBottom: sp.md }}>
               <Flag tone={t.warn}>
-                {num(loadsInjury.length)} movement{loadsInjury.length === 1 ? '' : 's'} in this programme
-                load something {client?.name.split(' ')[0] ?? 'this client'} has disclosed
-                ({[...new Set(loadsInjury.map((e) => areaLabel(injuryFlag(e.name, e.group || '', clientInjuries)!.injury.area).toLowerCase()))].join(', ')}).
-                Each one is marked above.
+                {injuryLoads.map((x) => `${x.name}: ${num(x.movements.length)} movement${x.movements.length === 1 ? '' : 's'} (${[...new Set(x.movements.map((m) => areaLabel(m.area).toLowerCase()))].join(', ')})`).join(' · ')}
+                {' — '}this programme loads something they have disclosed. You will be asked to confirm.
               </Flag>
             </View>
           ) : null}
-          {!injuryGate.allowed ? (
+
+          <View style={{ opacity: canAssign ? 1 : 0.4 }} pointerEvents={canAssign && !assignBusy ? 'auto' : 'none'}>
+            <Cta wide label={assignCtaLabel({
+              busy: assignBusy,
+              picked: pickedIds.length,
+              exercises: totalExercises,
+              planLabel: plan.label,
+              soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
+            })} onPress={assign} />
+          </View>
+
+          {totalExercises === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-              {injuryGate.reason}
+              Add at least one exercise to assign this program.
             </Text>
-          ) : !planGuard.allowed ? (
+          ) : pickedIds.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-              {planGuard.reason}
-            </Text>
-          ) : !canAssign ? (
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-              {clientId ? 'Add at least one exercise to assign this program.' : 'Pick a client first.'}
+              Tick everybody who should get this — one client or twenty.
             </Text>
           ) : null}
-          {assignedNow ? (
+
+          {/* ── taking somebody off, without putting them on something else ──
+              Un-assign was reachable only as the Revert below, which acts on
+              the one client the builder is looking at — so a coach ending a
+              block for eight people had to open eight builders. This is the
+              same fan-out over the ticks.
+
+              Independent of what is in the builder: removing a programme has
+              nothing to do with the week on screen, so it is offered whether or
+              not there are exercises in it. */}
+          {unassignable.length ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Ghost label={assignBusy ? 'Working…' : unassignable.length === 1
+                ? `Take ${unassignable[0].name} Off Their Programme`
+                : `Take ${num(unassignable.length)} Off Their Programmes`} onPress={unassign} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+                They go back to an auto-generated plan. Every session they have logged stays exactly where it is, so
+                you can put the same programme back later and their history is still underneath it.
+              </Text>
+            </View>
+          ) : null}
+
+          {/* The single-client version, kept because it does something the
+              fan-out above does not: it also puts the BUILDER back on the
+              client's auto plan, so the coach can see what they will be
+              training next. Only offered when the control above is not already
+              about this person — two buttons doing nearly the same thing to the
+              same client is how a coach ends up unsure which one they pressed. */}
+          {assignedNow && !unassignable.some((u) => u.clientId === clientId) ? (
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Revert to Auto-generated Program" onPress={revert} />
             </View>
@@ -1490,24 +2105,43 @@ export default function Builder() {
             {templates.length === 0 && tplStatus === 'ready' ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>No templates saved yet.</Text>
             ) : null}
+            {/* A refused delete leaves the row exactly where it was, which is
+                right and is also silent — so it says so here. */}
+            {tplDelFailed ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{tplDelFailed}</Text>
+            ) : null}
             {templates.map((tpl, i) => {
               const dc = tpl.program.days.length;
               const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
               return (
-                <Pressable key={tpl.id} onPress={() => { loadFrom(tpl.program, null); setTplName(tpl.name); setTplPick(false); }}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
-                    borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-                  }}>
-                  <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name="grid" size={17} color={t.brand} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{num(dc)} day{s(dc)} · {num(ec)} exercise{s(ec)}</Text>
-                  </View>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Use</Text>
-                </Pressable>
+                <View key={tpl.id} style={{
+                  flexDirection: 'row', alignItems: 'center',
+                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                }}>
+                  <Pressable onPress={() => { loadFrom(tpl.program, null); setTplName(tpl.name); setTplPick(false); }}
+                    accessibilityRole="button" accessibilityLabel={`Start from ${tpl.name}`}
+                    style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                    <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="grid" size={17} color={t.brand} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{num(dc)} day{s(dc)} · {num(ec)} exercise{s(ec)}{isStarter(tpl.id) ? ' · starter' : ''}</Text>
+                    </View>
+                    <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Use</Text>
+                  </Pressable>
+                  {/* Not offered on a starter. Those three are compiled into
+                      the bundle, so "deleting" one hides it until the next
+                      launch and it is back — and it was the only way to empty
+                      the picker entirely, with no route back to them. */}
+                  {isStarter(tpl.id) ? null : (
+                    <Pressable onPress={() => deleteTemplate(tpl.id, tpl.name)} hitSlop={8}
+                      accessibilityRole="button" accessibilityLabel={`Delete ${tpl.name}`}
+                      style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
+                      <Icon name="minus" size={17} color={t.ink3} />
+                    </Pressable>
+                  )}
+                </View>
               );
             })}
           </ScrollView>
@@ -1518,6 +2152,54 @@ export default function Builder() {
       </Modal>
 
       {/* ── save-as-template ─────────────────────────────────────────────── */}
+      {/* ── How this exercise is performed ────────────────────────────────
+          A sheet rather than a cycling button: there are twelve methods and
+          each needs its sentence to be choosable at all. A coach who does not
+          already know what "rest-pause" means cannot pick it from a label. */}
+      <Modal visible={methodFor_ !== null} transparent animationType="slide" onRequestClose={() => setMethodOpenFor(null)}>
+        <Pressable style={scrim} onPress={() => setMethodOpenFor(null)} />
+        <View style={sheet}>
+          <Text style={{ ...ty.title, color: t.ink }}>How is it performed?</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
+            This is carried to the client and read at the machine. It also drives their rest timer — a drop set runs straight through with no rest.
+          </Text>
+          <ScrollView style={{ maxHeight: 380 }}>
+            {SET_METHODS.map((m) => {
+              const [mdi, ...rest] = (methodFor_ ?? '').split(':');
+              const mkey = rest.join(':');
+              const cur = days[Number(mdi)]?.exercises.find((x) => x.key === mkey);
+              const on = (cur?.method ?? DEFAULT_METHOD) === m.id;
+              return (
+                <Pressable key={m.id} accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={`${m.label}. ${m.blurb}`}
+                  onPress={() => {
+                    // 'normal' is stored as null rather than as the string, so
+                    // an ordinary set carries no field at all and a programme
+                    // written before methods existed reads back identically.
+                    patchEx(Number(mdi), mkey, { method: m.id === DEFAULT_METHOD ? null : m.id });
+                    setMethodOpenFor(null);
+                  }}
+                  style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md,
+                           borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                  <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+                                 backgroundColor: on ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.caption, fontWeight: '700', color: on ? t.brandInk : t.ink3 }}>{m.short}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, color: t.ink, fontWeight: on ? '600' : '400' }}>{m.label}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{m.blurb}</Text>
+                    {!m.countsToVolume ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Not counted as training volume.</Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </Modal>
+
       <Modal visible={saveOpen} transparent animationType="slide" onRequestClose={() => setSaveOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={scrim} onPress={() => setSaveOpen(false)} />
