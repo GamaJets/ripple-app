@@ -142,37 +142,69 @@ for (const rec of records) {
   plans.push({ ...p, rec });
 }
 
-// Media is confirmed on disk, never trusted from the JSON. Six of the 489
-// records that set `animation: true` in the Standard bundle have no file under
-// that name, and writing animation_path for a file that is not there produces a
-// signed URL to nothing — the client gets a permanently spinning player instead
-// of falling back to the stills it would otherwise have shown.
+// Media is confirmed on disk, never trusted from the JSON: writing
+// animation_path for a file that is not there produces a signed URL to nothing
+// — the client gets a permanently spinning player instead of falling back to
+// the stills it would otherwise have shown.
+//
+// ── Counted once per BUCKET OBJECT, not once per record ───────────────────
+//
+// Twelve movements borrow another's artwork via image_alias, so 601 records
+// name fewer distinct pack files than they have rows. Pushing a path per record
+// made the same bytes appear twice in the upload list and twice in the size
+// estimate, which is a wrong number in the one place this script exists to
+// produce a right one: the figure somebody reads before deciding to move 1.7 GB
+// into a paid bucket.
+//
+// ── The two key shapes, which are not the same shape ──────────────────────
+//
+// A STILL is keyed by its own filename under `stills/`, so two rows sharing one
+// picture share one object — `image_paths` is an array and both rows simply
+// list the same key.
+//
+// An ANIMATION is keyed by the ROW id at the bucket root, which is what
+// upload-exercise-demos.mjs writes and what the 483 objects in the bucket are
+// named today. It is emphatically NOT the pack's filename: keyed by the vendor
+// stem this script would have uploaded 483 objects under names no row points at
+// and then repointed all 489 rows at them, blanking every animation in the
+// product on the next `--write`. The cost of the row-id rule is that the twelve
+// borrowed clips are stored twice, about 22 MB, in exchange for the invariant
+// that every row owns the object it names.
+const stillKey = (p) => `stills/${p.split('/').pop()}`;
+const animKey = (rowId, p) => `${rowId}${p.slice(p.lastIndexOf('.'))}`;
+
 let bytes = 0;
 const missingStills = [];
 const missingAnimations = [];
-const uploads = [];
+/** bucket key → pack-relative path. A Map, so one object is uploaded once
+ *  however many rows asked for it. */
+const moves = new Map();
+const want = (key, packPath) => {
+  if (moves.has(key)) return;
+  moves.set(key, packPath);
+  bytes += statSync(join(PACK, packPath)).size;
+};
 for (const p of plans) {
   const confirmed = [];
   for (const s of p.stills) {
     const abs = join(PACK, s);
     if (!existsSync(abs)) { missingStills.push(`${p.id}: ${s}`); continue; }
-    bytes += statSync(abs).size;
-    confirmed.push(s);
-    uploads.push(s);
+    confirmed.push(stillKey(s));
+    want(stillKey(s), s);
   }
   p.confirmedStills = confirmed;
   p.confirmedAnimation = null;
   if (p.animation) {
     const abs = join(PACK, p.animation);
     if (existsSync(abs)) {
-      bytes += statSync(abs).size;
-      p.confirmedAnimation = p.animation;
-      uploads.push(p.animation);
+      p.confirmedAnimation = animKey(p.id, p.animation);
+      want(p.confirmedAnimation, p.animation);
     } else {
       missingAnimations.push(`${p.id} (${p.mediaKey})`);
     }
   }
 }
+const uploads = [...moves.keys()];
 
 // Equipment icons and muscle diagrams are catalogue-wide rather than per-row,
 // so they are counted separately: they are a fixed cost that does not scale
@@ -198,8 +230,8 @@ console.log('');
 console.log('── mapping ─────────────────────────────────────────────');
 console.log(`  ${matched.length} of ${records.length} map onto exercises the app already has`);
 console.log(`  ${added.length} would be new rows`);
-console.log(`  ${rekeyed.length} are keyed by a vendor id that differs from the slug of their name`);
-console.log(`      (their media files are named by the vendor id, their rows by the name —`);
+console.log(`  ${rekeyed.length} have a media stem that differs from the slug of their name`);
+console.log(`      (their files are named by the vendor id or by image_alias, their rows by the name —`);
 console.log(`       conflating the two loses the pictures for all ${rekeyed.length})`);
 if (rekeyed.length) {
   for (const p of rekeyed.slice(0, 3)) console.log(`      e.g. row ${p.id}  ←  files ${p.mediaKey}-*.webp`);
@@ -207,7 +239,7 @@ if (rekeyed.length) {
 if (unplannable.length) console.log(`  ${unplannable.length} could not be planned at all: ${unplannable.slice(0, 5).join(', ')}`);
 console.log('');
 console.log('── media ───────────────────────────────────────────────');
-console.log(`  ${withStills.length} rows with stills   (${uploads.filter((u) => !u.includes('/animations/')).length} files)`);
+console.log(`  ${withStills.length} rows with stills   (${uploads.filter((u) => u.startsWith('stills/')).length} files)`);
 console.log(`  ${withAnim.length} rows with an animation confirmed on disk`);
 if (missingAnimations.length) {
   console.log(`  ${missingAnimations.length} claim an animation with NO FILE in the pack — animation_path stays null for these:`);
@@ -227,26 +259,19 @@ mkdirSync(join(ROOT, OUT_DIR), { recursive: true });
 const q = (v) => (v == null || v === '' ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
 const arr = (xs) => (!xs || !xs.length ? 'null' : `array[${xs.map(q).join(', ')}]`);
 
-// Storage keys, not pack-relative paths. The bucket is flat under a per-kind
-// prefix, and `images/classic/x-start.webp` inside the pack becomes
-// `stills/x-start.webp` in the bucket — the shape upload-exercise-stills.mjs
-// already writes and signedMedia.ts already recognises. Storing the pack's own
-// path instead would produce a key that exists nowhere.
-const storageKey = (p) =>
-  p.startsWith('images/animations/') ? p.replace('images/animations/', '')
-    : `stills/${p.split('/').pop()}`;
-
+// confirmedStills and confirmedAnimation are already BUCKET KEYS — resolved
+// where the file was confirmed on disk, so the key written to the row and the
+// key uploaded to are produced by one line of code rather than by two that can
+// drift. `images/classic/x-start.webp` inside the pack is `stills/x-start.webp`
+// in the bucket, the shape upload-exercise-stills.mjs writes and signedMedia.ts
+// recognises; an animation is `<row id>.webp` at the root.
 const updates = plans
   .filter((p) => p.confirmedStills.length || p.confirmedAnimation)
-  .map((p) => {
-    const stills = p.confirmedStills.map(storageKey);
-    const anim = p.confirmedAnimation ? storageKey(p.confirmedAnimation) : null;
-    return `update public.exercises set\n`
-      + `    image_paths   = ${arr(stills)},\n`
-      + `    animation_path = ${q(anim)},\n`
+  .map((p) => `update public.exercises set\n`
+      + `    image_paths   = ${arr(p.confirmedStills)},\n`
+      + `    animation_path = ${q(p.confirmedAnimation)},\n`
       + `    demo_licence  = ${q(demoLicence)}\n`
-      + `  where id = ${q(p.id)};`;
-  });
+      + `  where id = ${q(p.id)};`);
 
 const sqlPath = join(ROOT, OUT_DIR, 'media-link.sql');
 writeFileSync(sqlPath,
@@ -276,7 +301,7 @@ writeFileSync(manifestPath, JSON.stringify({
     bytes: bytes + sidecarBytes,
   },
   missing_animations: missingAnimations,
-  uploads: uploads.map((p) => ({ from: p, to: storageKey(p) })),
+  uploads: [...moves].map(([to, from]) => ({ from, to })),
 }, null, 2));
 
 console.log('');
@@ -306,10 +331,10 @@ const BUCKET = 'exercise-demos';
 if (UPLOAD) {
   console.log(`\nuploading ${uploads.length + sidecarFiles} files (${mb(bytes + sidecarBytes)}) to ${BUCKET}…`);
   let done = 0; const failed = [];
-  for (const p of uploads) {
-    const body = readFileSync(join(PACK, p));
-    const { error } = await db.storage.from(BUCKET).upload(storageKey(p), body, { contentType: 'image/webp', upsert: true });
-    if (error) { failed.push(`${p}: ${error.message}`); continue; }
+  for (const [key, packPath] of moves) {
+    const body = readFileSync(join(PACK, packPath));
+    const { error } = await db.storage.from(BUCKET).upload(key, body, { contentType: 'image/webp', upsert: true });
+    if (error) { failed.push(`${packPath}: ${error.message}`); continue; }
     if (++done % 100 === 0) console.log(`  ${done}/${uploads.length}`);
   }
   console.log(`  uploaded ${done}/${uploads.length}`);
@@ -330,8 +355,8 @@ if (WRITE) {
     // the movement would come out with no picture and no complaint.
     if (!existing.has(p.id)) { failed.push(`${p.id}: no such row in the catalogue`); continue; }
     const { error } = await db.from('exercises').update({
-      image_paths: p.confirmedStills.map(storageKey),
-      animation_path: p.confirmedAnimation ? storageKey(p.confirmedAnimation) : null,
+      image_paths: p.confirmedStills,
+      animation_path: p.confirmedAnimation,
       demo_licence: demoLicence,
     }).eq('id', p.id);
     if (error) { failed.push(`${p.id}: ${error.message}`); continue; }

@@ -346,9 +346,29 @@ export async function spotifySearchTracks(queries: string[], want: number, salt:
   const out: { title: string; artist: string; uri: string | null }[] = [];
   const seen = new Set<string>();
   for (let qi = 0; qi < queries.length && out.length < want; qi++) {
-    const offset = Math.min(950, ((salt * 3 + qi * 5) % 19) * 50);
+    // Paging deep into a search is how the same seeds return a different
+    // playlist each time you press Regenerate. It is also the part Spotify can
+    // refuse: it answers 400 "Invalid limit" when offset + limit exceeds what
+    // the query can serve, and that limit is not the documented 1000 for every
+    // query — a narrow one ("chill stretching") runs out far sooner.
+    //
+    // So a refused PAGE is not a refused SEARCH. Falling back to the first page
+    // keeps the tracks; only the shuffle is lost, which nobody can see. Before
+    // this, one 400 on one seed threw out of the whole loop, discarded every
+    // track already gathered from earlier seeds, and put a Spotify error over a
+    // screen that had just built a working playlist from the built-in list.
     const q = encodeURIComponent(queries[qi]);
-    const r = await api<any>(`/search?q=${q}&type=track&limit=50&offset=${offset}`);
+    const offset = Math.min(900, ((salt * 3 + qi * 5) % 19) * 50);
+    let r: any = null;
+    try {
+      r = await api<any>(`/search?q=${q}&type=track&limit=50&offset=${offset}`);
+    } catch (e) {
+      // Only a refusal of the PAGE is retried. A dead token or a revoked scope
+      // fails the same way at offset 0, so rethrowing those is the honest
+      // outcome — the caller says "Spotify search failed" and means it.
+      if (offset === 0) throw e;
+      r = await api<any>(`/search?q=${q}&type=track&limit=50&offset=0`);
+    }
     const items = r?.tracks?.items ?? [];
     for (const it of items) {
       const id = it?.id; if (!id || seen.has(id) || !it?.name) continue;

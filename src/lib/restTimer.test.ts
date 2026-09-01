@@ -156,16 +156,34 @@ recordRestSoundConsent('yes');
 eq(restSoundConsent(), 'yes', 'and it can be changed by the member tapping the switch back on');
 
 // ── what the switch says about itself ─────────────────────────────────────
-ok(/mute switch/.test(restSoundNote(true)),
-  'the working note names the mute switch, because a member whose phone is on silent will otherwise report the chime as broken');
-ok(/notification/.test(restSoundNote(true)),
-  'and names what actually happens when the phone is in a pocket, rather than implying the chime plays from there');
-ok(/build/.test(restSoundNote(false)),
-  'A BUILD WITH NO AUDIO SAYS SO — a switch offering a sound the binary cannot make is the expo-video defect again');
-ok(!/mute switch/.test(restSoundNote(false)),
-  'and it does not go on describing behaviour this install does not have');
-ok(restSoundNote(true) !== restSoundNote(false),
-  'the two cases are genuinely different sentences, not one string with a flag nobody reads');
+//
+// The note has to be true on the handset holding it. It named the MUTE SWITCH
+// on every platform, and no Android phone has one — so the single sentence the
+// app offers to explain a silent chime sent Android members looking for a
+// control that is not on their device, and the bug they would file is "the
+// toggle is on and nothing happens". The behaviour itself is the same on both:
+// expo-audio maps `playsInSilentMode: false` to the iOS mute switch and to the
+// Android RINGER, so silent and vibrate both suppress it there.
+ok(/mute switch/.test(restSoundNote(true, 'ios')),
+  'on iOS the note names the mute switch, because a member whose phone is on silent will otherwise report the chime as broken');
+ok(!/mute switch/.test(restSoundNote(true, 'android')),
+  'AN ANDROID PHONE HAS NO MUTE SWITCH — naming one points the member at hardware their handset does not have');
+ok(!/mute switch/.test(restSoundNote(true, 'other')),
+  'and neither has anything that is not a handset');
+ok(/silent or vibrate/.test(restSoundNote(true, 'android')),
+  'so Android names what actually silences it: expo-audio gates play() on the ringer, and VIBRATE suppresses the chime exactly as silent does');
+for (const p of ['ios', 'android', 'other'] as const) {
+  ok(/notification/.test(restSoundNote(true, p)),
+    `${p} names what actually happens when the phone is in a pocket, rather than implying the chime plays from there`);
+  ok(/build/.test(restSoundNote(false, p)),
+    `${p}: A BUILD WITH NO AUDIO SAYS SO — a switch offering a sound the binary cannot make is the expo-video defect again`);
+  ok(!/mute switch/.test(restSoundNote(false, p)),
+    `${p}: and it does not go on describing behaviour this install does not have`);
+  ok(restSoundNote(true, p) !== restSoundNote(false, p),
+    `${p}: the two cases are genuinely different sentences, not one string with a flag nobody reads`);
+}
+ok(restSoundNote(true, 'ios') !== restSoundNote(true, 'android'),
+  'the two platforms do not share one sentence — that sharing is the whole defect');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('restTimer tests passed');

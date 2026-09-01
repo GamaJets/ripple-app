@@ -23,7 +23,8 @@
 //     answers "not in our catalogue" when tapped. That is precisely what
 //     happened to 80 movements once already; see 74-repdb-catalogue.sql.
 //
-//   · the MEDIA FILE is named by RepDB's own id. On disk the picture for
+//   · the MEDIA FILE is named by RepDB's own id — or, for six records, by the
+//     `image_alias` they borrow artwork under. On disk the picture for
 //     "Bent-Over Barbell Row" is `barbell-row-start.webp`, not
 //     `bent-over-barbell-row-start.webp`. Building the filename from the row id
 //     finds nothing for those same 80 rows, and the failure is a silent one:
@@ -100,6 +101,10 @@ export const slug = (s: string | null | undefined): string =>
 export type RepdbRecord = {
   id?: string | null;
   name_en?: string | null;
+  /** Set when this movement REUSES another movement's artwork. The pack's own
+   *  README: "build their image (and animation) filenames from the alias slug,
+   *  not the `id`". Six records in the Standard bundle carry one. */
+  image_alias?: string | null;
   images?: { classic?: string[]; flat?: string[] } | null;
   animation?: boolean | null;
   animation_type?: string | null;
@@ -124,9 +129,25 @@ export function catalogueId(rec: RepdbRecord): string {
  * named function so that a future reader cannot mistake it for catalogueId():
  * the two return different strings for 80 of the 601 records, and the compiler
  * cannot tell you which one a call site wanted.
+ *
+ * ── image_alias comes FIRST, and skipping it looked like missing files ────
+ *
+ * A handful of movements are visual variants of another and ship no artwork of
+ * their own — Paused Overhead Press reuses Overhead Press's, Pause Deadlift
+ * reuses Deadlift's. Those records carry `image_alias`, and the pack's README
+ * is explicit that image AND animation filenames are built from the alias
+ * rather than from the id.
+ *
+ * Reading the id regardless does not fail loudly. It produces a filename that
+ * is simply not in the pack, so the importer reported "6 claim an animation
+ * with NO FILE" and "12 stills named in the JSON are absent" — which reads as
+ * the vendor shipping an incomplete archive, and was in fact us looking in the
+ * wrong place. Every one of those 18 files is present under the alias. Confirmed
+ * against the Standard bundle: keyed by id, 6 animations and 12 stills are
+ * missing; keyed by the alias, nothing is.
  */
 export function mediaKey(rec: RepdbRecord): string {
-  return slug(rec.id) || slug(rec.name_en);
+  return slug(rec.image_alias) || slug(rec.id) || slug(rec.name_en);
 }
 
 /** Which of the two shipped art styles to import. */
@@ -162,12 +183,17 @@ export function stillFiles(rec: RepdbRecord, style: Style): string[] {
 /**
  * The animation file for a record, or null when it claims none.
  *
- * Returning a path here is a CLAIM, not a confirmation. Six of the 489 records
- * that set `animation: true` in the Standard bundle have no file on disk under
- * that name, so the caller has to stat the file before writing animation_path —
- * a path written for a file that is not there produces a signed URL to nothing,
- * and the client sees a permanently spinning player rather than the still
- * frames it would otherwise have fallen back to.
+ * Returning a path here is a CLAIM, not a confirmation. The caller still has to
+ * stat the file before writing animation_path — a path written for a file that
+ * is not there produces a signed URL to nothing, and the client sees a
+ * permanently spinning player rather than the still frames it would otherwise
+ * have fallen back to.
+ *
+ * All 489 records that set `animation: true` in the Standard bundle do resolve
+ * to a file, but only via mediaKey() — six of them name their clip by
+ * `image_alias`, and 483 files serve the 489 records because those six share
+ * artwork with another movement. A pack where the stat fails is a pack to stop
+ * on, not one to write through.
  */
 export function animationFile(rec: RepdbRecord): string | null {
   if (!rec.animation) return null;

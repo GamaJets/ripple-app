@@ -80,7 +80,7 @@ export default function ExerciseScreen() {
   // that is the shape that already produced a client app and a coach app
   // disagreeing about the name of a muscle — worse here, because a picture
   // that fails to resolve is an empty box with no error to read.
-  const { frames, animUrl, equipmentUrl } = useExerciseMedia(detail);
+  const { frames, animUrl, animCacheKey, equipmentUrl } = useExerciseMedia(detail);
   const caption = demoCaption(detail?.source, frames.length);
 
   const G = layout.gutter;
@@ -111,7 +111,11 @@ export default function ExerciseScreen() {
           <ExerciseVideo video={clip} exerciseName={detail?.name || name} />
         ) : animUrl ? (
           <>
-            <DemoAnimation uri={animUrl} label={detail?.name || name} />
+            <DemoAnimation uri={animUrl} label={detail?.name || name}
+              // The stills, so the box is never empty while 1.6 MB of clip is on
+              // its way, and so a clip that never arrives lands on the picture we
+              // already had rather than on a hole.
+              stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
             {detail?.demoLicence !== 'commercial' ? (
               <View style={{ marginTop: sp.sm }}>
                 <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>

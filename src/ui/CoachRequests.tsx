@@ -104,12 +104,32 @@ export function CoachRequests() {
           Alert.alert('Could not accept', `${r.name} was not added. ${linkErr.message}`);
           setBusy(null); return;
         }
-        // coach_clients is keyed on the client's own id; name and mode are NOT NULL.
-        const { error } = await supabase.from('coach_clients').upsert(
-          { id: r.clientId, trainer_id: uid, name: r.name, mode: r.mode },
-          { onConflict: 'id' },
-        );
-        if (error) { Alert.alert('Could not accept', error.message); setBusy(null); return; }
+        // NO roster write here, and its absence is the fix.
+        //
+        // This used to upsert `coach_clients` right after the RPC, and it was
+        // the line that broke Accept:
+        //
+        //     Could not accept
+        //     new row violates row-level security policy (USING expression)
+        //     for table "coach_clients"
+        //
+        // `coach_clients` is keyed on the CLIENT's id alone. So when somebody
+        // already on another coach's roster is accepted, the upsert finds that
+        // row and becomes an UPDATE — and an UPDATE is checked against the
+        // EXISTING row's USING expression, `trainer_id = auth.uid()`. The row
+        // belongs to the previous coach, so this coach is refused. Correctly:
+        // they were asking to write another coach's roster row.
+        //
+        // supabase/parts/155 moved the write INSIDE `link_coaching`, where it
+        // runs as the definer and may retire the old coach's row — something no
+        // coach may do themselves. The SQL landed and this caller did not, so
+        // the app went on making the refused write after the RPC had already
+        // made the correct one. `link_coaching` also takes the name from the
+        // profile rather than the caller, so a coach cannot file somebody under
+        // a name of their choosing.
+        //
+        // If a roster row is ever missing after an accept, the bug is in that
+        // function and belongs there — not in a second write from here.
       }
       const { error: uErr } = await supabase.from('coach_requests')
         .update({ status: accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() })

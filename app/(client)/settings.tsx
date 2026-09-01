@@ -36,7 +36,7 @@
 // its complexity — a failed read rendered as "no request" would tell somebody who
 // asked to be erased that they never asked, which is the one wrong answer here.
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -52,11 +52,23 @@ import { deviceUnitNote } from '../../src/lib/unitPreference';
 import { useAuth } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
-import { restSoundNote } from '../../src/lib/restTimer';
+import { restSoundNote, type SoundPlatform } from '../../src/lib/restTimer';
 import { SOUNDS_AVAILABLE } from '../../src/ui/sounds';
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
+
+/**
+ * Which phone the rest-timer sound note is about.
+ *
+ * Read once at module load, because it cannot change while the app is running —
+ * the same reasoning as DEVICE_REGION in src/ui/settings.tsx. It exists because
+ * that note used to name the MUTE SWITCH on every platform and Android phones
+ * do not have one, so the only sentence explaining a silent chime sent Android
+ * members hunting for a control that is not on their handset. See restSoundNote.
+ */
+const SOUND_PLATFORM: SoundPlatform =
+  Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'other';
 
 /**
  * The pill switch used down the right-hand side of this screen.
@@ -374,7 +386,7 @@ export default function Settings() {
               before — see the long note above togglePush — and this one is
               wired at the speaker rather than at each call site so there is no
               second place to forget it. */}
-          <Row t={t} label="Rest Timer Sound" sub={restSoundNote(SOUNDS_AVAILABLE)}
+          <Row t={t} label="Rest Timer Sound" sub={restSoundNote(SOUNDS_AVAILABLE, SOUND_PLATFORM)}
             right={<Toggle t={t} on={st.restSound} label="Rest Timer Sound" onPress={() => st.set({ restSound: !st.restSound })} />} />
         </Section>
 

@@ -30,7 +30,7 @@ import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, Field, fig, ChipGrid } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, Field, fig, ChipGrid, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -71,6 +71,9 @@ import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
 import { RECOVERY_ACTIVITIES } from '../../src/lib/recoveryActs';
 import { HIIT_ACTIVITIES, MOBILITY_ACTIVITIES } from '../../src/lib/workoutKind';
+import { STRETCH_ROUTINES, routineSummary, type StretchRoutine } from '../../src/lib/stretchRoutine';
+import { buildRoutine, BUILD_MINUTES, STRETCH_FOCUS } from '../../src/lib/stretchBuilder';
+import { StretchRunner } from '../../src/ui/StretchRunner';
 import { attributionLine } from '../../src/lib/workoutAttribution';
 import { dayKeyOf, instantForDay, readWorkoutEdit } from '../../src/lib/entryEdit';
 import { useSettings } from '../../src/ui/settings';
@@ -137,12 +140,36 @@ const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility' | 'recovery', string[
   mobility: names(MOBILITY_ACTS),
   recovery: names(RECOVERY_ACTS),
 };
-const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility'], ['recovery', 'Recovery']] as const;
+// 'stretch' is a MODE, not a kind, and the difference is the whole design of
+// this row. KIND_LABEL in src/lib/workoutKind.ts already documents the same
+// separation for the entry beside it: 'strength' reads "Strength" on a calendar
+// dot and "Program" here, because this row names WHAT YOU ARE ABOUT TO DO and a
+// kind names WHAT A PAST SESSION WAS.
+//
+// So Stretch opens the routine library, and a routine finished there is
+// committed as a MOBILITY session called "Stretching" — the identical entry the
+// Mobility chip has always written. It is not a sixth WorkoutKind: there is no
+// `kind` column on `workouts`, so a kind is derived from the exercise name, and
+// promoting "Stretching" out of MOBILITY_ACTIVITIES would silently re-colour
+// every mobility session anybody has ever logged. The reasoning in full is at
+// the head of src/lib/stretchRoutine.ts.
+const WTYPES = [['strength', 'Program'], ['cardio', 'Cardio'], ['hiit', 'HIIT'], ['mobility', 'Mobility'], ['recovery', 'Recovery'], ['stretch', 'Stretch']] as const;
+
+/** What this screen is currently offering to do. Two of the six are not a
+ *  clock over an activity: 'strength' is today's programme, and 'stretch' is a
+ *  library of guided routines. */
+type TrainMode = 'strength' | 'cardio' | 'hiit' | 'mobility' | 'recovery' | 'stretch';
 
 /** The four session types that are an activity and a clock rather than a list
  *  of lifts. Named because both the log form and the live runner below branch
  *  on it, and recovery has to stay distinguishable from the other three. */
 type SessionKind = 'cardio' | 'hiit' | 'mobility' | 'recovery';
+
+/** True for a mode that IS a clock over an activity — the four above, and not
+ *  the programme or the stretch library. One predicate rather than
+ *  `m !== 'strength'` repeated, which is what silently started indexing
+ *  SESSION_TYPES with 'stretch' the moment a sixth mode existed. */
+const isSessionKind = (m: TrainMode): m is SessionKind => m !== 'strength' && m !== 'stretch';
 const KIND_LABEL: Record<SessionKind, string> = { cardio: 'Cardio', hiit: 'HIIT', mobility: 'Mobility', recovery: 'Recovery' };
 
 // Approx METs per activity — kcal = MET x weight(kg) x hours (standard estimate).
@@ -208,9 +235,9 @@ export default function Train() {
   // right type, so logging a sauna is one tap from the screen that shows it.
   // Anything unrecognised falls back to the program, which is the default.
   const { mode: modeParam } = useLocalSearchParams<{ mode?: string }>();
-  const startMode = (['strength', 'cardio', 'hiit', 'mobility', 'recovery'] as const)
+  const startMode: TrainMode = (['strength', 'cardio', 'hiit', 'mobility', 'recovery', 'stretch'] as const)
     .find((m) => m === modeParam) ?? 'strength';
-  const [mode, setMode] = useState<'strength' | 'cardio' | 'hiit' | 'mobility' | 'recovery'>(startMode);
+  const [mode, setMode] = useState<TrainMode>(startMode);
   const [swaps, setSwaps] = useState<Record<string, string>>({});
   // `kg` is KILOGRAMS, whatever unit the member typed it in. The conversion
   // happens once, in `LogRow` at the keyboard, rather than being deferred to
@@ -275,6 +302,32 @@ export default function Train() {
   // modal is open, so a session that began as Recovery is still saved as
   // recovery even if the chips underneath are touched behind it.
   const [timed, setTimed] = useState<{ kind: SessionKind; activity: string } | null>(null);
+  // The routine being followed, or null. Held here rather than inside the
+  // runner so the modal is MOUNTED only while one is running — the same reason
+  // the timed runner is, and for the same effect: a routine reopened starts at
+  // its first position with a full clock instead of carrying the last one's.
+  const [stretchOn, setStretchOn] = useState<StretchRoutine | null>(null);
+  // What the member has told the builder: how long they have, which part of
+  // themselves, and which of the several routines that could produce.
+  //
+  // The seed is reset by both other setters on purpose. Changing the duration
+  // or the area is a NEW question and should be answered with that question's
+  // first, canonical routine — carrying rotation four across to it would mean
+  // the ten-minute leg routine somebody saw last week is not the one they get
+  // this week, for no reason they could see. Rotating is something "Build
+  // Another" does, deliberately, and nothing else touches it.
+  const [buildMins, setBuildMins] = useState(BUILD_MINUTES[1]);
+  const [buildFocus, setBuildFocus] = useState(STRETCH_FOCUS[0].id);
+  const [buildSeed, setBuildSeed] = useState(0);
+  // Built on every change of the three, and not on a button. There is no read
+  // behind it — src/lib/stretchBuilder.ts holds the catalogue as a constant and
+  // says at length why — so this is arithmetic over 51 rows and costs less than
+  // the tap that would have asked for it. A "Build" button would only be a
+  // chance to leave a stale routine on screen under changed chips.
+  const built = useMemo(
+    () => buildRoutine({ minutes: buildMins, focus: buildFocus, seed: buildSeed }),
+    [buildMins, buildFocus, buildSeed],
+  );
 
   // While a session modal is open, poll local HR sources every 5s instead
   // of every 60s so the live heart rate actually tracks what you're doing. Cloud
@@ -306,10 +359,10 @@ export default function Train() {
   // attempt would fail where the first worked — and it would also fight a
   // manual chip choice every time the tab regained focus.
   useEffect(() => {
-    const m = (['strength', 'cardio', 'hiit', 'mobility', 'recovery'] as const).find((x) => x === modeParam);
+    const m = (['strength', 'cardio', 'hiit', 'mobility', 'recovery', 'stretch'] as const).find((x) => x === modeParam);
     if (!m) return;
     setMode(m);
-    if (m !== 'strength') setCtype(SESSION_TYPES[m][0]);
+    if (isSessionKind(m)) setCtype(SESSION_TYPES[m][0]);
     router.setParams({ mode: undefined });
   }, [modeParam]);
  const [dist, setDist] = useState(''); const [unit, setUnit] = useState<'km' | 'mi'>('km');
@@ -756,7 +809,7 @@ export default function Train() {
 
   const logCardio = () => {
     const m = parseInt(mins, 10) || 0; if (!m) return;
-    void commitSession(mode === 'strength' ? 'cardio' : mode, ctype, m, {
+    void commitSession(isSessionKind(mode) ? mode : 'cardio', ctype, m, {
       // `readNumber`, not `parseFloat`. Distance is the one cardio figure that is
       // genuinely fractional — 12.7 km is an ordinary run — so its box is a decimal
       // pad, and the decimal key on that pad is a comma in most of Europe.
@@ -925,9 +978,16 @@ export default function Train() {
             {WTYPES.map(([id, label]) => {
               const on = mode === id;
               return (
-                <Pressable key={id} onPress={() => { setMode(id); if (id !== 'strength') setCtype(SESSION_TYPES[id][0]); }}
+                <Pressable key={id} onPress={() => { setMode(id); if (isSessionKind(id)) setCtype(SESSION_TYPES[id][0]); }}
                   style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
-                  <Text style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.ink : t.ink3 }}>{label}</Text>
+                  {/* One line, shrunk to fit. A sixth chip took the widest label
+                      — "Mobility" — under the width it needs at 13pt on a 375pt
+                      phone, and the default is to wrap: five chips one line tall
+                      beside one that is two, with the row's baseline pulled
+                      down. `adjustsFontSizeToFit` gives up a point of size on
+                      the two longest rather than the layout. */}
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
+                    style={{ ...ty.label, fontWeight: on ? '500' : '400', color: on ? t.ink : t.ink3 }}>{label}</Text>
                 </Pressable>
               );
             })}
@@ -1196,6 +1256,105 @@ export default function Train() {
                   <Cta label="Save Workout to Log" wide onPress={saveManual} />
                 </View>
               ) : null}
+            </View>
+          ) : mode === 'stretch' ? (
+            /* ── the stretch library ───────────────────────────────────────
+               A list of routines rather than a clock over an activity, because
+               the report was not "there is no stretch chip" on its own — it was
+               "there should be stretch programs and they should have animations
+               demonstrating the stretches". A sixth chip that only asked for a
+               number of minutes would have answered the first four words of
+               that and none of the rest.
+
+               So the duration IS asked for, at the top, and it produces a
+               programme rather than a stopwatch: the chips below build a real
+               routine out of the catalogue and hand it to the same runner the
+               six written ones use. Minutes and routines, not minutes instead
+               of routines. */
+            <View>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.xs }}>Stretch routines</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+                Guided, one position at a time, with the hold counted down for you. Twelve stretches in the catalogue are moving
+                sequences and play as animations; the rest are held, and a still is what a held stretch looks like.
+              </Text>
+
+              {/* ── built to fit the time you have ─────────────────────────
+                  The six below are fixed lengths, which answers "give me a
+                  good back routine" and does not answer "I have ten minutes".
+                  Two rows of chips and the routine is already built underneath
+                  them — see src/lib/stretchBuilder.ts, which holds all of the
+                  deciding and none of the drawing. */}
+              <SectionHead title="Built for the Time You Have" note="Pick how long you have and what you want to loosen." />
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {BUILD_MINUTES.map((n) => (
+                  <Pressable key={n} accessibilityRole="button" accessibilityLabel={`Build a ${n} minute routine`}
+                    accessibilityState={{ selected: buildMins === n }}
+                    onPress={() => { setBuildMins(n); setBuildSeed(0); tapLight(); }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: buildMins === n ? t.brand : t.surface2 }}>
+                    {/* "min" stays lower case — it is a unit and not a word to
+                        capitalise, which is written down in coverage.test.ts. */}
+                    <Text style={{ ...ty.label, ...numeric, fontWeight: buildMins === n ? '500' : '400', color: buildMins === n ? t.brandInk : t.ink2 }}>{n} min</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {STRETCH_FOCUS.map((f) => (
+                  <Pressable key={f.id} accessibilityRole="button" accessibilityLabel={`Stretch your ${f.phrase}`}
+                    accessibilityState={{ selected: buildFocus === f.id }}
+                    onPress={() => { setBuildFocus(f.id); setBuildSeed(0); tapLight(); }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: buildFocus === f.id ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, fontWeight: buildFocus === f.id ? '500' : '400', color: buildFocus === f.id ? t.brandInk : t.ink2 }}>{f.label}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              {/* There is no load status here and there is deliberately no
+                  spinner: nothing is fetched. A problem is therefore always
+                  something about the request itself, and it is worded as
+                  something we could not do rather than something you got
+                  wrong. */}
+              {built.problem ? (
+                <Notice tone={t.s3} kicker="Stretch" title="We could not build that one" note={built.problem} />
+              ) : null}
+
+              {built.routine ? (
+                <View>
+                  <ListRow icon="clock" title={built.routine.title}
+                    note={`${routineSummary(built.routine)} · ${built.routine.note}`}
+                    onPress={() => { if (built.routine) { setStretchOn(built.routine); tapLight(); } }} />
+                  {/* Said UNDER the routine rather than instead of it. Asked
+                      for twenty minutes of shoulders we have seven stretches
+                      for, the answer is those seven and a sentence — not a
+                      repeat of them, and not a two-minute hold on each. */}
+                  {built.shortfall ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{built.shortfall}</Text>
+                  ) : null}
+                  {/* Only offered when there is genuinely another one to
+                      build. On a focus whose whole list is already in the
+                      routine, this button would redraw the same stretches and
+                      look broken. */}
+                  {built.canVary ? (
+                    <View style={{ alignSelf: 'flex-start', marginTop: sp.xs }}>
+                      <Ghost label="Build Another" icon="swap" onPress={() => { setBuildSeed((n) => n + 1); tapLight(); }} />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              <Rule />
+
+              <SectionHead title="Ready-Made Routines" note="Six written routines, each with a fixed set of stretches." />
+              {STRETCH_ROUTINES.map((r) => (
+                <ListRow key={r.id} icon="clock" title={r.title} note={`${routineSummary(r)} · ${r.note}`}
+                  onPress={() => { setStretchOn(r); tapLight(); }} />
+              ))}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: layout.section }}>
+                A finished routine is written to your log as a mobility session called Stretching — the same entry the
+                Mobility chip makes, so it is counted once and not twice. That is true of a routine you built and one you
+                picked: both are the same session to your calendar and to your coach.
+              </Text>
             </View>
           ) : (
             <View>
@@ -1613,6 +1772,23 @@ export default function Train() {
             // makes saying so useful, because the Save button is still there.
             onSave={async (v) => { const ok = await commitSession(timed.kind, timed.activity, v.mins, v); if (ok) setTimed(null); return ok; }}
             onClose={() => setTimed(null)}
+          />
+        ) : null}
+      </Modal>
+
+      {/* Same contract as the timed runner above: it never writes the log
+          itself, `commitSession` does, and the sheet stays up until the row is
+          actually on the server. A stretch routine commits as a MOBILITY
+          session named "Stretching" — the entry the Mobility chip has always
+          made — so it is counted once, in one place, and a session logged
+          before this feature existed still reads exactly as it did. */}
+      <Modal visible={stretchOn != null} animationType="slide" onRequestClose={() => setStretchOn(null)}>
+        {stretchOn ? (
+          <StretchRunner
+            t={t}
+            routine={stretchOn}
+            onSave={async (mins) => { const ok = await commitSession('mobility', 'Stretching', mins); if (ok) setStretchOn(null); return ok; }}
+            onClose={() => setStretchOn(null)}
           />
         ) : null}
       </Modal>

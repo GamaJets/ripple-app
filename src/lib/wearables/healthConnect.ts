@@ -222,6 +222,49 @@ export function openHealthConnect(): void {
 let glucoseAskInFlight: Promise<void> | null = null;
 
 /**
+ * How long anything will WAIT on that ask before going and asking Health
+ * Connect itself what the permission state is.
+ *
+ * ── The wedge this exists to stop ──────────────────────────────────────────
+ *
+ * `requestPermission` resolves off an Android activity result, and an activity
+ * result is not guaranteed to arrive: the note on `requestGlucoseAuth` already
+ * says the promise does not resolve if the app is killed while the system
+ * screen is up, and a host activity that is destroyed and recreated underneath
+ * it orphans the promise the same way without killing the process. A bare
+ * `await` on that promise never returns — and the only caller is
+ * `importFromHealth`, which the glucose screen wraps in a `busy` flag. So one
+ * dropped activity result left the Import button reading "Reading…" forever,
+ * for the rest of the app's life, on every subsequent tap and every remount,
+ * with no error anywhere to explain it.
+ *
+ * Two minutes rather than a few seconds because the thing being waited on is a
+ * PERSON reading a permission screen, and cutting them off mid-decision would
+ * be inventing a refusal. Nothing is inferred from the deadline expiring in any
+ * case: `hasGlucosePermission()` is asked again immediately afterwards and is
+ * authoritative whether or not the ask ever settled, so the worst outcome of
+ * expiring early is the honest 'denied' sentence and a second tap that works.
+ *
+ * The LATCH is not cleared by the deadline — only by the ask actually settling.
+ * A second caller arriving while the screen is genuinely still up joins the
+ * same ask rather than raising a second one.
+ */
+const ASK_DEADLINE_MS = 120_000;
+
+/** Settle when `p` does, or when the deadline passes, whichever is first. Never
+ *  rejects and never reports which happened: the caller re-reads the permission
+ *  afterwards, and that answer is better than either. */
+function withDeadline(p: Promise<void>, ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    // Unreferenced so a pending deadline cannot hold a JS runtime open. Guarded
+    // because React Native's setTimeout returns a number with no `unref`.
+    (timer as any)?.unref?.();
+    void p.then(() => { clearTimeout(timer); resolve(); }, () => { clearTimeout(timer); resolve(); });
+  });
+}
+
+/**
  * How many records to ask for at once, and how many pages to accept.
  *
  * A CGM writes a sample every five minutes — 288 a day, roughly 4,000 a
@@ -317,8 +360,17 @@ export async function fetchGlucose(sinceDays = 7): Promise<GlucoseRead> {
       readingCount: 0,
     });
     if (auto) {
-      if (!glucoseAskInFlight) glucoseAskInFlight = requestGlucoseAuth().catch(() => { /* declined, or the screen never appeared */ });
-      await glucoseAskInFlight;
+      if (!glucoseAskInFlight) {
+        glucoseAskInFlight = requestGlucoseAuth()
+          .catch(() => { /* declined, or the screen never appeared */ })
+          // Released once the ask has actually finished. It used to be held for
+          // the life of the process, so the module went on carrying a settled
+          // promise nobody could ever be waiting for.
+          .then(() => { glucoseAskInFlight = null; });
+      }
+      // Bounded — see ASK_DEADLINE_MS. The permission question below is asked
+      // again either way and is the authoritative answer.
+      await withDeadline(glucoseAskInFlight, ASK_DEADLINE_MS);
       granted = await hasGlucosePermission();
     }
     if (granted !== true) {

@@ -214,25 +214,65 @@ export function restSoundConsent(): SoundConsent { return soundAnswer; }
 export function recordRestSoundConsent(answer: 'yes' | 'no'): void { soundAnswer = answer; }
 
 /**
+ * Which phone the note is describing.
+ *
+ * `Platform.OS`, narrowed to the three cases this sentence has to tell apart,
+ * and PASSED IN rather than read here. This module is compiled a second time by
+ * tsconfig.test.json and run under plain node, where `react-native` does not
+ * resolve — the same constraint that keeps the consent latch above taking its
+ * answer from the caller instead of reading storage itself.
+ */
+export type SoundPlatform = 'ios' | 'android' | 'other';
+
+/**
  * The sentence under the Rest Timer Sound switch.
  *
- * Two versions, because there are two different truths and only one of them is
- * a setting. On an install made before expo-audio was added there is no audio
- * code in the binary at all, and a switch that offers a sound that build cannot
- * make is the expo-video defect again — a control for a feature that is not
- * there, with nothing on screen admitting it. That case says so and names the
- * fix, which is a new build rather than anything the member can do here.
+ * On an install made before expo-audio was added there is no audio code in the
+ * binary at all, and a switch that offers a sound that build cannot make is the
+ * expo-video defect again — a control for a feature that is not there, with
+ * nothing on screen admitting it. That case says so and names the fix, which is
+ * a new build rather than anything the member can do here.
  *
- * The working version states the two limits out loud rather than letting people
- * discover them: it obeys the phone's mute switch (the audio session is
- * `.ambient` on purpose — see src/ui/sounds.ts), and when the app is not on
- * screen it is a notification that arrives, not the chime, which is why it is
- * silent on a phone whose notifications are switched off. Neither is a defect,
- * and both are the kind of thing somebody would otherwise report as one.
+ * ── WHY THE WORKING SENTENCE IS PER-PLATFORM ───────────────────────────────
+ *
+ * It named the MUTE SWITCH on every platform, and an Android phone does not
+ * have one. The first handset this feature was ever put on — a Motorola Edge 60
+ * Fusion — has no such control anywhere on it, so the single sentence the app
+ * offers to explain a silent chime pointed at a piece of hardware the member
+ * cannot find, and the fault they would report is "the toggle is on and it
+ * never makes a noise".
+ *
+ * The BEHAVIOUR is right on both, and it is one behaviour described twice.
+ * `playsInSilentMode: false` maps on iOS to AVAudioSession category `.ambient`,
+ * which obeys the physical mute switch. expo-audio implements the same flag on
+ * Android against the RINGER: AudioModule.kt gates `play()` on
+ * `playsInSilentMode || audioManager.ringerMode == RINGER_MODE_NORMAL`, and a
+ * RingerModeReceiver pauses anything already sounding the moment the ringer
+ * leaves normal. So on Android the chime goes quiet when the phone is on silent
+ * OR ON VIBRATE — the right call in a gym, and what this now says out loud.
+ *
+ * Both versions also state the pocket limit rather than letting people discover
+ * it: when the app is not on screen it is a notification that arrives, not the
+ * chime, which is why it is silent on a phone whose notifications are switched
+ * off. Neither limit is a defect, and both are the kind of thing somebody would
+ * otherwise report as one.
  */
-export function restSoundNote(available: boolean): string {
+export function restSoundNote(available: boolean, platform: SoundPlatform): string {
   if (!available) {
     return 'This version of the app was installed before sounds were added, so it can only buzz. A newer build restores the chime.';
+  }
+  const pocket = 'while the app is in your pocket it arrives as a notification instead.';
+  if (platform === 'android') {
+    // No mute switch exists on this platform to point at. expo-audio maps
+    // `playsInSilentMode: false` to the RINGER here, so silent and vibrate both
+    // suppress the chime — see the note above.
+    return `A chime when your rest between sets is over. It goes quiet when your phone is on silent or vibrate, and ${pocket}`;
+  }
+  if (platform !== 'ios') {
+    // Anything that is not a handset. There is no mute switch and no ringer to
+    // name, and inventing one would be the same mistake in a third direction —
+    // so this describes the rule rather than the control.
+    return `A chime when your rest between sets is over. It follows however this device has been silenced, and ${pocket}`;
   }
   return 'A chime when your rest between sets is over. It follows your phone\u2019s mute switch, and while the app is in your pocket it arrives as a notification instead.';
 }

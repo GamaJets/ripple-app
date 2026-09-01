@@ -33,6 +33,7 @@ import {
   spotifyMyPlaylists, spotifyPlay, SpotifyError, type PlaylistRef,
 } from '../../src/lib/spotify';
 import { playlistLine } from '../../src/lib/spotifyPlayback';
+import { reportError } from '../../src/lib/reportError';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
@@ -200,7 +201,17 @@ export default function Music() {
      // not "your Spotify" — say which list this actually is.
      setPl({ ...base, subtitle: base.subtitle + ' · built-in list; Spotify matched too few tracks' });
    } catch (e) {
-     Alert.alert('Spotify', spotifyMessage(e, 'Could not search Spotify.'));
+     // No alert. The generate succeeded — `base` is a real playlist from the
+     // built-in list and it is on screen — so a modal saying "Spotify returned
+     // 400" over a working result reads as a failure when nothing failed for
+     // the person reading it. Reported exactly that way: an error box on top of
+     // a playlist that had just been built.
+     //
+     // The subtitle already carries it, in the one place somebody looking at
+     // this playlist will read: which list these tracks came from, and that
+     // Spotify was tried. That is the whole of what they can act on. The detail
+     // goes to reportError, where it is useful to us and not to them.
+     reportError('music.spotifySearch', e);
      setPl({ ...base, subtitle: base.subtitle + ' · built-in list; Spotify search failed' });
    } finally {
      setGenBusy(false);
@@ -280,55 +291,30 @@ export default function Music() {
  ))}
  </Section>
 
- {/* ── the account's own playlists ────────────────────────────────── */}
- {conn.spotify && !needsReconnect ? (
- <>
+
  <Rule />
+
+ {/* ── what to build ──────────────────────────────────────────────────
+     Reported as "I'm trying to build a playlist for the work out and it is
+     only showing playlists I have already made — it doesn't give me an
+     option to generate a new playlist."
+
+     The generator was here the whole time, under a heading that named a
+     SETTING rather than the action. "Build For" reads as a filter over the
+     list above it, and it sat below that list, so somebody looking for a way
+     to make a playlist scrolled past their own playlists, found a row of
+     chips, and reasonably concluded there was not one.
+
+     The heading now says what pressing on produces, and its note carries the
+     whole spec — "45 min · Lifting · Hard" — so the section states its output
+     before anything is tapped, rather than making the reader assemble that
+     from three rows of chips. */}
  <Section>
- <SectionHead title="Your Playlists" note={mine ? String(mine.length) : undefined} onPress={loadMine} />
- {mineBusy ? (
- <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.md }}>
- <ActivityIndicator size="small" color={t.ink3} />
- <Text style={{ ...ty.label, color: t.ink3 }}>Reading your Spotify…</Text>
- </View>
- ) : mineProblem ? (
- <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-start', paddingVertical: sp.md }}>
- <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, marginTop: 6 }} />
- <View style={{ flex: 1 }}>
- <Text style={{ ...ty.label, color: t.ink2 }}>{mineProblem}</Text>
- <Pressable onPress={loadMine} accessibilityRole="button" style={{ marginTop: sp.sm }}>
- <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try Again</Text>
- </Pressable>
- </View>
- </View>
- ) : mine && mine.length === 0 ? (
- <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
- This Spotify account has no playlists yet. Build one below and save it.
+ <SectionHead title="Build a Workout Playlist"
+ note={`${minutes} min · ${MODES.find((m) => m.id === mode)?.label ?? ''} · ${INTENSITY.find((x) => x.v === intensity)?.label ?? ''}`} />
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: -2, marginBottom: sp.lg }}>
+ Pick the work, how hard it is and how long you have. Nothing reaches your account until you save it.
  </Text>
- ) : (mine ?? []).map((p, i) => (
- <Pressable key={p.id} onPress={() => playPlaylist(p)} accessibilityRole="button" accessibilityLabel={'Play ' + p.name}
- style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
- {p.artUrl
- ? <Image source={{ uri: p.artUrl }} style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
- : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
- <Icon name="play" size={16} color={t.ink3} />
- </View>}
- <View style={{ flex: 1 }}>
- <Text numberOfLines={1} style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
- <Text numberOfLines={1} style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{playlistLine(p)}</Text>
- </View>
- <Icon name="play" size={15} color={t.ink3} />
- </Pressable>
- ))}
- </Section>
- </>
- ) : null}
-
- <Rule />
-
- {/* ── what to build ──────────────────────────────────────────────── */}
- <Section>
- <SectionHead title="Build For" note={`${minutes} min`} />
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
  {MODES.map((m) => <Chip key={m.id} on={mode === m.id} label={m.label} onPress={() => setMode(m.id)} />)}
  </View>
@@ -343,7 +329,7 @@ export default function Music() {
  <Pressable onPress={() => generate(salt + 1)} disabled={genBusy} accessibilityRole="button"
  style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginTop: sp.xl, opacity: genBusy ? 0.7 : 1, flexDirection: 'row', justifyContent: 'center', gap: sp.sm }}>
  {genBusy ? <ActivityIndicator color={t.brandInk} size="small" /> : null}
- <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{genBusy ? 'Finding songs…' : pl ? 'Regenerate playlist' : 'Generate workout playlist'}</Text>
+ <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{genBusy ? 'Finding songs…' : pl ? 'Regenerate Playlist' : 'Generate Workout Playlist'}</Text>
  </Pressable>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
  {conn.spotify && !needsReconnect
@@ -408,6 +394,49 @@ export default function Music() {
  </View>
  )}
  </Section>
+ {/* ── the account's own playlists ────────────────────────────────── */}
+ {conn.spotify && !needsReconnect ? (
+ <>
+ <Rule />
+ <Section>
+ <SectionHead title="Your Playlists" note={mine ? String(mine.length) : undefined} onPress={loadMine} />
+ {mineBusy ? (
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.md }}>
+ <ActivityIndicator size="small" color={t.ink3} />
+ <Text style={{ ...ty.label, color: t.ink3 }}>Reading your Spotify…</Text>
+ </View>
+ ) : mineProblem ? (
+ <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-start', paddingVertical: sp.md }}>
+ <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, marginTop: 6 }} />
+ <View style={{ flex: 1 }}>
+ <Text style={{ ...ty.label, color: t.ink2 }}>{mineProblem}</Text>
+ <Pressable onPress={loadMine} accessibilityRole="button" style={{ marginTop: sp.sm }}>
+ <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try Again</Text>
+ </Pressable>
+ </View>
+ </View>
+ ) : mine && mine.length === 0 ? (
+ <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
+ This Spotify account has no playlists yet. Build one above and save it.
+ </Text>
+ ) : (mine ?? []).map((p, i) => (
+ <Pressable key={p.id} onPress={() => playPlaylist(p)} accessibilityRole="button" accessibilityLabel={'Play ' + p.name}
+ style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+ {p.artUrl
+ ? <Image source={{ uri: p.artUrl }} style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
+ : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+ <Icon name="play" size={16} color={t.ink3} />
+ </View>}
+ <View style={{ flex: 1 }}>
+ <Text numberOfLines={1} style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
+ <Text numberOfLines={1} style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{playlistLine(p)}</Text>
+ </View>
+ <Icon name="play" size={15} color={t.ink3} />
+ </Pressable>
+ ))}
+ </Section>
+ </>
+ ) : null}
 
  </ScrollView>
  </SafeAreaView>

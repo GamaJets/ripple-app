@@ -12,7 +12,7 @@
 // the answer depends on the licence recorded against the row and on whether the
 // build is a release.
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, ActivityIndicator, Animated, Easing } from 'react-native';
+import { View, Text, Image, ActivityIndicator, Animated, Easing, AccessibilityInfo, StyleSheet } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from './nativeModules';
 import { Image as ExpoImage } from 'expo-image';
@@ -43,6 +43,29 @@ import { radius, sp, type as ty } from '../theme/scale';
  */
 const ANIMATED_IMAGE = /\.(webp|gif|apng)(\?|$)/i;
 
+/**
+ * Whether the person using the phone has asked the OS for less movement.
+ *
+ * Read once and then watched, because it is a Settings toggle rather than a
+ * build-time fact: somebody who turns it on mid-session because a screen made
+ * them queasy should not have to relaunch the app to be believed.
+ *
+ * Answering `false` while the real answer is being fetched is deliberate. The
+ * alternative — hold everything still until we know — makes every demonstration
+ * on every screen start frozen for a frame or two, which is a visible defect for
+ * everyone in order to be marginally more correct for a few milliseconds.
+ */
+function useReduceMotion(): boolean {
+  const [reduce, setReduce] = useState(false);
+  useEffect(() => {
+    let live = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((r) => { if (live) setReduce(r); }).catch(() => {});
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (r) => { if (live) setReduce(r); });
+    return () => { live = false; sub.remove(); };
+  }, []);
+  return reduce;
+}
+
 export function DemoVideo({ uri, label }: { uri: string; label: string }) {
   const t = useTheme();
   // An install made before expo-video was added has this screen and not the
@@ -71,21 +94,81 @@ export function DemoVideo({ uri, label }: { uri: string; label: string }) {
   );
 }
 
-export function DemoAnimation({ uri, label }: { uri: string; label: string }) {
+/**
+ * ── Why the still is rendered underneath, and then thrown away ─────────────
+ *
+ * The clip is about 1.6 MB and the two stills are about 66 KB, already fetched
+ * for the row's thumbnail in the library the client just came from. So the
+ * still is on screen at once and the clip arrives a second or two later on gym
+ * wifi. Without this the box is empty for that second or two, which reads as a
+ * broken picture rather than as a picture on its way.
+ *
+ * It is UNMOUNTED the moment the clip loads, not left behind it. The artwork is
+ * transparent WebP — leaving the still underneath would show the start position
+ * through the moving figure, which is a double exposure rather than a fallback.
+ *
+ * ── And why a failure here is silent ───────────────────────────────────────
+ *
+ * If the clip never arrives — no signal, a signature that expired mid-download,
+ * or one of the 115 movements that has no clip at all — onLoad simply never
+ * fires and the still stays. That is the correct end state and not an error:
+ * a fifth of the catalogue lives there permanently, so a retry button or a
+ * broken-image glyph would be telling most of those clients that something is
+ * wrong with a screen that is working exactly as designed.
+ */
+export function DemoAnimation({ uri, label, stillUrls = [], cacheKey }: {
+  uri: string;
+  label: string;
+  /** The row's stills, shown until the clip is decoded. Optional: a caller with
+   *  none gets the plain clip, which is what the screen did before. */
+  stillUrls?: string[];
+  /** The row's storage path. See the note on the source below — without it a
+   *  re-signed URL is a cache miss and the clip is downloaded again. */
+  cacheKey?: string;
+}) {
   const t = useTheme();
+  const reduceMotion = useReduceMotion();
+  const [loaded, setLoaded] = useState(false);
+  // A new clip is a new wait. Without this, moving from a movement that had one
+  // to a movement that has not loaded yet keeps `loaded` true and shows the
+  // empty box this whole component exists to avoid.
+  useEffect(() => { setLoaded(false); }, [uri]);
+
   if (!ANIMATED_IMAGE.test(uri)) return <DemoVideo uri={uri} label={label} />;
+
+  const showStill = !loaded && stillUrls.length > 0;
   return (
-    <ExpoImage
-      source={{ uri }}
-      contentFit="contain"
-      // expo-image animates WebP and GIF on both platforms; the built-in
-      // <Image> shows only the first frame on iOS, which looks like a still
-      // rather than like a failure.
-      autoplay
-      cachePolicy="disk"
-      accessibilityLabel={`${label}, looping demonstration`}
-      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
-    />
+    <View style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2, overflow: 'hidden' }}>
+      {showStill ? <View style={StyleSheet.absoluteFill}><FrameLoop urls={stillUrls} label={label} /></View> : null}
+      <ExpoImage
+        // ── cacheKey, or the bytes are fetched again every hour ───────────
+        //
+        // The bucket is private, so this URL carries a signature that expires;
+        // signedMedia.ts retires each one after 55 minutes and signs a fresh
+        // one. expo-image keys its disk cache by URL, so without a stable key
+        // every re-signing is a cache miss and the same 1.6 MB comes down the
+        // wire again — the exact shape of "the URL is cached and the bytes are
+        // not". The storage path never changes, so it is the key.
+        source={{ uri, cacheKey }}
+        contentFit="contain"
+        // expo-image animates WebP and GIF on both platforms; the built-in
+        // <Image> shows only the first frame on iOS, which looks like a still
+        // rather than like a failure.
+        //
+        // Looping is the file's own: transcode-demos.mjs writes `-loop 0` and
+        // these are two-second movement loops, so they run continuously with no
+        // begin or end to notice. Reduce Motion holds frame one instead — the
+        // same picture, at the same size, not moving.
+        autoplay={!reduceMotion}
+        cachePolicy="disk"
+        onLoad={() => setLoaded(true)}
+        // No onError branch on purpose. A clip that fails leaves the still up,
+        // which is a complete and honest screen; saying so would invent a fault
+        // out of the ordinary state of a fifth of the catalogue.
+        accessibilityLabel={reduceMotion ? `${label}, demonstration` : `${label}, looping demonstration`}
+        style={StyleSheet.absoluteFill}
+      />
+    </View>
   );
 }
 
@@ -121,6 +204,11 @@ const FADE_MS = 420;   // long enough to dissolve rather than cut
 
 export function FrameLoop({ urls, label }: { urls: string[]; label: string }) {
   const t = useTheme();
+  // Held on the start position when the OS has been asked for less movement.
+  // A dissolve between two postures is exactly the kind of repeating motion
+  // that setting exists to stop, and the start position alone still answers
+  // "what does this movement look like".
+  const reduceMotion = useReduceMotion();
   const [ready, setReady] = useState(false);
   // 0 → first frame, 1 → second. Everything else is interpolated from it.
   const progress = useRef(new Animated.Value(0)).current;
@@ -134,7 +222,7 @@ export function FrameLoop({ urls, label }: { urls: string[]; label: string }) {
   }, [urls.join('|')]);
 
   useEffect(() => {
-    if (!ready || urls.length < 2) return;
+    if (!ready || urls.length < 2 || reduceMotion) return;
     progress.setValue(0);
     // Ease in and out of each fade. A linear dissolve still reads as mechanical;
     // easing makes the hold at each end feel like the pause at the top and
@@ -146,7 +234,12 @@ export function FrameLoop({ urls, label }: { urls: string[]; label: string }) {
     const anim = Animated.loop(Animated.sequence([wait(HOLD_MS), leg(1), wait(HOLD_MS), leg(0)]));
     anim.start();
     return () => anim.stop();
-  }, [ready, urls.length, progress]);
+  }, [ready, urls.length, progress, reduceMotion]);
+
+  // Reduce Motion turned on mid-loop leaves the fade wherever it was, so the
+  // two frames sit half-dissolved into each other permanently. Put it back on
+  // the start position rather than stopping in place.
+  useEffect(() => { if (reduceMotion) progress.setValue(0); }, [reduceMotion, progress]);
 
   // Opposed opacities from ONE value, so the two never both dim mid-fade and
   // show the container through the gap.

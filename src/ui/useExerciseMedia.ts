@@ -26,6 +26,16 @@ export interface ExerciseMedia {
   /** The looping animation, or null when there is none for this movement or
    *  the licence does not permit showing it in this build. */
   animUrl: string | null;
+  /**
+   * A stable name for the animation's BYTES, for the image cache.
+   *
+   * The storage path, which never changes, rather than the URL, which is
+   * re-signed every 55 minutes. An image cache keyed by URL treats each fresh
+   * signature as a file it has never seen, so the clip — 1.6 MB of it — is
+   * pulled down again on the hour, every hour, for a movement the client has
+   * already looked at. Null when there is nothing to cache.
+   */
+  animCacheKey: string | null;
   /** A picture of the KIT, for the handful of rows that name a machine rather
    *  than a movement. Shown only when there is nothing else, and labelled as
    *  equipment — it is not a demonstration and must never be presented as
@@ -91,6 +101,10 @@ export function useExerciseMedia(detail: ExerciseDetail | null): ExerciseMedia {
     // are still served from it.
     frames: ourFrames.length ? ourFrames : vendorFrames,
     animUrl,
+    // Only for a clip we host. An evaluation asset is served off a laptop at a
+    // URL that is already stable, and caching one of those on a device for
+    // longer than the session is the opposite of what its licence wants.
+    animCacheKey: animUrl && animPath && needsSigning(animPath) ? animPath : null,
     // Deliberately NOT folded into `frames`. A screen that cross-fades this
     // would animate a static machine and caption it as somebody performing a
     // lift; the caller shows it separately, labelled as the kit.

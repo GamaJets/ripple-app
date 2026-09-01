@@ -301,7 +301,20 @@ export default function Glucose() {
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Could not be read just now.</Text>
           ) : g.readings.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              {known ? 'Nothing recorded in the last 14 days.'
+              {/* "Nothing recorded in the last 14 days." is what this said, and
+                  it is a sentence about the wrong thing. `g.status` is the
+                  status of REPPLE'S OWN TABLE — it says nothing whatever about
+                  the health store, which this screen has not read unless
+                  somebody pressed Import. So on a phone with no Health Connect,
+                  or with the permission refused, or simply never imported from,
+                  a successful read of an empty table told a person wearing a
+                  CGM that their monitor recorded nothing for a fortnight. That
+                  is the one claim on this screen they would act on, and it was
+                  the default state of the screen on a brand new install.
+
+                  The list is still empty and the count is still nought; what
+                  changes is whose absence it is reported as. */}
+              {known ? `No readings in Repple from the last 14 days. They arrive by importing from ${src.storeName} or by adding one by hand, so an empty list here is Repple’s record rather than a statement about what your monitor saw.`
                 : g.status === 'loading' ? 'Still loading.'
                 : 'More on record than we can read at once, so this is not a statement that nothing was recorded.'}
             </Text>

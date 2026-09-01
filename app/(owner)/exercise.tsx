@@ -55,7 +55,7 @@ export default function OwnerExercise() {
   // The same hook the client screen uses. Three apps showing the same
   // movement must resolve its pictures the same way, and a picture that fails
   // to resolve is a silent empty box rather than an error anybody sees.
-  const { frames, animUrl } = useExerciseMedia(detail);
+  const { frames, animUrl, animCacheKey } = useExerciseMedia(detail);
   const caption = demoCaption(detail?.source, frames.length);
 
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
@@ -83,7 +83,11 @@ export default function OwnerExercise() {
             note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
         ) : animUrl ? (
           <>
-            <DemoAnimation uri={animUrl} label={detail?.name || name} />
+            <DemoAnimation uri={animUrl} label={detail?.name || name}
+              // The stills, so the box is never empty while 1.6 MB of clip is on
+              // its way, and so a clip that never arrives lands on the picture we
+              // already had rather than on a hole.
+              stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
             {detail?.demoLicence !== 'commercial' ? (
               <View style={{ marginTop: sp.sm }}>
                 <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>

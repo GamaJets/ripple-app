@@ -87,6 +87,22 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   // string for this fixture, one of them has been "tidied" into the other and
   // 80 rows are about to lose their pictures — or gain unreachable ids.
   ok(mediaKey(rec) !== catalogueId(rec), 'the media key and the row id are NOT the same string');
+
+  // ── and image_alias beats the vendor id where it is present ──────────────
+  //
+  // The six records that reuse another movement's artwork. Reading `id` here
+  // does not throw and does not show up in a count: it builds a filename that
+  // is simply not in the pack, so the importer announced "6 claim an animation
+  // with NO FILE" and "12 stills are absent" and looked like an incomplete
+  // archive. Every one of those 18 files is present under the alias.
+  eq(mediaKey({ id: 'paused-ohp', name_en: 'Paused Overhead Press', image_alias: 'ohp' }), 'ohp',
+    'a record that borrows artwork is keyed by the alias, not by its own id');
+  eq(catalogueId({ id: 'paused-ohp', name_en: 'Paused Overhead Press', image_alias: 'ohp' }), 'paused-overhead-press',
+    'while its ROW is still keyed by its own displayed name — the alias is about files only');
+  eq(mediaKey({ id: 'pause-deadlift', name_en: 'Pause Deadlift', image_alias: null }), 'pause-deadlift',
+    'a null alias falls through to the vendor id rather than blanking the key');
+  eq(mediaKey({ id: 'pause-deadlift', name_en: 'Pause Deadlift', image_alias: '' }), 'pause-deadlift',
+    'and so does an empty one');
 }
 
 // ── stills come back in the order the screen cross-fades them ──────────────
@@ -115,6 +131,15 @@ const eq = (a: unknown, b: unknown, msg: string) => {
     'images/animations/barbell-row.webp', 'the animation is named by the vendor id too');
   eq(animationFile({ id: 'x', name_en: 'X', animation: false }), null, 'a record claiming none yields none');
   eq(animationFile({ id: 'x', name_en: 'X' }), null, 'and so does one that says nothing about it');
+  // The exact pair that came out unillustrated: plain Overhead Press played a
+  // clip and Paused Overhead Press showed two cross-faded stills, because the
+  // second one's animation was looked for under its own id. One file, both
+  // records — which is what sharing artwork means.
+  eq(animationFile({ id: 'paused-ohp', name_en: 'Paused Overhead Press', image_alias: 'ohp', animation: true }),
+    'images/animations/ohp.webp', 'an aliased record finds its clip under the alias');
+  eq(stillFiles({ id: 'paused-ohp', name_en: 'Paused Overhead Press', image_alias: 'ohp', images: { classic: ['start', 'peak'] } }, 'classic'),
+    ['images/classic/ohp-start.webp', 'images/classic/ohp-peak.webp'],
+    'and its stills too — the alias governs every filename, not just the animation');
 }
 
 // ── the whole plan for one record ──────────────────────────────────────────
