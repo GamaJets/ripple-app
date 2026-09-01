@@ -344,6 +344,22 @@ export default function Train() {
   const [confetti, setConfetti] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [customEx, setCustomEx] = useState<ProgramExercise[]>([]);
+  /**
+   * Sets, reps and load a member has changed on a PROGRAMME exercise.
+   *
+   * Keyed like `swaps`, by `dayIdx:key`, because that is what identifies one
+   * row on one day rather than a movement in general. Held apart from
+   * `customEx` because these rows still belong to the plan: the coach can
+   * change the programme underneath and everything else about the row should
+   * follow, while the three numbers the member set stay theirs.
+   *
+   * This exists because editing was reachable only for exercises the member had
+   * typed themselves — `replaceExercise` sent a programme lift to the SWAP
+   * sheet — so on the plan a coach had written, none of the three numbers could
+   * be changed at all. The load was the one people noticed, because it is the
+   * one that changes every week.
+   */
+  const [exEdits, setExEdits] = useState<Record<string, { sets?: number; reps?: string; loadKg?: number | null }>>({});
   const [addOpen, setAddOpen] = useState(false);
   // Exercises the user took off today, by uid. Today only — the programme
   // itself is not edited, so tomorrow's copy of the same lift still appears.
@@ -467,7 +483,14 @@ export default function Train() {
   const deload = deloadCheck(workoutLog);
   // Default: expand the first not-yet-finished exercise, collapse the rest (until the user taps).
   const isRemovedEx = (e: ProgramExercise) => removedEx.indexOf(`${dayIdx}:${e.key}`) >= 0;
-  const planEx = orderedExercises.filter((e) => !isRemovedEx(e));
+  // Applied here rather than at each render site: the ring, the set counter,
+  // the runner and the suggestion all read `e.sets`/`e.reps`, and an override
+  // honoured in only some of them is worse than none.
+  const withEdits = (e: ProgramExercise): ProgramExercise => {
+    const ed = exEdits[uid(e)];
+    return ed ? { ...e, ...(ed.sets != null ? { sets: ed.sets } : {}), ...(ed.reps != null ? { reps: ed.reps } : {}), ...(ed.loadKg !== undefined ? { loadKg: ed.loadKg } : {}) } : e;
+  };
+  const planEx = orderedExercises.filter((e) => !isRemovedEx(e)).map(withEdits);
 
   const isCustomEx = (e: ProgramExercise) => e.key.indexOf('custom-') === 0;
 
@@ -542,16 +565,28 @@ export default function Train() {
     );
   };
 
+  /**
+   * Open the editor for ANY exercise — one the member typed or one the coach
+   * planned. Sets, reps and the load are all editable either way; a programme
+   * row keeps its Swap action separately, because replacing the movement and
+   * correcting its numbers are different intentions.
+   */
+  /** The name the plan gives a row, so a rename is only recorded when it IS one. */
+  const planNameFor = (key: string) => (exercises.find((x) => x.key === key) || { name: '' }).name;
+
+  const openEditFor = (e: ProgramExercise) => {
+    setEditingKey(e.key);
+    setCxName(nameOf(e)); setCxSets(String(e.sets)); setCxReps(String(e.reps));
+    // Read back out in the unit the sheet is currently set to, so what is shown
+    // is what would be saved.
+    setCxWeight(e.loadKg == null ? '' : String(liftIn(e.loadKg, cxUnit)));
+    setAddOpen(true);
+  };
+
   /** Replace an exercise. A programme lift swaps to a catalogue alternative;
    *  one the user typed has none, so it opens for editing instead. */
   const replaceExercise = (e: ProgramExercise) => {
-    if (isCustomEx(e)) {
-      setEditingKey(e.key);
-      setCxName(e.name); setCxSets(String(e.sets)); setCxReps(String(e.reps));
-      // Read back out in the member's own unit, so what they see is what they typed.
-      setCxWeight(e.loadKg == null ? '' : String(liftIn(e.loadKg, cxUnit)));
-      setAddOpen(true);
-    } else setSwapFor(e);
+    openEditFor(e);
   };
 
   /** Commit the add sheet. Only clears the draft once the exercise is really
@@ -568,8 +603,19 @@ export default function Train() {
     const read = cxWeight.trim() ? readLift(cxWeight, cxUnit) : null;
     const loadKg = read && read.ok ? read.kg : null;
     if (editingKey) {
-      // Same key, so sets already logged against it survive the rename.
-      setCustomEx((prev) => prev.map((x) => (x.key === editingKey ? { ...x, name, sets, reps, loadKg } : x)));
+      const isCustom = editingKey.indexOf('custom-') === 0;
+      if (isCustom) {
+        // Same key, so sets already logged against it survive the rename.
+        setCustomEx((prev) => prev.map((x) => (x.key === editingKey ? { ...x, name, sets, reps, loadKg } : x)));
+      } else {
+        // A PROGRAMME row. The three numbers are recorded as an override rather
+        // than by rewriting the plan, so the coach's programme stays the
+        // programme and this stays the member's correction to it. A rename on a
+        // planned movement goes through `swaps`, which is what the Swap sheet
+        // already writes and what `nameOf` already reads.
+        setExEdits((prev) => ({ ...prev, [dayIdx + ':' + editingKey]: { sets, reps, loadKg } }));
+        if (name && name !== planNameFor(editingKey)) setSwaps((prev) => ({ ...prev, [dayIdx + ':' + editingKey]: name }));
+      }
     } else {
       const key = 'custom-' + Date.now();
       setCustomEx((p) => [...p, { key, name, group: 'Added', sets, reps, loadKg, alternatives: [] } as ProgramExercise]);
@@ -948,7 +994,17 @@ export default function Train() {
                                 genuinely have a demo — hiding the button meant a client
                                 whose coach had filmed exactly that could never reach it. */}
                             <Pressable accessibilityLabel={'Watch a demonstration of ' + nameOf(e)} accessibilityRole="button" onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: nameOf(e), from: 'clientWorkouts' } })} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
-                            <Pressable accessibilityRole="button" accessibilityLabel={isCustom ? 'Edit ' + nameOf(e) : 'Swap ' + nameOf(e)} onPress={() => replaceExercise(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name={isCustom ? 'pencil' : 'swap'} size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
+                            {/* A pencil on every row. It used to be a pencil
+                                only on exercises the member had typed, and a
+                                SWAP arrow on everything the coach had planned —
+                                so on a real programme there was no way to
+                                change the sets, the reps or the load at all.
+                                Swapping the movement is a different intention
+                                and keeps its own button beside this one. */}
+                            <Pressable accessibilityRole="button" accessibilityLabel={'Edit sets, reps and weight for ' + nameOf(e)} onPress={() => openEditFor(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
+                            {!isCustom ? (
+                              <Pressable accessibilityRole="button" accessibilityLabel={'Swap ' + nameOf(e) + ' for another movement'} onPress={() => setSwapFor(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
+                            ) : null}
                           </View>
                           <LogRow t={t} unit={wu} onLog={(reps, kg) => logSet(e, reps, kg)} />
                         </View>
