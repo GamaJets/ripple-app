@@ -169,9 +169,21 @@ export type HealthKey = typeof HEALTH_KEYS[number];
  * a difference between them would be a difference nobody intended.
  */
 export function sharedInjuries(injs: Injury[] = []): string {
-  const act = activeInjuries(injs);
-  if (!act.length) return '';
-  return act.map((i) => `${areaLabel(i.area)} (${i.severity})`).join('; ');
+  return sharedAreas(activeInjuries(injs));
+}
+
+/**
+ * The same redaction over a list that is ALREADY active.
+ *
+ * The roster carries a trimmed disclosure — area, severity, note — with the
+ * recovered ones kept in a separate field, so it has no `status` for
+ * `activeInjuries` to filter on. Rather than let the coach screens assemble the
+ * string themselves (which is how the note gets back in), the redaction is one
+ * function and `sharedInjuries` delegates to it.
+ */
+export function sharedAreas(list: readonly { area: string; severity: string }[] = []): string {
+  if (!list.length) return '';
+  return list.map((i) => `${areaLabel(i.area)} (${i.severity})`).join('; ');
 }
 
 /**
@@ -267,3 +279,202 @@ export const WITHHELD_NOTE =
  *  same words, on the screen that actually sends the injuries somewhere. */
 export const NOT_MEDICAL_ADVICE =
   'For pain, a new injury, or a diagnosis, see a doctor or physio before training.';
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * THE COACH'S SIDE OF THE SAME DOOR
+ *
+ * Everything above is about a MEMBER asking about themselves. This half is
+ * about a COACH asking about somebody else, and it is the same defect wearing
+ * a different hat — with one difference that makes it worse rather than
+ * better.
+ *
+ * ── What was already going out ────────────────────────────────────────────
+ *
+ * Two coach screens call `askCoach`, the unfiltered door, and both of them
+ * name the client:
+ *
+ *   app/(trainer)/dashboard.tsx · draftNudge   { name, goal, adherence, reason }
+ *   app/(trainer)/dashboard.tsx · genSummary   { name, goal, adherence,
+ *                                                recentMeals, composition }
+ *
+ * `composition` is `visceralFat`, `inbodyScore`, `leanMassKg`, `fatMassKg` and
+ * a left/right limb imbalance — a body-composition scan — and `recentMeals` is
+ * a list of what a named person ate. Nothing on either screen said any of this
+ * was leaving the phone. The member answered a consent question about their own
+ * coach chat, on their own device, and it has never governed this path.
+ *
+ * ── The difference, and why it decides the design ─────────────────────────
+ *
+ * On the member's side there is somebody in the room who can answer. Here there
+ * is not. The coach can consent to sending THEIR OWN figures — their takings,
+ * their session count, how many clients are drifting — because those are facts
+ * about the coach. They cannot consent on behalf of the person the question is
+ * about, and `COACH_SHARE_KEY` lives in that person's AsyncStorage on that
+ * person's handset, which this app cannot read from here.
+ *
+ * So the coach's ask carries the FITNESS tier about a client and never the
+ * health tier. Not because health data is categorically unsendable — the member
+ * can send their own, and does — but because the only person entitled to answer
+ * is not being asked. If the answer is ever moved to a column both sides can
+ * read, `clientAskContext` gains a consent parameter and `COACH_CLIENT_HEALTH`
+ * below becomes reachable; until then it is documented and unused, which is a
+ * better record of the decision than an absent list.
+ *
+ * ── And the name does not go at all, in any state ─────────────────────────
+ *
+ * Same argument as `name` above, and it survives the strongest objection to it:
+ * "but the reply has to greet them". It does not. The reply comes back with the
+ * literal placeholder `{name}` in it and the SCREEN substitutes — the coach is
+ * looking at their own client list and knows perfectly well who they asked
+ * about. `fillName` is that substitution and it is the same one the message
+ * templates use, so there is one placeholder convention in the coach app rather
+ * than two.
+ *
+ * The injury NOTE does not go either, by the same rule and for the stronger
+ * reason: `candidateNote` seeds it with the line off the member's uploaded
+ * document, and src/ui/injuryDocs.ts states the rule — the coach sees the
+ * extracted injury, never the document. A coach forwarding that to a model is
+ * the document leaving by a second door.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * The coach's own business figures. No person is named by any of them.
+ *
+ * An allowlist even though every one of these is the coach's own data about
+ * themselves, for the reason the header of this file gives about denylists: the
+ * next field somebody adds to an analytics digest will be a list of client
+ * names, and the default for a field nobody has thought about has to be "not
+ * sent".
+ *
+ * `currency` is in, and it matters: the digest prompt tells the model which ISO
+ * code the amounts are in so it does not write dollars at a coach in Dubai.
+ * Amounts with no currency are passed as the string the screen composes
+ * ("unknown — the gym has not set one"), never as a bare number.
+ */
+export const COACH_BUSINESS_KEYS = [
+  'sessionsDeliveredThisMonth', 'revenueAtOwnRate', 'currency',
+  'clients', 'avgAdherence', 'atRiskClients', 'onTrack', 'watch', 'atRiskLow',
+  'newClientsThisMonth', 'endedThisMonth', 'unreadThreads',
+] as const;
+
+/**
+ * What may travel about ONE client, with nothing on it that says who.
+ *
+ * Every one of these is a training fact the coach was given in order to coach:
+ * what they are working towards, how they are delivered, whether they are
+ * turning up, what they are on and what is next. The list is deliberately the
+ * coach-side echo of `FITNESS_KEYS` rather than a second vocabulary — a coach
+ * and a member asking the same question about the same training should be
+ * sending the same shape.
+ *
+ * `injuryAreas` is here and is the redacted form: `sharedInjuries` output, area
+ * and severity, no note, ever. It is in the fitness tier rather than the health
+ * one because a coach asking "what should they train next" and getting an
+ * answer that loads an injured knee is the failure this whole feature would be
+ * judged on — and the AREA is what stops it. The note adds nothing to that
+ * decision and is the part that came off a medical document.
+ */
+export const COACH_CLIENT_KEYS = [
+  'goal', 'coachedMode', 'adherence', 'lastActive', 'joinedMonthsAgo',
+  'programTitle', 'programFocus', 'nextLift', 'lastTrained', 'streak',
+  'sessionsLast30', 'unread', 'injuryAreas', 'reason',
+  'kcal', 'protein', 'carbs', 'fat', 'eatenToday', 'mealsLoggedCount', 'diet',
+] as const;
+
+/**
+ * The health tier for a client, documented and NOT SENT.
+ *
+ * Exported so that the assertion tying it to `clientAskContext` can exist: the
+ * test states that none of these ever survives the filter, which is a much
+ * stronger statement than the absence of a list would be, and it fails the day
+ * somebody adds one of them to `COACH_CLIENT_KEYS` without reading the header.
+ *
+ * `focusAreas` is in here rather than merely absent because it is the least
+ * obvious of them: it reads as a training field and it is derived from the
+ * member's progress PHOTOGRAPHS.
+ */
+export const COACH_CLIENT_HEALTH = [
+  'weightKg', 'bodyFatPct', 'muscleKg', 'visceralFat', 'inbodyScore',
+  'leanMassKg', 'fatMassKg', 'limbImbalance',
+  'readiness', 'readinessGaps', 'sleep', 'focusAreas',
+  'injuries', 'injuryNote', 'recentMeals',
+] as const;
+
+export type CoachBusinessKey = typeof COACH_BUSINESS_KEYS[number];
+export type CoachClientKey = typeof COACH_CLIENT_KEYS[number];
+
+/** Pick by name and drop `undefined`. The one mechanism both filters share, so
+ *  there is a single place that decides what "not sent" means. */
+function pick(full: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const v = full[k];
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * The coach's own numbers, filtered.
+ *
+ * Never null: there is no consent question here, because the subject and the
+ * asker are the same person. A field not in `COACH_BUSINESS_KEYS` is dropped
+ * however it got into the object.
+ */
+export function businessAskContext(full: Record<string, unknown>): Record<string, unknown> {
+  return pick(full, COACH_BUSINESS_KEYS);
+}
+
+/**
+ * One client, filtered, with no identity on it.
+ *
+ * The returned object is what a coach may ask a third party about somebody else
+ * without that person having been asked. It carries no name, no email, no
+ * photograph, no measurement, no note and nothing off a document.
+ *
+ * A caller may pass the whole client record; that is the point of doing this
+ * here rather than at the screen. Screens get edited by people who have not
+ * read this file, and `askAboutClient` in src/lib/coach.ts cannot be called
+ * without going past this function.
+ */
+export function clientAskContext(full: Record<string, unknown>): Record<string, unknown> {
+  return pick(full, COACH_CLIENT_KEYS);
+}
+
+/**
+ * The placeholder a reply refers to the client by, and how it comes back.
+ *
+ * One convention for the whole coach app: `{name}` is the client's first name
+ * and `{coach}` is the coach's. The model is told to write the placeholder; the
+ * screen substitutes before anybody reads it. The same two are what
+ * src/lib/messageTemplates.ts fills, so a coach who has learned the convention
+ * from a template recognises it in an AI draft.
+ */
+export const NAME_TOKEN = '{name}';
+
+/**
+ * Substitute the tokens, and leave an unfilled one visible.
+ *
+ * An unknown name yields the literal `{name}` rather than a blank or a guess —
+ * a draft reading "Hey {name}" is obviously unfinished and gets fixed, and a
+ * draft reading "Hey ," is sent.
+ */
+export function fillName(text: string, name: string | null | undefined, coach?: string | null): string {
+  let out = String(text ?? '');
+  const first = (name || '').trim().split(/\s+/)[0];
+  if (first) out = out.split(NAME_TOKEN).join(first);
+  const c = (coach || '').trim().split(/\s+/)[0];
+  if (c) out = out.split('{coach}').join(c);
+  return out;
+}
+
+/** What the coach is told about their assistant, on the screen. Sentence case;
+ *  it is prose under a heading. */
+export const COACH_ASK_WHAT_GOES =
+  'Your own figures go — sessions, clients, adherence, takings and the currency they are in. When you ask about one client, what goes is their goal, how they are coached, whether they are turning up, what they are training and which areas they have flagged as injured.';
+
+export const COACH_ASK_WHAT_NEVER_GOES =
+  'No name, no email and nothing that says who anybody is. No weight, body fat, scan, sleep or recovery figure. Nothing written in an injury note or read off a document, and nothing from your messages. Replies come back saying {name} and this screen fills it in.';
+
+export const COACH_ASK_NOT_ADVICE =
+  'It answers from the figures it is given and nothing else. It has not met your clients, it cannot see their form, and it is not a substitute for asking them.';

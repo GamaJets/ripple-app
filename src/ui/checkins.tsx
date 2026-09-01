@@ -43,7 +43,7 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { adoptServerId, isPending, localId, mergeLog } from '../lib/wellnessSync';
-import { classifyWrite, serverRows, type WriteOutcome } from '../lib/offlineQueue';
+import { classifyWrite, registerFlush, serverRows, type WriteOutcome } from '../lib/offlineQueue';
 import { useAuthRevision } from './authRevision';
 
 export interface CheckIn {
@@ -226,6 +226,27 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
     })();
     return () => { cancelled = true; };
   }, [authRev]);
+
+  /**
+   * Send the check-ins this device is holding that the server has never had.
+   *
+   * This is the queue in the app with somebody waiting at the other end, and
+   * until this function existed it drained on a launch that happened to mount
+   * this provider and on nothing else. A client who wrote to their coach from a
+   * changing room could be a day late being heard from. It is now also run on
+   * the reconnect edge and on returning to the foreground, through
+   * src/lib/offlineQueue.ts · `flushAll`.
+   */
+  const flushQueue = async (): Promise<void> => {
+    const owner = uidRef.current;
+    if (!USE_SUPABASE || !owner) return;
+    for (const c of listRef.current.filter((x) => isPending(x.id))) {
+      // Stop at the first silence: the rest would meet the same one.
+      if ((await send(owner, c)) === 'unsent') return;
+    }
+  };
+
+  useEffect(() => registerFlush('checkins', flushQueue), []);
 
   const sendCheckIn: CheckInsValue['sendCheckIn'] = async (c) => {
     const entry: CheckIn = { ...c, id: localId(), at: new Date().toISOString() };

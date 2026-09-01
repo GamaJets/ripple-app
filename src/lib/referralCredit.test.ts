@@ -21,10 +21,19 @@ import {
 } from './referralCredit';
 import type { LoadStatus } from '../ui/loadStatus';
 
+import { setAppLocale } from './locale';
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) =>
   ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
+
+// These assertions read dates in British order — the day first. That is no
+// longer what the app writes for everybody: src/lib/format.ts asks
+// src/lib/locale.ts, which reads the handset, so the same call produces
+// "Sep 2, 2026" on an American one. The locale is stated here for the same
+// reason this file states its timezones: a test that reads whatever the runner
+// happens to be set to is a test of the machine.
+setAppLocale('en-GB');
 
 // Exactly the shape my_referrals() answered with, live, on 2026-08-31: a first
 // name, a join timestamp, and a first-workout timestamp that is null for

@@ -12,6 +12,8 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+import { classifyWrite } from '../lib/offlineQueue';
+import { useOutbox } from './outbox';
 import { useAuthRevision } from './authRevision';
 
 export interface MeasureEntry {
@@ -78,14 +80,36 @@ function entryToRows(uid: string, e: MeasureEntry) {
   return rows;
 }
 
+/**
+ * What became of a tape measurement.
+ *
+ * 'stored'   the rows are on the server.
+ * 'queued'   nobody answered. The measurement is on this phone, in the outbox,
+ *            and it goes up when there is signal — under the timestamp it was
+ *            TAKEN, not the one it is sent at, which is what stops a Tuesday
+ *            measurement landing on Thursday's chart.
+ * 'refused'  the server read it and declined, or there was nothing to write, or
+ *            this device could not keep it. Nothing is waiting and the caller
+ *            has to say so.
+ */
+export type MeasureOutcome = 'stored' | 'queued' | 'refused';
+
 interface MeasureValue {
   entries: MeasureEntry[];
   /** Whether `entries` is the server's answer. Under 'error' an empty list
    *  means the history could not be read, not that there is none. */
   status: LoadStatus;
-  /** Resolves true only once the rows are on the server. False means the entry
-   *  is on this phone for this session only. */
-  addEntry: (vals: Partial<Omit<MeasureEntry, 'id' | 'at'>>) => Promise<boolean>;
+  /**
+   * Record a measurement.
+   *
+   * Three answers, not two. Before the outbox there were two states — on the
+   * server, or on this phone until the next launch and then gone — and a member
+   * taping themselves in a changing room with no signal got the second one with
+   * a sentence telling them to try again later, by which time the numbers were
+   * off the screen and they would have to re-measure. 'queued' is the state
+   * that did not exist.
+   */
+  addEntry: (vals: Partial<Omit<MeasureEntry, 'id' | 'at'>>) => Promise<MeasureOutcome>;
 }
 
 const Ctx = createContext<MeasureValue | null>(null);
@@ -95,6 +119,32 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<MeasureEntry[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const outbox = useOutbox();
+
+  /**
+   * Send the measurements this device is holding.
+   *
+   * Registered here rather than at the root, unlike the message handler: this
+   * provider is mounted for the whole app (app/_layout.tsx), so there is no
+   * state in which a queued measurement has nobody to send it.
+   *
+   * The rows carry their own `taken_at`, so a measurement queued on Tuesday and
+   * sent on Thursday is filed on Tuesday — the trend on this screen is the
+   * whole point of it, and a date that slides is a trend that lies.
+   */
+  useEffect(() => {
+    if (!outbox) return;
+    return outbox.registerHandler('measurement', async (item) => {
+      const rows = (item.payload as any)?.rows;
+      // A payload nothing can send. 'refused' takes it out rather than leaving
+      // it to be retried on every reconnect for the life of the install.
+      if (!Array.isArray(rows) || !rows.length) return 'refused';
+      try {
+        const { data, error } = await supabase.from('measurements').insert(rows).select('id');
+        return classifyWrite(error as any, data ? data.length : 0);
+      } catch { return 'unsent'; }
+    });
+  }, [outbox]);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -140,17 +190,37 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [authRev]);
 
-  const addEntry = async (vals: Partial<Omit<MeasureEntry, 'id' | 'at'>>): Promise<boolean> => {
+  const addEntry = async (vals: Partial<Omit<MeasureEntry, 'id' | 'at'>>): Promise<MeasureOutcome> => {
     const clean: Partial<MeasureEntry> = {};
     for (const { key } of METRICS) { const v = vals[key]; if (typeof v === 'number' && !isNaN(v) && v > 0) clean[key] = v; }
-    if (Object.keys(clean).length === 0) return false;
+    // Nothing to write. 'refused' is the one answer of the three that cannot
+    // become a false "saved" or a false "waiting".
+    if (Object.keys(clean).length === 0) return 'refused';
     const entry: MeasureEntry = { id: 'm' + SEQ++, at: new Date().toISOString(), ...clean };
     setEntries((p) => [entry, ...p].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)));
-    if (!USE_SUPABASE || !uid) return false;
+    if (!USE_SUPABASE || !uid) return 'refused';
+    const rows = entryToRows(uid, entry);
+    /** Keep it for the next time this phone can reach us. */
+    const keep = async (): Promise<MeasureOutcome> => {
+      if (!outbox) return 'refused';
+      // `at` is the moment it was TAKEN. The rows already carry their own
+      // `taken_at` date, so the send cannot drift; this is what orders the
+      // outbox and what a screen would show it under.
+      const { result } = await outbox.enqueue('measurement', { rows }, { at: entry.at });
+      return result === 'queued' ? 'queued' : 'refused';
+    };
     try {
-      const { error } = await supabase.from('measurements').insert(entryToRows(uid, entry));
-      return !error;
-    } catch { return false; }
+      // `.select('id')` and a row COUNT, not just `error`. An insert PostgREST
+      // narrows to zero rows under a policy does not fail — it succeeds having
+      // written nothing — and reading only `error` reported that as saved. This
+      // read was `return !error`.
+      const { data, error } = await supabase.from('measurements').insert(rows).select('id');
+      const out = classifyWrite(error as any, data ? data.length : 0);
+      if (out === 'stored') return 'stored';
+      // A refusal offered again gets the same refusal, so it is not kept.
+      if (out === 'refused') return 'refused';
+      return keep();
+    } catch { return keep(); }
   };
 
   return <Ctx.Provider value={{ entries, status, addEntry }}>{children}</Ctx.Provider>;

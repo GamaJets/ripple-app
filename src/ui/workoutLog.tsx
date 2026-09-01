@@ -72,7 +72,7 @@ import { reportError } from '../lib/reportError';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { isPending, localId } from '../lib/wellnessSync';
-import { classifyWrite, serverRows, unsentCount, type WriteOutcome } from '../lib/offlineQueue';
+import { classifyWrite, registerFlush, serverRows, unsentCount, type WriteOutcome } from '../lib/offlineQueue';
 // The queue's own rules, out here where a test can hold both ends of each —
 // src/lib/workoutRow.ts makes that argument at length about the row converters
 // it took out of this same file, having found two fields that had never once
@@ -410,6 +410,43 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
       return 'unsent';
     }
   };
+
+  /**
+   * Send every session on this device that the server has never heard of.
+   *
+   * The same loop the hydrate runs, lifted out of it — because the hydrate was
+   * the ONLY thing that ran it. That made the honest answer to "when does a set
+   * logged in a basement go up" the next launch that also happened to mount
+   * this provider, which for somebody who trains at seven and does not open the
+   * app again is the following morning, from inside the same basement.
+   *
+   * It is now also called on the reconnect edge and on returning to the
+   * foreground, through src/lib/offlineQueue.ts · `flushAll`.
+   *
+   * One insert per SESSION, not per set: a session is the unit a member thinks
+   * in, and eight round trips on wifi that has just come back is eight chances
+   * for half a push day to land. And it STOPS at the first 'unsent' — every
+   * session after it would meet the same silence, and hammering a returning
+   * connection is how one success becomes eight timeouts.
+   */
+  const flushQueue = async (): Promise<void> => {
+    const owner = uidRef.current;
+    if (!USE_SUPABASE || !owner) return;
+    for (const t of queuedSessions(listRef.current.filter(isQueued))) {
+      // Re-read from `listRef` each time round: the send before this one
+      // rewrote the list with the ids it adopted, and a stale slice would offer
+      // a row the server has just taken.
+      const batch = listRef.current.filter((e) => isQueued(e) && e.t === t);
+      if (!batch.length) continue;
+      if ((await send(owner, batch)) === 'unsent') return;
+    }
+  };
+
+  // Registered once. The closure reads `uidRef` and `listRef`, so it stays
+  // correct across every re-render and across a change of account without
+  // needing to be re-registered — and re-registering on every render would
+  // churn the map for no gain.
+  useEffect(() => registerFlush('workoutLog', flushQueue), []);
 
   const logWorkouts: WorkoutLogValue['logWorkouts'] = async (entries) => {
     // Nothing to write. See the contract: 'refused' is the only one of the

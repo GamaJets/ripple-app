@@ -39,11 +39,16 @@ import { ClassesProvider } from '../src/ui/classes';
 import { AuthProvider } from '../src/ui/auth';
 import { ErrorBoundary } from '../src/ui/ErrorBoundary';
 import { AppLockProvider } from '../src/ui/appLock';
+import { ToastProvider } from '../src/ui/toast';
 import { LockGate } from '../src/ui/LockScreen';
 import { useAuth } from '../src/ui/auth';
 import { AppThemeProvider, useTheme } from '../src/ui/components';
 import { BrandProvider } from '../src/ui/brand';
 import { TenantProvider } from '../src/ui/tenant';
+import { OutboxProvider } from '../src/ui/outbox';
+import { ReachabilityProbe } from '../src/ui/reachability';
+import { OfflineFlush } from '../src/ui/offlineFlush';
+import { MessageOutboxHandler } from '../src/ui/messaging';
 
 function ThemedStack() {
   const t = useTheme();
@@ -93,7 +98,16 @@ function LockedApp() {
   return (
     <AppLockProvider signedIn={authed}>
       <LockGate>
-        <ThemedStack />
+        {/* Inside the lock and around the whole stack. Inside, because a bar
+            saying "Meal removed. Undo" must not be readable over a locked
+            phone; around the stack, because the toast has to outlive the
+            screen that raised it — a delete staged on Meals and undone from
+            the bar is undone whether or not the member has already navigated,
+            and ToastProvider flushes the held write when it goes away rather
+            than when a screen does. */}
+        <ToastProvider>
+          <ThemedStack />
+        </ToastProvider>
       </LockGate>
     </AppLockProvider>
   );
@@ -107,6 +121,11 @@ export default function RootLayout() {
         <BrandProvider>
         <AuthProvider>
         <TenantProvider>
+        {/* Above every provider that queues a write, because it holds the
+            device's outbox and they register their handlers into it. Inside
+            AuthProvider, because an outbox is keyed by account: two people
+            sharing a phone must not inherit each other's unsent messages. */}
+        <OutboxProvider>
         <ClientDataProvider>
           {/* Above everything that can schedule a notification, and it seeds
               src/lib/notifyPrefsLatch.ts — the synchronous read the gate inside
@@ -163,6 +182,26 @@ export default function RootLayout() {
                         <ChallengesProvider>
                         <ProgramTemplatesProvider>
                         <ClassesProvider>
+                        {/* Both render nothing, and both are here — at the
+                            bottom of the provider stack — for the same reason:
+                            they act on every queue in the app, and a queue
+                            whose provider is mounted below them would not be
+                            registered when they first fire.
+
+                            The probe asks whether we can reach the server when
+                            nothing else is asking; the flush sends what is
+                            waiting the moment we can. Neither is inside
+                            ErrorBoundary, because a crash in a screen must not
+                            take the app's ability to send a queued session with
+                            it. */}
+                        <ReachabilityProbe />
+                        {/* Mounted at the root rather than inside the chat
+                            screen: a message typed in a basement and then left
+                            there — app closed, thread never reopened — would
+                            otherwise have nothing registered to send it, and
+                            would sit on the phone being counted forever. */}
+                        <MessageOutboxHandler />
+                        <OfflineFlush />
                         <ErrorBoundary>
                           <LockedApp />
                         </ErrorBoundary>
@@ -199,6 +238,7 @@ export default function RootLayout() {
           </ReminderSyncProvider>
           </NotifyPrefsProvider>
         </ClientDataProvider>
+        </OutboxProvider>
         </TenantProvider>
         </AuthProvider>
       </BrandProvider>

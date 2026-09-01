@@ -22,6 +22,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -31,6 +32,8 @@ import { Rule, Section, SectionHead, Hero, Meter, Ghost, Cta, Flag, fig } from '
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, type Purchase, type TrainerPackage } from '../../src/lib/connect';
 import { packBalance, type PackPurchase } from '../../src/lib/packDraw';
+import { useAuth } from '../../src/ui/auth';
+import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
 import {
   fetchMySubscriptions, myCoachId, subscribeToPackage, cancelSubscription, resumeSubscription,
   openSubscriptionPortal, pkgMoney, pkgPriceLine, statusLabel, isLive, type ClientSubscription,
@@ -55,12 +58,60 @@ export default function ClientPackages() {
   // size and an amount can end up as a dash.
   const [pkgInfo, setPkgInfo] = useState<Map<string, { name: string | null; currency: string | null }>>(new Map());
   const [loading, setLoading] = useState(true);
+  /** The signed-in account, purely to key this device's copy of these lists. */
+  const uid = useAuth().user?.id ?? null;
+  /** When the purchases on screen were last confirmed, or null when they just
+   *  were. Non-null means what is drawn came off this phone. */
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+
+    // ── this device's copy, before the network ──────────────────────────
+    //
+    // "Anything you have paid for is still yours — it just is not readable
+    // right now" was the honest thing to say when there was nothing to show.
+    // Now there usually is: what somebody bought does not change while they are
+    // in a basement, so a cached list of purchases is very nearly always still
+    // true, and it is labelled with its age either way.
+    //
+    // The package names and currencies are cached alongside, because a purchase
+    // row carries neither: without them every amount on this screen renders as
+    // a dash, and a list of packs with no prices is barely a list. No currency
+    // is ever assumed — a purchase whose package is not in the cache still
+    // shows a dash rather than a number in some default unit.
+    if (uid) {
+      try {
+        const [rawP, rawS, rawI] = await Promise.all([
+          AsyncStorage.getItem(cacheKey('purchases', uid)),
+          AsyncStorage.getItem(cacheKey('subscriptions', uid)),
+          AsyncStorage.getItem(cacheKey('packageLabels', uid)),
+        ]);
+        const cachedP = readCache<Purchase>(rawP);
+        // `rows === null` means the device taught us nothing, which must never
+        // become "No purchases yet" — the empty state two screens down.
+        if (cachedP.rows && withinHorizon(cachedP.at)) {
+          setRows(cachedP.rows);
+          setCachedAt(cachedP.at);
+          const cachedS = readCache<ClientSubscription>(rawS);
+          if (cachedS.rows) setSubs(cachedS.rows);
+          const cachedI = readCache<{ id: string; name: string | null; currency: string | null }>(rawI);
+          if (cachedI.rows) setPkgInfo(new Map(cachedI.rows.map((r) => [r.id, { name: r.name, currency: r.currency }])));
+        }
+      } catch { /* no usable cache; the reads below are the only source */ }
+    }
+
     const [p, s, c] = await Promise.all([fetchMyPurchases(), fetchMySubscriptions(), myCoachId()]);
-    setRows(p); setFailed(p === null); setSubs(s);
+    // `p === null` is a failed read. Assigning it would wipe the cached list
+    // above — replacing what somebody bought with the fact that we could not
+    // ask, which is the exact substitution this screen's own header warns
+    // about. `failed` still records it, and the render below shows the cached
+    // list with its age when there is one and the failure state when there is
+    // not.
+    if (p) setRows(p);
+    setFailed(p === null);
+    if (s) setSubs(s);
     setCoachId(c.coachId); setCoachErr(c.error);
     // What the coach currently sells — null means the read failed, which is not
     // "your coach sells nothing".
@@ -73,9 +124,21 @@ export default function ClientPackages() {
     // part 147 means DELETED, not merely withdrawn: pkg_read now lets a buyer
     // read any package they paid for. See packageLabels.
     const ids = [...(p ?? []).map((r) => r.package_id), ...(s ?? []).map((r) => r.package_id)].filter(Boolean) as string[];
-    setPkgInfo(await packageLabels(ids));
+    const info = await packageLabels(ids);
+    setPkgInfo(info);
+    // Cached only when the purchases actually came back. `p === null` is a
+    // failed read, and writing that over a good copy would replace what
+    // somebody bought with the fact that we could not ask.
+    if (uid && p) {
+      setCachedAt(null);
+      AsyncStorage.setItem(cacheKey('purchases', uid), packCache(p)).catch(() => { /* right this session either way */ });
+      if (s) AsyncStorage.setItem(cacheKey('subscriptions', uid), packCache(s)).catch(() => { /* as above */ });
+      AsyncStorage.setItem(cacheKey('packageLabels', uid),
+        packCache([...info].map(([id, v]) => ({ id, name: v.name, currency: v.currency }))))
+        .catch(() => { /* as above */ });
+    }
     setLoading(false);
-  }, []);
+  }, [uid]);
   useEffect(() => { load(); }, [load]);
 
   // The currency of a past amount, and nothing else. Kept as its own lookup so
@@ -256,7 +319,11 @@ export default function ClientPackages() {
 
             <Rule />
 
-            {failed ? (
+            {/* What is below came off this phone. Said above the list, because
+                a member checking how many sessions are left on a pack is about
+                to plan around the number. */}
+            {cachedAt && (rows ?? []).length ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{cachedAtLine(cachedAt)}</Flag> : null}
+            {failed && !(rows ?? []).length ? (
               <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
                 <Icon name="trophy" size={30} color={t.ink3} />
                 <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>We couldn't load your purchases</Text>

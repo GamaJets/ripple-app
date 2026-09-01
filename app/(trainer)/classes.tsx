@@ -32,6 +32,9 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Field } fr
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { CLASS_KINDS, branchesFrom, type GymClass } from '../../src/lib/classesMock';
+import {
+  duplicatePlan, duplicateBrief, duplicateBlocker, duplicateOutcome,
+} from '../../src/lib/classSeries';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const timeLabel = (iso: string) => { const d = new Date(iso); let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`; };
@@ -60,6 +63,12 @@ export default function TrainerClasses() {
   const [cap, setCap] = useState(16);
   const [weeks, setWeeks] = useState(1);
   const [busy, setBusy] = useState(false);
+  /** How many more weeks "Same Again" runs a series for. Its own state, and not
+   *  `weeks`: that one belongs to the form above and a coach who set it to 12
+   *  three minutes ago did not thereby ask for twelve more Reformer classes. */
+  const [againWeeks, setAgainWeeks] = useState(12);
+  /** The class currently being repeated, so two taps cannot fan out twice. */
+  const [againBusy, setAgainBusy] = useState<string | null>(null);
   const knownBranches = branchesFrom(classes);
 
   const upcoming = useMemo(() => [...classes].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)), [classes]);
@@ -99,6 +108,46 @@ export default function TrainerClasses() {
         Alert.alert('Partly added', `${saved} of ${weeks} ${nm} classes reached the server. The other ${weeks - saved} are on this phone only and cannot be booked — add them again once you have signal.`);
       }
     } finally { setBusy(false); }
+  };
+
+  /* ── "same again next term" ────────────────────────────────────────────
+   *
+   * Repeat above is 1/4/8/12 weeks AT CREATION and nowhere else, so twelve
+   * weeks later the Tuesday 6pm Reformer simply stops and the only way to put
+   * it back is to re-type nine fields from memory for a class that is on the
+   * screen in front of the coach. This copies the row it is given, weekly, from
+   * the LAST occurrence of its series — see src/lib/classSeries.ts for what a
+   * "series" is here (a description of matching rows, not a record) and why the
+   * run starts after the last class rather than after today.
+   *
+   * It refuses under anything but a whole read of the timetable. A duplicate's
+   * one job is to land on empty slots, and under 'partial' the rows missing
+   * from this screen are the ones furthest ahead — exactly the ones a next-term
+   * run would collide with.
+   */
+  const repeatSeries = async (c: GymClass) => {
+    if (againBusy) return;
+    const why = duplicateBlocker(status);
+    if (why) { Alert.alert('Not Repeated', why); return; }
+    const plan = duplicatePlan(c, classes, againWeeks, new Date());
+    const brief = duplicateBrief(plan);
+    if (!brief.canWrite) { Alert.alert(brief.title, brief.body); return; }
+    const go = await new Promise<boolean>((resolve) => {
+      Alert.alert(brief.title, brief.body, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: brief.confirmLabel, onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+    if (!go) return;
+    setAgainBusy(c.id);
+    let saved = 0;
+    try {
+      for (const occ of plan.toWrite) {
+        if (await addClass({ ...plan.shape, startsAt: occ.startsAt })) saved++;
+      }
+    } finally { setAgainBusy(null); }
+    const out = duplicateOutcome(plan.shape.title, plan.toWrite.length, saved);
+    Alert.alert(out.title, out.body);
   };
 
   const G = layout.gutter;
@@ -204,6 +253,22 @@ export default function TrainerClasses() {
               does not know. PartialRead below says "the first N" instead. */}
           <SectionHead title="Upcoming" note={status === 'ready' && upcoming.length ? String(upcoming.length) : undefined} />
 
+          {/* How far "Same Again" runs. Above the list rather than inside each
+              row, because it is one answer for whichever class the coach taps
+              and repeating it per row would be twenty copies of the same
+              control. Only drawn once there is something to repeat. */}
+          {upcoming.length > 0 ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Text style={lbl}>Same Again runs for</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
+                {([[4, '4 more weeks'], [8, '8 more weeks'], [12, '12 more weeks']] as [number, string][]).map(([n, label]) => chip(label, againWeeks === n, () => setAgainWeeks(n)))}
+              </ScrollView>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Counted from the last class in that series rather than from today, so a term that is nearly over carries straight on. Dates already on the timetable, and any that fall in the past, are skipped rather than doubled.
+              </Text>
+            </View>
+          ) : null}
+
           {/* An unread timetable is not an empty week. Without this the screen
               shows a coach with forty classes on the books a blank schedule and
               the words "No classes yet", and they plan their week around it. */}
@@ -266,7 +331,15 @@ export default function TrainerClasses() {
                   ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{!countsKnown ? 'capacity' : full ? 'full' : 'booked'}</Text>
                 </View>
-                <Ghost label="Check In" onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} />
+                <View style={{ gap: 6 }}>
+                  <Ghost label="Check In" onPress={() => router.push({ pathname: '/(trainer)/class-checkin', params: { id: c.id, title: c.title, branch: c.branch } })} />
+                  {/* The nine fields a coach otherwise re-types every term. It
+                      is a Ghost rather than a Cta because it is not the thing
+                      this row is for — taking the register is — and because it
+                      writes to the timetable rather than to somebody's record,
+                      so it needs no destructive styling. */}
+                  <Ghost label={againBusy === c.id ? 'Repeating…' : 'Same Again'} onPress={() => { void repeatSeries(c); }} />
+                </View>
               </View>
             );
           })}

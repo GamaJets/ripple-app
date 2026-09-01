@@ -32,23 +32,33 @@
 // client screen gives at length: a coach who thinks their demonstration went is
 // worse off than one who knows it did not.
 import { useRef, useState } from 'react';
-import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModules';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { peerHeading, type PeerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { attachmentNoun, unsentNote } from '../../src/lib/messageAttachments';
+import { useMyTemplates } from '../../src/ui/messageTemplates';
 import {
-  useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment,
+  applyTemplate, orderTemplates, templatesEmptyLine, hasUnfilledToken,
+  UNFILLED_TOKEN_NOTE,
+} from '../../src/lib/messageTemplates';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import {
+  useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
   type AttachSource, type PendingAttachment, type ThreadMessage,
 } from '../../src/ui/messaging';
+import {
+  blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
+  reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
+} from '../../src/lib/threadSafety';
 
 /** The clip itself, in its own component so the player hook receives a settled
  *  URL — a signature arrives asynchronously and a hook cannot wait for one. */
@@ -139,7 +149,28 @@ export default function CoachChat() {
   // Used where a sentence needs to address them. Falls back to the role word
   // rather than to a dash mid-sentence — "say hi to —" is not a sentence.
   const firstName = head.isName ? head.text.split(' ').filter(Boolean)[0] : null;
-  const { messages: msgs, send, status, unsent } = useThread(clientId, 'coach');
+  const { messages: msgs, send, status, unsent, cachedNote } = useThread(clientId, 'coach');
+  /* ── the way out ───────────────────────────────────────────────────────
+   *
+   * The database has supported blocking and reporting in BOTH directions since
+   * supabase/parts/240 — `report_abuse` derives the reported party from the
+   * thread and reads 'coach' as readily as 'client'. Only the client app had
+   * controls, which left a coach being harassed by a client with a working
+   * mechanism and no button. The two sides are the same screen to the person
+   * using them, so this mirrors `app/(client)/messages.tsx` rather than
+   * inventing a second shape for it.
+   *
+   * The word for the other party is 'this client' and not their name: a coach
+   * blocking somebody does not need the name they are about to stop reading
+   * spelled out in the confirm, and `head.text` is a dash when the read failed.
+   */
+  const safety = useThreadSafety(clientId, 'coach');
+  const OTHER = 'this client';
+  const blockNote = blockedComposerNote(safety.state, OTHER);
+  const canSend = canSendInto(safety.state);
+  const [reportFor, setReportFor] = useState<{ open: true; messageId: string | null } | null>(null);
+  const [reportNote, setReportNote] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
   const [text, setText] = useState('');
   const [pending, setPending] = useState<PendingAttachment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -165,6 +196,40 @@ export default function CoachChat() {
   // swallowed with it: a send that did not go says so here as well as leaving
   // the bubble marked, because a coach who believes a demonstration arrived
   // will not send it again.
+  const onSafety = () => {
+    const blocked = safety.state === 'blocked-by-me';
+    const c = blocked ? unblockConfirm(OTHER) : blockConfirm(OTHER);
+    Alert.alert(c.title, c.body, [
+      { text: 'Not Now', style: 'cancel' },
+      {
+        text: blocked ? 'Unblock' : 'Block',
+        style: blocked ? 'default' : 'destructive',
+        onPress: async () => {
+          const r = blocked ? await safety.unblock() : await safety.block();
+          if (!r.ok) { Alert.alert(blocked ? 'Not unblocked' : 'Not blocked', r.error ?? 'That did not save.'); return; }
+          Alert.alert(
+            blocked ? 'Unblocked' : 'Blocked',
+            blocked
+              ? 'They can message you again. Any report you made stays on record.'
+              : 'Nothing more can be sent either way. Everything already here is kept, so you can still read it and still report it.',
+          );
+        },
+      },
+    ]);
+  };
+
+  /** File the report the sheet has collected. `id` coming back is the row
+   *  existing — a call that merely did not raise is not a report. */
+  const fileReport = async (category: ReportCategory) => {
+    if (reportBusy || !reportFor) return;
+    setReportBusy(true);
+    const res = await safety.report(category, reportNote, reportFor.messageId);
+    setReportBusy(false);
+    if (!res.id) { Alert.alert('Not reported', res.error ?? 'That did not save.'); return; }
+    setReportFor(null); setReportNote('');
+    Alert.alert('Reported', reportFiledLine(category, safety.state));
+  };
+
   const onSend = async () => {
     if (busy) return;
     if (!text.trim() && !pending) return;
@@ -173,8 +238,37 @@ export default function CoachChat() {
     setText(''); setPending(null); setBusy(true);
     const res = await send(body, att);
     setBusy(false);
-    if (!res.ok && res.reason) Alert.alert('Not sent', res.reason);
+    // Three outcomes, not two. A message held on this phone because there is no
+    // signal is not a message that failed: the words are safe, they are marked
+    // under the bubble as waiting, and they go on their own. Heading it "Not
+    // sent" would tell somebody to type it again.
+    if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to send' : 'Not sent', res.reason);
   };
+  /* ── the six messages a coach types every week ─────────────────────────
+   *
+   * The library lands text IN THE COMPOSER and does not send. That is the same
+   * rule src/lib/nudge.ts holds for AI drafts and supabase/parts/140 holds in
+   * the database — a message is never composed under somebody else's name, and
+   * a message the coach did not read before it went is exactly that.
+   *
+   * `{name}` is filled from the name this screen already resolved for its own
+   * header, so a template used from a thread whose peer name did not load comes
+   * out with the token still visible rather than with a blank where somebody's
+   * name should be. `hasUnfilledToken` says so under the box.
+   *
+   * Appended rather than replacing what is typed: a coach who has half-written
+   * a message and then reaches for a template is adding to it, and silently
+   * discarding their words would be the one thing this feature must not do.
+   */
+  const templates = useMyTemplates();
+  const { name: coachName } = useMyTrainerProfile();
+  const [tplOpen, setTplOpen] = useState(false);
+  const useTemplate = (body: string) => {
+    const filled = applyTemplate(body, firstName ?? null, coachName ?? null);
+    setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, '')}\n\n${filled}` : filled));
+    setTplOpen(false);
+  };
+
   const fmt = (iso: string) => { const d = new Date(iso); const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
   const G = layout.gutter;
   const { ref: barRef, lift } = useKeyboardLift();
@@ -201,6 +295,16 @@ export default function CoachChat() {
           <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{head.note ?? 'Coaching chat'}</Text>
         </View>
+        {/* In the header rather than buried in a menu, for the same reason it is
+            in the client's: a moderation path somebody has to go looking for is
+            one they reach for after it has already gone wrong. The icon carries
+            no status colour — the state is said in words under the composer. */}
+        <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
+          accessibilityLabel={blockActionLabel(safety.state, OTHER)}
+          accessibilityHint="Block this conversation, or report a message in it"
+          style={{ width: 34, height: 34, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="lock" size={16} color={t.ink2} />
+        </Pressable>
       </View>
       <Rule />
 
@@ -211,6 +315,11 @@ export default function CoachChat() {
       <View style={{ flex: 1, paddingBottom: lift }}>
 
         {/* ── the conversation ───────────────────────────────────────────── */}
+        {/* This conversation came off the phone, not off the server. Said
+            once, above the thread, because a member reading a cached thread as
+            a live one believes they have heard everything — and the message
+            that is missing is the one that arrived after the signal went. */}
+        {cachedNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingTop: sp.sm }}>{cachedNote}</Flag> : null}
         <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled">
           {/* A thread that failed to load has not been read, so it cannot be
               reported as one nobody has written in. */}
@@ -234,7 +343,13 @@ export default function CoachChat() {
             const kind = m.local?.kind ?? (m.attachment.state === 'ok' ? m.attachment.attachment.kind : null);
             const hasMedia = m.attachment.state !== 'none' || !!m.local;
             return (
-              <View key={m.id} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '82%', marginBottom: sp.md }}>
+              <Pressable key={m.id}
+                onLongPress={() => { if (safety.threadId) setReportFor({ open: true, messageId: m.id }); }}
+                delayLongPress={400}
+                accessibilityRole="button"
+                accessibilityLabel={mine ? 'Your message' : 'Their message'}
+                accessibilityHint="Press and hold to report this message"
+                style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '82%', marginBottom: sp.md }}>
                 {hasMedia ? (
                   <View style={{ marginBottom: m.body ? sp.xs : 0, alignSelf: mine ? 'flex-end' : 'flex-start', overflow: 'hidden', borderRadius: radius.md }}>
                     <Attachment m={m} />
@@ -254,7 +369,7 @@ export default function CoachChat() {
                     {stage ? unsentNote(firstName ?? 'they', stage, kind) : m.sending ? 'Sending…' : fmt(m.createdAt)}
                   </Text>
                 </View>
-              </View>
+              </Pressable>
             );
           })}
         </ScrollView>
@@ -279,18 +394,112 @@ export default function CoachChat() {
             </Pressable>
           </View>
         ) : null}
+        {/* Said under the box and only when it is true: the template still has
+            a placeholder in it, which means the name it needed was not known
+            and this text goes to the client exactly as it reads. */}
+        {hasUnfilledToken(text) ? (
+          <View style={{ paddingHorizontal: G, paddingTop: sp.sm }}>
+            <Text style={{ ...ty.caption, color: t.ink2 }}>{UNFILLED_TOKEN_NOTE}</Text>
+          </View>
+        ) : null}
         <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'center' }}>
           <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={8}
             style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="camera" size={18} color={t.ink2} />
           </Pressable>
-          <TextInput value={text} onChangeText={setText} placeholder={firstName ? 'Message ' + firstName + '…' : 'Message your client…'} placeholderTextColor={t.ink3}
-            style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+          <Pressable onPress={() => setTplOpen(true)} accessibilityRole="button" accessibilityLabel="Use a saved message" hitSlop={8}
+            style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="pencil" size={18} color={t.ink2} />
+          </Pressable>
+          <TextInput value={text} onChangeText={setText} editable={canSend}
+            placeholder={canSend ? (firstName ? 'Message ' + firstName + '…' : 'Message your client…') : 'This conversation is closed'}
+            placeholderTextColor={t.ink3}
+            style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, opacity: canSend ? 1 : 0.6 }} />
           {/* Disabled while a send is in flight: tapping twice would put the
-              same clip in the bucket twice and the thread twice with it. */}
-          <Cta label={busy ? 'Sending…' : 'Send'} onPress={onSend} disabled={busy} />
+              same clip in the bucket twice and the thread twice with it. And
+              disabled while blocked — the database refuses the write either
+              way, so leaving it live would only turn a closed conversation into
+              an error message. */}
+          <Cta label={busy ? 'Sending…' : 'Send'} onPress={onSend} disabled={busy || !canSend} />
         </View>
+        {/* The state, in words, under the box. `blockedComposerNote` returns
+            null for an unread state rather than guessing: a coach who has not
+            blocked anybody must not be told they have. */}
+        {blockNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingBottom: sp.md }}>{blockNote}</Flag> : null}
       </View>
+
+      {/* ── the saved messages ───────────────────────────────────────────
+          A picker and nothing more. Editing them lives on the Documents screen
+          rather than here: a coach standing in front of a client wants the
+          message, and an editor inside a chat is where somebody edits a
+          template by accident while meaning to edit the message. */}
+      <Modal visible={tplOpen} transparent animationType="slide" onRequestClose={() => setTplOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, maxHeight: '70%' }}>
+          <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+            Tapping one puts it in your box, with {firstName ? firstName + '’s' : 'the'} name filled in. Nothing is sent until you press Send.
+          </Text>
+          <ScrollView>
+            {templates.rows.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>{templatesEmptyLine(templates.status)}</Text>
+            ) : orderTemplates(templates.rows).map((tpl, i) => (
+              <Pressable key={tpl.id ?? tpl.title} onPress={() => useTemplate(tpl.body)}
+                accessibilityRole="button" accessibilityLabel={`Use the ${tpl.title} message`}
+                style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: t.ring }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.title}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>
+                  {applyTemplate(tpl.body, firstName ?? null, coachName ?? null)}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          <Ghost label="Manage Your Messages" onPress={() => { setTplOpen(false); router.push('/(trainer)/templates-messages'); }} />
+          <View style={{ height: sp.sm }} />
+          <Cta label="Close" wide onPress={() => setTplOpen(false)} />
+        </View>
+      </Modal>
+      {/* Reporting is its own sheet rather than an Alert, because the list of
+          reasons is the part that has to be readable and the note underneath
+          is optional: requiring an explanation puts a writing task in front of
+          the person least able to do one at that moment. */}
+      <Modal visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+            <Text style={{ ...ty.title, color: t.ink }}>
+              {reportFor?.messageId ? 'Report this message' : 'Report this conversation'}
+            </Text>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>{REPORT_EXPLAINER}</Text>
+
+            {REPORT_OPTIONS.map((o, i) => (
+              <View key={o.id}>
+                {i > 0 ? <Rule /> : null}
+                <Pressable onPress={() => { void fileReport(o.id); }} disabled={reportBusy}
+                  accessibilityRole="button" accessibilityLabel={o.label} accessibilityHint={o.note}
+                  accessibilityState={{ disabled: reportBusy }}
+                  style={{ paddingVertical: sp.md, opacity: reportBusy ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{o.label}</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{o.note}</Text>
+                </Pressable>
+              </View>
+            ))}
+
+            <Rule />
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Anything you want to add</Text>
+            <TextInput value={reportNote} onChangeText={setReportNote} multiline editable={!reportBusy}
+              placeholder="Optional. Nobody but us reads this." placeholderTextColor={t.ink3}
+              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, textAlignVertical: 'top' }} />
+
+            <Pressable onPress={() => setReportFor(null)} accessibilityRole="button"
+              accessibilityLabel="Close without reporting anything"
+              style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

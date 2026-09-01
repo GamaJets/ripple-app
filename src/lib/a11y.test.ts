@@ -16,7 +16,7 @@ import {
   contrastRatio, hitSlopFor, isLargeText, luminance, meetsMark, meetsTarget,
   meetsText, readableInkOn, rgb, switchLabel,
 } from './a11y';
-import { PALETTES, brandInkFor, type Theme } from '../theme/tokens';
+import { PALETTES, brandInkFor, highContrast, metaByKey, paletteForScheme, type Theme } from '../theme/tokens';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -193,6 +193,71 @@ eq(best, picked, `brandInkFor picks the better of black and white for every bran
 // answered. A tenant mid-edit with "#12" in the field must not crash a screen.
 eq(brandInkFor('#12'), INK_ON_DARK, 'a half-typed hex falls back to white');
 eq(brandInkFor(''), INK_ON_DARK, 'an empty brand colour falls back to white');
+
+
+/* ── following the phone between light and dark ────────────────────────── */
+
+// The follow reads `counterpart` once in each direction. A counterpart that
+// names a palette which does not exist, or one in the SAME scheme, is a dead
+// end: a member on a light phone would be left in a dark app with no way back
+// except finding Appearance and picking a hue by hand. Neither failure is
+// visible in review, and both are one line of data.
+for (const p of PALETTES) {
+  const c = PALETTES.find((x) => x.key === p.counterpart);
+  ok(!!c, `${p.key}: its counterpart "${p.counterpart}" is a real palette`);
+  if (c) ok(c.light !== p.light, `${p.key}: its counterpart is in the other scheme, not another ${p.light ? 'light' : 'dark'} one`);
+}
+
+// The resolution itself. A palette that already matches the phone is left
+// alone — somebody who picked Mono Noir and set their phone to dark stays in
+// Mono Noir rather than being sent on a round trip through Swiss Ivory.
+for (const p of PALETTES) {
+  eq(paletteForScheme(p.key, p.light ? 'light' : 'dark'), p.key, `${p.key}: a phone already in its scheme changes nothing`);
+  const flipped = paletteForScheme(p.key, p.light ? 'dark' : 'light');
+  eq(metaByKey(flipped).light, !p.light, `${p.key}: the other scheme resolves to a palette of that scheme`);
+  // Not asserted: that flipping twice returns the same key. It does not, and
+  // must not be expected to — three dark palettes map onto Clinical Light, so
+  // the mapping cannot be one-to-one. What makes the round trip lossless is
+  // that AppThemeProvider never rewrites the STORED key; it derives.
+}
+
+// The platform declining to answer is not an answer. 'unspecified' is narrowed
+// to null in AppThemeProvider, and null must change nothing.
+for (const p of PALETTES) {
+  eq(paletteForScheme(p.key, null), p.key, `${p.key}: an unanswered scheme changes nothing`);
+  eq(paletteForScheme(p.key, undefined), p.key, `${p.key}: nor does a missing one`);
+}
+
+/* ── higher contrast, measured like everything else ────────────────────── */
+
+// The transform invents no colour: ink3 becomes ink2 and ink2 becomes ink,
+// both of which the loop above has already measured at 4.5:1 on all four
+// grounds of all ten palettes. So this CANNOT fail while that passes — which
+// is the entire argument for doing it as a transform rather than as an
+// eleventh hand-picked palette. Measured anyway, because "cannot fail" is a
+// claim about today's implementation and this is a check on tomorrow's.
+for (const p of PALETTES) {
+  const hc = highContrast(p.theme);
+  for (const ink of INKS) {
+    for (const g of GROUNDS) {
+      atLeast(contrastRatio(hc[ink], hc[g]), AA_TEXT, `${p.key} higher contrast: ${ink} on ${g} is body text`);
+    }
+  }
+  // It raises the quiet inks and never lowers them. A "higher contrast" option
+  // that made any text quieter would be the worst possible version of this.
+  for (const ink of INKS) {
+    for (const g of GROUNDS) {
+      const before = contrastRatio(p.theme[ink], p.theme[g]) as number;
+      const after = contrastRatio(hc[ink], hc[g]) as number;
+      ok(after >= before - 0.001, `${p.key} higher contrast: ${ink} on ${g} did not get quieter`);
+    }
+  }
+  eq(hc.brand, p.theme.brand, `${p.key} higher contrast: the brand colour is untouched`);
+  eq(hc.crit, p.theme.crit, `${p.key} higher contrast: the status marks are untouched`);
+  // The grounds must not move either: every ratio above is measured against
+  // them, and a transform that shifted a surface would invalidate its own test.
+  for (const g of GROUNDS) eq(hc[g], p.theme[g], `${p.key} higher contrast: ${g} is untouched`);
+}
 
 /* ── touch targets ─────────────────────────────────────────────────────── */
 

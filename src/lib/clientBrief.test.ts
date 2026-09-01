@@ -26,8 +26,17 @@ import { type PlannedDay } from './dayPlan';
 import { assessDrift } from './clientDrift';
 import { type Inbox, type InboxPhoto } from './photoInbox';
 
+import { setAppLocale } from './locale';
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
+
+// These assertions read dates in British order — the day first. That is no
+// longer what the app writes for everybody: src/lib/format.ts asks
+// src/lib/locale.ts, which reads the handset, so the same call produces
+// "Sep 2, 2026" on an American one. The locale is stated here for the same
+// reason this file states its timezones: a test that reads whatever the runner
+// happens to be set to is a test of the machine.
+setAppLocale('en-GB');
 
 const NOW = Date.parse('2026-09-01T12:00:00Z');
 const TODAY = '2026-09-01';

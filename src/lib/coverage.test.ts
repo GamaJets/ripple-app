@@ -5,6 +5,7 @@ import { overlaps, isLateCancellation, cancelSession, nextFromWaitlist } from '.
 import type { WorkoutEntry } from './mockData';
 import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
+import { localDay } from './attendance';
 import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass, classFillState } from './gymSchedule';
 import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
@@ -300,9 +301,19 @@ ok(wk(1) - wk(0) === 7 * 86400000, 'occurrences are exactly a week apart');
 ok(series.every((c) => c.title === 'Spin' && c.capacity === 20), 'series carries the class details');
 
 // A public holiday is a skipped date, not a broken series.
-const skipped = weeklyOccurrences(base, 4, ['2026-09-15']);
+//
+// The skipped day is DERIVED from the occurrence rather than written as a
+// literal, and the ISO string is never sliced to get a date. `weeklyOccurrences`
+// compares the gym's LOCAL day, which is the whole point of it — a gym at UTC+4
+// typing 25 December must have its Christmas class skipped, not the 24th's.
+// `2026-09-01T18:00:00.000Z` is the 1st of September in London and the 2nd in
+// Auckland, so both a hardcoded skip date and `.slice(0, 10)` (which reads the
+// UTC day) agreed with the code only in timezones at or behind UTC. This test
+// failed under Pacific/Auckland while the code was correct.
+const thirdDay = localDay(series[2].startsAt)!;
+const skipped = weeklyOccurrences(base, 4, [thirdDay]);
 ok(skipped.length === 3, `skipping one date drops one occurrence (got ${skipped.length})`);
-ok(!skipped.some((c) => c.startsAt.slice(0, 10) === '2026-09-15'), 'the skipped date is absent');
+ok(!skipped.some((c) => localDay(c.startsAt) === thirdDay), 'the skipped date is absent');
 
 // Attendance figures must not invent a rate.
 const cls = (booked: number, attended: number, capacity: number): GymClass => ({

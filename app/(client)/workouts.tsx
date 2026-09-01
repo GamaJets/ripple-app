@@ -59,6 +59,7 @@ import { planEditsNote } from '../../src/lib/planEdits';
 import { usePlanEdits } from '../../src/ui/planEdits';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useToast } from '../../src/ui/toast';
 // Three outcomes, not two. Since src/ui/workoutLog.tsx was brought onto the
 // offline queue a write that nobody answered is KEPT — on this phone, in the
 // log, counted, and sent on the next launch that reaches a server — so every
@@ -250,7 +251,29 @@ export default function Train() {
   const _cp = useAssignedPrograms().getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
-  const { log: workoutLog, status: workoutLogStatus, unsent: unsentWorkouts, logWorkouts, flushWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
+  const { log: loggedWorkouts, status: workoutLogStatus, unsent: unsentWorkouts, logWorkouts, flushWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
+  const toast = useToast();
+  // An entry whose delete is staged: off this screen and out of every figure
+  // computed from the log, and not yet written. `id` is absent until the row
+  // has come back from the server, so the key falls back to the pair that
+  // identifies an unsaved entry — the same pair `removeWorkout` matches on.
+  const [pendingRemoval, setPendingRemoval] = useState<string[]>([]);
+  const entryKey = (l: WorkoutEntry): string => l.id ?? `${l.t}|${l.exercise}`;
+  // Filtered ONCE, here, rather than at each of the twenty places that read
+  // the log. A staged removal has to come out of the day's volume, the
+  // calories, the deload check and the next set's suggestion as well as out of
+  // the row — an entry that is off the list and still inside the numbers is
+  // the same inconsistency the delete was meant to remove.
+  const workoutLog = useMemo(
+    () => (pendingRemoval.length ? loggedWorkouts.filter((l) => !pendingRemoval.includes(entryKey(l))) : loggedWorkouts),
+    [loggedWorkouts, pendingRemoval],
+  );
+  useEffect(() => {
+    setPendingRemoval((ids) => {
+      const live = ids.filter((id) => loggedWorkouts.some((l) => entryKey(l) === id));
+      return live.length === ids.length ? ids : live;
+    });
+  }, [loggedWorkouts]);
   // The unit the member reads a LOAD in. Deliberately left out of TF-37 —
   // barbell plates are metric hardware and tools.tsx does its plate maths
   // against a metric rack — and asked for since: "Need to be able to select kg
@@ -331,7 +354,7 @@ export default function Train() {
     // sentence that stops a write nobody answered being the same event as a
     // successful one — in both directions, since it is also no longer the same
     // event as a lost one.
-    if (out === 'stored') Alert.alert('Logged', `${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
+    if (out === 'stored') toast.say(`${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
     else if (out === 'unsent') Alert.alert('Saved on this phone', `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet — nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and ${lifts.length === 1 ? 'goes' : 'go'} up on their own the next time you have signal.`);
     else Alert.alert('Not saved', 'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box — sending it again as it is will be rejected again.');
   };
@@ -719,28 +742,40 @@ export default function Train() {
   const isCustomEx = (e: ProgramExercise) => e.key.indexOf('custom-') === 0;
 
   /**
-   * Delete something already in the log. Confirmed first, and believed only
-   * when the server says the row is gone.
+   * Delete something already in the log. Taken back for six seconds, and
+   * believed only when the server says the row is gone.
    *
-   * The confirm was always here; what was missing is that the row left the
-   * screen whether or not the delete landed, so a refused one looked done and
-   * the session — with its volume and its calories — was back at the next
-   * launch. `removeWorkout` resolves false in that case and leaves `log`
-   * alone, and this says so rather than swallowing it.
+   * This was a modal asking "Delete this entry?" — and a modal is the wrong
+   * shape for it. The tap that deletes is the same tap on the same side of the
+   * same dialog every time, so people stop reading it, and once it goes
+   * through the set is gone. The row leaves immediately now, the bar at the
+   * bottom says so, and the WRITE is held behind an Undo for six seconds; see
+   * src/lib/undoable.ts.
+   *
+   * What has not changed is the half that was already right: the delete is
+   * believed only when `removeWorkout` says the row is gone. A refused one
+   * used to look done and come back at the next launch with the session — its
+   * volume and its calories — back with it. `removeWorkout` resolves false in
+   * that case and leaves the log alone, and this says so rather than
+   * swallowing it.
    */
   const deleteEntry = (l: WorkoutEntry) => {
-    Alert.alert(
-      'Delete this entry?',
-      `${l.exercise} will be removed from your log, and this day's volume and calories go down by it.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: async () => {
-          if (!(await removeWorkout(l))) {
-            Alert.alert('Not deleted', `${l.exercise} is still in your log — we could not reach the server to remove it.`);
-          }
-        } },
-      ],
-    );
+    const key = entryKey(l);
+    setPendingRemoval((ids) => (ids.includes(key) ? ids : [...ids, key]));
+    const putBack = () => setPendingRemoval((ids) => ids.filter((x) => x !== key));
+    toast.remove({
+      id: key,
+      text: `${l.exercise} removed from your log.`,
+      onUndo: putBack,
+      onCommit: async () => {
+        if (!(await removeWorkout(l))) {
+          // Still an alert, and deliberately: this one says the log is not
+          // what the screen just showed, and the entry is back on it.
+          putBack();
+          Alert.alert('Not deleted', `${l.exercise} is still in your log — we could not reach the server to remove it.`);
+        }
+      },
+    });
   };
 
   /**

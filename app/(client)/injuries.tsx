@@ -6,9 +6,36 @@
 // Re-skinned onto the kit (`src/ui/kit`) + scale (`src/theme/scale`): the
 // per-injury bordered boxes became hairline-separated rows, the disclaimer
 // became the screen's one <Notice>, and severity is a coloured dot beside ink
-// text rather than coloured text. Every route, hook and branch is unchanged.
+// text rather than coloured text.
+//
+// ── Correcting one, and deleting one on purpose ────────────────────────────
+//
+// This screen offered Mark Recovered, Reactivate and Delete, though
+// `updateInjury` has always accepted any patch. So fixing a wrong severity or a
+// typo meant Delete and re-add — and that is not a wash: re-adding mints a new
+// id and a new disclosure key, which throws away the coach's acknowledgement
+// over a spelling. Editing keeps the id and the disclosure date, so a
+// correction is a correction (src/lib/injuryEdit.ts).
+//
+// What it does NOT do is get round the gate. `injuryKey` is `area:severity`, so
+// changing either is a new disclosure and the coach is asked to read it again —
+// correctly, because a mild knee that is now severe is news. The sheet says
+// which of the two kinds of edit is being made before it is saved.
+//
+// And Delete now has an <Alert> in front of it, like every other destructive
+// action in this app. It names the injury, because "are you sure?" over five
+// rows a few pixels apart does not say which one, and it offers Mark Recovered
+// to somebody whose injury has simply healed.
+//
+// NOTHING HERE TOUCHES THE DOCUMENT. An injury may have been read off a
+// physiotherapy report, and that report is private to the client by design:
+// own-folder storage policies with no trainer branch (supabase/parts/91), an
+// allowlist that keeps the note away from the model (src/lib/coachShare.ts),
+// and a viewer that never hands the file to another app
+// (src/lib/injuryDocView.ts). Editing the injury a report produced changes the
+// injury and nothing else.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -16,7 +43,8 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, ListRow, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
-import { INJURY_AREAS, areaLabel, newInjuryId, type InjurySeverity } from '../../src/lib/injuries';
+import { INJURY_AREAS, areaLabel, newInjuryId, type Injury, type InjurySeverity } from '../../src/lib/injuries';
+import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle } from '../../src/lib/injuryEdit';
 import { ackState } from '../../src/lib/injuryGate';
 import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
 import { fmtDay, num } from '../../src/lib/format';
@@ -33,6 +61,10 @@ export default function Injuries() {
   const [area, setArea] = useState('knee');
   const [sev, setSev] = useState<InjurySeverity>('moderate');
   const [note, setNote] = useState('');
+  // The injury being corrected, or null when the sheet is a first disclosure.
+  // Held whole rather than as an id: the warning below is about what CHANGED,
+  // so it needs the values as they were before the fields were touched.
+  const [editing, setEditing] = useState<Injury | null>(null);
 
   const active = c.injuries.filter((i) => i.status === 'active');
   const past = c.injuries.filter((i) => i.status === 'recovered');
@@ -50,14 +82,46 @@ export default function Injuries() {
   // client who has added one since is told it is waiting rather than read.
   const coachRead = ackState(mine.status, active, mine.read?.keys ?? null);
 
-  const save = () => {
-    c.addInjury({ id: newInjuryId(), area, severity: sev, status: 'active', note: note.trim() || undefined, at: new Date().toISOString() });
-    setNote(''); setSev('moderate'); setArea('knee'); setOpen(false);
+  const closeSheet = () => { setNote(''); setSev('moderate'); setArea('knee'); setEditing(null); setOpen(false); };
+
+  const startEdit = (i: Injury) => {
+    setEditing(i); setArea(i.area); setSev(i.severity); setNote(i.note ?? ''); setOpen(true);
   };
+
+  const save = () => {
+    if (editing) {
+      // The id and `at` are not in the patch, so the disclosure keeps both.
+      // That is the whole of the fix: delete-and-re-add minted a new id, and a
+      // new id is a new disclosure the coach has not read.
+      c.updateInjury(editing.id, injuryPatch({ area, severity: sev, note }));
+      closeSheet();
+      return;
+    }
+    c.addInjury({ id: newInjuryId(), area, severity: sev, status: 'active', note: note.trim() || undefined, at: new Date().toISOString() });
+    closeSheet();
+  };
+
+  /** Delete, with the confirm every other destructive action in this app has.
+   *  The sentences are in src/lib/injuryEdit.ts so the screen and its tests
+   *  cannot come to describe the same tap differently. */
+  const confirmDelete = (i: Injury) => {
+    const cf = deleteInjuryConfirm(i);
+    Alert.alert(cf.title, cf.body, [
+      { text: 'Keep It', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => c.removeInjury(i.id) },
+    ]);
+  };
+
+  // Only ever about an edit in progress, and only when it changes what the
+  // coach acknowledged. Null for a first disclosure, for a note-only fix, and
+  // for anything on a recovered injury.
+  const ackWarning = editing ? editAckWarning(editing, { area, severity: sev, note }) : null;
 
   // One injury: a status dot, the area, its severity as ink text, and its two
   // actions. Divided by a hairline rather than boxed.
-  const Row = ({ id, areaId, severity, status, note: nt, first }: { id: string; areaId: string; severity: InjurySeverity; status: string; note?: string; first?: boolean }) => (
+  const Row = ({ inj, first }: { inj: Injury; first?: boolean }) => {
+    const { id, area: areaId, severity, status, note: nt } = inj;
+    return (
     <View style={{ paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       {/* One element, one sentence. The dot's colour is the severity said in
           colour, and colour is the one thing a screen reader cannot read out —
@@ -74,16 +138,24 @@ export default function Injuries() {
       </View>
       {/* Named, because "Delete, button" in a list of injuries does not say
           which one — and this one cannot be undone from here. */}
-      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
         {status === 'active' ? (
           <Ghost label="Mark Recovered" icon="check" a11yLabel={`Mark your ${areaLabel(areaId).toLowerCase()} injury as recovered`} onPress={() => c.updateInjury(id, { status: 'recovered' })} />
         ) : (
           <Ghost label="Reactivate" a11yLabel={`Mark your ${areaLabel(areaId).toLowerCase()} injury as active again`} onPress={() => c.updateInjury(id, { status: 'active' })} />
         )}
-        <Ghost label="Delete" a11yLabel={`Delete your ${areaLabel(areaId).toLowerCase()} injury`} onPress={() => c.removeInjury(id)} />
+        {/* Before Delete, and deliberately so. Correcting is the thing most
+            people opening these controls actually want, and it was the one
+            thing this row did not offer. */}
+        <Ghost label="Edit" icon="pencil" a11yLabel={`Edit your ${areaLabel(areaId).toLowerCase()} injury`} onPress={() => startEdit(inj)} />
+        {/* Now behind an Alert, like every other destructive action in the
+            client app. It was a bare button on a screen whose rows are a few
+            pixels apart. */}
+        <Ghost label="Delete" a11yLabel={`Delete your ${areaLabel(areaId).toLowerCase()} injury`} onPress={() => confirmDelete(inj)} />
       </View>
     </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
@@ -128,7 +200,7 @@ export default function Injuries() {
             <Rule />
             <Section>
               <SectionHead title="Active" note={String(active.length)} />
-              {active.map((i, idx) => <Row key={i.id} id={i.id} areaId={i.area} severity={i.severity} status={i.status} note={i.note} first={idx === 0} />)}
+              {active.map((i, idx) => <Row key={i.id} inj={i} first={idx === 0} />)}
             </Section>
           </View>
         ) : null}
@@ -138,7 +210,7 @@ export default function Injuries() {
             <Rule />
             <Section>
               <SectionHead title="Recovered" note={String(past.length)} />
-              {past.map((i, idx) => <Row key={i.id} id={i.id} areaId={i.area} severity={i.severity} status={i.status} note={i.note} first={idx === 0} />)}
+              {past.map((i, idx) => <Row key={i.id} inj={i} first={idx === 0} />)}
             </Section>
           </View>
         ) : null}
@@ -227,12 +299,14 @@ export default function Injuries() {
         ) : null}
       </ScrollView>
 
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
+      <Modal visible={open} transparent animationType="slide" onRequestClose={closeSheet}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={closeSheet} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Disclose an Injury</Text>
+            {/* An edit and a first disclosure are the same three fields and two
+                entirely different acts, so the sheet says which one it is. */}
+            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>{editSheetTitle(!!editing)}</Text>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Area</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
@@ -267,8 +341,18 @@ export default function Injuries() {
             <TextInput value={note} onChangeText={setNote} placeholder="e.g. sharp on deep squats; cleared for light work" placeholderTextColor={t.ink3} multiline
               style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, marginBottom: sp.lg, textAlignVertical: 'top' }} />
 
-            <Cta label="Save" onPress={save} wide />
-            <Pressable onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Cancel without disclosing an injury" style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+            {/* Said BEFORE the save, not discovered afterwards. Only when the
+                edit changes `area:severity` — the key `injuryKey` and the
+                coach's assign gate both read — because a note fixed for a typo
+                must not re-gate anybody, and telling somebody it will is as
+                wrong as doing it. */}
+            {ackWarning ? <Flag tone={t.s3} style={{ marginBottom: sp.lg }}>{ackWarning}</Flag> : null}
+
+            <Cta label={editing ? 'Save Changes' : 'Save'} onPress={save} wide
+              a11yLabel={editing ? `Save your changes to this ${areaLabel(area).toLowerCase()} injury` : undefined} />
+            <Pressable onPress={closeSheet} accessibilityRole="button"
+              accessibilityLabel={editing ? 'Cancel without changing this injury' : 'Cancel without disclosing an injury'}
+              style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
             </Pressable>
           </ScrollView>

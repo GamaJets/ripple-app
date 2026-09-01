@@ -141,8 +141,25 @@ export interface TrainingSession {
    *  not from `sessions` — the note beside it is private to the client and their
    *  trainer, and RLS cannot hide a single column. */
   approvedAt?: string | null;
-  /** The comment the client left when approving. */
+  /** The comment the client left when approving, or the account they gave when
+   *  disputing. One column, one meaning: what the client said about this
+   *  session (supabase/parts/241). */
   approvalNote?: string | null;
+  /**
+   * The client's own verdict — 'approved' or 'disputed' — or null/absent when
+   * they have not answered.
+   *
+   * Deliberately separate from `approvedAt` rather than encoded in it. A
+   * disputed session has NO approval timestamp, so a screen branching on
+   * `!approvedAt` alone puts a dispute back in the "awaiting your approval"
+   * list, which is the one place it must never appear.
+   */
+  approvalState?: 'approved' | 'disputed' | null;
+  /** When they disputed it. Null unless `approvalState` is 'disputed'. */
+  disputedAt?: string | null;
+  /** What the objection is: did_not_happen | wrong_time | wrong_length | other.
+   *  Null unless disputed. */
+  disputeKind?: string | null;
 }
 
 export interface CancellationResult {

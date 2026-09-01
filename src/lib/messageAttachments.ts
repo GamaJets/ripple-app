@@ -263,7 +263,19 @@ export function hasSomethingToSend(body: string, hasAttachment: boolean): boolea
  * refused row means try again, and a refused upload means the file itself did
  * not go, which is worth knowing before you put your phone away.
  */
-export function unsentNote(them: string, stage: 'upload' | 'send', kind: AttachmentKind | null): string {
+export function unsentNote(them: string, stage: 'upload' | 'send' | 'queued', kind: AttachmentKind | null): string {
+  // 'queued' is a different fact from the other two and must read as one. The
+  // message is on this phone, it is counted, and it will go when there is
+  // signal — but nobody has it, and the sentence has to hold both halves at
+  // once. This is the same line src/lib/offlineQueue.ts · `unsentNote` walks
+  // for a check-in: the work is safe, and it has NOT been delivered. A member
+  // who puts their phone away believing their coach has read this is the
+  // failure both sentences exist to prevent.
+  //
+  // An attachment is never queued (the file lives in a cache directory the OS
+  // may empty before the queue runs), so this stage never carries a kind — and
+  // if a later change makes it, the sentence still says the true half.
+  if (stage === 'queued') return `Waiting to send — ${them} cannot see this yet`;
   if (stage === 'upload' && kind) {
     return `Not sent — the ${attachmentNoun(kind)} did not upload, so ${them} cannot see it`;
   }

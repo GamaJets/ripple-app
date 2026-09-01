@@ -47,6 +47,7 @@ import {
   recordEndReason, type EndReason,
 } from '../lib/endCoaching';
 import type { LoadStatus } from './loadStatus';
+import { appLocale } from '../lib/locale';
 
 /* ── the sheet ─────────────────────────────────────────────────────────────── */
 
@@ -295,7 +296,7 @@ export function UnexplainedDepartures() {
                 {d.endedByMe === true ? 'You ended this one.'
                   : d.endedByMe === false ? 'They ended it.'
                     : 'Who ended it was not recorded.'}
-                {d.endedAt ? ` ${new Date(d.endedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.` : ''}
+                {d.endedAt ? ` ${new Date(d.endedAt).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' })}.` : ''}
               </Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
                 <Ghost label="Record Why"

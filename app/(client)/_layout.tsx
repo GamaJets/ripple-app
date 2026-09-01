@@ -10,7 +10,7 @@ import { groupAllowed } from '../../src/lib/variant';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { sp, type as ty } from '../../src/theme/scale';
+import { sp, type as ty, grown } from '../../src/theme/scale';
 import { WaiverGate, useWaiver } from '../../src/ui/waiver';
 import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
@@ -53,7 +53,12 @@ export default function ClientLayout() {
         headerStyle: { backgroundColor: t.surface },
         headerTintColor: t.ink,
         headerShadowVisible: false,
-        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: 56 + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
+        // The bar grows with the reader's text. 56 was drawn around a 23pt icon
+        // and an 11pt name, and on Larger Text the name is 22 or 33 — which the
+        // safe-area padding then pushes off the bottom of a bar that never
+        // moved. Only the part that holds content is scaled; the inset below it
+        // is the phone's and is not text.
+        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: grown(56) + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad },
         tabBarActiveTintColor: t.brand,
         tabBarInactiveTintColor: t.ink3,
         // The scale's smallest step, in sentence case and at the emphasis weight.

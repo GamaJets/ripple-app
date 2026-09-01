@@ -60,7 +60,8 @@ import { type RosterClient } from '../../src/lib/trainerMock';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode } from '../../src/lib/types';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
-import { askCoach } from '../../src/lib/coach';
+import { askAboutClient } from '../../src/lib/coach';
+import { sharedAreas, fillName } from '../../src/lib/coachShare';
 import { useRoster } from '../../src/ui/roster';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useCoachFeedback } from '../../src/ui/feedback';
@@ -92,8 +93,8 @@ import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { sendCoachMessages } from '../../src/ui/messaging';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import {
-  overwriteBrief, bulkReport, guardRecipients, bulkThreadNote,
-  type AssignTarget, type WriteOutcome,
+  overwriteBrief, bulkReport, guardRecipients, bulkThreadNote, endCoachingBrief,
+  type AssignTarget, type WriteOutcome, type EndTarget,
 } from '../../src/lib/bulkActions';
 import { listNames } from '../../src/lib/groupProgram';
 import { buildRosterExport, rosterExportBlocker, type RosterExportRow } from '../../src/lib/rosterExport';
@@ -454,6 +455,11 @@ export default function TrainerClients() {
   const { assignProgramTo, getProgram, status: programStatus } = useAssignedPrograms();
   const [bulkTplOpen, setBulkTplOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Removing a whole segment is the one bulk action on this screen that cannot
+  // be retried into a good state, so it gets its own busy flag rather than
+  // sharing `bulkBusy` with the assign — a coach who taps Remove while an
+  // assign is in flight must be refused by the control that is actually busy.
+  const [endBusy, setEndBusy] = useState(false);
   // The segment composer. `msgBody` is the coach's own words and nothing else
   // ever writes to it — see the note on `openBulkMessage`.
   const [msgOpen, setMsgOpen] = useState(false);
@@ -937,13 +943,37 @@ export default function TrainerClients() {
     return (a.adherence ?? -1) - (b.adherence ?? -1);
   });
   // AI-draft a personalised check-in the coach reviews before sending.
+  // ── the client's name used to go to a model, and now does not ──────────
+  //
+  // This posted `{ name, goal, adherence, reason }` through the unfiltered
+  // `askCoach`, so a named person's adherence reached api.anthropic.com every
+  // time a coach tapped Draft. The member answered a consent question about
+  // their own AI Coach chat, on their own phone; it has never governed this
+  // path, and nobody on this screen can answer it for them.
+  //
+  // `askAboutClient` filters by allowlist (src/lib/coachShare.ts) and the name
+  // is not in it. The model writes `{name}` and `fillName` puts the first name
+  // back before the coach reads the draft — which is where it was always going
+  // to end up, and it never had to leave the phone to get there.
   const draftNudge = async (client: RosterClient) => {
     setDraftClient(client); setDraftText(''); setDraftBusy(true);
     const reason = attnReason(client) || 'general check-in';
-    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet', reason };
-    const reply = await askCoach([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Write only the message, no preamble.' }], ctx);
+    const ctx = {
+      goal: client.goal,
+      adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet',
+      lastActive: client.lastActive,
+      coachedMode: client.mode,
+      // Areas and severity, never the note. The note is seeded from the line
+      // off an uploaded medical document (src/lib/injuryExtract.ts) and
+      // src/ui/injuryDocs.ts states the rule it would break.
+      injuryAreas: sharedAreas(client.injuries ?? []) || 'none disclosed',
+      reason,
+    };
+    const answer = await askAboutClient([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Address them as {name} — write that literally, it is filled in afterwards. Write only the message, no preamble.' }], ctx);
     setDraftBusy(false);
-    setDraftText(reply || ('Hey ' + client.name.split(' ')[0] + ' — checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
+    setDraftText(answer.ok
+      ? fillName(answer.reply, client.name)
+      : ('Hey ' + client.name.split(' ')[0] + ' — checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
   };
   const sendDraft = async () => {
     const client = draftClient; const body = draftText.trim();
@@ -1081,6 +1111,76 @@ export default function TrainerClients() {
     Alert.alert(report.title, report.body);
   };
 
+  /* ── ending the coaching for a whole segment ───────────────────────────
+   *
+   * The most destructive control in the coach app, and the reason it exists is
+   * the ordinary one: a coach cleaning up a year of dormant rows taps through
+   * forty confirmations one at a time and gives up at six, so forty people who
+   * stopped training in March are still reading as clients in December — in the
+   * roster count, in the analytics, in every segment and in every figure
+   * computed over the book.
+   *
+   * Three things it does that the single-client path does not:
+   *
+   *   · it names the SIZE before anything happens. `endCoachingBrief` puts the
+   *     count in the heading and on the button and writes out who, because a
+   *     coach cannot tell from "40 clients" whether the one person they did not
+   *     mean to include is in there.
+   *   · it reports PER CLIENT. `removeClient` returns false both for a refused
+   *     write and for a person neither table had anything to remove for, and
+   *     the roster puts a refused row back — so a bulk run that half-landed
+   *     leaves a roster that disagrees with any single sentence about it.
+   *   · it never says "Done" over a partial failure. `bulkReport` has no such
+   *     sentence, and the failures are named so the coach knows who is still on
+   *     their book.
+   *
+   * No reason is recorded, deliberately — see the note on `endCoachingBrief`.
+   * The Unexplained Departures card goes on asking about each of them
+   * individually, which is the only way a reason stays attributable to one
+   * person's actual departure.
+   */
+  const bulkEnd = async () => {
+    if (endBusy) return;
+    if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+    const list = shownRoster;
+    if (!list.length) return;
+    const targets: EndTarget[] = list.map((c) => ({
+      clientId: c.id, name: c.name.split(' ')[0], handAdded: c.handAdded === true,
+    }));
+    const brief = endCoachingBrief(targets);
+    const go = await new Promise<boolean>((resolve) => {
+      Alert.alert(brief.title, brief.body, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: brief.confirmLabel, style: 'destructive', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+    if (!go) return;
+    setEndBusy(true);
+    // Sequential, not `Promise.all`. Every one of these is a write against the
+    // same roster provider, which removes optimistically and puts the row back
+    // when the server refuses — forty of those interleaving produce a list that
+    // is briefly whatever the last setState happened to hold. Forty round trips
+    // is slower and it is the only version whose end state is the server's.
+    const outcomes: WriteOutcome[] = [];
+    for (const tg of targets) {
+      const ok = await removeClient(tg.clientId);
+      outcomes.push({
+        clientId: tg.clientId,
+        name: tg.name,
+        ok,
+        // `removeClient` returns a bare boolean and has two ways to reach
+        // false — the server refused, or neither table had a row to remove.
+        // It cannot say which, so this does not pretend to: the sentence names
+        // both and says the roster is unchanged for them, which is the part the
+        // coach acts on.
+        why: ok ? null : 'nothing was removed — either the server refused it or there was no coaching relationship left to end. They are still on your roster.',
+      });
+    }
+    setEndBusy(false);
+    const report = bulkReport('end', outcomes);
+    Alert.alert(report.title, report.body);
+  };
+
   /* ── the roster, out of the app ────────────────────────────────────────
    *
    * The safe one of the three, and the one asked for most. Its single hazard is
@@ -1128,14 +1228,39 @@ export default function TrainerClients() {
       Alert.alert('Not Exported', 'The file could not be written. Try again once you have a little free space on your phone.');
     } finally { setExportBusy(false); }
   };
+  // ── and the same for the weekly summary ────────────────────────────────
+  //
+  // This one was worse than the draft: alongside the name it posted
+  // `composition` — visceral fat, InBody score, lean and fat mass, and a
+  // left/right limb imbalance — and `recentMeals`, a list of what a named
+  // person had eaten. That is a body-composition scan and a food diary about
+  // somebody who was never asked.
+  //
+  // Both are gone rather than gated, and the reason is in coachShare.ts: the
+  // only person entitled to answer is the member, their answer lives in their
+  // own AsyncStorage, and this app cannot read it from the coach's handset. So
+  // the summary is written from what the coach may honestly send about somebody
+  // else — training, turning up, and which areas are flagged — and the prompt
+  // says the composition is not available rather than letting the model infer
+  // that there is none.
   const genSummary = async (client: RosterClient) => {
     setAiBusy(true); setAiSummary('');
-    const m = client.metrics;
-    const compStr = m ? [m.visceralFat != null ? 'visceral fat ' + m.visceralFat : '', m.inbodyScore != null ? 'InBody score ' + m.inbodyScore : '', m.leanMassKg != null ? 'lean mass ' + m.leanMassKg + 'kg' : '', m.fatMassKg != null ? 'fat mass ' + m.fatMassKg + 'kg' : '', (m.leanArmLKg != null && m.leanArmRKg != null && Math.abs(m.leanArmLKg - m.leanArmRKg) / Math.max(m.leanArmLKg, m.leanArmRKg) >= 0.1) ? 'arm imbalance' : '', (m.leanLegLKg != null && m.leanLegRKg != null && Math.abs(m.leanLegLKg - m.leanLegRKg) / Math.max(m.leanLegLKg, m.leanLegRKg) >= 0.1) ? 'leg imbalance' : ''].filter(Boolean).join(', ') : '';
-    const ctx = { name: client.name, goal: client.goal, adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet', recentMeals: clientMeals === null ? 'their food log could not be read — do not comment on their food logging' : (clientMeals.map((mm) => mm.name).join(', ') || 'no meals logged yet'), composition: compStr || 'no InBody scan yet' };
-    const reply = await askCoach([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. Use their adherence, recent meals and InBody composition where available.' }], ctx);
+    const ctx = {
+      goal: client.goal,
+      adherence: client.adherence != null ? client.adherence + '%' : 'no check-ins yet',
+      lastActive: client.lastActive,
+      coachedMode: client.mode,
+      injuryAreas: sharedAreas(client.injuries ?? []) || 'none disclosed',
+      // A COUNT, not the names. "Logged 9 meals this week" is the adherence
+      // fact a summary needs; "chicken shawarma, protein shake" is a diary.
+      mealsLoggedCount: clientMeals === null ? 'their food log could not be read — do not comment on their food logging' : clientMeals.length,
+      programTitle: getProgram(client.id)?.title ?? 'no coach-assigned programme',
+    };
+    const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only — you have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
     setAiBusy(false);
-    setAiSummary(reply || 'Could not generate a summary right now — the AI backend may be unavailable.');
+    setAiSummary(answer.ok
+      ? fillName(answer.reply, client.name)
+      : 'Could not generate a summary right now — the AI backend may be unavailable.');
   };
 
   // Both of these read the *signed-in user's* own rows. They stay mounted (the
@@ -1511,6 +1636,31 @@ export default function TrainerClients() {
                   if (!bulkGuard.allowed) { Alert.alert(bulkGuard.label as string, bulkGuard.reason as string); return; }
                   setBulkTplOpen(true);
                 }} /></View>
+            </View>
+          ) : null}
+
+          {/* Removing the segment. On its own row rather than beside the other
+              two, because a destructive control the width of a Ghost sitting
+              next to "Message 12" is a thumb-width away from it — and this one
+              cannot be taken back for anybody it reaches.
+
+              The count is on the label for the same reason it is in the dialog:
+              this button is the last thing the coach reads before the dialog,
+              and a bare "Remove" beside a segment chip is how somebody removes
+              a book they thought was a filter. Withheld with the reason under
+              anything but a whole read of the segment — `guardRecipients`
+              refuses rather than warns, and forty irreversible writes over a
+              list nobody read whole is the case it was written for. */}
+          {shownRoster.length > 0 ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Ghost
+                label={!segClaim.allowed
+                  ? 'Cannot Remove This Segment'
+                  : endBusy ? 'Removing…' : `Remove ${shownRoster.length} From Your Roster`}
+                onPress={() => {
+                  if (!segClaim.allowed) { Alert.alert(segClaim.label as string, segClaim.reason as string); return; }
+                  void bulkEnd();
+                }} />
             </View>
           ) : null}
 
@@ -2134,7 +2284,19 @@ export default function TrainerClients() {
             onDone={(reason: EndReason | null, note: string | null) => {
               const e = ending;
               setEnding(null);
-              void removeClient(e.id, reason, note);
+              // The boolean was being discarded. `removeClient` returns false
+              // both when the server refuses and when neither table had a row
+              // to remove, and in both cases it PUTS THE CLIENT BACK on the
+              // roster — so the coach watched somebody leave the list, saw
+              // nothing, and found them there again a second later with no
+              // explanation. The bulk path above reports every row by name;
+              // the single one was silent.
+              void (async () => {
+                const ok = await removeClient(e.id, reason, note);
+                if (!ok) {
+                  Alert.alert('Not Removed', `${e.name.split(' ')[0]} is still on your roster. Either the server refused the change or there was no coaching relationship left to end — nothing was written either way, and anything you recorded about why they left was not saved.`);
+                }
+              })();
             }}
           />
         ) : null}

@@ -11,8 +11,11 @@ import { View, Text, Pressable, type ViewStyle, type StyleProp } from 'react-nat
 import Svg, { Circle, Polyline, Line } from 'react-native-svg';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, fontScale, grown } from '../theme/scale';
+import { effectiveWidth, linesAtScale } from '../lib/typeScale';
 import { hitSlopFor } from '../lib/a11y';
+import { appLocale } from '../lib/locale';
+import { num } from '../lib/format';
 import {
   axisLabel, pointLabel, tickIndices, maxTicksForWidth,
   segments, readablePoints, hasInteriorGap, nearestPoint,
@@ -164,9 +167,14 @@ export function Hero({
           accessibilityRole="progressbar"
           accessibilityLabel={arcLabel ? `${arcPct(arc)}% ${arcLabel}` : `${arcPct(arc)}%`}
           accessibilityValue={{ min: 0, max: 100, now: arcPct(arc) }}
-          style={{ width: 72, height: 72, alignItems: 'center', justifyContent: 'center' }}
+          // The ring grows with the reader's text because the percentage is
+          // drawn INSIDE it. `viewBox` is unitless, so the whole drawing scales
+          // and the stroke stays proportional; capping the figure instead would
+          // have left the one number this ring exists to state as the only
+          // small text on a screen somebody turned up to read.
+          style={{ width: grown(72), height: grown(72), alignItems: 'center', justifyContent: 'center' }}
         >
-          <Svg width={72} height={72} viewBox="0 0 72 72" style={{ position: 'absolute' }}>
+          <Svg width={grown(72)} height={grown(72)} viewBox="0 0 72 72" style={{ position: 'absolute' }}>
             <Circle cx="36" cy="36" r={R} fill="none" stroke={t.surface3} strokeWidth={3} />
             <Circle cx="36" cy="36" r={R} fill="none" stroke={mark} strokeWidth={3} strokeLinecap="round"
               strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, arc)))}
@@ -287,7 +295,7 @@ export function KpiRow({ items, onPress }: { items: KpiItem[]; onPress?: (i: Kpi
             // the useful notes now fit.
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 4 }}>
               <View style={{ width: 5, height: 5, borderRadius: 2.5, marginTop: 5, flexShrink: 0, backgroundColor: k.good ? t.brand : t.ink3 }} />
-              <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={2}>{k.delta}</Text>
+              <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={linesAtScale(fontScale, 2)}>{k.delta}</Text>
             </View>
           ) : null}
         </Pressable>
@@ -358,19 +366,21 @@ export function ActionCard({
             accessibilityLabel={[ringLabel, ringNote].filter(Boolean).join(' ') || undefined}
             accessibilityValue={{ min: 0, max: 100, now: arcPct(ring) }}
           >
-            <View style={{ width: 56, height: 56 }}>
-              <Svg width={56} height={56} viewBox="0 0 56 56">
+            {/* Grows with the reader's text: `ringLabel` is drawn inside it.
+                Same reasoning as the Hero's arc above. */}
+            <View style={{ width: grown(56), height: grown(56) }}>
+              <Svg width={grown(56)} height={grown(56)} viewBox="0 0 56 56">
                 <Circle cx="28" cy="28" r={R} fill="none" stroke={t.surface3} strokeWidth={2.5} />
                 <Circle cx="28" cy="28" r={R} fill="none" stroke={mark} strokeWidth={2.5} strokeLinecap="round"
                   strokeDasharray={C} strokeDashoffset={C * (1 - Math.max(0, Math.min(1, ring)))}
                   transform="rotate(-90 28 28)" />
               </Svg>
-              <View style={{ position: 'absolute', width: 56, height: 56, alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ position: 'absolute', width: grown(56), height: grown(56), alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ ...ty.head, ...numeric, color: t.ink }}>{ringLabel}</Text>
               </View>
             </View>
             {ringNote ? (
-              <Text numberOfLines={1} style={{ ...ty.micro, color: t.ink3, marginTop: 4, textAlign: 'center', letterSpacing: 0.4 }}>
+              <Text numberOfLines={linesAtScale(fontScale)} style={{ ...ty.micro, color: t.ink3, marginTop: 4, textAlign: 'center', letterSpacing: 0.4 }}>
                 {ringNote}
               </Text>
             ) : null}
@@ -696,20 +706,27 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
   // toLocaleString, not a bare number: a weekly tonnage reaches five digits and
   // the house rule is that anything which can pass a thousand is separated.
   const shownValue = shownPoint == null ? null
-    : (Math.round(shownPoint.v * 10) / 10).toLocaleString('en-GB');
+    : (Math.round(shownPoint.v * 10) / 10).toLocaleString(appLocale());
   const when = shownPoint == null || !labels ? null : pointLabel(labels[shownPoint.i]);
 
   // How many dates the axis carries is decided by the width it was actually
   // given, measured — not by the viewBox, which is a drawing unit and the same
   // 320 on every handset.
-  const ticks = labels ? tickIndices(n, maxTicksForWidth(boxW || w)) : [];
+  // Fewer dates, not smaller ones. At 200% text a 54pt axis label holds "14 A…"
+  // and the fix is not a smaller font — it is to stop trying to fit six labels
+  // where three now belong. `maxTicksForWidth` already decides this from a
+  // MEASURED width, so it is handed a width divided by the reader's text scale
+  // rather than taught a second rule about type.
+  const ticks = labels ? tickIndices(n, maxTicksForWidth(effectiveWidth(boxW || w, fontScale))) : [];
   const gapped = hasInteriorGap(data);
 
   return (
     <View onLayout={(e) => setBoxW(e.nativeEvent.layout.width)}>
       {/* The readout sits above the line rather than floating on it: a tooltip
           over a 74px chart covers the thing it is describing. */}
-      <View style={{ height: 16, justifyContent: 'center' }}>
+      {/* One line of caption. Pinned at 16 it clipped the readout in half for
+          anybody on Larger Text — the strip grows with the line it holds. */}
+      <View style={{ height: grown(16), justifyContent: 'center' }}>
         {shownValue != null ? (
           <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>
             {shownValue}{unit}{when ? ` · ${when}` : ''}
@@ -742,7 +759,7 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
         }}
         accessibilityValue={{
           text: shownPoint == null
-            ? `${(Math.round(last.v * 10) / 10).toLocaleString('en-GB')}${unit}${labels ? `, ${pointLabel(labels[last.i])}` : ''}`
+            ? `${(Math.round(last.v * 10) / 10).toLocaleString(appLocale())}${unit}${labels ? `, ${pointLabel(labels[last.i])}` : ''}`
             : `${shownValue}${unit}${when ? `, ${when}` : ''}`,
         }}
         onStartShouldSetResponder={() => true}
@@ -779,13 +796,13 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
           sits under the thing it names; the two ends are pulled flush to the
           edges, where a centred box would be clipped by the container. */}
       {ticks.length ? (
-        <View style={{ height: 14, marginTop: 3 }}>
+        <View style={{ height: grown(14), marginTop: 3 }}>
           {ticks.map((i) => {
             const end = i === 0 ? 'first' : i === n - 1 ? 'last' : null;
             const frac = (6 + (i / (n - 1)) * (w - 12)) / w;
             const place: StyleProp<ViewStyle> = end === 'first' ? { left: 0, alignItems: 'flex-start' }
               : end === 'last' ? { right: 0, alignItems: 'flex-end' }
-                : { left: `${frac * 100}%`, marginLeft: -27, width: 54, alignItems: 'center' };
+                : { left: `${frac * 100}%`, marginLeft: -grown(54) / 2, width: grown(54), alignItems: 'center' };
             return (
               <View key={i} style={[{ position: 'absolute', top: 0 }, place]}>
                 <Text numberOfLines={1} style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3 }}>
@@ -902,7 +919,7 @@ export function PartialRead({ what, shown, onPress }: {
     <Notice
       tone={t.warn}
       kicker="Not the whole list"
-      title={shown != null ? `Showing the first ${shown.toLocaleString()}` : 'Showing part of the list'}
+      title={shown != null ? `Showing the first ${num(shown)}` : 'Showing part of the list'}
       note={`There are more ${what} than fit in one read. What is listed is real and current. The rest are on the server and not on this screen, so anything here that looks like a total is not one.`}
     >
       {onPress ? <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={onPress} /></View> : null}

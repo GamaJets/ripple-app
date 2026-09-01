@@ -98,3 +98,37 @@ export function currencyGapLine(gap: CurrencyGap, consequence: string): string {
       return `Your gym has not set a currency, so ${c}. An owner sets one in the gym settings.`;
   }
 }
+
+/**
+ * The same four causes, about SOMEBODY ELSE'S money.
+ *
+ * `currencyGapLine` above is written to a coach about their own gym: it says
+ * "your currency" and, for 'unset', sends them to an owner who can fix it. The
+ * client's coach directory needs the identical distinction and none of that
+ * voice. A member browsing coaches is not the customer of any of those gyms,
+ * cannot fix anybody's setting, and must not be told to go and chase one —
+ * "your gym has not set a currency" is simply false addressed to them.
+ *
+ * So this is the third-person half. `who` is a description rather than a name —
+ * "this coach", "their gym" — because a name that could not be read renders as
+ * a dash, and a dash as the subject of a sentence reads as the screen having
+ * broken (scripts/check-prose.mjs).
+ *
+ * The three read-failure branches deliberately do NOT say "try again": on a
+ * directory the member did not ask for this figure and has nothing to retry.
+ * They say what the number is and is not, which is the fact they need in order
+ * to ask the coach.
+ */
+export function currencyGapLineAbout(gap: CurrencyGap, who: string): string {
+  const w = who.trim();
+  switch (gap) {
+    case 'reading':
+      return `The currency for this figure is still loading, so it is a number without a unit for the moment.`;
+    case 'unreadable':
+      return `We could not read what ${w} charges in, so this is a number without a currency. It is not a price in any currency this app has picked.`;
+    case 'incomplete':
+      return `Only part of the read behind this came back, so we cannot say what ${w} charges in. This is a number without a currency, and not a price in any currency this app has picked.`;
+    case 'unset':
+      return `${w.charAt(0).toUpperCase()}${w.slice(1)} has not told us which currency they charge in, so this is a number without a unit. Ask them before you book.`;
+  }
+}

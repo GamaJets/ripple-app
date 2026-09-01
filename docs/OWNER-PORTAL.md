@@ -75,8 +75,37 @@ in a `useState` that resets.
    become writes, not `setState`. This alone makes `trainers.tsx` and the
    Overview real.
 
-3. **Split the routes.** `(owner)` for the gym owner, `(admin)` for you. Move
-   `trainers.tsx`, `revenue.tsx` and the MRR trend to `(admin)`. Leave
+3. **Split the routes. — PARTLY DONE, in the console rather than the app.**
+   Repple's own book now has a screen: `studio-web/app/platform/page.tsx`,
+   reading `subscriptions`, `invoices` and `billing_customers`.
+
+   Point 1 above ("decide who the owner role means") is what made this
+   buildable, and it was NOT answered with a fourth `profiles.role` value. It
+   could not be: the platform lets people sign up as an owner, which is exactly
+   how the pre-part-39 `owner-metrics` leak was reachable, and a fourth role
+   would be one signup form away from the same shape. `supabase/parts/252` adds
+   an explicit `platform_admins` allowlist instead — no INSERT policy for
+   anybody, so a row can only be written with the service role, and it ships
+   empty. Every account, including yours, is refused until you add yourself.
+
+   Two things that screen deliberately does NOT do, and both are load-bearing:
+
+   - **No MRR.** The `sum(case plan when 'Starter' then 49 …)` query offered
+     above is the pattern this document's own closing section warns about: those
+     three prices are in a markdown file and in no column of this database, in
+     one currency, ignoring coupons, annual plans and every price change since.
+     What Stripe actually invoiced is measured instead, per currency, never
+     merged.
+   - **No names.** Part 252 does not widen the read on `profiles`. A count, a
+     plan and a status answer "what is Repple's book"; a name would be making
+     the argument about every person on the platform at once.
+
+   A native `(admin)` route group in the Expo app was considered and not built:
+   it is a fourth App Store record, a fourth `EXPO_PUBLIC_APP_VARIANT`, and edits
+   to `variant.ts`, `app.config.ts`, `eas.json` and three `check:*` gates — a
+   large change to ship a screen that is better as a browser page anyway.
+
+   The gym-side half of this point is unchanged. Leave
    `class-analytics`, `financials`, `ops`, `promotions`, `brand` in `(owner)` and
    scope every query by `tenant_id`.
 
@@ -109,9 +138,21 @@ in a `useState` that resets.
 
 ## Two things not to repeat
 
-- `owner-metrics` is deployed as an edge function and called by nothing. If the
-  aggregate queries belong server-side, use it; if not, delete it. A deployed
-  function nobody calls is a trap for the next person reading the code.
+- ~~`owner-metrics` is deployed as an edge function and called by nothing.~~
+  **Closed.** It has a caller: `studio-web/lib/ownerMetrics.ts`, used by the
+  console's Overview for the engagement counts a browser cannot compute whole
+  (a paged read across `workouts`/`scans` hits PostgREST's 1000-row ceiling and
+  silently reports a fraction; the function pages properly and omits a metric it
+  could not compute rather than returning a short one). Its `live` array is
+  honoured — a metric absent from it renders as a dash, never a zero, and
+  nothing falls back to sample data. The rest of what it returns (cohorts, the
+  named activity feed, the at-risk list) is deliberately unused: /analytics and
+  /retention answer those from `memberships` and the door log, and two screens
+  answering "who is at risk" two ways is how a product ends up with two
+  retention numbers.
+
+  The sentence it was written under still stands as a rule: a deployed function
+  nobody calls is a trap for the next person reading the code.
 - Every number on these screens should be traceable to a row. The pattern that
   produced the bugs cleared out in `6b1cbdf`, `bcdfddb` and `98252ff` was always
   the same: a plausible constant standing in for a measurement, then arithmetic on

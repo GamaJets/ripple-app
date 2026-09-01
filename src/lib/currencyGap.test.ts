@@ -4,7 +4,7 @@
 // The bug these guard: a refused read and an unset setting both arrive as a
 // null currency, and both screens printed "your gym has not set a currency" for
 // either — sending a coach to chase their gym owner over a query that failed.
-import { currencyGapLine, currencyGapOf, currencyGapOfStatus } from './currencyGap';
+import { currencyGapLine, currencyGapLineAbout, currencyGapOf, currencyGapOfStatus, type CurrencyGap } from './currencyGap';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -70,6 +70,47 @@ ok(!/\.\./.test(currencyGapLine('unset', 'this target cannot be shown as an amou
   'a trailing stop on the fragment is absorbed, not doubled');
 ok(currencyGapLine('unset', '  a new client cannot be priced  ').includes('so a new client cannot be priced.'),
   'surrounding whitespace is trimmed');
+
+/* ── the same four causes, about somebody else's money ─────────────────── */
+//
+// The client's coach directory prints `trainers.session_fee` and needs the
+// identical distinction in a voice that is not the coach's. "Your gym has not
+// set a currency" is simply false said to a member browsing strangers, and
+// "try again" is advice about a read they did not ask for.
+
+const WHO = 'this coach';
+const GAPS: CurrencyGap[] = ['reading', 'unreadable', 'incomplete', 'unset'];
+const aboutLines = GAPS.map((g) => [g, currencyGapLineAbout(g, WHO)] as const);
+
+for (const [gap, line] of aboutLines) {
+  ok(line.trim().endsWith('.'), `about/${gap} is a finished sentence`);
+  ok(!/your gym|your currency/i.test(line), `about/${gap} does not address the reader as the gym's customer`);
+  ok(!/gym settings/.test(line), `about/${gap} does not send a member to a setting they cannot reach`);
+  ok(!/try again/i.test(line), `about/${gap} does not ask a member to retry a read they did not start`);
+}
+
+eq(new Set(aboutLines.map(([, l]) => l)).size, 4, 'the four causes read as four different sentences here too');
+
+// The one sentence that must not be said about a read that failed, in this
+// voice as well as the other one.
+for (const [gap, line] of aboutLines) {
+  eq(/has not told us which currency/.test(line), gap === 'unset',
+    `about/${gap} claims nobody stated one only when that is known`);
+}
+
+// Only 'unset' points the member at a person, and it points at the right one:
+// the coach whose price it is, not an owner the member has never met.
+ok(/Ask them before you book/.test(currencyGapLineAbout('unset', WHO)),
+  'an unset currency tells the member what to actually do about it');
+ok(/This coach/.test(currencyGapLineAbout('unset', 'this coach')),
+  'and the description is capitalised at the head of a sentence, never left as a dash');
+
+// Every failing branch says what the number IS, because the number is still on
+// screen beside it and a member will otherwise read it in their own currency.
+for (const gap of ['unreadable', 'incomplete', 'unset'] as const) {
+  ok(/number without a (currency|unit)/.test(currencyGapLineAbout(gap, WHO)),
+    `about/${gap} says what the figure beside it is`);
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('currencyGap: ok');

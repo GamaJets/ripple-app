@@ -49,6 +49,7 @@ import { capLimit, capped } from './rowCap';
 // that list is a second thing to forget a currency in, and this file used to
 // hold the forgetting — see the note on `amount` below.
 import { minorMoney } from './coachMoney';
+import { appLocale } from './locale';
 
 type Queryable = { from: (table: string) => any };
 
@@ -260,7 +261,7 @@ export function amount(cents: number | null | undefined, currency: string | null
   if (cents == null || !Number.isFinite(cents)) return '—';
   const stated = minorMoney(cents, currency);
   if (stated) return stated;
-  return `${cents.toLocaleString('en-GB')} (currency not recorded)`;
+  return `${cents.toLocaleString(appLocale())} (currency not recorded)`;
 }
 
 export interface CurrencyTotal {

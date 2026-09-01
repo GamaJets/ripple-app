@@ -40,7 +40,8 @@
 //
 // A bubble is `sending` until the row is on the server, and marked in `unsent`
 // with WHICH half failed if it never gets there.
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
@@ -52,8 +53,15 @@ import { reportError } from '../lib/reportError';
 import type { Message } from '../lib/types';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
+import { classifyWrite } from '../lib/offlineQueue';
+import { useOutbox } from './outbox';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
 import { resolvePeerAvatar } from '../lib/peerAvatar';
+import {
+  blockStateOf, looksLikeThreadRefusal, REPORT_FAILED_NOTE, SEND_REFUSED_NOTE,
+  type BlockRow, type BlockState, type ReportCategory,
+} from '../lib/threadSafety';
 import {
   MESSAGE_MEDIA_BUCKET, MESSAGE_MEDIA_TTL_S, MESSAGE_IMAGE_WIDTH, MESSAGE_VIDEO_MAX_SECONDS,
   messageAttachmentPath, attachmentContentType, attachmentExtension, attachmentKindFor,
@@ -62,6 +70,37 @@ import {
 } from '../lib/messageAttachments';
 
 export type ChatRole = 'client' | 'coach';
+
+/** Where a thread is kept on this device, keyed by the thread's own id. */
+const THREAD_SCOPE = 'thread';
+
+/**
+ * How stale a cached thread may be before it stops being worth opening.
+ *
+ * Fourteen days, far longer than the timetable's two. The failure a stale
+ * timetable causes is somebody turning up to a class that is not on; the
+ * failure a stale thread causes is somebody reading a conversation that is
+ * genuinely theirs and genuinely happened, missing only whatever came after —
+ * and the label says exactly that. The one thing it must not do is silently
+ * become the thread, which is what `cachedNote` prevents.
+ */
+const THREAD_CACHE_HORIZON_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** What one queued message carries. Text only — see `send`, and the argument in
+ *  src/lib/outbox.ts about why a queued write may not depend on a file. */
+export interface QueuedMessage { clientId: string; sender: ChatRole; body: string }
+
+/** Narrow an outbox payload back to a message. Written down once because the
+ *  payload crosses AsyncStorage as `unknown` and two places read it. */
+export function asQueuedMessage(payload: unknown): QueuedMessage | null {
+  const p = payload as any;
+  if (!p || typeof p !== 'object') return null;
+  const clientId = typeof p.clientId === 'string' ? p.clientId : '';
+  const body = typeof p.body === 'string' ? p.body : '';
+  const sender = p.sender === 'coach' ? 'coach' : 'client';
+  if (!clientId || !body.trim()) return null;
+  return { clientId, sender, body };
+}
 
 /**
  * A message as this thread holds it.
@@ -356,10 +395,33 @@ export function useAttachmentUrl(attachment: MessageAttachment | null): { url: s
  * nothing to say — a cancel, or an empty box — never as a stand-in for a
  * failure whose cause we did not bother to name.
  */
-export type SendResult = { ok: true } | { ok: false; reason: string | null };
+export type SendResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: string | null;
+      /**
+       * The words are on this device and will be sent when there is signal.
+       *
+       * Still `ok: false`, deliberately and permanently: `ok` means the other
+       * person can read it, and a queued message is exactly the state where
+       * they cannot. A caller that wants to say something softer than "that did
+       * not send" reads this; a caller that does nothing with it keeps the
+       * honest, pessimistic sentence it had before.
+       */
+      queued?: boolean;
+    };
 
-/** Which half of an attached send failed, kept per bubble. */
-export type UnsentStage = 'upload' | 'send';
+/**
+ * What became of a bubble that is not on the server.
+ *
+ * 'upload' and 'send' are failures: the file did not go, or the row did not.
+ * 'queued' is not a failure — the words are on this phone, they are counted,
+ * and they go up when there is signal. It has to be a third value rather than
+ * a flavour of 'send', because the sentence under the bubble is different and
+ * so is what the sender should do about it.
+ */
+export type UnsentStage = 'upload' | 'send' | 'queued';
 
 /**
  * Chat thread hook.
@@ -377,6 +439,21 @@ export function useThread(clientId: string | null, role: ChatRole) {
   const [unsent, setUnsent] = useState<Record<string, UnsentStage>>({});
   const tid = useRef<string | null>(clientId);
   const seen = useRef<Set<string>>(new Set());
+  /** The device's outbox, or null in a tree without one. Null is a normal
+   *  state, not an error — see `useOutbox`: a thread must still be able to
+   *  attempt a send and report honestly that nothing was kept. */
+  const outbox = useOutbox();
+  /** When the thread on screen was last confirmed by the server, or null when
+   *  it just was. Non-null means what is drawn came off this device. */
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
+  /** The same value as `tid.current`, in state. The ref is what the async
+   *  paths read; this is what the merge below needs, because a ref changing
+   *  re-renders nothing and the queued bubbles would not appear until something
+   *  else happened to cause a render. */
+  const [threadId, setThreadId] = useState<string | null>(clientId);
+  /** Bumped to re-read the thread. See the effect below: the only thing that
+   *  bumps it is a queued message of ours having gone. */
+  const [reloadTick, setReloadTick] = useState(0);
   const coachId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -425,6 +502,7 @@ export function useThread(clientId: string | null, role: ChatRole) {
       }
       if (cancelled) return;
       tid.current = cid;
+      setThreadId(cid);
       // No thread key at all: there is nothing to read, and nothing was hidden.
       if (!cid) { setReady(true); setStatus('ready'); return; }
       if (role === 'client') {
@@ -434,6 +512,33 @@ export function useThread(clientId: string | null, role: ChatRole) {
         // no-error-ok: a tie-break for which coach to show; absent behaves the same as having no coach
       try { const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', cid).single(); coachId.current = (cr as any)?.trainer_id ?? null; } catch { /* push addressing only */ }
       }
+      // ── this device's copy of the thread, before the network ───────────
+      //
+      // A member in a basement could not read a word their coach had written.
+      // This is the thread as it stood the last time this phone could ask, and
+      // `cachedNote` is what stops it reading as the live one.
+      //
+      // Assigned only when the cache actually parsed AND is inside the horizon.
+      // `rows === null` means we learnt nothing from the device, which is not
+      // the same as an empty thread and must never render as one — the empty
+      // state on this screen is "No messages yet. Say hello.", said to somebody
+      // whose coach wrote to them that morning.
+      try {
+        const cached = readCache<any>(await AsyncStorage.getItem(cacheKey(THREAD_SCOPE, cid)));
+        if (cancelled) return;
+        if (cached.rows && cached.rows.length && withinHorizon(cached.at, Date.now(), THREAD_CACHE_HORIZON_MS)) {
+          const rows = cached.rows.map(rowToMsg);
+          seen.current = new Set(rows.map((m: ThreadMessage) => m.id));
+          setMessages(rows);
+          setCachedAt(cached.at);
+          // Not `setStatus('ready')`. Nothing has been confirmed; the read
+          // below decides between 'ready' and 'error', and under 'error' this
+          // list is exactly the "what we had before the failure" case
+          // src/ui/loadStatus.ts describes.
+          setReady(true);
+        }
+      } catch { /* no usable cache; the read below is the only source */ }
+
       try {
         // Newest-first on the wire, oldest-first in the state. A thread is the
         // one read here where the ascending page is unambiguously the wrong
@@ -460,6 +565,20 @@ export function useThread(clientId: string | null, role: ChatRole) {
           // somebody else's conversation.
           setMessages(rows.map(rowToMsg));
           setStatus(page.truncated ? 'partial' : 'ready');
+          setCachedAt(null);
+          // …and this is now what a basement gets. The raw rows are cached
+          // rather than the ThreadMessage objects, so the cache round-trips
+          // through `rowToMsg` — the same converter the server's answer goes
+          // through — and cannot grow a second opinion about a column name or
+          // about what makes an attachment readable.
+          //
+          // A truncated page is cached anyway, and this is the one place in
+          // this change where that is right: what was dropped is the OLDEST end
+          // of a thread that is already longer than the cap, the rows on screen
+          // are the same rows the live read shows, and the alternative is a
+          // member with a long history having no cached thread at all.
+          AsyncStorage.setItem(cacheKey(THREAD_SCOPE, cid), packCache(rows))
+            .catch(() => { /* the thread is right this session either way */ });
         }
       } catch { if (!cancelled) setStatus('error'); }
       if (!cancelled) setReady(true);
@@ -483,13 +602,85 @@ export function useThread(clientId: string | null, role: ChatRole) {
       } catch { /* realtime optional: the thread is already loaded, this only adds live updates */ }
     })();
     return () => { cancelled = true; if (channel) { try { supabase.removeChannel(channel); } catch { /* ignore */ } } };
-  }, [clientId, role, authRev]);
+  }, [clientId, role, authRev, reloadTick]);
+
+  /**
+   * Re-read the thread when one of OUR queued messages has been sent.
+   *
+   * Without this the bubble the merge below draws from the outbox simply
+   * disappears at the moment it succeeds, and the real row does not arrive
+   * until the realtime channel delivers it — which it usually does, and must
+   * not be relied on to: a project without the publication, a network that will
+   * not open a websocket, and the member watches the message they just sent
+   * vanish off the screen.
+   *
+   * Only on a DECREASE. Queuing a message increases the count and must not
+   * trigger a read; the bubble is already on screen from the send path.
+   */
+  const queuedHere = useMemo(() => {
+    const waiting = outbox?.pending;
+    if (!waiting || !threadId) return 0;
+    let n = 0;
+    for (const i of waiting) {
+      if (i.kind !== 'message') continue;
+      if (asQueuedMessage(i.payload)?.clientId === threadId) n += 1;
+    }
+    return n;
+  }, [outbox?.pending, threadId]);
+  const queuedBefore = useRef(queuedHere);
+  useEffect(() => {
+    const before = queuedBefore.current;
+    queuedBefore.current = queuedHere;
+    if (queuedHere < before) setReloadTick((n) => n + 1);
+  }, [queuedHere]);
 
   /** Stop a bubble reading as in-flight, and record which half of the send
    *  failed so the screen can say the useful half of it. */
   const markUnsent = (id: string, stage: UnsentStage) => {
     setUnsent((p) => ({ ...p, [id]: stage }));
     setMessages((p) => p.map((m) => (m.id === id ? { ...m, sending: false } : m)));
+  };
+
+  /**
+   * Nobody answered. Keep the words, if they can be kept.
+   *
+   * ── Why an attachment is never queued ──────────────────────────────────
+   *
+   * The outbox holds JSON in AsyncStorage. A photo lives at a file:// URI in a
+   * cache directory the operating system is free to empty whenever it likes,
+   * so a queued send with an attachment is an intent whose subject may not
+   * exist by the time it runs — and the failure mode is the worst one this hook
+   * has: a message that says it sent a photograph, delivered days later without
+   * one. The file half fails immediately and honestly, and the member still has
+   * the picture in their library to send again.
+   *
+   * ── Why the bubble is re-keyed onto the outbox's id ────────────────────
+   *
+   * Because the queued intent and the optimistic bubble are otherwise two
+   * objects describing one message, and the thread merges the outbox in below.
+   * Sharing an id is what stops the member's unsent message being drawn twice.
+   */
+  const keepForLater = async (localId: string, body: string, att: PendingAttachment | null): Promise<SendResult> => {
+    const cid = tid.current;
+    const failed = (): SendResult => {
+      markUnsent(localId, 'send');
+      return { ok: false, reason: 'That message did not reach the server, so it has not been sent.' };
+    };
+    if (att || !outbox || !cid || !body.trim()) return failed();
+    const { result, id } = await outbox.enqueue('message', { clientId: cid, sender: role, body } satisfies QueuedMessage);
+    if (result !== 'queued' || !id) {
+      // Nothing was kept — the phone is holding as much as it will hold, or its
+      // outbox could not be read. The member is told the pessimistic truth
+      // rather than a promise this device cannot keep.
+      return failed();
+    }
+    setMessages((p) => p.map((m) => (m.id === localId ? { ...m, id, sending: false } : m)));
+    setUnsent((p) => { const n = { ...p }; delete n[localId]; n[id] = 'queued'; return n; });
+    return {
+      ok: false,
+      queued: true,
+      reason: 'No signal, so that message is saved on this phone and has not been sent yet. It goes as soon as you are back online.',
+    };
   };
 
   /**
@@ -562,6 +753,21 @@ export function useThread(clientId: string | null, role: ChatRole) {
         // leave an object in the bucket that no row references and no purge
         // exists for (the operator note in supabase/parts/124).
         if (stored) await removeMessageAttachment(stored.path);
+        // A REFUSAL is not a failure to reach the server, and since part 240 it
+        // is a state a member can put this thread into on purpose. Saying "that
+        // did not reach the server" to somebody whose coach blocked them sends
+        // them to check their signal over and over. The two causes a 42501 can
+        // have here are named honestly in SEND_REFUSED_NOTE, because this
+        // device cannot tell them apart and must not pick one.
+        if (looksLikeThreadRefusal(error)) {
+          markUnsent(localId, 'send');
+          return { ok: false, reason: SEND_REFUSED_NOTE };
+        }
+        // Everything else goes through the same classifier every other queue in
+        // this app uses. `data` missing with no error is PostgREST having
+        // narrowed the insert to nothing, which is a refusal; an error with no
+        // SQLSTATE is nobody having answered, which is what may wait.
+        if (classifyWrite(error as any, data ? 1 : 0) === 'unsent') return keepForLater(localId, b, att);
         markUnsent(localId, 'send');
         return { ok: false, reason: 'That message did not reach the server, so it has not been sent.' };
       }
@@ -587,17 +793,139 @@ export function useThread(clientId: string | null, role: ChatRole) {
       // with no clientId: an empty thread headed "Client", and a reply that went
       // nowhere because `send` has no thread to insert into. The client's route
       // needs no key; their thread is their own id, resolved from auth.
-      else if (role === 'client' && coachId.current && tid.current) sendPush([coachId.current], 'New message from your client', preview, { route: '/(trainer)/chat?clientId=' + encodeURIComponent(tid.current) });
+      // 'chat' — the coach can mute this category on its own without losing
+      // bookings or a failed subscription payment with it. The filter is
+      // applied in the send-push edge function, not here; see the note on
+      // `PushChannel` in src/ui/pushNotifications.ts. The push to the CLIENT
+      // above carries no channel, because the channels are the coach's and a
+      // member's own controls are src/lib/notifyPrefs.ts.
+      else if (role === 'client' && coachId.current && tid.current) sendPush([coachId.current], 'New message from your client', preview, { route: '/(trainer)/chat?clientId=' + encodeURIComponent(tid.current) }, 'chat');
       return { ok: true };
     } catch (e) {
       reportError('messaging.send', e);
       if (stored) await removeMessageAttachment(stored.path);
-      markUnsent(localId, 'send');
-      return { ok: false, reason: 'That message did not reach the server, so it has not been sent.' };
+      // Nobody answered at all — the offline case this whole path exists for.
+      return keepForLater(localId, b, att);
     }
   };
 
-  return { messages, send, ready, status, unsent };
+  /**
+   * The thread, plus whatever this device is still holding for it.
+   *
+   * Without this, a message typed with no signal is invisible the moment the
+   * screen is left and reopened: it is in the outbox, it will be sent, and the
+   * member can see no trace of having written it. That is the same silence this
+   * hook was rewritten to end, one layer further out.
+   *
+   * Keyed by id against what is already on screen, so the bubble the send path
+   * re-keyed onto the outbox id is not drawn a second time from here.
+   */
+  const shown = useMemo(() => {
+    const waiting = outbox?.pending;
+    if (!waiting || !waiting.length || !threadId) return messages;
+    const have = new Set(messages.map((m) => m.id));
+    const extra: ThreadMessage[] = [];
+    for (const item of waiting) {
+      if (item.kind !== 'message' || have.has(item.id)) continue;
+      const q = asQueuedMessage(item.payload);
+      if (!q || q.clientId !== threadId) continue;
+      extra.push({
+        id: item.id, clientId: threadId, sender: q.sender, body: q.body, createdAt: item.at,
+        // A queued message never carries one — see `keepForLater`.
+        attachment: { state: 'none' }, local: null, sending: false,
+      });
+    }
+    if (!extra.length) return messages;
+    // Oldest first, like the rest of the thread. A queued message belongs at
+    // the moment it was WRITTEN, not at the end: a member who typed two things
+    // in a basement and one on the platform should read them back in the order
+    // they said them.
+    return [...messages, ...extra].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  }, [messages, outbox?.pending, threadId]);
+
+  /** The per-bubble marks, plus a 'queued' one for every bubble the merge above
+   *  added — otherwise a waiting message renders with a timestamp and reads as
+   *  delivered. */
+  const shownUnsent = useMemo(() => {
+    const waiting = outbox?.pending;
+    if (!waiting || !waiting.length) return unsent;
+    const out: Record<string, UnsentStage> = { ...unsent };
+    for (const item of waiting) if (item.kind === 'message') out[item.id] = 'queued';
+    return out;
+  }, [unsent, outbox?.pending]);
+
+  return {
+    messages: shown,
+    send,
+    ready,
+    status,
+    unsent: shownUnsent,
+    /** The sentence for a thread read off this device rather than the server,
+     *  or null when it was confirmed. Goes with `status === 'error'`. */
+    cachedNote: cachedAtLine(cachedAt),
+  };
+}
+
+/**
+ * Performs the write for a message that was queued while there was no signal.
+ *
+ * Renders nothing. Mounted once at the root, NOT inside `useThread`, and that
+ * placement is the whole point of it: a message typed in a basement and then
+ * left there — the app closed, the chat screen never reopened — would otherwise
+ * have no handler registered when the flush ran, and would sit on the phone
+ * being counted and never sent. The write is self-contained because the payload
+ * carries the thread key and the sender, so nothing about it needs the screen.
+ *
+ * The push is sent from here too. A queued message that lands silently is a
+ * message the other person does not know about until they next open the app,
+ * which for a coach is the difference between answering a client the same day
+ * and not.
+ */
+export function MessageOutboxHandler(): null {
+  const outbox = useOutbox();
+  useEffect(() => {
+    if (!outbox) return;
+    return outbox.registerHandler('message', async (item) => {
+      const q = asQueuedMessage(item.payload);
+      // A payload this file cannot read is one nothing can ever send. 'refused'
+      // takes it out of the queue rather than leaving it to be retried on every
+      // reconnect for the life of the install.
+      if (!q) return 'refused';
+      try {
+        const { data, error } = await supabase.from('messages').insert({
+          client_id: q.clientId, sender: q.sender, body: q.body,
+          attachment_path: null, attachment_kind: null,
+        }).select('id');
+        const out = classifyWrite(error as any, data ? data.length : 0);
+        if (out !== 'stored') {
+          if (out === 'refused') reportError('messaging.outbox', error);
+          return out;
+        }
+        // Best effort, and deliberately after the row. A failed push costs a
+        // notification; a failed row costs the message, and the row is already
+        // safe by the time this runs.
+        try {
+          if (q.sender === 'coach') {
+            sendPush([q.clientId], 'New message from your coach', q.body, { route: '/(client)/messages' });
+          } else {
+            // no-error-ok: addressing for a notification; without it the message is still delivered and visible in the thread
+            const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', q.clientId).single();
+            const coach = (cr as any)?.trainer_id ?? null;
+            if (coach) {
+              sendPush([coach], 'New message from your client', q.body,
+                { route: '/(trainer)/chat?clientId=' + encodeURIComponent(q.clientId) });
+            }
+          }
+        } catch { /* the message is delivered either way */ }
+        return 'stored';
+      } catch {
+        // Still no answer. It stays in the outbox, stays counted, and is tried
+        // again on the next reconnect.
+        return 'unsent';
+      }
+    });
+  }, [outbox]);
+  return null;
 }
 
 /* ── the coach's words, into several threads at once ───────────────────────── */
@@ -674,7 +1002,13 @@ export async function sendCoachMessages(
         reportError('messaging.sendCoachMessages', error ?? new Error('insert returned no row'), { clientId });
         return {
           clientId, ok: false,
-          why: 'That message did not reach their thread. Clients you added by hand have no account to message until they join.',
+          // A REFUSAL is a different fact from a client who has no account yet,
+          // and since part 240 it is one a member can create on purpose. Left
+          // as the sentence below, a coach whose client blocked them would go on
+          // believing the problem was a hand-added roster row.
+          why: looksLikeThreadRefusal(error)
+            ? 'That conversation is closed, so the message was not delivered.'
+            : 'That message did not reach their thread. Clients you added by hand have no account to message until they join.',
         };
       }
       return { clientId, ok: true, why: null };
@@ -836,4 +1170,181 @@ export function useThreadPeerName(role: ChatRole, clientId: string | null): Thre
   }, [role, clientId, authRev]);
 
   return peer;
+}
+
+/* ── blocking, and reporting what was sent ─────────────────────────────────── */
+//
+// The moderation path this thread did not have. A repo-wide grep for
+// `blockUser`, `report_user` or "report abuse" used to return nothing, on the
+// one surface in this product that carries photographs and 30-second video
+// between two named adults in a conversation nobody else can see.
+//
+// Everything enforceable is at the database (supabase/parts/240):
+//
+//   · a block is a row, and the WITH CHECK on msg_client, msg_coach and
+//     msgmedia_obj_insert REFUSES the write. It is not a filter over messages
+//     that arrived anyway, and it is not a mute — the file has nowhere to land
+//     either, which matters because the upload happens BEFORE the row.
+//   · a report COPIES the message into `abuse_reports`. `msg_coach` is
+//     `for all using (is_my_client(client_id))`, so the reported person can
+//     delete the message; a report that only pointed at an id would be one they
+//     could empty.
+//
+// This hook is therefore thin on purpose. It reads the rows so a screen can say
+// what is true, and it makes the two writes. It decides nothing that the
+// database does not also decide, so a stale or unread state costs a sentence
+// and never costs the protection.
+
+/** What a screen needs to offer a block, an unblock and a report. */
+export interface ThreadSafety {
+  /** Where this conversation stands. 'unknown' until a read lands — never
+   *  softened into 'open', which would tell somebody who blocked their coach
+   *  last night that they had not blocked anybody. */
+  state: BlockState;
+  /** How the read behind `state` went. */
+  status: LoadStatus;
+  /** The thread key, once resolved. Null means there is nothing to act on —
+   *  no signed-in client, or a coach screen with no client selected. */
+  threadId: string | null;
+  /** Block the other party. Resolves ok only when the row is on the server. */
+  block: () => Promise<{ ok: boolean; error: string | null }>;
+  /** Lift my own block. Resolves ok only when a row was actually removed. */
+  unblock: () => Promise<{ ok: boolean; error: string | null }>;
+  /**
+   * File one report. `messageId` null reports the conversation rather than one
+   * message — which is the case when the abuse was the sum of it, or when the
+   * message has already been deleted.
+   *
+   * Resolves an `id` only when the row exists. A report that "did not raise" is
+   * not a report, and somebody who believes one is filed stops looking for
+   * another way to get help.
+   */
+  report: (
+    category: ReportCategory,
+    note: string | null,
+    messageId?: string | null,
+  ) => Promise<{ id: string | null; error: string | null }>;
+  reload: () => void;
+}
+
+export function useThreadSafety(clientId: string | null, role: ChatRole): ThreadSafety {
+  const authRev = useAuthRevision();
+  const [threadId, setThreadId] = useState<string | null>(role === 'coach' ? clientId : null);
+  const [myId, setMyId] = useState<string | null>(null);
+  const [rows, setRows] = useState<BlockRow[] | null>(null);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((n) => n + 1), []);
+
+  useEffect(() => {
+    // With no server there is no thread_blocks table to read and never will be.
+    // 'ready' with no rows is the complete answer here, not a fabricated one.
+    if (!USE_SUPABASE) { setStatus('ready'); setRows([]); return; }
+    let cancelled = false;
+    // Dropped before the new key is read, exactly as useThread drops its
+    // messages: a coach moving between two clients on the same mounted screen
+    // would otherwise carry the previous client's block state onto this one.
+    setRows(null);
+    setStatus('loading');
+    (async () => {
+      const { data: auth, error: authErr } = await supabase.auth.getUser();
+      if (cancelled) return;
+      // Not knowing who I am is a failed read, not an open thread — blockStateOf
+      // returns 'unknown' for a null id and this is why it has that branch.
+      if (authErr) { setStatus('error'); return; }
+      const uid = auth?.user?.id ?? null;
+      setMyId(uid);
+      const tid = role === 'coach' ? clientId : uid;
+      setThreadId(tid);
+      if (!tid) { setStatus('ready'); setRows([]); return; }
+      try {
+        const { data, error } = await supabase.from('thread_blocks').select('blocker_id').eq('thread_id', tid);
+        if (cancelled) return;
+        if (error) { reportError('messaging.blocks', error); setStatus('error'); return; }
+        setRows(((data ?? []) as any[]).map((r) => ({ blockerId: String(r.blocker_id) })));
+        setStatus('ready');
+      } catch (e) {
+        if (!cancelled) { reportError('messaging.blocks', e); setStatus('error'); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [clientId, role, authRev, tick]);
+
+  const block = async (): Promise<{ ok: boolean; error: string | null }> => {
+    if (!USE_SUPABASE) return { ok: false, error: 'This build has no server, so nothing can be blocked on it.' };
+    if (!threadId || !myId) return { ok: false, error: 'We could not tell which conversation this is, so nothing was blocked.' };
+    try {
+      // `ignoreDuplicates` makes a second tap idempotent rather than an error:
+      // the state it is asking for is already true. Only `error` is read, and
+      // deliberately — an ignored duplicate returns NO rows, so counting rows
+      // here would report "not blocked" for the one case where they certainly
+      // are. An error-free upsert means the row is there, whichever tap put it
+      // there, and `reload()` re-reads the truth for the screen either way.
+      const { error } = await supabase.from('thread_blocks')
+        .upsert({ thread_id: threadId, blocker_id: myId }, { onConflict: 'thread_id,blocker_id', ignoreDuplicates: true });
+      if (error) {
+        reportError('messaging.block', error);
+        return { ok: false, error: 'That did not save, so nothing has been blocked and they can still message you.' };
+      }
+      reload();
+      return { ok: true, error: null };
+    } catch (e) {
+      reportError('messaging.block', e);
+      return { ok: false, error: 'That did not save, so nothing has been blocked and they can still message you.' };
+    }
+  };
+
+  const unblock = async (): Promise<{ ok: boolean; error: string | null }> => {
+    if (!USE_SUPABASE) return { ok: false, error: 'This build has no server, so there is nothing to unblock on it.' };
+    if (!threadId || !myId) return { ok: false, error: 'We could not tell which conversation this is, so nothing was changed.' };
+    try {
+      // PostgREST reports a delete that matched no rows as a success, which is
+      // how "you have unblocked them" gets printed over a row that is still
+      // there. The returned rows are what decides.
+      const { data, error } = await supabase.from('thread_blocks').delete()
+        .eq('thread_id', threadId).eq('blocker_id', myId).select('blocker_id');
+      if (error) {
+        reportError('messaging.unblock', error);
+        return { ok: false, error: 'That did not save, so they are still blocked.' };
+      }
+      if (!((data ?? []) as any[]).length) {
+        return { ok: false, error: 'Nothing was unblocked. Open this screen again — the block may already have been lifted somewhere else.' };
+      }
+      reload();
+      return { ok: true, error: null };
+    } catch (e) {
+      reportError('messaging.unblock', e);
+      return { ok: false, error: 'That did not save, so they are still blocked.' };
+    }
+  };
+
+  const report = async (
+    category: ReportCategory,
+    note: string | null,
+    messageId?: string | null,
+  ): Promise<{ id: string | null; error: string | null }> => {
+    if (!USE_SUPABASE) return { id: null, error: 'This build has no server, so a report has nowhere to go.' };
+    if (!threadId) return { id: null, error: 'We could not tell which conversation this is, so nothing was reported.' };
+    try {
+      // `report_abuse` decides who is being reported from the database rather
+      // than from this request, and snapshots the message. It raises on every
+      // refusal, so an id coming back is the row existing.
+      const { data, error } = await supabase.rpc('report_abuse', {
+        p_thread: threadId,
+        p_category: category,
+        p_note: note && note.trim() ? note.trim() : null,
+        p_message: messageId ?? null,
+      });
+      if (error || !data) {
+        reportError('messaging.report', error ?? new Error('report_abuse returned no id'));
+        return { id: null, error: REPORT_FAILED_NOTE };
+      }
+      return { id: String(data), error: null };
+    } catch (e) {
+      reportError('messaging.report', e);
+      return { id: null, error: REPORT_FAILED_NOTE };
+    }
+  };
+
+  return { state: blockStateOf(status, rows, myId), status, threadId, block, unblock, report, reload };
 }

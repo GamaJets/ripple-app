@@ -46,6 +46,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
+import { useToast } from '../../src/ui/toast';
 import { Icon } from '../../src/ui/Icon';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useExerciseVideos, type VideoItem } from '../../src/ui/exerciseVideos';
@@ -68,6 +69,7 @@ import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
 
 export default function Library() {
+ const toast = useToast();
  // The unit this member reads a LIFTED load in. Chosen if they have chosen,
  // otherwise read off the phone's region and said so in Settings — see
  // src/lib/unitPreference.ts. Never a 'kg' typed after a figure.
@@ -239,7 +241,7 @@ export default function Library() {
   }
   notifySuccess();
   const total = pending.length;
-  Alert.alert('Logged', `${num(total)} set${total === 1 ? '' : 's'} of ${open.name} added to today.`);
+  toast.say(`${num(total)} set${total === 1 ? '' : 's'} of ${open.name} added to today.`);
   setBanked([]); setReps(''); setKg('');
   close();
  };

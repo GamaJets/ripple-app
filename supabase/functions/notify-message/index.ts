@@ -75,6 +75,29 @@ Deno.serve(async (req: Request) => {
   try { await admin.from('notifications').insert({ user_id: recipient, icon: 'message', title, body: text, route }); } catch { /* ignore */ }
 
   // Expo push to the recipient's devices — best-effort.
+  //
+  // ── the 'chat' channel ──────────────────────────────────────────────────
+  //
+  // This function does not go through supabase/functions/send-push, so the
+  // per-channel filter added there does not reach it — and chat is the one
+  // channel a coach most wants to mute, because it is the one that arrives at
+  // 11pm. The same check is therefore made here, in the same shape and with the
+  // same three rules: only an explicit `enabled = false` suppresses, a failed
+  // read sends, and the notifications ROW above is written either way.
+  //
+  // The row above is the reason muting is safe to offer at all. A muted coach
+  // still finds the message in their notifications list and in the thread; what
+  // stops is the banner.
+  try {
+    const { data: off, error: prefErr } = await admin
+      .from('notify_channel_prefs')
+      .select('user_id')
+      .eq('user_id', recipient)
+      .eq('channel', 'chat')
+      .eq('enabled', false)
+      .maybeSingle();
+    if (!prefErr && off) return json({ ok: true, muted: true });
+  } catch { /* a preference we cannot read is not a mute — fall through and send */ }
   try {
     const { data: toks } = await admin.from('push_tokens').select('token').eq('user_id', recipient);
     const tokens: string[] = (toks ?? []).map((r: any) => r.token).filter(Boolean);

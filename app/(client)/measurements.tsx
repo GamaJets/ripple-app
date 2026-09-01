@@ -28,6 +28,7 @@ import { View, Text, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useToast } from '../../src/ui/toast';
 import { useMeasurements, METRICS, type MeasureEntry } from '../../src/ui/measurements';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
@@ -49,6 +50,7 @@ const fmtDate = shortDayLabel;
 
 export default function Measurements() {
  const t = useTheme();
+ const toast = useToast();
  const router = useRouter();
  const { entries, status, addEntry } = useMeasurements();
  // The member's own goal, purely so the mark beside a fall can stop claiming to
@@ -91,18 +93,30 @@ export default function Measurements() {
  // does nothing — the moment it does, a 32 in waist becomes a 32 cm one.
  for (const { key } of METRICS) { const cm = lengthToCm(vals[key], lu); if (cm != null && cm > 0) parsed[key] = cm; }
  if (Object.keys(parsed).length === 0) { Alert.alert('Nothing to save', 'Enter at least one measurement.'); return; }
- // `addEntry` resolves true only once the rows are on the server, and its
- // answer was being thrown away — so a refused write showed the entry on
- // screen, said "Saved", and lost it at the next launch. The client is told
- // which of the two happened while they are still standing there with the tape.
- const stored = await addEntry(parsed);
+ // `addEntry` says which of three things happened, and its answer was once
+ // being thrown away entirely — so a refused write showed the entry on screen,
+ // said "Saved", and lost it at the next launch. The client is told which one
+ // while they are still standing there with the tape.
+ //
+ // 'queued' is the answer that did not used to exist: a member measuring
+ // themselves in a changing room with no signal was told to enter it all
+ // again later, by which time the numbers were off the screen. Now it waits
+ // on the phone, under the date it was taken, and goes up on its own.
+ const out = await addEntry(parsed);
  setVals({});
- Alert.alert(
-  stored ? 'Saved' : 'Saved on this phone only',
-  stored
-   ? 'Your measurements were logged.'
-   : 'These are on screen but could not be sent to your account, so they will be gone at the next launch. Check your connection and enter them again.',
- );
+ // A statement, not a question. It used to stop the screen and wait for a
+ // tap to say one word; it now says it in the bar at the bottom and gets out
+ // of the way. The two branches below are NOT statements — one says the
+ // numbers have not reached the account and the other says they were refused
+ // — so both keep the interruption.
+ if (out === 'stored') { toast.say('Measurements logged.'); return; }
+ if (out === 'queued') {
+  Alert.alert('Waiting to send',
+   'No signal, so these are saved on this phone and have not reached your account yet. They go up on their own once you are back online, under today\u2019s date.');
+  return;
+ }
+ Alert.alert('Not saved',
+  'These are on screen but could not be sent to your account, so they will be gone at the next launch. Enter them again in a moment.');
  };
 
  const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, width: 96, textAlign: 'center' } as const;

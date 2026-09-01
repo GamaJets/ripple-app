@@ -71,6 +71,7 @@ import { SkeletonList } from './Skeleton';
 import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+import { useLive } from './realtime';
 
 export interface InboxItem {
   id: string;
@@ -200,6 +201,10 @@ export function useNotifications(group: AppVariant): InboxValue {
   const [items, setItemsState] = useState<InboxItem[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const uid = useRef<string | null>(null);
+  /** The same id in state. The ref is what the async paths read; the live
+   *  subscription needs a value that causes a render when it arrives, or the
+   *  channel is never opened for the account that just signed in. */
+  const [liveUid, setLiveUid] = useState<string | null>(null);
   const listRef = useRef<InboxItem[]>([]);
   /** False once a read comes back truncated: caching a prefix would make the
    *  next launch open on part of the list with no way to know it. */
@@ -228,8 +233,9 @@ export function useNotifications(group: AppVariant): InboxValue {
     // Signed out, or a build with no backend. Nothing is addressed to nobody,
     // and there is no absent server to misreport — so this is 'ready', and an
     // empty inbox here is a true statement.
-    if (!id || !USE_SUPABASE) { uid.current = null; setItems([], null); setStatus('ready'); return; }
+    if (!id || !USE_SUPABASE) { uid.current = null; setLiveUid(null); setItems([], null); setStatus('ready'); return; }
     uid.current = id;
+    setLiveUid(id);
 
     let local: InboxItem[] = [];
     try {
@@ -262,6 +268,31 @@ export function useNotifications(group: AppVariant): InboxValue {
   }, [group]);
 
   useEffect(() => { void load(); }, [load, authRev]);
+
+  /* ── live ────────────────────────────────────────────────────────────────
+   *
+   * A notification arriving while the app is open reached this hook only when
+   * the screen was left and reopened, so the bell could sit at zero with a
+   * message from the coach already in the table. The push itself is not this:
+   * a push is a banner the OS draws, it does not exist when notifications are
+   * switched off, and it never updated the in-app list.
+   *
+   * No `.eq('user_id', …)` filter, exactly as the read below has none: the
+   * `notif_self` policy is what decides whose rows come back, and realtime
+   * applies it. A second copy of that rule here would be a weaker one that
+   * eventually disagrees with the policy.
+   *
+   * INSERT only. An update — a row being marked read — is almost always this
+   * device having just done it, and refetching on our own write is a round trip
+   * that can only tell us what we already applied.
+   */
+  useLive({
+    channel: 'notifications:' + (liveUid ?? 'none'),
+    table: 'notifications',
+    event: 'INSERT',
+    enabled: !!liveUid,
+    onChange: () => { void load(); },
+  });
 
   const markAllRead = useCallback(async (): Promise<{ ok: boolean; changed: number }> => {
     if (!USE_SUPABASE || !uid.current) return { ok: false, changed: 0 };

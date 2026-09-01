@@ -88,7 +88,7 @@ import { buildChecklist, scheduledFocus, type ChecklistGap, type ChecklistSource
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { WATER_CAP, clampGlasses, mergeCount, type CountAt } from '../lib/wellnessSync';
-import { classifyWrite, serverRows, type WriteOutcome } from '../lib/offlineQueue';
+import { classifyWrite, registerFlush, serverRows, type WriteOutcome } from '../lib/offlineQueue';
 import { useAuthRevision } from './authRevision';
 import { useClientData } from './clientData';
 import { useCoachNutrition } from './coachNutrition';
@@ -622,6 +622,40 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     }
     markPending(id, null);
   };
+
+  /**
+   * Offer the toggles the server has not accepted, again.
+   *
+   * A tick is a toggle rather than a row, so what is queued here is the last
+   * state the member chose for each habit — `settle` is what takes it out of
+   * `pendingRef` once the server agrees, or puts the tick back when the server
+   * refuses. Replaying the map is therefore idempotent in the way an insert
+   * queue is not: offering "this habit is done today" twice writes one row.
+   *
+   * Lifted out of the hydrate, which was the only thing that ran it. A
+   * checklist worked through in a basement gym sat unsent until the next launch
+   * that landed here; it now also goes on the reconnect edge and on returning
+   * to the foreground, through src/lib/offlineQueue.ts · `flushAll`.
+   *
+   * Today's water count is deliberately NOT part of this. It is an upsert of a
+   * single number that `mergeCount` reconciles against the server's own on the
+   * next hydrate, and pushing it from here would race that reconciliation with
+   * no more recent information than it already has.
+   */
+  const flushQueue = async (): Promise<void> => {
+    const owner = uidRef.current;
+    if (!USE_SUPABASE || !owner) return;
+    for (const [habit, on] of [...pendingRef.current]) {
+      const out = await persist(owner, habit, on);
+      settle(habit, on, out);
+      // Stop at the first silence: the rest would meet the same one, and every
+      // attempt past it is a toggle re-offered to a connection that is not
+      // there.
+      if (out === 'unsent') return;
+    }
+  };
+
+  useEffect(() => registerFlush('habits', flushQueue), []);
 
   const toggleHabit = async (id: string): Promise<boolean> => {
     // Only what is on today's list may be ticked. A derived list can lose a row

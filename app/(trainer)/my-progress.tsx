@@ -273,18 +273,25 @@ export default function MyProgress() {
     for (const { key } of METRICS) { const cm = lengthToCm(tape[key], lu); if (cm != null && cm > 0) parsed[key] = cm; }
     if (Object.keys(parsed).length === 0) { Alert.alert('Nothing to save', 'Enter at least one measurement.'); return; }
     setTapeBusy(true);
-    const stored = await ms.addEntry(parsed);
+    const out = await ms.addEntry(parsed);
     setTapeBusy(false);
-    if (stored) {
+    if (out === 'stored') {
       notifySuccess();
       setTape({});
       Alert.alert('Saved', 'Your measurements are on your own record.');
       return;
     }
-    // Not cleared, and not called saved. `addEntry` resolves true only once the
-    // rows are on the server.
-    Alert.alert('Saved on this phone only',
-      'These are on screen but could not be sent to your account, so they will be gone at the next launch. Check your connection and save again.');
+    // 'queued' is not 'stored' and the form is deliberately NOT cleared for it
+    // either: the numbers stay in front of the coach until they are actually on
+    // their record. But it is not a loss and must not be described as one.
+    if (out === 'queued') {
+      Alert.alert('Waiting to send',
+        'No signal, so these are saved on this phone and have not reached your record yet. They go up on their own once you are back online.');
+      return;
+    }
+    // Not cleared, and not called saved.
+    Alert.alert('Not saved',
+      'These are on screen but could not be sent to your account, so they will be gone at the next launch. Save again in a moment.');
   };
 
   /* ── logging a body scan ─────────────────────────────────────────────── */

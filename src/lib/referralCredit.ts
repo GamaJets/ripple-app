@@ -34,6 +34,7 @@
 // other.
 import { num } from './format';
 import type { LoadStatus } from '../ui/loadStatus';
+import { appLocale } from './locale';
 
 /** A row of my_referrals(), as PostgREST hands it back. */
 export interface RawReferral {
@@ -90,7 +91,7 @@ export function shapeReferrals(rows: RawReferral[] | null | undefined): Referral
 export function joinedLabel(iso: string): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return '';
-  return new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return new Date(t).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short' });
 }
 
 /**

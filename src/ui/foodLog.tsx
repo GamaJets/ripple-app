@@ -51,7 +51,7 @@ import type { FoodFigures } from '../lib/entryEdit';
 import { isWhole, worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { isPending, localId, mergeLog } from '../lib/wellnessSync';
-import { classifyWrite, forDay, serverRows, staleForDay, todayKey, type WriteOutcome } from '../lib/offlineQueue';
+import { classifyWrite, forDay, registerFlush, serverRows, staleForDay, todayKey, type WriteOutcome } from '../lib/offlineQueue';
 import { useAuthRevision } from './authRevision';
 
 export type LogVia = 'search' | 'barcode' | 'photo' | 'manual';
@@ -308,6 +308,35 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
     })();
     return () => { cancelled = true; };
   }, [authRev]);
+
+  /**
+   * Send everything this device is holding that the server has never heard of.
+   *
+   * Both halves of it: today's pending entries and the ones OWED from earlier
+   * days (see `staleForDay` — yesterday's unsent dinner is still real and still
+   * has to go, it just must never be counted against today's calories).
+   *
+   * The same loop the hydrate runs, lifted out of it, because the hydrate was
+   * the only thing that ran it: a meal logged in a gym cafe with no signal
+   * waited for the next launch that also landed on this screen. It is now also
+   * called on the reconnect edge and on returning to the foreground, through
+   * src/lib/offlineQueue.ts · `flushAll`.
+   */
+  const flushQueue = async (): Promise<void> => {
+    const owner = uidRef.current;
+    if (!USE_SUPABASE || !owner) return;
+    for (const e of listRef.current.filter((x) => isPending(x.id))) {
+      // Stop at the first silence. Everything after it would meet the same
+      // silence, and eight simultaneous timeouts on wifi that has just come
+      // back is how half a day's log fails to land.
+      if ((await send(owner, e)) === 'unsent') return;
+    }
+    for (const e of [...owedRef.current]) await sendOwed(owner, e);
+  };
+
+  // Registered once: the closure reads refs, so it stays correct across
+  // re-renders and across a change of account.
+  useEffect(() => registerFlush('foodLog', flushQueue), []);
 
   const logFood: FoodLogValue['logFood'] = async (f) => {
     const entry: FoodEntry = { ...f, id: localId(), at: new Date().toISOString() };

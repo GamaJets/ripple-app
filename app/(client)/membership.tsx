@@ -38,6 +38,7 @@
 //     <today + 1 year>" is exactly what this screen is not doing again.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -53,19 +54,21 @@ import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
 import { memberNoFrom } from '../../src/lib/membership';
 import {
   amount, fetchMyMemberships, isCurrent, planStateOf, primaryMembership, renewalNote,
   standingLabel, standingOf, todayIso, type MemberMembership,
 } from '../../src/lib/memberRecord';
 import { localDate } from '../../src/lib/localDate';
+import { appLocale } from '../../src/lib/locale';
 
 /** A bare ISO date as a member reads it. Local, because a date column means a
  *  calendar day in the reader's own life — see src/lib/localDate.ts. */
 function day(iso: string | null): string {
   const d = localDate(iso);
   if (!d) return fig(null);
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  return d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 /** A label and a fact, one line. */
@@ -116,10 +119,35 @@ export default function Membership() {
 
   const [mships, setMships] = useState<MemberMembership[]>([]);
   const [mStatus, setMStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  /** When this membership was last confirmed by the server, or null when it
+   *  just was. Non-null means what is on screen came off this phone. */
+  const [mCachedAt, setMCachedAt] = useState<string | null>(null);
 
   const loadMembership = useCallback(async () => {
     if (!USE_SUPABASE) { setMStatus('ready'); return; }
     if (!uid) { if (!auth.loading) setMStatus('error'); return; }
+
+    // ── this device's copy, before the network ──────────────────────────
+    //
+    // "Not cleared" below was as far as this could go: it kept whatever was
+    // already on screen, and on a cold launch in a basement there was nothing
+    // on screen to keep. A member standing inside the building their membership
+    // is for could not see that they were a member.
+    //
+    // A membership ages gracefully — it is a plan and a pair of dates, not a
+    // timetable — so the default week-long horizon applies rather than the two
+    // days the class list uses. Whatever is shown is labelled with its age.
+    try {
+      const cached = readCache<MemberMembership>(await AsyncStorage.getItem(cacheKey('memberships', uid)));
+      // `rows === null` is "we learnt nothing from the device". It must not
+      // become "your gym has no record of you", which is the sentence directly
+      // below this one on the screen.
+      if (cached.rows && cached.rows.length && withinHorizon(cached.at)) {
+        setMships(cached.rows);
+        setMCachedAt(cached.at);
+      }
+    } catch { /* no usable cache; the read below is the only source */ }
+
     const res = await fetchMyMemberships(supabase, uid);
     if (!res.ok) {
       reportError('membership.load', new Error(res.reason));
@@ -131,6 +159,9 @@ export default function Membership() {
     }
     setMships(res.value);
     setMStatus('ready');
+    setMCachedAt(null);
+    AsyncStorage.setItem(cacheKey('memberships', uid), packCache(res.value))
+      .catch(() => { /* the membership is right this session either way */ });
   }, [uid, auth.loading]);
   useEffect(() => { void loadMembership(); }, [loadMembership]);
 
@@ -199,6 +230,10 @@ export default function Membership() {
               <Flag tone={t.crit}>
                 We couldn’t read your membership. That is a read that failed, not an answer — it does not mean your gym has no record of you.
               </Flag>
+              {/* …and when there IS something below, say where it came from and
+                  how old it is. A member reading a cached membership as a live
+                  one goes to reception believing they are in good standing. */}
+              {mCachedAt && mships.length ? <Flag tone={t.warn}>{cachedAtLine(mCachedAt)}</Flag> : null}
               <View style={{ flexDirection: 'row' }}>
                 <Ghost label="Try Again" onPress={() => { void loadMembership(); }} />
               </View>

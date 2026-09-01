@@ -130,6 +130,11 @@ import {
   PAYOUT_IS_NOT_A_SALE, PAYOUT_STRIPE_IS_THE_RECORD, type CoachPayout,
 } from '../../src/lib/coachPayouts';
 import { receiptsTaken, receiptsEmptyLine, RECEIPT_MAY_DOUBLE_COUNT, type CoachReceipt } from '../../src/lib/coachReceipts';
+import {
+  clientValue, rankByValue, currenciesIn, unattributedReceipts, unattributedLine,
+  valueSpanLine, valueEmptyLine, VALUE_IS_PAST, VALUE_NEEDS_YOUR_RECORDS,
+  type RankedClient,
+} from '../../src/lib/clientValue';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 
 /** The month a period figure covers, in the words a person uses for it. */
@@ -218,6 +223,51 @@ export default function CoachMoney() {
   // is the one thing that would make this figure worse than not having it.
   const receiptRows = useMemo<TakenRow[]>(
     () => receipts.rows.map((r) => ({ amount_cents: r.amountCents, currency: r.currency, created_at: r.receivedOn })),
+    [receipts.rows],
+  );
+
+  /* ── what each client has paid, all time ──────────────────────────────
+   *
+   * The three reads are already on this screen with their own statuses, which
+   * is why this section lives here rather than on a fourth screen doing the
+   * same three queries again.
+   *
+   * `valueReads` is passed as a SET to `clientValue`, never composed here:
+   * a caller that took two of the three would produce a figure that looks
+   * trustworthy while the cash half is unread, and for most coaches the cash
+   * half is the bigger one. */
+  const valueReads = useMemo(
+    () => ({ purchases: sales.status, renewals: renewals.status, receipts: receipts.status }),
+    [sales.status, renewals.status, receipts.status],
+  );
+
+  /** Every client id that appears in any of the three sources, once each. */
+  const ranked = useMemo<RankedClient[]>(() => {
+    const ids = new Set<string>();
+    sales.rows.forEach((r) => { if (r.client_id) ids.add(r.client_id); });
+    renewals.rows.forEach((r) => { if (r.client_id) ids.add(r.client_id); });
+    receipts.rows.forEach((r) => { if (r.clientId) ids.add(r.clientId); });
+    // The name comes from whichever source holds one. `client_purchases` joins
+    // `profiles` for it; a receipt carries the name the coach TYPED, which is a
+    // snapshot and is deliberately not a join — see part 138 on `bill_to`. A
+    // renewal carries neither, so a client known only from renewals shows as a
+    // dash and the money beside them is still real.
+    const nameOf = (id: string): string | null =>
+      sales.rows.find((r) => r.client_id === id)?.client_name
+      ?? receipts.rows.find((r) => r.clientId === id)?.paidBy
+      ?? null;
+    const rows: RankedClient[] = [...ids].map((id) => ({
+      clientId: id,
+      name: nameOf(id),
+      value: clientValue(id, sales.rows, renewals.rows, receipts.rows, valueReads),
+    }));
+    const cur = currenciesIn(rows)[0];
+    return cur ? rankByValue(rows, cur) : rows;
+  }, [sales.rows, renewals.rows, receipts.rows, valueReads]);
+
+  const valueCurrencies = useMemo(() => currenciesIn(ranked), [ranked]);
+  const orphanLine = useMemo(
+    () => unattributedLine(unattributedReceipts(receipts.rows).count),
     [receipts.rows],
   );
 
@@ -556,6 +606,91 @@ export default function CoachMoney() {
           <ListRow icon="trending" title="Ad Spend"
             note="Connect an ad account, and see the spend that matched no code"
             onPress={() => router.push('/(trainer)/ad-spend')} />
+        </Section>
+
+        <Rule />
+
+        {/* ── WHAT EACH CLIENT HAS PAID ──────────────────────────────────
+            The one figure this app could not produce. Three lists existed —
+            sales, renewals, cash — on three screens, and no per-person total
+            anywhere, so the decision a coach makes when somebody goes quiet or
+            asks for a discount was made without the number that would change
+            it.
+
+            It is a SUM OF ROWS THAT ALREADY EXIST. Not a projection, not a
+            model, not "lifetime value" in the sense anybody else uses the
+            phrase — every figure is money already charged or already handed
+            over, and `VALUE_IS_PAST` says so on the screen because a coach who
+            reads it as a forecast will act on it as one.
+
+            The cash half is not optional. A total from Stripe alone is wrong
+            for most coaches and wrong in the direction that makes them
+            undervalue the person in front of them, so a receipts read that did
+            not come back whole withholds the total exactly as a failed sales
+            read does. src/lib/clientValue.ts carries the argument. */}
+        <Section>
+          <SectionHead title="What Each Client Has Paid" note="All time" />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{VALUE_IS_PAST}</Text>
+
+          {ranked.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {valueEmptyLine(clientValue('', [], [], [], valueReads))}
+            </Text>
+          ) : (<>
+            {/* Ranked within ONE currency. Sorting a mixed book by "amount"
+                would put AED 5,000 above GBP 900 because five thousand is more
+                than nine hundred, and the order would be a fact about exchange
+                rates nobody supplied. A coach paid in two currencies gets the
+                leading one ranked and is told the other exists. */}
+            {ranked.map((r, i) => {
+              const total = r.value.ledger.total;
+              const pots = total?.pots ?? [];
+              return (
+                <View key={r.clientId} style={{
+                  paddingVertical: sp.md,
+                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1, textTransform: 'capitalize' }} numberOfLines={1}>
+                      {r.name ?? '—'}
+                    </Text>
+                    <Text style={{ ...ty.body, ...numeric, color: t.ink }}>
+                      {pots.length
+                        ? pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
+                        : '—'}
+                    </Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {total ? (valueSpanLine(r.value, now) ?? '') : valueEmptyLine(r.value)}
+                  </Text>
+                  {/* An amount with no currency on it is a hole in the figure
+                      and the size of the hole is what is worth reporting. It is
+                      never summed into a unit nobody stated. */}
+                  {total && (total.unlabelled > 0 || total.unpriced > 0) ? (
+                    <Flag style={{ marginTop: sp.sm }}>
+                      {total.unlabelled > 0 ? `${total.unlabelled} ${plural(total.unlabelled, 'payment has', 'payments have')} no currency recorded and ${plural(total.unlabelled, 'is', 'are')} in no figure above. ` : ''}
+                      {total.unpriced > 0 ? `${total.unpriced} ${plural(total.unpriced, 'payment has', 'payments have')} no amount recorded at all.` : ''}
+                    </Flag>
+                  ) : null}
+                </View>
+              );
+            })}
+            {valueCurrencies.length > 1 ? (
+              <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                You have been paid in {valueCurrencies.join(' and ')}. Those are separate amounts of money, they are never added together, and the order above is by {valueCurrencies[0]} alone.
+              </Flag>
+            ) : null}
+          </>)}
+
+          {/* Cash from somebody the coach bills by hand has a typed name and no
+              Repple account, so it can be attached to nobody in the list above.
+              Counted and reported rather than dropped: a per-client breakdown
+              that silently omits most of the cash is the same defect this whole
+              section exists to close, one level down. */}
+          {orphanLine ? <Flag style={{ marginTop: sp.md }}>{orphanLine}</Flag> : null}
+
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{VALUE_NEEDS_YOUR_RECORDS}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
         </Section>
 
         <Rule />

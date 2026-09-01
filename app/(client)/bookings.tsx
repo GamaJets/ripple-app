@@ -23,17 +23,23 @@
 // name the row is titled "PT session" and carries no location. A booking that
 // reads "PT with —" in the app, and worse in the calendar it is exported to, is
 // not more honest than one that simply says what it is.
-import { useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, Alert } from 'react-native';
+import { useMemo, useCallback, useState } from 'react';
+import { View, Text, ScrollView, Alert, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
-import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
+// Moving a session rather than cancelling it and hoping. See src/lib/reschedule
+// for why a move never charges and why one made inside the coach's notice
+// window is refused rather than priced.
+import { canOfferMove, moveConfirm, noSlotsLine, rescheduleLines, rescheduleRefusalLine } from '../../src/lib/reschedule';
 import { useBrand } from '../../src/ui/brand';
 import { useClientData } from '../../src/ui/clientData';
 import type { TrainingSession } from '../../src/lib/types';
@@ -86,8 +92,11 @@ type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; star
 export default function Bookings() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, status: classStatus, cancel: cancelClass } = useClasses();
-  const { sessions, status: sessionStatus, releaseSession, cancelMyBooking } = useSessions();
+  const { classes, myStatus, status: classStatus, cancel: cancelClass, cachedNote: classCachedNote } = useClasses();
+  const { sessions, status: sessionStatus, releaseSession, cancelMyBooking, rescheduleMyBooking, cachedNote: sessionCachedNote } = useSessions();
+  // Whether this phone can reach us. It decides the second half of every
+  // failure sentence on this screen.
+  const reach = useReachability();
   // The coach's own policy, so the warning on this screen and the warning on
   // the Book screen are the same sentence about the same money. They came apart
   // once already — see the long note above `Item` — and a hardcoded 24 hours in
@@ -154,6 +163,65 @@ export default function Bookings() {
     return out.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
   }, [classes, myStatus, sessions, coachName]);
 
+  // The session being moved, or null. Held whole because the picker below has
+  // to know whose coach's slots to offer and what the old time was.
+  const [moveFor, setMoveFor] = useState<TrainingSession | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+
+  /**
+   * The other times this member could take instead.
+   *
+   * Straight off the provider — no new read. `sessions_client_read` already
+   * shows a client their coach's OPEN slots (part 22), which is exactly the set
+   * a move may go to, so the picker cannot offer a slot the server would then
+   * refuse. Filtered to the same coach, because a session cannot move between
+   * coaches, and to the future, because a slot that has started cannot be moved
+   * into.
+   */
+  const openSlots = useMemo(() => {
+    const from = moveFor;
+    if (!from) return [] as TrainingSession[];
+    const now = Date.now();
+    return sessions
+      .filter((s) => s.status === 'available' && s.trainerId === from.trainerId && s.id !== from.id && Date.parse(s.startsAt) > now)
+      .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+  }, [sessions, moveFor]);
+
+  /**
+   * Move one session into one slot.
+   *
+   * The confirm says what it costs before the tap; the report says what
+   * happened after it. Neither sentence is written here — both come from
+   * src/lib/reschedule, so this screen and its tests cannot come to describe the
+   * same move differently, which is exactly how this screen and the Book screen
+   * once came to price the same cancellation two ways.
+   */
+  const doMove = (from: TrainingSession, to: TrainingSession) => {
+    const fromLabel = `${dayLabel(from.startsAt)} ${timeLabel(from.startsAt)}`;
+    const toLabel = `${dayLabel(to.startsAt)} ${timeLabel(to.startsAt)}`;
+    const cf = moveConfirm(fromLabel, toLabel);
+    Alert.alert(cf.title, cf.body, [
+      { text: 'Keep It', style: 'cancel' },
+      { text: 'Move It', onPress: async () => {
+        if (moveBusy) return;
+        setMoveBusy(true);
+        const r = await rescheduleMyBooking(from.id, to.id);
+        setMoveBusy(false);
+        if (!r.moved) {
+          // Every refusal names the state of the world afterwards, because a
+          // refusal is indistinguishable from a loss unless somebody says so.
+          Alert.alert('Not moved', rescheduleRefusalLine(r, timeLabel(from.startsAt)), [{ text: 'OK' }]);
+          return;
+        }
+        setMoveFor(null);
+        // The freed slot may already belong to whoever was first in line for
+        // it, and this member's own queues may have moved with it.
+        reloadWait();
+        Alert.alert('Moved', rescheduleLines(r, fromLabel, toLabel).join('\n\n'), [{ text: 'OK' }]);
+      } },
+    ]);
+  };
+
   const confirmCancel = (it: Item) => {
     // Captured before either alert, so the 24-hour rule the member is warned
     // about is the same one that decides whether their credit comes back.
@@ -162,11 +230,23 @@ export default function Bookings() {
     // the time this alert appears the row has already blinked out and back, and
     // "that didn't save" over an unnamed booking leaves the member checking the
     // list to work out which one it meant.
+    // The second half used to be "Check your connection and try again" whatever
+    // had happened, and half the time the server had read the cancellation and
+    // declined it. `retryLine` says which — src/lib/reachability.ts.
+    //
+    // A cancellation is deliberately NOT queued for later. What it costs is
+    // computed against the policy at the moment it is made — whether a pack
+    // credit comes back, whether a late fee applies, whether the slot is
+    // re-offered, whether the coach is paged — so one replayed two hours later
+    // is a different cancellation, and by then the member has been marked
+    // absent for the class they thought they had come out of. Failing loudly is
+    // what sends them to ring the gym, which is the thing that actually saves
+    // them the no-show fee. See src/lib/outbox.ts.
     const failed = () => Alert.alert(
       it.waitlist ? 'Still on the waitlist' : 'Not cancelled',
       it.waitlist
-        ? `You are still on the waitlist for ${it.title} — that did not save, so nothing has changed. Check your connection and try again.`
-        : `${it.title} on ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)} is still booked — that did not save, so nothing has changed and you are still expected. Check your connection and try again.`,
+        ? `You are still on the waitlist for ${it.title} — that did not save, so nothing has changed. ${retryLine(reach)}`
+        : `${it.title} on ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)} is still booked — that did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
       [{ text: 'OK' }],
     );
     const doCancel = async () => {
@@ -298,6 +378,15 @@ export default function Bookings() {
               look finished, and the reader has to be told before they scroll
               past the one booking that did come back. */}
           {gap ? <Notice tone={t.warn} kicker="Bookings" title={gap.title} note={gap.note} /> : null}
+          {/* One of the two lists came off this phone rather than off the
+              server. Said above the rows for the same reason the gap notice is:
+              a member who reads a cached booking as a confirmed one turns up to
+              a session that was moved. The class list and the PT list can be in
+              that state independently, so whichever is stale says so — and if
+              both are, the older sentence is the one that matters. */}
+          {classCachedNote || sessionCachedNote
+            ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{classCachedNote ?? sessionCachedNote}</Flag>
+            : null}
           {items.map((it, i) => (
             <View key={it.id}>
               {i > 0 ? <Rule /> : null}
@@ -317,6 +406,20 @@ export default function Bookings() {
                     booking, on a screen that is a list of them. The visible
                     label can lean on the row above it; the spoken one is read
                     on its own. */}
+                {/* Move before Cancel, and that order is the point of the
+                    whole item: cancelling was the only way to change a time,
+                    and it is the expensive one. Offered only for PT — a class
+                    is the gym's own timetable and there is nothing to move it
+                    into — and only outside the coach's notice window, which is
+                    where the move is free. `canOfferMove` is permissive on an
+                    unread policy: the server decides, and being told "no, and
+                    here is the notice period" beats a button that was never
+                    there. */}
+                {it.pt && canOfferMove(it.startsAt, cancelPolicy) ? (
+                  <Ghost label="Move"
+                    a11yLabel={`Move ${it.title}, ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)}, to another time`}
+                    onPress={() => setMoveFor(it.pt!)} />
+                ) : null}
                 <Ghost label={it.waitlist ? 'Leave' : 'Cancel'}
                   a11yLabel={`${it.waitlist ? 'Leave the waitlist for' : 'Cancel'} ${it.title}, ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)}`}
                   onPress={() => confirmCancel(it)} />
@@ -372,6 +475,59 @@ export default function Bookings() {
           </>
         ) : null}
       </ScrollView>
+
+      {/* ── move this session ───────────────────────────────────────────────
+          The coach's own open slots, off the provider rather than a new read:
+          `sessions_client_read` already shows a client their coach's available
+          slots, which is exactly the set the server will accept a move into, so
+          this picker cannot offer something that is then refused for being
+          somebody else's.
+
+          The empty state is gated on the read that produced it. "Your coach has
+          no other open times" is a claim about their calendar, and a failed
+          read may not make it. */}
+      <Modal visible={!!moveFor} transparent animationType="slide" onRequestClose={() => setMoveFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMoveFor(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
+          {moveFor ? (<>
+            <Text style={{ ...ty.title, color: t.ink }}>Move to another time</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+              {dayLabel(moveFor.startsAt)} at {timeLabel(moveFor.startsAt)} becomes whichever of these you pick. Nothing is charged and no session comes off your pack.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {openSlots.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>{noSlotsLine(sessionStatus)}</Text>
+              ) : (
+                <>
+                  {sessionStatus === 'partial' ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{noSlotsLine('partial')}</Flag>
+                  ) : null}
+                  {openSlots.map((sl, i) => (
+                    <View key={sl.id}>
+                      {i > 0 ? <Rule /> : null}
+                      <Pressable onPress={() => doMove(moveFor, sl)} disabled={moveBusy}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Move to ${dayLabel(sl.startsAt)} at ${timeLabel(sl.startsAt)}`}
+                        accessibilityState={{ disabled: moveBusy }}
+                        style={{ paddingVertical: sp.md, opacity: moveBusy ? 0.5 : 1 }}>
+                        <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>
+                          {dayLabel(sl.startsAt)} at {timeLabel(sl.startsAt)}
+                        </Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sl.durationMin} min</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </>
+              )}
+              <Pressable onPress={() => setMoveFor(null)} accessibilityRole="button"
+                accessibilityLabel="Close without moving anything"
+                style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+              </Pressable>
+            </ScrollView>
+          </>) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

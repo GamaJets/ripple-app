@@ -67,6 +67,17 @@ import { fetchMetricHistory, saveMetricHistory } from '../lib/metricHistoryStore
 /** How many months a chart shows. Six, as it has always been. */
 const WINDOW = 6;
 
+/**
+ * How many a YEAR-ON-YEAR read needs, which is thirteen and not twelve.
+ *
+ * Twelve months back from August is last August, and a window of twelve holds
+ * September through August — it stops one month short of the month the
+ * comparison is against. Thirteen is the smallest window that contains both
+ * ends of it. Written down rather than inlined because "12" is the number
+ * everybody reaches for and it is wrong by exactly one column.
+ */
+export const YEAR_WINDOW = 13;
+
 export interface MonthlyHistory {
   series: (number | null)[];
   labels: string[];
@@ -77,6 +88,17 @@ export interface MonthlyHistory {
    *  may be all of it, some of it, or none of it. Additive: callers that
    *  ignore it behave exactly as they did before. */
   status: LoadStatus;
+  /**
+   * Every month this account and this device hold, keyed 'YYYY-MM' — not just
+   * the ones in the window above.
+   *
+   * `series` is the CHART. This is the RECORD, and the two are different
+   * questions: `yearOnYear` in src/lib/coachCohorts.ts needs the same month
+   * last year whether or not the chart is currently drawing it, and a caller
+   * forced to widen the chart to reach that month would be changing what is on
+   * screen in order to compute something that is not on it.
+   */
+  snapshots: Snapshots;
 }
 
 /**
@@ -86,7 +108,7 @@ export interface MonthlyHistory {
  * **A null `currentValue` is not recorded.** See the header — this hook WRITES,
  * and now writes to the account rather than to one phone.
  */
-export function useMonthlyHistory(storageKey: string, currentValue: number | null): MonthlyHistory {
+export function useMonthlyHistory(storageKey: string, currentValue: number | null, window: number = WINDOW): MonthlyHistory {
   const [hist, setHist] = useState<Snapshots>({});
   const [status, setStatus] = useState<LoadStatus>('loading');
   const rev = useAuthRevision();
@@ -172,7 +194,7 @@ export function useMonthlyHistory(storageKey: string, currentValue: number | nul
     return () => { cancelled = true; };
   }, [storageKey, currentValue, rev]);
 
-  const cols = monthWindow(new Date(), WINDOW);
+  const cols = monthWindow(new Date(), window);
   const series = seriesFor(cols, hist);
   return {
     series,
@@ -181,6 +203,12 @@ export function useMonthlyHistory(storageKey: string, currentValue: number | nul
     delta: historyDelta(series, currentValue),
     months: recordedCount(series),
     status,
+    // The whole map, not the window. A year-on-year read needs a month that
+    // may sit outside whatever window the chart happens to be drawing, and a
+    // caller that had to widen the chart to reach it would be changing what is
+    // on screen in order to compute something that is not. Additive: every
+    // existing caller ignores it and behaves exactly as before.
+    snapshots: hist,
   };
 }
 

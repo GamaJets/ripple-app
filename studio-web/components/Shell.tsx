@@ -27,6 +27,17 @@ export interface NavItem {
   context: NavContext;
   /** The rail's heading this sits under. Eighteen ungrouped links is a wall. */
   group: string;
+  /**
+   * True for a link only somebody on the `platform_admins` allowlist may see.
+   *
+   * A separate flag rather than a fourth value in `roles`, because it is not a
+   * role: `profiles.role` is signed up for, and the whole argument in
+   * supabase/parts/252 is that platform access must not be reachable that way.
+   * The page refuses independently — `is_platform_admin()` is checked there
+   * too — so this flag and that check say the same thing rather than one
+   * covering for the other.
+   */
+  adminOnly?: boolean;
 }
 
 export const CONTEXTS: Array<{ id: NavContext; label: string }> = [
@@ -138,6 +149,12 @@ export const NAV: NavItem[] = [
   // Beside Import deliberately: a gym that can be imported into and not
   // exported out of is a gym that cannot leave.
   { href: '/export', label: 'Export', roles: ['owner'], context: 'gym' , group: 'System' },
+  // Repple's own book — what trainers and gyms pay Repple, which is the
+  // opposite direction from every other Money entry above. Its own group of one
+  // so it cannot be misread as part of the gym's finances, and shown only to an
+  // account on the platform_admins allowlist. The list is empty on a fresh
+  // project, so on every gym's console this link does not exist.
+  { href: '/platform', label: 'Repple', roles: ['owner', 'trainer'], context: 'gym', group: 'Platform', adminOnly: true },
 ];
 
 // Which context the reader is currently in. Derived from the URL rather than
@@ -155,6 +172,7 @@ export function Shell({
   me,
   gymName,
   gymNameUnread,
+  platformAdmin,
   current,
   children,
 }: {
@@ -174,11 +192,21 @@ export function Shell({
    * it need not pass anything.
    */
   gymNameUnread?: boolean;
+  /**
+   * True only when `is_platform_admin()` came back true.
+   *
+   * Optional and defaulting to false, so every existing page keeps the rail it
+   * had and the one admin link is offered by nothing until a page deliberately
+   * says so. An UNKNOWN answer (the check itself failed) is false here: the
+   * rail offering a link the page will refuse is worse than a missing link
+   * somebody can reach by typing the URL.
+   */
+  platformAdmin?: boolean;
   current: string;
   children: React.ReactNode;
 }) {
   const role = me.role;
-  const reachable = NAV.filter((n) => role && (n.roles as string[]).includes(role));
+  const reachable = NAV.filter((n) => role && (n.roles as string[]).includes(role) && (!n.adminOnly || platformAdmin === true));
   const ctx = contextOf(current);
   const items = reachable.filter((n) => n.context === ctx);
   // Only offer a switch for contexts this role can actually reach. A role with

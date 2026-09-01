@@ -4,11 +4,30 @@
 // (url-polyfill not needed on RN 0.81 / SDK 54 — URL is built in)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+import { observedFetch } from './reachability';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const anon = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export const supabase = createClient(url, anon, {
+  // Every HTTP call this client makes, reporting whether it reached us.
+  //
+  // Here and not in each provider, because "is there a signal" is one fact
+  // about the device and it must not be able to be true on the screen that
+  // remembered to ask and false on the screen that did not. src/lib/reachability.ts
+  // makes the argument for why a request to OUR host is the only instrument
+  // that answers the question the callers are actually asking — a captive
+  // portal is an association with no server behind it, and NetInfo calls that
+  // connected.
+  //
+  // `observedFetch` returns the response untouched and re-throws errors
+  // unchanged; supabase-js cannot tell it is there. Realtime is a WebSocket and
+  // does not come through here, which is why the probe in
+  // src/ui/reachability.tsx still exists.
+  // The inner call is a lambda rather than a reference to `fetch` so the global
+  // is resolved per request: a polyfill installed after this module evaluates
+  // would otherwise be bypassed for the life of the process.
+  global: { fetch: observedFetch((input, init) => fetch(input, init)) as any },
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,

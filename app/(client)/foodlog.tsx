@@ -48,6 +48,7 @@ import {
 } from '../../src/lib/foodMemory';
 import { supabase } from '../../src/lib/supabase';
 import { notifySuccess } from '../../src/ui/haptics';
+import { useToast } from '../../src/ui/toast';
 import { useFoodLog, useFoodHistory, type FoodEntry } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { todayKey } from '../../src/lib/offlineQueue';
@@ -85,6 +86,18 @@ export default function FoodLog() {
   : null;
 
  const fl = useFoodLog();
+ const toast = useToast();
+ // Meals whose removal is staged: off the screen, not yet written, still
+ // takeable back. Pruned as soon as the write lands and the provider drops
+ // them, so a stale id cannot hide a meal somebody logs again later with the
+ // same key.
+ const [pendingRemoval, setPendingRemoval] = useState<string[]>([]);
+ useEffect(() => {
+  setPendingRemoval((ids) => {
+   const live = ids.filter((id) => fl.entries.some((e) => e.id === id));
+   return live.length === ids.length ? ids : live;
+  });
+ }, [fl.entries]);
  const [q, setQ] = useState('');
  const [nl, setNl] = useState(''); const [nlBusy, setNlBusy] = useState(false);
  // ── Search foods ────────────────────────────────────────────────────────
@@ -292,20 +305,52 @@ export default function FoodLog() {
   setEditing(null);
   notifySuccess();
  };
- const confirmRemove = (fe: FoodEntry) => {
-  Alert.alert('Remove this meal?', `${fe.name} — ${num(fe.kcal)} kcal — comes off today's log, and today's totals go back down by it.`, [
-   { text: 'Cancel', style: 'cancel' },
-   { text: 'Remove', style: 'destructive', onPress: async () => {
+ // Removing a meal, without a dialog in front of it.
+ //
+ // This was a modal asking "Remove this meal?" with Cancel and Remove. The tap
+ // that removes is the same tap on the same side of the same dialog every
+ // time, so people learn it and stop reading it — and the moment it went
+ // through, the meal was gone. The row now disappears immediately, the bar at
+ // the bottom says what happened, and the WRITE is held for six seconds behind
+ // an Undo. See src/lib/undoable.ts for why it is the write that is held
+ // rather than the deletion that is reversed.
+ //
+ // The row and today's totals are hidden together. Hiding one without the
+ // other would leave the meal off the list and still inside the calories for
+ // six seconds, which is the one number this screen exists to state.
+ const removeMeal = (fe: FoodEntry) => {
+  setPendingRemoval((ids) => (ids.includes(fe.id) ? ids : [...ids, fe.id]));
+  const putBack = () => setPendingRemoval((ids) => ids.filter((x) => x !== fe.id));
+  toast.remove({
+   id: fe.id,
+   text: `${fe.name} removed, and ${num(fe.kcal)} kcal with it.`,
+   onUndo: putBack,
+   onCommit: async () => {
     const gone = await fl.removeFood(fe.id);
-    // The meal is still on screen when this is false, which is the truth: the
-    // row is still there. It used to disappear on the spot and come back at the
-    // next launch with the day's calories quietly different again.
-    if (!gone) Alert.alert('Not removed', `${fe.name} is still in your log — we could not reach the server to remove it. It is still counting toward today.`);
-   } },
-  ]);
+    // Still an interruption, and deliberately. Everything else on this screen
+    // is a statement and belongs in the bar; this one says the figures the
+    // member is eating the rest of their day against are not what the screen
+    // just told them, and it has to be read. The row comes back at the same
+    // moment, which is the truth: it is still in the log.
+    if (!gone) {
+     putBack();
+     Alert.alert('Not removed', `${fe.name} is still in your log — we could not reach the server to remove it. It is still counting toward today.`);
+    }
+   },
+  });
  };
 
- const tot = { k: fl.consumed.kcal, p: fl.consumed.protein, c: fl.consumed.carbs, f: fl.consumed.fat };
+ // Meals whose delete is staged and can still be taken back. They are off the
+ // list and out of the totals; nothing has been written yet.
+ const staged = fl.entries.filter((e) => pendingRemoval.includes(e.id));
+ const entries = fl.entries.filter((e) => !pendingRemoval.includes(e.id));
+ const off = staged.reduce((a, e) => ({
+  k: a.k + (e.kcal || 0), p: a.p + (e.protein || 0), c: a.c + (e.carbs || 0), f: a.f + (e.fat || 0),
+ }), { k: 0, p: 0, c: 0, f: 0 });
+ const tot = {
+  k: fl.consumed.kcal - off.k, p: fl.consumed.protein - off.p,
+  c: fl.consumed.carbs - off.c, f: fl.consumed.fat - off.f,
+ };
  // Whether that is a TOTAL or a floor. Under 'error' there may be meals we
  // could not read, and under 'partial' there certainly are — so "calories
  // remaining" is an overestimate, and it is the number a person eats the rest
@@ -566,7 +611,7 @@ export default function FoodLog() {
  {unsentNote(fl.unsent, 'meal') ? (
  <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{unsentNote(fl.unsent, 'meal')}</Flag>
  ) : null}
- {fl.entries.length === 0 ? (
+ {entries.length === 0 ? (
  // An empty list under 'error' means we could not ask, never that nobody
  // ate anything — and "Nothing logged yet today" is exactly the sentence
  // that sends somebody to log their breakfast a second time.
@@ -577,7 +622,7 @@ export default function FoodLog() {
  </Text>
  ) : (<>
  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Tap a meal to correct what it was worth.</Text>
- {fl.entries.map((fe, i) => (
+ {entries.map((fe, i) => (
  <View key={fe.id}>
  {i > 0 ? <Rule /> : null}
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
@@ -588,7 +633,7 @@ export default function FoodLog() {
  <Pressable onPress={() => openEdit(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Edit ' + fe.name}>
  <Icon name="pencil" size={15} color={t.ink3} />
  </Pressable>
- <Pressable onPress={() => confirmRemove(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
+ <Pressable onPress={() => removeMeal(fe)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
  <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
  </Pressable>
  </View>
@@ -720,7 +765,7 @@ export default function FoodLog() {
  {/* Deleting is here as well as in the list, because "this was not a meal at
      all" is the correction somebody arrives at while they have the sheet
      open, and the confirm is the same one either way. */}
- <Pressable onPress={() => { const fe = editing; setEditing(null); if (fe) confirmRemove(fe); }} accessibilityRole="button"
+ <Pressable onPress={() => { const fe = editing; setEditing(null); if (fe) removeMeal(fe); }} accessibilityRole="button"
  style={{ paddingVertical: sp.md, alignItems: 'center', marginTop: sp.xs }}>
  {/* The kit's ListRow idiom: crit in the icon, which only has to clear the
      3:1 of a mark, and the label in ink. crit as text is 3.03–4.05:1 on all

@@ -2,10 +2,13 @@
 // (Elevated Teal default), selectable by client & trainer. An optional accent
 // override sits on top for owner white-labelling. Both persist.
 import { ReactNode, createContext, useContext, useState, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, TextInput } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, TextInput, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { paletteByKey, brandInkFor, DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta } from '../theme/tokens';
+import {
+  paletteByKey, paletteForScheme, highContrast, brandInkFor,
+  DEFAULT_PALETTE, PALETTES, teal, type Theme, type PaletteMeta,
+} from '../theme/tokens';
 import { VARIANT, VARIANT_ACCENT } from '../lib/variant';
 import { Icon } from './Icon';
 import { passwordRules } from '../lib/passwordRules';
@@ -13,43 +16,130 @@ import { passwordRules } from '../lib/passwordRules';
 import { sp, layout, radius, hairline, type as ty, value as figure } from '../theme/scale';
 
 interface ThemeControls {
+  /** The palette the member CHOSE. Not necessarily the one on screen — see
+   *  `shownPalette`, which is what the follow resolves it to. */
   palette: string; setPalette: (k: string) => void;
   accent: string | null; setAccent: (c: string | null) => void;
+  /** Follow the phone between light and dark. */
+  follow: boolean; setFollow: (v: boolean) => void;
+  /** Bring the two quiet inks up to the two loudest. See `highContrast`. */
+  contrast: boolean; setContrast: (v: boolean) => void;
+  /** What the phone says right now, or null when it will not say. */
+  scheme: 'light' | 'dark' | null;
+  /** The palette actually being drawn, once the follow has had its say. */
+  shownPalette: string;
   palettes: PaletteMeta[]; theme: Theme;
 }
 const ThemeCtx = createContext<ThemeControls | null>(null);
 
+/**
+ * The live theme.
+ *
+ * ── What this used to do, and why it was a defect ─────────────────────────
+ *
+ * It started at a fixed DEFAULT_PALETTE — a dark one — and stayed there
+ * forever. `useColorScheme` appeared nowhere in the app, and `app.json`'s
+ * `userInterfaceStyle: automatic` governs native chrome only, so a member
+ * whose phone had been in Light Mode since the day they bought it opened this
+ * app into a dark screen and had no way to change that except knowing that
+ * Appearance existed and that three of its ten hues happened to be light.
+ * Appearance was the one screen a person visits BECAUSE something is hard to
+ * read, and all it changed was hue.
+ *
+ * ── The three settings and how they compose ───────────────────────────────
+ *
+ *   follow      derives the palette from the phone's scheme, through the
+ *               counterpart mapping in tokens.ts. The member's stored choice
+ *               is never rewritten, so going light and back is lossless.
+ *   accent      an explicit brand colour, white-label. Wins over the variant.
+ *   contrast    applied LAST, and only to the inks, so it cannot undo the
+ *               measured ink-on-brand decision `brandInkFor` just made.
+ *
+ * ── What "not chosen" defaults to ─────────────────────────────────────────
+ *
+ * Follow is ON for anybody who has never picked a palette, and OFF the moment
+ * they do — picking Sunset means you want Sunset, not "surprise me twice a
+ * day". Both are stored, so a member who wants the follow back gets it by
+ * choosing Match System in Appearance.
+ */
 export function AppThemeProvider({ children }: { children: ReactNode }) {
   const [palette, setPaletteState] = useState<string>(DEFAULT_PALETTE);
   const [accent, setAccentState] = useState<string | null>(null);
+  const [follow, setFollowState] = useState<boolean>(true);
+  const [contrast, setContrastState] = useState<boolean>(false);
+  // Re-renders on its own when the phone flips, including while the app is in
+  // the foreground, which is the whole point: the member changes the setting
+  // from Control Centre and comes back to an app that has already followed.
+  // `ColorSchemeName` is 'light' | 'dark' | 'unspecified' | null | undefined,
+  // and 'unspecified' means the platform declined to say. It is narrowed to
+  // null here rather than treated as light: an unanswered question is not an
+  // answer, and `paletteForScheme` leaves the member's own palette alone for it.
+  const raw = useColorScheme();
+  const scheme: 'light' | 'dark' | null = raw === 'light' || raw === 'dark' ? raw : null;
+
   useEffect(() => { (async () => {
     try {
       const p = await AsyncStorage.getItem('repple.palette');
       const a = await AsyncStorage.getItem('repple.accent.v2');
+      const f = await AsyncStorage.getItem('repple.theme.follow');
+      const c = await AsyncStorage.getItem('repple.theme.contrast');
       if (p) setPaletteState(p);
       if (a) setAccentState(a);
+      // A member with a stored palette and no stored follow chose that palette
+      // before this setting existed. Honouring it is the only reading of their
+      // choice that does not change the app under them on upgrade.
+      setFollowState(f != null ? f === '1' : p == null);
+      setContrastState(c === '1');
     } catch {}
   })(); }, []);
-  const setPalette = (k: string) => { setPaletteState(k); setAccentState(null); AsyncStorage.setItem('repple.palette', k).catch(() => {}); AsyncStorage.removeItem('repple.accent.v2').catch(() => {}); };
+
+  const setPalette = (k: string) => {
+    setPaletteState(k); setAccentState(null); setFollowState(false);
+    AsyncStorage.setItem('repple.palette', k).catch(() => {});
+    AsyncStorage.setItem('repple.theme.follow', '0').catch(() => {});
+    AsyncStorage.removeItem('repple.accent.v2').catch(() => {});
+  };
   const setAccent = (c: string | null) => {
     setAccentState(c);
     if (c) AsyncStorage.setItem('repple.accent.v2', c).catch(() => {});
     else AsyncStorage.removeItem('repple.accent.v2').catch(() => {});
   };
-  const base = paletteByKey(palette);
+  const setFollow = (v: boolean) => {
+    setFollowState(v);
+    AsyncStorage.setItem('repple.theme.follow', v ? '1' : '0').catch(() => {});
+  };
+  const setContrast = (v: boolean) => {
+    setContrastState(v);
+    AsyncStorage.setItem('repple.theme.contrast', v ? '1' : '0').catch(() => {});
+  };
+
+  const shownPalette = follow ? paletteForScheme(palette, scheme) : palette;
+  const base = paletteByKey(shownPalette);
 
   // Each app is drawn in its own colour. Applied only to the DEFAULT palette:
   // if somebody has deliberately chosen midnight or cream, that is their choice
   // and this must not quietly override it. An explicit accent still wins over
   // both, which is the white-label case a gym uses for its own branding.
+  //
+  // The test is on the CHOSEN palette, not the shown one. A member on the
+  // default who is following their phone into Clinical Light has still not
+  // chosen a palette, and the variant colour is still the right mark for their
+  // app; `brandInkFor` measures the label against it either way, so the light
+  // ground does not cost them a readable button.
   const withVariant: Theme = palette === DEFAULT_PALETTE
     ? { ...base, brand: VARIANT_ACCENT[VARIANT], brandInk: brandInkFor(VARIANT_ACCENT[VARIANT]) }
     : base;
 
-  const theme: Theme = accent
+  const branded: Theme = accent
     ? { ...withVariant, brand: accent, brandInk: brandInkFor(accent) }
     : withVariant;
-  return <ThemeCtx.Provider value={{ palette, setPalette, accent, setAccent, palettes: PALETTES, theme }}>{children}</ThemeCtx.Provider>;
+  const theme: Theme = contrast ? highContrast(branded) : branded;
+  return (
+    <ThemeCtx.Provider value={{
+      palette, setPalette, accent, setAccent, follow, setFollow, contrast, setContrast,
+      scheme, shownPalette, palettes: PALETTES, theme,
+    }}>{children}</ThemeCtx.Provider>
+  );
 }
 
 export function useTheme(): Theme {

@@ -61,6 +61,11 @@ import {
 import {
   useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, cancelWarningFor,
 } from '../../src/ui/sessions';
+import { useSeriesPauses, pauseSeriesForDays, resumeSeries } from '../../src/ui/seriesPause';
+import {
+  pausePreviewLine, pauseOutcomeLines, pausedRangeLine, resumeConfirm, resumedLine,
+} from '../../src/lib/reschedule';
+import { insideNoticeWindow, noticeHoursOf } from '../../src/lib/booking';
 import { useClientData } from '../../src/ui/clientData';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
@@ -106,7 +111,13 @@ export default function StandingAppointments() {
   // way to ask again was the Try Again button inside the failure notice, and
   // there is no such button on a screen that merely went stale. Pull to refresh
   // is the gesture people already try — see src/ui/pullToRefresh.tsx.
-  const pull = usePullToRefresh(useCallback(() => { void reloadSeries(); refreshSessions(); }, [reloadSeries, refreshSessions]));
+  // A fortnight away used to cost two separate cancellations, each priced on
+  // its own notice, and there was no way to say "not for the next two weeks"
+  // once. Pausing is that (supabase/parts/244): a hole in the arrangement the
+  // materialiser respects, so the sessions do not quietly re-book themselves.
+  const { pauses, status: pauseStatus, reload: reloadPauses } = useSeriesPauses();
+  const [pauseFor, setPauseFor] = useState<RecurringSeries | null>(null);
+  const pull = usePullToRefresh(useCallback(() => { void reloadSeries(); refreshSessions(); void reloadPauses(); }, [reloadSeries, refreshSessions, reloadPauses]));
   const { policy: cancelPolicy, status: policyStatus } = useCancellationPolicy();
   const cd = useClientData();
 
@@ -129,7 +140,8 @@ export default function StandingAppointments() {
   useFocusEffect(useCallback(() => {
     void reloadSeries();
     void refreshSessions();
-  }, [reloadSeries, refreshSessions]));
+    void reloadPauses();
+  }, [reloadSeries, refreshSessions, reloadPauses]));
 
   const devTz = deviceTimeZone();
   const standing = series.filter((s) => s.active);
@@ -223,6 +235,75 @@ export default function StandingAppointments() {
    * same tap. The sentences about the member's money come back from
    * `ptCancelLines` for the same reason.
    */
+  /**
+   * Take a week, a fortnight or a month off, without ending the arrangement.
+   *
+   * `days` is sent as a NUMBER OF DAYS and the server turns it into dates, in
+   * the arrangement's own zone. `occurrence_on` and the materialiser both work
+   * in that zone, and a member on holiday in Sydney pausing a London Tuesday
+   * would otherwise pause the wrong dates at both ends.
+   *
+   * The preview counts THIS DEVICE'S view of what is booked in the range and
+   * says so honestly; the server counts again and the report afterwards is the
+   * authority. Both sentences come from src/lib/reschedule, so the promise made
+   * before the tap and the account given after it cannot drift apart.
+   */
+  const doPause = (s: RecurringSeries, days: number, label: string) => {
+    const untilMs = Date.now() + days * 86_400_000;
+    const inRange = sessions.filter((x) =>
+      x.clientId === cd.id && x.status === 'booked'
+      && Date.parse(x.startsAt) > Date.now() && Date.parse(x.startsAt) < untilMs);
+    const notice = noticeHoursOf(policyStatus === 'ready' ? cancelPolicy : null);
+    const late = inRange.filter((x) => insideNoticeWindow(x.startsAt, notice)).length;
+    // A policy that could not be read is passed as null, never softened into
+    // "no fee" — that is the sentence this whole family of screens exists to
+    // stop being printed by accident.
+    const preview = pausePreviewLine(inRange.length, late, policyStatus === 'ready' ? cancelPolicy : null);
+
+    Alert.alert(
+      `Pause for ${label}?`,
+      `${seriesLabel(s)} will not run for the next ${label}. Your standing appointment is NOT ended: it starts again by itself afterwards.\n\n${preview}`,
+      [
+        { text: 'Not Now', style: 'cancel' },
+        { text: 'Pause It', style: 'destructive', onPress: async () => {
+          if (busy) return;
+          setBusy(true);
+          const res = await pauseSeriesForDays(s.id, days, null);
+          setBusy(false);
+          setPauseFor(null);
+          if (!res.report) {
+            Alert.alert('Not paused', res.error ?? 'That did not save, so your sessions are still booked.');
+            return;
+          }
+          await refreshSessions();
+          void reloadSeries();
+          void reloadPauses();
+          Alert.alert('Paused', pauseOutcomeLines(res.report).join('\n\n'));
+        } },
+      ],
+    );
+  };
+
+  /** Lift one. Says what does not come back, because it is the thing people
+   *  expect it to do: a week that has already passed stays gone. */
+  const doResume = (skipId: string, from: string, to: string) => {
+    const cf = resumeConfirm(from, to);
+    Alert.alert(cf.title, cf.body, [
+      { text: 'Leave It Paused', style: 'cancel' },
+      { text: 'Start Again', onPress: async () => {
+        if (busy) return;
+        setBusy(true);
+        const res = await resumeSeries(skipId);
+        setBusy(false);
+        if (!res.resumed) { Alert.alert('Not resumed', res.error ?? 'That did not save.'); return; }
+        await refreshSessions();
+        void reloadSeries();
+        void reloadPauses();
+        Alert.alert('Back on', resumedLine(res.created));
+      } },
+    ]);
+  };
+
   const cancelOne = (one: TrainingSession) => {
     // Captured before the alert and passed through, so the rule the member is
     // warned under is the rule that decides whether their credit comes back.
@@ -358,10 +439,39 @@ export default function StandingAppointments() {
                       </Text>
                     ) : null}
                   </View>
-                  {/* Named for both things it opens. A button that said "End"
-                      would be a button that had already chosen. */}
-                  <Ghost label="Cancel or End" onPress={() => setEndFor(s)} />
+                  <View style={{ gap: sp.sm, alignItems: 'flex-end' }}>
+                    {/* Pause first, and above the destructive pair, because it
+                        is the one a member going away actually wants and the
+                        one that was missing: a fortnight off used to be two
+                        separate cancellations, each priced on its own notice.
+                        It ends nothing. */}
+                    <Ghost label="Pause" a11yLabel={`Pause ${seriesLabel(s)} for a week or more`}
+                      onPress={() => setPauseFor(s)} />
+                    {/* Named for both things it opens. A button that said "End"
+                        would be a button that had already chosen. */}
+                    <Ghost label="Cancel or End" onPress={() => setEndFor(s)} />
+                  </View>
                 </View>
+                {/* The holes already in this arrangement, and the way out of
+                    each. Only ever drawn from a read that finished: an empty
+                    list under a failed read is UNKNOWN, and a member shown
+                    nothing would believe their Tuesdays were running while they
+                    were away. */}
+                {pauseStatus === 'ready'
+                  ? pauses.filter((k) => k.seriesId === s.id).map((k) => (
+                    <View key={k.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.sm }}>
+                      {/* The mark carries the status colour; the text does not. */}
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
+                      <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{pausedRangeLine(k.fromOn, k.toOn, k.reason)}</Text>
+                      <Ghost label="Start Again" a11yLabel={`Start ${seriesLabel(s)} again from ${k.fromOn}`}
+                        onPress={() => doResume(k.id, k.fromOn, k.toOn)} />
+                    </View>
+                  ))
+                  : pauseStatus === 'error' ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                      We couldn’t read whether you have paused any dates, so this is not a statement that none are paused.
+                    </Flag>
+                  ) : null}
               </View>
             ))}
           </>)}
@@ -486,6 +596,55 @@ export default function StandingAppointments() {
                 nothing. Neither of the two above may be the default: one of
                 them ends an arrangement two people made. */}
             <Cta label="Change Nothing" wide onPress={() => setEndFor(null)} />
+          </>) : null}
+        </View>
+      </Modal>
+
+      {/* ── pause for a while ───────────────────────────────────────────────
+          Three presets rather than a date picker. The case this exists for is
+          "I am away", and a member who is away knows it in weeks; a two-ended
+          calendar control is a lot of screen to express "a fortnight", and it
+          is a lot of ways to pick a range that starts in the past.
+
+          Every option says what it will cancel and what that costs BEFORE it is
+          taken (`pausePreviewLine`), and what it actually did afterwards
+          (`pauseOutcomeLines`). Both sentences live in src/lib/reschedule so
+          they cannot drift from one another or from the tests. */}
+      <Modal visible={!!pauseFor} animationType="slide" transparent onRequestClose={() => setPauseFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPauseFor(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+          {pauseFor ? (<>
+            <Text style={{ ...ty.head, color: t.ink }}>Pause this, or end it?</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+              {seriesLabel(pauseFor)} {withWhom}. Pausing stops the sessions for a while and keeps the arrangement.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {[{ days: 7, label: 'a week' }, { days: 14, label: 'a fortnight' }, { days: 28, label: 'four weeks' }].map((o, i) => (
+                <View key={o.days}>
+                  {i > 0 ? <Rule /> : null}
+                  <Pressable onPress={() => doPause(pauseFor, o.days, o.label)} disabled={busy}
+                    accessibilityRole="button" accessibilityLabel={`Pause for ${o.label}`}
+                    accessibilityState={{ disabled: busy }}
+                    style={{ paddingVertical: sp.md, opacity: busy ? 0.5 : 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                      {o.days === 7 ? 'Pause for a Week' : o.days === 14 ? 'Pause for a Fortnight' : 'Pause for Four Weeks'}
+                    </Text>
+                    <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
+                      Your usual time starts again by itself after that. You can start it again sooner.
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+              <Rule />
+              {/* Said here as well as in the confirm, because this is the sheet
+                  somebody opens when they are worried about what a fortnight
+                  away is going to cost them. */}
+              <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
+                Sessions already booked in those dates are cancelled, and your coach’s notice policy prices each of them exactly as cancelling it on its own would. Pausing in advance costs nothing.
+              </Flag>
+              <View style={{ height: sp.lg }} />
+              <Cta label="Change Nothing" wide onPress={() => setPauseFor(null)} />
+            </ScrollView>
           </>) : null}
         </View>
       </Modal>

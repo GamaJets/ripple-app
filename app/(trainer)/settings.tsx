@@ -72,6 +72,12 @@ import { reportError } from '../../src/lib/reportError';
 import { parseCooldown, cooldownText, cooldownNote, MIN_NUDGE_COOLDOWN, MAX_NUDGE_COOLDOWN } from '../../src/lib/coachPrefs';
 import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
 import { rateFieldNote } from '../../src/lib/coachPrefs';
+import { useChannelPrefs, setChannel } from '../../src/ui/coachNotify';
+import {
+  COACH_CHANNELS, channelState, channelsNote,
+  CHANNEL_UNKNOWN_LABEL, CHANNEL_MASTER_NOTE, CHANNEL_STILL_RECORDED,
+  CHANNEL_QUIET_COST, CHANNEL_ACCOUNT_WIDE,
+} from '../../src/lib/coachNotify';
 
 /** A label and its value. `value` is already a string — see `fig`. */
 function Line({ t, label, value, first }: { t: Theme; label: string; value: string; first?: boolean }) {
@@ -103,6 +109,42 @@ function SwitchRow({ t, label, note, on, onPress, first }: {
   );
 }
 
+/**
+ * The same row, for a switch whose position may be UNKNOWN.
+ *
+ * `SwitchRow` above takes a boolean, and a boolean cannot say "we have not read
+ * your answer yet" — it has to pick one of the two, and picking "on" is the app
+ * stating a fact about somebody's settings that it has not looked up, on the
+ * screen they came to in order to control them. A coach who then taps it has
+ * just saved the value the app was guessing.
+ *
+ * So 'unknown' draws neither position: the track is neutral, the knob is
+ * centred, and the row says which. It is still pressable — turning something
+ * off is a valid thing to want to do — and the handler reports what the server
+ * actually took.
+ */
+function TriSwitchRow({ t, label, note, state, onPress, first }: {
+  t: Theme; label: string; note: string; state: 'on' | 'off' | 'unknown'; onPress: () => void; first?: boolean;
+}) {
+  const on = state === 'on';
+  const unknown = state === 'unknown';
+  return (
+    <Pressable onPress={onPress} accessibilityRole="switch"
+      accessibilityState={{ checked: unknown ? 'mixed' : on }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: first ? 0 : sp.lg }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, color: t.ink }}>{label}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+          {unknown ? `${CHANNEL_UNKNOWN_LABEL} — ${note}` : note}
+        </Text>
+      </View>
+      <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: unknown ? t.surface2 : on ? t.brand : t.surface3, borderWidth: hairline, borderColor: unknown ? t.ring : on ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
+        <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: unknown ? t.ink3 : on ? t.brandInk : t.ink3, alignSelf: unknown ? 'center' : on ? 'flex-end' : 'flex-start', opacity: unknown ? 0.45 : 1 }} />
+      </View>
+    </Pressable>
+  );
+}
+
 const ROLE_LABEL: Record<string, string> = { owner: 'Gym owner', trainer: 'Trainer', client: 'Member' };
 
 /** A timestamp as the day it happened, or a dash. Never the string "null". */
@@ -116,6 +158,34 @@ export default function TrainerSettings() {
   const t = useTheme();
   const router = useRouter();
   const st = useSettings();
+
+  /* ── the five categories ───────────────────────────────────────────────
+   *
+   * `channels.status` is carried out to every switch rather than collapsed to a
+   * boolean. Under 'loading' and 'error' the muted set is empty, and an empty
+   * muted set means "everything on" — so a screen that only read the set would
+   * draw five switches in the on position over a read that never happened.
+   */
+  const channels = useChannelPrefs();
+  const channelNote = channelsNote(channels.status);
+  const toggleChannel = async (key: (typeof COACH_CHANNELS)[number]['key']) => {
+    // Toggling from 'unknown' would save a value nobody read. A coach who wants
+    // one off while the read is failing can have it once the read lands, and
+    // the row already says which of the two states this is.
+    const state = channelState(key, channels.muted, channels.status);
+    if (state === 'unknown') {
+      Alert.alert('Not Changed', channelNote ?? 'Your notification settings have not been read yet, so nothing was changed. Turning one on or off now would save over whatever is actually stored.');
+      return;
+    }
+    const next = state === 'off';
+    const ok = await setChannel(key, next);
+    if (!ok) {
+      Alert.alert('Not Saved', 'The server did not take that change, so nothing has moved. Your notifications carry on exactly as they were — try again once you have signal.');
+    }
+    // Re-read rather than assume: what the switch shows next comes from the
+    // row, which is the same discipline `loadPending` above keeps.
+    await channels.reload();
+  };
   // The same sentence the client's settings screen shows: what a change to
   // this actually converts, so nobody expects it to rewrite stored history.
   const weightNote = convertedNote(st.weightUnit);
@@ -467,6 +537,50 @@ export default function TrainerSettings() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             Turning this off takes this phone off the list entirely. Your clients can still message you and book with you — you will see it next time you open the app rather than as it happens, and your other devices are unaffected.
           </Text>
+
+          {/* ── the categories ────────────────────────────────────────────
+              The switch above is all-or-nothing by construction: it removes
+              this handset's row from `push_tokens`, which is the table the
+              send-push function resolves recipients from. So a coach who muted
+              to stop 11pm chat pings also stopped hearing that a client's card
+              was declined, and would not turn it back on.
+
+              These five are a SERVER preference, because every coach-directed
+              notification is remote — sent by a client's handset, by a trigger,
+              or by an edge function — and a device-local switch would read
+              "off" while the banner kept arriving. The filter is applied in
+              supabase/functions/send-push and notify-message, where the
+              recipients are resolved. src/lib/coachNotify.ts carries the whole
+              argument.
+
+              An unread preference is NOT "opted in": a switch whose value has
+              not been read draws in neither position and says so, because a
+              coach who taps a guessed switch has just saved the guess. */}
+          <View style={{ marginTop: sp.xl }}>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>What you are told about</Text>
+            {channelNote ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{channelNote}</Text>
+            ) : null}
+            {COACH_CHANNELS.map((c, i) => (
+              <View key={c.key}>
+                <TriSwitchRow t={t} first={i === 0 && !channelNote}
+                  label={c.title}
+                  note={c.note}
+                  state={channelState(c.key, channels.muted, channels.status)}
+                  onPress={() => { void toggleChannel(c.key); }} />
+                {/* Shown under the money switch alone, so it means something
+                    when it appears. A missed chat message is visible the next
+                    time the coach opens the app; a failed subscription payment
+                    is a client who has quietly stopped paying. */}
+                {c.quietCost && channelState(c.key, channels.muted, channels.status) === 'off' ? (
+                  <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{CHANNEL_QUIET_COST}</Flag>
+                ) : null}
+              </View>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{CHANNEL_STILL_RECORDED}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_ACCOUNT_WIDE}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_MASTER_NOTE}</Text>
+          </View>
         </Section>
 
         <Rule />

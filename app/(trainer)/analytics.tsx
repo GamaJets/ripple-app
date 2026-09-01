@@ -24,7 +24,7 @@
 // `useMonthlyHistory` stores this month's figure, so one bad month recorded
 // from a truncated read stays in the chart forever, indistinguishable from a
 // month that really was that quiet.
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
@@ -38,15 +38,28 @@ import { atRiskClient } from '../../src/lib/trainerMock';
 import { STATUS_LABEL } from '../../src/lib/status';
 import { useRoster } from '../../src/ui/roster';
 import { DistBar } from '../../src/ui/charts';
-import { askCoach } from '../../src/lib/coach';
+import { askAboutMyBusiness } from '../../src/lib/coach';
+import { useCoachingSpans } from '../../src/ui/coachCohorts';
+import {
+  yearOnYear, yearOnYearLine, cohorts, cohortsBlocker,
+  MILESTONES, COHORT_CAVEAT, COHORT_FLOOR_NOTE,
+} from '../../src/lib/coachCohorts';
+import {
+  buildAnalyticsExport, analyticsExportBlocker, analyticsShareNote,
+  monthLabel as monthLabelOf, type AnalyticsReads,
+} from '../../src/lib/analyticsExport';
+import { shareTextFile, fileShareBlocker } from '../../src/lib/exportShare';
+import { localDayKey } from '../../src/lib/clientDrift';
+import { reportError } from '../../src/lib/reportError';
 import { useTrainerGoals, goalPct } from '../../src/ui/trainerGoals';
 import { goalsEmptyLine, parseGoal, goalText } from '../../src/lib/coachPrefs';
-import { useMonthlyHistory } from '../../src/ui/useMrrHistory';
+import { useMonthlyHistory, YEAR_WINDOW } from '../../src/ui/useMrrHistory';
 import { useSessions } from '../../src/ui/sessions';
 import { myTenantCurrency } from '../../src/lib/subscriptions';
 import { currencyGapLine, currencyGapOf } from '../../src/lib/currencyGap';
 import { deltaSign } from '../../src/lib/deltaLabel';
 import { wholeMoney } from '../../src/lib/coachMoney';
+import { monthWindow } from '../../src/lib/monthlyHistory';
 
 export default function TrainerAnalytics() {
   const t = useTheme();
@@ -190,9 +203,12 @@ export default function TrainerAnalytics() {
     // formatter could catch it. It is now told the gym's actual code — or told
     // there is none, and to leave the amount out rather than pick one.
     const ctx = { sessionsDeliveredThisMonth: sessionsMo, revenueAtOwnRate: revenue ?? 'unknown — no session rate set', currency: gymCur ?? 'unknown — the gym has not set one', clients, avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
-    const reply = await askCoach([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueAtOwnRate is sessions delivered multiplied by the coach own session rate, denominated in the currency given in the currency field — write that ISO code before any amount, never a currency symbol, and if currency is unknown do not state an amount at all): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
+    // `askAboutMyBusiness`, not `askCoach`. Nothing in `ctx` above names a
+    // person today, and the filter is what keeps that true the day somebody
+    // adds `atRiskNames` to it — see the coach half of src/lib/coachShare.ts.
+    const answer = await askAboutMyBusiness([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueAtOwnRate is sessions delivered multiplied by the coach own session rate, denominated in the currency given in the currency field — write that ISO code before any amount, never a currency symbol, and if currency is unknown do not state an amount at all): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
     setDigestBusy(false);
-    setDigest(reply || 'Could not generate the digest right now — the AI backend may be unavailable.');
+    setDigest(answer.ok ? answer.reply : 'Could not generate the digest right now — the AI backend may be unavailable.');
   };
   // `revenue` is already null unless the sessions read was whole, and that
   // matters more here than anywhere else on the screen: this hook WRITES. A
@@ -200,7 +216,74 @@ export default function TrainerAnalytics() {
   // is saved as that month's history and shows in the trend chart forever,
   // indistinguishable from a month that really was that quiet. Nothing later
   // can tell the two apart — see the note on useMonthlyHistory.
-  const revHist = useMonthlyHistory('repple.trainer.revHistory', revenue);
+  //
+  // The window is THIRTEEN months rather than six, so `revHist.snapshots` holds
+  // the same month last year and the year-on-year read below has both ends of
+  // its comparison. The CHART still draws six — `Spark` is handed the last six
+  // columns — because thirteen labels do not fit on a phone and the trend the
+  // chart is for is the recent one. Two questions, one record.
+  const revHist = useMonthlyHistory('repple.trainer.revHistory', revenue, YEAR_WINDOW);
+  const CHART_MONTHS = 6;
+  const chartSeries = revHist.series.slice(-CHART_MONTHS);
+  const chartLabels = revHist.labels.slice(-CHART_MONTHS);
+  const chartMonths = chartSeries.filter((v) => v != null).length;
+
+  /* ── the same month last year ─────────────────────────────────────────
+   *
+   * Coaching is seasonal, so "down 18% on last month" is a sentence about the
+   * calendar at least as often as it is a sentence about the coach. The
+   * comparison is withheld outright when the month it needs was never
+   * recorded — `yearOnYear` returns null rather than reaching for the nearest
+   * month it does have, which is the substitution src/lib/monthlyHistory.ts
+   * exists to prevent. */
+  const yoy = yearOnYear(revHist.snapshots, new Date());
+
+  /* ── how long people stay ─────────────────────────────────────────────
+   *
+   * Read from `coaching_relationships` and NOT from the roster: the roster is
+   * the people who did not leave, so a curve built from it is flat at 100%
+   * forever with nothing on it to give that away. See src/ui/coachCohorts.ts. */
+  const spans = useCoachingSpans();
+  const cohortBlock = cohortsBlocker(spans.status);
+  // Newest cohorts first — a coach reads the recent ones and the oldest are
+  // the ones with the least left to say.
+  const cohortRows = cohortBlock ? [] : cohorts(spans.spans, new Date()).slice().reverse();
+
+  const [exportBusy, setExportBusy] = useState(false);
+  /* ── the screen, out of the app ───────────────────────────────────────
+   *
+   * The statement already does this for the money and the coach has the habit.
+   * Every figure in the file is `number | null` and a null is written as an
+   * EMPTY cell, never a zero — the difference between a dash on screen and a
+   * zero in a spreadsheet is that nobody doubts the zero. src/lib/analyticsExport.ts
+   * carries the reasoning and the banner row. */
+  const exportAnalytics = async () => {
+    if (exportBusy) return;
+    const reads: AnalyticsReads = { roster: rosterStatus, sessions: sessionsStatus, history: revHist.status };
+    const why = analyticsExportBlocker(reads);
+    if (why) { Alert.alert('Nothing to Export', why); return; }
+    setExportBusy(true);
+    try {
+      const file = buildAnalyticsExport({
+        currency: gymCur,
+        sessionsThisMonth: sessionsMo,
+        revenueAtOwnRate: revenue,
+        clients,
+        avgAdherencePct: avgAdh,
+        onTrack, watch, atRisk: riskCount,
+        history: revHist.series,
+        months: monthWindow(new Date(), YEAR_WINDOW).map((m) => m.key),
+      }, reads, localDayKey(Date.now()));
+      const blocked = fileShareBlocker();
+      const how = await shareTextFile(file.csv, file.filename, 'text/csv', 'Your analytics');
+      // Said after, because it is about what actually left the phone.
+      if (how === 'text' && blocked) Alert.alert('Sent as Text', blocked);
+      else if (!file.complete) Alert.alert('Exported, but Incomplete', analyticsShareNote(file, revHist.months));
+    } catch (e) {
+      reportError('analytics.export', e);
+      Alert.alert('Not Exported', 'The file could not be written. Try again once you have a little free space on your phone.');
+    } finally { setExportBusy(false); }
+  };
   // Only the targets that have both a number to aim at and a number reached so
   // far. A revenue goal with no session rate has the first and not the second,
   // and is spoken to separately below rather than drawn as a bar at zero.
@@ -465,8 +548,8 @@ export default function TrainerAnalytics() {
               above the wrong month, by up to two. Nothing on screen gave a
               reason to doubt it. Spark takes the holes now and keeps each
               reading in its own slot. */}
-          {revHist.months >= 2 ? (
-          <Spark data={revHist.series} labels={revHist.labels} />
+          {chartMonths >= 2 ? (
+          <Spark data={chartSeries} labels={chartLabels} />
           ) : revHist.status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading the months you have recorded…</Text>
           ) : revHist.status === 'error' ? (
@@ -484,11 +567,107 @@ export default function TrainerAnalytics() {
               goes and is not the whole of the account. Said under the line
               rather than in place of it: withholding a trend the coach has
               genuinely recorded would be its own kind of wrong. */}
-          {revHist.months >= 2 && revHist.status === 'error' ? (
+          {chartMonths >= 2 && revHist.status === 'error' ? (
             <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
               Drawn from what this phone recorded — your account's months could not be read just now, so there may be more than this.
             </Flag>
           ) : null}
+        </Section>
+
+        <Rule />
+
+        {/* ── the same month last year ───────────────────────────────────
+            The comparison directly above is month-on-month, and coaching is a
+            seasonal business: August against July is a sentence about the
+            summer at least as often as it is a sentence about the coach, and a
+            coach who reads it as the second discounts their prices.
+
+            Withheld outright rather than approximated. `yearOnYear` returns
+            null when the month it needs was never recorded, and
+            `yearOnYearLine` says WHICH of the three reasons applies — still
+            reading, not enough history yet with a count of the months to wait,
+            or a hole where that month should be. Reaching for the nearest
+            month there is instead would be the exact substitution
+            src/lib/monthlyHistory.ts exists to prevent. */}
+        <Section>
+          <SectionHead title="Against Last Year" />
+          {yoy ? (<>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+              <Text style={{ ...value(26), color: t.ink }}>
+                {priced(Math.abs(yoy.delta)) == null
+                  ? '—'
+                  : `${deltaSign(yoy.delta, 0)}${priced(Math.abs(yoy.delta))}`}
+              </Text>
+              {/* The percentage is null when last year was zero. There is no
+                  percentage of nothing, and "+100%" over a zero base is a
+                  figure with no meaning that reads like a triumph. */}
+              {yoy.pct != null ? (
+                <Text style={{ ...ty.body, color: t.ink2 }}>{deltaSign(yoy.pct, 0)}{Math.abs(yoy.pct)}%</Text>
+              ) : null}
+            </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+              {priced(yoy.then) == null
+                ? noCur('this month and the same month last year cannot be shown as amounts')
+                : `${monthLabelOf(yoy.monthKey)} against the same month last year, which was ${priced(yoy.then)}. Both figures are sessions delivered at your own rate, so a change in your rate moves this as much as a change in your book.`}
+            </Text>
+          </>) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{yearOnYearLine(revHist.snapshots, new Date(), revHist.status)}</Text>
+          )}
+        </Section>
+
+        <Rule />
+
+        {/* ── how long people stay ───────────────────────────────────────
+            Read from `coaching_relationships` and NOT from the roster. The
+            roster is the people who have not left, so a curve built from it is
+            flat at 100% forever and there is nothing on it that would give
+            that away — see src/ui/coachCohorts.ts.
+
+            Counts first, percentages only where the cohort is big enough. The
+            floor is the console's own `MIN_COHORT_FOR_RATE` rather than a
+            second number, and it is ten — more people than most self-employed
+            coaches sign in a month — so a screen that had only percentages
+            would say "too small" against every row it ever drew. */}
+        <Section>
+          <SectionHead title="How Long People Stay" />
+          {cohortBlock ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{cohortBlock}</Text>
+          ) : cohortRows.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              Nobody has started with you yet, so there is no cohort to follow. This fills in on its own as people join and as time passes.
+            </Text>
+          ) : (<>
+            <View style={{ flexDirection: 'row', paddingBottom: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3, flex: 1.4 }}>Started</Text>
+              {MILESTONES.map((m) => (
+                <Text key={m} style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>{m}m</Text>
+              ))}
+            </View>
+            {cohortRows.map((row, i) => (
+              <View key={row.month} style={{
+                flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm,
+                borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+              }}>
+                <View style={{ flex: 1.4 }}>
+                  <Text style={{ ...ty.label, color: t.ink }}>{monthLabelOf(row.month)}</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>{row.size} joined</Text>
+                </View>
+                {row.held.map((h, k) => (
+                  <View key={MILESTONES[k]} style={{ flex: 1, alignItems: 'flex-end' }}>
+                    {/* A dash where the cohort has not reached this milestone.
+                        A zero there would draw as a collapse on the right-hand
+                        side of the table, which is where the eye lands. */}
+                    <Text style={{ ...value(15), color: t.ink }}>{h == null ? '—' : `${h}/${row.size}`}</Text>
+                    {row.retained[k] != null ? (
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>{row.retained[k]}%</Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COHORT_CAVEAT}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{COHORT_FLOOR_NOTE}</Text>
+          </>)}
         </Section>
 
         <Rule />
@@ -573,6 +752,23 @@ export default function TrainerAnalytics() {
         <Rule />
 
         <Section>
+          {/* The conversational half of the digest above. The digest answers
+              one fixed question this app wrote; a coach's second question has
+              never had anywhere to go. It sends the same figures through the
+              same filter — see app/(trainer)/assistant.tsx for why it will not
+              name a client. */}
+          <ListRow icon="sparkle" title="Ask The Assistant"
+            note="A conversation about your own figures, with no client named to it"
+            onPress={() => router.push('/(trainer)/assistant')} />
+          {/* Out of the app. The statement already does this for the money and
+              the coach has the habit; analytics had no share action at all, so
+              the one screen a coach would show an accountant was the one screen
+              they could only photograph. Every unknown figure leaves as an
+              EMPTY cell — see src/lib/analyticsExport.ts for why a zero in a
+              spreadsheet is worse than a dash on a screen. */}
+          <ListRow icon="share" title={exportBusy ? 'Exporting…' : 'Export These Figures'}
+            note="A CSV of the figures above and every month you have recorded"
+            onPress={() => { void exportAnalytics(); }} />
           <ListRow icon="chart" title="Payments"
             onPress={() => router.push('/(trainer)/payments')} />
           {/* Beside Payments because it is the other half of the same sum —

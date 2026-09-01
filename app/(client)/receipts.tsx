@@ -28,6 +28,7 @@
 // lines and both are true; they never get their sum.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -38,14 +39,16 @@ import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
 import { amount, fetchMyPayments, methodLabel, totalsByCurrency, type MemberPayment } from '../../src/lib/memberRecord';
+import { appLocale } from '../../src/lib/locale';
 
 /** A timestamptz as the day it happened, in the reader's own zone. A payment
  *  carries an instant, not a calendar date, so this one is parsed normally. */
 function paidOn(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return fig(null);
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export default function Receipts() {
@@ -56,11 +59,36 @@ export default function Receipts() {
 
   const [rows, setRows] = useState<MemberPayment[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  /** When the list was last confirmed, or null when it just was. */
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     if (!uid) { if (!auth.loading) setStatus('error'); return; }
+
+    // ── this device's copy, before the network ──────────────────────────
+    //
+    // "NOT clearing `rows`" below was as far as this could go: it kept what was
+    // already on screen, and on a cold launch with no signal there was nothing
+    // to keep. A payment history ages more gracefully than almost anything else
+    // in this app — a receipt from March is still a receipt from March — so the
+    // default week-long horizon applies, and the age is stated either way.
+    //
+    // A cached page is NEVER 'ready', which matters here more than anywhere
+    // else on this screen: the per-currency totals below are computed only from
+    // a whole read, so a cached list shows its rows and no totals rather than
+    // a total over a set that may be missing last week's payment.
+    try {
+      const cached = readCache<MemberPayment>(await AsyncStorage.getItem(cacheKey('payments', uid)));
+      // `rows === null` taught us nothing, and must not become "your gym has
+      // taken nothing from you".
+      if (cached.rows && cached.rows.length && withinHorizon(cached.at)) {
+        setRows(cached.rows);
+        setCachedAt(cached.at);
+      }
+    } catch { /* no usable cache; the read below is the only source */ }
+
     const res = await fetchMyPayments(supabase, uid);
     if (!res.ok) {
       reportError('receipts.load', new Error(res.reason));
@@ -73,6 +101,14 @@ export default function Receipts() {
     }
     setRows(res.value.rows);
     setStatus(res.value.truncated ? 'partial' : 'ready');
+    setCachedAt(null);
+    // Only a whole read is cached. A truncated page written here would be
+    // opened next launch as the member's whole payment history, and the totals
+    // this screen prints are the reason that is not acceptable.
+    if (!res.value.truncated) {
+      AsyncStorage.setItem(cacheKey('payments', uid), packCache(res.value.rows))
+        .catch(() => { /* the list is right this session either way */ });
+    }
   }, [uid, auth.loading]);
 
   useEffect(() => { void load(); }, [load]);
@@ -105,7 +141,11 @@ export default function Receipts() {
           <Section>
             <Notice tone={t.crit} kicker="Not read" title="We couldn’t read your payments"
               note={rows.length
-                ? 'What is listed below is what we had before the read failed. It is not confirmed current, and there may be payments missing from it.'
+                // When the list came off this device, say WHEN. "Not confirmed
+                // current" is equally true of a copy from four minutes ago and
+                // one from four days ago, and only one of those is worth
+                // acting on.
+                ? (cachedAtLine(cachedAt) ?? 'What is listed below is what we had before the read failed. It is not confirmed current, and there may be payments missing from it.')
                 : 'This is not a record with nothing in it — it is a record we could not open. Pull down to try again, or ask your gym for a statement.'} >
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void load(); }} /></View>
             </Notice>

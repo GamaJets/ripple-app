@@ -35,6 +35,20 @@ And with 93% of text bold there was no hierarchy left to give.
    put a coloured dot beside ink-coloured text instead.
 8. **Numbers get tabular figures** so digits don't jitter as values tick.
 9. **Empty states are honest.** "No X yet" beats a zero pretending to be data.
+10. **Interrupt to ask, never to tell.** A modal is what a QUESTION looks like.
+    "Saved", "Logged", "Removed" and "Sent" are statements and belong in the
+    bar at the bottom — `useToast().say()`. A destructive action does not get a
+    confirmation dialog either: it happens, and `useToast().remove()` holds the
+    write for six seconds behind an Undo. See `src/ui/toast.tsx`.
+11. **Nothing is written in our locale.** No `'en-GB'` anywhere. Dates, times
+    and figures go through `src/lib/format.ts`, which asks
+    `src/lib/locale.ts` for the reader's own tag. `npm run check:locale` fails
+    the build on a literal. This is a white-label product: there is no default
+    locale and no default currency.
+12. **Line heights grow with the reader's text.** React Native scales
+    `fontSize` on its own and does NOT scale `lineHeight`, so any pinned point
+    measurement that has to track the text goes through `grown()` from the
+    scale. Never multiply a `fontSize` — see `src/lib/typeScale.ts`.
 
 ## The scale — `src/theme/scale.ts`
 
@@ -48,7 +62,16 @@ type      hero 44/600 · title 26/600 · head 17/600 · body 15/400
           label 13/400 · caption 12/400 · micro 11/500 uppercase
 numeric   tabular figures
 value(n)  a metric at an arbitrary size (600 + tabular)
+fontScale the phone's own text size, clamped. Read once, at module load.
+grown(pt) a pinned point measurement at that size — a line height, a strip
+          that holds one line, a ring with a figure inside it. NEVER a
+          fontSize: React Native is already scaling those, and doing it here
+          as well squares the multiplier.
 ```
+
+Every `lineHeight` in `type` is already `grown()`. A screen that pins its own
+box height around one line of text has to do the same, or that text clips for
+anybody on Larger Text — which is most of the people who turned it on.
 
 ## The kit — `src/ui/kit.tsx`
 
@@ -69,6 +92,33 @@ value(n)  a metric at an arbitrary size (600 + tabular)
 | `<Spark data/>` | single-series trend, 2px, ringed end dot |
 | `<WeekDots done/>` | seven day cells |
 | `<Notice tone kicker title note>` | something needing a decision |
+| `<Flag tone>` | one line of trouble, inline: a 6pt dot beside ink text |
+| `<PartialRead what shown onPress/>` | the banner for a truncated read |
+
+## Saying things — `src/ui/toast.tsx`
+
+```ts
+const toast = useToast();
+
+toast.say('Measurements logged.');          // a statement. 3.2s, no tap.
+
+toast.remove({                               // a delete that can be taken back
+  id: entry.id,                              // hide the row yourself, now
+  text: `${entry.name} removed.`,
+  onUndo: putBack,                           // window still open: cannot fail
+  onCommit: async () => { ... },             // the real write, 6s later
+});
+```
+
+`remove()` HOLDS the write rather than reversing it, because a re-insert is a
+second write that can be refused and an Undo that sometimes cannot undo is
+worse than none. `ToastProvider` flushes anything pending when a second action
+is staged and when it unmounts, so a staged delete has exactly two ends: it is
+written, or it is undone. `src/lib/undoable.ts` is the arithmetic and is
+tested.
+
+A failure still interrupts. "Not removed — it is still counting toward today"
+changes what the person believes about their own data and has to be read.
 
 ## Screen skeleton
 

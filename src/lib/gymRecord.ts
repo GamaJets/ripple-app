@@ -9,6 +9,7 @@
 // not belong anywhere near a ledger: 0.1 + 0.2 is a rounding error in a
 // spreadsheet and a dispute in a gym.
 
+import { minorMoney } from './coachMoney';
 import { assertWhole, capLimit } from './rowCap';
 import { assertWrote } from './wroteRows';
 
@@ -663,14 +664,20 @@ export function summarise(
  * both take a currency and are the preferred doors.
  */
 export function money(cents: number | null | undefined, currency: string | null | undefined): string | null {
-  if (cents == null) return null;
-  // Not `currency ?? ''`: an empty-string currency is the same fact as a null
-  // one — nobody has said — and printing " 6,300.00" with a leading space is
-  // the bare figure this function exists to refuse.
-  if (!currency) return null;
-  return `${currency} ${(cents / 100).toLocaleString(undefined, {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  })}`;
+  // Delegates rather than dividing by a hundred itself. It used to do the
+  // division here, unconditionally and to two decimal places, which is wrong in
+  // sixteen currencies: there are no fils in a yen, so a minor-unit amount in
+  // JPY, KRW or VND *is* the whole amount and ¥6,300 printed as ¥63.00 — a
+  // hundredth of the real figure, on a gym's own books, in the currencies where
+  // nobody reviewing this code was likely to notice.
+  //
+  // `minorMoney` already held the zero-decimal list and already refused a
+  // missing currency the same way. A second copy of that list here is how the
+  // two come to disagree, so there is one, and it lives beside the list.
+  // Everything this function used to promise still holds: a null amount or a
+  // missing currency renders a dash, and an empty-string currency is the same
+  // fact as a null one — nobody has said.
+  return minorMoney(cents, currency);
 }
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */

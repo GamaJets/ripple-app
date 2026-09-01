@@ -16,7 +16,8 @@
 //   · Status colours (warn/crit) are reserved for status and are never used as
 //     text colour; a coloured mark sits *beside* ink-coloured text instead.
 //   · Borders divide; elevation groups. Don't use a border to fake depth.
-import { StyleSheet, type TextStyle } from 'react-native';
+import { PixelRatio, StyleSheet, type TextStyle } from 'react-native';
+import { atScale, clampFontScale } from '../lib/typeScale';
 
 /** Space — 4pt-derived, 7 steps. */
 export const sp = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, huge: 48 } as const;
@@ -46,18 +47,61 @@ export const elevation = {
   },
 } as const;
 
+/* ── Dynamic Type ───────────────────────────────────────────────────────────
+ *
+ * `fontScale` is the reader's own text size, off the phone. See
+ * src/lib/typeScale.ts for the whole argument; the short version is the one
+ * rule that governs everything below:
+ *
+ *     React Native scales fontSize for us and does NOT scale lineHeight.
+ *
+ * So a member on Larger Text at 200% was being drawn 30pt glyphs inside the
+ * 21pt line this file pinned beside them — clipped descenders and overlapping
+ * lines, getting worse the more legibility they asked for. Every lineHeight
+ * here is now multiplied by the same number the platform is multiplying the
+ * font size by, and the two agree again.
+ *
+ * fontSize is deliberately NOT multiplied here. Doing it in both places is the
+ * one mistake available in this file and it squares the scale.
+ *
+ * Read ONCE, at module load, rather than through a hook. Two reasons. Three
+ * and a half thousand inline style objects in this app spread `ty.body` into a
+ * literal, and a hook cannot reach a single one of them — a module constant
+ * fixes every screen in the app without touching any of them. And the value is
+ * a device setting: changing it on iOS sends the app through a full remount,
+ * so the constant is re-read at the moment it changes.
+ */
+export const fontScale = clampFontScale((() => {
+  // Guarded for the same reason `deviceRegion()` in unitPreference.ts is: this
+  // runs during module evaluation, and a throw here takes out every screen
+  // that imports the scale, which is all of them. A missing reading means the
+  // app as it was drawn, never a blank app.
+  try { return PixelRatio.getFontScale(); } catch { return 1; }
+})());
+
+/** A pinned point measurement grown to the reader's text — a line height, a
+ *  strip that holds one line, the diameter of a ring with a figure in it.
+ *  Never a fontSize. Bound to the live scale so callers cannot pass the wrong
+ *  one; `atScale` in src/lib/typeScale.ts is the arithmetic and is tested. */
+export const grown = (pt: number): number => atScale(pt, fontScale);
+
 /**
  * Type — 7 steps. `hero` is the one big number a screen leads with (max one).
  * Numeric styles carry tabular figures so digits don't jitter as values tick.
+ *
+ * Line heights are the reader's; see the block above. `letterSpacing` is left
+ * alone on purpose: it is optical correction for a typeface at a size, and the
+ * -2 on `hero` exists because 44pt display type sets too loose. Scaled up with
+ * the text it would close 88pt glyphs into each other.
  */
 export const type = {
-  hero:    { fontSize: 44, fontWeight: '600', letterSpacing: -2,   lineHeight: 46 },
-  title:   { fontSize: 26, fontWeight: '600', letterSpacing: -0.6, lineHeight: 32 },
-  head:    { fontSize: 17, fontWeight: '600', letterSpacing: -0.2, lineHeight: 22 },
-  body:    { fontSize: 15, fontWeight: '400', letterSpacing: 0,    lineHeight: 21 },
-  label:   { fontSize: 13, fontWeight: '400', letterSpacing: 0,    lineHeight: 18 },
-  caption: { fontSize: 12, fontWeight: '400', letterSpacing: 0,    lineHeight: 16 },
-  micro:   { fontSize: 11, fontWeight: '500', letterSpacing: 0.9,  lineHeight: 14, textTransform: 'uppercase' },
+  hero:    { fontSize: 44, fontWeight: '600', letterSpacing: -2,   lineHeight: grown(46) },
+  title:   { fontSize: 26, fontWeight: '600', letterSpacing: -0.6, lineHeight: grown(32) },
+  head:    { fontSize: 17, fontWeight: '600', letterSpacing: -0.2, lineHeight: grown(22) },
+  body:    { fontSize: 15, fontWeight: '400', letterSpacing: 0,    lineHeight: grown(21) },
+  label:   { fontSize: 13, fontWeight: '400', letterSpacing: 0,    lineHeight: grown(18) },
+  caption: { fontSize: 12, fontWeight: '400', letterSpacing: 0,    lineHeight: grown(16) },
+  micro:   { fontSize: 11, fontWeight: '500', letterSpacing: 0.9,  lineHeight: grown(14), textTransform: 'uppercase' },
 } satisfies Record<string, TextStyle>;
 
 /** Values read as data, not prose: semibold + tabular figures. */

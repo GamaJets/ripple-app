@@ -68,13 +68,14 @@ import {
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { fetchMyCoachBrand } from '../../src/ui/coachBrand';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { appLocale } from '../../src/lib/locale';
 
 /** A date as a coach reads one. Unknown stays unknown. */
 function when(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return '—';
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** The mark beside a state. A coloured dot beside ink text, never coloured

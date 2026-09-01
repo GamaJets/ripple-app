@@ -32,38 +32,44 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { num } from '../../src/lib/format';
+import { num, fmtClock, fmtAxisDay } from '../../src/lib/format';
+import { appLocale } from '../../src/lib/locale';
+import { dateParts } from '../../src/lib/localDate';
 import { useMyAttendance, RHYTHM_WEEKS } from '../../src/ui/attendance';
 import { dwellMinutes, type AttendanceEvent, type ClassOutcome } from '../../src/lib/attendance';
 
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// The weekday used to be this file's own English array — 'Sun' through 'Sat',
+// hand-written beside a date string that was hardcoded to en-GB. Both are the
+// reader's now: `weekday: 'short'` is part of the same format call, so a member
+// on a French handset reads "sam. 14 août" rather than "Sat" glued to a British
+// date. See src/lib/locale.ts.
 
 /** A timestamp as the day it happened, in the reader's own zone. */
 function dayLabel(iso: string | null): string {
   if (!iso) return fig(null);
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return fig(null);
-  return `${DOW[d.getDay()]} ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  return d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+/** The time of day, in whichever clock the reader's phone is set to. This was
+ *  the fifth hand-rolled 12-hour am/pm formatter in the app; `fmtClock` is the
+ *  one that asks — see src/lib/format.ts. */
 function timeLabel(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  let h = d.getHours();
-  const m = d.getMinutes();
-  const ap = h >= 12 ? 'pm' : 'am';
-  h = h % 12 || 12;
-  return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`;
+  return fmtClock(d.getHours(), d.getMinutes());
 }
 
-/** A bare ISO day as "5 Sep". Parsed from components rather than through Date,
- *  which would read a bare date as UTC midnight and print the day before it in
- *  every zone west of Greenwich. */
+/** A bare ISO day as "5 Sep". Read through `dateParts` and rendered by
+ *  `fmtAxisDay`, which is the app's one day-precision date: a bare date parsed
+ *  through `new Date(day)` is UTC midnight and prints the day before it in
+ *  every zone west of Greenwich, and the local re-parse this used to do by hand
+ *  is the exact line the two shipped off-by-one date bugs were written on. */
 function shortDay(day: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
-  if (!m) return day;
-  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const p = dateParts(day);
+  return p ? fmtAxisDay(p[0], p[1], p[2]) : day;
 }
 
 /** What the record says happened, in words nobody has to interpret. */
@@ -93,7 +99,7 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
 export default function Attendance() {
   const t = useTheme();
   const router = useRouter();
-  const { status, events, undated, days, rhythm, classesComplete, reload } = useMyAttendance();
+  const { status, events, undated, days, rhythm, classesComplete, cachedNote, reload } = useMyAttendance();
   const [refreshing, setRefreshing] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -183,7 +189,11 @@ export default function Attendance() {
           <Section>
             <Notice tone={t.crit} kicker="Not read" title="We couldn’t read your attendance"
               note={events.length
-                ? 'What is below is what we had before the read failed. It is not confirmed current, and there may be visits missing from it.'
+                // When the list came off this device, say WHEN. "Not confirmed
+                // current" is true of a cache from four minutes ago and of one
+                // from four days ago, and the member can only judge what they
+                // are looking at if they are told which.
+                ? (cachedNote ?? 'What is below is what we had before the read failed. It is not confirmed current, and there may be visits missing from it.')
                 : 'This is NOT a record of you never coming in — it is a record we could not open. Pull down to try again.'}>
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void reload(); }} /></View>
             </Notice>

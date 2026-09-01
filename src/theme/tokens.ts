@@ -70,21 +70,92 @@ const cream: Theme = { bg: '#fbf6ef', surface: '#ffffff', surface2: '#f5efe5', s
 const violet: Theme = { bg: '#100e18', surface: '#191529', surface2: '#201a33', surface3: '#2a2440', ink: '#ece9f7', ink2: '#c3bce0', ink3: '#918bab', ring: 'rgba(255,255,255,0.09)', brand: '#7756ff', brandInk: '#ffffff', ...darkSem };
 const swiss: Theme = { bg: '#f6f5f1', surface: '#ffffff', surface2: '#f0efe9', surface3: '#e6e4dc', ink: '#111111', ink2: '#4a4842', ink3: '#686660', ring: 'rgba(17,17,17,0.12)', brand: '#e3261c', brandInk: '#ffffff', ...lightSem };
 
-export interface PaletteMeta { key: string; name: string; theme: Theme; light: boolean }
+export interface PaletteMeta {
+  key: string; name: string; theme: Theme; light: boolean;
+  /**
+   * The palette this one becomes when the phone flips between light and dark.
+   *
+   * Seven of these ten are dark and three are light, so this is a mapping and
+   * not a pairing: three darks land on `clinical`. What it must be is CLOSED —
+   * every counterpart names a real palette of the OPPOSITE scheme, asserted in
+   * src/lib/a11y.test.ts — because the follow reads it once in each direction
+   * and a dead end would leave a member on a light phone in a dark app with no
+   * way back except picking a palette by hand.
+   *
+   * The member's own choice is never rewritten. `AppThemeProvider` derives the
+   * counterpart at render and leaves the stored key alone, so going dark and
+   * back returns the palette they picked rather than whatever the mapping
+   * happened to land on.
+   *
+   * Paired by what the palette is FOR rather than by hue arithmetic: the two
+   * monospace-feeling ones face each other, the two coral ones face each other,
+   * and the cool neutrals fall to Clinical Light, which is the only light
+   * palette with a cool brand.
+   */
+  counterpart: string;
+}
 export const PALETTES: PaletteMeta[] = [
-  { key: 'teal', name: 'Elevated Teal', theme: teal, light: false },
-  { key: 'midnight', name: 'Midnight Blue', theme: midnight, light: false },
-  { key: 'sage', name: 'Sage', theme: sage, light: false },
-  { key: 'noir', name: 'Mono Noir', theme: noir, light: false },
-  { key: 'sunset', name: 'Sunset', theme: sunset, light: false },
-  { key: 'clinical', name: 'Clinical Light', theme: clinical, light: true },
-  { key: 'terminal', name: 'Terminal', theme: terminal, light: false },
-  { key: 'cream', name: 'Cream & Coral', theme: cream, light: true },
-  { key: 'violet', name: 'Electric Violet', theme: violet, light: false },
-  { key: 'swiss', name: 'Swiss Ivory', theme: swiss, light: true },
+  { key: 'teal', name: 'Elevated Teal', theme: teal, light: false, counterpart: 'clinical' },
+  { key: 'midnight', name: 'Midnight Blue', theme: midnight, light: false, counterpart: 'clinical' },
+  { key: 'sage', name: 'Sage', theme: sage, light: false, counterpart: 'cream' },
+  { key: 'noir', name: 'Mono Noir', theme: noir, light: false, counterpart: 'swiss' },
+  { key: 'sunset', name: 'Sunset', theme: sunset, light: false, counterpart: 'cream' },
+  { key: 'clinical', name: 'Clinical Light', theme: clinical, light: true, counterpart: 'midnight' },
+  { key: 'terminal', name: 'Terminal', theme: terminal, light: false, counterpart: 'swiss' },
+  { key: 'cream', name: 'Cream & Coral', theme: cream, light: true, counterpart: 'sunset' },
+  { key: 'violet', name: 'Electric Violet', theme: violet, light: false, counterpart: 'clinical' },
+  { key: 'swiss', name: 'Swiss Ivory', theme: swiss, light: true, counterpart: 'noir' },
 ];
-export const paletteByKey = (k: string): Theme => (PALETTES.find((p) => p.key === k) ?? PALETTES[0]).theme;
+export const paletteByKey = (k: string): Theme => (metaByKey(k)).theme;
+export const metaByKey = (k: string): PaletteMeta => PALETTES.find((p) => p.key === k) ?? PALETTES[0];
 export const DEFAULT_PALETTE = 'teal';
+
+/**
+ * The palette to draw when the phone is in `scheme` and the member chose `key`.
+ *
+ * Returns the member's own palette whenever it already matches the phone, so
+ * somebody who deliberately picked Mono Noir and set their phone to dark stays
+ * exactly where they were. A null scheme — the platform has not said — is not
+ * a light phone, and changes nothing.
+ */
+export function paletteForScheme(key: string, scheme: 'light' | 'dark' | null | undefined): string {
+  if (scheme !== 'light' && scheme !== 'dark') return key;
+  const meta = metaByKey(key);
+  const wantsLight = scheme === 'light';
+  return meta.light === wantsLight ? meta.key : metaByKey(meta.counterpart).key;
+}
+
+/**
+ * A palette with its two quiet inks brought up to its two loudest.
+ *
+ * ── Why it is a transform rather than an eleventh palette ─────────────────
+ *
+ * Appearance offered ten hues and nothing for legibility, which is the thing
+ * most people open that screen looking for. The obvious way to add a
+ * high-contrast option is to type new colours; the tokens in this file were
+ * measured against every ground they are drawn on, and hand-picking eleven
+ * more sets of them is how a palette ends up at 2.79:1 without anybody
+ * noticing — which is what the ink3 comment above is about.
+ *
+ * So no colour is invented. ink3 becomes ink2 and ink2 becomes ink, both of
+ * which src/lib/a11y.test.ts already measures at 4.5:1 or better on all four
+ * grounds of all ten palettes. The transform therefore CANNOT drop below the
+ * floor: every value in the result is a value that was already passing, and
+ * a11y.test.ts asserts that over the transformed palettes too.
+ *
+ * What it costs is the three-step ink hierarchy — a caption now reads as
+ * loudly as the value above it. That is the trade a person asking for higher
+ * contrast is making on purpose, and it is why this is a setting rather than
+ * the default.
+ *
+ * `brand`, `brandInk` and the status colours are untouched. brandInk is
+ * measured against whatever the brand is by `brandInkFor`, and the status
+ * colours are marks at 3:1 and are never text — raising them here would only
+ * make the marks louder, which is not what the reader asked for.
+ */
+export function highContrast(t: Theme): Theme {
+  return { ...t, ink3: t.ink2, ink2: t.ink };
+}
 
 // Backward-compat exports (some modules import these directly).
 export const dark = teal;

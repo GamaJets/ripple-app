@@ -17,6 +17,7 @@ import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
 import { fetchMemberships, fetchPayments, fetchPlans, summarise, type Membership } from '@lib/gymRecord';
 import { fetchClasses, summariseAttendance, pct } from '@lib/gymSchedule';
 import { fetchVisits, summariseVisits } from '@lib/gymVisits';
+import { fetchOwnerMetrics, type OwnerMetrics } from '@/lib/ownerMetrics';
 
 interface Gym {
   id: string;
@@ -197,6 +198,33 @@ export default function Overview() {
         doorRead: visits !== null,
       });
     })();
+    return () => { live = false; };
+  }, []);
+
+  /* ── the engagement figures, from owner-metrics ────────────────────────
+   *
+   * `supabase/functions/owner-metrics` has been deployed, tenant-scoped and
+   * correct since part 39 closed the cross-gym leak in it, and until now it was
+   * invoked by nothing at all — which docs/OWNER-PORTAL.md calls, accurately, "a
+   * trap for the next person". This is its caller.
+   *
+   * It is used for the figures this page cannot honestly compute from the
+   * browser and no other: how many members trained at all in the last thirty
+   * days, how many workouts and scans there were. Each of those needs a paged
+   * read across `workouts` or `scans` joined through the person's profile, and
+   * a browser doing it hits PostgREST's row ceiling and quietly reports a
+   * fraction. The function pages properly and — this is why it is worth calling
+   * rather than reimplementing — it drops a metric it could not compute WHOLE
+   * rather than returning a short one.
+   *
+   * `live` is that contract: a metric absent from it is unknown, and this page
+   * renders a dash. Nothing here falls back to sample data, which is the other
+   * thing the function's own header records having gone wrong.
+   */
+  const [engage, setEngage] = useState<OwnerMetrics | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void fetchOwnerMetrics().then((m) => { if (live) setEngage(m); });
     return () => { live = false; };
   }, []);
 
@@ -453,6 +481,53 @@ export default function Overview() {
                ? 'nothing to assess yet — no clients between them'
                : undefined} />
       </div>
+
+      {/* ── engagement ────────────────────────────────────────────────
+          The only figures on this page that do not come from a query in this
+          browser. See the comment on `engage` above for why, and for what the
+          `live` array means: a metric the function could not compute whole is
+          absent from it, and absent renders as a dash rather than as a zero. */}
+      <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 18 }}>
+        <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
+          <h2>Engagement</h2>
+        </div>
+        <div style={{ padding: '14px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {engage === undefined ? (
+            <div style={{ color: 'var(--ink3)', fontSize: 13 }}>Loading…</div>
+          ) : engage === null || !engage.ok ? (
+            <div style={{ color: 'var(--ink3)', fontSize: 13, maxWidth: '68ch' }}>
+              {engage?.error
+                ?? 'These figures could not be read. That is unknown rather than nil — nobody has said your members have stopped training.'}
+            </div>
+          ) : (
+            ([
+              ['Trained in 30 days', 'activeMembers', 'members with at least one workout'],
+              ['Workouts, 7 days', 'workouts7', 'logged across the gym'],
+              ['Scans, 7 days', 'scans7', 'body composition scans taken'],
+              ['PT sessions, 30 days', 'ptSessions30', 'booked and already started'],
+            ] as Array<[string, string, string]>).map(([label, key, note]) => {
+              // A metric is quotable only when the function put it in `live`.
+              // Reading `metrics[key] ?? 0` here would undo the whole point of
+              // that array — the function omits what it could not compute
+              // WHOLE, and a zero in its place is the plausible wrong number
+              // its own header was written about.
+              const known = engage.live.includes(key);
+              const v = known ? engage.metrics[key] : null;
+              return (
+                <div key={key} style={{ border: '1px solid var(--ring)', padding: '12px 14px', minWidth: 150 }}>
+                  <div className="eyebrow">{label}</div>
+                  <div className="mono" style={{ fontSize: 22, marginTop: 4 }}>
+                    {v == null ? <span className="dash">—</span> : v.toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 4 }}>
+                    {v == null ? 'not counted — unknown, not nil' : note}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </section>
 
       <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)' }}>
         <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>

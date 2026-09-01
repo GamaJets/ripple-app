@@ -38,6 +38,8 @@
 // goes away entirely, the second one still holds — the photos stop rendering
 // within five minutes rather than sitting there indefinitely on the strength
 // of a read that is no longer true.
+import { appLocale } from './locale';
+
 
 /** A signed link to one file, and the instant the signature stops working. */
 export interface SignedLink {
@@ -239,7 +241,7 @@ export function gapNote(takenAt: string, sharedAt: string): string | null {
 export function stamp(iso: string): string | null {
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return null;
-  return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /**

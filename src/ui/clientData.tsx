@@ -38,6 +38,7 @@ import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+import { registerFlush } from '../lib/offlineQueue';
 
 // Declared in src/lib/types.ts alongside the labels and the two predicates the
 // screens branch on; re-exported because every client screen imports it from
@@ -193,6 +194,24 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [profileStatus, setProfileStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [scansStatus, setScansStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [saveFailed, setSaveFailed] = useState(false);
+  /**
+   * Bumped to make the push effect below run again without anything having
+   * changed.
+   *
+   * The profile write is the one that carries `injuries`, and an injury is the
+   * field in this app with a safety meaning: it is what makes a plan avoid a
+   * movement. Until this existed, a client who disclosed a knee with no signal
+   * had it saved to this device (the local cache effect above) and re-sent only
+   * when something else in the profile changed, or at the next launch. It now
+   * also goes on the reconnect edge and on returning to the foreground, through
+   * src/lib/offlineQueue.ts · `flushAll`.
+   *
+   * A tick rather than a queued intent, and that is the right shape here: this
+   * write is an UPDATE of the whole row from state, so "send it again" and
+   * "send the current state" are the same instruction — there is nothing to
+   * queue that state is not already holding.
+   */
+  const [pushTick, setPushTick] = useState(0);
 
   // Load the user's saved profile on first mount.
   useEffect(() => { (async () => {
@@ -484,7 +503,16 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       })();
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced]);
+  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced, pushTick]);
+
+  // Try the profile write again when the app can reach the server again.
+  //
+  // Only when the last one FAILED. A tick on every reconnect would rewrite an
+  // unchanged row on every walk out of a lift, and this write is six hundred
+  // milliseconds of debounce away from two full-table updates.
+  useEffect(() => registerFlush('clientProfile', () => {
+    if (saveFailed) setPushTick((n) => n + 1);
+  }), [saveFailed]);
 
   // Load locally-cached InBody composition metrics (keyed by scan date).
   useEffect(() => { (async () => { try { const raw = await AsyncStorage.getItem('repple.scanMetrics'); if (raw) setScanMetrics(JSON.parse(raw)); } catch { /* ignore */ } })(); }, []);

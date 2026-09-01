@@ -17,16 +17,24 @@
 // not absent, and the screen must say so; under 'partial' the rows are real and
 // no rate may be computed from them. Both are carried here rather than left to
 // the screen to infer from an array length.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
 import {
   fetchMyAttendance, mergeAttendance, attendedDays, rhythm, localDay,
   type AttendanceEvent, type Rhythm,
 } from '../lib/attendance';
+
+/** Where this device keeps the member's own attendance. Two keys, because the
+ *  undated events are a separate list that must never be folded into the dated
+ *  one — see rule 3 in src/lib/attendance.ts. */
+const ATT_SCOPE = 'attendance';
+const ATT_UNDATED_SCOPE = 'attendanceUndated';
 
 /** Weeks drawn on the rhythm strip. Twelve is a quarter — long enough to show a
  *  habit forming or stopping, short enough that every bar fits on a phone. */
@@ -46,6 +54,17 @@ export interface MyAttendance {
   /** False when at least one class row did not come back, so some event on
    *  screen is unlabelled. The screen says which, rather than showing a blank. */
   classesComplete: boolean;
+  /**
+   * The sentence for a history that came off this device rather than off the
+   * server, or null when what is on screen was confirmed.
+   *
+   * Goes with `status === 'error'`. The rule this holds is the one the header
+   * states: under 'error' the rows are UNKNOWN. A cached list makes them
+   * "what we last saw", which is a better answer than an empty screen and a
+   * strictly worse one than a live read — and the member has to be able to tell
+   * which they are looking at.
+   */
+  cachedNote: string | null;
   reload: () => Promise<void>;
 }
 
@@ -57,6 +76,10 @@ export function useMyAttendance(): MyAttendance {
   const [days, setDays] = useState<string[]>([]);
   const [rh, setRh] = useState<Rhythm>({ weeks: [], firstDay: null, countedWeeks: 0, perWeek: null });
   const [classesComplete, setClassesComplete] = useState(true);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
+  /** True once the server has answered this session, so a later failed reload
+   *  does not put an older copy over a confirmed one. */
+  const confirmed = useRef(false);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
@@ -72,6 +95,34 @@ export function useMyAttendance(): MyAttendance {
         setRh({ weeks: [], firstDay: null, countedWeeks: 0, perWeek: null });
         setStatus('ready');
         return;
+      }
+
+      // ── this device's copy, before the network ──────────────────────────
+      //
+      // A member with no signal could not see their own attendance at the gym
+      // they were standing in. `days` and `rhythm` are recomputed from the
+      // cached events rather than cached themselves — two copies of one derived
+      // figure is how they come to disagree — and the rate is computed as a
+      // NOT-whole read, because a cached list is by definition not confirmed to
+      // be all of it.
+      if (!confirmed.current) {
+        try {
+          const [rawEv, rawUn] = await Promise.all([
+            AsyncStorage.getItem(cacheKey(ATT_SCOPE, uid)),
+            AsyncStorage.getItem(cacheKey(ATT_UNDATED_SCOPE, uid)),
+          ]);
+          const cached = readCache<AttendanceEvent>(rawEv);
+          if (cached.rows && cached.rows.length && withinHorizon(cached.at)) {
+            const cachedUndated = readCache<AttendanceEvent>(rawUn);
+            const cd = attendedDays(cached.rows);
+            const cToday = localDay(new Date().toISOString());
+            setEvents(cached.rows);
+            setUndated(cachedUndated.rows ?? []);
+            setDays(cd);
+            setRh(rhythm(cd, cToday ?? '', RHYTHM_WEEKS, false));
+            setCachedAt(cached.at);
+          }
+        } catch { /* no usable cache; the read below is the only source */ }
       }
 
       const res = await fetchMyAttendance(supabase, uid);
@@ -99,6 +150,18 @@ export function useMyAttendance(): MyAttendance {
       setRh(rhythm(d, today ?? '', RHYTHM_WEEKS, !res.value.truncated));
       setClassesComplete(res.value.classesComplete);
       setStatus(res.value.truncated ? 'partial' : 'ready');
+      confirmed.current = true;
+      setCachedAt(null);
+      // Cached only when the read was whole AND every class row came back.
+      // A partial history written to this device would be opened, next launch,
+      // as the member's whole record — and the one thing this screen must never
+      // do is understate how often somebody has been in.
+      if (!res.value.truncated && res.value.classesComplete) {
+        AsyncStorage.setItem(cacheKey(ATT_SCOPE, uid), packCache(ev))
+          .catch(() => { /* the history is right this session either way */ });
+        AsyncStorage.setItem(cacheKey(ATT_UNDATED_SCOPE, uid), packCache(un))
+          .catch(() => { /* as above */ });
+      }
     } catch (e) {
       reportError('attendance.read', e);
       setStatus('error');
@@ -107,5 +170,5 @@ export function useMyAttendance(): MyAttendance {
 
   useEffect(() => { void load(); }, [load, authRev]);
 
-  return { status, events, undated, days, rhythm: rh, classesComplete, reload: load };
+  return { status, events, undated, days, rhythm: rh, classesComplete, cachedNote: cachedAtLine(cachedAt), reload: load };
 }

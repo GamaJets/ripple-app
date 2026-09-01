@@ -19,12 +19,21 @@ import {
   type BlockResult,
 } from './blockRange';
 
+import { setAppLocale } from './locale';
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) =>
   ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 const same = (a: unknown, b: unknown, msg: string) =>
   ok(JSON.stringify(a) === JSON.stringify(b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
+
+// These assertions read dates in British order — the day first. That is no
+// longer what the app writes for everybody: src/lib/format.ts asks
+// src/lib/locale.ts, which reads the handset, so the same call produces
+// "Sep 2, 2026" on an American one. The locale is stated here for the same
+// reason this file states its timezones: a test that reads whatever the runner
+// happens to be set to is a test of the machine.
+setAppLocale('en-GB');
 
 /* ── the days a plan covers ─────────────────────────────────────────────── */
 

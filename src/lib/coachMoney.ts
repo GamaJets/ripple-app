@@ -43,6 +43,8 @@
 // platform fee and whether the money has actually landed in the coach's bank
 // are all things Stripe knows and this app has never been told — see the note
 // on `Taken` below.
+import { appLocale } from './locale';
+
 
 /** Currencies Stripe bills in whole units — there are no fils in a yen, so a
  *  minor-unit amount is not divided by a hundred. Getting this backwards prints
@@ -70,7 +72,7 @@ export function moneyIn(amount: number | null | undefined, currency: string | nu
   const zero = ZERO_DECIMAL.has(cur);
   const whole = minor && !zero ? amount / 100 : amount;
   const dp = zero ? 0 : 2;
-  return `${cur.toUpperCase()} ${whole.toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
+  return `${cur.toUpperCase()} ${whole.toLocaleString(appLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
 }
 
 /** A Stripe amount, in minor units. */

@@ -65,6 +65,7 @@ import { weekStats } from '../../src/lib/streaks';
 import { num } from '../../src/lib/format';
 import { localDate } from '../../src/lib/localDate';
 import type { WorkoutEntry } from '../../src/lib/mockData';
+import { appLocale } from '../../src/lib/locale';
 
 /** How many days back "Recent" reaches. Beyond a fortnight this stops being a
  *  log a coach reads and starts being a history screen, which is not what this
@@ -75,7 +76,7 @@ const RECENT_DAYS = 14;
 function dayLabel(day: string): string {
   const d = localDate(day);
   if (!d) return day;
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 export default function MyTraining() {

@@ -25,7 +25,7 @@
 //                       it belongs to a different change; this comment is here
 //                       so whoever picks it up finds the gate already built.
 import { supabase } from './supabase';
-import { shareableContext, type ShareConsent } from './coachShare';
+import { shareableContext, businessAskContext, clientAskContext, type ShareConsent } from './coachShare';
 
 export type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
@@ -105,4 +105,56 @@ export async function askCoachForMember(
 export async function askCoach(messages: ChatMsg[], context: Record<string, unknown>): Promise<string | null> {
   if (!coachAvailable()) return null;
   return invoke(messages, context);
+}
+
+/* ── the coach's own doors ─────────────────────────────────────────────────
+ *
+ * `askCoach` above is the unfiltered call and its remaining callers are coach
+ * screens. That was defensible for the digest, which is aggregate, and it was
+ * never defensible for the two that pass a client: `draftNudge` and
+ * `genSummary` in app/(trainer)/dashboard.tsx post a named person's adherence,
+ * their body-composition scan and a list of what they have eaten to
+ * api.anthropic.com. The member consented to their COACH seeing all of that.
+ * Nobody asked them about a model, and nobody in the room can answer for them.
+ *
+ * So the two functions below are the coach's versions of `askCoachForMember`,
+ * and they exist for the same reason it does: the filter is applied HERE, so a
+ * screen cannot skip it and a field added to a context object without anybody
+ * reading src/lib/coachShare.ts is simply not transmitted.
+ *
+ * `askCoach` is deliberately left in place and unchanged. Removing it would
+ * break app/(client)/report.tsx, which is a separate unfixed defect and is
+ * flagged as one at the top of this file; changing its signature to make a
+ * point about a screen it does not belong to would cost more than it is worth.
+ */
+
+/**
+ * A question about the coach's own business.
+ *
+ * Nothing here names a person, and the filter is what keeps it that way when
+ * somebody adds `atRiskNames` to the digest context six months from now.
+ */
+export async function askAboutMyBusiness(messages: ChatMsg[], context: Record<string, unknown>): Promise<CoachAnswer> {
+  if (!coachAvailable()) return { ok: false, reason: 'unavailable' };
+  const reply = await invoke(messages, businessAskContext(context));
+  return reply == null ? { ok: false, reason: 'failed' } : { ok: true, reply };
+}
+
+/**
+ * A question about one client.
+ *
+ * The context that goes carries no name, no measurement and nothing off a
+ * document — see the second half of src/lib/coachShare.ts for the whole
+ * argument, including why there is no consent parameter here and what would
+ * have to change for one to exist.
+ *
+ * The reply comes back with `{name}` where the client's first name belongs and
+ * the CALLER substitutes, with `fillName`. That is not a nicety: it is what
+ * makes "the name never goes" survive contact with a feature whose whole output
+ * is a message addressed to somebody.
+ */
+export async function askAboutClient(messages: ChatMsg[], context: Record<string, unknown>): Promise<CoachAnswer> {
+  if (!coachAvailable()) return { ok: false, reason: 'unavailable' };
+  const reply = await invoke(messages, clientAskContext(context));
+  return reply == null ? { ok: false, reason: 'failed' } : { ok: true, reply };
 }

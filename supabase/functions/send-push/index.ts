@@ -2,8 +2,41 @@
 // Delivers an Expo push notification to one or more users. Reads their tokens
 // from push_tokens (service role, bypassing RLS) and posts to Expo's push API.
 // Deploy: supabase functions deploy send-push
-// Request JSON: { user_ids: string[], title: string, body: string, data?: object }
-// Response JSON: { sent: number }
+// Request JSON: { user_ids: string[], title: string, body: string, data?: object, channel?: string }
+// Response JSON: { sent: number, muted?: number }
+//
+// ── `channel`, and why the filter is HERE ─────────────────────────────────
+//
+// A coach who muted notifications to stop 11pm chat pings also stopped hearing
+// that a client's card had been declined, because the only control that existed
+// was the master switch — and the master switch works by taking a handset's row
+// OUT of push_tokens, which is all-or-nothing by construction.
+//
+// `notify_channel_prefs` (see the SQL part of the same name) holds a per-channel
+// answer, and it is applied at this function rather than at the two dozen
+// sendPush() call sites for exactly the reason the master switch is applied at
+// the token: a call-site check is a check somebody forgets at the next call
+// site, and the next one is always the one that matters.
+//
+// Three properties of the filter, and all three are deliberate:
+//
+//   · `channel` is OPTIONAL. A send with no channel is not filtered at all.
+//     Every existing caller keeps working unchanged and nothing is silently
+//     suppressed by a preference nobody could have been shown a switch for.
+//   · ONLY an explicit `enabled = false` row suppresses. No row is not an
+//     answer, and the product default is on — the same default the switch on
+//     the settings screen shows, because a screen showing a switch on while
+//     this function suppressed the push would be the original bug pointing the
+//     other way.
+//   · A FAILED read of the preferences sends. The alternative is that a
+//     transient database error silently swallows a coach's notification that a
+//     subscription payment failed, and there would be nothing anywhere to find
+//     that out from. Erring towards the notification is the recoverable error.
+//
+// It suppresses the PUSH and nothing else. The inbox row is written by
+// notify_users() before this function is ever called, so a muted channel still
+// appears in the notifications list — muting is "do not buzz me about this",
+// not "do not tell me".
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const CORS = {
@@ -18,20 +51,52 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   let user_ids: string[] = [], title = '', body = '', data: Record<string, unknown> = {};
+  let channel = '';
   try {
     const b = await req.json();
     user_ids = Array.isArray(b.user_ids) ? b.user_ids : [];
     title = String(b.title || 'Repple');
     body = String(b.body || '');
     data = b.data || {};
+    channel = typeof b.channel === 'string' ? b.channel.trim() : '';
   } catch { return json({ error: 'Invalid JSON body' }, 400); }
   if (!user_ids.length) return json({ error: 'user_ids required' }, 400);
 
   try {
     const supa = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data: rows } = await supa.from('push_tokens').select('token').in('user_id', user_ids);
+
+    // ── the per-channel preference ──────────────────────────────────────
+    //
+    // Recipients who have explicitly turned this channel off are dropped
+    // BEFORE the tokens are read, so a muted coach with three handsets costs
+    // one query rather than three rows of work.
+    //
+    // The read failing is not a mute. `error` here means the preferences could
+    // not be read, and suppressing on that would swallow a coach's "a
+    // subscription payment failed" notification on the strength of a transient
+    // fault, with nothing anywhere to find it out from.
+    let recipients = user_ids;
+    let muted = 0;
+    if (channel) {
+      const { data: prefs, error: prefErr } = await supa
+        .from('notify_channel_prefs')
+        .select('user_id')
+        .in('user_id', user_ids)
+        .eq('channel', channel)
+        .eq('enabled', false);
+      if (!prefErr && prefs) {
+        const off = new Set((prefs as { user_id: string }[]).map((r) => r.user_id));
+        if (off.size) {
+          recipients = user_ids.filter((id) => !off.has(id));
+          muted = user_ids.length - recipients.length;
+        }
+      }
+    }
+    if (!recipients.length) return json({ sent: 0, muted });
+
+    const { data: rows } = await supa.from('push_tokens').select('token').in('user_id', recipients);
     const tokens: string[] = (rows ?? []).map((r: any) => r.token).filter(Boolean);
-    if (!tokens.length) return json({ sent: 0 });
+    if (!tokens.length) return json({ sent: 0, muted });
     const messages = tokens.map((to) => ({ to, title, body, sound: 'default', data }));
     // Expo accepts up to 100 messages per request.
     for (let i = 0; i < messages.length; i += 100) {
@@ -41,7 +106,7 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify(messages.slice(i, i + 100)),
       });
     }
-    return json({ sent: tokens.length });
+    return json({ sent: tokens.length, muted });
   } catch (e) {
     return json({ error: 'send failed', detail: String(e) }, 500);
   }

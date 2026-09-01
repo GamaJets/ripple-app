@@ -242,3 +242,117 @@ export function unsentNote(n: number, noun: string, nounPlural = `${noun}s`): st
   if (n <= 0) return null;
   return `${n} ${n === 1 ? noun : nounPlural} saved on this phone and not sent yet — ${n === 1 ? 'it goes' : 'they go'} up next time you have signal.`;
 }
+
+/* ── When the queue actually gets sent ─────────────────────────────────────
+ *
+ * Until this section existed, the honest answer to "when does a queued write go
+ * up" was: the next time the member launches the app AND lands on the screen
+ * that owns that queue. Every provider flushed inside its own hydrate effect,
+ * so a workout logged in a basement went up when the app was next opened —
+ * which for a member who trains at 7am and does not touch the app again until
+ * the next session is the following day, from inside the same basement.
+ *
+ * Two moments are worth flushing on and neither of them is a launch:
+ *
+ *   · THE SIGNAL COMES BACK. src/lib/reachability.ts knows the exact edge,
+ *     because every request the app makes reports through it. Thirty seconds
+ *     after somebody walks up the stairs, their session is on the server.
+ *
+ *   · THE APP COMES BACK TO THE FOREGROUND. A phone that was locked in a
+ *     pocket for the walk home has made no requests, so there is no edge to
+ *     hear; the first thing to do on waking is try.
+ *
+ * Both live in src/ui/offlineFlush.tsx, because AppState is React Native's and
+ * this file is plain TypeScript that the tests run under node. What is here is
+ * the registry and the single-flight rule, which are the parts that can be
+ * got wrong quietly.
+ */
+
+/** What a provider registers: send whatever of mine is still waiting. Resolves
+ *  when it has finished trying. A rejection is caught by `flushAll` — a
+ *  provider that throws must not stop the others from being sent. */
+export type Flusher = () => Promise<unknown> | unknown;
+
+const flushers = new Map<string, Flusher>();
+
+/**
+ * Register this provider's send-what-is-waiting function.
+ *
+ * Keyed, and the key replaces rather than accumulates. Providers register from
+ * an effect, and an effect that re-runs — a new auth revision, a reload tick —
+ * would otherwise leave a closure over the previous account's uid in the
+ * registry, quietly sending the wrong person's queue on the next reconnect.
+ *
+ * Returns an unregister, which is deliberately a no-op if this key has already
+ * been taken over by a later registration: unmount order is not something the
+ * caller controls, and an unmount must never delete a live registration.
+ */
+export function registerFlush(key: string, fn: Flusher): () => void {
+  flushers.set(key, fn);
+  return () => { if (flushers.get(key) === fn) flushers.delete(key); };
+}
+
+/** How many providers currently have something registered. For the test, and
+ *  for a diagnostics screen; nothing branches on it. */
+export const flusherCount = (): number => flushers.size;
+
+let running: Promise<number> | null = null;
+let askedAgain = false;
+
+/**
+ * Run every registered flush, once.
+ *
+ * SINGLE FLIGHT, and this is the part that has to be right. The two triggers
+ * fire together all the time — coming back to the foreground is usually also
+ * the moment the first request succeeds and the reconnect edge fires — and two
+ * concurrent flushes of the same queue is how one workout becomes two rows.
+ * A call made while one is in flight does not start a second and does not get
+ * dropped either: it sets `askedAgain`, and one more pass runs when the current
+ * one finishes, because the state that prompted it may have arrived after that
+ * provider had already read its queue.
+ *
+ * Resolves with the number of flushers that were run in the final pass.
+ */
+export function flushAll(): Promise<number> {
+  if (running) { askedAgain = true; return running; }
+  // The latch is taken BEFORE the work starts, not after. An async function
+  // body runs synchronously up to its first await, and the first await here is
+  // the call to a provider's flusher — so assigning `running` from the result
+  // of the IIFE would leave a window in which a flusher that reaches back into
+  // flushAll starts a second pass over the same queues.
+  let settle: (n: number) => void = () => { /* replaced below, before any await */ };
+  const pass = new Promise<number>((res) => { settle = res; });
+  running = pass;
+  void (async () => {
+    let ran = 0;
+    do {
+      askedAgain = false;
+      // A snapshot, so a provider registering mid-flush is picked up by the
+      // next pass rather than being called while this list is being walked.
+      const batch = [...flushers.values()];
+      ran = batch.length;
+      for (const fn of batch) {
+        // Serial, not Promise.all. These are network writes from a device that
+        // has just got its signal back, and the failure mode of firing eight
+        // of them at once on returning wifi is half of them timing out and
+        // going back into the queue they came from.
+        try { await fn(); } catch { /* this provider keeps its own rows; the rest still go */ }
+      }
+    } while (askedAgain);
+    // Cleared before the promise resolves, so a caller that chains another
+    // flush onto this one gets a fresh pass rather than this same settled
+    // promise handed straight back.
+    if (running === pass) running = null;
+    settle(ran);
+  })();
+  return pass;
+}
+
+/** True while a flush is in flight. A screen may show "sending" off this; no
+ *  logic branches on it, because the answer that matters is the count of
+ *  unsent rows and that is derived from the rows themselves. */
+export const isFlushing = (): boolean => running !== null;
+
+/** Drop every registration. Tests only — an app that called this would go
+ *  quiet until every provider happened to re-register. */
+export function resetFlushers(): void { flushers.clear(); running = null; askedAgain = false; }

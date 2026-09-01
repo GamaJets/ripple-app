@@ -188,6 +188,61 @@ export async function shareTextFile(content: string, filename: string, mime: str
   return 'text';
 }
 
+/**
+ * Write BYTES to the cache and hand them to the share sheet.
+ *
+ * The binary sibling of `shareTextFile`, and the whole reason it exists is the
+ * GDPR export: a member's own progress photographs, their message attachments
+ * and their physiotherapy reports are FILES, and a JSON bundle that lists them
+ * without containing them is an export that omits the part they most want.
+ * There is no text fallback here and there must not be: a base64 blob pasted
+ * into a message is not a photograph, and offering one would be the same lie
+ * `shareTextFile`'s fallback is careful not to tell.
+ *
+ * `base64` is the file exactly as it came out of storage. Returns false when
+ * this build cannot write a file or cannot reach a share sheet — the caller has
+ * `fileShareBlocker()` for the sentence — and false rather than a throw for the
+ * same reason `copyToClipboard` returns a boolean: "saved" is a thing somebody
+ * ACTS on, and claiming it against a build with no share sheet costs them the
+ * copy of their own record they think they now have.
+ *
+ * Both generations of the expo-file-system API are handled, for the reason the
+ * header gives at length: the SDK 54 names replaced the older ones and left
+ * them on the module as stubs that throw.
+ */
+export async function shareBinaryFile(
+  base64: string, filename: string, mime: string, title: string,
+): Promise<boolean> {
+  if (!fileExportAvailable()) return false;
+  try {
+    let uri: string;
+    if (FileSystem?.Paths?.cache && FileSystem?.File) {
+      const f = new FileSystem.File(FileSystem.Paths.cache, filename);
+      // A file left behind by a previous save is still sitting there, and
+      // `create()` refuses an existing path without this.
+      f.create({ overwrite: true, intermediates: true });
+      // Synchronous by design in the new API — `write` returns void, so there
+      // is nothing to await and awaiting it would silently succeed on a failed
+      // write.
+      f.write(base64, { encoding: 'base64' });
+      uri = f.uri;
+    } else {
+      uri = FileSystem.cacheDirectory + filename;
+      // Must stay awaited: handing the share sheet a URI before the bytes are
+      // on disk attaches an EMPTY file, which to whoever receives it looks like
+      // a member with no records rather than like a race.
+      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType?.Base64 ?? 'base64' });
+    }
+    const ok = Sharing.isAvailableAsync ? await Sharing.isAvailableAsync() : true;
+    if (!ok) return false;
+    await Sharing.shareAsync(uri, { mimeType: mime, dialogTitle: title });
+    return true;
+  } catch {
+    // Reported as a failure, never as a silent success. The caller says so.
+    return false;
+  }
+}
+
 export async function shareIcs(ics: string, filename: string, title: string): Promise<'file' | 'text'> {
   if (fileExportAvailable()) {
     try {

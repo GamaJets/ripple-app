@@ -50,7 +50,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag } from '../../src/ui/kit';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
@@ -78,6 +78,12 @@ import {
   ratingDisplay, ratingLine, reviewListState, reviewerLabel, gymLine,
   MAX_RATING, type RatingSummary, type Review,
 } from '../../src/lib/reviews';
+// What a session fee is denominated in, and the four different reasons there
+// might be no answer. `wholeMoney` is the whole-unit formatter a human-typed
+// rate wants, and it knows the zero-decimal currencies — a ¥50,000 rate divided
+// by a hundred is the bug at the other end of this one.
+import { wholeMoney } from '../../src/lib/coachMoney';
+import { currencyGapOfStatus, currencyGapLineAbout } from '../../src/lib/currencyGap';
 
 interface Coach {
   id: string;
@@ -87,6 +93,16 @@ interface Coach {
   sessionFee: number;
   bio: string;
 }
+
+/**
+ * How the read of what these coaches charge IN went.
+ *
+ * Its own status, and its own read, for the same reason the ratings and the
+ * credentials have theirs: the directory above is real and useful without it,
+ * and losing it must cost the currency in front of a figure rather than the
+ * list of coaches.
+ */
+type CcyStatus = 'loading' | 'ready' | 'error';
 
 export default function FindTrainer() {
   const t = useTheme();
@@ -124,6 +140,13 @@ export default function FindTrainer() {
   const [ratingStatus, setRatingStatus] = useState<LoadStatus>('loading');
   const [creds, setCreds] = useState<Record<string, Credential[]> | null>(null);
   const [credStatus, setCredStatus] = useState<LoadStatus>('loading');
+  // What each listed coach's fee is denominated in, by trainer id. A key that
+  // is PRESENT with a null value means that coach's gym has genuinely not set a
+  // currency; a key that is ABSENT means we did not get an answer about them.
+  // Those are two different sentences (src/lib/currencyGap.ts) and collapsing
+  // them is how a member gets sent to chase a setting that was already correct.
+  const [feeCcy, setFeeCcy] = useState<Record<string, string | null>>({});
+  const [ccyStatus, setCcyStatus] = useState<CcyStatus>('loading');
   // The reviews of the one coach whose profile is open, fetched when it opens
   // rather than for the whole directory — a page of twenty coaches is twenty
   // review lists nobody asked to read.
@@ -429,6 +452,36 @@ export default function FindTrainer() {
         setRatingStatus(sum.status);
         setCreds(cr.rows);
         setCredStatus(cr.status);
+
+        // ── and what those figures are actually denominated in ───────────
+        //
+        // Through an RPC rather than a read of `tenants`, because RLS selects
+        // ROWS and not columns: any policy wide enough to show a stranger the
+        // currency would hand over the whole gym row. Part 131 is the worked
+        // example of that mistake one table over. `listed_trainer_currencies`
+        // returns exactly two columns, and only for coaches who opted into the
+        // directory (supabase/parts/242).
+        try {
+          const { data: ccyRows, error: ccyErr } = await supabase.rpc('listed_trainer_currencies', { p_ids: listed });
+          if (cancelled) return;
+          // Checked, and it has to be: a refused RPC arriving as `data: null`
+          // would fall through to an empty map, and an empty map is
+          // indistinguishable from every gym having set no currency. That is
+          // the one sentence this feature must not print off a failed read.
+          if (ccyErr) { reportError('findTrainer.currencies', ccyErr); setCcyStatus('error'); }
+          else {
+            const map: Record<string, string | null> = {};
+            for (const r of (ccyRows ?? []) as any[]) {
+              const code = typeof r?.currency === 'string' ? r.currency.trim() : '';
+              map[String(r?.trainer_id)] = code || null;
+            }
+            setFeeCcy(map);
+            setCcyStatus('ready');
+          }
+        } catch (e) {
+          reportError('findTrainer.currencies', e);
+          if (!cancelled) setCcyStatus('error');
+        }
       } catch (e) {
         reportError('findTrainer.load', e);
         if (!cancelled) setStatus('error');
@@ -489,6 +542,35 @@ export default function FindTrainer() {
 
   /** The rating beside a directory row, or null when nothing may be said. */
   const rateLine = (id: string) => ratingLine(ratingDisplay(ratings[id] ?? null, ratingStatus));
+
+  /**
+   * The fee, with the money it is in, or null when we cannot put a unit on it.
+   *
+   * `wholeMoney` returns null the moment either half is missing, so there is no
+   * branch here on which a number acquires a currency nobody chose. That is the
+   * whole rule this screen already followed by printing the figure bare; what
+   * is new is that it can now often print it properly.
+   */
+  const feeMoney = (id: string, fee: number): string | null =>
+    wholeMoney(fee, ccyStatus === 'ready' ? (feeCcy[id] ?? null) : null);
+
+  /**
+   * Why there is no currency in front of that number, in the third person.
+   *
+   * The status handed to `currencyGapOfStatus` is per COACH, not per screen: a
+   * coach whose row did not come back is 'error' even on a read that otherwise
+   * succeeded, because we were told nothing about them specifically. Null when
+   * there is a currency and therefore nothing to explain.
+   */
+  const feeGap = (id: string): string | null => {
+    if (ccyStatus === 'loading') return currencyGapLineAbout('reading', 'this coach');
+    const known = ccyStatus === 'ready' && Object.prototype.hasOwnProperty.call(feeCcy, id);
+    const gap = currencyGapOfStatus({
+      currency: known ? feeCcy[id] : null,
+      status: ccyStatus === 'error' || !known ? 'error' : 'ready',
+    });
+    return gap ? currencyGapLineAbout(gap, 'this coach') : null;
+  };
   /** What this coach has stated. `null` under a failed read, never `[]`. */
   const credsFor = (id: string): Credential[] | null =>
     credStatus === 'ready' && creds ? (creds[id] ?? []) : null;
@@ -698,9 +780,25 @@ export default function FindTrainer() {
                     tells them "Repple does not print a symbol it has not been
                     told" — this is the screen that sentence was describing, and
                     it was the half still printing one. */}
+                {/* The figure now carries its currency WHEN THE APP HAS BEEN
+                    TOLD ONE. `feeMoney` is `wholeMoney`, which returns null the
+                    moment either half is missing, so there is still no branch
+                    on which a number acquires a currency nobody chose — the
+                    bare number below is the same honest fallback that has stood
+                    here since the '$' came off. What is different is that the
+                    app can now find out: supabase/parts/242 returns the
+                    currency of a listed coach's gym, which is where a session
+                    fee has always been denominated (part 126).
+
+                    The row shows the figure and nothing else. The SENTENCE
+                    explaining a missing currency is in the profile sheet
+                    instead: it is four different sentences depending on why,
+                    and a directory of twenty coaches carrying twenty of them is
+                    unreadable — while the sheet is where somebody actually
+                    decides. */}
                 {c.sessionFee > 0 ? (
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ ...value(17), color: t.ink }}>{c.sessionFee}</Text>
+                    <Text style={{ ...value(17), color: t.ink }}>{feeMoney(c.id, c.sessionFee) ?? c.sessionFee}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>/ session</Text>
                   </View>
                 ) : null}
@@ -730,10 +828,21 @@ export default function FindTrainer() {
                   has never been told what this figure is denominated in, so it
                   states the number and not a currency nobody chose. */}
               {sel.sessionFee > 0 ? (
-                <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: sp.lg }}>
-                  <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
-                  <Text style={{ ...value(20), color: t.ink }}>{sel.sessionFee}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 4 }}>/ session</Text>
+                <View style={{ marginBottom: sp.lg }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                    <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
+                    <Text style={{ ...value(20), color: t.ink }}>{feeMoney(sel.id, sel.sessionFee) ?? sel.sessionFee}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 4 }}>/ session</Text>
+                  </View>
+                  {/* The screen where somebody decides is the screen that owes
+                      them the explanation. Four causes, four sentences, and
+                      only one of them says nobody has stated a currency — the
+                      other three are reads that did not answer, and printing
+                      the confident sentence for those is the defect
+                      src/lib/currencyGap.ts exists to stop. */}
+                  {feeGap(sel.id) ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{feeGap(sel.id)}</Flag>
+                  ) : null}
                 </View>
               ) : null}
 

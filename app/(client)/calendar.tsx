@@ -71,6 +71,9 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Card, ListRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, useLateCancelCharges, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
+// Moving costs nothing and cancelling can cost a credit and a fee, so the
+// cheaper answer is offered first. See src/lib/reschedule.ts.
+import { canOfferMove } from '../../src/lib/reschedule';
 import { feeAmountLine } from '../../src/lib/booking';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -496,7 +499,8 @@ export default function Calendar() {
     // claim success — which is why `sendPushChecked` exists. "Your coach has
     // been notified" was printed either way, and a client whose coach never
     // heard would turn up to the gym believing they were expected.
-    const push = await sendPushChecked([s.trainerId], 'New booking', `A client booked ${slot}.`, { route: '/(trainer)/calendar' });
+    // 'bookings', so a coach who has muted chat still hears about this one.
+    const push = await sendPushChecked([s.trainerId], 'New booking', `A client booked ${slot}.`, { route: '/(trainer)/calendar' }, 'bookings');
 
     // The sentence is rewritten around the missing name rather than having a
     // dash dropped into the middle of it: this alert exists to confirm a
@@ -564,7 +568,21 @@ export default function Calendar() {
     if (late) {
       Alert.alert('Cancelling late', `${warn.line}${slotLine} Continue?`, [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel anyway', style: 'destructive', onPress: doCancel }]);
     } else {
-      Alert.alert('Cancel session?', `${warn.line}${slotLine}`, [{ text: 'Keep it', style: 'cancel' }, { text: 'Cancel', style: 'destructive', onPress: doCancel }]);
+      // MOVING IT IS OFFERED BEFORE CANCELLING IT, and only where moving is
+      // actually free: outside the coach's notice window. Until there was a
+      // reschedule at all, cancelling was the only way to change a time, and it
+      // is the expensive one — a credit is not returned, the slot may go
+      // straight to somebody's waitlist, and inside the window it can cost a
+      // fee. The picker itself lives on My Bookings rather than being built
+      // twice; this is the sentence that tells somebody it exists at the moment
+      // they were about to do the costly thing instead.
+      Alert.alert('Cancel session?', `${warn.line}${slotLine}`, [
+        { text: 'Keep it', style: 'cancel' },
+        ...(canOfferMove(s.startsAt, cancelPolicy)
+          ? [{ text: 'Move It Instead', onPress: () => router.push('/(client)/bookings') }]
+          : []),
+        { text: 'Cancel', style: 'destructive', onPress: doCancel },
+      ]);
     }
   }
 

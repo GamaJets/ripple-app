@@ -28,6 +28,17 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/bulkEnd.test.ts",
+    "src/lib/analyticsExport.test.ts",
+    "src/lib/coachNotify.test.ts",
+    "src/lib/messageTemplates.test.ts",
+    "src/lib/coachCohorts.test.ts",
+    "src/lib/clientValue.test.ts",
+    "src/lib/classSeries.test.ts",
+    "src/lib/coachAsk.test.ts",
+    "src/lib/undoable.test.ts",
+    "src/lib/typeScale.test.ts",
+    "src/lib/locale.test.ts",
     "src/lib/consoleRoutes.test.ts",
     "src/lib/foodLogging.test.ts",
     "src/lib/frontDesk.test.ts",
@@ -212,6 +223,15 @@
     "src/lib/gymBilling.test.ts",
     "src/lib/gymClose.test.ts",
     "src/lib/gymPay.test.ts",
-    "src/lib/gymPaperwork.test.ts"
+    "src/lib/gymPaperwork.test.ts",
+    "src/lib/reachability.test.ts",
+    "src/lib/outbox.test.ts",
+    "src/lib/offlineFlush.test.ts",
+    "src/lib/readCache.test.ts",
+    "src/lib/threadSafety.test.ts",
+    "src/lib/sessionDispute.test.ts",
+    "src/lib/injuryEdit.test.ts",
+    "src/lib/reschedule.test.ts",
+    "src/lib/dataExport.test.ts"
   ]
 }

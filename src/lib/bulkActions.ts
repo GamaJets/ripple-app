@@ -67,6 +67,18 @@
 // Individual ticks stay available under every status where a name is on screen.
 // A tick is a claim about one person the coach can see and read; only the
 // sweeping gesture claims anything about rows that never arrived.
+//
+// ── 4 · AND ONE ACTION WHERE ALL THREE ARE AT THEIR WORST ──────────────────
+//
+// `endCoachingBrief` is at the bottom of this file, and it is the reason the
+// three rules above are rules rather than habits. Ending the coaching for forty
+// dormant rows is forty irreversible acts behind one tap: a hand-added client's
+// row is DELETED, a linked client's shared progress photos are un-shared for
+// good (part 47 deletes the grants), and every one of the forty is a separate
+// server call that can be refused on its own. So the count is on the button,
+// the two costs are described separately because they fall on two different
+// populations, and the report is the same `bulkReport` — which cannot say
+// "Done" over a partial failure because it does not have that sentence.
 import { num } from './format';
 import type { LoadStatus } from '../ui/loadStatus';
 import { worstStatus } from '../ui/loadStatus';
@@ -260,7 +272,7 @@ export interface WriteOutcome {
 
 /** What a bulk action was doing, which is the only thing the report's wording
  *  needs to differ on. */
-export type BulkKind = 'assign' | 'unassign' | 'message';
+export type BulkKind = 'assign' | 'unassign' | 'message' | 'end';
 
 export interface BulkReport {
   title: string;
@@ -312,6 +324,12 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
     // `clearProgramFrom` in src/ui/assignedPrograms.tsx.
     : kind === 'unassign'
     ? (c: number) => `${c === 1 ? 'They are' : `All ${num(c)} are`} back on an auto-generated plan. Every session ${c === 1 ? 'they have' : 'they have'} logged is untouched.`
+    // Said in the past tense and about the OTHER person, because that is the
+    // half a coach cannot see afterwards: the roster on their screen is already
+    // shorter, and what they have no way of checking is that the client's own
+    // account is intact and that the client has been told.
+    : kind === 'end'
+    ? (c: number) => `${c === 1 ? 'They are' : `All ${num(c)} are`} off your roster, and anyone with an account has been told the coaching ended. They keep everything they logged; anyone you had added by hand is deleted along with the name and goal you typed.`
     : (c: number) => `Your message is in ${c === 1 ? 'their thread' : `${num(c)} threads`} now.`;
 
   if (n === 0) {
@@ -320,8 +338,8 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
     return { title: 'Nobody Selected', body: 'Nothing was written, because nobody was ticked.', retry: [] };
   }
 
-  const verbTitle = kind === 'assign' ? 'Assigned' : kind === 'unassign' ? 'Taken Off' : 'Sent';
-  const verbBody = kind === 'assign' ? 'Assigned to' : kind === 'unassign' ? 'Took the programme off' : 'Sent to';
+  const verbTitle = kind === 'assign' ? 'Assigned' : kind === 'unassign' ? 'Taken Off' : kind === 'end' ? 'Removed' : 'Sent';
+  const verbBody = kind === 'assign' ? 'Assigned to' : kind === 'unassign' ? 'Took the programme off' : kind === 'end' ? 'Removed' : 'Sent to';
 
   if (!bad.length) {
     return {
@@ -337,7 +355,7 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
 
   if (!ok.length) {
     return {
-      title: kind === 'assign' ? 'Not Assigned' : kind === 'unassign' ? 'Not Taken Off' : 'Not Sent',
+      title: kind === 'assign' ? 'Not Assigned' : kind === 'unassign' ? 'Not Taken Off' : kind === 'end' ? 'Nobody Was Removed' : 'Not Sent',
       body:
         `${n === 1 ? 'The write' : `None of the ${num(n)} writes`} landed, so nothing has changed for ${n === 1 ? 'them' : 'any of them'}. `
         + `${n === 1 ? 'They are' : 'They are all'} still selected, so you can try again without finding ${n === 1 ? 'them' : 'them all'} again.\n\n`
@@ -347,7 +365,7 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
   }
 
   return {
-    title: kind === 'assign' ? 'Partly Assigned' : kind === 'unassign' ? 'Partly Taken Off' : 'Partly Sent',
+    title: kind === 'assign' ? 'Partly Assigned' : kind === 'unassign' ? 'Partly Taken Off' : kind === 'end' ? 'Partly Removed' : 'Partly Sent',
     body:
       `${num(ok.length)} of ${num(n)} landed — ${namesWithRest(ok.map((r) => r.name))}. ${landed(ok.length)}\n\n`
       + `${num(bad.length)} did not, and ${bad.length === 1 ? 'is' : 'are'} still selected so you can try again:\n\n`
@@ -534,4 +552,107 @@ export function bulkThreadNote(count: number): string | null {
   if (count < 2) return null;
   return `Each of these ${num(count)} people gets this as an ordinary message from you, in their own thread. `
     + 'Nothing marks it as having gone to anybody else, so it will read as though you wrote it to them — if you want it to say it went to everyone, say so in the message.';
+}
+
+/* ── ending the coaching for many people at once ───────────────────────────── */
+
+/**
+ * One client a bulk end-coaching is about to act on.
+ *
+ * `handAdded` is the only field beyond a name, and it is not decoration: the
+ * two kinds of client are removed by two different writes with two different
+ * costs, and a dialog that describes one of them describes the wrong thing for
+ * half the set.
+ *
+ *   handAdded  a `coach_clients` row — a name and a goal the coach typed, with
+ *              no account behind it. Removing it DELETES that row. Nothing is
+ *              recoverable and nobody is notified, because there is nobody to
+ *              notify.
+ *   linked     a real person with an account. `end_coaching()` ends the
+ *              relationship and leaves everything of theirs where it is; they
+ *              are notified (part 159) and can re-join with the coach's code.
+ *              One thing does not come back: every progress photo they shared
+ *              is un-shared for good — part 47 deletes the grants rather than
+ *              flagging them, and re-joining does not hand them back.
+ */
+export interface EndTarget {
+  clientId: string;
+  name: string;
+  handAdded: boolean;
+}
+
+/**
+ * What the coach must read before ending the coaching for a set of people.
+ *
+ * ── Why this is not `unassignBrief` with a different verb ─────────────────
+ *
+ * Un-assigning a programme is recoverable in every respect and the brief spends
+ * its words saying so. This is the opposite: it is many irreversible acts
+ * behind one tap, and the brief's whole job is to make the SIZE of that visible
+ * before it happens. So the count is in the heading, in the body and on the
+ * button, and the two costs are named separately because they fall on two
+ * different populations.
+ *
+ * Names are written out, capped by `namesWithRest`, for the reason
+ * `overwriteBrief` gives: a coach reading "40 clients" cannot tell whether the
+ * one person they did not mean to include is in there, and a coach reading
+ * "including Ana, Ben and Cara" recognises the name and stops.
+ *
+ * There is deliberately no reason picker here. `end_coaching_with_reason` takes
+ * ONE reason for ONE relationship (part 200), and a reason applied to forty
+ * endings at once would be a belief recorded as forty separate pieces of
+ * evidence — `end_reason_by` would attribute every one of them to the coach,
+ * which is honest, but the churn report would then read as forty people who
+ * left for the same stated cause. So a bulk ending records no reason, which is
+ * exactly what the one-argument `end_coaching()` has always done, and the
+ * Unexplained Departures card goes on asking about each of them individually.
+ */
+export function endCoachingBrief(targets: readonly EndTarget[]): OverwriteBrief {
+  const n = targets.length;
+  if (n === 0) {
+    return {
+      title: 'Nobody Selected',
+      body: 'Nothing has been ticked, so there is nobody to remove.',
+      confirmLabel: 'OK',
+      replacing: [],
+    };
+  }
+
+  const hand = targets.filter((x) => x.handAdded);
+  const linked = targets.filter((x) => !x.handAdded);
+  const who = namesWithRest(targets.map((x) => x.name));
+
+  const lead = n === 1
+    ? `${who} comes off your roster.`
+    : `All ${num(n)} of these come off your roster — ${who}.`;
+
+  // Said for the linked half only, because it is the only half it is true of,
+  // and said in full: the photo grant is the one part of this that re-joining
+  // does not undo, and it is the reason the single-client version of this
+  // dialog exists at all.
+  const linkedCost = linked.length
+    ? `${linked.length === n ? (n === 1 ? 'They keep' : 'They all keep') : `${num(linked.length)} of them keep`} their account and everything logged in it, and ${linked.length === 1 ? 'they are' : 'they are each'} told the coaching has ended. `
+      + `You stop seeing ${linked.length === 1 ? 'their' : 'their'} workouts, measurements, check-ins and food logs, and your thread ${linked.length === 1 ? 'with them closes' : 'with each of them closes'}. `
+      + `Every progress photo ${linked.length === 1 ? 'they' : 'they'} shared is un-shared straight away and that part cannot be undone — joining you again later does not hand the photos back.`
+    : '';
+
+  // And for the hand-added half, which is a delete rather than an ending.
+  const handCost = hand.length
+    ? `${hand.length === n ? (n === 1 ? 'This one is' : `All ${num(n)} are`) : `${num(hand.length)} of them — ${namesWithRest(hand.map((x) => x.name))} — are`} clients you added by hand, with no account behind them. `
+      + `Removing ${hand.length === 1 ? 'that row deletes it' : 'those rows deletes them'}, along with the name and goal you typed. There is no undo and nothing to re-join.`
+    : '';
+
+  const parts = [lead, linkedCost, handCost].filter(Boolean);
+
+  return {
+    title: n === 1 ? 'Remove This Client?' : `Remove ${num(n)} Clients?`,
+    body: parts.join('\n\n'),
+    // The number is on the button. A destructive button reading only "Remove"
+    // is the sentence the coach remembers afterwards, and this one can be
+    // forty people.
+    confirmLabel: n === 1 ? 'Remove Them' : `Remove All ${num(n)}`,
+    // Everybody, because every one of them loses something. `replacing` is what
+    // the caller styles the button destructive on.
+    replacing: targets.map((x) => ({ clientId: x.clientId, name: x.name, onProgramme: false })),
+  };
 }

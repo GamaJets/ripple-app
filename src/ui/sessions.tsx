@@ -21,13 +21,20 @@
 // addSession's `{ ok }` shape is untouched — screens destructure it — but it now
 // also carries `saved`, a promise that resolves to whether the row reached the
 // server.
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   overlaps, insideNoticeWindow, noticeHoursOf, lateCancelFee, cancelWarningLine,
   feeRecordedLine, waitlistLine, type CancellationPolicy,
 } from '../lib/booking';
 import { VARIANT } from '../lib/variant';
 import type { TrainingSession } from '../lib/types';
+import type { DisputeKind } from '../lib/sessionDispute';
+import { NOT_MOVED, type RescheduleRefusal, type RescheduleReport } from '../lib/reschedule';
+// Named explicitly. Without the import `reportError` resolves to the DOM global
+// of the same name, which takes ONE argument and swallows the context string —
+// so every report from this file would have arrived unattributable.
+import { reportError } from '../lib/reportError';
 import { scheduleLocal, sendPushChecked } from './pushNotifications';
 import { reofferSlot, refundSession, sessionsRemaining } from '../lib/connect';
 import { useAuthRevision } from './authRevision';
@@ -35,6 +42,24 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
+import { classifyWrite } from '../lib/offlineQueue';
+import { useOutbox } from './outbox';
+import { useLive } from './realtime';
+
+/** Where this device keeps the calendar. */
+const SESSIONS_SCOPE = 'sessions';
+
+/**
+ * How stale a cached calendar may be before it stops being worth showing.
+ *
+ * Two days, the same as the class timetable and for the same reason: a PT slot
+ * that was moved yesterday, shown today as though it were live, sends somebody
+ * to the gym at the wrong time. What this keeps is the case it exists for — the
+ * member who knows they have a session this morning and is standing in a
+ * basement trying to remember when.
+ */
+const SESSIONS_CACHE_HORIZON_MS = 2 * 24 * 60 * 60 * 1000;
 
 interface SessionsValue {
   sessions: TrainingSession[];
@@ -43,6 +68,16 @@ interface SessionsValue {
    *  the calendar is longer than what is here — the newest ROW_CAP sessions —
    *  so it may be shown but not counted or totalled. */
   status: LoadStatus;
+  /**
+   * The sentence to put over a calendar that came off this device rather than
+   * off the server, or null when what is on screen was confirmed.
+   *
+   * Goes with `status === 'error'`: a cached calendar is the "what we had
+   * before the failure" case, and it must never render as a live one — a
+   * member standing in reception has to be able to tell "you have a session at
+   * 6" from "you had one at 6 the last time we could ask".
+   */
+  cachedNote: string | null;
   /** Add a slot. Rejected (ok:false) if it overlaps an existing session — no
    *  double-booking. `saved` (present only when ok) resolves true once the slot
    *  is on the server, where clients can actually see and book it. */
@@ -71,10 +106,42 @@ interface SessionsValue {
    *  booking made on somebody else's phone is on this one by the time its owner
    *  looks at it. */
   refresh: () => Promise<void>;
+  /**
+   * Move a booked session to another OPEN slot of the same coach, atomically.
+   *
+   * Not cancel-then-book. Those are two acts with a gap in the middle, and the
+   * waitlist promotion in part 126 is instantaneous — so a member freeing 07:00
+   * to take 18:00 could lose the 07:00 to somebody waiting and then find 18:00
+   * gone as well, having asked to move one session and ended up with none.
+   *
+   * Never charges and never draws or returns a pack credit. A move made inside
+   * the coach's notice window is REFUSED with the notice period in the report,
+   * rather than priced — supabase/parts/243 has the argument in full.
+   */
+  rescheduleMyBooking: (fromId: string, toId: string) => Promise<RescheduleReport>;
   /** Client confirms a delivered session, with an optional comment for the trainer.
    *  Goes through the `approve_session` RPC — a client has no write access to
    *  `sessions` or `session_approvals` directly. */
-  approveSession: (id: string, note?: string) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * The client agrees a delivered session happened as claimed.
+   *
+   * `ok` means the server holds it and the coach can see it. `queued` on a
+   * false is the third answer: nobody answered, the approval is on this phone,
+   * and it goes up on its own — which is not a failure and must not be
+   * described as one to somebody standing at reception with no signal.
+   */
+  approveSession: (id: string, note?: string) => Promise<{ ok: boolean; error?: string; queued?: boolean }>;
+  /**
+   * The other answer. The client says a delivered session did not happen as
+   * claimed.
+   *
+   * Writes to `session_approvals` and to nothing else: it does not set
+   * `sessions.outcome`, so it changes NOTHING about what any payroll run pays.
+   * The long version of why is in src/lib/sessionDispute.ts and
+   * supabase/parts/241 — a dispute that wrote an outcome would be one party
+   * deciding from a phone what the other is paid.
+   */
+  disputeSession: (id: string, kind: DisputeKind, note?: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 /**
@@ -146,6 +213,18 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  /** When the calendar on screen was last confirmed, or null when it just was. */
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
+  /** True once a server answer has landed this session, so a later failed
+   *  refresh cannot replace a live calendar with an older copy of itself. */
+  const confirmed = useRef(false);
+  /** The account the live subscription is for. In state so an unrelated
+   *  re-render does not tear the channel down and reopen it. */
+  const [liveUid, setLiveUid] = useState<string | null>(null);
+  /** The device's outbox, or null in a tree without one. Null is a normal
+   *  state: the write is still attempted and reported honestly. */
+  const outbox = useOutbox();
+
 
   // Pulled out of the mount effect so the screens can ask for it again. A
   // booking made on the client's phone lands in the database and fires a push,
@@ -169,6 +248,30 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         const id = auth?.user?.id;
         if (!id) { setStatus('ready'); return; }
         setUid(id);
+        setLiveUid(id);
+
+        // ── this device's copy, before the network ─────────────────────────
+        //
+        // A member in a basement gym could not see the PT session they were
+        // standing there for. This is that copy, and it is labelled as one:
+        // `cachedNote` is non-null for exactly as long as nothing has confirmed
+        // it.
+        //
+        // Only while nothing has been confirmed this session — a refresh that
+        // fails must leave the live calendar it already has on screen.
+        if (!confirmed.current) {
+          try {
+            const cached = readCache<TrainingSession>(await AsyncStorage.getItem(cacheKey(SESSIONS_SCOPE, id)));
+            if (cancelled()) return;
+            // `rows === null` means the cache taught us nothing. Nothing is
+            // assigned, and the empty list on screen keeps whatever the status
+            // says about it — it is never turned into "you have no sessions".
+            if (cached.rows && cached.rows.length && withinHorizon(cached.at, Date.now(), SESSIONS_CACHE_HORIZON_MS)) {
+              setSessions(cached.rows);
+              setCachedAt(cached.at);
+            }
+          } catch { /* no usable cache; the read below is the only source */ }
+        }
         // Descending, then reversed below, rather than the ascending read this
         // used to be. Both orders return the same rows until the cap bites; past
         // it they return opposite halves of the calendar, and the ascending half
@@ -182,7 +285,18 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         if (error) { setStatus('error'); return; }
         // A confirmed empty calendar is a real answer and now reports itself as
         // one, instead of returning down the same path as a failed read.
-        if (!data || !data.length) { setSessions([]); setStatus('ready'); return; }
+        if (!data || !data.length) {
+          setSessions([]);
+          setStatus('ready');
+          confirmed.current = true;
+          setCachedAt(null);
+          // A confirmed empty calendar is cached as an empty calendar. Leaving
+          // the previous file in place would resurrect a cancelled session on
+          // the next launch that could not reach us.
+          AsyncStorage.setItem(cacheKey(SESSIONS_SCOPE, id), packCache<TrainingSession>([]))
+            .catch(() => { /* the calendar is right this session either way */ });
+          return;
+        }
         const page = capped(data);
         // Back to ascending for everyone downstream: the calendar, `overlaps`
         // and the analytics screens were all written against a chronological
@@ -199,20 +313,45 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
           // Scoped this way it cannot exceed the session count, which is capped.
           // no-error-ok: an unread approval leaves the session showing as not-yet-approved, which is what it shows before anyone approves it; the sessions themselves are the point of this screen
           const { data: appr } = await supabase.from('session_approvals')
-            .select('session_id, approved_at, note')
+            .select('session_id, approved_at, note, state, disputed_at, dispute_kind')
             .in('session_id', rows.map((r) => r.id))
             .limit(capLimit());
           if (appr?.length) {
             const byId = new Map(appr.map((a: any) => [String(a.session_id), a]));
             rows = rows.map((r) => {
               const a = byId.get(r.id);
-              return a ? { ...r, approvedAt: a.approved_at, approvalNote: a.note ?? null } : r;
+              // `state` and its two companions ride on the same row and the
+              // same policy (supabase/parts/241). A row from before that part
+              // has no `state` at all, which is why the field is carried
+              // through as-is rather than defaulted here: `verdictOf` in
+              // src/lib/sessionDispute.ts is the one place that decides what an
+              // absent one means, and it reads a stateless row with a timestamp
+              // as the approval it could only have been.
+              return a ? {
+                ...r,
+                approvedAt: a.approved_at,
+                approvalNote: a.note ?? null,
+                approvalState: a.state ?? null,
+                disputedAt: a.disputed_at ?? null,
+                disputeKind: a.dispute_kind ?? null,
+              } : r;
             });
           }
         } catch { /* sessions still load */ }
         if (cancelled()) return;
         setSessions(rows);
         setStatus(page.truncated ? 'partial' : 'ready');
+        confirmed.current = true;
+        setCachedAt(null);
+        // Cached only on a whole read. A truncated page written here would be
+        // opened next launch as though it were the calendar, with nothing to
+        // say it was a prefix — and the sessions it is missing are the oldest,
+        // which is the half that matters least, but "matters least" is not the
+        // same as "may be silently presented as all of them".
+        if (!page.truncated) {
+          AsyncStorage.setItem(cacheKey(SESSIONS_SCOPE, id), packCache(rows))
+            .catch(() => { /* the calendar is right this session either way */ });
+        }
       } catch { if (!cancelled()) setStatus('error'); }
     }
   }, []);
@@ -222,6 +361,49 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     hydrate(() => cancelled);
     return () => { cancelled = true; };
   }, [authRev, hydrate]);
+
+  /* ── live ────────────────────────────────────────────────────────────────
+   *
+   * A booking a coach just made, a session cancelled, a slot re-offered. All of
+   * them reached this provider only when somebody left the screen and came
+   * back, which is why the hydrate had to be pulled out for a push
+   * notification to be able to open onto a correct screen at all.
+   *
+   * No filter: `sessions` rows are read whole here (row-level security decides
+   * whose calendar this is, not a client-side `eq`), and the coach's row and
+   * the client's row for the same session are the same row. `useLive` debounces,
+   * so a coach publishing a week of slots is one refetch.
+   *
+   * Approvals get their own subscription because they live in their own table
+   * and are what the coach's "awaiting sign-off" state is computed from — a
+   * client approving a session at reception should take it off the coach's list
+   * without either of them touching anything.
+   */
+  const refetch = useCallback(() => { void hydrate(); }, [hydrate]);
+  /**
+   * Send the approvals this device is holding.
+   *
+   * Registered here because this provider is mounted for the whole app
+   * (app/_layout.tsx), so a queued approval always has somebody to send it —
+   * unlike a queued message, whose handler had to be lifted to the root.
+   */
+  useEffect(() => {
+    if (!outbox) return;
+    return outbox.registerHandler('pt-approval', async (item) => {
+      const p = item.payload as any;
+      const id = typeof p?.id === 'string' ? p.id : '';
+      // A payload nothing can send comes out rather than being retried forever.
+      if (!id) return 'refused';
+      try {
+        const { error } = await supabase.rpc('approve_session', { p_session: id, p_note: p?.note ?? null });
+        if (!error) { void hydrate(); return 'stored'; }
+        return classifyWrite(error as any, 1) === 'unsent' ? 'unsent' : 'refused';
+      } catch { return 'unsent'; }
+    });
+  }, [outbox, hydrate]);
+
+  useLive({ channel: 'sessions:calendar:' + (liveUid ?? 'none'), table: 'sessions', enabled: !!liveUid, onChange: refetch });
+  useLive({ channel: 'sessions:approvals:' + (liveUid ?? 'none'), table: 'session_approvals', enabled: !!liveUid, onChange: refetch });
 
   const addSession: SessionsValue['addSession'] = (s) => {
     if (overlaps(s.startsAt, s.durationMin, sessions)) return { ok: false };
@@ -377,22 +559,102 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     } catch { return false; }
   };
 
+  const rescheduleMyBooking: SessionsValue['rescheduleMyBooking'] = async (fromId, toId) => {
+    if (!USE_SUPABASE) return NOT_MOVED;
+    try {
+      const { data, error } = await supabase.rpc('reschedule_my_session', { p_from: fromId, p_to: toId });
+      // Checked, and it has to be. `data: null` from a refused RPC would fall
+      // through to a report that reads as a refusal with no reason, and the
+      // caller would tell somebody their session did not move when we do not
+      // know whether it did.
+      if (error || !data) { reportError('sessions.reschedule', error ?? new Error('reschedule_my_session returned nothing')); return NOT_MOVED; }
+      const r = data as any;
+      const report: RescheduleReport = {
+        moved: !!r.moved,
+        reason: (r.reason ?? null) as RescheduleRefusal | null,
+        noticeHours: toNum(r.notice_hours),
+        fee: toNum(r.fee),
+        currency: typeof r.currency === 'string' ? r.currency : null,
+        promoted: !!r.promoted,
+        waiting: Number(r.waiting) || 0,
+      };
+      // The calendar this device holds is now wrong in two places at once, and
+      // both of them are the point of the screen. Re-read rather than patched:
+      // the freed slot may already belong to whoever was first in line for it.
+      if (report.moved) await hydrate();
+      return report;
+    } catch (e) {
+      reportError('sessions.reschedule', e);
+      return NOT_MOVED;
+    }
+  };
+
   const approveSession: SessionsValue['approveSession'] = async (id, note) => {
     const trimmed = (note || '').trim();
     if (!USE_SUPABASE) return { ok: false, error: 'Not signed in to the server.' };
+    /**
+     * Nobody answered. Keep the approval on this phone.
+     *
+     * This is one of the writes that may safely wait, and it is worth spelling
+     * out why when a class booking may not: approving is a statement about work
+     * that has ALREADY happened, it allocates nothing anybody else can take,
+     * and the answer the server would give now is the answer it will give in an
+     * hour. A member who approves their session at reception, where the signal
+     * is worst, should not have to remember to do it again later.
+     *
+     * It is still `ok: false`, because `ok` means the coach can see it.
+     */
+    const keep = async (): Promise<{ ok: boolean; error?: string; queued?: boolean }> => {
+      if (!outbox) return { ok: false, error: 'Could not reach the server.' };
+      const { result } = await outbox.enqueue('pt-approval', { id, note: trimmed || null });
+      return result === 'queued'
+        ? { ok: false, queued: true, error: 'No signal, so this is saved on this phone and has not reached your trainer yet. It goes as soon as you are back online.' }
+        : { ok: false, error: 'Could not reach the server.' };
+    };
     try {
       const { error } = await supabase.rpc('approve_session', { p_session: id, p_note: trimmed || null });
+      // A refusal is the server having read it and said no — a session that is
+      // not this member's, one already disputed by the coach. Offering the same
+      // call again gets the same answer, so it is not kept.
+      if (error) return classifyWrite(error as any, 1) === 'unsent' ? keep() : { ok: false, error: error.message };
+    } catch {
+      return keep();
+    }
+    // Only after the server accepted it — an approval that exists on this phone
+    // and nowhere else is exactly the bug this replaced.
+    // Approving is also how a dispute is withdrawn, so the three dispute fields
+    // are cleared here as well. Leaving them would show a session as both
+    // approved and disputed on this device until the next hydrate, which is the
+    // one state the database's own constraints refuse to hold.
+    setSessions((p) => p.map((x) => (x.id === id
+      ? { ...x, approvedAt: new Date().toISOString(), approvalNote: trimmed || null, approvalState: 'approved' as const, disputedAt: null, disputeKind: null }
+      : x)));
+    return { ok: true };
+  };
+
+  const disputeSession: SessionsValue['disputeSession'] = async (id, kind, note) => {
+    const trimmed = (note || '').trim();
+    if (!USE_SUPABASE) return { ok: false, error: 'Not signed in to the server.' };
+    try {
+      const { error } = await supabase.rpc('dispute_session', { p_session: id, p_kind: kind, p_note: trimmed || null });
       if (error) return { ok: false, error: error.message };
     } catch (e: any) {
       return { ok: false, error: e?.message || 'Could not reach the server.' };
     }
-    // Only after the server accepted it — an approval that exists on this phone
-    // and nowhere else is exactly the bug this replaced.
-    setSessions((p) => p.map((x) => (x.id === id ? { ...x, approvedAt: new Date().toISOString(), approvalNote: trimmed || null } : x)));
+    // Only after the server accepted it, exactly as approveSession does. A
+    // dispute that exists on this phone and nowhere else is a member who
+    // believes their coach has been told and has not been.
+    setSessions((p) => p.map((x) => (x.id === id
+      ? { ...x, approvedAt: null, approvalNote: trimmed || null, approvalState: 'disputed' as const, disputedAt: new Date().toISOString(), disputeKind: kind }
+      : x)));
     return { ok: true };
   };
 
-  return <Ctx.Provider value={{ sessions, status, refresh: () => hydrate(), addSession, bookSession, releaseSession, cancelMyBooking, removeSession, approveSession }}>{children}</Ctx.Provider>;
+  // Computed per render rather than stored: the sentence says how long ago, and
+  // a stored one would go on saying "4 minutes ago" while the screen stays open.
+  const cachedNote = cachedAtLine(cachedAt);
+
+  return <Ctx.Provider value={{ sessions, status, cachedNote, refresh: () => hydrate(), addSession, bookSession, releaseSession, cancelMyBooking, removeSession, approveSession, disputeSession, rescheduleMyBooking }}>{children}</Ctx.Provider>;
 }
 
 export function useSessions(): SessionsValue {
@@ -590,6 +852,10 @@ export async function cancelBookedSession(
     'Session cancelled',
     `A client cancelled ${dow} ${at}.${res.promotedClient ? ' It went straight to the next client on its waitlist.' : ' The slot re-opened.'}${res.charged ? ' (Late cancel — fee recorded.)' : ''}`,
     { route: '/(trainer)/calendar' },
+    // 'bookings'. The coach may mute chat and still be told their morning
+    // changed — which is the whole point of the categories, and this is the
+    // notification that most obviously has to survive one.
+    'bookings',
   )).ok;
 
   return {

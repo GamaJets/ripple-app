@@ -32286,3 +32286,1951 @@ grant  execute on function public.set_code_organic(uuid, boolean) to authenticat
 
 comment on function public.set_code_organic(uuid, boolean) is
   'Marks one of the caller''s own join codes as costing nothing. A function rather than a policy because part 152 revokes UPDATE on this table from authenticated outright — a direct write would have matched zero rows and reported success.';
+
+-- ▶ nothing-in-the-app-updated-live-except-one-message-thread.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 220 · Nothing in the app updated live except one message thread
+--
+-- `.channel(` appeared exactly once in the whole of src/ui, on the chat thread,
+-- and part 10 is where its table was added to the realtime publication. Every
+-- other screen in the app was a snapshot from whenever it happened to load: a
+-- class filling up while a member looked at it, a PT session the coach had just
+-- booked, a notification that had already arrived. None of them appeared until
+-- the member left the screen and came back.
+--
+-- The app half of that is src/ui/realtime.ts. This is the database half, and
+-- without it the app half is inert: Supabase Realtime only emits
+-- `postgres_changes` for tables that are members of the `supabase_realtime`
+-- publication, and a subscription to a table that is not in it succeeds,
+-- reports itself subscribed, and silently never fires.
+--
+-- ── What this does NOT do ────────────────────────────────────────────────
+--
+-- It does not widen who can see anything. Realtime applies row-level security
+-- to every change it forwards, so a member subscribed to `class_bookings`
+-- receives exactly the rows their own policies already let them SELECT — which
+-- for `class_bookings` is their own seats and nobody else's. That is precisely
+-- why src/ui/realtime.ts never reads a payload's contents: the numbers on the
+-- class screen come from `class_counts()`, a security-definer aggregate over
+-- everybody's bookings, and a change event is treated only as a signal to ask
+-- that function again.
+--
+-- Adding a table to a publication also has no effect on any client that is not
+-- subscribed to it. The cost is WAL retention on rows that change, which for
+-- these five tables is a handful of rows per member per day.
+--
+-- ── Re-runnable ──────────────────────────────────────────────────────────
+--
+-- `alter publication ... add table` errors with `duplicate_object` when the
+-- table is already a member, so each is wrapped exactly as part 10 wraps the
+-- `messages` one. `when others then null` covers the two other ways this can
+-- fail on somebody's project — the publication not existing at all on a very
+-- old project, and the role running this not owning it — neither of which is a
+-- reason for the rest of the setup bundle to stop.
+-- ─────────────────────────────────────────────────────────────────────────
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    -- The timetable itself: a class added, moved or cancelled under somebody
+    -- who is looking at it.
+    'gym_classes',
+    -- How full it is. Not read for its contents; it is what tells the app to
+    -- ask class_counts() again.
+    'class_bookings',
+    -- PT: a booking a coach just made, a slot released, a cancellation.
+    'sessions',
+    -- A client agreeing a delivered session should take it off the coach's
+    -- "awaiting sign-off" list without either of them touching anything.
+    'session_approvals',
+    -- The in-app inbox and the bell. A push is a banner the OS draws; it does
+    -- not exist when notifications are switched off and it never updated this
+    -- list.
+    'notifications'
+  ]
+  loop
+    begin
+      -- to_regclass rather than a catalog join: a project that has not applied
+      -- the part which creates one of these tables should skip it quietly, not
+      -- fail the bundle.
+      if to_regclass('public.' || t) is not null then
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      end if;
+    exception
+      when duplicate_object then null;
+      when others then null;
+    end;
+  end loop;
+end $$;
+
+-- ▶ a-thread-that-accepts-photos-and-has-no-way-out.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- A conversation that carries photographs and video, with no way to stop it
+-- and nobody to tell.
+--
+-- ── What was here ────────────────────────────────────────────────────────
+--
+-- Since part 124 the coach↔client thread accepts one photo or one 30-second
+-- video in either direction. A repo-wide grep for `blockUser`, `report_user`
+-- or "report abuse" returns nothing, and there is no table here that could
+-- hold either. So the member's entire moderation path was: read it, or stop
+-- opening the app.
+--
+-- That is user-generated content from a named adult to a named adult, one of
+-- whom is paying the other, inside a private thread nobody else can see. It is
+-- also, separately, an App Review refusal — 1.2 requires a way to report
+-- objectionable content and a way to block the person sending it.
+--
+-- ── The two things this part must get right ──────────────────────────────
+--
+-- A BLOCK MUST STOP DELIVERY, NOT HIDE IT. A block implemented as a client-side
+-- filter is worse than none: the sender keeps sending, the server keeps
+-- accepting, the files keep landing in the bucket, and the only person who has
+-- been protected from the messages is the one who does not read them. So the
+-- block is a row the database checks in the WITH CHECK of both message
+-- policies and in the storage INSERT policy — the message is REFUSED, and the
+-- file has nowhere to go.
+--
+-- A REPORT MUST SURVIVE THE PERSON IT IS ABOUT. `msg_coach` is `for all using
+-- (is_my_client(client_id))`, which means a coach can DELETE any message in
+-- their client's thread, and `msgmedia_obj_delete` lets the uploader remove
+-- their own object. Both are pre-existing and neither is changed here. The
+-- consequence for a report is decisive: a report that merely POINTS at a
+-- message id is a report the reported person can empty. So `report_abuse`
+-- COPIES the message — sender, body, attachment key, kind and time — into the
+-- report row at the moment it is made. Deleting the message afterwards leaves
+-- the evidence standing.
+--
+-- ── What a block deliberately does NOT do ────────────────────────────────
+--
+-- It does not delete anything. The thread stays readable to both of them, and
+-- it must: the report is made out of what was said, and a block that erased
+-- the history would destroy the evidence in the act of asking for help.
+--
+-- It does not end the coaching relationship, cancel a session, refund anything
+-- or touch money. Those are separate decisions with separate consequences, and
+-- a member who blocks somebody at eleven at night has not thereby cancelled
+-- Tuesday. `end_coaching` (part 68) is still how the relationship ends.
+--
+-- It is not secret, and this file will not pretend otherwise. A thread has
+-- exactly two people on it, so "a block exists and it is not mine" identifies
+-- the blocker with certainty; a SELECT policy that hid the row would buy no
+-- secrecy and would cost the blocked party any honest account of why their
+-- message did not send. This codebase's oldest rule is that a message the
+-- server refused must never look delivered (the header of src/ui/messaging.ts
+-- is the long version), and that rule wins here. The blocked party is told the
+-- conversation is closed. They are not told who to be angry with, because
+-- there is only one other person and they already know.
+--
+-- ── Reporting does not depend on the other party ─────────────────────────
+--
+-- No approval, no acknowledgement, no notification to the reported person, and
+-- no state on the reported person's side at all. `report_abuse` is SECURITY
+-- DEFINER and writes one row; a member can block and report the same person in
+-- either order, or do one without the other. Nothing about either path can be
+-- interfered with by the person being reported.
+-- ═════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The block
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Keyed by (thread, blocker) so both directions are expressible and each side
+-- can lift only its own. `thread_id` is `messages.client_id` — the client's id
+-- — exactly as every other object in this feature keys itself.
+create table if not exists public.thread_blocks (
+  thread_id  uuid        not null references public.clients(id) on delete cascade,
+  blocker_id uuid        not null references auth.users(id)     on delete cascade,
+  created_at timestamptz not null default now(),
+  -- Optional and free text. A block needs no justification and this is never
+  -- shown to the other party; it is here so the blocker's own screen can
+  -- remind them later why they did it.
+  reason     text,
+  primary key (thread_id, blocker_id)
+);
+
+alter table public.thread_blocks enable row level security;
+
+comment on table public.thread_blocks is
+  'One row = this person has blocked the other on this message thread. Checked '
+  'by the WITH CHECK of msg_client/msg_coach and by msgmedia_obj_insert, so a '
+  'block refuses the write rather than hiding it. See supabase/parts/240.';
+
+-- Both participants may read it, for the reason in the header: there is no
+-- secrecy to buy in a two-party thread, and the blocked side needs a truthful
+-- sentence for a composer that will not send.
+drop policy if exists thread_blocks_participant_r on public.thread_blocks;
+create policy thread_blocks_participant_r on public.thread_blocks
+  for select to authenticated
+  using (public.can_use_message_thread(thread_id::text));
+
+-- Block somebody you are actually in a conversation with, as yourself.
+-- `can_use_message_thread` is part 124's function and is the union of
+-- msg_client and msg_coach — so the set of threads you may block is exactly
+-- the set you may write to, asked in one place.
+drop policy if exists thread_blocks_own_i on public.thread_blocks;
+create policy thread_blocks_own_i on public.thread_blocks
+  for insert to authenticated
+  with check (
+    blocker_id = (select auth.uid())
+    and public.can_use_message_thread(thread_id::text)
+  );
+
+-- Lift your own block and nobody else's. Deliberately not conditioned on still
+-- being on the thread: a client whose coach changed must still be able to undo
+-- a block they made, and a row nobody can delete is a permanent one.
+drop policy if exists thread_blocks_own_d on public.thread_blocks;
+create policy thread_blocks_own_d on public.thread_blocks
+  for delete to authenticated
+  using (blocker_id = (select auth.uid()));
+
+-- No UPDATE policy. A block has nothing to amend: lift it and make it again.
+
+grant select, insert, delete on public.thread_blocks to authenticated;
+
+create index if not exists thread_blocks_thread_idx on public.thread_blocks (thread_id);
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · One definition of "this conversation is closed"
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Takes TEXT and guards with a CASE, for exactly the reasons part 124 gives
+-- for `can_use_message_thread`: the storage policy hands it
+-- `storage.foldername(name)[1]`, which is text and may not be a uuid at all,
+-- and casting inside a policy would raise 22P02 on an object in another bucket
+-- because nothing guarantees the planner evaluates the `bucket_id` arm first.
+-- CASE does not evaluate the branch it does not take.
+--
+-- SECURITY DEFINER so the answer does not depend on the caller's own SELECT on
+-- `thread_blocks`, and so a policy calling it cannot re-enter a policy and
+-- recurse — the 42P17 fault part 54 had to undo across the whole video library.
+--
+-- EITHER side's block closes the thread. That is the deliberate shape: a
+-- one-directional block would leave the blocker able to keep writing to
+-- somebody who cannot answer, which is not protection, it is the last word.
+create or replace function public.message_thread_blocked(p_thread text)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+  select case
+    when p_thread is null then false
+    when p_thread !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then false
+    else exists (select 1 from public.thread_blocks b where b.thread_id = p_thread::uuid)
+  end;
+$function$;
+
+comment on function public.message_thread_blocked(text) is
+  'Has either party blocked this message thread? Takes the thread key as text '
+  'so the storage policies can pass a path segment. SECURITY DEFINER so it does '
+  'not depend on the caller''s own read of thread_blocks. See supabase/parts/240.';
+
+-- `revoke ... from public` alone leaves BOTH API roles standing — Supabase
+-- grants execute to anon and authenticated separately, which is how part 105
+-- shipped an unauthenticated cross-tenant write (part 120). anon has no
+-- business asking; a policy is evaluated as the querying role, so
+-- authenticated needs it.
+revoke all on function public.message_thread_blocked(text) from public, anon;
+grant execute on function public.message_thread_blocked(text) to authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · The refusal, in the three places a message can get through
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The USING clauses are UNCHANGED and stay wide. Reading the thread is not
+-- what a block stops — see the header: the report is made out of the history,
+-- and a block that hid it would destroy the evidence.
+--
+-- Only WITH CHECK changes, so the cost is one function call per INSERTed row
+-- and nothing per row read (the concern part 145 exists for).
+--
+-- Both policies are recreated in full rather than patched, because a policy
+-- cannot be altered in place and because part 83 is the record of what happens
+-- when a part supersedes another without saying so: only the names you write
+-- survive. These two names are msg_client and msg_coach, defined in part 10,
+-- and this file is the newest definition of both.
+drop policy if exists msg_client on public.messages;
+create policy msg_client on public.messages for all
+  using (client_id = (select auth.uid()))
+  with check (
+    client_id = (select auth.uid())
+    and sender = 'client'
+    and not public.message_thread_blocked(client_id::text)
+  );
+
+drop policy if exists msg_coach on public.messages;
+create policy msg_coach on public.messages for all
+  using (public.is_my_client(client_id))
+  with check (
+    public.is_my_client(client_id)
+    and sender = 'coach'
+    and not public.message_thread_blocked(client_id::text)
+  );
+
+-- And the file, which is uploaded BEFORE the row exists (the order is the
+-- feature — src/ui/messaging.ts). Without this, a blocked sender's photograph
+-- would still land in the bucket and only the message would be refused: bytes
+-- from a blocked person, in storage, that nothing points at and no purge
+-- exists for. The read and delete policies from part 124 are untouched —
+-- blocking does not take away a photograph somebody was already sent.
+drop policy if exists msgmedia_obj_insert on storage.objects;
+create policy msgmedia_obj_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'message-media'
+    and public.can_use_message_thread((storage.foldername(name))[1])
+    and (storage.foldername(name))[2] = (select auth.uid())::text
+    and not public.message_thread_blocked((storage.foldername(name))[1])
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · The report
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- ── Why the message is COPIED and not merely referenced ──────────────────
+--
+-- Explained at length in the header. `msg_coach` permits DELETE on any row in
+-- the thread and `msgmedia_obj_delete` permits an uploader to remove their own
+-- object, so a report holding only `message_id` is a report the reported
+-- person can empty. Every column prefixed `reported_` below is a snapshot
+-- taken inside `report_abuse` at the moment the report is made.
+--
+-- The attachment is snapshotted as its KEY, not its bytes. The object may
+-- since have been deleted and the key may resolve to nothing — which is itself
+-- a fact worth having, and is why `reported_attachment_path` is stored even
+-- though it may not be signable later.
+--
+-- ── Why the references are `set null` and not `cascade` ──────────────────
+--
+-- Part 184 settled the shape of this argument for the financial record under
+-- GDPR Article 17(3)(b), and the same reasoning reaches a safety record by a
+-- different limb: a report is evidence of what one person did to another, and
+-- the person it is ABOUT must not be able to erase it by deleting their
+-- account. So no reference here cascades. What survives an erasure is the
+-- snapshot and the fact that a report was made; the names go with the rows
+-- they belonged to.
+--
+-- This is a retention, so it is stated rather than assumed: the reporter's own
+-- identity is dropped to NULL when their account goes, and nothing else about
+-- them is held here.
+create table if not exists public.abuse_reports (
+  id            uuid        primary key default gen_random_uuid(),
+  -- Who reported. NULL once that account is erased.
+  reporter_id   uuid        references auth.users(id) on delete set null,
+  -- Which side of the thread they were on. Kept as its own column because
+  -- reporter_id may be gone and "the client reported the coach" is the first
+  -- thing anybody reviewing this needs to know.
+  reporter_role text        not null,
+  -- Who was reported. NULL once that account is erased.
+  reported_id   uuid        references auth.users(id) on delete set null,
+  thread_id     uuid        references public.clients(id) on delete set null,
+  message_id    uuid        references public.messages(id) on delete set null,
+  category      text        not null,
+  -- What the reporter typed. Optional: a report with no words is still a
+  -- report, and requiring an explanation is a barrier in front of the person
+  -- least able to write one at that moment.
+  note          text,
+  -- ── the snapshot ──
+  reported_sender          text,
+  reported_body            text,
+  reported_attachment_path text,
+  reported_attachment_kind text,
+  reported_sent_at         timestamptz,
+  created_at    timestamptz not null default now(),
+  -- Set by an operator working with the service key. There is no policy below
+  -- that lets anybody in any app write it, and that is deliberate: "reviewed"
+  -- is a claim about somebody having actually looked.
+  reviewed_at   timestamptz,
+  constraint abuse_reports_role_chk check (reporter_role in ('client', 'coach')),
+  constraint abuse_reports_category_chk
+    check (category in ('harassment', 'sexual', 'threat', 'spam', 'other'))
+);
+
+alter table public.abuse_reports enable row level security;
+
+create index if not exists abuse_reports_reported_idx on public.abuse_reports (reported_id, created_at desc);
+create index if not exists abuse_reports_reporter_idx on public.abuse_reports (reporter_id, created_at desc);
+
+comment on table public.abuse_reports is
+  'One row = somebody reported a message or a conversation. Written only by '
+  'report_abuse(); the message is COPIED in so the reported person cannot empty '
+  'the report by deleting the message. See supabase/parts/240.';
+
+-- The reporter reads their own reports, so their screen can say "you reported
+-- this on the 4th" rather than offering to report it again as though nothing
+-- had happened. Nobody else reads anything: not the reported person, not their
+-- gym owner, not another trainer at the same tenant. Part 120's lesson stands
+-- — `role = 'owner'` is never an authorisation — and a gym owner reading the
+-- reports its members make about its trainers is the single worst outcome this
+-- table can have.
+drop policy if exists abuse_reports_own_r on public.abuse_reports;
+create policy abuse_reports_own_r on public.abuse_reports
+  for select to authenticated
+  using (reporter_id = (select auth.uid()));
+
+-- No INSERT, UPDATE or DELETE policy anywhere. Every write goes through
+-- `report_abuse` below — the same shape part 22 uses for `session_approvals`
+-- — so a reporter cannot choose who they are reporting, cannot write the
+-- snapshot themselves, and cannot withdraw a report by deleting the row.
+grant select on public.abuse_reports to authenticated;
+
+drop policy if exists abuse_reports_owner_r on public.abuse_reports;
+drop policy if exists abuse_reports_tenant_r on public.abuse_reports;
+
+
+-- One report. Either a specific message, or the conversation as a whole when
+-- there is no one message to point at — the abuse was the sum of it, or the
+-- message has already been deleted.
+--
+-- Returns the report id, so the caller can say the row exists rather than that
+-- the request did not raise. Every refusal below raises rather than returning
+-- null, because "we could not record your report" and "your report is filed"
+-- must never be the same answer to the person making it.
+create or replace function public.report_abuse(
+  p_thread   uuid,
+  p_category text,
+  p_note     text default null,
+  p_message  uuid default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid      uuid := auth.uid();
+  v_role     text;
+  v_reported uuid;
+  v_id       uuid;
+  -- Scalars, not a `record`. An unassigned record raises the moment a field of
+  -- it is read, so a conversation-level report — the whole point of p_message
+  -- being optional — would have failed at the INSERT rather than filing.
+  v_sender   text;
+  v_body     text;
+  v_att_path text;
+  v_att_kind text;
+  v_sent_at  timestamptz;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  -- Who is asking, and therefore who is being reported. Taken from the
+  -- database, never from the request: a reporter does not get to name their
+  -- subject. The two arms are the two halves of can_use_message_thread, spelled
+  -- out because this needs the OTHER party's id and not merely a yes.
+  if p_thread = v_uid then
+    v_role := 'client';
+    select c.trainer_id into v_reported from public.clients c where c.id = p_thread;
+  elsif exists (select 1 from public.clients c where c.id = p_thread and c.trainer_id = v_uid) then
+    v_role := 'coach';
+    v_reported := p_thread;
+  else
+    raise exception 'That is not your conversation.' using errcode = '42501';
+  end if;
+
+  if p_category not in ('harassment', 'sexual', 'threat', 'spam', 'other') then
+    raise exception 'Unknown report category.' using errcode = '22023';
+  end if;
+
+  -- A message, if one was named, and it must be ON this thread. Without the
+  -- second condition a participant could file a report quoting a message id
+  -- from a conversation they are not on, and the snapshot would copy its
+  -- contents out of that thread and into a row they can then read back.
+  if p_message is not null then
+    select m.sender, m.body, m.attachment_path, m.attachment_kind, m.created_at
+      into v_sender, v_body, v_att_path, v_att_kind, v_sent_at
+      from public.messages m
+     where m.id = p_message and m.client_id = p_thread;
+    if not found then
+      raise exception 'That message is not in this conversation.' using errcode = '22023';
+    end if;
+  end if;
+
+  insert into public.abuse_reports (
+    reporter_id, reporter_role, reported_id, thread_id, message_id, category, note,
+    reported_sender, reported_body, reported_attachment_path, reported_attachment_kind, reported_sent_at
+  ) values (
+    v_uid, v_role, v_reported, p_thread, p_message, p_category,
+    nullif(btrim(coalesce(p_note, '')), ''),
+    v_sender, v_body, v_att_path, v_att_kind, v_sent_at
+  )
+  returning id into v_id;
+
+  return v_id;
+end
+$fn$;
+
+revoke all on function public.report_abuse(uuid, text, text, uuid) from public, anon;
+grant execute on function public.report_abuse(uuid, text, text, uuid) to authenticated;
+
+comment on function public.report_abuse(uuid, text, text, uuid) is
+  'File one abuse report against the other party on a message thread. Snapshots '
+  'the reported message so deleting it cannot empty the report. Needs nothing '
+  'from the reported person. See supabase/parts/240.';
+
+-- ▶ a-session-you-can-only-agree-with.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- A delivered session could only be approved, never disputed.
+--
+-- ── What was here ────────────────────────────────────────────────────────
+--
+-- app/(client)/pt-sessions.tsx offers one control: Approve Session. There is no
+-- decline, no query, no "this didn't happen". Part 22 built the table with one
+-- verb in its name and one timestamp in its shape, and the coach's pay hangs on
+-- that timestamp being set.
+--
+-- The consequence is not that a member cannot complain. It is that SILENCE is
+-- the only way they can, and silence is unreadable: a client who was never
+-- there and a client who has not opened the app produce byte-identical
+-- records. The coach cannot tell a dispute from a forgetful client, and the
+-- member cannot say the thing they actually want to say. Both of them then
+-- have the argument by text message, where nothing about it is recorded.
+--
+-- ── The load-bearing decision: A DISPUTE IS NOT A CANCELLATION ───────────
+--
+-- The obvious implementation is to write `sessions.outcome` — and it is wrong,
+-- because that column is what payroll reads. `isPayable` in
+-- src/lib/gymSessions.ts pays 'completed' and pays 'no_show' and
+-- 'late_cancelled' under the gym's stated policy; a NULL outcome is reported
+-- as unmarked and paid for by nothing. So a dispute that wrote an outcome
+-- would be one party unilaterally deciding what the other party is paid, from
+-- a phone, with no review, and the gym's payroll run would silently come out
+-- short with nothing on any screen saying why.
+--
+-- So the dispute is ITS OWN STATE, on the row that already holds the client's
+-- answer, and it touches nothing else:
+--
+--   IT DOES     record that this member says the session did not happen as
+--               claimed, what kind of objection it is, when they said it, and
+--               in their own words if they wrote any.
+--   IT DOES NOT set or clear `sessions.outcome`. The gym's record of what
+--               happened stays the gym's to write.
+--   IT DOES NOT change what any payroll run pays. A disputed session that is
+--               marked 'completed' is still payable, and stays payable until
+--               somebody with the authority to change the outcome changes it.
+--   IT DOES NOT refund a pack credit. The credit came off when the session was
+--               BOOKED (calendar.tsx and part 126's promotion path), and
+--               handing it back on a client's say-so is a refund this product
+--               does not have and must not grow sideways out of a complaint.
+--   IT DOES NOT cancel anything, and it is not late-cancellation. The session
+--               has already happened; part 126 is about ones that have not.
+--
+-- What it is FOR is the record. Two people disagree about an hour of work, and
+-- until now the product had nowhere to put that fact. Now it has one place,
+-- both of them can read it, and the money it moves is none.
+--
+-- ── Why it lives on `session_approvals` ─────────────────────────────────
+--
+-- One row per session, primary-keyed on the session, holding THE CLIENT'S
+-- ANSWER. Approving and disputing are two values of one answer and not two
+-- facts that could both be true, so a second table would need a rule about
+-- what to do when both existed and would eventually be asked it. The table
+-- keeps its name — renaming it would break part 22's policy, both apps and the
+-- Studio for a word — and its comment now says what it actually holds.
+-- ═════════════════════════════════════════════════════════════════════════
+
+
+-- ── 1. The answer, and its two values ─────────────────────────────────────
+alter table public.session_approvals
+  add column if not exists state         text not null default 'approved',
+  add column if not exists disputed_at   timestamptz,
+  add column if not exists dispute_kind  text;
+
+alter table public.session_approvals drop constraint if exists session_approvals_state_chk;
+alter table public.session_approvals add constraint session_approvals_state_chk
+  check (state in ('approved', 'disputed'));
+
+-- `approved_at` was `not null default now()`, which is right for the only row
+-- shape that existed. It cannot stay that way: a disputed session was not
+-- approved at any time, and stamping one anyway would put a confirmation
+-- timestamp on the coach's calendar for a session the client says never
+-- happened — which is the exact false claim this part exists to make sayable.
+alter table public.session_approvals alter column approved_at drop not null;
+
+-- Exactly one timestamp, matching the state. Structural rather than left to
+-- the two functions below, because a row that says 'disputed' with an approval
+-- time on it is readable by three different apps and each would make its own
+-- guess about which half to believe.
+alter table public.session_approvals drop constraint if exists session_approvals_approved_at_chk;
+alter table public.session_approvals add constraint session_approvals_approved_at_chk
+  check ((state = 'approved') = (approved_at is not null));
+
+alter table public.session_approvals drop constraint if exists session_approvals_disputed_at_chk;
+alter table public.session_approvals add constraint session_approvals_disputed_at_chk
+  check ((state = 'disputed') = (disputed_at is not null));
+
+-- What the objection is. Four values because they are four different
+-- conversations for the coach to have, and none of them is a legal
+-- characterisation the member is being asked to make.
+--
+-- Null exactly when the row is an approval.
+alter table public.session_approvals drop constraint if exists session_approvals_dispute_kind_chk;
+alter table public.session_approvals add constraint session_approvals_dispute_kind_chk
+  check (
+    (state = 'approved' and dispute_kind is null)
+    or (state = 'disputed' and dispute_kind in ('did_not_happen', 'wrong_time', 'wrong_length', 'other'))
+  );
+
+comment on table public.session_approvals is
+  'THE CLIENT''S ANSWER about one delivered session: approved, or disputed. One '
+  'row per session. A dispute records that they object and what to; it does not '
+  'touch sessions.outcome and changes nothing about what any payroll run pays. '
+  'See supabase/parts/22 and 241.';
+comment on column public.session_approvals.state is
+  'approved | disputed. The client''s own verdict, and nothing else''s.';
+comment on column public.session_approvals.note is
+  'What the client wrote — the comment on an approval, or the account behind a dispute.';
+comment on column public.session_approvals.dispute_kind is
+  'did_not_happen | wrong_time | wrong_length | other. Null exactly when state = approved.';
+
+
+-- ── 2. Approving, which must now also be able to UNDO a dispute ───────────
+--
+-- Redefined here rather than edited in part 22, and this is a SUPERSEDE, said
+-- out loud because part 83 is the record of what happens when one is not. A
+-- function is not a policy: `create or replace` with the same signature leaves
+-- exactly one definition standing, so there is no older copy to drop and no
+-- second version to be OR'd with this one. Part 22 remains the account of why
+-- the table and the RPC exist; this is the newest definition of the function,
+-- and the only behaviour that changes is the three columns it now clears.
+--
+-- Clearing them is the whole reason it had to be touched at all. Without it a
+-- member who disputed and then remembered — the session did happen, it was the
+-- Tuesday not the Thursday — could approve, and the upsert would leave
+-- `state = 'disputed'` standing beside a fresh approval timestamp, which the
+-- constraints above would refuse outright. A dispute has to be withdrawable by
+-- the person who made it, and approving IS the withdrawal.
+create or replace function public.approve_session(p_session uuid, p_note text default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  if not exists (
+    select 1 from sessions s
+     where s.id = p_session
+       and s.client_id = auth.uid()
+       and s.status = 'booked'
+       and s.starts_at <= now()
+  ) then
+    -- Covers all three refusals: not yours, not booked, or not yet delivered.
+    raise exception 'That session cannot be approved.';
+  end if;
+
+  insert into session_approvals (session_id, client_id, note, state, approved_at, disputed_at, dispute_kind)
+  values (p_session, auth.uid(), v_note, 'approved', now(), null, null)
+  on conflict (session_id) do update
+     set note         = excluded.note,
+         state        = 'approved',
+         approved_at  = now(),
+         disputed_at  = null,
+         dispute_kind = null;
+end
+$function$;
+
+revoke all on function public.approve_session(uuid, text) from public, anon;
+grant execute on function public.approve_session(uuid, text) to authenticated;
+
+
+-- ── 3. Disputing ─────────────────────────────────────────────────────────
+--
+-- The same gate as approving, and deliberately the same one: yours, booked,
+-- and already started. A member cannot dispute a session that has not happened
+-- yet — that is a cancellation, it has a different screen and different money
+-- (part 126) — and cannot dispute somebody else's.
+--
+-- Writes to `session_approvals` and to NOTHING ELSE. There is no update of
+-- `sessions` anywhere in this function, and there must never be one: the
+-- header says why at length.
+create or replace function public.dispute_session(
+  p_session uuid,
+  p_kind    text,
+  p_note    text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+begin
+  if p_kind not in ('did_not_happen', 'wrong_time', 'wrong_length', 'other') then
+    raise exception 'Unknown kind of dispute.' using errcode = '22023';
+  end if;
+
+  if not exists (
+    select 1 from sessions s
+     where s.id = p_session
+       and s.client_id = auth.uid()
+       and s.status = 'booked'
+       and s.starts_at <= now()
+  ) then
+    raise exception 'That session cannot be disputed.' using errcode = '42501';
+  end if;
+
+  insert into session_approvals (session_id, client_id, note, state, approved_at, disputed_at, dispute_kind)
+  values (p_session, auth.uid(), v_note, 'disputed', null, now(), p_kind)
+  on conflict (session_id) do update
+     set note         = excluded.note,
+         state        = 'disputed',
+         approved_at  = null,
+         disputed_at  = now(),
+         dispute_kind = excluded.dispute_kind;
+end
+$function$;
+
+revoke all on function public.dispute_session(uuid, text, text) from public, anon;
+grant execute on function public.dispute_session(uuid, text, text) to authenticated;
+
+comment on function public.dispute_session(uuid, text, text) is
+  'The client says a delivered session did not happen as claimed. Writes only to '
+  'session_approvals: it does not touch sessions.outcome and changes nothing '
+  'about payroll. Approving the same session withdraws it. See supabase/parts/241.';
+
+
+-- ── 4. Who reads it ──────────────────────────────────────────────────────
+--
+-- Nobody new. `session_approvals_read` (part 22) already covers the client who
+-- wrote the row and the trainer who delivered the session, which is exactly the
+-- pair a dispute is between — and the columns added above ride on that policy
+-- rather than needing one of their own. Restated here only so a reader of this
+-- part does not have to go and check that a new column did not arrive
+-- unprotected.
+--
+-- There is deliberately no owner or tenant branch. A gym owner who needs to
+-- settle a disagreement between their trainer and a member is doing so with
+-- both of them, not by reading one side's private note.
+
+-- ▶ a-fee-a-client-can-read-the-currency-of.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- "120 / session", and no currency anywhere on the screen.
+--
+-- ── What was here, and why it was already the right behaviour ────────────
+--
+-- app/(client)/trainers.tsx prints `trainers.session_fee` bare. A '$' used to
+-- stand in front of it and was removed on purpose, and the comment where it
+-- stood is the whole argument: Repple is white-labelled, `trainers` has no
+-- currency column, and a client browsing a directory of coaches priced in
+-- dirhams was reading every one of them in dollars. Not a formatting slip — a
+-- different amount, on the figure somebody picks a coach by.
+--
+-- So the number without a symbol is honest. THE GAP IS THE MISSING COLUMN, not
+-- the missing symbol, and this part closes it.
+--
+-- ── Why there is no new column ───────────────────────────────────────────
+--
+-- A session fee is denominated in the gym's currency and always has been. Part
+-- 126 states it while pricing the late-cancellation fee: the policy is the
+-- coach's, "the gym still owns the CURRENCY (`tenants.currency`, part 99)
+-- because that is what the money is denominated in, and a coach does not get to
+-- pick that per policy." Part 164 gives the coach who sits alone in their own
+-- tenant a way to name it once. `charges.currency` snapshots it at the moment
+-- money is raised, which is right for a charge and wrong for a price list: a
+-- rate is what the coach charges TODAY, so re-reading it today is correct.
+--
+-- Adding `trainers.session_fee_currency` would therefore be a SECOND copy of a
+-- fact that already exists, kept in step by a trigger or by an app remembering
+-- to write both. Two copies of a permission drift and the copy that drifts
+-- wider is the one nobody notices (part 124's own words); two copies of a
+-- CURRENCY drift and the one that drifts is on a price.
+--
+-- What the client actually lacked was the READ. `tenants` has no policy that
+-- lets a member read another tenant's row — correctly — so the directory could
+-- not find out what any listed coach's figure was denominated in.
+--
+-- ── Why a function and not a policy ──────────────────────────────────────
+--
+-- Because RLS selects ROWS, not columns. Any policy on `tenants` wide enough to
+-- show a stranger the currency would hand over the whole row: the gym's name,
+-- its brand colour, its plan, its session fee, its retention period. Part 131
+-- is the worked example of exactly that mistake one table over — `join_code`
+-- was readable by every signed-in account because the policy that exposed the
+-- directory could not stop at one column.
+--
+-- So this returns TWO columns for the trainers it is asked about, and only for
+-- trainers who have opted into the public directory. It is the same shape and
+-- the same reasoning as `my_coach()` (parts 67 and 115).
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- One row per id asked about that belongs to a LISTED trainer. `currency` is
+-- null when that trainer's gym has not set one, and the row is still returned —
+-- which is the entire point of the shape.
+--
+-- "No row came back" and "a row came back with no currency" are two different
+-- facts and the app prints two different sentences for them
+-- (src/lib/currencyGap.ts): one is a read that has not answered, the other is a
+-- gym that has never stated a currency. Filtering the nulls away here would
+-- collapse them, and the collapsed version is the sentence that sends a client
+-- to chase a coach over a setting that was already correct.
+--
+-- LEFT JOIN, so a trainer with no tenant at all is also reported honestly
+-- rather than dropped.
+create or replace function public.listed_trainer_currencies(p_ids uuid[])
+returns table (trainer_id uuid, currency text)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+  select t.id, tn.currency
+    from public.trainers t
+    left join public.tenants tn on tn.id = t.tenant_id
+   where t.listed = true
+     and t.id = any(coalesce(p_ids, array[]::uuid[]));
+$function$;
+
+comment on function public.listed_trainer_currencies(uuid[]) is
+  'ISO 4217 for each LISTED trainer asked about, so a client can read what '
+  'trainers.session_fee is denominated in. Two columns only: RLS selects rows, '
+  'not columns, and a policy on tenants wide enough for this would hand over the '
+  'whole gym row (part 131). NULL currency means the gym has not set one, and '
+  'the row is still returned. See supabase/parts/242.';
+
+-- `revoke ... from public` alone leaves BOTH API roles standing — Supabase
+-- grants execute to anon and authenticated separately, which is how part 105
+-- shipped an unauthenticated cross-tenant write (part 120). The directory is
+-- for signed-in members, and `trainers_public_directory_r` is already `to
+-- authenticated`, so anon gets nothing here either.
+revoke all on function public.listed_trainer_currencies(uuid[]) from public, anon;
+grant execute on function public.listed_trainer_currencies(uuid[]) to authenticated;
+
+-- ▶ a-session-you-can-move-instead-of-losing.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- There is no reschedule, anywhere.
+--
+-- A repo-wide grep for `reschedul` hits one test fixture. Moving a session
+-- means CANCELLING it and booking again, and those are two separate acts with
+-- a gap in the middle:
+--
+--   · the gap is real. The slot is `available` between the two taps and the
+--     waitlist promotion in part 126 is deliberately instantaneous, so a member
+--     freeing 07:00 to take 18:00 can lose the 07:00 to somebody waiting and
+--     then find 18:00 taken as well. They now have no session at all, having
+--     asked to move one.
+--   · the cancellation may cost a late fee, and the re-booking draws a second
+--     pack credit for a session they had already paid for. So a move can cost
+--     money twice for one hour of training.
+--
+-- This is the move as ONE transaction: the old slot is freed and the new one
+-- booked together, or neither happens.
+--
+-- ── THE DECISION THAT SHAPES THE WHOLE FUNCTION: it never charges ────────
+--
+-- A move inside the coach's notice window is REFUSED, with the notice period
+-- and the fee in the refusal, and the member is sent to cancel instead. It is
+-- not priced and it never writes to `charges`.
+--
+-- Three alternatives were considered and all three are worse:
+--
+--   MOVE FREELY INSIDE THE WINDOW. This deletes the coach's policy. A member
+--   an hour before their session moves it to a slot three weeks out, then
+--   cancels that one — which is outside anybody's notice window and therefore
+--   free. "Reschedule" becomes the button that makes late cancellation cost
+--   nothing, and no coach in the product is told their policy has a hole in it.
+--
+--   CHARGE FOR IT, AS A CANCELLATION. The record would then say a session was
+--   cancelled when it was moved. Both people can read that record.
+--
+--   CHARGE FOR IT UNDER A NEW REASON. `charges.reason` is free text, so
+--   'late_reschedule' would insert happily — and then be INVISIBLE. Both
+--   screens that read this table filter on the literal string:
+--   src/ui/sessions.tsx (`useLateCancelCharges`, the member's own list of what
+--   they owe) and src/ui/coachStatement.ts (what the coach is owed). A fee
+--   neither party can see is worse than no fee, and widening two reads in two
+--   files to keep one new string in step is exactly the drift this codebase
+--   has been bitten by before.
+--
+-- So the notice window is a GATE here rather than a price. Nothing about the
+-- coach's policy changes, no new money appears anywhere, and the honest path
+-- for a late change is the one that already exists and is already priced:
+-- cancel, which prices it, and book again.
+--
+-- Outside the window — which is the overwhelming majority of moves, and the
+-- whole of the complaint this part answers — the move is free, atomic, and
+-- costs no credit.
+--
+-- ── What it does with the money it does not move ────────────────────────
+--
+-- NO CREDIT IS DRAWN for the new slot and none is returned for the old one.
+-- The credit follows the MEMBER, not the slot: they paid for one session when
+-- they booked, they are having one session, and it is the same one at a
+-- different hour. Drawing another would charge twice for it; returning the old
+-- one and drawing a new one would be the same thing with two extra failure
+-- modes, since `redeemSession` can decline and this function cannot un-decline
+-- it halfway through.
+--
+-- ── What it does with the slot it frees ─────────────────────────────────
+--
+-- Exactly what a cancellation does: the slot goes back on the coach's calendar
+-- and is handed to the head of its waitlist inside the same transaction, so it
+-- is never observable as bookable while somebody is waiting for it (part 126's
+-- argument, and its `_promote_session_waitlist` does the work).
+--
+-- A freed occurrence of a standing appointment keeps its `series_id` and
+-- `occurrence_on`, unchanged, for the same reason `cancel_my_session` leaves
+-- them: those two columns are how the materialiser knows this week's Tuesday
+-- has already been written out, and clearing them would have it write a second
+-- one the next morning. The NEW slot does not take them. The arrangement is
+-- still Tuesday at seven; one occurrence of it moved.
+-- ═════════════════════════════════════════════════════════════════════════
+
+create or replace function public.reschedule_my_session(p_from uuid, p_to uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid      uuid := auth.uid();
+  v_from     record;
+  v_to       record;
+  v_applies  boolean := false;
+  v_notice   int := 24;
+  v_fee      numeric;
+  v_currency text;
+  v_promoted uuid;
+  v_waiting  int := 0;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  if p_from = p_to then
+    return jsonb_build_object('moved', false, 'reason', 'same_slot');
+  end if;
+
+  -- Both rows locked, and in a fixed order by id so two members moving into
+  -- each other's slots at the same moment cannot deadlock.
+  perform 1 from sessions s
+   where s.id in (p_from, p_to)
+   order by s.id
+     for update;
+
+  select s.id, s.trainer_id, s.starts_at, s.duration_min
+    into v_from
+    from sessions s
+   where s.id = p_from and s.client_id = v_uid and s.status = 'booked';
+  if not found then
+    -- Not yours, or not booked. Reported rather than raised, because it is a
+    -- refusal and not a fault: somebody may have opened this screen an hour
+    -- ago and the session may already have moved.
+    return jsonb_build_object('moved', false, 'reason', 'not_yours');
+  end if;
+
+  select s.id, s.trainer_id, s.starts_at, s.duration_min
+    into v_to
+    from sessions s
+   where s.id = p_to and s.status = 'available';
+  if not found then
+    return jsonb_build_object('moved', false, 'reason', 'taken');
+  end if;
+
+  -- The same coach. A move to another coach's slot is not a move, it is a
+  -- different booking with a different relationship and possibly a different
+  -- pack behind it.
+  if v_to.trainer_id <> v_from.trainer_id then
+    return jsonb_build_object('moved', false, 'reason', 'other_coach');
+  end if;
+
+  -- Never into the past, and never into a slot that has already begun.
+  if v_to.starts_at <= now() then
+    return jsonb_build_object('moved', false, 'reason', 'already_started');
+  end if;
+
+  select coalesce(t.late_cancel_applies, false),
+         coalesce(t.late_cancel_notice_hours, 24),
+         t.late_cancel_fee,
+         tn.currency
+    into v_applies, v_notice, v_fee, v_currency
+    from trainers t
+    left join tenants tn on tn.id = t.tenant_id
+   where t.id = v_from.trainer_id;
+
+  -- The gate. Measured on the session being MOVED OUT OF, on exactly the rule
+  -- `cancel_my_session` uses — `starts_at - now() < notice`, with no lower
+  -- bound, so a session already in progress is inside the window.
+  --
+  -- Only when the coach actually HAS a policy. A coach who has not set one has
+  -- not agreed to charge anybody and has no window to be inside, so their
+  -- clients may move a session at any notice. That is the same default part
+  -- 126 chose for the fee itself, and choosing differently here would invent a
+  -- restriction out of a policy nobody stated.
+  if v_applies and (v_from.starts_at - now()) < make_interval(hours => v_notice) then
+    return jsonb_build_object(
+      'moved', false,
+      'reason', 'inside_notice',
+      'notice_hours', v_notice,
+      'fee', v_fee,
+      'currency', v_currency);
+  end if;
+
+  -- Free first, then book. If booking the new slot violates the no-double-
+  -- booking exclusion constraint — the member is already booked with this coach
+  -- across that hour — the whole subtransaction rolls back and the old session
+  -- is still theirs. A member who asked to move must never end up with neither.
+  begin
+    update sessions
+       set client_id = null, status = 'available', released = true
+     where id = p_from;
+
+    update sessions
+       set client_id = v_uid, status = 'booked', released = false
+     where id = p_to;
+  exception when exclusion_violation then
+    return jsonb_build_object('moved', false, 'reason', 'clash');
+  end;
+
+  -- The freed slot goes to whoever is first in line, in this same transaction,
+  -- so it is never observable as bookable while somebody is waiting.
+  v_promoted := public._promote_session_waitlist(p_from);
+  select count(*) into v_waiting from session_waitlist where session_id = p_from;
+
+  return jsonb_build_object(
+    'moved', true,
+    'reason', null,
+    'from_at', v_from.starts_at,
+    'to_at', v_to.starts_at,
+    'notice_hours', v_notice,
+    'policy_applies', v_applies,
+    -- Said explicitly rather than left to be inferred from its absence. A
+    -- screen reading this report tells somebody what just happened to their
+    -- money, and "nothing" is a thing to say out loud.
+    'charged', false,
+    'credit_drawn', false,
+    'promoted', v_promoted,
+    'waiting', v_waiting);
+end $fn$;
+
+revoke all on function public.reschedule_my_session(uuid, uuid) from public, anon;
+grant execute on function public.reschedule_my_session(uuid, uuid) to authenticated;
+
+comment on function public.reschedule_my_session(uuid, uuid) is
+  'Move one booked session to another open slot of the SAME coach, atomically. '
+  'Never charges and never draws or returns a pack credit; refuses a move made '
+  'inside the coach''s notice window rather than pricing one. See supabase/parts/243.';
+
+-- ▶ a-fortnight-away-that-does-not-cost-two-cancellations.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- A standing appointment cannot be paused, or skipped for a week.
+--
+-- Part 135 gave a member every Tuesday at seven for as long as they want it,
+-- and exactly two ways out: cancel ONE occurrence, or end the arrangement. A
+-- fortnight away is therefore two separate cancellations — two taps in two
+-- places, each priced on its own notice, each capable of costing a late fee —
+-- and there is no way at all to say "not for the next two weeks" once. Somebody
+-- who forgets the second one has a coach standing in an empty gym.
+--
+-- ── The model: a skip is a HOLE IN THE ARRANGEMENT, not a state on it ────
+--
+-- `session_series` gains nothing. A pause is a row in its own table naming a
+-- date range, and there may be several: a member with a fortnight in June and
+-- a week in September has two holes, not a status that is "paused" and then
+-- somehow paused again. Two columns on the series would force the second
+-- absence to overwrite the first, and the overwritten one comes back as eight
+-- weeks of sessions nobody expected.
+--
+-- The hole is read in exactly two places and both are below:
+--
+--   · the MATERIALISER skips a date inside one, so the pause survives. This is
+--     the half that makes it a pause rather than a tidy-up: without it, part
+--     135's daily run writes the Tuesday back out the next morning, and the
+--     member's cancelled fortnight quietly re-books itself.
+--   · PAUSING removes the occurrences that have already been written out.
+--
+-- ── The money, and why this file contains none of it ────────────────────
+--
+-- Removing an occurrence that is already booked IS a cancellation, and it is
+-- priced like one. There is no cheaper door here: a pause taken an hour before
+-- Tuesday's session is a late cancellation of Tuesday's session, whatever the
+-- screen it was tapped on, and a coach whose policy could be sidestepped by
+-- pausing would have no policy at all.
+--
+-- So `pause_my_session_series` does not price anything itself. It CALLS
+-- `cancel_my_session` (part 126) once per already-booked occurrence in the
+-- range, which is the one place in this database that knows the coach's notice
+-- window, records the fee, snapshots the currency and promotes the waitlist. A
+-- second implementation of that would be a second answer to "what does this
+-- cost", and the two would disagree within a month.
+--
+-- The report adds up what those calls did, so the app can tell the member
+-- exactly what a pause cost before and after they take one. In the ordinary
+-- case — a holiday booked in advance — every occurrence is outside the window
+-- and the answer is nothing.
+--
+-- ── Who may pause ───────────────────────────────────────────────────────
+--
+-- The CLIENT, and only the client. That is not a judgement about coaches, it
+-- is what `cancel_my_session` enforces one call down: it frees a session where
+-- `client_id = auth.uid()` and nothing else, so a coach calling this would
+-- record a skip and free nothing, which is the worst of both. A coach who
+-- needs a fortnight off has their own blocked time (part 89) and
+-- `end_session_series` (part 135).
+-- ═════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The hole
+-- ═════════════════════════════════════════════════════════════════════════
+create table if not exists public.session_series_skips (
+  id         uuid        primary key default gen_random_uuid(),
+  series_id  uuid        not null references public.session_series(id) on delete cascade,
+  -- LOCAL dates in the series' own zone, which is what `occurrence_on` is and
+  -- what the materialiser walks. A range stored as instants would move by an
+  -- hour twice a year and take a Tuesday with it.
+  from_on    date        not null,
+  to_on      date        not null,
+  created_at timestamptz not null default now(),
+  created_by uuid        references public.profiles(id) on delete set null,
+  -- Optional and free text: "away", "shoulder". Shown to both of them, because
+  -- a coach seeing four weeks disappear is entitled to a word about why.
+  reason     text,
+  constraint session_series_skips_range_chk check (from_on <= to_on)
+);
+
+alter table public.session_series_skips enable row level security;
+
+create index if not exists session_series_skips_series_idx
+  on public.session_series_skips (series_id, from_on);
+
+comment on table public.session_series_skips is
+  'A date range this standing appointment does not run. Read by the materialiser '
+  'so the pause survives its daily run. Written only by pause_my_session_series. '
+  'See supabase/parts/244.';
+
+-- Both people in the arrangement read it. Same pair, same reasoning and same
+-- omissions as `session_series_parties_r`: no tenant branch and no owner
+-- branch, because part 120's lesson is that `role = 'owner'` is never an
+-- authorisation and when a member is away is not something the gym needs.
+drop policy if exists session_series_skips_parties_r on public.session_series_skips;
+create policy session_series_skips_parties_r on public.session_series_skips
+  for select to authenticated
+  using (exists (
+    select 1 from public.session_series ss
+     where ss.id = session_series_skips.series_id
+       and (ss.client_id = (select auth.uid()) or ss.trainer_id = (select auth.uid()))
+  ));
+
+-- SELECT only. Both writes go through the SECURITY DEFINER functions below,
+-- because neither is expressible as a row predicate: pausing has to cancel the
+-- occurrences already written out, and resuming has to write them back.
+--
+-- RLS narrows a GRANT; it does not confer access, and Supabase's stock default
+-- privileges hand `anon` the full DML set on anything created in this schema
+-- (parts 119, 120, 134). A privilege that is only ever refused is one to
+-- remove.
+revoke all on public.session_series_skips from anon;
+revoke insert, update, delete on public.session_series_skips from authenticated;
+grant select on public.session_series_skips to authenticated;
+
+drop policy if exists session_series_skips_owner_r  on public.session_series_skips;
+drop policy if exists session_series_skips_tenant_r on public.session_series_skips;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · The materialiser, which must now know about the hole
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- A SUPERSEDE of part 135's `_materialise_session_series`, said out loud
+-- because part 83 is the record of what happens when one is not. A function is
+-- not a policy: `create or replace` with the same signature leaves exactly one
+-- definition standing, so there is no older copy to drop and no second version
+-- to be OR'd with this one. Part 135 remains the account of why this function
+-- exists and why it is shaped the way it is — the zone reasoning, the clash
+-- handling, the claim of an existing open slot, and the deliberate absence of a
+-- pack credit are all unchanged and are all still argued there.
+--
+-- ONE CONDITION IS ADDED, in the `if` that decides whether to write a date:
+-- a date inside a skip range is not written. Without it this function undoes
+-- the pause every morning.
+create or replace function public._materialise_session_series(p_series uuid, p_horizon_days int default 56)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_s        record;
+  v_today    date;
+  v_horizon  date;
+  v_date     date;
+  v_ts       timestamptz;
+  v_rows     int;
+  v_created  int := 0;
+  v_skipped  int := 0;
+  v_paused   int := 0;
+  v_clashes  jsonb := '[]'::jsonb;
+  v_tenant   uuid;
+begin
+  select ss.* into v_s from session_series ss where ss.id = p_series for update;
+  if not found or v_s.status <> 'active' then
+    return jsonb_build_object('created', 0, 'skipped', 0, 'paused', 0, 'clashed_on', '[]'::jsonb);
+  end if;
+
+  select t.tenant_id into v_tenant from trainers t where t.id = v_s.trainer_id;
+
+  -- "Today" is today WHERE THE APPOINTMENT IS, not where the server is. A
+  -- coach in Auckland materialising at 11:00 UTC is on tomorrow's date, and a
+  -- horizon measured in the server's day would be a day short or a day long
+  -- for half the world.
+  v_today   := (now() at time zone v_s.tz)::date;
+  v_horizon := v_today + greatest(p_horizon_days, 0);
+
+  -- First candidate: the later of the series start and today, rolled forward
+  -- to the next matching weekday. `(target - actual + 7) % 7` is 0 when today
+  -- already is the day, which is right — this morning's occurrence is still
+  -- wanted if its hour has not passed.
+  v_date := greatest(v_s.starts_on, v_today);
+  v_date := v_date + ((v_s.dow - extract(dow from v_date)::int + 7) % 7);
+
+  while v_date <= v_horizon and (v_s.ends_on is null or v_date <= v_s.ends_on) loop
+    v_ts := (v_date + make_time(v_s.hour, v_s.minute, 0)) at time zone v_s.tz;
+
+    -- THE ADDED CONDITION. A date the member has paused is not written out,
+    -- today or on any morning after it. Counted separately from a clash and
+    -- reported separately, because a paused date is a thing somebody chose and
+    -- a clash is a thing that went wrong, and a coach reading one report should
+    -- not have to guess which of the two happened.
+    if exists (
+      select 1 from session_series_skips k
+       where k.series_id = v_s.id and v_date between k.from_on and k.to_on
+    ) then
+      v_paused := v_paused + 1;
+
+    -- Never into the past. A materialiser that back-fills writes sessions
+    -- nobody attended and payroll then counts them.
+    -- Nor a second time: the unique index makes this check the difference
+    -- between idempotent and "re-books an occurrence the client cancelled".
+    elsif v_ts > now()
+       and not exists (select 1 from sessions s
+                        where s.series_id = v_s.id and s.occurrence_on = v_date) then
+      begin
+        -- Claim one of the coach's own OPEN slots at exactly this instant if
+        -- there is one, rather than adding a second row beside it. Otherwise
+        -- the coach's Generate and their standing appointment both draw an
+        -- 07:00 Tuesday, a client books the open one, and the exclusion
+        -- constraint refuses them at the moment of tapping — a slot the app
+        -- offered and the database then took away.
+        update sessions s
+           set client_id = v_s.client_id, status = 'booked', released = false,
+               series_id = v_s.id, occurrence_on = v_date
+         where s.id = (
+           select s2.id from sessions s2
+            where s2.trainer_id = v_s.trainer_id
+              and s2.starts_at = v_ts
+              and s2.duration_min = v_s.duration_min
+              and s2.status = 'available'
+              and s2.series_id is null
+            order by s2.created_at
+            limit 1
+              for update skip locked);
+        get diagnostics v_rows = row_count;
+
+        if v_rows = 0 then
+          insert into sessions (trainer_id, client_id, starts_at, duration_min,
+                                status, released, tenant_id, series_id, occurrence_on)
+          values (v_s.trainer_id, v_s.client_id, v_ts, v_s.duration_min,
+                  'booked', false, v_tenant, v_s.id, v_date);
+        end if;
+        v_created := v_created + 1;
+      exception when exclusion_violation then
+        -- The coach is already booked or blocked across that hour. Skip the
+        -- date, keep the arrangement, and say which date so somebody can act
+        -- on it. See part 135's header.
+        v_skipped := v_skipped + 1;
+        v_clashes := v_clashes || to_jsonb(v_date::text);
+      end;
+    end if;
+
+    v_date := v_date + 7;
+  end loop;
+
+  -- `created`, `skipped` and `clashed_on` keep their names and their meanings,
+  -- so part 135's callers and everything reading their reports are unaffected.
+  -- `paused` is new and additive.
+  return jsonb_build_object('created', v_created, 'skipped', v_skipped,
+                            'paused', v_paused, 'clashed_on', v_clashes);
+end $fn$;
+
+revoke all on function public._materialise_session_series(uuid, int) from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · Pausing
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Records the hole, then clears the occurrences already inside it — through
+-- `cancel_my_session`, which is the only thing in this database that knows what
+-- a cancellation costs. See the header on why there is no pricing here.
+create or replace function public.pause_my_session_series(
+  p_series uuid,
+  p_from   date,
+  p_to     date,
+  p_reason text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid      uuid := auth.uid();
+  v_s        record;
+  v_today    date;
+  v_skip     uuid;
+  v_occ      record;
+  v_rep      jsonb;
+  v_freed    int := 0;
+  v_charged  int := 0;
+  v_fees     numeric := 0;
+  v_currency text := null;
+  v_mixed    boolean := false;
+  v_failed   int := 0;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  if p_from is null or p_to is null or p_from > p_to then
+    raise exception 'That is not a range of dates.' using errcode = '22023';
+  end if;
+
+  select ss.id, ss.tz, ss.status, ss.client_id
+    into v_s
+    from session_series ss
+   where ss.id = p_series and ss.client_id = v_uid
+     for update;
+  if not found then
+    -- The client's own arrangement, and nobody else's. A coach reaching this
+    -- would record a skip and free nothing, because cancel_my_session below
+    -- only frees sessions booked to the caller.
+    raise exception 'That standing appointment is not yours.' using errcode = '42501';
+  end if;
+  if v_s.status <> 'active' then
+    raise exception 'That standing appointment has already ended.' using errcode = '22023';
+  end if;
+
+  -- Today in the arrangement's own zone, exactly as the materialiser measures
+  -- it. A pause that ended yesterday is not a pause, it is a request to undo
+  -- sessions that have already happened, and this product does not do that.
+  v_today := (now() at time zone v_s.tz)::date;
+  if p_to < v_today then
+    raise exception 'That pause is entirely in the past.' using errcode = '22023';
+  end if;
+
+  insert into session_series_skips (series_id, from_on, to_on, created_by, reason)
+  values (p_series, greatest(p_from, v_today), p_to, v_uid,
+          nullif(btrim(coalesce(p_reason, '')), ''))
+  returning id into v_skip;
+
+  -- Every occurrence already written out inside the hole, oldest first so the
+  -- report reads in the order the member's calendar does.
+  for v_occ in
+    select s.id, s.starts_at
+      from sessions s
+     where s.series_id = p_series
+       and s.client_id = v_uid
+       and s.status = 'booked'
+       and s.occurrence_on between greatest(p_from, v_today) and p_to
+       and s.starts_at > now()
+     order by s.starts_at
+  loop
+    v_rep := public.cancel_my_session(v_occ.id);
+    if coalesce((v_rep ->> 'freed')::boolean, false) then
+      v_freed := v_freed + 1;
+      if coalesce((v_rep ->> 'charged')::boolean, false) then
+        v_charged := v_charged + 1;
+        v_fees := v_fees + coalesce((v_rep ->> 'fee')::numeric, 0);
+        -- Two fees in two different currencies are not a sum of money. If the
+        -- gym's currency changed between two occurrences the total is withheld
+        -- rather than added up, which is the rule src/lib/coachMoney.ts states
+        -- at length and the one thing a figure about somebody's money must not
+        -- get wrong.
+        if v_currency is null then v_currency := v_rep ->> 'currency';
+        elsif v_currency is distinct from (v_rep ->> 'currency') then v_mixed := true;
+        end if;
+      end if;
+    else
+      -- Refused, which at this point means it moved under us: somebody
+      -- cancelled it on another device between the select and the call.
+      -- Counted rather than raised — the pause itself is recorded and correct.
+      v_failed := v_failed + 1;
+    end if;
+  end loop;
+
+  return jsonb_build_object(
+    'skip_id', v_skip,
+    'from_on', greatest(p_from, v_today),
+    'to_on', p_to,
+    'freed', v_freed,
+    'charged', v_charged,
+    -- Null when nothing was charged, and null when the fees were in more than
+    -- one currency. A number with no unit is not an amount of money.
+    'fees', case when v_charged = 0 or v_mixed then null else v_fees end,
+    'currency', case when v_charged = 0 or v_mixed then null else v_currency end,
+    'mixed_currencies', v_mixed,
+    'not_freed', v_failed);
+end $fn$;
+
+revoke all on function public.pause_my_session_series(uuid, date, date, text) from public, anon;
+grant execute on function public.pause_my_session_series(uuid, date, date, text) to authenticated;
+
+comment on function public.pause_my_session_series(uuid, date, date, text) is
+  'Skip a standing appointment for a range of dates. Records the hole so the '
+  'materialiser does not fill it back in, and cancels the occurrences already '
+  'inside it through cancel_my_session, which is the only thing here that prices '
+  'a cancellation. See supabase/parts/244.';
+
+
+-- The same thing said in weeks, which is how a person going away says it.
+--
+-- THE DATES ARE COMPUTED HERE, NOT ON THE PHONE, and that is the whole reason
+-- this exists beside the function above. "Today" for a standing appointment is
+-- today IN THE ARRANGEMENT'S OWN ZONE — the zone `occurrence_on` is a date in
+-- and the zone the materialiser walks — and a member on holiday in Sydney
+-- pausing a London Tuesday would otherwise send Sydney's date and pause the
+-- wrong dates at both ends. The device cannot get this right without knowing
+-- the series' zone, and it is one line to get it right here.
+--
+-- `p_days` counts from today inclusive: 7 is this week, 14 a fortnight.
+create or replace function public.pause_my_session_series_for(
+  p_series uuid,
+  p_days   int,
+  p_reason text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_tz    text;
+  v_today date;
+begin
+  if p_days is null or p_days < 1 or p_days > 365 then
+    raise exception 'A pause is between one day and a year.' using errcode = '22023';
+  end if;
+  -- Only the zone is read here. Everything that authorises the pause — that
+  -- this is the caller's own arrangement, and that it is still active — is
+  -- decided by the function below, in one place, rather than half-checked twice.
+  select ss.tz into v_tz from session_series ss where ss.id = p_series;
+  if v_tz is null then
+    raise exception 'That standing appointment is not yours.' using errcode = '42501';
+  end if;
+  v_today := (now() at time zone v_tz)::date;
+  return public.pause_my_session_series(p_series, v_today, v_today + (p_days - 1), p_reason);
+end $fn$;
+
+revoke all on function public.pause_my_session_series_for(uuid, int, text) from public, anon;
+grant execute on function public.pause_my_session_series_for(uuid, int, text) to authenticated;
+
+comment on function public.pause_my_session_series_for(uuid, int, text) is
+  'Pause a standing appointment for N days from today IN THE ARRANGEMENT''S OWN '
+  'ZONE. The dates are computed here so a member abroad cannot pause the wrong '
+  'ones. Delegates to pause_my_session_series. See supabase/parts/244.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Resuming
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Removes the hole and writes the arrangement back out immediately, rather
+-- than leaving it to tomorrow's cron. A member who comes back early and is
+-- told "your Tuesdays will reappear at some point" has not been given their
+-- Tuesdays back.
+--
+-- `_materialise_session_series` is revoked from `authenticated`, and this
+-- function can still call it: EXECUTE is checked against the current user,
+-- which inside a SECURITY DEFINER function is its owner. That is the whole
+-- reason the internal function exists.
+--
+-- Dates that have already passed while paused do not come back — the
+-- materialiser never writes into the past, deliberately (part 135), and a week
+-- of sessions nobody attended appearing on a coach's calendar is exactly what
+-- that rule exists to stop.
+create or replace function public.resume_my_session_series(p_skip uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid    uuid := auth.uid();
+  v_series uuid;
+  v_rep    jsonb;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  delete from session_series_skips k
+   using session_series ss
+   where k.id = p_skip
+     and ss.id = k.series_id
+     and ss.client_id = v_uid
+  returning k.series_id into v_series;
+
+  if v_series is null then
+    -- Not theirs, or already lifted. A refusal rather than a fault, and said
+    -- as one: PostgREST reports a delete that matched nothing as a success,
+    -- which is how "resumed" gets printed over a pause that is still in place.
+    return jsonb_build_object('resumed', false, 'created', 0);
+  end if;
+
+  v_rep := public._materialise_session_series(v_series);
+  return jsonb_build_object(
+    'resumed', true,
+    'created', coalesce((v_rep ->> 'created')::int, 0),
+    'clashed_on', coalesce(v_rep -> 'clashed_on', '[]'::jsonb));
+end $fn$;
+
+revoke all on function public.resume_my_session_series(uuid) from public, anon;
+grant execute on function public.resume_my_session_series(uuid) to authenticated;
+
+comment on function public.resume_my_session_series(uuid) is
+  'Lift a pause and write the arrangement back out to the horizon at once. '
+  'Dates that passed while it was paused do not come back. See supabase/parts/244.';
+
+-- ▶ the-six-messages-a-coach-types-every-week.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- The six messages a coach types every week.
+--
+-- ── What was measured ───────────────────────────────────────────────────
+--
+-- Welcome, the note before a first session, rescheduling, the note after a
+-- block finishes, chasing paperwork, checking in. A coach with thirty clients
+-- writes each of them several times a month, from scratch, into a composer
+-- with no memory. About an hour a week, reported directly.
+--
+-- Nothing in this database could hold one. `nudge_drafts` does not exist;
+-- src/lib/nudge.ts composes a draft per client at read time and keeps nothing.
+-- So the composer forgot every good sentence a coach had ever written in it.
+--
+-- ── The rule this table does NOT change ─────────────────────────────────
+--
+-- A TEMPLATE IS NOT A SEND.
+--
+-- Nothing about this row automates anything. There is no trigger on it, no
+-- schedule, no "send to everyone tagged X", and no column that could carry one.
+-- A template lands in the coach's composer as editable text and the coach
+-- presses send — which is the rule supabase/parts/140 and src/lib/nudge.ts
+-- already hold and which was earned: `messages.sender` once came from the
+-- caller's own request, so a client could post into their own thread as their
+-- coach. A message composed under somebody's name without them reading it is
+-- the same defect with better manners.
+--
+-- That is why this table has no `auto_send_on`, no `trigger_event` and no
+-- audience. It is six paragraphs somebody wrote down.
+--
+-- ── Why the body is bounded and the placeholders are not validated here ──
+--
+-- 2000 characters, because a message longer than that is a document rather
+-- than a message and nobody reads it in a chat bubble — and because an
+-- unbounded text column is one paste accident away from a row nothing can
+-- render. The CHECK mirrors MAX_TEMPLATE_BODY in src/lib/messageTemplates.ts,
+-- so a body this database refuses is one the app refused first.
+--
+-- The `{name}` / `{coach}` placeholders are deliberately NOT enforced here. A
+-- template with no placeholder in it is perfectly good ("Session times move
+-- next week"), and a near-miss like `{Name}` is a thing to warn a person about
+-- while they are typing rather than to reject at the database, where the only
+-- available answer is an error message they will read as a fault.
+--
+-- Every new table gets RLS and explicit policies. Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.coach_message_templates (
+  id         uuid primary key default gen_random_uuid(),
+  -- The coach who wrote it. `profiles` and not `auth.users`, matching every
+  -- other coach-owned table here, so a deleted account takes its templates
+  -- with it rather than leaving orphan rows nobody can read or remove.
+  coach_id   uuid not null references public.profiles(id) on delete cascade,
+  title      text not null,
+  body       text not null,
+  -- Ordering in the picker. An integer the app spaces by 100 so a coach can put
+  -- one of their own between two others without renumbering the set.
+  position   integer not null default 100,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.coach_message_templates
+  drop constraint if exists coach_message_templates_title_chk;
+alter table public.coach_message_templates
+  add constraint coach_message_templates_title_chk
+  check (btrim(title) <> '' and length(title) <= 60);
+
+alter table public.coach_message_templates
+  drop constraint if exists coach_message_templates_body_chk;
+alter table public.coach_message_templates
+  add constraint coach_message_templates_body_chk
+  check (btrim(body) <> '' and length(body) <= 2000);
+
+-- Blank-is-null does not apply here: both columns are NOT NULL and the checks
+-- above refuse whitespace outright. A template with a blank name is a row the
+-- picker draws as an empty tappable line, which is worse than a refused save.
+
+create index if not exists coach_message_templates_by_coach
+  on public.coach_message_templates (coach_id, position, title);
+
+alter table public.coach_message_templates enable row level security;
+
+-- One policy, FOR ALL, and no second reader. A template is the coach's own
+-- private working note: no client may read one, no gym owner may read one, and
+-- there is no screen anywhere that shows another person's. Postgres uses a FOR
+-- ALL policy's USING expression as the insert check when no WITH CHECK is
+-- given, and the WITH CHECK is written out anyway rather than relied on — a
+-- policy whose write rule is implicit is a policy the next person edits in half.
+drop policy if exists cmt_self on public.coach_message_templates;
+create policy cmt_self on public.coach_message_templates for all
+  using (coach_id = auth.uid())
+  with check (coach_id = auth.uid());
+
+-- `updated_at` by trigger rather than by the app. The app can forget; a coach
+-- reading "edited 3 months ago" against a template they rewrote this morning
+-- would have no way to know which of the two was wrong.
+create or replace function public.coach_message_templates_touch()
+returns trigger language plpgsql as $function$
+begin
+  new.updated_at := now();
+  -- The owner is never taken from the payload on an update. Without this a
+  -- coach could move their own template onto another account by passing a
+  -- different coach_id — the WITH CHECK above would refuse it, but refusing at
+  -- the policy produces an error where pinning it produces the correct row.
+  new.coach_id := old.coach_id;
+  return new;
+end
+$function$;
+
+drop trigger if exists coach_message_templates_touch on public.coach_message_templates;
+create trigger coach_message_templates_touch
+  before update on public.coach_message_templates
+  for each row execute function public.coach_message_templates_touch();
+
+comment on table public.coach_message_templates is
+  'The messages a coach types every week, saved. Read into their composer and never sent by anything: there is deliberately no trigger, no schedule and no audience column on this table — a message composed under somebody''s name without them reading it is what supabase/parts/140 exists to prevent.';
+comment on column public.coach_message_templates.body is
+  'The message, with the {name} and {coach} placeholders the app fills in. Bounded at 2000 characters, mirroring MAX_TEMPLATE_BODY in src/lib/messageTemplates.ts. The placeholders are deliberately not validated here — a template with none is perfectly good, and a near-miss is worth a warning while somebody types rather than a database error.';
+comment on column public.coach_message_templates.position is
+  'Picker order. Spaced by 100 by the app so a new template can go between two existing ones without renumbering.';
+
+-- ▶ muting-the-11pm-ping-should-not-mute-the-declined-card.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- Muting the 11pm ping should not mute the declined card.
+--
+-- ── What was measured ───────────────────────────────────────────────────
+--
+-- app/(trainer)/settings.tsx has ONE switch: "Push Notifications". It does not
+-- filter sends — it deletes this handset's row from `push_tokens`, which is
+-- the table supabase/functions/send-push resolves recipients from — so it is
+-- all-or-nothing by construction, and that was deliberate and right for what
+-- it was for.
+--
+-- Behind it, src/lib/notifyInbox.ts catalogues roughly a dozen coach-directed
+-- triggers: a client's chat message, a booking, a cancellation, a slot
+-- re-opening, a coaching request, a document accepted, an intake coming back,
+-- a subscription starting, a subscription ENDING, a subscription PAYMENT
+-- FAILING, a package bought, a release signed, a review left.
+--
+-- So a coach who turns the switch off to stop chat messages arriving at 11pm
+-- also stops being told that a client's card was declined. They will not turn
+-- it back on, because turning it back on brings back the 11pm messages — and
+-- nothing anywhere tells them they have stopped hearing about their money.
+--
+-- ── Why this cannot be a device setting ─────────────────────────────────
+--
+-- src/lib/notifyPrefs.ts is the MEMBER's per-category control and it is
+-- scrupulous about its own limit: it offers a switch only for notifications
+-- this app schedules locally, and says on the screen that the remote ones
+-- follow the single switch. `CategoryDef.local` is that line.
+--
+-- Every coach-directed notification is remote. All of them. Some are sent by
+-- another person's handset (a client's message, a client's booking) and the
+-- rest are written server-side by a trigger or an edge function. There is no
+-- local half at all, so a device-local preference would be a switch reading
+-- "off" while the banner kept arriving — the exact shape of the defect
+-- src/lib/pushConsent.ts was written for.
+--
+-- The answer therefore lives here, and it is applied where the recipients are
+-- resolved: supabase/functions/send-push (every sendPush call site at once)
+-- and supabase/functions/notify-message (chat, which does not go through it).
+-- Same argument the master switch makes about `push_tokens`: the gate goes
+-- where a sender cannot route around it, because a check at the call site is a
+-- check somebody forgets at the twenty-fifth call site.
+--
+-- ── THE THREE RULES THE FILTER HOLDS, AND WHY EACH ONE ──────────────────
+--
+-- 1. NO ROW IS NOT AN ANSWER. Only an explicit `enabled = false` suppresses.
+--    The product default is on, the settings screen shows a switch on for an
+--    unanswered channel, and the two must agree — a screen showing "on" while
+--    the server suppressed the push would be the master switch's original bug
+--    pointing the other way.
+--
+-- 2. A FAILED READ SENDS. The edge functions treat an error reading this table
+--    as "not muted". The alternative is that a transient fault silently
+--    swallows a coach's notification that a subscription payment failed, with
+--    nothing anywhere to find that out from. Erring towards the notification
+--    is the recoverable error.
+--
+-- 3. IT SUPPRESSES THE PUSH AND NEVER THE RECORD. `notify_users()` (part 122)
+--    writes the `notifications` row before send-push is ever called, so a
+--    muted category is still in the coach's notifications list and still shows
+--    on the bell. Muting is "do not buzz my phone about this", not "do not
+--    tell me" — and that distinction is what makes it safe to offer for the
+--    money channel at all.
+--
+-- ── Why the channel is TEXT and not an enum ─────────────────────────────
+--
+-- The list will be tuned by somebody reading a support thread, and adding a
+-- value to an enum needs a type change and a lock. A CHECK is edited in one
+-- statement. The set mirrors `CoachChannel` in src/lib/coachNotify.ts, and the
+-- app drops a channel it does not recognise rather than acting on it — so a
+-- newer build writing a channel this one has never heard of cannot mute
+-- anything here by accident.
+--
+-- ── Why this is per ACCOUNT and the master switch is per HANDSET ────────
+--
+-- They are different questions. "This phone should stop receiving" is about a
+-- device — a coach hands their old handset to somebody and wants it silent.
+-- "I do not want to be told about paperwork" is about the person, and holding
+-- it per device would mean setting it again on every phone they sign into and
+-- finding it disagreeing with itself. The screen says which is which.
+--
+-- Not coach-only by construction: `user_id` is any profile. A member's
+-- preferences are src/lib/notifyPrefs.ts today and this table takes no view on
+-- whether they ever move here — nothing about the shape would have to change.
+--
+-- Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.notify_channel_prefs (
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  channel    text not null,
+  -- The answer. NOT NULL, because a null here would be a third state this
+  -- table has no meaning for — "no row" is already the way to say "never
+  -- answered", and two ways to say the same thing is how they come to be read
+  -- differently by two callers.
+  enabled    boolean not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, channel)
+);
+
+alter table public.notify_channel_prefs
+  drop constraint if exists notify_channel_prefs_channel_chk;
+alter table public.notify_channel_prefs
+  add constraint notify_channel_prefs_channel_chk
+  check (channel in ('chat', 'bookings', 'money', 'clients', 'admin'));
+
+-- The edge functions ask "which of these recipients has this channel off", so
+-- the index leads on the channel and carries the answer. Partial on `not
+-- enabled` because that is the only half either function ever looks for, and
+-- the table is then a handful of rows however many coaches have answered "on".
+create index if not exists notify_channel_prefs_muted
+  on public.notify_channel_prefs (channel, user_id) where not enabled;
+
+alter table public.notify_channel_prefs enable row level security;
+
+-- One policy, FOR ALL, and nobody else may read it. A coach's notification
+-- preferences are theirs: no gym owner, no client and no other coach has any
+-- business knowing which categories somebody has silenced, and a table that
+-- admitted an owner would make "why did you not answer me" a thing they could
+-- look up. The two edge functions run with the SERVICE ROLE and bypass this
+-- entirely, which is the whole reason the filter can live there.
+drop policy if exists ncp_self on public.notify_channel_prefs;
+create policy ncp_self on public.notify_channel_prefs for all
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+create or replace function public.notify_channel_prefs_touch()
+returns trigger language plpgsql as $function$
+begin
+  new.updated_at := now();
+  -- The owner is pinned on update for the same reason it is in part 250: the
+  -- WITH CHECK would refuse a moved row, and refusing produces an error where
+  -- pinning produces the correct row.
+  new.user_id := old.user_id;
+  return new;
+end
+$function$;
+
+drop trigger if exists notify_channel_prefs_touch on public.notify_channel_prefs;
+create trigger notify_channel_prefs_touch
+  before update on public.notify_channel_prefs
+  for each row execute function public.notify_channel_prefs_touch();
+
+comment on table public.notify_channel_prefs is
+  'Which categories of notification somebody has turned OFF. A row is only ever an explicit answer: no row means never answered, which the product default reads as on. Applied in supabase/functions/send-push and notify-message, where recipients are resolved — never at a call site. It suppresses the push and never the notifications row, so a muted category is still in the inbox.';
+comment on column public.notify_channel_prefs.enabled is
+  'False means muted. There is deliberately no null: "never answered" is said by the absence of the row, and two ways to say one thing is how two callers come to read it differently.';
+comment on column public.notify_channel_prefs.channel is
+  'Mirrors CoachChannel in src/lib/coachNotify.ts. A CHECK rather than an enum because this list will be tuned by somebody reading a support thread, and an enum change takes a lock.';
+
+-- ▶ repples-own-numbers-had-nobody-allowed-to-read-them.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- Repple's own numbers had nobody allowed to read them.
+--
+-- ── What was measured, and what turned out to be already fixed ──────────
+--
+-- docs/OWNER-PORTAL.md describes the platform's SaaS side — what trainers and
+-- gyms pay Repple — living in `subscriptions`, `invoices` and
+-- `billing_customers`, and says the screens for it were removed from the owner
+-- app. Correctly: `role = 'owner'` means a GYM owner, and a gym owner has no
+-- business seeing Repple's MRR.
+--
+-- The obvious worry on reading part 20 is that its policies grant SELECT to
+-- ANY account with `role = 'owner'`, with no tenant test — one gym's owner
+-- reading every other gym's trainers' plans and invoices. That is NOT open.
+-- Part 39 replaced `cust_read` and `sub_read` with tenant-scoped versions, and
+-- part 106 narrowed `inv_read` to the trainer alone. Both were checked before
+-- this part was written and neither is touched here. Part 20's text is the
+-- superseded version and is left exactly as it is: rewriting history in a part
+-- file is how a re-run stops being a re-run.
+--
+-- What IS missing is the other end. After those two parts, the reader set for
+-- the platform's own book is: the trainer themselves, and the owner of that
+-- trainer's own gym. Nobody at Repple is on that list. So "Repple's own
+-- numbers have no screen" is not a missing screen — it is a missing READER,
+-- and a screen built without this part would have shown its author an empty
+-- table and called it zero revenue.
+--
+-- ── Why an allowlist TABLE and not a role value ─────────────────────────
+--
+-- `profiles.role` is the obvious place and it is the wrong one, for a reason
+-- this codebase has already paid for once: the platform LETS PEOPLE SIGN UP AS
+-- AN OWNER. That is what made the pre-part-39 `owner-metrics` leak reachable
+-- by anybody who registered — the header of supabase/functions/owner-metrics
+-- spells it out. A fourth role would be one CHECK constraint and one signup
+-- form away from the same shape, and the failure would be silent.
+--
+-- An explicit table cannot be reached by signing up. It has no INSERT policy
+-- at all, for anybody: a row can only be written by the service role or by
+-- somebody with a SQL console, which is to say by the person who owns the
+-- project. It ships EMPTY, and an empty allowlist means every screen built on
+-- it says "not your console" to everybody, including its author, until a row
+-- is deliberately added.
+--
+-- ── What this does NOT widen ────────────────────────────────────────────
+--
+-- Nothing for gym owners. The three policies below are ADDITIVE and are
+-- separate policies rather than an extra `or` bolted onto the existing ones,
+-- which matters twice over:
+--
+--   · a re-run of part 39 or part 106 replaces their own policies and leaves
+--     these standing, so applying the parts in any order converges;
+--   · the reader set granted here is visible as its own line in
+--     `pg_policies`, named for what it is, instead of being an extra clause
+--     inside a policy about gym owners that somebody later "simplifies".
+--
+-- Postgres OR's permissive policies for the same command, so these add exactly
+-- one reader and take none away.
+--
+-- SELECT only. There is deliberately no write anywhere in this part: the
+-- platform's billing rows are written by Stripe's webhook with the service
+-- role and by nothing else, and an admin who could edit an invoice is an admin
+-- who can edit an invoice.
+--
+-- Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.platform_admins (
+  -- The account. `profiles` rather than `auth.users`, matching the rest of
+  -- this schema, so a deleted account takes its admin row with it rather than
+  -- leaving a dangling grant nothing renders.
+  user_id    uuid primary key references public.profiles(id) on delete cascade,
+  -- Why this person is on the list, in words, for whoever reads the table in
+  -- two years. Not an audit trail and not pretending to be one.
+  note       text,
+  added_at   timestamptz not null default now()
+);
+
+alter table public.platform_admins enable row level security;
+
+-- ── the ONLY policy on this table ───────────────────────────────────────
+--
+-- An admin may read their own row, and that is the whole of it. There is:
+--
+--   · no INSERT policy, so no authenticated account can add itself or anybody
+--     else. This is the property that makes the table safe;
+--   · no UPDATE and no DELETE policy, so nobody can remove somebody else from
+--     the list — or themselves, which would be an admin able to hide;
+--   · no read of OTHER admins' rows. A list of who at Repple has access is not
+--     something one of them needs from a browser, and a table that returned it
+--     would be a list of high-value accounts behind one leaked session.
+--
+-- The service role bypasses all of this, which is how a row gets in.
+drop policy if exists pa_self on public.platform_admins;
+create policy pa_self on public.platform_admins for select
+  using (user_id = auth.uid());
+
+-- ── the test the policies below use ─────────────────────────────────────
+--
+-- SECURITY DEFINER and `search_path` pinned, exactly as `is_owner_of` is
+-- (part 28), and for the same two reasons: the policies on the billing tables
+-- must not depend on the caller being able to read `platform_admins` through
+-- RLS, and a function used inside a policy with a mutable search_path is a
+-- function somebody can shadow.
+--
+-- STABLE, not VOLATILE: it is called once per row of a scan and the answer
+-- cannot change within a statement.
+create or replace function public.is_platform_admin()
+returns boolean language sql stable security definer set search_path to 'public', 'pg_temp'
+as $function$
+  select exists (select 1 from public.platform_admins pa where pa.user_id = auth.uid());
+$function$;
+
+revoke all on function public.is_platform_admin() from public, anon;
+grant  execute on function public.is_platform_admin() to authenticated;
+
+-- ── the three reads ─────────────────────────────────────────────────────
+--
+-- Named for the reader rather than for the table, so `pg_policies` says who
+-- these are for. Each is additive: the trainer's own policy and the gym
+-- owner's tenant-scoped one (parts 39 and 106) are untouched and still apply.
+drop policy if exists sub_platform_admin on public.subscriptions;
+create policy sub_platform_admin on public.subscriptions for select
+  using (public.is_platform_admin());
+
+drop policy if exists inv_platform_admin on public.invoices;
+create policy inv_platform_admin on public.invoices for select
+  using (public.is_platform_admin());
+
+drop policy if exists cust_platform_admin on public.billing_customers;
+create policy cust_platform_admin on public.billing_customers for select
+  using (public.is_platform_admin());
+
+-- The names behind the ids. Without this the platform screen can count
+-- subscriptions and cannot say whose — and `profiles` is the one table where
+-- widening a read is worth stating out loud rather than doing quietly.
+--
+-- Deliberately NOT added. `profiles` already carries several policies and the
+-- platform screen does not need a name to answer "what is Repple's MRR" — it
+-- needs a count, a plan and a status, all of which are on `subscriptions`
+-- itself. A screen that wanted to name a trainer would be a different screen
+-- with a different argument to make, and it would be making it about every
+-- person on the platform at once.
+
+comment on table public.platform_admins is
+  'Who at Repple may read the platform''s own billing. An explicit allowlist and NOT a profiles.role value, because the platform lets people sign up as an owner — which is exactly how the pre-part-39 owner-metrics leak was reachable. It has no INSERT, UPDATE or DELETE policy for anybody: a row can only be written by the service role. It ships empty, and an empty allowlist means the platform screen refuses everybody until somebody is deliberately added.';
+comment on column public.platform_admins.note is
+  'Why this person is on the list, for whoever reads this table in two years. Not an audit trail.';
+comment on function public.is_platform_admin() is
+  'True when the caller is on the platform_admins allowlist. SECURITY DEFINER with a pinned search_path, like is_owner_of, so the billing policies do not depend on the caller being able to read platform_admins through RLS.';

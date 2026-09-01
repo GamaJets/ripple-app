@@ -37,15 +37,17 @@
 // asked to be erased that they never asked, which is the one wrong answer here.
 import { useState, useEffect, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
-import { View, Text, Pressable, ScrollView, Alert, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, ListRow, Ghost, fig } from '../../src/ui/kit';
 import { RepdbAttribution } from '../../src/ui/Attribution';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
@@ -55,9 +57,21 @@ import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
 import { restSoundNote, type SoundPlatform } from '../../src/lib/restTimer';
 import { SOUNDS_AVAILABLE } from '../../src/ui/sounds';
-import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
-import { shareTextFile } from '../../src/lib/exportShare';
+import {
+  exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt,
+  readMyFile, MY_DATA_FILENAME, type ExportFile,
+} from '../../src/lib/gdpr';
+import { shareTextFile, shareBinaryFile, fileShareBlocker } from '../../src/lib/exportShare';
+// What the export claims to hold, what a short one says, and what deleting an
+// account actually does to the FILES. All of it in one place so the sentences a
+// member reads at the two most consequential moments in this app can be
+// asserted under `npm test` without a device.
+import {
+  fileSizeLabel, filesRowNote, saveFileFailure, incompleteExportLine,
+  DELETION_FILES_NOTE, EXPORT_ROW_NOTE,
+} from '../../src/lib/dataExport';
 import { reportError } from '../../src/lib/reportError';
+import { appLocale } from '../../src/lib/locale';
 
 /**
  * Which phone the rest-timer sound note is about.
@@ -145,12 +159,15 @@ function requestedDay(iso: string | null): string {
   if (!iso) return fig(null);
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return fig(null);
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  return d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 export default function Settings() {
   const t = useTheme();
   const router = useRouter();
+  // Whether this phone can reach us, so a refusal and a basement do not get the
+  // same sentence. See src/lib/reachability.ts.
+  const reach = useReachability();
   const st = useSettings();
   const auth = useAuth();
   const lock = useAppLock();
@@ -254,6 +271,13 @@ export default function Settings() {
   const lengthNote = deviceUnitNote(st.lengthUnit, st.lengthSource) ?? convertedNote(st.lengthUnit);
   const [legal, setLegal] = useState<'privacy' | 'terms' | null>(null);
   const [dataBusy, setDataBusy] = useState(false);
+  // The manifest from the last export, and whether the read behind it finished.
+  // Held rather than re-fetched so "Save My Files" lists exactly what the file
+  // the member is holding says they have — the two must not disagree.
+  const [files, setFiles] = useState<ExportFile[] | null>(null);
+  const [filesComplete, setFilesComplete] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [savingPath, setSavingPath] = useState<string | null>(null);
   // null = not read yet · 'failed' = the read itself failed · otherwise the
   // answer, whose requestedAt is null when there is genuinely no request. Those
   // three must never collapse into one another, so they are one value, not a
@@ -275,22 +299,67 @@ export default function Settings() {
     if (dataBusy) return; setDataBusy(true);
     try {
       const res = await exportMyDataDetailed();
-      await shareTextFile(res.json, 'repple-my-data.json', 'application/json', 'Export my data');
+      // The filename comes from the brand, not from a literal. A member of a
+      // white-labelled chain saving `repple-my-data.json` has been handed a file
+      // named after a company they do not deal with, and it is the name they
+      // will search for in two years — the argument is in src/lib/gdpr.ts and
+      // this screen was the one place still ignoring it.
+      await shareTextFile(res.json, MY_DATA_FILENAME, 'application/json', 'Export my data');
+      // The manifest, so the files can be saved from the row below. Kept
+      // whether or not the export was complete, along with WHETHER it was —
+      // a count over a short read is the same defect as an empty table over a
+      // refused one.
+      setFiles(res.files);
+      setFilesComplete(res.complete);
       if (!res.complete) {
         // A partial export handed over silently is the same failure one level
-        // up: somebody deletes their account believing they have a copy.
+        // up: somebody deletes their account believing they have a copy. The
+        // parts are NAMED rather than counted, because "3 parts" tells nobody
+        // whether their payments are in the file.
         Alert.alert(
           'That copy is incomplete',
-          `${res.failed.length} part${res.failed.length === 1 ? '' : 's'} of your record could not be read `
-          + `(${res.failed.map((f) => f.table).join(', ')}). The file has been saved and says so inside, `
-          + 'but do not treat it as a full copy, and do not delete your account on the strength of it. '
-          + 'Try again in a moment, or email support@repplefitness.com.',
+          incompleteExportLine(res.failed.map((f) => f.table), BRAND.supportEmail),
         );
       }
     } finally { setDataBusy(false); }
   };
+
+  /**
+   * Hand one of the member's own files to the share sheet.
+   *
+   * One at a time, and that is not a limitation being apologised for: the share
+   * sheet takes one file, and a member's message attachments can be 64 MB of
+   * video each (supabase/parts/124), so a bundle assembled in memory is a crash
+   * at the exact moment somebody is taking their last copy.
+   *
+   * `shareBinaryFile` reports whether it actually landed. A silent success here
+   * would be somebody believing they have saved a physiotherapy report they
+   * have not.
+   */
+  const saveFile = async (f: ExportFile) => {
+    if (savingPath) return;
+    setSavingPath(f.path);
+    try {
+      const b64 = await readMyFile(f.bucket, f.path);
+      if (!b64) { Alert.alert('Not saved', saveFileFailure(fileShareBlocker())); return; }
+      // The object key's last segment. It is the name this app chose at upload
+      // and is already safe on every platform (see `injuryDocObjectPath` and
+      // `messageAttachmentPath`), so nothing here has to invent one.
+      const name = f.path.split('/').pop() || 'file';
+      const ok = await shareBinaryFile(b64, name, 'application/octet-stream', 'Save this file');
+      if (!ok) Alert.alert('Not saved', saveFileFailure(fileShareBlocker()));
+    } finally { setSavingPath(null); }
+  };
   const deleteAccount = () => {
-    Alert.alert('Delete your account?', 'This requests permanent deletion of your account and all your data. This cannot be undone.', [
+    // The files are named, and what actually happens to them is stated rather
+    // than smoothed over. This alert used to say nothing about them at all, so
+    // somebody deleting their account had no reason to think their
+    // physiotherapy report was anywhere but gone with it.
+    Alert.alert(
+      'Delete your account?',
+      'This requests permanent deletion of your account and all your data. This cannot be undone.\n\n'
+      + DELETION_FILES_NOTE,
+      [
       { text: 'Keep my account', style: 'cancel' },
       // The failure branch used to say "We've recorded your request", which was a
       // claim the app could not stand behind — request_account_deletion() had
@@ -300,10 +369,16 @@ export default function Settings() {
       { text: 'Request deletion', style: 'destructive', onPress: async () => {
         const ok = await requestAccountDeletion();
         await loadDeletion();
-        if (!ok) { Alert.alert('Not requested', "We couldn't record your request just now, so nothing has been scheduled. Check your connection and try again, or email support@repplefitness.com from the address on your account."); return; }
+        // "Check your connection" was printed here whatever had happened, and
+        // account deletion is the worst screen in the app to say it on: a
+        // request the server READ and declined is a policy answer, and sending
+        // somebody to their router over it means they try again, and again,
+        // with no idea why. `retryLine` says which — src/lib/reachability.ts.
+        if (!ok) { Alert.alert('Not requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email support@repplefitness.com from the address on your account.`); return; }
         Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. You have been signed out.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch { /* ignore */ } } }]);
       } },
-    ]);
+      ],
+    );
   };
   const withdrawDeletion = () => {
     Alert.alert('Withdraw your deletion request?', 'Your account and everything in it will be kept. You can ask to be deleted again at any time.', [
@@ -314,7 +389,7 @@ export default function Settings() {
           const ok = await withdrawAccountDeletion();
           if (!ok) {
             reportError('settings.withdrawDeletion', new Error('withdraw_account_deletion did not clear the request'));
-            Alert.alert('Not withdrawn', 'Your deletion request is still in place — nothing has changed. Check your connection and try again, or email support@repplefitness.com from the address on your account.');
+            Alert.alert('Not withdrawn', `Your deletion request is still in place — nothing has changed. ${retryLine(reach)} You can also email support@repplefitness.com from the address on your account.`);
             return;
           }
           // Re-read rather than assume: what the screen shows next comes from the
@@ -416,9 +491,25 @@ export default function Settings() {
         <Section>
           <SectionHead title="Your Data" />
           <Pressable onPress={exportData} accessibilityRole="button" accessibilityLabel="Export my data">
-            <Row t={t} first label={dataBusy ? 'Preparing Export…' : 'Export My Data'} sub="Download everything we store about you (JSON)"
+            {/* The note names the money and the bookings, because the whole
+                defect was that it had neither and nobody could tell. It promises
+                a LIST of files rather than the files: those are saved one at a
+                time from the row below, and a JSON bundle cannot carry them. */}
+            <Row t={t} first label={dataBusy ? 'Preparing Export…' : 'Export My Data'} sub={EXPORT_ROW_NOTE}
               right={<Text style={{ ...ty.head, color: t.brand }}>{'⤓'}</Text>} />
           </Pressable>
+          {/* Only after an export, because the manifest is what the export
+              produced and this row must list exactly what that file says the
+              member has. `filesRowNote` refuses to state a count over a read
+              that came back short. */}
+          {files !== null ? (
+            <Pressable onPress={() => setFilesOpen(true)} accessibilityRole="button"
+              accessibilityLabel="Save my files" disabled={files.length === 0}
+              accessibilityState={{ disabled: files.length === 0 }}>
+              <Row t={t} label="Save My Files" sub={filesRowNote(files.length, filesComplete)}
+                right={files.length > 0 ? <Icon name="chevron" size={15} color={t.ink3} /> : undefined} />
+            </Pressable>
+          ) : null}
           {deletion === null ? (
             // Not read yet. Deliberately not pressable: requesting again would
             // reset deletion_requested_at, restarting somebody's 30 days.
@@ -505,6 +596,47 @@ export default function Settings() {
 
         <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>{BRAND.label} · made for coaches &amp; their clients</Text>
       </ScrollView>
+
+      {/* ── your files ──────────────────────────────────────────────────────
+          One at a time, and that is not an apology. The share sheet takes one
+          file, and a member's message attachments can be 64 MB of video each
+          (supabase/parts/124) — a bundle assembled in memory is a crash at the
+          exact moment somebody is taking the last copy of their records.
+
+          Every row says what the file is in words rather than showing a storage
+          key, and the injury documents say plainly that nobody else can see
+          them, because that is the promise the rest of the product makes about
+          them and this is the one screen where the member gets them back. */}
+      <Modal visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
+          <Text style={{ ...ty.title, color: t.ink }}>Your files</Text>
+          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>
+            {filesRowNote(files?.length ?? 0, filesComplete)} Tap one to save it to your phone.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {(files ?? []).map((f, i) => (
+              <View key={f.path}>
+                {i > 0 ? <Rule /> : null}
+                <Pressable onPress={() => { void saveFile(f); }} disabled={!!savingPath}
+                  accessibilityRole="button" accessibilityLabel={`Save ${f.what}`}
+                  accessibilityState={{ disabled: !!savingPath }}
+                  style={{ paddingVertical: sp.md, opacity: savingPath && savingPath !== f.path ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink }}>{f.what}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {savingPath === f.path ? 'Saving…' : fileSizeLabel(f.sizeBytes)}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+            <Pressable onPress={() => setFilesOpen(false)} accessibilityRole="button"
+              accessibilityLabel="Close your files"
+              style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Done</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

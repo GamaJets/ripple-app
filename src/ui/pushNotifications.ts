@@ -10,6 +10,7 @@ import { pushConsent } from '../lib/pushConsent';
 import { allows, hourToDeliver, whenToDeliver, type NotifyCategory } from '../lib/notifyPrefs';
 import { notifyPrefs } from '../lib/notifyPrefsLatch';
 import { VARIANT, type AppVariant } from '../lib/variant';
+import type { CoachChannel } from '../lib/coachNotify';
 
 let Notifications: any = null;
 let Device: any = null;
@@ -82,6 +83,25 @@ export async function recordInbox(
   } catch { return 0; }
 }
 
+/**
+ * Which category of coach notification this send belongs to.
+ *
+ * OPTIONAL, and the optionality is the compatibility story: a send with no
+ * channel is not filtered by the edge function at all, so every existing call
+ * site keeps working unchanged and nothing is suppressed by a preference the
+ * recipient was never shown a switch for.
+ *
+ * Passed straight through to send-push and applied THERE, where the recipients
+ * are resolved — not here, and not at the call sites. Same argument the master
+ * switch makes about `push_tokens`: a check at the call site is a check
+ * somebody forgets at the next one, and the gate has to be somewhere a sender
+ * cannot route around. See src/lib/coachNotify.ts.
+ *
+ * It suppresses the PUSH and never the inbox row: `recordInbox` below runs
+ * regardless, so a muted category is still in the coach's notifications list.
+ */
+export type PushChannel = CoachChannel;
+
 /** Fire a remote push to specific users via the send-push edge function.
  *  Best-effort and safe to call today: no tokens / undeployed function → silent
  *  no-op. Recipients receive it once they're on a push-enabled build.
@@ -90,12 +110,12 @@ export async function recordInbox(
  *  here, because this function's whole contract is that it does not make the
  *  caller wait and does not report. A caller that needs to know used
  *  sendPushChecked() already. */
-export async function sendPush(userIds: string[], title: string, body: string, data?: Record<string, unknown>): Promise<void> {
+export async function sendPush(userIds: string[], title: string, body: string, data?: Record<string, unknown>, channel?: PushChannel): Promise<void> {
   if (!USE_SUPABASE) return;
   const ids = (userIds || []).filter(Boolean);
   if (!ids.length) return;
   void recordInbox(ids, title, body, data).catch(() => { /* best-effort, like the send */ });
-  try { supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {} } }).then(() => {}, () => {}); } catch { /* best-effort */ }
+  try { supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {}, ...(channel ? { channel } : {}) } }).then(() => {}, () => {}); } catch { /* best-effort */ }
 }
 
 /** Same send, but awaited and reporting what happened. Use this anywhere the UI
@@ -109,7 +129,7 @@ export async function sendPush(userIds: string[], title: string, body: string, d
  *  `ok` still means exactly what it meant, which is "the send-push function
  *  accepted this". A screen that wants to say "they will see it next time they
  *  open the app" now has something true to say it on. */
-export async function sendPushChecked(userIds: string[], title: string, body: string, data?: Record<string, unknown>): Promise<{ ok: boolean; error?: string; recorded: number }> {
+export async function sendPushChecked(userIds: string[], title: string, body: string, data?: Record<string, unknown>, channel?: PushChannel): Promise<{ ok: boolean; error?: string; recorded: number }> {
   if (!USE_SUPABASE) return { ok: false, error: 'Not connected to the server.', recorded: 0 };
   const ids = (userIds || []).filter(Boolean);
   if (!ids.length) return { ok: false, error: 'Nobody to send to.', recorded: 0 };
@@ -119,7 +139,7 @@ export async function sendPushChecked(userIds: string[], title: string, body: st
   // should be the one that survives.
   const recorded = await recordInbox(ids, title, body, data);
   try {
-    const { error } = await supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {} } });
+    const { error } = await supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {}, ...(channel ? { channel } : {}) } });
     if (error) return { ok: false, error: error.message, recorded };
     return { ok: true, recorded };
   } catch (e: any) {

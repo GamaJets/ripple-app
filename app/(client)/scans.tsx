@@ -46,6 +46,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { useTheme } from '../../src/ui/components';
+import { useToast } from '../../src/ui/toast';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
@@ -392,6 +393,7 @@ export default function Scans() {
   const weightNote = convertedNote(wu);
   // `null` is "not asked yet, or the ask failed" — never "you have none".
   // `[]` is "asked, and there are none". They render differently below.
+  const toast = useToast();
   const [photos, setPhotos] = useState<ProgressPhoto[] | null>(null);
   const [photosErr, setPhotosErr] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -721,18 +723,43 @@ export default function Scans() {
     }
   };
 
+  /**
+   * Delete a progress photo, with six seconds to change your mind.
+   *
+   * This used to be a modal whose own copy said "this cannot be undone", and
+   * it was telling the truth: the moment Delete was tapped the file came off
+   * storage and the row went with it. The dialog was the only thing standing
+   * between a mis-tap and a picture nobody can get back, and a dialog people
+   * have learned to tap through is not a thing standing anywhere.
+   *
+   * The photo leaves the grid immediately and the WRITE is held for six
+   * seconds behind an Undo, so the sentence in that dialog is no longer true —
+   * see src/lib/undoable.ts for why holding the write is what makes the undo
+   * reliable rather than best-effort.
+   *
+   * One thing the bar says that the dialog said and this must keep saying: a
+   * photo the coach was sent comes back from them too. And one thing it does
+   * not claim — while the six seconds are running the photo is still on the
+   * server and the coach can still open it. It is a delete that has not
+   * happened yet, not a delete that has happened invisibly.
+   */
   const removePhoto = (p: ProgressPhoto) => {
     const sentToCoach = shareStateOf(p.id, shares) === 'sent';
-    Alert.alert('Delete this photo?', (sentToCoach
-        ? 'Your coach was sent this one — deleting it takes it back from them as well. '
-        : '')
-      + 'The picture is deleted from storage and removed from your progress. This cannot be undone — your camera roll is not touched.', [
-      { text: 'Keep it', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
+    setPhotos((ps) => (ps ? ps.filter((x) => x.id !== p.id) : ps));
+    setCmp((c) => c.filter((x) => x !== p.id));
+    toast.remove({
+      id: p.id,
+      text: sentToCoach
+        ? 'Photo deleted, and taken back from your coach.'
+        : 'Photo deleted. Your camera roll is untouched.',
+      // Re-read rather than splice the row back in at a remembered index. The
+      // photo was never deleted, so the server is the shortest true answer to
+      // what the grid should now contain.
+      onUndo: () => { void loadPhotos(); },
+      onCommit: async () => {
         setPhotoBusy(true);
         try {
           await deleteProgressPhoto(p);
-          setCmp((c) => c.filter((x) => x !== p.id));
           await loadPhotos();
           // The grant is removed by the database (the row cascades with the
           // photo), but this screen must not go on drawing a "Sent to coach"
@@ -742,12 +769,15 @@ export default function Scans() {
         } catch (e) {
           reportError('scans.photos.delete', e);
           // The file comes off storage BEFORE the row, so a failure here means
-          // nothing was removed. Say exactly that rather than "something went
-          // wrong" — the difference is whether the photo is still there.
+          // nothing was removed. Still an alert, and deliberately: the grid is
+          // about to put the photo back and the member has to know why. Say
+          // exactly what happened rather than "something went wrong" — the
+          // difference is whether the photo is still there.
+          await loadPhotos();
           Alert.alert('Still there', 'That photo could not be deleted, so nothing was removed. Try again in a moment.');
         } finally { setPhotoBusy(false); }
-      } },
-    ]);
+      },
+    });
   };
 
   /** Send ONE photo. The confirmation says "this one photo, and only this one"
@@ -768,7 +798,7 @@ export default function Scans() {
           // on the strength of a request that was never confirmed.
           const g = await sharePhoto(p.id, c.id);
           setShares((s) => (s === null ? [g] : [g, ...s.filter((x) => x.photoId !== g.photoId)]));
-          Alert.alert('Sent', `${who} can now open this photo. It is listed under "Your coach can see" below until you take it back.`);
+          toast.say(`Sent. ${who} can now open this photo until you take it back.`);
         } catch (e) {
           reportError('scans.photos.share', e);
           Alert.alert('Not sent', `That photo was not sent, so ${who} still cannot see it. Nothing about your photos has changed. Try again in a moment.`);

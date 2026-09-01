@@ -190,6 +190,18 @@ const STRANGER = '1efee95c-f17d-47b7-bff8-fcc11c7c8d65';
     unsentNote('they', 'send', 'video')]) {
     ok(n.startsWith('Not sent'), `"${n}" leads with the fact that it did not go`);
   }
+  // A message held on this phone because there is no signal is NOT the same
+  // event as one the server refused, and the two sentences have to differ. This
+  // one has to hold both halves at once: the words are safe, and nobody has
+  // read them.
+  eq(unsentNote('your coach', 'queued', null), 'Waiting to send — your coach cannot see this yet',
+    'a queued message says it is waiting, not that it failed');
+  ok(!unsentNote('your coach', 'queued', null).startsWith('Not sent'),
+    'and specifically does not lead with a failure that did not happen');
+  ok(/cannot see/.test(unsentNote('they', 'queued', null)),
+    'while still saying plainly that the other person does not have it');
+  ok(unsentNote('your coach', 'queued', null) !== unsentNote('your coach', 'send', null),
+    'if these ever collapse to one sentence, a member cannot tell a basement from a refusal');
   eq(attachmentNoun('image'), 'photo', 'the word for an image in a sentence');
   eq(attachmentNoun('video'), 'video', 'and for a video');
 }

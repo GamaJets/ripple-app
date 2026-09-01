@@ -53,23 +53,43 @@
 //                whose link could not be signed. It says so. It never renders
 //                as a message with nothing attached, which would be a photo
 //                the sender believes arrived and the reader never saw.
+//
+// ── A way out of a conversation that carries photographs ──────────────────
+//
+// The thread above accepts a photo or a 30-second video in either direction and
+// had no block and no report — a private surface carrying user-generated media
+// between two named adults, with no moderation path for the person receiving
+// it. Both now exist, and the enforcement is at the database, not here
+// (supabase/parts/240): a block is a row the WITH CHECK on the message policies
+// and on the storage INSERT policy reads, so a blocked message is REFUSED and
+// the file has nowhere to land. This screen can therefore be stale about the
+// block and cost only a sentence, never the protection.
+//
+// Two ways in, because they are two different moments. The header control is
+// for "I want this to stop"; a long press on a bubble is for "look at THIS",
+// and it is the one that files a report carrying the message itself — copied
+// into the report row, so deleting the message afterwards cannot empty it.
 import { useRef } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Image, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Image, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule } from '../../src/ui/kit';
+import { Rule, Flag } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModules';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { attachmentNoun, unsentNote } from '../../src/lib/messageAttachments';
 import {
-  useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment,
+  blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
+  reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
+} from '../../src/lib/threadSafety';
+import {
+  useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
   type AttachSource, type PendingAttachment, type ThreadMessage,
 } from '../../src/ui/messaging';
 
@@ -156,11 +176,29 @@ export default function Messages() {
   const router = useRouter();
   const peer = useThreadPeerName('client', null);
   const head = peerHeading(peer, 'coach');
-  const { messages: msgs, send, status, unsent } = useThread(null, 'client');
+  const { messages: msgs, send, status, unsent, cachedNote } = useThread(null, 'client');
+  // The block and the report. Its state is deliberately allowed to be stale or
+  // unread: the database refuses a blocked write regardless, so being wrong
+  // here costs a sentence rather than the protection. See src/lib/threadSafety.
+  const safety = useThreadSafety(null, 'client');
   const [text, setText] = useState('');
   const [pending, setPending] = useState<PendingAttachment | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which message is being reported, or null for the conversation as a whole.
+  // `open` is separate from the id because reporting the conversation is a
+  // legitimate report with no message on it — the abuse was the sum of it, or
+  // the message has already been deleted by the person who sent it.
+  const [reportFor, setReportFor] = useState<{ open: true; messageId: string | null } | null>(null);
+  const [reportNote, setReportNote] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
   const scRef = useRef<ScrollView>(null);
+  // "your coach" rather than their name, and everywhere on this surface. A name
+  // that could not be read renders as a dash, and a dash as the subject of
+  // "— will not be able to send you messages" reads as the screen having broken
+  // at the exact moment somebody needs to trust it (scripts/check-prose.mjs).
+  const OTHER = 'your coach';
+  const blockNote = blockedComposerNote(safety.state, OTHER);
+  const canSend = canSendInto(safety.state);
 
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
@@ -182,6 +220,46 @@ export default function Messages() {
   // the failure being swallowed with it: a send that did not go says so here,
   // as well as leaving the bubble marked, because the alert is what reaches
   // somebody who is about to put their phone away.
+  /**
+   * Block, or lift a block. Confirmed first, and the confirm says the three
+   * things a block does NOT do — it is a control somebody reaches for under
+   * pressure, and the fear that it cancels their sessions is what stops people
+   * using it.
+   */
+  const onSafety = () => {
+    const blocked = safety.state === 'blocked-by-me';
+    const c = blocked ? unblockConfirm(OTHER) : blockConfirm(OTHER);
+    Alert.alert(c.title, c.body, [
+      { text: 'Not Now', style: 'cancel' },
+      {
+        text: blocked ? 'Unblock' : 'Block',
+        style: blocked ? 'default' : 'destructive',
+        onPress: async () => {
+          const r = blocked ? await safety.unblock() : await safety.block();
+          if (!r.ok) { Alert.alert(blocked ? 'Not unblocked' : 'Not blocked', r.error ?? 'That did not save.'); return; }
+          Alert.alert(
+            blocked ? 'Unblocked' : 'Blocked',
+            blocked
+              ? `${OTHER.charAt(0).toUpperCase()}${OTHER.slice(1)} can message you again. Any report you made stays on record.`
+              : `Nothing more can be sent either way. Everything already here is kept, so you can still read it and still report it.`,
+          );
+        },
+      },
+    ]);
+  };
+
+  /** File the report the sheet has collected. `id` coming back is the row
+   *  existing — a call that merely did not raise is not a report. */
+  const fileReport = async (category: ReportCategory) => {
+    if (reportBusy || !reportFor) return;
+    setReportBusy(true);
+    const res = await safety.report(category, reportNote, reportFor.messageId);
+    setReportBusy(false);
+    if (!res.id) { Alert.alert('Not reported', res.error ?? 'That did not save.'); return; }
+    setReportFor(null); setReportNote('');
+    Alert.alert('Reported', reportFiledLine(category, safety.state));
+  };
+
   const onSend = async () => {
     if (busy) return;
     if (!text.trim() && !pending) return;
@@ -190,7 +268,11 @@ export default function Messages() {
     setText(''); setPending(null); setBusy(true);
     const res = await send(body, att);
     setBusy(false);
-    if (!res.ok && res.reason) Alert.alert('Not sent', res.reason);
+    // Three outcomes, not two. A message held on this phone because there is no
+    // signal is not a message that failed: the words are safe, they are marked
+    // under the bubble as waiting, and they go on their own. Heading it "Not
+    // sent" would tell somebody to type it again.
+    if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to send' : 'Not sent', res.reason);
   };
   const fmt = (iso: string) => { const d = new Date(iso); const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
   const G = layout.gutter;
@@ -220,6 +302,16 @@ export default function Messages() {
           <Text style={{ ...ty.head, color: head.isName ? t.ink : t.ink3, marginTop: 2, textTransform: head.isName ? 'capitalize' : 'none' }} numberOfLines={1}>{head.text}</Text>
           {head.note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{head.note}</Text> : null}
         </View>
+        {/* The way out. In the header rather than buried in a menu, because a
+            moderation path somebody has to go looking for is one they use after
+            it has already gone wrong. The icon carries no status colour — the
+            state is said in words under the composer. */}
+        <Pressable onPress={onSafety} accessibilityRole="button" hitSlop={8}
+          accessibilityLabel={blockActionLabel(safety.state, OTHER)}
+          accessibilityHint="Block this conversation, or report a message in it"
+          style={{ width: 34, height: 34, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="lock" size={16} color={t.ink2} />
+        </Pressable>
       </View>
       <Rule />
       {/* The compose bar is lifted by measurement rather than by
@@ -227,6 +319,11 @@ export default function Messages() {
           navigator header and left the keyboard sitting over the field you were
           typing into. See `src/ui/keyboardLift.ts` for why. */}
       <View style={{ flex: 1, paddingBottom: lift }}>
+        {/* This conversation came off the phone, not off the server. Said
+            once, above the thread, because a member reading a cached thread as
+            a live one believes they have heard everything — and the message
+            that is missing is the one that arrived after the signal went. */}
+        {cachedNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingTop: sp.sm }}>{cachedNote}</Flag> : null}
         <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled">
           {msgs.map((m) => {
             const mine = m.sender === 'client';
@@ -238,7 +335,17 @@ export default function Messages() {
             const kind = m.local?.kind ?? (m.attachment.state === 'ok' ? m.attachment.attachment.kind : null);
             const hasMedia = m.attachment.state !== 'none' || !!m.local;
             return (
-              <View key={m.id} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '82%', marginBottom: sp.md }}>
+              // A long press on ANY bubble opens the report, and only a bubble
+              // that is not this reader's own is worth reporting — reporting
+              // yourself is not a thing, and offering it would make the gesture
+              // read as something else. Wrapped rather than replacing the View
+              // so nothing about how a bubble draws depends on this.
+              <Pressable key={m.id} disabled={mine}
+                onLongPress={() => { setReportNote(''); setReportFor({ open: true, messageId: m.id.startsWith('local-') ? null : m.id }); }}
+                accessibilityRole={mine ? undefined : 'button'}
+                accessibilityLabel={mine ? undefined : 'Report this message'}
+                accessibilityHint={mine ? undefined : 'Opens the report options for this message'}
+                style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '82%', marginBottom: sp.md }}>
                 {hasMedia ? (
                   <View style={{ marginBottom: m.body ? sp.xs : 0, alignSelf: mine ? 'flex-end' : 'flex-start', overflow: 'hidden', borderRadius: radius.md }}>
                     <Attachment m={m} />
@@ -258,7 +365,7 @@ export default function Messages() {
                     {stage ? unsentNote('your coach', stage, kind) : m.sending ? 'Sending…' : fmt(m.createdAt)}
                   </Text>
                 </View>
-              </View>
+              </Pressable>
             );
           })}
           {/* An empty thread that failed to load is not an empty thread. */}
@@ -287,22 +394,84 @@ export default function Messages() {
             </Pressable>
           </View>
         ) : null}
+        {/* Why the box below will not send. Said in words rather than by a
+            greyed-out button with no explanation, and it says the history is
+            kept — a member who thinks blocking deleted the conversation has
+            lost the evidence they might want to report. Nothing here is drawn
+            on an unread state: `blockedComposerNote` returns null for that,
+            and the composer stays live, because the server refuses a blocked
+            write anyway and gagging somebody nobody blocked is the worse
+            error. */}
+        {blockNote ? (
+          <View style={{ paddingHorizontal: G, paddingTop: sp.md }}>
+            <Flag tone={t.warn}>{blockNote}</Flag>
+          </View>
+        ) : null}
         <View ref={barRef} style={{ flexDirection: 'row', gap: sp.sm, paddingHorizontal: G, paddingVertical: sp.md, backgroundColor: t.bg, alignItems: 'center' }}>
           <Pressable onPress={onAttach} accessibilityRole="button" accessibilityLabel="Add a photo or video" hitSlop={8}
             style={{ width: 40, height: 40, borderRadius: radius.md, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="camera" size={18} color={t.ink2} />
           </Pressable>
-          <TextInput value={text} onChangeText={setText} placeholder="Message your coach…" placeholderTextColor={t.ink3}
-            style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
+          <TextInput value={text} onChangeText={setText} editable={canSend}
+            placeholder={canSend ? 'Message your coach…' : 'This conversation is closed'} placeholderTextColor={t.ink3}
+            style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, opacity: canSend ? 1 : 0.6 }} />
           {/* Disabled while a send is in flight: tapping twice would put the
-              same photo in the bucket twice and the thread twice with it. */}
-          <Pressable onPress={onSend} disabled={busy} accessibilityRole="button" accessibilityLabel="Send message"
-            accessibilityState={{ disabled: busy }}
-            style={{ backgroundColor: t.brand, borderRadius: radius.md, paddingHorizontal: sp.lg, justifyContent: 'center', opacity: busy ? 0.5 : 1 }}>
+              same photo in the bucket twice and the thread twice with it. And
+              disabled on a thread this device KNOWS is blocked — not to enforce
+              anything (the database does that) but so nobody writes a message,
+              taps Send, and reads an alert instead of a bubble. */}
+          <Pressable onPress={onSend} disabled={busy || !canSend} accessibilityRole="button" accessibilityLabel="Send message"
+            accessibilityState={{ disabled: busy || !canSend }}
+            style={{ backgroundColor: t.brand, borderRadius: radius.md, paddingHorizontal: sp.lg, justifyContent: 'center', opacity: busy || !canSend ? 0.5 : 1 }}>
             <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{busy ? 'Sending…' : 'Send'}</Text>
           </Pressable>
         </View>
       </View>
+
+      {/* ── the report sheet ────────────────────────────────────────────────
+          A sheet rather than an alert, because every option carries a sentence
+          saying what it covers and an alert cannot show one. Nothing here asks
+          the member to characterise what happened in legal terms, and the note
+          is optional: requiring an explanation puts a writing task in front of
+          the person least able to do one at that moment. */}
+      <Modal visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+            <Text style={{ ...ty.title, color: t.ink }}>
+              {reportFor?.messageId ? 'Report this message' : 'Report this conversation'}
+            </Text>
+            {/* What a report does and does not do — including the sentence that
+                matters most, which is that a report is not a block. */}
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>{REPORT_EXPLAINER}</Text>
+
+            {REPORT_OPTIONS.map((o, i) => (
+              <View key={o.id}>
+                {i > 0 ? <Rule /> : null}
+                <Pressable onPress={() => { void fileReport(o.id); }} disabled={reportBusy}
+                  accessibilityRole="button" accessibilityLabel={o.label} accessibilityHint={o.note}
+                  accessibilityState={{ disabled: reportBusy }}
+                  style={{ paddingVertical: sp.md, opacity: reportBusy ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{o.label}</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{o.note}</Text>
+                </Pressable>
+              </View>
+            ))}
+
+            <Rule />
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Anything you want to add</Text>
+            <TextInput value={reportNote} onChangeText={setReportNote} multiline editable={!reportBusy}
+              placeholder="Optional. Nobody but us reads this." placeholderTextColor={t.ink3}
+              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, textAlignVertical: 'top' }} />
+
+            <Pressable onPress={() => setReportFor(null)} accessibilityRole="button"
+              accessibilityLabel="Close without reporting anything"
+              style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

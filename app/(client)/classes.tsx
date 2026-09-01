@@ -12,9 +12,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { classFillState } from '../../src/lib/gymSchedule';
-import { Rule, Section, SectionHead, Cta, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 import { useSettings } from '../../src/ui/settings';
 import { scheduleLocal } from '../../src/ui/pushNotifications';
 import type { GymClass } from '../../src/lib/classesMock';
@@ -26,7 +28,10 @@ const dayLabel = (iso: string) => { const d = new Date(iso); const t = new Date(
 export default function Classes() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, status: classStatus, book, cancel, countsKnown } = useClasses();
+  const { classes, myStatus, status: classStatus, book, cancel, countsKnown, cachedNote } = useClasses();
+  // Whether this phone can reach us at all. It decides which second half every
+  // failure sentence on this screen gets.
+  const reach = useReachability();
   // The class reminder below is a notification, so it answers to the switch on
   // the Settings screen like every other one. That switch used to be wired to
   // nothing at all; now that it means something, a member who has turned
@@ -55,7 +60,13 @@ export default function Classes() {
     // fall into the else below, so the client was told "Booked", got a local
     // reminder an hour before, and turned up to a class with no seat.
     if (st === null) {
-      Alert.alert('Not booked', `We could not get you into ${c.title}. Nothing has been reserved — try again in a moment.`);
+      // A booking is deliberately NOT queued for later. A seat is a scarce
+      // thing somebody else can take, and "we will book you when you have
+      // signal" is a promise this app cannot keep — forty minutes later the
+      // class is full and the member has arranged their evening around a place
+      // they never had. See src/lib/outbox.ts on which writes may wait.
+      // What CAN be improved is saying why, which is what `retryLine` does.
+      Alert.alert('Not booked', `We could not get you into ${c.title}. Nothing has been reserved. ${retryLine(reach)}`);
       return;
     }
     if (st === 'waitlist') Alert.alert('Added to waitlist', `${c.title} is full — you're on the waitlist and we'll move you up if a spot opens.`);
@@ -94,11 +105,17 @@ export default function Classes() {
     const doCancel = async () => {
       const wasWaitlist = myStatus[c.id] === 'waitlist';
       if (await cancel(c.id)) return;
+      // The second half of each sentence used to be "Check your connection and
+      // try again" whatever had happened. Half the time it is wrong: the server
+      // read the cancellation and declined it, and sending somebody to their
+      // wifi settings hides that. `retryLine` says which — see
+      // src/lib/reachability.ts, which is how this app knows the difference
+      // without a native connectivity module.
       Alert.alert(
         wasWaitlist ? 'Still on the waitlist' : 'Not cancelled',
         wasWaitlist
-          ? `You are still on the waitlist for ${c.title} — that did not save, so nothing has changed. Check your connection and try again.`
-          : `Your seat in ${c.title} on ${dayLabel(c.startsAt)} at ${timeLabel(c.startsAt)} is still booked — that did not save, so nothing has changed and the gym still expects you. Check your connection and try again.`,
+          ? `You are still on the waitlist for ${c.title} — that did not save, so nothing has changed. ${retryLine(reach)}`
+          : `Your seat in ${c.title} on ${dayLabel(c.startsAt)} at ${timeLabel(c.startsAt)} is still booked — that did not save, so nothing has changed and the gym still expects you. ${retryLine(reach)}`,
         [{ text: 'OK' }],
       );
     };
@@ -148,6 +165,13 @@ export default function Classes() {
             {branches.map((b) => chip(b, branch === b, () => setBranch(b === branch ? null : b)))}
           </ScrollView>
         ) : null}
+
+        {/* The timetable came off this phone, not off the server. Said once,
+            above the list, because a member reading a cached timetable as a
+            live one turns up to a class that was cancelled yesterday — and the
+            counts are withheld entirely in that state (see `countsKnown` in
+            src/ui/classes.tsx), so nothing here claims a class has spaces. */}
+        {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{cachedNote}</Flag> : null}
 
         {byDay.map((g) => (
           <View key={g.key}>
