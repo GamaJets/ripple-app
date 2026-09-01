@@ -1407,8 +1407,35 @@ export default function TrainerClients() {
         <Pressable style={SCRIM} onPress={() => setSel(null)} />
         <View style={sheet(t, { padding: 0, paddingBottom: 0, maxHeight: '86%' })}>
           {sel && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{sel.name}</Text>
+            <>
+            {/* ── A way out that is always on screen ────────────────────────
+                Reported as "when you click on a client you are not able to
+                deselect or exit out — the only way to get out of the window is
+                to close out the app completely".
+
+                There WAS a way out, three of them: the scrim, the Android back
+                button, and a Close button. The Close button sat at the far
+                bottom of a sheet that runs to several screens of scrolling, and
+                the scrim above a sheet at 86% height is a strip most of a
+                thumb wide. So the honest reading of that report is not "no
+                control existed" but "no control was where somebody would look",
+                which for a dismissal is the same defect.
+
+                This one is pinned OUTSIDE the ScrollView, so it cannot scroll
+                away no matter how much this client's record holds. The one at
+                the bottom stays: somebody who has read to the end should not
+                have to scroll back up to leave. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                           paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 }}>
+              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', flex: 1 }} numberOfLines={1}>{sel.name}</Text>
+              <Pressable onPress={() => setSel(null)} accessibilityRole="button"
+                accessibilityLabel={`Close ${sel.name}`} hitSlop={12}
+                style={{ marginLeft: sp.md, width: 32, height: 32, borderRadius: 16, alignItems: 'center',
+                         justifyContent: 'center', backgroundColor: t.surface2 }}>
+                <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 4, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>{sel.goal} · {sel.weightDelta == null ? 'no scans yet' : deltaLabel(weightDeltaIn(sel.weightDelta, coachUnit), { since: null, unit: coachUnit, noChange: 'no change', noBaseline: 'no scans yet' })} · {sel.adherence != null ? sel.adherence + '% adherence' : 'no check-ins yet'}</Text>
 
               <View style={{ marginBottom: sp.xl }}>
@@ -1806,6 +1833,7 @@ export default function TrainerClients() {
               </Pressable>
               <Cta label="Close" wide onPress={() => setSel(null)} />
             </ScrollView>
+            </>
           )}
         </View>
               </KeyboardAvoidingView>

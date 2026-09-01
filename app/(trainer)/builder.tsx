@@ -36,12 +36,13 @@
 // src/lib/overwriteGuard.ts.
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { num } from '../../src/lib/format';
-import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { badges as groupBadges, canJoinNext, isGrouped, joinNext, leaveGroup } from '../../src/lib/setGroups';
+import { applyMove, shifts as dragShifts, targetIndex } from '../../src/lib/dragReorder';
 import { SET_METHODS, DEFAULT_METHOD, badgeFor, methodFor } from '../../src/lib/setMethods';
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -588,6 +589,69 @@ export default function Builder() {
    * would delete the keystroke.
    */
   const [restDraft, setRestDraft] = useState<Record<string, string>>({});
+
+  /* ── Press and hold to drag an exercise into place ──────────────────────
+     Asked for twice: arrows shipped first because they work over the air, and
+     then "you should be able to press and hold an exercise and drag it in the
+     position you want it."
+
+     Built on PanResponder's raw responder props and `Animated`, both in React
+     Native core. The usual answer — gesture-handler plus reanimated — could not
+     ship: reanimated 4 is what this SDK resolves and it requires the New
+     Architecture, which this app does not run. Installing it does not make the
+     drag slower, it makes the app not build. Core works on the old
+     architecture and is already inside every binary in the field, so this
+     reaches people who have the app rather than people who reinstall it.
+
+     Row heights are MEASURED (`onLayout`) rather than assumed. An exercise row
+     here is not a fixed height — it grows with a note, a group badge, and the
+     sets/reps/weight row wrapping on a narrow phone — so a constant row height
+     would land the drag somewhere nobody aimed at, worse the further you drag.
+     The arithmetic is in src/lib/dragReorder.ts, where it is tested. */
+  const dragY = useRef(new Animated.Value(0)).current;
+  const rowH = useRef<Record<string, number>>({});
+  const dragFrom = useRef<{ di: number; ei: number } | null>(null);
+  const dragStartY = useRef(0);
+  const dragTo = useRef<number | null>(null);
+  const [dragging, setDragging] = useState<{ di: number; ei: number } | null>(null);
+  // Only the TARGET is state. The finger position lives in an Animated.Value so
+  // the moving row does not re-render on every pixel; the list re-renders only
+  // when the row would actually change place, which is a few times per drag.
+  const [dropAt, setDropAt] = useState<number | null>(null);
+
+  const heightsFor = (di: number, count: number) =>
+    Array.from({ length: count }, (_, i) => rowH.current[`${di}:${i}`] ?? 0);
+
+  const beginDrag = (di: number, ei: number, pageY: number) => {
+    dragFrom.current = { di, ei };
+    dragStartY.current = pageY;
+    dragTo.current = ei;
+    dragY.setValue(0);
+    setDragging({ di, ei });
+    setDropAt(ei);
+  };
+
+  const moveDrag = (pageY: number, count: number) => {
+    const from = dragFrom.current;
+    if (!from) return;
+    const dy = pageY - dragStartY.current;
+    dragY.setValue(dy);
+    const to = targetIndex(heightsFor(from.di, count), from.ei, dy);
+    if (to !== dragTo.current) { dragTo.current = to; setDropAt(to); }
+  };
+
+  const endDrag = () => {
+    const from = dragFrom.current;
+    const to = dragTo.current;
+    dragFrom.current = null; dragTo.current = null;
+    dragY.setValue(0);
+    setDragging(null);
+    setDropAt(null);
+    if (!from || to == null || to === from.ei) return;
+    setDays((ds) => ds.map((d, i) =>
+      (i === from.di ? { ...d, exercises: applyMove(d.exercises, from.ei, to) as BEx[] } : d)));
+  };
+
   /** The exercise whose method sheet is open, as `dayIndex:key`, or null. */
   const [methodFor_, setMethodOpenFor] = useState<string | null>(null);
 
@@ -1170,7 +1234,11 @@ export default function Builder() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      {/* Scrolling is off while a row is held. Without this the ScrollView and
+          the drag both claim the same vertical movement, and the list scrolls
+          under the finger while the row tries to follow it — which reads as
+          the drag being broken rather than as two gestures competing. */}
+      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
@@ -1413,12 +1481,31 @@ export default function Builder() {
                 <Pressable onPress={() => toggleDay(di)} accessibilityRole="button"
                   accessibilityState={{ expanded: !foldedDays[di] }}
                   accessibilityLabel={`${foldedDays[di] ? 'Show' : 'Hide'} the ${d.exercises.length} exercise${d.exercises.length === 1 ? '' : 's'} on ${d.day}`}
-                  hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: sp.sm, paddingVertical: sp.sm }}>
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{d.exercises.length}</Text>
+                  hitSlop={10}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6,
+                           paddingHorizontal: sp.md, paddingVertical: 7,
+                           borderRadius: radius.pill, borderWidth: hairline,
+                           borderColor: t.ring, backgroundColor: t.surface2 }}>
+                  {/* Sized up and given an edge, on the report that "the 5 and
+                      down arrow next to the day should be a little bigger so we
+                      know what to do with it."
+
+                      That is the real complaint under it: two faint grey
+                      characters at caption size read as a LABEL — a count and a
+                      decoration — not as something to press. Bigger type alone
+                      would have made a bigger label. What says "press me" is the
+                      pill: a border, a filled ground, and the word for what
+                      happens, so the control announces itself instead of
+                      relying on somebody guessing that a triangle is a button.
+
+                      The count stays, because it is the thing worth knowing
+                      about a day that is folded shut. */}
+                  <Text style={{ ...ty.label, color: t.ink2, fontWeight: '600' }}>{d.exercises.length}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{foldedDays[di] ? 'Show' : 'Hide'}</Text>
                   {/* A triangle rather than an Icon: the set has no chevron up
                       or down, and `app/(client)/workouts.tsx` already uses
                       exactly these two characters for the same gesture. */}
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>{foldedDays[di] ? '▾' : '▴'}</Text>
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{foldedDays[di] ? '▾' : '▴'}</Text>
                 </Pressable>
                 <Pressable onPress={() => removeDay(di)} accessibilityRole="button" accessibilityLabel="Remove day" hitSlop={8}
                   style={{ paddingHorizontal: sp.sm, paddingVertical: sp.sm }}>
@@ -1438,13 +1525,31 @@ export default function Builder() {
                 // "these are separate". The group's own tinted rail down the
                 // left is what says they are not.
                 const joinedAbove = ei > 0 && gb != null && dayBadges[ei - 1]?.id === gb.id;
+                const isDragging = dragging?.di === di && dragging?.ei === ei;
+                // Every other row slides to open the gap the dragged one will
+                // drop into. Computed from the same module the drop uses, so
+                // what you see during the drag and where it lands cannot
+                // disagree.
+                const shift = dragging?.di === di && dropAt != null
+                  ? dragShifts(heightsFor(di, d.exercises.length), dragging.ei, dropAt)[ei] ?? 0
+                  : 0;
                 return (
-                <View key={e.key} style={{
+                <Animated.View key={e.key}
+                  onLayout={(ev) => { rowH.current[`${di}:${ei}`] = ev.nativeEvent.layout.height; }}
+                  style={{
                   marginTop: joinedAbove ? 0 : sp.md,
                   paddingTop: sp.md,
                   borderTopWidth: joinedAbove ? 0 : hairline,
                   borderTopColor: t.ring,
                   ...(gb ? { borderLeftWidth: 2, borderLeftColor: t.brand, paddingLeft: sp.md, marginLeft: -sp.md } : null),
+                  ...(isDragging ? {
+                    // Lifted: it must read as picked up, or a coach cannot tell
+                    // a drag from a list that has started scrolling.
+                    zIndex: 10, elevation: 6, opacity: 0.96,
+                    backgroundColor: t.surface, borderRadius: radius.md,
+                    shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
+                  } : null),
+                  transform: [{ translateY: isDragging ? dragY : (shift as number) }],
                 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     {/* The whole name and picture open the movement, so a coach
@@ -1504,25 +1609,82 @@ export default function Builder() {
                         })()}
                       </View>
                     </Pressable>
-                    {/* Hidden at the ends rather than disabled: a control that
+                    {/* ── The grip: press and hold here, then drag ────────
+                        A dedicated handle rather than the whole row, because
+                        the row's name and picture already open the movement
+                        and a long-press that stole that tap would cost a coach
+                        the thing they use most. The grip says what it is by
+                        looking like one.
+
+                        Raw responder props rather than a PanResponder: these
+                        rows are produced by a .map(), where a hook cannot go.
+                        Same gesture system underneath. */}
+                    {d.exercises.length > 1 ? (
+                      <View
+                        accessible
+                        accessibilityRole="adjustable"
+                        accessibilityLabel={`Reorder ${e.name}. Position ${ei + 1} of ${d.exercises.length}. Hold and drag, or use the arrows.`}
+                        onStartShouldSetResponder={() => true}
+                        onMoveShouldSetResponder={() => true}
+                        onResponderGrant={(ev) => beginDrag(di, ei, ev.nativeEvent.pageY)}
+                        onResponderMove={(ev) => moveDrag(ev.nativeEvent.pageY, d.exercises.length)}
+                        onResponderRelease={endDrag}
+                        onResponderTerminate={endDrag}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                                 marginRight: 6, backgroundColor: isDragging ? t.brand : t.surface2,
+                                 borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.label, color: isDragging ? t.brandInk : t.ink3, lineHeight: 18 }}>≡</Text>
+                      </View>
+                    ) : null}
+
+                    {/* ── Three controls, one of them destructive ──────────
+                        Reported as "the up and down arrows and the x need to be
+                        bigger and more spaced apart so you don't tap the wrong
+                        icon". They were ~24pt of tappable area sitting a few
+                        points apart, and the neighbour of the down arrow
+                        DELETES the exercise along with its sets, reps, weight,
+                        rest and notes.
+
+                        So the fix is not only size. Each is now a 40pt round
+                        target — above the 44pt-with-hitSlop mark and the size
+                        the rest of this app uses for a real button — and the ×
+                        is pushed away from the pair with a gap wide enough that
+                        a thumb aiming at "down" cannot reach it. It is also
+                        tinted as a destructive control rather than sharing the
+                        arrows' grey, because the one that cannot be undone
+                        should not look like the two that can.
+
+                        Hidden at the ends rather than disabled: a control that
                         cannot do anything is still something to aim at. */}
                     {d.exercises.findIndex((x) => x.key === e.key) > 0 ? (
                       <Pressable onPress={() => moveExercise(di, e.key, -1)} accessibilityRole="button"
-                        accessibilityLabel={`Move ${e.name} earlier in ${d.day}`} hitSlop={8}
-                        style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
-                        <Text style={{ ...ty.body, color: t.ink3 }}>▲</Text>
+                        accessibilityLabel={`Move ${e.name} earlier in ${d.day}`} hitSlop={6}
+                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                                 backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.label, color: t.ink2 }}>▲</Text>
                       </Pressable>
                     ) : null}
                     {d.exercises.findIndex((x) => x.key === e.key) < d.exercises.length - 1 ? (
                       <Pressable onPress={() => moveExercise(di, e.key, 1)} accessibilityRole="button"
-                        accessibilityLabel={`Move ${e.name} later in ${d.day}`} hitSlop={8}
-                        style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
-                        <Text style={{ ...ty.body, color: t.ink3 }}>▼</Text>
+                        accessibilityLabel={`Move ${e.name} later in ${d.day}`} hitSlop={6}
+                        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                                 marginLeft: 6, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.label, color: t.ink2 }}>▼</Text>
                       </Pressable>
                     ) : null}
-                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button" accessibilityLabel={`Remove ${e.name} from ${d.day}`} hitSlop={8}
-                      style={{ paddingHorizontal: sp.sm, paddingVertical: sp.xs }}>
-                      <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+                    <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button"
+                      accessibilityLabel={`Remove ${e.name} from ${d.day}`} hitSlop={6}
+                      style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                               marginLeft: sp.lg, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.crit }}>
+                      {/* The critical tone is the BORDER, not the glyph. As ink
+                          it measures 3.03–4.05:1 across the ten palettes, under
+                          the 4.5:1 text needs, and check:contrast is right to
+                          refuse it — a status colour is tuned for a mark. The
+                          ring carries the warning, the × stays readable, and
+                          the accessibility label says "Remove" in words, so
+                          colour is never the only channel saying so. */}
+                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
                     </Pressable>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
@@ -1674,7 +1836,7 @@ export default function Builder() {
                       multiline
                       style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
                   </View>
-                </View>
+                </Animated.View>
                 );
               });
               })()}

@@ -137,6 +137,7 @@
     "src/lib/restTimer.test.ts",
     "src/lib/setGroups.test.ts",
     "src/lib/setMethods.test.ts",
+    "src/lib/dragReorder.test.ts",
     "src/lib/exerciseHistory.test.ts"
   ]
 }

@@ -2735,7 +2735,36 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
             <Text style={{ ...ty.micro, color: t.brandInk, marginTop: sp.xs, opacity: 0.8 }}>{restIsMethods ? `Part of the ${methodFor(ex.method).method.label.toLowerCase()}` : ex.restSec != null ? 'Set by your coach' : `App default of ${DEFAULT_REST_SEC} seconds`}</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={() => startRest(0)} hitSlop={8} style={{ marginTop: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.brandInk }}>Skip rest</Text></Pressable>
           </View>
-        ) : null}
+        ) : (
+          /* ── Starting a rest yourself ──────────────────────────────────
+             Reported as "there is not a way to start the timer between reps".
+             True: `startRest` was called from exactly one place, inside
+             `logSet`, so the timer only ever began as a side effect of
+             recording a set through that button.
+
+             Every other way of resting had no timer at all — resting before
+             the first set, between a warm-up and the working sets, or after a
+             set logged from the plan rather than the runner. And once a rest
+             was skipped it could not be restarted, only waited out by eye.
+
+             It starts the SAME number the automatic one would, from the same
+             `plannedRest`, so a rest a client starts and a rest the app starts
+             cannot disagree about what their coach asked for. Shown only when
+             the exercise has a rest to run; a movement with none has nothing
+             for this control to do. */
+          plannedRest > 0 ? (
+            <Pressable accessibilityRole="button"
+              accessibilityLabel={`Start the ${restClock(plannedRest)} rest`}
+              onPress={() => startRest(plannedRest)}
+              style={{ borderRadius: radius.md, padding: sp.lg, alignItems: 'center', marginTop: sp.xl,
+                       borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
+              <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Start rest</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                {restClock(plannedRest)}{ex.restSec != null ? ' · set by your coach' : ` · app default`}
+              </Text>
+            </Pressable>
+          ) : null
+        )}
 
         {/* The movement, playing here rather than in a browser. A client mid-set
             who is unsure of their form had no way to see the lift from this
