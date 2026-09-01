@@ -64,7 +64,13 @@ import type { LoadStatus } from '../../src/ui/loadStatus';
 import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
 import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
 import { useProgramGroups } from '../../src/ui/groupProgram';
-import { listNames } from '../../src/lib/groupProgram';
+import { listNames, planFanOut, fanOutSubject, type FanOutMember } from '../../src/lib/groupProgram';
+import {
+  overwriteBrief, bulkReport, selectAllOffer,
+  type AssignTarget, type WriteOutcome,
+} from '../../src/lib/bulkActions';
+import { seedDecision, stillListed, pruneSelection, assignCtaLabel } from '../../src/lib/assignPicker';
+import { notifySuccess } from '../../src/ui/haptics';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 /** 's' unless there is exactly one of them. Four counts on this screen said
@@ -107,6 +113,21 @@ type BEx = {
    */
   loadKg?: number | null;
   loadUnit?: WeightUnit;
+  /**
+   * What the coach wants said about THIS movement — "keep the elbows tucked",
+   * "3-1-1 tempo", "the machine by the window, seat on 4".
+   *
+   * Not the programme's `note`, which is the letter at the top of the week.
+   * That one is read once on the way in; this one is read at the machine by
+   * somebody who has already forgotten it. See ProgramExercise.note in
+   * src/lib/programs.ts for why the two are not collapsed into one field.
+   *
+   * A blank field is written out as `undefined` rather than as '', because an
+   * empty string stored as a note draws an empty bubble under the movement in
+   * the client's app — their coach appearing to have written something and
+   * left it blank.
+   */
+  note?: string;
 };
 type BDay = { day: string; focus: string; cardio?: string; exercises: BEx[] };
 
@@ -156,8 +177,13 @@ export default function Builder() {
   // before deciding what to put somebody through.
   useFocusEffect(useCallback(() => { refreshRoster(); }, [refreshRoster]));
 
-  const { getProgram, assignProgram, clearProgram, status: programStatus } = useAssignedPrograms();
-  const { templates, saveTemplate, status: tplStatus } = useProgramTemplates();
+  // `assignProgramTo` rather than `assignProgram`: this screen now writes to
+  // as many clients as the coach ticked, and a fan-out has to report on each
+  // one BY NAME. "8 of 12 saved" tells a coach something is wrong and nothing
+  // about which four or what to do — see src/lib/bulkActions.ts, which is where
+  // that arithmetic already lives and is not re-implemented here.
+  const { getProgram, assignProgramTo, clearProgram, status: programStatus } = useAssignedPrograms();
+  const { templates, saveTemplateTo, status: tplStatus } = useProgramTemplates();
   const router = useRouter();
 
   const params = useLocalSearchParams();
@@ -202,6 +228,61 @@ export default function Builder() {
   const [tplPick, setTplPick] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [tplName, setTplName] = useState('');
+  /**
+   * ── Who this programme is being assigned TO ───────────────────────────────
+   *
+   * Reported as "need to save all built templates and be able to choose which
+   * client(s) they are assigned to". It used to be one `clientId`, which was
+   * both the person whose programme seeded the builder AND the only person it
+   * could be sent to — so a coach who writes one week for four clients had to
+   * build it four times, and a coach who picked the wrong chip overwrote the
+   * wrong person's training with nothing on screen counting them.
+   *
+   * The two jobs are separated: `clientId` above is the client the builder is
+   * LOOKING AT (their current programme seeds it, their disclosures are shown),
+   * and this is the set it is being SENT to. They start the same, because the
+   * ordinary case is one client and making the coach tick their own subject
+   * would be ceremony.
+   */
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [assignBusy, setAssignBusy] = useState(false);
+  /**
+   * The client whose current programme the builder's contents were loaded FROM,
+   * or null when they are the coach's own composition.
+   *
+   * The whole reason this exists is in src/lib/assignPicker.ts: the builder used
+   * to replace everything in it whenever the selected client changed, and the
+   * screen opens with nobody selected, so the coach's own sequence — build the
+   * week, then pick who it is for — destroyed the week at the picking step.
+   */
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  const [tplSaveFailed, setTplSaveFailed] = useState<string | null>(null);
+
+  const rosterIds = useMemo(() => roster.map((c) => c.id), [roster]);
+  /**
+   * ── A selected client who is no longer on the book ────────────────────────
+   *
+   * Photographed by the user: this screen read "No clients yet — add a client
+   * from your dashboard" AND, on the primary button, "Injuries Could Not Be
+   * Read". Both came from a `clientId` still held for somebody the roster no
+   * longer lists. `roster.find()` returned undefined, `disclosureStatus` below
+   * maps a missing client onto 'error', and the injury gate then reported the
+   * disclosures of a person who is not on the book as unreadable — a sentence
+   * about the wrong failure, telling the coach to go and read injuries
+   * belonging to nobody.
+   *
+   * Cleared ONLY under a whole read, which is the one condition under which
+   * "they are not on your roster" is a fact. See src/lib/assignPicker.ts.
+   */
+  useEffect(() => {
+    if (clientId && !stillListed(rosterStatus, rosterIds, clientId)) setClientId('');
+    setPicked((p) => {
+      const on = Object.keys(p).filter((k) => p[k]);
+      const kept = pruneSelection(rosterStatus, rosterIds, on);
+      if (kept.length === on.length) return p;
+      return Object.fromEntries(kept.map((id) => [id, true]));
+    });
+  }, [rosterStatus, rosterIds, clientId]);
 
   const client = roster.find((c) => c.id === clientId);
   // Only a whole read of `assigned_programs` can tell us this. Under any other
@@ -285,14 +366,33 @@ export default function Builder() {
     if (!ok) setAckFailed(true);
   };
 
-  const loadFrom = (p: Program) => {
+  /**
+   * Fill the builder from a programme.
+   *
+   * `loadKg` and `note` are carried across, and were not. Both are written per
+   * exercise and both were dropped here, so opening a saved template — or the
+   * programme a client is already on — silently emptied every weight the coach
+   * had typed and every cue they had written, and the builder then presented
+   * that stripped copy as the thing they had built. Re-assigning it wrote the
+   * loss back over the client's real programme.
+   *
+   * `from` is the client this content belongs to, or null when it is the
+   * coach's own — a template, or a blank week. It is what stops the seeding
+   * effect below announcing a disagreement that does not exist.
+   */
+  const loadFrom = (p: Program, from: string | null) => {
     setTitle(p.title);
     setNote(p.note && !GENERATED_NOTE.test(p.note) ? p.note : '');
     setDays(p.days.map((d) => ({
       day: d.day, focus: d.focus, cardio: d.cardio,
-      exercises: d.exercises.map((e) => ({ key: nextKey(), name: e.name, group: e.group, sets: e.sets, reps: e.reps })),
+      exercises: d.exercises.map((e) => ({
+        key: nextKey(), name: e.name, group: e.group, sets: e.sets, reps: e.reps,
+        loadKg: e.loadKg ?? null, note: e.note,
+      })),
     })));
+    setSeededFor(from);
   };
+  const clearBuilder = () => { setTitle(''); setNote(''); setDays([]); setSeededFor(null); };
 
   // Load the client's current program (assigned if any, else their auto plan)
   // whenever the selected client changes — but only once we actually know what
@@ -304,11 +404,26 @@ export default function Builder() {
   // the coach's own work — so the coach tweaks it and assigns it, over the top
   // of whatever was really there. Blank is the honest state for "we do not
   // know yet", and the Program section says so in words.
-  useEffect(() => {
-    if (!clientId) return;
-    if (programStatus !== 'ready') { setTitle(''); setNote(''); setDays([]); return; }
+  const hasDraft = !!days.length || !!title.trim() || !!note.trim();
+  /**
+   * Whether the builder may fill itself from the selected client, and what to
+   * say when it may not. The rule, and the twenty minutes of lost work behind
+   * it, are in src/lib/assignPicker.ts.
+   */
+  const seed = seedDecision({
+    programStatus,
+    hasDraft,
+    seededFor,
+    clientId,
+    firstName: client?.name.split(' ')[0] ?? 'this client',
+  });
+  /** Load what the selected client is really on, over whatever is in the
+   *  builder. Only ever run from the control the coach taps — never on its
+   *  own, which is what it used to do. */
+  const loadTheirProgramme = () => {
+    if (!clientId || programStatus !== 'ready') return;
     const existing = getProgram(clientId);
-    if (existing) { loadFrom(existing); return; }
+    if (existing) { loadFrom(existing, clientId); return; }
     // No coach-assigned programme, so the builder would normally open on the
     // client's auto plan — but the auto plan's whole content is chosen by the
     // goal, and we do not have one. Generating from a guess and drawing it here
@@ -316,10 +431,16 @@ export default function Builder() {
     // the plan guard above exists for: the coach adjusts what is on screen and
     // assigns it, and somebody trains to a goal nobody ever established. Blank,
     // and the Program section says why.
-    if (!autoGoal) { setTitle(''); setNote(''); setDays([]); return; }
-    loadFrom(buildProgram(autoGoal, 25));
+    if (!autoGoal) { clearBuilder(); return; }
+    loadFrom(buildProgram(autoGoal, 25), clientId);
+  };
+  useEffect(() => {
+    if (seed.action === 'seed') loadTheirProgramme();
+    else if (seed.action === 'clear') clearBuilder();
+    // 'hold' is the whole point and does nothing: what is in the builder is the
+    // coach's, and it is not taken from them by a tap on somebody's name.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, programStatus, autoGoal]);
+  }, [clientId, programStatus, autoGoal, seed.action]);
 
   // If opened from the template library with a templateId, load it once.
   const loadedTplRef = useRef<string | null>(null);
@@ -327,7 +448,10 @@ export default function Builder() {
     const tid = params.templateId as string;
     if (!tid || loadedTplRef.current === tid) return;
     const tpl = templates.find((x) => x.id === tid);
-    if (tpl) { loadedTplRef.current = tid; loadFrom(tpl.program); setTplName(tpl.name); }
+    // A template is the coach's own work, not a client's programme, so it is
+    // seeded `from` nobody — which is what makes the notice below tell the
+    // truth when a client is then picked.
+    if (tpl) { loadedTplRef.current = tid; loadFrom(tpl.program, null); setTplName(tpl.name); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.templateId, templates.length]);
 
@@ -348,10 +472,10 @@ export default function Builder() {
         const d = JSON.parse(raw) as { title?: string; note?: string; days?: BDay[] };
         // Only restore a draft with something IN it. An empty one is not worth
         // resurrecting over whatever the screen has already been given.
-        if (Array.isArray(d.days) && d.days.length) {
+        if ((Array.isArray(d.days) && d.days.length) || (typeof d.title === 'string' && d.title.trim())) {
           setTitle(typeof d.title === 'string' ? d.title : '');
           setNote(typeof d.note === 'string' ? d.note : '');
-          setDays(d.days);
+          setDays(Array.isArray(d.days) ? d.days : []);
         }
       } catch { /* a draft that cannot be parsed is not a draft */ }
       finally { if (live) setDraftLoaded(true); }
@@ -361,9 +485,27 @@ export default function Builder() {
 
   useEffect(() => {
     if (!draftLoaded) return;
-    if (!days.length && !title.trim() && !note.trim()) { AsyncStorage.removeItem(DRAFT_KEY).catch(() => {}); return; }
+    // An EMPTY builder does not clear the stored draft, and that asymmetry is
+    // the whole point.
+    //
+    // The first version of this deleted the draft whenever the screen was
+    // empty, which reads as tidy and is a data-loss bug: the load is async, so
+    // a remount — a coach tapping a client's name and coming back — starts with
+    // empty state, and if the read is slow, fails, or returns a draft with no
+    // days, `draftLoaded` flips true with nothing in state and this effect
+    // wipes the one copy of their work. A guard against losing a programme must
+    // not be the thing that loses it.
+    //
+    // So autosave only ever WRITES. The draft is cleared deliberately, at the
+    // two moments the work is safely elsewhere — saved as a template, or
+    // assigned — and by nothing else.
+    if (!days.length && !title.trim() && !note.trim()) return;
     AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ title, note, days })).catch(() => {});
   }, [title, note, days, draftLoaded]);
+
+  /** Called once the work is somewhere durable, and only then. */
+  const clearDraft = () => { AsyncStorage.removeItem(DRAFT_KEY).catch(() => {}); };
+  void clearDraft;
 
   const patchEx = (di: number, key: string, patch: Partial<BEx>) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.map((e) => (e.key === key ? { ...e, ...patch } : e)) } : d)));
@@ -386,7 +528,77 @@ export default function Builder() {
   // rather than by silence.
   const loadsInjury = days.flatMap((d) => d.exercises)
     .filter((e) => injuryFlag(e.name, e.group || '', clientInjuries) !== null);
-  const canAssign = !!clientId && totalExercises > 0;
+
+  /* ── who this is going to ───────────────────────────────────────────────── */
+
+  const pickedIds = Object.keys(picked).filter((k) => picked[k]);
+  // The client the coach is looking at starts ticked, because the ordinary case
+  // is one client and making them tick the name already selected above would be
+  // ceremony. Only while nothing is ticked: once the coach has chosen a set,
+  // switching whose programme they are reading must not quietly add somebody to
+  // the write.
+  useEffect(() => {
+    if (!clientId) return;
+    setPicked((p) => (Object.keys(p).some((k) => p[k]) ? p : { [clientId]: true }));
+  }, [clientId]);
+
+  /** One client's disclosures, as both guards need to see them. */
+  const injuriesOf = (id: string): Injury[] => {
+    const c = roster.find((r) => r.id === id);
+    return (c?.injuries ?? []).map((i, n) => ({
+      id: `${id}-${n}`, area: i.area, severity: i.severity as Injury['severity'],
+      status: 'active', note: i.note, at: '',
+    }));
+  };
+  /** How the read of THIS person's own disclosures went — a different question
+   *  from how the acknowledgement read went, and the one nobody asked. A client
+   *  the roster never produced has an empty injury list for exactly the same
+   *  reason a healthy client does. */
+  const disclosuresOf = (id: string): LoadStatus =>
+    rosterStatus === 'error' ? 'error'
+    : roster.some((r) => r.id === id) ? 'ready'
+    : rosterStatus === 'loading' ? 'loading'
+    : 'error';
+  const asMember = (id: string): FanOutMember => ({
+    clientId: id,
+    name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
+    disclosures: disclosuresOf(id),
+    ackStatus: acks.status,
+    injuries: injuriesOf(id),
+    acknowledged: acks.acknowledged(id),
+  });
+  // The same fan-out plan the Groups screen and the template library use, so
+  // the injury gate is consulted ONCE PER RECIPIENT and the ones it holds are
+  // named rather than silently dropped. Not re-implemented here: a second
+  // fan-out is how two screens start disagreeing about who a bulk assign wrote
+  // to. See src/lib/groupProgram.ts.
+  //
+  // 'ready' for the list itself: unlike a group's membership, this is the ticks
+  // the coach just made with their own thumb, and there is no read of it that
+  // could have come back short. The roster it was ticked FROM carries its own
+  // banner above.
+  const plan = planFanOut('ready', programStatus, pickedIds.map(asMember), totalExercises > 0, fanOutSubject(pickedIds.length));
+  // What the sweeping gesture is allowed to claim, given how the roster read
+  // went — "Select All" over a roster that came back at its row limit ticks a
+  // thousand people and calls it everybody. See src/lib/bulkActions.ts.
+  const selAll = selectAllOffer(rosterStatus, roster.length);
+
+  /** Every movement in this programme that loads something a RECIPIENT has
+   *  disclosed, grouped by who. The old version asked this about the subject
+   *  only, so a programme fanned out to four people was checked against one of
+   *  them. */
+  const injuryLoads = pickedIds.map((id) => {
+    const inj = injuriesOf(id);
+    const movements = days.flatMap((d) => d.exercises)
+      .map((e) => {
+        const f = injuryFlag(e.name, e.group || '', inj);
+        return f ? { exercise: e.name, area: f.injury.area, severity: f.injury.severity } : null;
+      })
+      .filter(Boolean) as { exercise: string; area: string; severity: string }[];
+    return { clientId: id, name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client', movements };
+  }).filter((x) => x.movements.length);
+
+  const canAssign = pickedIds.length > 0 && totalExercises > 0 && plan.allowed;
 
   // ── what the picker searches ────────────────────────────────────────────
   //
@@ -447,43 +659,74 @@ export default function Builder() {
     router.push({ pathname: '/(trainer)/exercise', params: { name, from: 'trainerBuilder' } });
   };
 
+  /**
+   * The one place the builder's state becomes a Program.
+   *
+   * ONE place, because the assign handler used to carry its own identical copy
+   * of this object literal — so `loadKg` and the per-exercise note, added to the
+   * builder later, would have had to be remembered twice and would have gone
+   * out on the template and not on the assignment, or the other way round. The
+   * fields a coach types are the fields that must survive all three paths out
+   * of this screen: the template, the assignment, and the on-device draft.
+   *
+   * `note` is `undefined` and never '' for a blank field: an empty string
+   * stored as a note draws an empty bubble under the movement in the client's
+   * app, which reads as their coach having written something and left it blank.
+   */
   const composeProgram = (): Program => ({
     title: title.trim() || 'Custom program',
     focus: ['Coach-assigned', 'Personalised for you'],
     note: note.trim() || 'Your coach built this program for you. Progress the weight when you hit the top of the rep range.',
     days: days.filter((d) => d.exercises.length).map((d) => ({
       day: d.day, focus: d.focus.trim() || 'Training', cardio: d.cardio,
-      exercises: d.exercises.map((e, i) => ({ key: d.day + '-' + i, name: e.name, group: e.group || '', sets: e.sets, reps: e.reps || '8-12', alternatives: [] })),
+      exercises: d.exercises.map((e, i) => ({
+        key: d.day + '-' + i, name: e.name, group: e.group || '', sets: e.sets,
+        reps: e.reps || '8-12', alternatives: [],
+        loadKg: e.loadKg ?? null,
+        note: e.note && e.note.trim() ? e.note.trim() : undefined,
+      })),
     })),
   });
-  // `saveTemplate` resolves false when the insert never reached
+  // `saveTemplateTo` resolves { ok: false } when the insert never reached
   // `program_templates`, and this used to discard that and say "Template
   // saved". The template then sat in the library for the rest of the session
   // and was gone at the next launch, so the coach's evidence that their work
   // was saved was a sentence this screen made up.
+  //
+  // The failure now carries its own reason, because "did not reach the server"
+  // was said for every cause alike — including the one the coach can act on,
+  // which was the app not yet knowing who they were signed in as.
   const doSaveTemplate = async () => {
     if (totalExercises === 0) { Alert.alert('Nothing to save', 'Add at least one exercise first.'); return; }
     const nm = tplName.trim() || title.trim() || 'Untitled template';
-    const saved = await saveTemplate(nm, composeProgram());
+    const saved = await saveTemplateTo(nm, composeProgram());
     setSaveOpen(false); setTplName('');
+    setTplSaveFailed(saved.ok ? null : `“${nm}” is not in your library. ${saved.why ?? 'The server did not say why.'} Nothing has been lost from the builder — try saving it again.`);
     Alert.alert(
-      saved ? 'Template saved' : 'Saved on this device only',
-      saved
-        ? 'It is in your Program Templates — assign it to as many clients as you like.'
-        : `“${nm}” did not reach the server, so it is in your library on this phone only and will be gone when you reopen the app. Save it again once you have signal.`,
+      saved.ok ? 'Template saved' : 'Not saved',
+      saved.ok
+        ? 'It is in your Program Templates and will be there when you reopen the app — assign it to as many clients as you like.'
+        : `“${nm}” was not saved. ${saved.why ?? 'The server did not say why.'} What you built is still in the builder, so nothing has been lost — try again once you have signal.`,
     );
   };
-  // Recorded BEFORE the programme is assigned, and the assignment is abandoned
-  // if it cannot be. The point of the acknowledgement is that it exists; a
-  // programme that went out while the record of the coach's decision did not is
-  // the one outcome that makes this worse than having no record at all — it
-  // would look, afterwards, exactly like a coach who never knew.
-  const recordInjuryChoice = async (): Promise<boolean> => {
-    if (!clientId || !loadsInjury.length) return true;
-    const movements = loadsInjury.map((e) => {
-      const f = injuryFlag(e.name, e.group || '', clientInjuries)!;
-      return { exercise: e.name, area: f.injury.area, severity: f.injury.severity };
-    });
+  /**
+   * Record that the coach chose to load a disclosure, for ONE recipient.
+   *
+   * Recorded BEFORE that person's programme is written, and their write is
+   * abandoned if it cannot be. The point of the acknowledgement is that it
+   * exists; a programme that went out while the record of the coach's decision
+   * did not is the one outcome that makes this worse than having no record at
+   * all — it would look, afterwards, exactly like a coach who never knew.
+   *
+   * Per recipient rather than per tap, and that is the change a fan-out forces:
+   * this used to be written once, for the subject, and a programme sent to four
+   * people left a record against one of them.
+   */
+  const recordInjuryChoice = async (
+    forClient: string,
+    movements: { exercise: string; area: string; severity: string }[],
+  ): Promise<boolean> => {
+    if (!movements.length) return true;
     try {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
@@ -494,38 +737,88 @@ export default function Builder() {
       // row for the foreign key to find, and the whole point of the record is
       // that it survives to be read back by somebody arguing about it later.
       const { data, error } = await supabase.from('program_injury_acknowledgements')
-        .insert({ trainer_id: uid, client_id: clientId, movements })
+        .insert({ trainer_id: uid, client_id: forClient, movements })
         .select('id');
-      if (error) { reportError('builder.injuryChoice', error, { clientId }); return false; }
+      if (error) { reportError('builder.injuryChoice', error, { clientId: forClient }); return false; }
       if (!data || !data.length) {
-        reportError('builder.injuryChoice', new Error('acknowledgement insert returned no row'), { clientId });
+        reportError('builder.injuryChoice', new Error('acknowledgement insert returned no row'), { clientId: forClient });
         return false;
       }
       return true;
-    } catch (e) { reportError('builder.injuryChoice', e, { clientId }); return false; }
+    } catch (e) { reportError('builder.injuryChoice', e, { clientId: forClient }); return false; }
   };
 
+  /**
+   * Send what is in the builder to everybody ticked.
+   *
+   * ── 1 · a count is not consent ────────────────────────────────────────────
+   *
+   * Assigning REPLACES what somebody is currently training, with no undo, no
+   * record of what was there and nothing telling the client their next session
+   * changed. So the write is preceded by a sentence that states how many of the
+   * ticked clients are on a programme now and NAMES them — `overwriteBrief`, in
+   * src/lib/bulkActions.ts. The names are the part that works: a coach does not
+   * recognise "3 of 4", and does recognise the person they spent an hour
+   * programming on Tuesday.
+   *
+   * ── 2 · partial failure is the normal case ────────────────────────────────
+   *
+   * Four writes are four chances to be refused, and the ordinary reason is not
+   * a network: `assigned_programs_coach_rw` runs through `is_my_client`, which
+   * looks in `clients`, so every hand-added client on the book fails it. The
+   * report names both halves and the FAILURES STAY TICKED, so trying again is
+   * the same gesture over the set that still needs it.
+   *
+   * ── 3 · and the injury gate keeps its own list ───────────────────────────
+   *
+   * `plan.blocked` is who this must not write to at all. They were never in
+   * `plan.send`, they stay ticked with the retries, and they are named
+   * separately — a client held for an unread disclosure is not a failed write
+   * and the two must not be reported as one thing.
+   */
   const assign = async () => {
     // Belt as well as braces: the control is withheld above, and the handler
     // refuses too. An overwrite of somebody's training must not be one stray
     // render away from happening.
-    if (!canAssign || !planGuard.allowed || !injuryGate.allowed) return;
+    if (!canAssign || assignBusy) return;
+
+    const targets: AssignTarget[] = plan.send.map((id) => ({
+      clientId: id,
+      name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client',
+      // Only sayable because `planFanOut` has already passed the overwrite
+      // guard: under any status but a whole read a null from getProgram means
+      // "we did not find out", and this sentence would be counting silence.
+      onProgramme: !!getProgram(id),
+    }));
+    const brief = overwriteBrief(targets, title.trim() || 'this programme');
+    const go = await new Promise<boolean>((resolve) => {
+      Alert.alert(brief.title, brief.body, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        // Destructive only when something is actually being destroyed. A red
+        // button on every assign is a red button nobody reads.
+        { text: brief.confirmLabel, style: brief.replacing.length ? 'destructive' : 'default', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+    if (!go) return;
 
     // Knowing about a disclosure is not the same as deciding to load it anyway.
-    // The gate above covers the first; this covers the second, and asks at the
-    // moment the coach commits rather than while they are still arranging days.
-    if (loadsInjury.length) {
-      const lines = loadsInjury.slice(0, 6).map((e) => {
-        const f = injuryFlag(e.name, e.group || '', clientInjuries)!;
-        return `· ${e.name} — ${areaLabel(f.injury.area).toLowerCase()}, ${f.injury.severity}`;
-      });
-      const more = loadsInjury.length - lines.length;
-      const go = await new Promise<boolean>((resolve) => {
+    // The gate covers the first; this covers the second, and asks at the moment
+    // the coach commits rather than while they are still arranging days. Asked
+    // once, about everybody it applies to — four dialogs in a row is a dialog
+    // nobody reads.
+    const sending = injuryLoads.filter((x) => plan.send.includes(x.clientId));
+    if (sending.length) {
+      const lines = sending.flatMap((x) =>
+        x.movements.slice(0, 4).map((m) => `· ${x.name} — ${m.exercise}, ${areaLabel(m.area).toLowerCase()}, ${m.severity}`),
+      );
+      const shown = lines.slice(0, 8);
+      const more = sending.reduce((a, x) => a + x.movements.length, 0) - shown.length;
+      const okd = await new Promise<boolean>((resolve) => {
         Alert.alert(
           'These load what they disclosed',
-          `${lines.join('\n')}${more > 0 ? `\n· and ${num(more)} more` : ''}\n\n` +
+          `${shown.join('\n')}${more > 0 ? `\n· and ${num(more)} more` : ''}\n\n` +
             'You can absolutely programme these on purpose. Confirming records that you chose to, with the date — ' +
-            `${client?.name.split(' ')[0] ?? 'your client'} can see that record too.`,
+            `${listNames(sending.map((x) => x.name))} can see that record too.`,
           [
             { text: 'Change the Programme', style: 'cancel', onPress: () => resolve(false) },
             { text: 'I Know — Assign', style: 'destructive', onPress: () => resolve(true) },
@@ -533,32 +826,46 @@ export default function Builder() {
           { cancelable: true, onDismiss: () => resolve(false) },
         );
       });
-      if (!go) return;
-      const recorded = await recordInjuryChoice();
-      if (!recorded) {
-        Alert.alert(
-          'Not assigned',
-          'Your acknowledgement could not be saved, so the programme was not assigned either — sending it without the record would leave no sign you knew. Nothing has changed. Try again.',
-          [{ text: 'OK' }],
-        );
-        return;
-      }
+      if (!okd) return;
     }
 
-    const program: Program = {
-      title: title.trim() || 'Custom program',
-      focus: ['Coach-assigned', 'Personalised for you'],
-      note: note.trim() || 'Your coach built this program for you. Progress the weight when you hit the top of the rep range.',
-      days: days.filter((d) => d.exercises.length).map((d) => ({
-        day: d.day, focus: d.focus.trim() || 'Training', cardio: d.cardio,
-        exercises: d.exercises.map((e, i) => ({ key: `${d.day}-${i}`, name: e.name, group: e.group || '', sets: e.sets, reps: e.reps || '8-12', alternatives: [] })),
-      })),
-    };
-    const saved = await assignProgram(clientId, program);
-    Alert.alert(saved ? 'Program assigned' : 'Saved on this device only',
-      saved ? `${client?.name ?? 'Your client'} will now see this in their Train tab.`
-            : `It could not be saved to the server, so ${client?.name ?? 'your client'} cannot see it yet. Clients you added by hand have no Train tab until they join.`,
-      [{ text: 'Done' }]);
+    setAssignBusy(true);
+    const program = composeProgram();
+    const outcomes: WriteOutcome[] = await Promise.all(targets.map(async (tg) => {
+      // The record first, and this client's write abandoned if it cannot be
+      // made. Per client, so one unrecordable acknowledgement does not cancel
+      // three assignments that had nothing to acknowledge.
+      const mine = sending.find((x) => x.clientId === tg.clientId);
+      if (mine) {
+        const recorded = await recordInjuryChoice(tg.clientId, mine.movements);
+        if (!recorded) {
+          return {
+            clientId: tg.clientId, name: tg.name, ok: false,
+            why: 'your acknowledgement could not be saved, so the programme was not sent either — it would have left no sign you knew.',
+          };
+        }
+      }
+      const r = await assignProgramTo(tg.clientId, program);
+      return { clientId: tg.clientId, name: tg.name, ok: r.ok, why: r.why };
+    }));
+    setAssignBusy(false);
+
+    const report = bulkReport('assign', outcomes);
+    if (outcomes.some((o) => o.ok)) notifySuccess();
+    // What is left to do: the writes that did not land, plus the people the
+    // injury gate held. Both need the coach to come back to them, so both stay
+    // ticked and trying again is the same gesture over the set that still
+    // needs it.
+    const outstanding = [...report.retry, ...plan.blocked.map((b) => b.clientId)];
+    setPicked(Object.fromEntries(outstanding.map((id) => [id, true])));
+
+    const parts = [report.body];
+    // Named, never silently dropped. A coach who believes four people got a
+    // programme when three did is worse off than one who was refused.
+    if (plan.blocked.length) {
+      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all — they have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Select them above and read what they disclosed.`);
+    }
+    Alert.alert(report.title, parts.join('\n\n'));
   };
 
   // `clearProgram` resolves false when the delete never reached the server, and
@@ -576,8 +883,8 @@ export default function Builder() {
     // their auto plan from the goal on their own row. All that is in question
     // here is what this builder shows next, so an unknown goal empties it
     // rather than filling it with a fat-loss plan nobody chose.
-    if (autoGoal) loadFrom(buildProgram(autoGoal, 25));
-    else { setTitle(''); setNote(''); setDays([]); }
+    if (autoGoal) loadFrom(buildProgram(autoGoal, 25), clientId);
+    else clearBuilder();
     Alert.alert('Reverted to auto', `${client?.name ?? 'Your client'} is back on their auto-generated program.`);
   };
 
@@ -673,9 +980,46 @@ export default function Builder() {
         <Rule />
 
         {/* ── templates ──────────────────────────────────────────────────── */}
+        {/* Save as Template used to be the `note` on the SectionHead: small,
+            quiet, uppercased micro text with a chevron, in the top right
+            corner. Reported as "need to make the Save as Template bigger, it
+            gets lost" — and it is the primary way a coach keeps their work,
+            drawn like a footnote. It is a control now, beside the one that
+            takes a template out, so the two read as the pair they are.
+
+            The count waits for a whole read, because under 'partial' or
+            'error' `templates.length` is the size of what arrived plus three
+            built-in starters, which is not the size of the library. */}
         <Section>
-          <SectionHead title="Templates" note="Save as Template" onPress={() => { setTplName(title); setSaveOpen(true); }} />
+          <SectionHead title="Templates" note={tplStatus === 'ready' && templates.length ? `${num(templates.length)} saved` : undefined} />
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+            Save this week to reuse it with anybody, or start from one you have already built.
+          </Text>
+
+          {/* The starters are the problem, not the consolation. Three of them
+              are always present, so a coach whose saved programmes did not come
+              back sees a working library with somebody else's programmes in it
+              and concludes their work is gone. */}
+          {tplStatus === 'error' ? (
+            <Notice tone={t.warn} kicker="Library" title="Your saved templates could not be read"
+              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing — your own programmes are on the server and did not come back. Reopen this screen once you have signal." />
+          ) : tplStatus === 'partial' ? (
+            <PartialRead what="templates in your library" shown={templates.length} />
+          ) : null}
+
+          {tplSaveFailed ? (
+            <Notice tone={t.crit} kicker="Template" title="That template was not saved" note={tplSaveFailed} />
+          ) : null}
+
+          <Cta wide label="Save as Template" onPress={() => { setTplName(tplName || title); setSaveOpen(true); }} />
+          <View style={{ height: sp.sm }} />
           <Ghost label="Start From a Template" icon="grid" onPress={() => setTplPick(true)} />
+          <View style={{ height: sp.sm }} />
+          {/* The library was reachable from inside the picker sheet above and
+              from the Explore list, and from nowhere a coach standing on this
+              screen would look. It is where the twelve programmes they have
+              built actually live. */}
+          <Ghost label="Open Template Library" icon="grid" onPress={() => router.push('/(trainer)/templates')} />
         </Section>
 
         <Rule />
@@ -688,11 +1032,32 @@ export default function Builder() {
               blank program with no explanation and starts typing one, which is
               the same trap by a different door: the work is real, the save at
               the bottom is what has to be held. */}
-          {planGuard.allowed ? null : (
+          {!planGuard.allowed && !hasDraft ? (
             <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programme'}
               title={programStatus === 'loading' ? 'Reading their current programme' : 'What they are on could not be read'}
               note={`${planGuard.reason} Nothing has been loaded into the builder, because an empty builder is not this client's plan.`} />
-          )}
+          ) : null}
+
+          {/* ── what is in the builder, and whose it is ──────────────────────
+              The builder used to replace everything in it whenever the
+              selected client changed, and the screen opens with nobody
+              selected — so the coach's own order of work, lay out the week and
+              then pick who it is for, destroyed the week at the picking step.
+              Nothing is taken from them now.
+
+              The other half of that has to be said out loud: a builder showing
+              one thing while a client's name is selected is exactly the trap
+              the rest of this screen guards, so when the two disagree it says
+              so and offers the replacement as something the coach taps. */}
+          {seed.note ? (
+            <Notice tone={t.ink3} kicker="Builder" title="This is your own draft" note={seed.note}>
+              {seed.replaceLabel ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Ghost label={seed.replaceLabel} onPress={loadTheirProgramme} />
+                </View>
+              ) : null}
+            </Notice>
+          ) : null}
 
           {/* An unreadable goal used to be answered with a fat-loss programme.
               The builder is empty instead, and this says whose goal is missing
@@ -714,9 +1079,15 @@ export default function Builder() {
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Program name</Text>
           <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
             style={[inp, { marginBottom: sp.lg }]} />
+          {/* The letter at the top of the week. Cues about ONE movement go on
+              that movement — a tempo note is useless attached to a Tuesday —
+              which is what the Notes field under each exercise below is for. */}
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Note to client (optional)</Text>
-          <TextInput value={note} onChangeText={setNote} placeholder="Focus, tempo, anything they should know…" placeholderTextColor={t.ink3}
+          <TextInput value={note} onChangeText={setNote} placeholder="Why this block, what to watch for overall…" placeholderTextColor={t.ink3}
             multiline style={[inp, { minHeight: 72, textAlignVertical: 'top' }]} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+            This sits at the top of their week. Notes about a single movement go on that movement, further down.
+          </Text>
         </Section>
 
         <Rule />
@@ -1123,7 +1494,7 @@ export default function Builder() {
               const dc = tpl.program.days.length;
               const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
               return (
-                <Pressable key={tpl.id} onPress={() => { loadFrom(tpl.program); setTplName(tpl.name); setTplPick(false); }}
+                <Pressable key={tpl.id} onPress={() => { loadFrom(tpl.program, null); setTplName(tpl.name); setTplPick(false); }}
                   style={{
                     flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
                     borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
