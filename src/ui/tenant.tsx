@@ -25,6 +25,7 @@ import { reportError } from '../lib/reportError';
 import { checkTenantBrand } from '../lib/tenantBrand';
 import { money } from '../lib/gymRecord';
 import type { LoadStatus } from './loadStatus';
+import { classifySetCurrencyError, isCurrencyCode, readSetCurrency, type SetCurrencyOutcome, type SetCurrencyReply } from '../lib/coachCurrency';
 import { useAuthRevision } from './authRevision';
 
 /**
@@ -169,6 +170,29 @@ interface TenantValue {
   refresh: () => void;
   /** Owner-only; RLS enforces it. Returns false when the write is rejected. */
   updateTenant: (patch: Partial<Pick<Tenant, 'name' | 'brandColor' | 'sessionFee' | 'currency'>>) => Promise<boolean>;
+  /**
+   * The OTHER way a currency gets set, and the only one a coach has.
+   *
+   * `updateTenant` above is owner-only and that is correct for a gym. It is
+   * also a dead end for the person it blocks hardest: `is_owner_of(t)` requires
+   * `profiles.role = 'owner'`, a coach's role is 'trainer', and part 153
+   * measured that every coach sits ALONE in a personal tenant. So a coach's
+   * UPDATE matches zero rows, six screens withhold every money figure they
+   * have, and all six tell that coach to ask a gym owner who does not exist.
+   *
+   * This goes through `set_my_tenant_currency()` (supabase/parts/164), which is
+   * security definer and grants exactly one thing: the SOLE occupant of a
+   * tenant may name its currency once, when none is set. It refuses a shared
+   * tenant — that is a gym, it has an owner, and `tenants_owner_rw` decides —
+   * and it refuses to CHANGE a currency, because every stored price is
+   * denominated in the one that is there.
+   *
+   * It lives on this provider rather than in src/lib/coachCurrency.ts for two
+   * reasons: every write to `tenants` in this repository goes through this
+   * file, and coachCurrency.ts must not import the Supabase client or its own
+   * tests stop running. The outcome vocabulary and all the wording are there.
+   */
+  setOwnCurrency: (code: string) => Promise<SetCurrencyOutcome>;
 }
 
 const Ctx = createContext<TenantValue | null>(null);
@@ -288,8 +312,42 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     } catch (e) { reportError('tenant.update', e); return false; }
   }, [tenant]);
 
+  // The coach's route. See the note on `setOwnCurrency` in TenantValue.
+  //
+  // No local patch on success, and that is not laziness. `refresh()` re-reads
+  // the row, which is the same thing the six screens that withhold money do for
+  // themselves on their next mount — and a local patch here would be a second
+  // copy of the answer, written by the one caller with a reason to be
+  // optimistic about it. That is exactly how `updateTenant` came to report a
+  // gym name saved on one device and nowhere else.
+  const setOwnCurrency: TenantValue['setOwnCurrency'] = useCallback(async (code) => {
+    if (!USE_SUPABASE) return 'unavailable';
+    // Refused here rather than sent, because the column's own CHECK
+    // (`tenants_currency_is_iso`, part 99) refuses it and a constraint
+    // violation is a worse thing to show somebody than a sentence.
+    if (!isCurrencyCode(code)) return 'bad-code';
+    try {
+      const { data, error } = await supabase.rpc('set_my_tenant_currency', { p_currency: code });
+      if (error) {
+        const out = classifySetCurrencyError(error as { code?: string | null; status?: number | null; message?: string | null });
+        // Not reported when the function is simply not there yet: that is a
+        // migration waiting to be applied, it will be true on every launch
+        // until it is, and filing it as an error would bury the real ones.
+        if (out !== 'unavailable') reportError('tenant.setOwnCurrency', error);
+        return out;
+      }
+      const out = readSetCurrency(data as SetCurrencyReply | null);
+      if (out === 'set') refresh();
+      return out;
+    } catch (e) {
+      // A throw out of the fetch is nobody answering, never a refusal.
+      reportError('tenant.setOwnCurrency', e);
+      return 'unsent';
+    }
+  }, [refresh]);
+
   return (
-    <Ctx.Provider value={{ tenant, role, loading, status, brandMismatch, refresh, updateTenant }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ tenant, role, loading, status, brandMismatch, refresh, updateTenant, setOwnCurrency }}>{children}</Ctx.Provider>
   );
 }
 

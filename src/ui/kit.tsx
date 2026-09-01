@@ -408,8 +408,18 @@ export function ListRow({ icon, title, note, onPress, tone }: {
 
 /* ── controls ─────────────────────────────────────────────────────────────── */
 
-export function Cta({ label, onPress, tone, wide, disabled }: {
+export function Cta({ label, onPress, tone, wide, disabled, a11yLabel }: {
   label: string; onPress: () => void; tone?: string; wide?: boolean; disabled?: boolean;
+  /**
+   * What to SAY, when the visible label is not enough on its own.
+   *
+   * A primary action is read out of context by a screen reader: "Cancel",
+   * "Approve Session", "Join" — cancel what, approve whose, join which. The
+   * visible label can lean on the row it sits in and the spoken one cannot, so
+   * this is where the row's subject goes. Same prop, same precedence and same
+   * reasoning as `Ghost` below.
+   */
+  a11yLabel?: string;
 }) {
   const t = useTheme();
   return (
@@ -417,7 +427,7 @@ export function Cta({ label, onPress, tone, wide, disabled }: {
     // primary action on most screens — pressed one-handed, mid-set, with a wet
     // thumb. Slop rather than padding, so nothing in any layout moves.
     <Pressable onPress={onPress} disabled={disabled}
-      accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }}
+      accessibilityRole="button" accessibilityLabel={a11yLabel || label} accessibilityState={{ disabled: !!disabled }}
       hitSlop={{ top: 2, bottom: 2, left: 0, right: 0 }}
       style={{
         backgroundColor: disabled ? t.surface2 : (tone || t.brand), borderRadius: radius.sm,
@@ -515,7 +525,14 @@ export function Ghost({ label, onPress, icon, a11yLabel }: {
 }) {
   const t = useTheme();
   const round = !label;
-  const spoken = label || a11yLabel || (icon ? ICON_NAMES[icon] ?? icon : undefined);
+  // `a11yLabel` FIRST. It used to come second, so a caller that passed both got
+  // the visible label read out and the spoken one silently discarded — which is
+  // exactly what four buttons in the coach app were already doing: three
+  // "Try Again" buttons that had been given "Try reading your clip library
+  // again" and one that had been given the client's name. The prop existed for
+  // icon-only buttons and quietly refused to do the other half of its job, so a
+  // row of identical "Cancel" and "Leave" buttons could not be told apart.
+  const spoken = a11yLabel || label || (icon ? ICON_NAMES[icon] ?? icon : undefined);
   return (
     // The round form is 38pt and the pill form 40pt tall; both are under 44, and
     // the round one is the back button on nearly every screen in the app.

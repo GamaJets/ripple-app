@@ -41,6 +41,7 @@ import {
   type PtSession, type PayPolicy, type Settlement,
 } from '@lib/gymSessions';
 import { money } from '@lib/gymRecord';
+import { payPolicyOf, PAY_POLICY_LABEL, type PayPolicyCode } from '@lib/gymPolicy';
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit } from '@lib/rowCap';
 
@@ -349,10 +350,11 @@ export default function CoachEarnings() {
       setMe(who);
       if (!who?.tenantId) return;
       const { data: g, error } = await supabase
-        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', who.tenantId).single();
       if (!live) return;
       setGymName(error ? null : g?.name ?? null);
       setSessionFee(error ? null : g?.session_fee ?? null);
+      setPolicyCode(error ? null : (((g as any)?.session_pay_policy ?? null) as string | null));
       setCcy(error ? null : ((((g as any)?.currency ?? '') as string).trim().toUpperCase() || null));
       setGymError(error ? (error.message || 'Could not read your gym.') : null);
     })();
@@ -374,15 +376,26 @@ export default function CoachEarnings() {
   const fallbackCents = sessionFee == null ? null : Math.round(sessionFee * 100);
 
   /**
-   * The pay policy this screen reads by, stated rather than chosen.
+   * The gym's pay policy, READ — stated rather than chosen, and no longer
+   * assumed.
    *
-   * /payroll gives the owner a toggle for no-shows and late cancellations,
-   * because it is a gym decision. It is not a coach decision, and a toggle here
-   * would let a coach raise their own figure by ticking a box — so this screen
-   * takes the conservative position, counts no-shows and late cancellations
-   * separately, and says out loud that the gym may pay for them.
+   * This was `const policy: PayPolicy = PAY_DELIVERED_ONLY`, and the banner
+   * below said so to the coach in as many words: "whether your gym pays for a
+   * no-show or a late cancellation is its own policy, and this screen cannot
+   * read it". That sentence was true and it was the bug. A coach at a gym that
+   * does pay for no-shows was shown a number smaller than their actual pay,
+   * every month, with an explanation that made it sound like a limitation of
+   * the world rather than of a missing column.
+   *
+   * It is still not a coach DECISION — there is no control here, and there must
+   * not be, or a coach could raise their own figure by ticking a box. The gym
+   * says it once on /settings and this screen reads it.
    */
-  const policy: PayPolicy = PAY_DELIVERED_ONLY;
+  const [policyCode, setPolicyCode] = useState<string | null>(null);
+  const stated = payPolicyOf(policyCode);
+  // The floor where the gym has not said. It cannot overstate what a coach is
+  // owed, and the banner below now says which of the two cases this is.
+  const policy: PayPolicy = stated ?? PAY_DELIVERED_ONLY;
 
   // Stays null while `sessions` is null rather than collapsing to []. Handing
   // payrollByTrainer an empty array produces a confident, complete-looking month
@@ -641,10 +654,20 @@ export default function CoachEarnings() {
         <Banner>
           {notPaidByPolicy} session{notPaidByPolicy === 1 ? '' : 's'} this month{' '}
           {notPaidByPolicy === 1 ? 'was' : 'were'} recorded as a no-show or a cancellation, and{' '}
-          {notPaidByPolicy === 1 ? 'is' : 'are'} not counted as payable above. Whether your gym pays
-          for a no-show or a late cancellation is its own policy, and this screen cannot read it —
-          so it takes the narrow view. If your gym does pay for those, your figure is higher than
-          the one shown here, not lower.
+          {notPaidByPolicy === 1 ? 'is' : 'are'} not counted as payable above.{' '}
+          {gymError ? (
+            <>Your gym&rsquo;s record could not be read, so its pay policy is unknown here and this
+            takes the narrow view. If your gym does pay for those, your figure is higher than the
+            one shown, not lower.</>
+          ) : stated ? (
+            <>Your gym pays for{' '}
+            <strong style={{ color: 'var(--ink)' }}>{PAY_POLICY_LABEL[policyCode as PayPolicyCode].toLowerCase()}</strong>,
+            and that is what the figures above apply.</>
+          ) : (
+            <>Your gym has not recorded what it pays for beyond delivered sessions, so this takes
+            the narrow view. If it does pay for those, your figure is higher than the one shown, not
+            lower — worth asking, because nothing here can tell you.</>
+          )}
         </Banner>
       ) : null}
 

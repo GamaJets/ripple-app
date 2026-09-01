@@ -53,10 +53,16 @@ addEventListener('DOMContentLoaded', function () {
   through.
 
   The store addresses are the canonical ones, same as /download — they start
-  working by themselves the moment each listing is published. Checked 30 Aug
-  2026: both still 404, which is why the callout below says so rather than
-  letting a reader tap a badge into a dead page. Delete that callout when the
-  listings are live; nothing else here changes.
+  working by themselves the moment each listing is published. Re-checked 1 Sep
+  2026: `itunes.apple.com/lookup?id=6790096518` still answers `resultCount 0`
+  and the Play page still returns 404, so both are still dead and the callout
+  below still has to say so rather than letting a reader tap a badge into
+  nothing. Delete that callout when the listings are live; nothing else here
+  changes.
+
+  Which app those addresses point AT is now resolved per brand — see the
+  long note above the `site-brands` block further down. Repple's page is
+  unchanged; the mechanism only does anything on another brand's host.
 
   The code is rendered from ?c= and is shown BEFORE any of that, because it is
   the one thing that must survive: a reader who cannot install today still
@@ -66,13 +72,13 @@ addEventListener('DOMContentLoaded', function () {
 <header class="site">
   <div class="wrap">
     <a class="brand" href="/">
-      <span class="mark">
+      <span class="mark" id="b-mark">
         <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
           <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
           <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
-      Repple
+      <span id="b-wordmark">Repple</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -95,7 +101,7 @@ addEventListener('DOMContentLoaded', function () {
   <div class="page">
 
     <p class="eyebrow">You have been invited</p>
-    <h1 class="display">Train with your coach on Repple</h1>
+    <h1 class="display" id="b-h1">Train with your coach on Repple</h1>
     <p class="lede" id="who">Someone has invited you to train with them. Get the app, then enter
        their code when it asks.</p>
 
@@ -170,19 +176,19 @@ addEventListener('DOMContentLoaded', function () {
         <p style="margin:14px 0 0"><button class="btn" type="submit" id="asksend">Send it to them</button></p>
         <p class="compare-note bad" id="askerr" hidden></p>
         <p class="compare-note" id="askdone" hidden></p>
-        <p class="compare-note" style="margin-top:10px">Repple does not email you. Your coach reads this
+        <p class="compare-note" style="margin-top:10px" id="b-noemail">Repple does not email you. Your coach reads this
            and replies themselves, in their own time. If the code above is not exactly the one they sent
            you, there is no coach to pass this to and nobody will see it.</p>
       </form>
     </div>
 
     <div class="callout">
-      <p><strong>Being released now.</strong> Repple is in its first release and the store listings
+      <p><strong>Being released now.</strong> <span id="b-release">Repple</span> is in its first release and the store listings
          are still going live. The buttons below are the real App Store and Google Play addresses
          and will open the listing the moment it is published &mdash; if one does not open yet,
          that app has not finished going out.</p>
       <p>You do not have to wait to be useful to your coach: email
-         <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> with the code
+         <a id="b-support" href="mailto:support@repplefitness.com">support@repplefitness.com</a> with the code
          above and whether you are on iPhone or Android, and we will get you onto the test build.</p>
     </div>
 
@@ -195,7 +201,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <h2 class="hd">Once it is installed</h2>
     <div class="rows">
-      <div class="row"><span class="node">1</span><span>Open Repple and create your account.</span></div>
+      <div class="row"><span class="node">1</span><span id="b-step1">Open Repple and create your account.</span></div>
       <div class="row"><span class="node">2</span><span>Tap <strong>Find a trainer</strong>.</span></div>
       <div class="row"><span class="node">3</span><span>Enter the code above. Your coach gets the request and accepts it.</span></div>
     </div>
@@ -222,7 +228,7 @@ addEventListener('DOMContentLoaded', function () {
 
 <footer class="site">
   <div class="wrap">
-    <span>© 2026 Repple</span>
+    <span id="b-copy">© 2026 Repple</span>
     <span>
       <a href="/support">Support</a> ·
       <a href="/privacy">Privacy</a> ·
@@ -231,6 +237,185 @@ addEventListener('DOMContentLoaded', function () {
     </span>
   </div>
 </footer>
+
+<!--
+  WHICH BRAND'S APP THIS PAGE OFFERS.
+
+  This page is the top of a coach's funnel, and until now it offered exactly one
+  app: Repple's App Store id, Repple's Play package, `repple://join`, Repple's
+  support address, Repple's name in nine places. `src/lib/brands.ts` exists
+  because a chain buying this platform gets THEIR app in the store under THEIR
+  name — and `joinCode.ts` already composes the invite link against that brand's
+  own `joinOrigin`. So a chain's coach hands out a link to their own domain, and
+  whatever page answers it must offer their own app. A copy of this file that
+  says "Repple" is the one place where the whole white-label proposition is
+  visibly untrue, to the exact person the coach is trying to sign up.
+
+  ── Why a table on the page, and not a build step ─────────────────────────
+
+  There is no build step for `web/`. `.github/workflows/deploy-web.yml` copies
+  this directory to Cloudflare Pages verbatim; nothing transforms it, nothing
+  templates it, and inventing a generator that only this file used would be a
+  step nobody runs and nobody maintains. Server-side selection is out for the
+  same reason: Pages serves static files and there is no worker here.
+
+  What is left is selection in the browser, and the honest input is the HOST.
+  Cloudflare Pages puts as many custom domains as you like on ONE project, so
+  adding a brand's domain to the existing `repple` project is a dashboard action
+  with no second deployment and no second copy of this file to drift. The host
+  the reader arrived on is exactly the brand whose coach sent the link, because
+  the link was composed from that brand's `joinOrigin`.
+
+  `?b=<id>` overrides the host and exists to make a brand's page openable before
+  its domain is pointed anywhere — otherwise a new brand's page cannot be looked
+  at until DNS is live, which is the wrong order to find a mistake in. It cannot
+  do harm: it selects between entries in the table below and nothing else, and an
+  id that is not in the table falls back to Repple exactly as `resolveBrandId`
+  does in `brands.ts`.
+
+  ── The table, and the one field it cannot check ──────────────────────────
+
+  Everything below is duplicated from `src/lib/brands.ts`, which is normally the
+  thing that file's own header forbids. The duplicate is deliberate and it is
+  guarded: `src/lib/joinPage.test.ts` parses this JSON and fails if any entry
+  disagrees with `BRANDS`, so the copy cannot drift without a red test. It is a
+  copy rather than a generated file because a generated file needs a generator,
+  and see above.
+
+  `appleAppId` is the exception. An App Store numeric id is minted by Apple when
+  the listing is created, and the registry has nowhere to put it — so it is
+  stated here, per brand, and the test cannot verify it against anything. A
+  brand with no listing yet sets it null and the iOS badge is removed rather
+  than pointing at somebody else's app. The Play address needs no such field
+  because it IS the package name, which the registry already holds.
+
+  `example` is here for the same reason it is in `brands.ts`: it is IANA's
+  reserved domain and namespace, so it cannot collide with a real chain, and it
+  is the only way the rewriting path below is ever RUN. With one row in the
+  table that path never executes — not on this site, not in review, not until
+  the first real brand, which is the worst possible time to discover it. Open
+  `/join?c=E32ZMZ&b=example` and the whole mechanism is on screen, including the
+  removed App Store badge for a brand that has no listing.
+
+  ── What happens with no JavaScript ───────────────────────────────────────
+
+  The markup below is written in Repple's words, so repplefitness.com renders
+  correctly with scripting off and is byte-identical to what it was. A second
+  brand's host with scripting off would show Repple's page, which is a real
+  hole and is the price of having no build step; it is worth stating plainly
+  rather than pretending the mechanism is complete.
+
+  The same honesty applies with scripting ON. The block sits at the end of the
+  document and runs during parse, so on a page this size the rewrite lands
+  before anything is painted in practice — but that is the browser's scheduling
+  and not a promise, and on a slow device a second brand's reader could see
+  "Repple" for a frame. Moving it earlier does not help: it edits elements that
+  are further down the document and cannot run before they exist. Removing the
+  flash for good means a build step or a worker, which is the same open
+  deployment decision as everything above.
+-->
+<script type="application/json" id="site-brands">
+{
+  "repple": {
+    "hosts": ["repplefitness.com", "www.repplefitness.com"],
+    "label": "Repple",
+    "clientApp": "Repple",
+    "clientScheme": "repple",
+    "androidPackage": "com.washateria.repple",
+    "appleAppId": "6790096518",
+    "supportEmail": "support@repplefitness.com"
+  },
+  "example": {
+    "hosts": ["example.com", "www.example.com"],
+    "label": "Example Fitness",
+    "clientApp": "Example Fitness",
+    "clientScheme": "examplefitness",
+    "androidPackage": "com.example.fitness",
+    "appleAppId": null,
+    "supportEmail": "support@example.com"
+  }
+}
+</script>
+
+<script>
+(function () {
+  // The brand this visitor is being invited into, resolved before anything else
+  // on the page runs — the redirect below reads the store hrefs this sets, and
+  // reading them a moment too early would send a chain's member to Repple.
+  var BAKED = 'repple';
+  var table = {};
+  try {
+    table = JSON.parse(document.getElementById('site-brands').textContent) || {};
+  } catch (e) { table = {}; }
+
+  function resolve() {
+    var q = '';
+    try { q = (new URLSearchParams(location.search).get('b') || '').trim().toLowerCase(); } catch (e) { q = ''; }
+    if (q && Object.prototype.hasOwnProperty.call(table, q)) return q;
+    var host = (location.hostname || '').toLowerCase();
+    for (var k in table) {
+      if (!Object.prototype.hasOwnProperty.call(table, k)) continue;
+      var hosts = table[k].hosts || [];
+      for (var i = 0; i < hosts.length; i++) if (hosts[i] === host) return k;
+    }
+    // Same conservative direction as resolveBrandId() in brands.ts: an
+    // unrecognised host is served the default brand's page rather than a broken
+    // one. On a preview deployment (*.pages.dev) that is the correct answer.
+    return BAKED;
+  }
+
+  var id = resolve();
+  var b = table[id] || table[BAKED];
+  // Published for the two scripts further down, so neither of them re-reads the
+  // table and neither can disagree with what the page now says.
+  window.SITE_BRAND = b;
+  if (!b || id === BAKED) return;
+
+  // Everything from here rewrites Repple's words into this brand's. It runs for
+  // a non-default brand ONLY, so the default page is never touched by it.
+  var app = b.clientApp;
+  var set = function (elId, text) { var el = document.getElementById(elId); if (el) el.textContent = text; };
+
+  document.title = 'Your coach invited you — ' + app;
+  var canon = document.querySelector('link[rel=canonical]');
+  if (canon && b.hosts && b.hosts.length) canon.setAttribute('href', 'https://' + b.hosts[b.hosts.length - 1] + '/join');
+
+  // The ripple in the header is Repple's logo, drawn inline. There is no
+  // brand's logo to put in its place — this is a static site with no asset
+  // pipeline — so it is REMOVED rather than left. Another chain's page carrying
+  // its supplier's mark is the same failure as a second brand's app reaching
+  // the store wearing Repple's icon, and the wordmark alone reads as finished.
+  var mark = document.getElementById('b-mark');
+  if (mark) mark.hidden = true;
+  set('b-wordmark', b.label);
+
+  set('b-h1', 'Train with your coach on ' + app);
+  set('b-release', app);
+  set('b-step1', 'Open ' + app + ' and create your account.');
+  set('b-copy', '© 2026 ' + b.label);
+  set('storehd', 'Get ' + app);
+  set('openapp', 'Open in ' + app);
+  set('openhint', 'Already have ' + app + '? That opens it with your coach’s code filled in.');
+  set('b-noemail', b.label + ' does not email you. Your coach reads this and replies themselves, in their own time. '
+    + 'If the code above is not exactly the one they sent you, there is no coach to pass this to and nobody will see it.');
+  var desc = document.querySelector('meta[name=description]');
+  if (desc) desc.setAttribute('content', 'Someone invited you to train with them on ' + app + '. Get the app and enter their code.');
+
+  var sup = document.getElementById('b-support');
+  if (sup) { sup.textContent = b.supportEmail; sup.setAttribute('href', 'mailto:' + b.supportEmail); }
+
+  var android = document.getElementById('android');
+  if (android) android.setAttribute('href', 'https://play.google.com/store/apps/details?id=' + encodeURIComponent(b.androidPackage));
+
+  // No listing yet means no link. A dead App Store badge on a brand's own page
+  // is worse than an Android-only one: it reads as their app having been pulled.
+  var ios = document.getElementById('ios');
+  if (ios) {
+    if (b.appleAppId) ios.setAttribute('href', 'https://apps.apple.com/app/id' + encodeURIComponent(b.appleAppId));
+    else ios.hidden = true;
+  }
+})();
+</script>
 
 <script>
 (function () {
@@ -256,7 +441,11 @@ addEventListener('DOMContentLoaded', function () {
     // restricts this to letters and digits: the guarantee lives at the point of
     // use, not three lines away in a test somebody could later loosen.
     var open = document.getElementById('openapp');
-    open.setAttribute('href', 'repple://join?c=' + encodeURIComponent(up));
+    // The scheme is the BRAND's client app, not the literal `repple` this line
+    // used to carry: `repple://` on a chain's page opens nothing, or opens
+    // Repple on the phone of somebody who happens to have both installed.
+    var scheme = (window.SITE_BRAND && window.SITE_BRAND.clientScheme) || 'repple';
+    open.setAttribute('href', scheme + '://join?c=' + encodeURIComponent(up));
     open.hidden = false;
     document.getElementById('openhint').hidden = false;
     var btn = document.getElementById('copy');
@@ -299,8 +488,9 @@ addEventListener('DOMContentLoaded', function () {
   } else if (isIOS) {
     other.textContent = 'On Android instead? The Google Play link is beside it.';
   } else {
-    document.getElementById('storehd').textContent = 'Get Repple on your phone';
-    other.textContent = 'Repple is a phone app — open this link on the phone you train with.';
+    var appName = (window.SITE_BRAND && window.SITE_BRAND.clientApp) || 'Repple';
+    document.getElementById('storehd').textContent = 'Get ' + appName + ' on your phone';
+    other.textContent = appName + ' is a phone app — open this link on the phone you train with.';
   }
 
   // Desktop is never redirected: neither store app exists there, and a reader on
@@ -323,7 +513,15 @@ addEventListener('DOMContentLoaded', function () {
   var bounced = false;
   try { bounced = sessionStorage.getItem(BOUNCED_KEY) === '1'; } catch (e) { bounced = false; }
 
-  if (REDIRECT && (isAndroid || isIOS) && !bounced) {
+  // A brand with no App Store listing has had its iOS badge removed above, so
+  // there is no href to bounce an iPhone reader to. Sending them to `#` would
+  // reload this page and burn the once-per-session mark; they stay here with
+  // the code and the enquiry form, which is the whole point of both.
+  var hasStore = isAndroid
+    ? true
+    : !!(window.SITE_BRAND ? window.SITE_BRAND.appleAppId : true);
+
+  if (REDIRECT && (isAndroid || isIOS) && hasStore && !bounced) {
     var target = document.getElementById(isAndroid ? 'android' : 'ios').href;
     var note = document.getElementById('other');
     note.textContent = 'Taking you to the ' + (isAndroid ? 'Google Play Store' : 'App Store') + '…';
@@ -444,11 +642,13 @@ form.addEventListener('submit', async (e) => {
      function itself has no failing branch. So the message says the send did not
      happen, which is the one thing an error here actually establishes. */
   if (error) {
-    return fail('That did not send — your details have not gone anywhere. Check your connection and try again, or email support@repplefitness.com with the code above.');
+    const support = (window.SITE_BRAND && window.SITE_BRAND.supportEmail) || 'support@repplefitness.com';
+    return fail('That did not send — your details have not gone anywhere. Check your connection and try again, or email ' + support + ' with the code above.');
   }
 
   form.querySelectorAll('input, textarea').forEach((el) => { el.value = ''; });
-  done.textContent = 'Sent. Your coach will see this next time they open Repple — nothing is emailed to you, and the reply will come from them.';
+  const appName = (window.SITE_BRAND && window.SITE_BRAND.clientApp) || 'Repple';
+  done.textContent = 'Sent. Your coach will see this next time they open ' + appName + ' — nothing is emailed to you, and the reply will come from them.';
   done.hidden = false;
 });
 </script>

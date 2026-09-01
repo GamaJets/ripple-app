@@ -96,6 +96,7 @@ import { askToCompleteIntake, useClientIntake } from '../../src/ui/intake';
 import { intakeLine, intakePrompt } from '../../src/lib/intake';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useAuthRevision } from '../../src/ui/authRevision';
+import { useAuth } from '../../src/ui/auth';
 import {
   assessDrift, fetchClientActivity, DEFAULT_WINDOWS, DRIFT_LABEL,
   type Drift,
@@ -121,6 +122,18 @@ import {
   attention, noAccountNote, unaskedNote,
 } from '../../src/lib/clientBrief';
 import { sessionsOf, trainingBoard, trainingLine } from '../../src/lib/clientTraining';
+import {
+  checkInAge, checkInGapLine, ratingsLine, readCoachCheckIns,
+  type CheckInRow, type CoachCheckIn,
+} from '../../src/lib/coachCheckins';
+import {
+  CHANNELS, CONTACT_OUTCOMES, triedLine,
+  type Channel, type Contact, type ContactOutcome,
+} from '../../src/lib/interventions';
+import {
+  canLogContact, channelOptions, contactGapLine, contactInsert, contactScope,
+  contactScopeLine, draftBlocker, outcomeOptions,
+} from '../../src/lib/coachContacts';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
@@ -132,6 +145,27 @@ const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, crea
 // scripts/check-schema.mjs only follows a named select list inside the file
 // that names it.
 const TRAINING_SUMMARY_COLS = 'performed_at, exercise, logged_by';
+// The whole check-in, which is four more columns than any coach-side read in
+// this repository has ever asked for. client-goals.tsx and client-nutrition.tsx
+// both select 'at, weight_kg'; clientDrift.ts selects a timestamp; roster.tsx
+// reads `adherence`. Energy, sleep, mood and the NOTE the client wrote to their
+// coach were selected by nothing at all.
+// Declared here as a literal, not imported from src/lib/coachCheckins.ts, for
+// the reason TRAINING_SUMMARY_COLS gives above it: scripts/check-schema.mjs
+// resolves a named select list only against constants declared in the same
+// file, so a list that arrives by import is one it cannot check against the
+// live database.
+const CHECKIN_COLS = 'id, at, weight_kg, energy, sleep, mood, adherence, note';
+// The gym's shared record of who has already contacted this member. Byte for
+// byte the list studio-web/app/retention/page.tsx selects — one table, two
+// readers, and a coach and their owner must not be looking at different columns
+// of the same phone call. Declared here as a literal for the same
+// check-schema.mjs reason as the two above it.
+const CONTACT_COLS = 'id, member_id, at, channel, by_id, by_name, outcome, note';
+// One column, and it decides whether the log above applies at all. A coached
+// client does NOT share their coach's tenant (part 153, measured live), and
+// both policies on `member_interventions` are scoped `tenant_id = my_tenant()`.
+const CLIENT_TENANT_COLS = 'id, tenant_id';
 const ITEM_COLS = 'id, label, icon, active, created_at, updated_at';
 
 /**
@@ -176,7 +210,15 @@ export default function ClientScreen() {
   useFocusEffect(useCallback(() => { void r.refresh(); }, [r.refresh]));
 
   const ap = useAssignedPrograms();
-  const { tenant } = useTenant();
+  // `status` as well as the tenant: a null tenant under 'error' is a read that
+  // failed, not a coach with no gym, and the contact log below decides whether
+  // it applies to this client off exactly that distinction.
+  const { tenant, status: tenantStatus } = useTenant();
+  // Who a logged contact is filed under. `member_interventions_staff_w`
+  // requires `by_id = auth.uid()` in its WITH CHECK — a coach must not be able
+  // to file a call under a colleague's name, because "who has already tried" is
+  // the one thing that stops the second call.
+  const auth = useAuth();
   // The coach's own unit. Weight is stored in kilograms whatever it was typed
   // in (TF-37), so this changes what is printed and nothing else — but printing
   // kilograms to a coach who reads pounds is a wrong number, not a style.
@@ -589,6 +631,167 @@ export default function ClientScreen() {
     setModeUnsaved(stored ? null : m);
   };
 
+  /* ── who has already tried them ─────────────────────────────────────────── */
+
+  // The log that was built for this exact moment and shown to everybody except
+  // the person having it.
+  //
+  // `member_interventions` exists, is indexed both ways, and carries a read
+  // policy whose own comment says why: "a trainer about to ring a client has to
+  // be able to see that the desk rang them on Tuesday." src/lib/interventions.ts
+  // is a finished module around it. The only thing in the product that touched
+  // either was the gym owner's console on a laptop; nothing under app/(trainer)/
+  // imported a line of it.
+  //
+  // The scope question has to be settled BEFORE the read is believed. Both
+  // policies are `tenant_id = my_tenant()`, and part 153 measured that a coached
+  // client sits in a personal tenant of their own — so for an independent
+  // coach's client this read correctly returns zero rows, and zero rows renders
+  // as "nobody has contacted them", which is the one sentence this table exists
+  // to make trustworthy. See src/lib/coachContacts.ts.
+  const [clientTenantId, setClientTenantId] = useState<string | null>(null);
+  const [clientTenantStatus, setClientTenantStatus] = useState<LoadStatus>('loading');
+  useEffect(() => {
+    if (!canRead || !id) return;
+    let live = true;
+    setClientTenantId(null); setClientTenantStatus('loading');
+    (async () => {
+      // `profiles_trainer_r_clients` lets a coach select their own client's
+      // profile row, and `tenant_id` is among the granted columns — confirmed
+      // by an anonymous probe of this exact select list, which is refused by
+      // `my_tenant()` inside the policy rather than by a column privilege.
+      const { data, error } = await supabase.from('profiles').select(CLIENT_TENANT_COLS)
+        .eq('id', id).maybeSingle();
+      if (!live) return;
+      if (error) {
+        reportError('client.clientTenant', error, { clientId: id });
+        setClientTenantId(null); setClientTenantStatus('error'); return;
+      }
+      setClientTenantId((data as { tenant_id: string | null } | null)?.tenant_id ?? null);
+      setClientTenantStatus('ready');
+    })();
+    return () => { live = false; };
+  }, [canRead, id]);
+
+  const [contacts, setContacts] = useState<Contact[] | null>(null);
+  const [contactStatus, setContactStatus] = useState<LoadStatus>('loading');
+  const [contactTick, setContactTick] = useState(0);
+  useEffect(() => {
+    if (!canRead || !id || !tenant?.id) return;
+    let live = true;
+    setContacts(null); setContactStatus('loading');
+    (async () => {
+      const { data, error } = await supabase.from('member_interventions').select(CONTACT_COLS)
+        .eq('member_id', id).eq('tenant_id', tenant.id)
+        .order('at', { ascending: false }).limit(capLimit());
+      if (!live) return;
+      if (error) {
+        // Null, never []. An empty list here reads as "nobody has tried", and
+        // a coach who believes that rings the member the desk rang on Tuesday.
+        reportError('client.contacts', error, { clientId: id });
+        setContacts(null); setContactStatus('error'); return;
+      }
+      const page = capped((data ?? []) as unknown as Record<string, unknown>[]);
+      setContacts(page.rows.map((r) => ({
+        id: String(r.id),
+        memberId: String(r.member_id),
+        at: String(r.at),
+        channel: r.channel as Channel,
+        byId: (r.by_id as string | null) ?? null,
+        // Never the uuid dressed up as a name — the Studio console's own rule.
+        byName: (r.by_name as string | null) ?? null,
+        outcome: ((r.outcome as string | null) ?? 'unknown') as ContactOutcome,
+        note: (r.note as string | null) ?? null,
+      })));
+      setContactStatus(page.truncated ? 'partial' : 'ready');
+    })();
+    return () => { live = false; };
+  }, [canRead, id, tenant?.id, contactTick]);
+
+  /** The contact sheet's own state. Null when it is closed. */
+  const [logging, setLogging] = useState<{ channel: Channel | null; outcome: ContactOutcome | null; note: string } | null>(null);
+  const [logBusy, setLogBusy] = useState(false);
+  const [logErr, setLogErr] = useState<string | null>(null);
+
+  const saveContact = async () => {
+    if (!logging || !id || !tenant?.id || logBusy) return;
+    const me = auth.user;
+    if (!me) { setLogErr('You are not signed in, so a contact cannot be filed under your name.'); return; }
+    const row = contactInsert(logging, {
+      tenantId: tenant.id, memberId: id, byId: me.id, byName: me.name,
+      // The instant the contact happened, which for a coach filing it straight
+      // afterwards is now. The column is deliberately NOT defaulted to now() —
+      // setup.sql's own note says a value somebody had to supply is a value
+      // somebody had to think about.
+      at: new Date().toISOString(),
+    });
+    if (!row) { setLogErr(draftBlocker(logging)); return; }
+    setLogBusy(true); setLogErr(null);
+    // `.select('id')` so the rows are countable. An insert RLS narrows to zero
+    // rows does not error, and a contact reported as logged that nobody else
+    // can see gets the member rung twice — which is the whole failure this
+    // table was built to end.
+    const { data, error } = await supabase.from('member_interventions').insert(row).select('id');
+    setLogBusy(false);
+    if (error || !data || data.length !== 1) {
+      if (error) reportError('client.logContact', error, { clientId: id });
+      setLogErr('That contact was not recorded, so nobody else can see it. Nothing has changed — try again.');
+      return;
+    }
+    setLogging(null);
+    setContactTick((n) => n + 1);
+  };
+
+  /* ── what they told you, in their own words ─────────────────────────────── */
+
+  // The read that did not exist.
+  //
+  // A client fills in a weekly check-in — a weight, four self-ratings and a
+  // free-text note addressed to their coach — and until now no coach-side query
+  // in this repository read the ratings or the note at all. client-goals.tsx
+  // and client-nutrition.tsx both asked for `at, weight_kg`; clientDrift.ts
+  // asks for a timestamp; roster.tsx reads `adherence` for the roster figure.
+  // Energy, sleep, mood and the paragraph somebody sat down and wrote were
+  // read by nothing in the product. src/lib/coachCheckins.ts carries the
+  // measurement and the three ways this is easy to get wrong.
+  //
+  // No new policy was needed and none was added. `check_ins_coach_read` is
+  // `using (is_my_client(user_id))`, RLS narrows rows and not columns, and an
+  // anon probe of the full select list is refused by `is_my_client` rather than
+  // by a column privilege — which is what proves the list is readable. The
+  // coach could always have asked; nobody wrote the query.
+  const [checkIns, setCheckIns] = useState<CoachCheckIn[] | null>(null);
+  const [ciStatus, setCiStatus] = useState<LoadStatus>('loading');
+  useEffect(() => {
+    if (!canRead || !id) return;
+    let live = true;
+    setCheckIns(null); setCiStatus('loading');
+    (async () => {
+      // Newest-first, because the only one that has to survive the cap is the
+      // latest — the rest of this section is a count and a history the coach
+      // scrolls. Ordered by id as well as `at` for the reason
+      // client-goals.tsx gives about `measurements`: two rows sharing an
+      // instant have no order at the cap, so a check-in here yesterday can
+      // simply be gone today.
+      const { data, error } = await supabase.from('check_ins').select(CHECKIN_COLS)
+        .eq('user_id', id)
+        .order('at', { ascending: false }).order('id', { ascending: false })
+        .limit(capLimit());
+      if (!live) return;
+      if (error) {
+        // Left as null, never as []. An empty list under 'error' renders as
+        // "they have not sent a check-in", which is an accusation about a
+        // person manufactured by a failed read.
+        reportError('client.checkIns', error, { clientId: id });
+        setCheckIns(null); setCiStatus('error'); return;
+      }
+      const page = capped((data ?? []) as unknown as CheckInRow[]);
+      setCheckIns(readCoachCheckIns(page.rows));
+      setCiStatus(page.truncated ? 'partial' : 'ready');
+    })();
+    return () => { live = false; };
+  }, [canRead, id]);
+
   /* ── the briefing ───────────────────────────────────────────────────────── */
 
   const nowMs = Date.now();
@@ -611,6 +814,27 @@ export default function ClientScreen() {
   const unasked = !id
     ? 'No client was named in the link that opened this screen, so nothing was read.'
     : unaskedNote(USE_SUPABASE, queryable, who);
+  /** Whether the gym's shared contact log is about this person at all. */
+  const cScope = contactScope({
+    coachTenantId: tenant?.id ?? null,
+    coachTenantStatus: tenantStatus,
+    clientTenantId,
+    clientTenantStatus,
+    clientHasAccount: queryable,
+  });
+  /** Why the log is not being shown, or null when it applies. */
+  const cScopeLine = contactScopeLine(cScope, who);
+  /** Why there is nothing in it, or null when there is. */
+  const cGapLine = contactGapLine(contactStatus, contacts ? contacts.length : 0, who);
+
+  /** The most recent one. Null under 'error' by construction, because
+   *  `checkIns` is null there rather than empty. */
+  const latestCheckIn = checkIns && checkIns.length ? checkIns[0] : null;
+  /** Why there is nothing to show, or null when there is. `unasked` wins over
+   *  it: a client with no account has sent nothing and has not declined to,
+   *  and the two must not read the same. */
+  const checkInGap = unasked ?? checkInGapLine(ciStatus, checkIns ? checkIns.length : 0, who);
+
   const driftTone = !drift ? t.ink3
     : drift.status === 'at_risk' ? t.crit
     : drift.status === 'idle' ? t.s5
@@ -1082,6 +1306,116 @@ export default function ClientScreen() {
 
         <Rule />
 
+        {/* ── who has already tried them ───────────────────────────────────
+            `member_interventions` was built for the person about to make the
+            call, and until now the only screen that read or wrote it was the
+            gym owner's console on a laptop. The coach holding the phone had no
+            way to see that the front desk rang this member on Tuesday.
+            The scope line comes first and wins: an empty log is only worth
+            showing to somebody it could have had rows for. */}
+        <Section>
+          <SectionHead title="Who Has Already Tried" />
+          {cScopeLine ? (
+            cScope === 'unknown'
+              ? <Flag tone={t.warn}>{cScopeLine}</Flag>
+              : <Text style={{ ...ty.body, color: t.ink3 }}>{cScopeLine}</Text>
+          ) : (<>
+            {cGapLine ? (
+              // 'error' and 'partial' both get the flag. Both mean the coach
+              // must look before dialling, and a grey line under a heading is
+              // read as "nothing to report".
+              contactStatus === 'error' || contactStatus === 'partial'
+                ? <Flag tone={t.warn}>{cGapLine}</Flag>
+                : <Text style={{ ...ty.body, color: t.ink3 }}>{cGapLine}</Text>
+            ) : (
+              (contacts ?? []).map((c, i) => (
+                <View key={c.id} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                  {/* interventions.ts owns how a contact reads, and the Studio
+                      console renders the same sentence from the same function.
+                      Two wordings of one phone call is how a coach and their
+                      owner come to describe it differently. */}
+                  <Text style={{ ...ty.body, color: t.ink }}>{triedLine(c, nowMs)}</Text>
+                  {c.note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.note}</Text> : null}
+                </View>
+              ))
+            )}
+            {canLogContact(cScope) ? (
+              <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                <Ghost label="Log a Contact" onPress={() => { setLogErr(null); setLogging({ channel: null, outcome: null, note: '' }); }} />
+              </View>
+            ) : null}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Shared with everybody on your gym’s staff. A contact recorded here is not attendance and does not move anybody’s retention verdict — it is the record of what was tried, so the next person to look does not try it again.
+            </Text>
+          </>)}
+        </Section>
+
+        <Rule />
+
+        {/* ── what they actually wrote to you ──────────────────────────────
+            The half of the check-in this product collected every week and
+            never once showed the person it was addressed to. The weight and
+            the timestamp were read on four screens; the four self-ratings and
+            the note the client typed were read by nothing at all.
+            The note comes first and is drawn as a quotation, because it is the
+            only thing on this screen that is somebody's own words rather than
+            this app's summary of them. */}
+        <Section>
+          <SectionHead title="What They Told You" />
+          {checkInGap ? (
+            ciStatus === 'error' && !unasked
+              ? <Flag tone={t.warn}>{checkInGap}</Flag>
+              : <Text style={{ ...ty.body, color: t.ink3 }}>{checkInGap}</Text>
+          ) : latestCheckIn ? (<>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+              <Text style={{ ...ty.label, color: t.ink3 }}>Their latest check-in</Text>
+              {/* Null rather than a dash when the timestamp will not parse:
+                  a dash where a date goes, beside a note somebody wrote, reads
+                  as the screen having broken. */}
+              {checkInAge(latestCheckIn.at, nowMs)
+                ? <Text style={{ ...ty.caption, color: t.ink3 }}>{checkInAge(latestCheckIn.at, nowMs)}</Text>
+                : null}
+            </View>
+
+            {latestCheckIn.note ? (
+              <View style={{ marginTop: sp.md, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.brand }}>
+                <Text style={{ ...ty.body, color: t.ink }}>{latestCheckIn.note}</Text>
+              </View>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                They sent the form without writing anything with it.
+              </Text>
+            )}
+
+            {/* Withheld entirely when none of the four was answered, rather
+                than drawn as a row of dashes that says nothing and takes up
+                the space where something might have. */}
+            {ratingsLine(latestCheckIn)
+              ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{ratingsLine(latestCheckIn)}</Text>
+              : null}
+
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {/* Adherence is the client's own 1-5 rating of how well they
+                  stuck to the plan, and it is stated here as the scale it is
+                  on. The roster shows the same column as a percentage, and the
+                  day the two were confused a client who rated themselves 4 out
+                  of 5 was displayed as 4% and flagged at risk. */}
+              Their own ratings, out of five, including how well they feel they stuck to the plan. Not the same figure as the adherence percentage on your roster, which counts what they ticked.
+              {ciStatus === 'partial'
+                ? ' Only part of their history came back, so the count below is at least this many rather than all of them.'
+                : ''}
+            </Text>
+
+            {checkIns && checkIns.length > 1 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {checkIns.length} check-ins on record.
+              </Text>
+            ) : null}
+          </>) : null}
+        </Section>
+
+        <Rule />
+
         {/* ── the ways in, each saying whether there is anything in there ─── */}
         <Section>
           <SectionHead title="Open" />
@@ -1295,6 +1629,66 @@ export default function ClientScreen() {
           <Cta wide disabled={askBusy} label={askBusy ? 'Sending…' : 'Send the Ask'} onPress={sendAsk} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setAskOpen(false)} />
+        </View>
+      </Modal>
+
+      {/* ── record what was tried ──────────────────────────────────────────
+          Two closed sets and an optional note, which is the whole of the row.
+          `outcome` is not defaulted here even though the column defaults to
+          'unknown': the column's own comment says why the default is that and
+          not 'reached' — a row nobody finished must not assert that somebody
+          was spoken to — and a picker pre-set to an answer is a row nobody
+          finished wearing an answer. A coach who genuinely does not know
+          chooses "Not recorded" themselves, which is a different event from
+          having skipped the question. */}
+      <Modal visible={!!logging} animationType="slide" transparent onRequestClose={() => setLogging(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLogging(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Log a Contact with {who}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+            Everybody on your gym’s staff sees this. It records what was tried, not whether it worked — and it is not attendance, so it does not change how this client is assessed.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How did you contact them?</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
+              {channelOptions(CHANNELS).map((o) => (
+                <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, channel: o.value } : d))}
+                  accessibilityRole="button" accessibilityState={{ selected: logging?.channel === o.value }}
+                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.channel === o.value ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, color: logging?.channel === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What came of it?</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
+              {outcomeOptions(CONTACT_OUTCOMES).map((o) => (
+                <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, outcome: o.value } : d))}
+                  accessibilityRole="button" accessibilityState={{ selected: logging?.outcome === o.value }}
+                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.outcome === o.value ? t.brand : t.surface2 }}>
+                  <Text style={{ ...ty.label, color: logging?.outcome === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What was said (optional)</Text>
+            <TextInput value={logging?.note ?? ''} onChangeText={(v) => setLogging((d) => (d ? { ...d, note: v } : d))} multiline
+              placeholder="Away until the 12th, coming back to the Tuesday class."
+              placeholderTextColor={t.ink3}
+              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              The reason two people do not make the same call. Optional, because “rang, no answer” is already worth recording.
+            </Text>
+            {logErr ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{logErr}</Flag> : null}
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          <Cta wide disabled={logBusy || !!(logging && draftBlocker(logging))}
+            label={logBusy ? 'Recording…' : 'Record It'} onPress={() => { void saveContact(); }} />
+          {logging && draftBlocker(logging)
+            ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{draftBlocker(logging)}</Text>
+            : null}
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setLogging(null)} />
         </View>
       </Modal>
     </SafeAreaView>

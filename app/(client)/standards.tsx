@@ -59,7 +59,7 @@ export default function Standards() {
  const { log, status: logStatus } = useWorkoutLog();
  const wu = useSettings().weightUnit;
  const liftsWhole = isWhole(logStatus);
- const prs = personalRecords(log);
+ const prs = personalRecords(log, c.weightSeries);
  const bodyWhole = isWhole(c.profileStatus);
  const bw = c.weightKg;
 

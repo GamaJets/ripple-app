@@ -36,6 +36,7 @@
 // its complexity — a failed read rendered as "no request" would tell somebody who
 // asked to be erased that they never asked, which is the one wrong answer here.
 import { useState, useEffect, useCallback } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -472,7 +473,7 @@ export default function Settings() {
           <Pressable onPress={() => setLegal(legal === 'terms' ? null : 'terms')}>
             <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : '›'}</Text>} />
           </Pressable>
-          {legal === 'terms' ? <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>Repple provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text> : null}
+          {legal === 'terms' ? <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>{BRAND.label} provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text> : null}
         </Section>
 
         <Rule />
@@ -502,7 +503,7 @@ export default function Settings() {
 
         <Rule />
 
-        <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>Repple · made for coaches & their clients</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>{BRAND.label} · made for coaches &amp; their clients</Text>
       </ScrollView>
     </SafeAreaView>
   );

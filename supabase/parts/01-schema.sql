@@ -1,9 +1,18 @@
 -- ─────────────────────────────────────────────────────────────────────────
 -- ═══════════════════════════════════════════════════════════════════════════
--- FitForge — Postgres schema for Supabase
+-- Repple — Postgres schema for Supabase
 -- Multi-tenant white-label fitness platform (owner ▸ trainers ▸ clients)
 -- Run in the Supabase SQL editor, or `supabase db push` with the CLI.
 -- ═══════════════════════════════════════════════════════════════════════════
+--
+-- The first line read "FitForge" until 1 Sep 2026, left behind by a rename that
+-- stopped at the code and never reached the SQL. It is only a comment and it
+-- changes no object, which is exactly why it survived two years: nothing fails
+-- on it. It was worth fixing anyway. This is the first line of the file a
+-- person pastes into a brand new Supabase project, so it is the name a fresh
+-- deployment introduces itself by — and docs/WHITE-LABEL.md cites it, fairly,
+-- as the cheapest evidence in the repo of how far a brand name spreads and how
+-- little of that spread any test can see.
 
 create extension if not exists "uuid-ossp";
 

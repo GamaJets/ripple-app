@@ -543,6 +543,8 @@ for (const n of [0, 1, 4, 999, 1204, 99999]) {
     // part 159
     'A client has ended their coaching', 'A package was bought', 'An intake has come back',
     'A client has signed the release', 'A client has left you a review',
+    // part 163
+    'A session pack is nearly used up', 'A session pack has run out',
   ]) {
     const e = SERVER_WRITTEN.find((x) => x.title === title);
     ok(!!e, `“${title}” is still written to a coach somewhere`);
@@ -560,6 +562,28 @@ for (const n of [0, 1, 4, 999, 1204, 99999]) {
     const e = SERVER_WRITTEN.find((x) => x.title === title);
     ok(!!e, `“${title}” is still written to a client somewhere`);
     eq(e?.to, 'client', `“${title}” goes to the client's build`);
+  }
+
+  // A pack running out is TWO rows about one balance, and the pair only works
+  // if it stays a pair. The warning at one session left is what makes the
+  // conversation cheap — a coach raises it in the session they are already
+  // delivering — and the row at zero is the fact that the NEXT session is
+  // covered by nothing. Collapsing them back to one leaves the coach learning
+  // it at the moment it is too late to have said anything, which is where
+  // `packRunOut()` already was: computed, correct, and rendered only on a
+  // screen nobody opens weekly.
+  const packRows = SERVER_WRITTEN.filter((x) => /session pack/.test(x.title));
+  eq(packRows.length, 2, 'a pack running out is told twice: nearly, and then actually');
+  eq(new Set(packRows.map((x) => x.title)).size, 2, 'with two different headings');
+  for (const p of packRows) {
+    eq(p.to, 'trainer', `“${p.title}” goes to the coach — the client just booked the session that spent it`);
+    eq(p.route, '/(trainer)/payments', `“${p.title}” opens the screen that knows how to price a pack`);
+    // No figure and no currency, anywhere in the catalogue entry.
+    // `client_purchases.amount_cents` is nullable, its currency is a separate
+    // and often-null column, and part 150 left this product with no default
+    // currency at all. The count is the message; the money is on the screen.
+    ok(!/[$£€]|\b(?:AED|GBP|USD|EUR|SAR|AUD|CAD|ZAR)\b/.test(p.title),
+      `“${p.title}” states no currency — there is no default one to state`);
   }
 
   // A declined card is TWO rows about one status transition, and they are the

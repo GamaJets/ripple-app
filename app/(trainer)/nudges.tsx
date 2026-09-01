@@ -68,6 +68,7 @@ import {
   WHAT_IT_CANNOT_SEE, ACTION_LABEL, refusalsIn,
   type Evidence, type Nudge, type MutedRow,
 } from '../../src/lib/nudge';
+import { paceNote } from '../../src/lib/interventions';
 
 /** The mark beside a verdict. A coloured dot beside ink text, never coloured
  *  text: the scale reserves status colour for status and none of these clears
@@ -135,6 +136,19 @@ export default function Nudges() {
       <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>{item.observed}</Text>
 
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{item.caveat}</Text>
+
+      {/* HOW LONG to leave it, from this client's own pattern.
+          `Nudge.pace` has been on this object since the board was built and
+          nothing rendered it: the number reached the screen only as
+          `mutedDaysIfSent` inside a confirmation, so a coach could see how long
+          a suggestion would go quiet for and never why that was the number.
+          It is the whole argument for computing a per-client pace rather than
+          using one window for everybody — fourteen days loses a client who came
+          four times a week and says nothing at all about one who came
+          fortnightly, whose ordinary gap between visits IS fourteen days. A
+          coach shown a fixed window gives up on the second client for training
+          normally. src/lib/interventions.ts owns the sentence. */}
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{paceNote(item.pace)}</Text>
 
       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, flexWrap: 'wrap' }}>
         <Cta label="Write a Message" onPress={() => setDrafting(item)} />

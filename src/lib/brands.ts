@@ -107,6 +107,28 @@ export type Brand = {
    */
   linkHosts: string[];
   /**
+   * Where a member of THIS brand is told to write when something goes wrong.
+   *
+   * Not a marketing address. Every use of it is on a page or in a file that a
+   * person reads at the worst moment they will ever have with this software:
+   * the incomplete-export warning in gdpr.ts, the failed-send fallback on the
+   * join page, the "we could not do it, tell us" line under account deletion.
+   *
+   * So it is per brand for the same reason `webOrigin` is, only sharper. A
+   * chain's member who has just been handed a partial copy of their own
+   * training records is being told to email a company they have never heard of,
+   * about data they gave to their gym. That is a support request that will
+   * never be sent, and a disclosure of who the supplier is, in one string.
+   *
+   * Stated per brand rather than derived from `webOrigin` (`support@` + host)
+   * because the mailbox and the website are separate decisions somebody has to
+   * actually make: a chain may take support on a helpdesk domain, or hand it
+   * back to Repple under contract. Deriving it would invent an address that
+   * bounces, and a bouncing support address is worse than the wrong brand on a
+   * working one.
+   */
+  supportEmail: string;
+  /**
    * This brand's `google-services.json`, or null to use app.json's.
    *
    * Android push is not portable between brands. A Firebase project's
@@ -148,6 +170,10 @@ export const BRANDS: Record<string, Brand> = {
     // always used, kept character for character so no reset URL moves.
     webOrigin: 'https://repplefitness.com',
     linkHosts: ['repplefitness.com', 'www.repplefitness.com'],
+    // The literal that was already spelled out in gdpr.ts, on eight settings
+    // screens and across web/. Unchanged, deliberately, for the same reason the
+    // bundle ids above are unchanged: this is the address in the wild.
+    supportEmail: 'support@repplefitness.com',
     androidGoogleServices: null,
   },
 
@@ -174,6 +200,7 @@ export const BRANDS: Record<string, Brand> = {
     joinOrigin: 'https://www.example.com',
     webOrigin: 'https://example.com',
     linkHosts: ['example.com', 'www.example.com'],
+    supportEmail: 'support@example.com',
     androidGoogleServices: './google-services.example.json',
   },
 };

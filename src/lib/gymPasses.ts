@@ -437,17 +437,61 @@ export async function issuePass(sb: Queryable, tenantId: string, p: IssuePass): 
 /* ── redemption ────────────────────────────────────────────────────────────── */
 
 /**
- * Take a visit off a pass at the desk.
+ * Take a visit off a pass at the desk — and record the visit it paid for.
  *
  * `uses_spent` is not written here — the database trigger recounts it from the
  * redemption rows, so the counter cannot drift from the audit trail. The guard
  * below is a courtesy that gives a readable error; the table's own constraint
  * is what actually holds the line.
+ *
+ * ── Why this writes gym_visits too ────────────────────────────────────────
+ *
+ * It used to write the redemption and nothing else, and the consequence was
+ * invisible on the screen that does it: somebody paid for a day pass, walked
+ * past the desk into the gym, and left NO record of having been in the
+ * building. Not in "Visits today", not in "Inside now", not in the busiest-hour
+ * count, not in the door log /members reads a member's attendance out of, and
+ * not in any retention figure — every one of which is computed from gym_visits
+ * and none of which reads gym_pass_redemptions. A gym selling forty day passes
+ * a week read as forty quiet mornings.
+ *
+ * `gym_visits.pass_id` exists for precisely this and 32-door-log.sql says why
+ * in the column comment: "so the two records reconcile instead of double
+ * counting the same person". A pass visit written WITHOUT its pass_id is the
+ * other half of the same bug — it becomes an ordinary floor visit that cannot
+ * be matched back to what paid for it.
+ *
+ * ── The order, and what a half-failure looks like ─────────────────────────
+ *
+ * The redemption goes first because it is the entitlement: it is the row the
+ * constraint and the trigger police, and the one that decides whether the
+ * person is allowed in at all. If it fails, nothing is written and the desk is
+ * told why. If the redemption lands and the VISIT is refused, the error names
+ * that exact state — the pass was taken, the door log has no record — because
+ * the two repairs are different and a desk told only "could not take that pass"
+ * would take it a second time and spend two visits off one pass.
+ *
+ * `tenantId` is optional: `gym_visits_fill_tenant` derives the tenant from
+ * `pass_id` when it is not supplied, so a door terminal that does not know the
+ * gym cannot supply the wrong one. Callers that do know it pass it, because a
+ * stated value needs no trigger to be right.
  */
 export async function redeemPass(
   sb: Queryable,
   pass: GymPass,
-  opts: { classId?: string | null; redeemedBy?: string | null; today?: string } = {},
+  opts: {
+    classId?: string | null;
+    redeemedBy?: string | null;
+    today?: string;
+    /** The gym, when the caller knows it. Left out, the table's own trigger
+     *  fills it in from the pass. */
+    tenantId?: string | null;
+    /** Set false where the person is NOT entering the building — an
+     *  administrative correction rather than somebody walking in. Nothing in
+     *  this product does that yet; the flag exists so that when something does,
+     *  it has to say so rather than quietly stop writing the visit. */
+    recordVisit?: boolean;
+  } = {},
 ): Promise<void> {
   const today = opts.today ?? new Date().toISOString().slice(0, 10);
   if (remainingUses(pass) === 0) throw new Error('That pass has no visits left on it.');
@@ -459,6 +503,26 @@ export async function redeemPass(
     redeemed_by: opts.redeemedBy ?? null,
   });
   if (error) throw error;
+
+  if (opts.recordVisit === false) return;
+
+  const { error: vErr } = await sb.from('gym_visits').insert({
+    tenant_id: opts.tenantId ?? null,
+    // Null for a pass sold to a name at the desk, which is honest: nobody knows
+    // whose visit it is. It is still a visit, and it still counts toward the
+    // day and toward capacity.
+    member_id: pass.holderId ?? null,
+    pass_id: pass.id,
+    class_id: opts.classId ?? null,
+    entered_at: new Date().toISOString(),
+    source: 'desk',
+  });
+  if (vErr) {
+    throw new Error(
+      `The visit was taken off the pass, but the door log did not record it: ${vErr.message ?? 'the write was refused'}. `
+      + 'Do not take the pass again — that would spend a second visit. Add the arrival by hand from Check someone in.',
+    );
+  }
 }
 
 export async function fetchRedemptions(sb: Queryable, passId: string): Promise<Redemption[]> {

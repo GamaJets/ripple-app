@@ -24,7 +24,7 @@
 //     clients.
 // Both providers are still mounted (they are shared context) but nothing on this
 // screen renders one person's data as another's.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { num } from '../../src/lib/format';
 import {
   DELIVERED_WINDOW_DAYS, MARK_WINDOW_DAYS, awaitingOutcome, deliveredBetween, fetchMySessions, windowStart,
@@ -105,7 +105,13 @@ import { inviteMessage, joinLink } from '../../src/lib/joinCode';
 // evaluated at module scope, so on an Android install made before the
 // dependency landed that import THREW while this file was being loaded — and
 // this file is the coach's home tab. See src/ui/nativeModules.ts.
-import { HAS_NATIVE_CLIPBOARD, CLIPBOARD_UNAVAILABLE_NOTE, copyToClipboard } from '../../src/ui/nativeModules';
+import { HAS_NATIVE_CLIPBOARD, CLIPBOARD_UNAVAILABLE_NOTE, copyToClipboard, pickDocument, readFileBase64, DOCUMENT_PICKER_UNAVAILABLE_NOTE, FILE_READ_UNAVAILABLE_NOTE } from '../../src/ui/nativeModules';
+import { previewCoachRoster, type CoachClientRow, type ImportPreview } from '../../src/lib/csvImport';
+import { screenInvites } from '../../src/lib/memberInvites';
+import {
+  base64ToUtf8, planBlocker, planSummary, resultSummary, rosterPlan,
+  type RosterPlan, type RosterResult, type RowOutcome,
+} from '../../src/lib/rosterImport';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -408,7 +414,26 @@ export default function TrainerClients() {
   // could not see one of them anywhere in this app, so "did that go out?" was
   // answered by posting it again. The sheet below lists them.
   const { addAnnouncement, mine: myNotices, status: noticeStatus } = useAnnouncements();
-  const { sent: sentInvites, sendInvite, revokeInvite } = useInvites();
+  const { sent: sentInvites, sendInvite, revokeInvite, status: inviteStatus } = useInvites();
+  /**
+   * The addresses this coach already has an open invite for.
+   *
+   * `screenInvites` takes this to drop a second invite to somebody who already
+   * has one — the partial unique index in part 37 enforces the same rule, and a
+   * batch that violates it fails halfway with no record of where it stopped.
+   *
+   * ONLY populated from a whole read. Under any other status this is not an
+   * empty set, it is an unknown one, and passing [] would tell the importer
+   * that nobody has been invited — which is the collapse src/ui/loadStatus.ts
+   * exists to prevent, arriving as a half-failed import instead of as a wrong
+   * figure. The import is blocked in that case rather than run on a guess.
+   */
+  const openInviteEmails = useMemo(
+    () => (inviteStatus === 'ready'
+      ? sentInvites.filter((i) => i.status === 'pending').map((i) => i.email)
+      : []),
+    [inviteStatus, sentInvites],
+  );
   const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
   const { tagsFor, allTags, addTag, removeTag, status: tagStatus } = useClientTags();
   const { templates } = useProgramTemplates();
@@ -451,6 +476,98 @@ export default function TrainerClients() {
   // had not chosen it for.
   useEffect(() => { if (!sel) setMealPick(null); }, [sel]);
   const [addOpen, setAddOpen] = useState(false);
+
+  // ── bringing a whole book across ─────────────────────────────────────────
+  //
+  // Adding a client is a name, a goal, a delivery mode, a modal and a round
+  // trip. A coach arriving from another product with forty clients does that
+  // forty times, and most of them do not — which makes this the largest
+  // switching cost in the product.
+  //
+  // Preview then confirm, which is the shape the Studio console's own invite
+  // flow settled on and the shape src/lib/csvImport.ts is built for: it is
+  // ALWAYS a dry run, the coach sees exactly what will happen and to whom, and
+  // only then does anything reach the database. Nothing here reimplements the
+  // reading or the screening — `previewCoachRoster` and `screenInvites` are the
+  // same functions the console uses.
+  const [impOpen, setImpOpen] = useState(false);
+  const [impFile, setImpFile] = useState<string | null>(null);
+  const [impPreview, setImpPreview] = useState<ImportPreview<CoachClientRow> | null>(null);
+  const [impPlan, setImpPlan] = useState<RosterPlan | null>(null);
+  const [impErr, setImpErr] = useState<string | null>(null);
+  const [impBusy, setImpBusy] = useState(false);
+  const [impResult, setImpResult] = useState<RosterResult | null>(null);
+
+  const resetImport = () => {
+    setImpFile(null); setImpPreview(null); setImpPlan(null);
+    setImpErr(null); setImpResult(null);
+  };
+
+  const chooseRosterFile = async () => {
+    setImpErr(null);
+    // Both CSV spellings plus the catch-all, because a file exported from a
+    // spreadsheet on a Mac often arrives as public.comma-separated-values-text
+    // and one exported from a mail client as text/plain. Refusing on the type
+    // would refuse a perfectly good file.
+    const picked = await pickDocument({ type: ['text/csv', 'text/comma-separated-values', 'text/plain', '*/*'] });
+    // 'cancelled' and 'unavailable' are opposite facts about the same silent
+    // screen, and folding them shows nothing either way — see the note on
+    // `DocumentPick`. A coach on a build with no picker taps again forever.
+    if (picked.outcome === 'cancelled') return;
+    if (picked.outcome === 'unavailable') { setImpErr(DOCUMENT_PICKER_UNAVAILABLE_NOTE); return; }
+    if (picked.outcome === 'error') { setImpErr('That file could not be opened. Try choosing it again, or export it as CSV first.'); return; }
+    const b64 = await readFileBase64(picked.file.uri);
+    if (b64 == null) { setImpErr(FILE_READ_UNAVAILABLE_NOTE); return; }
+    // Decoded rather than read byte-per-character. A spreadsheet exported
+    // anywhere in Europe has accented names in its first column, and the naive
+    // read puts "ZoÃ«" on somebody's roster permanently.
+    const text = base64ToUtf8(b64);
+    if (text == null) { setImpErr('That file could not be read as text. Export it as CSV and try again — nothing has been imported.'); return; }
+    const pv = previewCoachRoster(text);
+    // A read that has not come back is not "nobody has been invited". Refused
+    // here rather than run on the guess: the alternative is re-inviting
+    // everybody who already has an open invite, which part 37's partial unique
+    // index refuses one row at a time, halfway through the batch.
+    if (inviteStatus !== 'ready') {
+      setImpFile(picked.file.name || 'your file');
+      setImpPreview(pv);
+      setImpPlan(null);
+      setImpErr('Your existing invites could not be read, so this cannot tell who you have already invited. That is a read that failed rather than a coach who has invited nobody — reopen this screen and try again. Nothing has been imported.');
+      return;
+    }
+    const screened = screenInvites<CoachClientRow>(pv.ready, openInviteEmails);
+    const plan = rosterPlan(pv, screened);
+    setImpFile(picked.file.name || 'your file');
+    setImpPreview(pv);
+    setImpPlan(plan);
+    setImpResult(null);
+    setImpErr(planBlocker(pv, plan));
+  };
+
+  const runImport = async () => {
+    if (!impPlan || impBusy) return;
+    setImpBusy(true);
+    const invited = new Set(impPlan.invite.map((r) => r.email));
+    const rows: { name: string; outcome: RowOutcome }[] = [];
+    // One round trip per row, in order, and the ORDER is what makes the report
+    // usable: these are N separate writes and not one transaction, so a
+    // connection that drops at row twelve leaves twelve clients across and
+    // twenty-eight nowhere. Naming which is what lets a coach re-import the
+    // remainder rather than the lot — and re-importing the lot is how somebody
+    // ends up with every client twice.
+    for (const r of impPlan.create) {
+      const added = await addClient(r.name, r.goal ?? '', r.mode);
+      if (!added) { rows.push({ name: r.name, outcome: 'failed' }); continue; }
+      if (!r.email || !invited.has(r.email)) { rows.push({ name: r.name, outcome: 'added-not-invited' }); continue; }
+      // Read, not fired. `sendInvite` resolves false on a refused write, and a
+      // client on the roster with no invite recorded will never link when they
+      // sign up — with nothing anywhere telling either side.
+      const ok = await sendInvite(r.email, r.mode);
+      rows.push({ name: r.name, outcome: ok ? 'added' : 'added-invite-failed' });
+    }
+    setImpBusy(false);
+    setImpResult({ rows });
+  };
   const [newName, setNewName] = useState('');
   const [newGoal, setNewGoal] = useState('Fat loss');
   const [newMode, setNewMode] = useState<CoachedMode>('online');
@@ -1278,6 +1395,10 @@ export default function TrainerClients() {
                 if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
                 await loadCodes();
               }} /></View>
+            {/* Import sits beside Add rather than under a menu, because the
+                moment a coach needs it is their first hour in the product —
+                and the alternative to finding it is typing forty clients. */}
+            <View style={{ flex: 1 }}><Ghost label="Import Clients" onPress={() => { resetImport(); setImpOpen(true); }} /></View>
             <View style={{ flex: 1 }}><Cta label="Add Client" wide onPress={async () => {
                 setNewName(''); setNewEmail(''); setNewGoal('Fat loss'); setNewMode('online'); setAddOpen(true);
                 // The code is needed by the alert at the end of THIS flow, so
@@ -2065,6 +2186,103 @@ export default function TrainerClients() {
                 }} />
               </View>
             </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── import a roster ───────────────────────────────────────────────
+          Preview, then confirm. The reading is src/lib/csvImport.ts's — the
+          same importer the Studio console uses, with a coach's columns — and
+          the screening is `screenInvites`, which is what catches an address
+          listed twice before the batch fails halfway through with nobody
+          knowing where it stopped.
+          Nothing reaches the database until Import is pressed. */}
+      <Modal visible={impOpen} transparent animationType="slide" onRequestClose={() => setImpOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable style={SCRIM} onPress={() => setImpOpen(false)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '88%', ...elevation.e2 }}>
+            <Text style={{ ...ty.head, color: t.ink }}>Import Your Clients</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+              A CSV with a Name column. Email, Goal and Delivery are optional. Nothing is written until you confirm, and every row this cannot read with confidence is refused with a reason rather than guessed at.
+            </Text>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* This screen has its own <Flag>, which takes the theme and the
+                  text as props rather than children — not the kit's. */}
+              {impErr ? (
+                <View style={{ marginBottom: sp.md }}><Flag t={t} tone={t.warn} text={impErr} /></View>
+              ) : null}
+
+              {impResult ? (<>
+                {/* Afterwards. Named row by row, because these were N separate
+                    writes and a coach who is told "40 imported" when eight
+                    failed has no way to find the eight. */}
+                <Text style={{ ...ty.body, color: t.ink, marginBottom: sp.md }}>{resultSummary(impResult)}</Text>
+                {impResult.rows.filter((r) => r.outcome !== 'added' && r.outcome !== 'added-not-invited').map((r, i) => (
+                  <View key={`${r.name}-${i}`} style={{ paddingVertical: 6, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.label, color: t.ink }}>{r.name}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      {r.outcome === 'failed'
+                        ? 'Not saved. They are not on your roster.'
+                        : 'On your roster, but no invite was recorded — send them your coaching code.'}
+                    </Text>
+                  </View>
+                ))}
+              </>) : impPreview && impPlan ? (<>
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>{impFile}</Text>
+                <Text style={{ ...ty.body, color: t.ink, marginBottom: sp.md }}>
+                  {planSummary(impPlan, impPreview.rows.length)}
+                </Text>
+
+                {/* Header columns that matched nothing. Reported and never
+                    silently dropped: a coach whose "Phone" column vanished
+                    without a word believes it came across. */}
+                {impPreview.unmatchedColumns.length ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                    Columns this does not read, and which will not come across: {impPreview.unmatchedColumns.join(', ')}.
+                  </Text>
+                ) : null}
+
+                {impPlan.rejected.length ? (<>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Rows that will not be imported</Text>
+                  {impPlan.rejected.map((r) => (
+                    <View key={r.line} style={{ paddingVertical: 5 }}>
+                      <Text style={{ ...ty.label, color: t.ink }}>
+                        Line {r.line}{r.name ? ` · ${r.name}` : ''}
+                      </Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{r.reason}</Text>
+                    </View>
+                  ))}
+                </>) : null}
+
+                {impPlan.inviteSkipped.length ? (<>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Added, but no invite recorded</Text>
+                  {impPlan.inviteSkipped.map((r) => (
+                    <View key={r.email} style={{ paddingVertical: 5 }}>
+                      <Text style={{ ...ty.label, color: t.ink }}>{r.name}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{r.reason}</Text>
+                    </View>
+                  ))}
+                </>) : null}
+              </>) : (
+                <Text style={{ ...ty.caption, color: t.ink3 }}>
+                  Export your client list from wherever it is now and choose the file. One row per client, with a header row on top.
+                </Text>
+              )}
+            </ScrollView>
+
+            <View style={{ height: sp.md }} />
+            {impResult ? (
+              <Cta label="Done" wide onPress={() => { setImpOpen(false); resetImport(); }} />
+            ) : impPlan && !impErr ? (
+              <Cta wide disabled={impBusy}
+                label={impBusy ? 'Importing…' : `Import ${impPlan.create.length} Client${impPlan.create.length === 1 ? '' : 's'}`}
+                onPress={() => { void runImport(); }} />
+            ) : (
+              <Cta label="Choose a File" wide onPress={() => { void chooseRosterFile(); }} />
+            )}
+            <View style={{ height: sp.sm }} />
+            <Ghost label={impResult ? 'Close' : 'Cancel'} onPress={() => { setImpOpen(false); resetImport(); }} />
           </View>
         </KeyboardAvoidingView>
       </Modal>

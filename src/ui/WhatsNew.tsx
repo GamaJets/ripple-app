@@ -31,6 +31,7 @@
 // under the release of liability, so it can never be what somebody is reading
 // instead of the thing they actually have to deal with.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { BRAND } from '../lib/brands';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from './components';
@@ -168,7 +169,7 @@ export function WhatsNewSheet({ visible, force, releases, onClose }: {
           <ScrollView showsVerticalScrollIndicator={false}>
             {shown.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.xl }}>
-                Nothing new since you last opened Repple.
+                Nothing new since you last opened {BRAND.label}.
               </Text>
             ) : <Body releases={shown} />}
           </ScrollView>

@@ -21,6 +21,8 @@ import { volumeIn, est1RMIn, weightDeltaIn, convertedNote } from '../../src/lib/
 import { deltaLabel, deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { shortDayLabel } from '../../src/lib/bodyFigures';
 import { est1RM } from '../../src/lib/streaks';
+import { entryTonnage, setLoadKg, tonnageNote, type BodyweightHistory, type Tonnage } from '../../src/lib/bodyweightSets';
+import { useClientData } from '../../src/ui/clientData';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
@@ -28,8 +30,17 @@ import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 const WEEKS = 10;
 
 function mondayOf(d: Date): Date { const x = new Date(d); x.setHours(0, 0, 0, 0); const back = (x.getDay() + 6) % 7; x.setDate(x.getDate() - back); return x; }
-function volumeOf(e: WorkoutEntry): number { return (e.sets || []).reduce((a, s) => a + (s[0] || 0) * (s[1] || 0), 0); }
-function bestOf(e: WorkoutEntry): number { return (e.sets || []).reduce((m, s) => Math.max(m, est1RM(s[1] || 0, s[0] || 0)), 0); }
+// Tonnage and best estimated max now go through src/lib/bodyweightSets.ts,
+// which is what lets a pull-up onto these charts. Both used to read a set's
+// second number as the load, and on a bodyweight set that number is zero — so
+// a member who trains on rings charted a flat run of zeros across ten weeks
+// and was told they had logged no volume at all.
+function bestOf(e: WorkoutEntry, history: BodyweightHistory): number {
+  return (e.sets || []).reduce((m, s, i) => {
+    const load = setLoadKg(e, i, s, history, e.t);
+    return load != null && s[0] ? Math.max(m, est1RM(load, s[0])) : m;
+  }, 0);
+}
 
 export default function Trends() {
   const t = useTheme();
@@ -43,6 +54,11 @@ export default function Trends() {
   // convert, at the edge, in src/lib/units.ts.
   const wu = useSettings().weightUnit;
   const unitNote = convertedNote(wu);
+  // The member's weight over time, used to price a bodyweight set at what they
+  // weighed ON OR BEFORE the day of it. Never today's figure carried backwards:
+  // this is a ten-week chart, and a chart whose past redraws itself every time
+  // somebody steps on a scale is not a record of anything.
+  const { weightSeries } = useClientData();
   // Under 'error' the log is empty because it could not be read, so every
   // tonnage below reduces to zero and gets printed with a thousands separator
   // and a unit — the full costume of a measured figure. "Best week" is the
@@ -56,7 +72,7 @@ export default function Trends() {
   // Weekly training volume (last 10 weeks, oldest → newest).
   const weeks = useMemo(() => {
     const thisMon = mondayOf(new Date());
-    const out: { label: string; iso: string; vol: number; sessions: number }[] = [];
+    const out: { label: string; iso: string; vol: number; unpriced: number; sessions: number }[] = [];
     for (let w = WEEKS - 1; w >= 0; w--) {
       const start = new Date(thisMon); start.setDate(thisMon.getDate() - w * 7);
       const end = new Date(start); end.setDate(start.getDate() + 7);
@@ -67,10 +83,15 @@ export default function Trends() {
       // from local getters, never from a string, so the week a member is
       // standing in is the week they are shown — see src/lib/localDate.ts.
       const iso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-      out.push({ label: `${start.getDate()}/${start.getMonth() + 1}`, iso, vol: inWk.reduce((a, e) => a + volumeOf(e), 0), sessions: days.size });
+      // The unpriced count travels with the tonnage, not beside it. A week of
+      // pull-ups done by somebody who has never been weighed has real work in
+      // it and no load to put on that work, and a bare `vol` would state the
+      // shortfall as a smaller number rather than as an unknown.
+      const t = inWk.reduce<Tonnage>((a, e) => { const x = entryTonnage(e, weightSeries); return { kg: a.kg + x.kg, unknownSets: a.unknownSets + x.unknownSets }; }, { kg: 0, unknownSets: 0 });
+      out.push({ label: `${start.getDate()}/${start.getMonth() + 1}`, iso, vol: t.kg, unpriced: t.unknownSets, sessions: days.size });
     }
     return out;
-  }, [log]);
+  }, [log, weightSeries]);
   const maxVol = Math.max(1, ...weeks.map((w) => w.vol));
 
   // Exercises that have logged sets (skip pure cardio) → trend of best est-1RM.
@@ -85,10 +106,10 @@ export default function Trends() {
   const series = useMemo(() => {
     if (!selName) return [] as { t: string; v: number }[];
     return log.filter((e) => e.exercise === selName && e.sets && e.sets.length)
-      .map((e) => ({ t: e.t, v: bestOf(e) }))
+      .map((e) => ({ t: e.t, v: bestOf(e, weightSeries) }))
       .sort((a, b) => +new Date(a.t) - +new Date(b.t))
       .slice(-12);
-  }, [log, selName]);
+  }, [log, selName, weightSeries]);
   const maxE = Math.max(1, ...series.map((s) => s.v));
   const first = series.length ? series[0].v : 0;
   const last = series.length ? series[series.length - 1].v : 0;
@@ -101,6 +122,7 @@ export default function Trends() {
   // Presentation-only: this week is the last bucket; a flat run of zeros is not
   // a trend, so the chart only draws once something has actually been lifted.
   const thisWeek = weeks[weeks.length - 1];
+  const weekNote = tonnageNote({ kg: thisWeek.vol, unknownSets: thisWeek.unpriced });
   const anyVolume = weeks.some((w) => w.vol > 0);
   const bestWeek = weeks.reduce((m, w) => (w.vol > m.vol ? w : m), weeks[0]);
   const G = layout.gutter;
@@ -133,6 +155,11 @@ export default function Trends() {
             reader is reading kilograms converted, and their coach's console is
             not, so the two disagreeing is worth explaining before it is seen. */}
         {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
+        {/* And said whenever the tonnage above is short. A bodyweight set whose
+            load nobody has recorded is real training that cannot be weighed,
+            and a hero figure printed over it without this is understating the
+            week while looking exactly like a measurement. */}
+        {logKnown && weekNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{weekNote}</Text> : null}
 
         <Rule />
 

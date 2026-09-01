@@ -42,10 +42,15 @@ import {
   type RowResult, type DateOrder,
 } from '@lib/csvImport';
 import {
-  recordPayment, fetchMemberships, fetchPlans, money,
+  fetchMemberships, fetchPlans, money,
   type Membership, type MembershipPlan,
 } from '@lib/gymRecord';
 import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import {
+  keyPaymentRows, startImportRun, finishImportRun, importPayments,
+  fetchImportRuns, undoImportRun, importedRowCount,
+  type ImportRun,
+} from '@lib/gymImports';
 import {
   fetchInvites, createInvites, screenInvites, inviteState, planIdFor, normaliseEmail,
   DEFAULT_VALID_DAYS, type MemberInvite,
@@ -68,7 +73,7 @@ export default function ImportPage() {
   //
   // A payments CSV has no currency column — `PaymentRow` in src/lib/csvImport.ts
   // carries an amount, a date and a method and nothing else — so every imported
-  // payment inherits the gym's. `recordPayment` used to stamp 'AED' over
+  // payment inherits the gym's. The write behind this used to stamp 'AED' over
   // whatever it was not told, which meant a whole historical ledger imported
   // from a GBP gym's old system landed as dirhams in one press, silently, and
   // was thereafter indistinguishable from a figure somebody had checked.
@@ -102,6 +107,18 @@ export default function ImportPage() {
   const [failed, setFailed] = useState<{ line: number; why: string }[]>([]);
 
   /**
+   * What this gym has already imported.
+   *
+   * Null until the read returns, and null on a failure — never [], which would
+   * tell an owner they have never run an import and is the sentence that makes
+   * somebody paste the file "again, to be safe".
+   */
+  const [runs, setRuns] = useState<ImportRun[] | null>(null);
+  const [runsErr, setRunsErr] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [undoMsg, setUndoMsg] = useState<string | null>(null);
+
+  /**
    * Read the two things an import is checked against: who the gym already has,
    * and what it already sells.
    *
@@ -130,6 +147,16 @@ export default function ImportPage() {
     } catch (e: any) {
       setInvites(null);
       setInvitesError(e?.message ?? 'Could not read the invitations already sent.');
+    }
+    // The runs already made. Its own try for the same reason as the other
+    // three: an unreadable history must not empty the receipt below into "this
+    // gym has never imported anything".
+    try {
+      setRuns(await fetchImportRuns(supabase, tenant));
+      setRunsErr(null);
+    } catch (e: any) {
+      setRuns(null);
+      setRunsErr(e?.message ?? 'Could not read what has already been imported.');
     }
   }, []);
 
@@ -301,33 +328,105 @@ export default function ImportPage() {
     return hit?.memberId ?? null;
   }, [members]);
 
+  /**
+   * Write the payments.
+   *
+   * This was a `for` loop of one-payment-at-a-time inserts with nothing to say
+   * which run wrote what, no way to recognise a line already imported, no
+   * receipt and no undo — on the one screen in this console that writes the
+   * money ledger irreversibly and in bulk. Its own failure message told the
+   * operator to fix the failed lines and paste back "only those, or the rest
+   * will be imported twice", which made correctness a transcription exercise
+   * performed once, by hand, under pressure.
+   *
+   * Now every line carries a key derived from its own content plus its
+   * occurrence in the file (`keyPaymentRows`), `(tenant_id, import_key)` is
+   * unique, and the write is an upsert that ignores duplicates. So re-running
+   * the whole file is the safe move rather than the dangerous one: the lines
+   * that landed are recognised and skipped BY THE DATABASE — not by anything
+   * this page remembers, which a reload would have thrown away.
+   *
+   * The run is opened before the first write and closed after the last, so an
+   * import interrupted halfway leaves a row with no finish time and rows
+   * attached to it. That is the only trace a closed browser would otherwise
+   * leave of two hundred half-written payments.
+   */
   const runImport = async () => {
     if (!preview || !tenantId || kind !== 'payments' || !paymentRows.length) return;
     // Belt as well as the disabled button: this writes money, permanently, in
     // bulk, and a currency nobody chose is not a detail that can be corrected
     // afterwards from the rows themselves.
     if (!ccy) return;
-    setBusy(true); setDone(null); setFailed([]);
-    let ok = 0; const bad: { line: number; why: string }[] = [];
-    for (const { line, payment } of paymentRows) {
-      try {
-        await recordPayment(supabase, tenantId, {
-          memberId: matchMember(payment),
-          amountCents: payment.amountCents,
-          method: payment.method,
-          takenAt: new Date(payment.takenOn + 'T12:00:00Z').toISOString(),
-          note: payment.note,
-          currency: ccy,
-        });
-        ok++;
-      } catch (e: any) {
-        bad.push({ line, why: e?.message ?? 'write failed' });
-      }
+    setBusy(true); setDone(null); setFailed([]); setUndoMsg(null);
+    const keyed = keyPaymentRows(paymentRows);
+    let runId: string | null = null;
+    try {
+      runId = await startImportRun(supabase, tenantId, 'payments', keyed.length, me?.id ?? null);
+    } catch (e: any) {
+      setBusy(false);
+      setDone({
+        text: `Nothing was written: the import could not be opened (${e?.message ?? 'the write was refused'}). `
+          + 'No payment was recorded, so the file is still to run.',
+        outcome: 'none',
+      });
+      return;
     }
+
+    const out = await importPayments(supabase, tenantId, runId, keyed, {
+      currency: ccy,
+      memberIdFor: matchMember,
+      recordedBy: me?.id ?? null,
+    });
+
+    // Closing the receipt is its own write and can be refused on its own. If it
+    // is, the payments are still written and the run row still names them —
+    // said out loud rather than swallowed, because a receipt with no counts is
+    // the one row somebody will later try to reconcile against.
+    let receiptErr: string | null = null;
+    try {
+      await finishImportRun(supabase, runId, {
+        written: out.written, skipped: out.skipped, failed: out.failed.length,
+      });
+    } catch (e: any) {
+      receiptErr = e?.message ?? 'the receipt could not be closed';
+    }
+
     setBusy(false);
-    setFailed(bad);
-    setDone(report(ok, bad.length, 'payment', 'recorded'));
-    if (ok > 0) await loadGym(tenantId);
+    setFailed(out.failed);
+    setDone(paymentReport(out, receiptErr));
+    await loadGym(tenantId);
+  };
+
+  /**
+   * Take back everything one run wrote.
+   *
+   * Confirmed rather than immediate, and the confirmation says the number,
+   * because "undo" on a money ledger is itself a destructive act. The count is
+   * read first so a run whose rows are already gone says so instead of
+   * offering a button that removes nothing and reports success.
+   */
+  const undoRun = async (run: ImportRun) => {
+    if (!tenantId) return;
+    setUndoMsg(null); setUndoing(run.id);
+    try {
+      const held = await importedRowCount(supabase, tenantId, run.id);
+      if (held === 0) {
+        setUndoMsg('That run has no payments left in the ledger — nothing to remove.');
+        return;
+      }
+      if (!confirm(
+        `Remove ${held} payment${held === 1 ? '' : 's'} written by this import?\n\n`
+        + 'They are deleted, not hidden, so every total goes back to what it was before the run. '
+        + 'The receipt stays.',
+      )) return;
+      const removed = await undoImportRun(supabase, tenantId, run.id);
+      setUndoMsg(`${removed} payment${removed === 1 ? '' : 's'} removed. Every total is back to what it was before that import.`);
+      await loadGym(tenantId);
+    } catch (e: any) {
+      setUndoMsg(`Nothing was removed: ${e?.message ?? 'the delete was refused'}. The ledger is unchanged.`);
+    } finally {
+      setUndoing(null);
+    }
   };
 
   /**
@@ -468,10 +567,14 @@ export default function ImportPage() {
   return (
     <Shell me={me} gymName={gymName} current="/import">
       <h1 style={{ margin: '0 0 4px', fontSize: 20 }}>Import</h1>
-      <p style={{ margin: '0 0 20px', color: 'var(--ink3)', fontSize: 13 }}>
+      <p style={{ margin: '0 0 20px', color: 'var(--ink3)', fontSize: 13, maxWidth: '78ch' }}>
         Paste a spreadsheet exported from whatever you used before. Nothing is written until you
-        say so, and you see exactly what will happen first.
+        say so, and you see exactly what will happen first. A payments file can be run again
+        safely — every line is recognised by its own content, so the ones already in the ledger are
+        skipped rather than recorded twice, and any run can be taken back below.
       </p>
+
+      <Runs runs={runs} error={runsErr} onUndo={undoRun} undoing={undoing} message={undoMsg} />
 
       <Section title="The file" sub="Copy the whole sheet, header row included, and paste it here.">
         <div style={{ ...formRow, borderBottom: 'none' }}>
@@ -655,7 +758,10 @@ export default function ImportPage() {
           ) : null}
 
           {kind === 'payments' && paymentRows.length > 0 ? (
-            <Section title="Import" sub={`${paymentRows.length} payments will be recorded. This writes to your gym.`}>
+            <Section
+              title="Import"
+              sub={`${paymentRows.length} payments will be offered. This writes to your gym — and any line already recorded from an earlier run is recognised and skipped, so running the same file twice does not double a month's takings.`}
+            >
               <div style={{ ...formRow, borderBottom: 'none' }}>
                 <button onClick={runImport} disabled={busy || !tenantId || !ccy} style={primaryBtn}>
                   {busy ? 'Importing…' : ccy ? `Record ${paymentRows.length} payments in ${ccy}` : `Record ${paymentRows.length} payments`}
@@ -857,6 +963,138 @@ function report(ok: number, bad: number, noun: string, verb: string): { text: st
   };
 }
 
+/**
+ * Every import this gym has run, and the way back from one.
+ *
+ * The receipt exists because the question an owner actually asks is "did last
+ * Tuesday's import work?", and until now there was nowhere to look — least of
+ * all when the true answer was "partly". A run with rows written and no finish
+ * time is the shape of a browser closed halfway through, and it is the row that
+ * most needs to be visible.
+ */
+function Runs({ runs, error, onUndo, undoing, message }: {
+  runs: ImportRun[] | null;
+  error: string | null;
+  onUndo: (r: ImportRun) => void;
+  undoing: string | null;
+  message: string | null;
+}) {
+  // Nothing at all before the first read returns: an empty receipt flashing up
+  // and then filling in reads as "you have never imported anything", which is
+  // the sentence that makes somebody paste the file again to be safe.
+  if (runs === null && !error) return null;
+  if (runs !== null && runs.length === 0 && !message) return null;
+
+  return (
+    <Section
+      title="Imports you have run"
+      sub="What each run offered, wrote and skipped. A payments run can be taken back — the payments are deleted, so every total returns to what it was, and the receipt stays."
+    >
+      {error ? (
+        <p style={{ margin: '12px 14px', fontSize: 13, color: '#ef8080' }}>
+          {error}. This is not a gym that has never imported anything — it is a read that failed,
+          and running a file now cannot be checked against what you have already run. The line-level
+          dedupe still holds either way: the database recognises a line it already has.
+        </p>
+      ) : null}
+      {message ? (
+        <p style={{ margin: '12px 14px', fontSize: 13, color: 'var(--ink2)' }}>{message}</p>
+      ) : null}
+      {(runs ?? []).map((r) => (
+        <div key={r.id} style={{
+          display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap',
+          padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5,
+        }}>
+          <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink3)', minWidth: 150 }}>
+            {new Date(r.startedAt).toLocaleString()}
+          </span>
+          <span style={{ color: 'var(--ink2)', minWidth: 70 }}>{r.kind}</span>
+          <span style={{ color: 'var(--ink2)', flex: 1, minWidth: 260 }}>
+            {r.finishedAt === null ? (
+              // The one line on this screen worth reading twice.
+              <span style={{ color: '#f0c04e' }}>
+                Never finished — {r.rowsOffered} line{r.rowsOffered === 1 ? '' : 's'} were offered and
+                this run never reported back. Some may have been written. Run the same file again:
+                anything already recorded is recognised and skipped.
+              </span>
+            ) : (
+              <>
+                {r.rowsWritten} written
+                {r.rowsSkipped > 0 ? ` · ${r.rowsSkipped} already there` : ''}
+                {r.rowsFailed > 0 ? ` · ${r.rowsFailed} refused` : ''}
+                {' '}of {r.rowsOffered} offered
+              </>
+            )}
+          </span>
+          {r.undoneAt ? (
+            <span style={{ color: 'var(--ink3)' }}>taken back {new Date(r.undoneAt).toLocaleDateString()}</span>
+          ) : r.kind === 'payments' ? (
+            <button
+              onClick={() => onUndo(r)}
+              disabled={undoing === r.id}
+              style={{ ...linkBtn, color: 'var(--crit)' }}
+            >
+              {undoing === r.id ? 'Removing…' : 'Take it back'}
+            </button>
+          ) : (
+            // Plans and invitations are not undone from here, and saying so is
+            // better than a greyed-out button nobody can explain: an invitation
+            // already sent cannot be unsent, and a plan somebody is already on
+            // must not vanish from underneath their membership.
+            <span style={{ color: 'var(--ink3)' }}>no undo</span>
+          )}
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+/**
+ * Say what a payments run did, including the case the old wording had no words
+ * for: lines the database recognised as already imported.
+ *
+ * That case is now the COMMON one — re-running a whole file after fixing a few
+ * lines is the safe move, and it produces a run that is almost entirely skips.
+ * `report()` would have called that "nothing was written", which reads as a
+ * failure and is the opposite of what happened.
+ */
+function paymentReport(
+  out: { written: number; skipped: number; failed: { line: number }[] },
+  receiptErr: string | null,
+): { text: string; outcome: Outcome } {
+  const s = (n: number) => (n === 1 ? '' : 's');
+  const bad = out.failed.length;
+  const already = out.skipped > 0
+    ? ` ${out.skipped} line${s(out.skipped)} ${out.skipped === 1 ? 'was' : 'were'} already in the ledger and ${out.skipped === 1 ? 'was' : 'were'} skipped, not written twice.`
+    : '';
+  const receipt = receiptErr
+    ? ` The payments are recorded, but this import's receipt could not be closed (${receiptErr}), so its counts below may be blank.`
+    : '';
+
+  if (bad === 0 && out.written === 0 && out.skipped > 0) {
+    return {
+      text: `Nothing new to write — every one of the ${out.skipped} line${s(out.skipped)} in this file is already recorded. Running it again changed nothing.${receipt}`,
+      outcome: 'all',
+    };
+  }
+  if (bad === 0 && out.written === 0) return { text: `Nothing was written.${receipt}`, outcome: 'none' };
+  if (bad === 0) {
+    return { text: `${out.written} payment${s(out.written)} recorded.${already}${receipt}`, outcome: 'all' };
+  }
+  if (out.written === 0 && out.skipped === 0) {
+    return {
+      text: `Nothing was written. All ${bad} payment${s(bad)} were refused — the reasons are below.${receipt}`,
+      outcome: 'none',
+    };
+  }
+  return {
+    text: `Partly imported: ${out.written} payment${s(out.written)} recorded and ${bad} refused.${already}`
+      + ' Fix the lines below and run the whole file again — the ones that landed are recognised and'
+      + ` will not be written twice.${receipt}`,
+    outcome: 'partial',
+  };
+}
+
 const OUTCOME_COLOUR: Record<Outcome, string> = {
   all: 'var(--ink2)',
   partial: '#f0c04e',
@@ -948,6 +1186,11 @@ const field = {
 const primaryBtn = {
   background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none', borderRadius: 0,
   padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+} as const;
+
+const linkBtn = {
+  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+  color: 'var(--brand)', fontSize: 12.5, fontFamily: 'var(--sans)',
 } as const;
 
 const formRow = {

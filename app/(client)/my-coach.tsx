@@ -45,6 +45,7 @@
 // keeps the right to write one; they simply reach it from the directory
 // instead, where their former coach's profile still is.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Image, TextInput, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -387,7 +388,7 @@ export default function MyCoach() {
                 </Text>
               ) : (creds ?? []).length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  {coach.name ?? 'Your coach'} hasn’t listed any qualifications or insurance in Repple. Ask
+                  {coach.name ?? 'Your coach'} hasn’t listed any qualifications or insurance in {BRAND.label}. Ask
                   them directly — it is a normal thing to ask.
                 </Text>
               ) : (<>
@@ -464,7 +465,7 @@ export default function MyCoach() {
                     <Text style={{ ...ty.label, color: t.ink3 }}>
                       {mine?.withdrawnAt
                         ? 'You withdrew your review. Writing a new one replaces it rather than adding a second.'
-                        : 'Nobody browsing Repple can tell what a coach is like to train with until somebody who has says so.'}
+                        : `Nobody browsing ${BRAND.label} can tell what a coach is like to train with until somebody who has says so.`}
                     </Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{IDENTITY_NOTE}</Text>
                     <View style={{ marginTop: sp.lg }}>

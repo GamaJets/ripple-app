@@ -22,9 +22,23 @@ import {
   type GymPass, type PassType,
 } from '@lib/gymPasses';
 import { fetchMemberships, money, type Membership } from '@lib/gymRecord';
+import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
 
 const DAY = 86400000;
+
+/**
+ * How far either side of now a class is offered as the reason for a visit.
+ *
+ * `gym_visits.class_id` is what makes a class attendance and a floor visit
+ * distinguishable in one table, and the desk is the only place that knows
+ * which it is. The window is deliberately wide enough for the person who
+ * arrives early to change and the one who stays behind to stretch, and narrow
+ * enough that a busy timetable does not offer eleven classes: attaching a
+ * visit to the WRONG class is worse than leaving it on the floor, because the
+ * floor is at least true.
+ */
+const CLASS_WINDOW_MIN = 90;
 
 /**
  * What a piece of state is when it is still null: a read in flight, or one that
@@ -54,6 +68,10 @@ export default function Door() {
   const [passes, setPasses] = useState<GymPass[] | null>(null);
   const [types, setTypes] = useState<PassType[] | null>(null);
   const [members, setMembers] = useState<Membership[] | null>(null);
+  // The classes running around now, so a check-in can name the one it is
+  // attendance at. Null on a refused read, like every other state here: an
+  // empty picker that says "gym floor only" is a claim about the timetable.
+  const [classes, setClasses] = useState<GymClass[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
@@ -62,11 +80,17 @@ export default function Door() {
     // — the visits table said "No visits logged today" on a morning that had
     // visits, and the check-in dropdown lost every member — so one broken query
     // produced three wrong facts and the banner named none of them.
-    const [vRes, pRes, tRes, mRes] = await Promise.allSettled([
-      fetchVisits(supabase, tenantId, { sinceIso: new Date(Date.now() - 30 * DAY).toISOString() }),
+    const now = Date.now();
+    const [vRes, pRes, tRes, mRes, cRes] = await Promise.allSettled([
+      fetchVisits(supabase, tenantId, { sinceIso: new Date(now - 30 * DAY).toISOString() }),
       fetchPasses(supabase, tenantId),
       fetchPassTypes(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
+      fetchClasses(
+        supabase, tenantId,
+        new Date(now - CLASS_WINDOW_MIN * 60_000).toISOString(),
+        new Date(now + CLASS_WINDOW_MIN * 60_000).toISOString(),
+      ),
     ]);
 
     // A read that failed is null, never []. [] is the gym saying it has none;
@@ -75,6 +99,7 @@ export default function Door() {
     setPasses(pRes.status === 'fulfilled' ? pRes.value : null);
     setTypes(tRes.status === 'fulfilled' ? tRes.value : null);
     setMembers(mRes.status === 'fulfilled' ? mRes.value : null);
+    setClasses(cRes.status === 'fulfilled' ? cRes.value : null);
 
     // Surfaced rather than swallowed: a door screen that silently fails to read
     // is worse than one that says so, because staff will keep using it. Each
@@ -85,6 +110,7 @@ export default function Door() {
       failure(pRes, 'the passes'),
       failure(tRes, 'the pass types'),
       failure(mRes, 'the member list'),
+      failure(cRes, 'the classes running now'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
   }, []);
@@ -95,7 +121,7 @@ export default function Door() {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
-      if (!who?.tenantId) { setVisits([]); setPasses([]); setTypes([]); setMembers([]); return; }
+      if (!who?.tenantId) { setVisits([]); setPasses([]); setTypes([]); setMembers([]); setClasses([]); return; }
       // no-error-ok: the gym's name is a header label; without it the header is blank and every figure below is unaffected
       const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
       if (live) setGymName(t?.name ?? null);
@@ -201,8 +227,9 @@ export default function Door() {
       </div>
 
       <CheckInBar
-        members={members} passes={passes} tenantId={tenantId}
-        membersUnread={unread(members)} onChange={refresh}
+        members={members} passes={passes} classes={classes} tenantId={tenantId}
+        membersUnread={unread(members)} classesUnread={unread(classes)}
+        today={today} onChange={refresh}
       />
       <Inside inside={inside} openBefore={openBefore.length} unread={unread(visits)} onChange={refresh} />
       <Today visits={todays} unread={unread(visits)} />
@@ -217,21 +244,67 @@ export default function Door() {
 
 /* ── check-in ──────────────────────────────────────────────────────────────── */
 
-function CheckInBar({ members, passes, tenantId, membersUnread, onChange }: {
-  members: Membership[] | null; passes: GymPass[] | null; tenantId: string;
-  membersUnread: Unread; onChange: () => void;
+function CheckInBar({ members, passes, classes, tenantId, membersUnread, classesUnread, today, onChange }: {
+  members: Membership[] | null; passes: GymPass[] | null; classes: GymClass[] | null;
+  tenantId: string;
+  membersUnread: Unread; classesUnread: Unread; today: string; onChange: () => void;
 }) {
   const [memberId, setMemberId] = useState('');
+  /**
+   * What paid for this visit, as one value the desk picks.
+   *
+   * `''` is the gym floor. `pass:<id>` and `class:<id>` are the two things
+   * `gym_visits` has a column for and has never been given: 32-door-log.sql
+   * added `pass_id` and `class_id` in the same breath as the comment "so the
+   * two records reconcile instead of double counting the same person", and
+   * this console wrote neither. The consequences were all silent — /members
+   * printed "gym floor" against every console visit including the ones that
+   * were plainly a booked class, a pass and its visit could not be reconciled
+   * so the same person counted twice, and nothing could tell class attendance
+   * from floor attendance in the one table built to hold both.
+   *
+   * One control rather than two, because they are alternatives: a visit is
+   * paid for by a pass or it is attendance at a class. A pass taken AT a class
+   * is redeemed from the Passes table below, which writes both.
+   */
+  const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  const active = (members ?? []).filter((m) => m.status === 'active');
+
+  /* The live passes held by the person selected. Keyed on `holderId`, which is
+   * the whole reason A1 had to be fixed first: a pass issued with only a
+   * `holderName` belongs to nobody and can never appear here. */
+  const theirPasses = (passes ?? []).filter(
+    (p) => !!memberId && p.holderId === memberId && passStatus(p, today) === 'live',
+  );
+  // Soonest first, so the class about to start is the first thing in the list
+  // rather than the one that finished an hour ago.
+  const nearby = [...(classes ?? [])].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+
+  // A pass belongs to its holder, so changing who is at the desk must not leave
+  // somebody else's pass selected. Silently keeping it would take a visit off
+  // the wrong person's pass — a real entitlement, spent on somebody else.
+  const pickMember = (id: string) => {
+    setMemberId(id);
+    if (reason.startsWith('pass:')) setReason('');
+  };
 
   const go = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setMsg(null);
+    const passId = reason.startsWith('pass:') ? reason.slice(5) : null;
+    const classId = reason.startsWith('class:') ? reason.slice(6) : null;
     try {
       // An empty selection is a deliberate anonymous head-count, not an error.
-      await checkIn(supabase, tenantId, { memberId: memberId || null, source: 'desk' });
-      setMemberId('');
+      await checkIn(supabase, tenantId, {
+        memberId: memberId || null,
+        passId,
+        classId,
+        source: 'desk',
+      });
+      setMemberId(''); setReason('');
       setMsg(memberId ? 'Checked in.' : 'Anonymous visit recorded.');
       onChange();
     } catch (e: any) {
@@ -239,21 +312,43 @@ function CheckInBar({ members, passes, tenantId, membersUnread, onChange }: {
     } finally { setBusy(false); }
   };
 
-  const active = (members ?? []).filter((m) => m.status === 'active');
-
   return (
-    <Section title="Check someone in" sub="Leave the member blank to record a visit you cannot attribute — it still counts toward the day.">
+    <Section title="Check someone in" sub="Leave the member blank to record a visit you cannot attribute — it still counts toward the day. Say what the visit was for and it reconciles against the class or the pass instead of counting twice.">
       <form onSubmit={go} style={formRow}>
-        <select value={memberId} onChange={(e) => setMemberId(e.target.value)} style={{ ...field, flex: 2 }}>
+        <select value={memberId} onChange={(e) => pickMember(e.target.value)} style={{ ...field, flex: 2 }}>
           <option value="">Anonymous / walk-in</option>
           {active.map((m) => (
             <option key={m.id} value={m.memberId}>{m.memberName ?? m.memberId}</option>
+          ))}
+        </select>
+        <select value={reason} onChange={(e) => setReason(e.target.value)} style={{ ...field, flex: 2 }}
+                aria-label="What this visit was for">
+          <option value="">Gym floor</option>
+          {theirPasses.map((p) => (
+            <option key={p.id} value={`pass:${p.id}`}>
+              On their {p.passTypeName ?? 'pass'} — {remainingUses(p)} left
+            </option>
+          ))}
+          {nearby.map((c) => (
+            <option key={c.id} value={`class:${c.id}`}>
+              {c.title} · {new Date(c.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </option>
           ))}
         </select>
         <button type="submit" disabled={busy} style={{ ...btn, flex: 'none' }}>
           {busy ? 'Recording…' : 'Check in'}
         </button>
       </form>
+      {/* Same distinction as the member list beside it. An unread timetable
+          offers no classes, and a desk reading that as "no class is on" files
+          a room full of people under gym floor for the rest of the morning. */}
+      {classesUnread ? (
+        <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {classesUnread === 'loading'
+            ? 'Still reading the timetable — a visit checked in now is recorded on the gym floor.'
+            : 'The timetable did not come back, so no class can be named against a visit. The banner above says why — this is not a morning with no classes on.'}
+        </p>
+      ) : null}
       {/* A dropdown holding nothing but "Anonymous" reads as a gym with no
           members. Say which it is, or the desk checks a member in as a walk-in
           and the visit never reaches their record. */}
@@ -358,6 +453,24 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
   tenantId: string; today: string; me: Me; onChange: () => void;
 }) {
   const [typeId, setTypeId] = useState('');
+  /**
+   * The account the pass belongs to, when the person at the desk has one.
+   *
+   * `gym_passes.holder_id` has existed since 31-drop-ins-and-passes.sql and
+   * `IssuePass.holderId` since the library was written; this form passed only
+   * `holderName`, so EVERY pass this console has ever sold is anonymous. That
+   * is not a cosmetic gap. /passes measures whether pass holders go on to join
+   * — the console's headline retention number — and it excludes anonymous
+   * passes from the denominator on purpose, because a walk-in name cannot be
+   * matched to a member without guessing at spellings. A price book of
+   * name-only passes therefore leaves that metric structurally empty: not low,
+   * not falling, empty, for a gym doing the exact thing the metric measures.
+   *
+   * The constraint takes either (`holder_id is not null or holder_name`), and
+   * `issuePass` nulls the name when an id is given so the two can never
+   * disagree about who holds it.
+   */
+  const [holderId, setHolderId] = useState('');
   const [holderName, setHolderName] = useState('');
   const [hostId, setHostId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -366,16 +479,25 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
   const sell = async (e: React.FormEvent) => {
     e.preventDefault();
     const t = (types ?? []).find((x) => x.id === typeId);
-    if (!t || !holderName.trim()) { setMsg('Pick a pass and give a name.'); return; }
+    if (!t) { setMsg('Pick a pass.'); return; }
+    if (!holderId && !holderName.trim()) {
+      setMsg('Say who the pass is for — pick the member, or type the name at the desk for somebody with no account.');
+      return;
+    }
     setBusy(true); setMsg(null);
     try {
       await issuePass(supabase, tenantId, {
         passType: t,
-        holderName: holderName.trim(),
+        holderId: holderId || null,
+        holderName: holderName.trim() || null,
         hostMemberId: t.kind === 'guest' ? (hostId || null) : null,
         issuedOn: today,
       });
-      setHolderName(''); setHostId(''); setMsg('Pass issued.');
+      const who = activeMembers.find((m) => m.memberId === holderId)?.memberName;
+      setHolderId(''); setHolderName(''); setHostId('');
+      setMsg(holderId
+        ? `Pass issued to ${who ?? 'that member'} — it is on their record, so what they do next counts.`
+        : 'Pass issued to a name at the desk. It counts toward pass revenue, but nothing can tell whether this person later joined.');
       onChange();
     } catch (e: any) {
       setMsg(e?.message ?? 'Could not issue that pass.');
@@ -385,7 +507,14 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
   const take = async (p: GymPass) => {
     setMsg(null);
     try {
-      await redeemPass(supabase, p, { redeemedBy: me.id ?? null, today });
+      // Two rows, deliberately, and `redeemPass` writes both — see the note on
+      // it in src/lib/gymPasses.ts. Taking a visit off a pass used to write the
+      // redemption alone, so somebody who paid at the desk and walked into the
+      // gym left NO trace in the door log: they are not in "Visits today", not
+      // in "Inside now", not in the busiest-hour count, and not in any
+      // attendance or retention figure built on gym_visits. The pass ledger
+      // knew and the door did not.
+      await redeemPass(supabase, p, { tenantId, redeemedBy: me.id ?? null, today });
       onChange();
     } catch (e: any) {
       // The reason matters at a desk: "expired on the 3rd" ends an argument
@@ -452,9 +581,27 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
               </option>
             ))}
           </select>
+          {/* The member picker comes FIRST, and the free-text name is the
+              fallback beside it rather than the only field. A desk offered one
+              box marked "Name at the desk" types a name every time, including
+              for the member standing there holding an account — which is how a
+              gym ends up unable to answer whether any pass it ever sold turned
+              into a membership. */}
+          <select value={holderId} onChange={(e) => setHolderId(e.target.value)} style={{ ...field, flex: 2 }}
+                  aria-label="Which member the pass is for">
+            <option value="">Not a member — name below</option>
+            {activeMembers.map((m) => (
+              <option key={m.id} value={m.memberId}>{m.memberName ?? m.memberId}</option>
+            ))}
+          </select>
+          {/* Disabled rather than hidden once a member is picked: the two are a
+              real either/or — `issuePass` nulls the name when it is given an id
+              — and a control that vanishes reads as one that was never there. */}
           <input
             value={holderName} onChange={(e) => setHolderName(e.target.value)}
-            placeholder="Name at the desk" style={{ ...field, flex: 2 }}
+            disabled={!!holderId}
+            placeholder={holderId ? 'On their account' : 'Name at the desk'}
+            style={{ ...field, flex: 2, opacity: holderId ? 0.5 : 1 }}
           />
           {selected?.kind === 'guest' ? (
             <select value={hostId} onChange={(e) => setHostId(e.target.value)} style={{ ...field, flex: 2 }}>
@@ -469,6 +616,15 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
           </button>
         </form>
       )}
+      {/* An empty member picker reads as a gym whose passes can only ever be
+          anonymous, and a desk that believes that stops looking for the name. */}
+      {types !== null && types.length > 0 && members === null ? (
+        <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          The member list did not come back, so a pass sold now can only carry a name at the desk —
+          and a pass with no account behind it is left out of the conversion figure on Passes. The
+          banner above says why; sell it on the member&rsquo;s record once the page reloads.
+        </p>
+      ) : null}
       {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
 
       {summary && summary.revenueCents == null && summary.issued > 0 ? (

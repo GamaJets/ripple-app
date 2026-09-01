@@ -50,6 +50,20 @@ export interface WorkoutEntry {
   t: string;
   exercise: string;
   sets?: [number, number][];       // [reps, kg]
+  /** Which of those sets were the person's own bodyweight, aligned to `sets`
+   *  exactly as `feel` is. `bw[i] === true` changes what `sets[i][1]` MEANS:
+   *  on an ordinary set it is the load, on a bodyweight set it is what was
+   *  ADDED to the body — 0 for a plain pull-up, 20 for one with a belt.
+   *
+   *  Absent on every entry written before this existed, and absent is not
+   *  false-for-every-set by accident: a set that predates the flag genuinely
+   *  is not known to be bodyweight, and reading it as "not bodyweight" is the
+   *  same answer the app gave before, which is the only honest default.
+   *
+   *  See src/lib/bodyweightSets.ts for why the flag is explicit rather than
+   *  inferred from a stored zero, and for what a bodyweight set contributes to
+   *  a tonnage when nobody has recorded what the person weighs. */
+  bw?: boolean[];
   feel?: ('easy' | 'ok' | 'hard')[]; // per-set perceived effort (RPE), aligned to sets
   cardio?: { mins: number; dist: number; unit: string; watts?: number; hrAvg?: number; hrHigh?: number };
   /** Seconds per heart-rate zone during the session. Absent when no HR source

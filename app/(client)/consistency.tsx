@@ -5,10 +5,12 @@
 // Every provider, computation and route is preserved — the five bordered stat
 // tiles became one hero figure plus a hairline-divided KPI row, and the heatmap
 // lost its box.
+import { useCallback } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
@@ -22,6 +24,11 @@ export default function Consistency() {
   const t = useTheme();
   const router = useRouter();
   const { log, status: logStatus, reload } = useWorkoutLog();
+  // A failed read used to strand this screen for the whole session: the only
+  // way to ask again was the Try Again button inside the failure notice, and
+  // there is no such button on a screen that merely went stale. Pull to refresh
+  // is the gesture people already try — see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
   // Under 'error' the log is empty because the read failed, not because nothing
   // was ever logged — so every figure on this screen is unknown rather than
   // zero. A broken streak is close to the worst thing this app can tell someone
@@ -84,7 +91,7 @@ export default function Consistency() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

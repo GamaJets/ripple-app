@@ -18,6 +18,7 @@
 // reported it — while the copy right above it promised the estimate came from
 // watts. Now the entry simply carries no calorie figure.
 import { useMemo, useState } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, TextInput, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -243,7 +244,7 @@ export default function ScanMachine() {
               </Section>
             ) : !permission.granted ? (
               <Notice kicker="Camera" title="Camera access"
-                note="Repple reads the code on a machine, then names the exercise and muscle group for you.">
+                note={`${BRAND.label} reads the code on a machine, then names the exercise and muscle group for you.`}>
                 <View style={{ marginTop: sp.lg }}>
                   <Cta label="Allow Camera" wide onPress={requestPermission} />
                 </View>

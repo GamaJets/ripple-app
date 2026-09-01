@@ -135,7 +135,8 @@ export default function Referral() {
             )}
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: status === 'ready' && (joined || 0) > 0 ? t.brand : t.ink3 }} />
+              <View accessibilityElementsHidden importantForAccessibility="no"
+                style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: status === 'ready' && (joined || 0) > 0 ? t.brand : t.ink3 }} />
               <Text style={{ ...ty.label, ...numeric, color: t.ink2 }} numberOfLines={2}>
                 {summaryLine(status, joined, converted)}
               </Text>

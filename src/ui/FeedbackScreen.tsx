@@ -6,6 +6,7 @@
 // scale's `micro`, and the submit button is the kit's `Cta`. Every handler,
 // route and piece of copy is unchanged — this is a re-skin.
 import { useState } from 'react';
+import { BRAND } from '../lib/brands';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -46,7 +47,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
       );
       return;
     }
-    Alert.alert('Thank you', 'Your feedback went to the Repple team.', [{ text: 'Done', onPress: () => router.back() }]);
+    Alert.alert('Thank you', `Your feedback went to the ${BRAND.label} team.`, [{ text: 'Done', onPress: () => router.back() }]);
   };
 
   return (

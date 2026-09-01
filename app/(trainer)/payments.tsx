@@ -171,15 +171,16 @@
 // A gym that has not set one cannot put a package on sale, and is told that,
 // rather than being given a price with a unit invented for it.
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
-import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, fetchClientPurchases, type ConnectStatus, type TrainerPackage, type CoachPurchase } from '../../src/lib/connect';
+import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, type ConnectStatus, type TrainerPackage, type CoachPurchase } from '../../src/lib/connect';
+import { packageEditBlocker, isReprice, repriceNote } from '../../src/lib/packageEdit';
 import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
 import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, type Pot, type TakenRow } from '../../src/lib/coachMoney';
@@ -348,6 +349,73 @@ export default function TrainerPayments() {
     Alert.alert('Stop this subscription?',
       `${who}${price ? ` — ${price}` : ''}\n\nThey keep what they have already paid for${ends ? ` until ${ends}` : ''}, and are not charged again after that. Nothing is refunded, and you can put it back any time before it ends.`,
       [{ text: 'Leave It', style: 'cancel' }, { text: 'Stop At Period End', style: 'destructive', onPress: go }]);
+  };
+
+  // ── changing a package that is already on sale ───────────────────────────
+  //
+  // There was no way to do this. `createPackage` and `deactivatePackage` were
+  // the whole of it, so a coach raising their rate withdrew the old package and
+  // created a new one — orphaning the price history and leaving existing
+  // subscribers pointing at something their coach considers gone.
+  //
+  // Only the name and the price. Currency, sessions and billing_interval are
+  // not editable and src/lib/packageEdit.ts holds the argument for each; the
+  // short version is that a package's currency is a lookup older
+  // `client_purchases` rows still fall back to, and the other two are what the
+  // product IS rather than what it costs.
+  //
+  // `subCount` is read when the sheet opens, not when Save is pressed, because
+  // it is the sentence the coach needs BEFORE they decide. Null is its own
+  // answer and is rendered as one: "nobody is on the old rate" is a fact about
+  // this coach's income and must come from a read that answered.
+  const [editing, setEditing] = useState<TrainerPackage | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPrice, setEditPrice] = useState('');
+  const [editBusy, setEditBusy] = useState(false);
+  const [editErr, setEditErr] = useState<string | null>(null);
+  const [subCount, setSubCount] = useState<number | null>(null);
+
+  const openEdit = (p: TrainerPackage) => {
+    setEditing(p);
+    setEditName(p.name);
+    // Shown in MAJOR units, which is what the coach thinks in and what the Add
+    // form above already takes. The conversion happens once, on save.
+    setEditPrice(String(p.price_cents / 100));
+    setEditErr(null);
+    setSubCount(null);
+    void countActiveSubscribers(p.id).then(setSubCount);
+  };
+
+  /** The patch as typed, or null when the price box does not hold a number.
+   *  Separate from the blocker so the sheet can disable Save before the coach
+   *  presses it rather than refusing afterwards. */
+  const editPatch = (): { name?: string; price_cents?: number } | null => {
+    if (!editing) return null;
+    const typed = Number(editPrice.replace(/,/g, '').trim());
+    if (!Number.isFinite(typed)) return null;
+    // Rounded to whole minor units here and NOWHERE else. `Math.round` on a
+    // major-unit figure is the only rounding in this path, and packageEdit
+    // refuses a fractional minor unit rather than rounding a second time — two
+    // roundings on one price is how 74.995 becomes a number nobody typed.
+    const cents = Math.round(typed * 100);
+    const patch: { name?: string; price_cents?: number } = {};
+    if (editName.trim() !== editing.name) patch.name = editName;
+    if (cents !== editing.price_cents) patch.price_cents = cents;
+    return patch;
+  };
+
+  const saveEdit = async () => {
+    if (!editing || editBusy) return;
+    const patch = editPatch();
+    if (!patch) { setEditErr('That price is not a number.'); return; }
+    const blocker = packageEditBlocker(patch);
+    if (blocker) { setEditErr(blocker); return; }
+    setEditBusy(true); setEditErr(null);
+    const res = await updatePackage(editing.id, patch);
+    setEditBusy(false);
+    if (!res.ok) { setEditErr(res.error ?? 'That package was not changed.'); return; }
+    setEditing(null);
+    load();
   };
 
   const remove = (id: string) => Alert.alert('Remove package?', 'Clients will no longer see it.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: async () => {
@@ -751,6 +819,13 @@ export default function TrainerPayments() {
                     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{billingWords(p)}</Text>
                   </View>
+                  {/* Edit before remove, and to the left of it: a coach whose
+                      only control was the minus sign withdrew a package to
+                      change its price, which is how the price history got
+                      orphaned in the first place. */}
+                  <Pressable onPress={() => openEdit(p)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Edit ' + p.name} style={{ padding: 6 }}>
+                    <Icon name="pencil" size={17} color={t.ink3} />
+                  </Pressable>
                   <Pressable onPress={() => remove(p.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + p.name} style={{ padding: 6 }}>
                     <Icon name="minus" size={17} color={t.ink3} />
                   </Pressable>
@@ -975,6 +1050,66 @@ export default function TrainerPayments() {
         )}
 
       </ScrollView>
+
+      {/* ── change a package's name or price ────────────────────────────────
+          The one thing a coach could not do without withdrawing the package
+          and building a new one.
+          The reprice sentence is the reason this is safe to offer at all: a
+          coach who believes they have just put their existing clients up to the
+          new rate has NOT, because connect-checkout inlines the price into each
+          Stripe subscription at checkout and Stripe bills that one forever
+          after. Telling them quietly would be worse than not offering it. */}
+      <Modal visible={!!editing} animationType="slide" transparent onRequestClose={() => setEditing(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Edit This Package</Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Name</Text>
+            <TextInput value={editName} onChangeText={(v) => { setEditName(v); if (editErr) setEditErr(null); }}
+              placeholder="What your client sees" placeholderTextColor={t.ink3}
+              accessibilityLabel="Package name"
+              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Price</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+              {/* The package's OWN currency, shown and not editable. It is a
+                  lookup that older `client_purchases` rows still fall back to
+                  — part 132 added their currency column and rows before it are
+                  null — so changing it here would redenominate sales that have
+                  already happened. */}
+              <Text style={{ ...ty.label, color: t.ink3 }}>{editing?.currency ? editing.currency.toUpperCase() : ''}</Text>
+              <TextInput value={editPrice} onChangeText={(v) => { setEditPrice(v); if (editErr) setEditErr(null); }}
+                keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={t.ink3}
+                accessibilityLabel={`Price in ${editing?.currency ? editing.currency.toUpperCase() : 'this package’s currency'}`}
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+            </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              A package keeps the currency it was created in for its whole life. To sell in another one, withdraw this and create a new package.
+            </Text>
+
+            {/* Said only when the price has actually moved. A coach warned
+                about their subscribers every time they correct a typo stops
+                reading the warning, and this is the warning that matters. */}
+            {editing && isReprice(editPatch() ?? {}, editing.price_cents) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{repriceNote(subCount)}</Flag>
+            ) : null}
+
+            {editing && (editing.sessions != null || editing.billing_interval) ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {editing.billing_interval
+                  ? 'How often this charges cannot be changed here — a running subscription bills on the schedule Stripe holds, and this screen would only be describing a different one.'
+                  : 'How many sessions this grants cannot be changed here. Packs already bought keep the number they were sold with, so changing it would only alter what you believe you sold.'}
+              </Text>
+            ) : null}
+
+            {editErr ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{editErr}</Flag> : null}
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          <Cta wide disabled={editBusy} label={editBusy ? 'Saving…' : 'Save Changes'} onPress={() => { void saveEdit(); }} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setEditing(null)} />
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

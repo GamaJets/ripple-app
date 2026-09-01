@@ -51,10 +51,13 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Ghost, fig, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { tapLight } from '../../src/ui/haptics';
-import { classRoster, setAttendance, UNLINKED_CLASS, type RosterMember } from '../../src/lib/classAttendance';
+import { classRoster, UNLINKED_CLASS, type RosterMember } from '../../src/lib/classAttendance';
 import { parseRate, rateText, payEstimate, rateFieldNote } from '../../src/lib/coachPrefs';
 import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { useAuth } from '../../src/ui/auth';
+import { useFloorQueue } from '../../src/ui/floorQueue';
+import { floorPendingNote, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
 
 export default function ClassCheckin() {
   const t = useTheme();
@@ -77,6 +80,10 @@ export default function ClassCheckin() {
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
   const [readFailed, setReadFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState<string | null>(null);
+  // The tick a trainer is PAID on, and the gym's payroll is built from it. This
+  // screen is used standing in a studio, which is where the signal is worst.
+  const auth = useAuth();
+  const queue = useFloorQueue(auth.user?.id ?? null);
   const [loading, setLoading] = useState(true);
   // Per-attendee pay, as the coach typed it. UNITLESS — see the header. The
   // string is what is on screen; `coach_prefs.class_rate` is what is stored.
@@ -174,20 +181,41 @@ export default function ClassCheckin() {
   // 'ready' an empty box speaks for itself.
   const rateNote = rate.trim() ? null : rateFieldNote(rateStatus);
 
-  // The tick used to move before anything was written, and setAttendance
+  // The tick used to move before anything was written, and `setAttendance`
   // swallowed every failure — so a refused check-in looked exactly like a saved
-  // one. Attendance is what the trainer is paid on: the row now moves only
-  // after the server agrees, and says so when it does not.
+  // one. Attendance is what the trainer is paid on, so the row moves only once
+  // this phone has actually taken responsibility for it, and the banner says
+  // whether the GYM has it.
   const toggle = async (m: RosterMember) => {
     const next = !m.attended;
     tapLight();
-    const ok = await setAttendance(classId, m.userId, next);
-    if (!ok) {
-      setSaveFailed(`${m.name} is still marked ${m.attended ? 'present' : 'absent'} — that change did not save.`);
+    // ── the tick, and the basement it is usually made in ──────────────────
+    //
+    // `setAttendance` returns a boolean, which collapses the only two answers
+    // that matter here into one: a refusal the server MADE, and a request that
+    // never reached it. The screen said the same sentence for both — "that
+    // change did not save" — and the coach, standing in a room with no signal,
+    // was right to believe it and wrong about what to do next.
+    //
+    // Through the queue: a refusal is still a refusal and the row does not
+    // move, and a request nobody answered is kept on this phone and goes up on
+    // the next launch with signal. The row DOES move for a kept tick, because
+    // it is the coach's decision and this phone now holds it — but the banner
+    // says plainly that the gym cannot see it yet, because a trainer who
+    // believes the gym has the attendance does not check it, and they are paid
+    // on it.
+    const out = await queue.attempt({
+      kind: 'class-attendance', classId, userId: m.userId, memberName: m.name, present: next,
+    });
+    if (out === 'refused') {
+      setSaveFailed(refusedLine(
+        `${m.name} is still marked ${m.attended ? 'present' : 'absent'} — that change`,
+        classId === UNLINKED_CLASS ? 'This screen was opened without a class.' : null,
+      ));
       return;
     }
-    setSaveFailed(null);
     setRoster((p) => (p ?? []).map((x) => (x.userId === m.userId ? { ...x, attended: next } : x)));
+    setSaveFailed(out === 'unsent' ? keptOfflineLine(`${m.name} marked ${next ? 'present' : 'absent'}`) : null);
   };
 
   const G = layout.gutter;
@@ -267,6 +295,16 @@ export default function ClassCheckin() {
 
         <Rule />
 
+        {/* What this phone is still carrying. Drawn even when the last tick
+            went through, because the count is about the morning and not about
+            the tap — and a queue that could not be READ is not an empty one. */}
+        {!queue.queueRead ? (
+          <Flag tone={t.warn} style={{ paddingTop: sp.sm }}>
+            What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost — it is not being written over either.
+          </Flag>
+        ) : floorPendingNote(queue.unsent) ? (
+          <Flag tone={t.warn} style={{ paddingTop: sp.sm }}>{floorPendingNote(queue.unsent)}</Flag>
+        ) : null}
         {saveFailed ? (
           <Flag tone={t.crit} style={{ paddingTop: sp.sm }}>{saveFailed}</Flag>
         ) : null}

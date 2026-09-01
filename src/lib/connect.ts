@@ -10,6 +10,8 @@ import { reportError } from './reportError';
 import { capLimit, capped, TruncatedRead, ROW_CAP } from './rowCap';
 import { writeFailure } from './wroteRows';
 import { packBalance, readDraw, drew, drawReason, type PackPurchase, type PackBalance } from './packDraw';
+import { PACKAGE_NOT_SAVED, packageEditBlocker, packageUpdateRow, type PackagePatch } from './packageEdit';
+import { subState } from './subscriptionScope';
 import type { LoadStatus } from '../ui/loadStatus';
 
 /**
@@ -156,6 +158,97 @@ export async function createPackage(p: { name: string; price_cents: number; sess
     const { error } = await supabase.from('trainer_packages').insert({ trainer_id: uid, name: p.name, price_cents: p.price_cents, sessions: p.sessions, billing_interval: interval, currency, active: true });
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
+}
+
+/**
+ * Change a package's name or its price.
+ *
+ * ── The gap between create and deactivate ─────────────────────────────────
+ *
+ * There was nothing here. A coach raising their rate had to withdraw the old
+ * package and create a new one, which orphans the price history — the old row
+ * survives with `active = false` and every sale still points at it — and leaves
+ * anybody already subscribed pointing at a package their coach considers gone.
+ *
+ * ── Why a price edit is safe, established rather than assumed ─────────────
+ *
+ * This is somebody else's card, so "probably fine" is not the standard.
+ * supabase/functions/connect-checkout builds every session with an INLINE price
+ * — `price_data: { currency, unit_amount: pkg.price_cents, recurring: { … } }`
+ * — rather than referencing a stored Stripe Price, so Stripe materialises that
+ * amount onto the subscription at checkout and never consults this column
+ * again. `client_subscriptions` carries its own `amount_cents`, and
+ * app/(trainer)/payments.tsx renders every subscriber from THOSE columns, so
+ * the coach's own screen keeps showing each person the figure they really pay.
+ * `client_purchases.amount_cents` is written at checkout too, so a completed
+ * sale is a fixed record.
+ *
+ * A reprice is therefore forward-looking. What it must never be is QUIET: a
+ * coach who believes they have just put everybody up to the new rate has not,
+ * and would find out a year later. `repriceNote` in src/lib/packageEdit.ts is
+ * that sentence and the caller is expected to show it.
+ *
+ * ── Three fields this will not touch ──────────────────────────────────────
+ *
+ * Currency, sessions and billing_interval. src/lib/packageEdit.ts holds the
+ * argument for each; the short version is that a package's currency is a lookup
+ * older `client_purchases` rows still fall back to, and the other two are what
+ * the product IS rather than what it costs. `packageUpdateRow` is what enforces
+ * it — this function never assembles a row of its own.
+ *
+ * Returns whether the package actually changed, counted. `pkg_write` is
+ * `trainer_id = auth.uid()` while `pkg_read` publishes every ACTIVE package to
+ * everybody, so an id this coach can SEE is not necessarily one they may write,
+ * and an UPDATE matching no row comes back 204 with `error` null — the same
+ * proof `deactivatePackage` below needs, for the same reason. A coach told
+ * their new price is live when it is not sells at the old one indefinitely.
+ */
+export async function updatePackage(id: string, patch: PackagePatch): Promise<{ ok: boolean; error?: string }> {
+  const blocker = packageEditBlocker(patch);
+  if (blocker) return { ok: false, error: blocker };
+  const row = packageUpdateRow(patch);
+  // Unreachable while the blocker above is the same rule, and here so that a
+  // future divergence between the two produces a refusal rather than an
+  // unvalidated write to somebody's price list.
+  if (!row) return { ok: false, error: PACKAGE_NOT_SAVED };
+  try {
+    const r = await supabase.from('trainer_packages').update(row, { count: 'exact' }).eq('id', id);
+    if (r.error) reportError('connect.updatePackage', r.error);
+    const failure = writeFailure('That package', r);
+    return failure === null ? { ok: true } : { ok: false, error: PACKAGE_NOT_SAVED };
+  } catch (e) {
+    reportError('connect.updatePackage', e);
+    return { ok: false, error: PACKAGE_NOT_SAVED };
+  }
+}
+
+/**
+ * How many people are currently being billed against one package.
+ *
+ * `null` means it could not be established, and that is a different answer from
+ * zero in the one place it matters: the sentence a coach reads before they
+ * reprice. "Nobody is on the old rate" is a fact about their income and must
+ * come from a read that answered.
+ *
+ * `subState()` in src/lib/subscriptionScope.ts owns which Stripe statuses count
+ * as live — 'trialing', 'active' and 'past_due' — so this does not re-decide
+ * it. A past_due subscriber IS on the old rate: their card failed, the
+ * subscription has not ended, and repricing the package does not touch them.
+ */
+export async function countActiveSubscribers(packageId: string): Promise<number | null> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return null;
+    const { data, error } = await supabase.from('client_subscriptions').select('status')
+      .eq('package_id', packageId).eq('trainer_id', uid).limit(capLimit());
+    if (error) { reportError('connect.countActiveSubscribers', error); return null; }
+    const page = capped((data as { status: string | null }[]) ?? []);
+    // A truncated read cannot produce a count. It would produce a floor, and a
+    // floor reported as a count is how "4 people are on the old rate" becomes
+    // the sentence for a package with two hundred.
+    if (page.truncated) return null;
+    return page.rows.filter((r) => subState(r.status) === 'live').length;
+  } catch (e) { reportError('connect.countActiveSubscribers', e); return null; }
 }
 
 /**

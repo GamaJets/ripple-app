@@ -7,14 +7,18 @@
 // version is preserved — only the presentation changed: the heaviest lift is the
 // screen's one hero figure, the stack of bordered cards became hairline rows,
 // and the est-1RM column reads as ink rather than accent.
+import { useCallback } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
 import { est1RMIn, liftLabel, convertedNote } from '../../src/lib/units';
 import { personalRecords } from '../../src/lib/streaks';
+import { repRecords, bodyweightSetLabel } from '../../src/lib/bodyweightSets';
+import { useClientData } from '../../src/ui/clientData';
 import { Rule, Section, SectionHead, Hero, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
@@ -22,20 +26,70 @@ export default function Records() {
  const t = useTheme();
  const router = useRouter();
  const { log, status: logStatus, reload } = useWorkoutLog();
+ // A failed read used to strand this screen for the whole session: the only
+ // way to ask again was the Try Again button inside the failure notice, and
+ // there is no such button on a screen that merely went stale. Pull to refresh
+ // is the gesture people already try — see src/ui/pullToRefresh.tsx.
+ const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
  const wu = useSettings().weightUnit;
  const note = convertedNote(wu);
+ // The member's own weight over time, which is what lets a pull-up onto this
+ // board at all. A bodyweight set is priced at what they weighed ON OR BEFORE
+ // the day they did it (src/lib/bodyweightSets.ts) — never at today's figure
+ // carried backwards, which would redraw last spring's records around a body
+ // that did not exist then. Empty when nobody has ever been scanned or typed a
+ // weight, and then a bodyweight set has no load and belongs on the reps board
+ // below rather than being given an invented body here.
+ const { weightSeries } = useClientData();
  // Ranked in the kilograms the board is stored in, and only then read out. The
  // order would come out the same either way today, but an estimate rounded to
  // the whole pound can tie two lifts that are a kilogram apart, and a board
  // sorted on the rounded figure would then order those two arbitrarily.
- const prs = [...personalRecords(log)].sort((a, b) => b.est1RM - a.est1RM);
+ const prs = [...personalRecords(log, weightSeries)].sort((a, b) => b.est1RM - a.est1RM);
  const top = prs[0];
+ // Movements the member does at their own bodyweight, ranked by reps. Shown
+ // whether or not their weight is known: a pull-up board built from "most reps
+ // in a set" needs nothing the log does not already hold, and for a member who
+ // has never been weighed it is the ONLY honest record of their calisthenics —
+ // which for months read back to them as no training at all.
+ const reps = repRecords(log);
+ // A movement whose best set is already the hero of the board above is not
+ // repeated down here as a lesser record of itself.
+ const repsOnly = reps.filter((r) => !prs.some((p) => p.exercise === r.exercise && p.bodyweight));
+ const nothing = prs.length === 0 && repsOnly.length === 0;
  const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+ /**
+  * What a row SAYS, as one sentence.
+  *
+  * Built rather than interpolated, because `fig()` renders an unknown figure as
+  * an em dash and a dash inside a spoken sentence is a word that has gone
+  * missing — "estimated one rep max, dash, kilograms" is not a thing to read
+  * out to somebody. Every clause here is withheld when its figure is not there,
+  * which is the same rule the visible figures on this screen already follow.
+  */
+ const prSpoken = (pr: ReturnType<typeof personalRecords>[number], rank: number): string => {
+  const load = liftLabel(pr.weight, wu);
+  const added = pr.addedKg ? liftLabel(pr.addedKg, wu) : null;
+  const best = pr.bodyweight
+   ? bodyweightSetLabel(pr.reps, pr.addedKg ?? 0, added != null ? `${added} ${wu}` : null)
+   : (load != null ? `${load} ${wu} by ${pr.reps} reps` : `${pr.reps} reps`);
+  const one = est1RMIn(pr.est1RM, wu);
+  const parts = [`${rank}. ${pr.exercise}`];
+  if (one != null) parts.push(`estimated one rep max ${one} ${wu}`);
+  parts.push(`best set ${best}`, `on ${dstr(pr.at)}`);
+  return parts.join(', ');
+ };
+ /** The same, for the reps board. Reps are always known there, so the only
+  *  withholdable clause is the belt. */
+ const repSpoken = (r: { exercise: string; reps: number; addedKg: number; at: string }): string => {
+  const added = r.addedKg ? liftLabel(r.addedKg, wu) : null;
+  return `${r.exercise}, ${bodyweightSetLabel(r.reps, r.addedKg, added != null ? `${added} ${wu}` : null)}, on ${dstr(r.at)}`;
+ };
  const G = layout.gutter;
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -69,13 +123,18 @@ export default function Records() {
    </Section>
   </>) : null}
 
-  {prs.length === 0 && logStatus === 'error' ? null
-   : prs.length === 0 && logStatus === 'loading' ? (<>
+  {/* `nothing` rather than `prs.length === 0`. A member who trains on rings and
+      a bar has no weighted set anywhere in their log, and this screen used to
+      tell them, in as many words, that they had no records — over a board that
+      had every pull-up they had ever done and could not read one of them. The
+      empty state is now reached only when BOTH boards are empty. */}
+  {nothing && logStatus === 'error' ? null
+   : nothing && logStatus === 'loading' ? (<>
    <Rule />
    <Section>
     <Text style={{ ...ty.body, color: t.ink3 }}>Loading your records…</Text>
    </Section>
-  </>) : prs.length === 0 ? (<>
+  </>) : nothing ? (<>
    <Rule />
    <Section>
     {/* 'partial' had no arm of its own and fell into "No Records Yet". A
@@ -85,8 +144,8 @@ export default function Records() {
     <SectionHead title={logStatus === 'partial' ? 'No Records in This Read' : 'No Records Yet'} />
     <Text style={{ ...ty.body, color: t.ink2 }}>
      {logStatus === 'partial'
-      ? 'You have logged more sessions than this screen can read in one go, and there were no weighted sets among the ones it read. This is not a statement that you have no records.'
-      : 'No records yet — log a strength workout to set your first PR.'}
+      ? 'You have logged more sessions than this screen can read in one go, and there were no sets among the ones it read that could set a record. This is not a statement that you have no records.'
+      : 'No records yet — log a strength workout to set your first PR. Pull-ups, dips and press-ups count: tick Bodyweight when you log the set.'}
     </Text>
    </Section>
   </>) : (<>
@@ -110,6 +169,7 @@ export default function Records() {
    </>) : null}
 
    {/* ── the hero: the heaviest thing you have lifted ────────────────── */}
+   {top ? (<>
    <Hero
     label={logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift'}
     figure={fig(est1RMIn(top.est1RM, wu))}
@@ -129,11 +189,13 @@ export default function Records() {
         on Consistency: it is the size of what came back, not of the board. */}
     <SectionHead title="All Records" note={logStatus === 'partial' ? undefined : `${prs.length} lift${prs.length === 1 ? '' : 's'}`} />
     {prs.map((pr, i) => (
-     <View key={pr.exercise} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+     <View key={pr.exercise} accessible accessibilityRole="text"
+      accessibilityLabel={prSpoken(pr, i + 1)}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{i + 1}</Text>
       <View style={{ flex: 1 }}>
        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{pr.exercise}</Text>
-       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {fig(liftLabel(pr.weight, wu))} × {pr.reps} · {dstr(pr.at)}</Text>
+       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {pr.bodyweight ? bodyweightSetLabel(pr.reps, pr.addedKg ?? 0, pr.addedKg ? `${fig(liftLabel(pr.addedKg, wu))} ${wu}` : null) : `${fig(liftLabel(pr.weight, wu))} × ${pr.reps}`} · {dstr(pr.at)}</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
        <Text style={{ ...value(17), color: t.ink }}>{fig(est1RMIn(pr.est1RM, wu))}</Text>
@@ -142,6 +204,41 @@ export default function Records() {
      </View>
     ))}
    </Section>
+   </>) : null}
+
+   {/* ── the second board: reps at your own bodyweight ────────────────── */}
+   {/* A board of its own rather than rows on the one above, because an
+       estimated 1RM needs a load and a bodyweight set has one only if the
+       member has been weighed. The choice was between inventing a body and
+       leaving calisthenics off the screen entirely, and this is neither: reps
+       at bodyweight is the record a gymnast actually keeps, and it needs
+       nothing the log does not already hold. */}
+   {repsOnly.length ? (<>
+    <Rule />
+    <Section>
+     <SectionHead title="Bodyweight Bests" note={logStatus === 'partial' ? undefined : `${repsOnly.length} movement${repsOnly.length === 1 ? '' : 's'}`} />
+     {repsOnly.map((r, i) => (
+      <View key={r.exercise} accessible accessibilityRole="text"
+       accessibilityLabel={repSpoken(r)}
+       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+       <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{r.exercise}</Text>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+         {/* delta-ok: the plus is not a movement, it is the weight hung off a belt. Nothing here changed from anything. */}
+         {r.addedKg > 0 ? `+${fig(liftLabel(r.addedKg, wu))} ${wu} added · ` : 'At bodyweight · '}{dstr(r.at)}
+        </Text>
+       </View>
+       <View style={{ alignItems: 'flex-end' }}>
+        <Text style={{ ...value(17), color: t.ink }}>{r.reps}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>reps</Text>
+       </View>
+      </View>
+     ))}
+     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+      Ranked by reps in a single set. Record your weight on Body and these join the board above with an estimated max too.
+     </Text>
+    </Section>
+   </>) : null}
   </>)}
  </ScrollView>
  </SafeAreaView>

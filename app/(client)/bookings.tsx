@@ -23,11 +23,12 @@
 // name the row is titled "PT session" and carries no location. A booking that
 // reads "PT with —" in the app, and worse in the calendar it is exported to, is
 // not more honest than one that simply says what it is.
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
@@ -97,6 +98,11 @@ export default function Bookings() {
   // their own row and nobody else's, so a position can only come from the
   // server: read from the app the queue is a set of one and everybody is first.
   const { mine: myQueue, status: waitStatus, leave: leaveWait, reload: reloadWait } = useSlotWaitlist();
+  // A failed read used to strand this screen for the whole session: the only
+  // way to ask again was the Try Again button inside the failure notice, and
+  // there is no such button on a screen that merely went stale. Pull to refresh
+  // is the gesture people already try — see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => { reloadWait(); }, [reloadWait]));
   // Either read failing makes this list a fragment, and a fragment must not be
   // announced as "you have nothing booked" — the member then turns up to
   // nothing, or fails to turn up to something.
@@ -253,7 +259,7 @@ export default function Bookings() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -307,7 +313,13 @@ export default function Bookings() {
                     </View>
                   ) : null}
                 </View>
-                <Ghost label={it.waitlist ? 'Leave' : 'Cancel'} onPress={() => confirmCancel(it)} />
+                {/* "Cancel, button" told a screen reader nothing about WHICH
+                    booking, on a screen that is a list of them. The visible
+                    label can lean on the row above it; the spoken one is read
+                    on its own. */}
+                <Ghost label={it.waitlist ? 'Leave' : 'Cancel'}
+                  a11yLabel={`${it.waitlist ? 'Leave the waitlist for' : 'Cancel'} ${it.title}, ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)}`}
+                  onPress={() => confirmCancel(it)} />
               </View>
             </View>
           ))}

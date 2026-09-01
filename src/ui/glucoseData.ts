@@ -14,6 +14,7 @@
 // CGM that their sensor recorded nothing — which is the one thing they would
 // actually act on.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { BRAND } from '../lib/brands';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { worstStatus, type LoadStatus } from './loadStatus';
@@ -263,7 +264,7 @@ export function useGlucose(personId?: string): GlucoseData {
       // never going to move.
       if (error.code === '23505') {
         await refresh();
-        return { added: 0, status: 'ready', reason: 'Those readings are already in Repple, so nothing new was added.' };
+        return { added: 0, status: 'ready', reason: `Those readings are already in ${BRAND.label}, so nothing new was added.` };
       }
       return { added: 0, status: 'error', reason: 'Those readings could not be saved. Try again in a moment.' };
     }

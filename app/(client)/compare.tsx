@@ -55,6 +55,7 @@ import { View, Text, Pressable, Image, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { reportError } from '../../src/lib/reportError';
@@ -103,6 +104,10 @@ export default function Compare() {
     }
   }, []);
   useEffect(() => { loadPhotos(); }, [loadPhotos]);
+  // A failed read used to strand this screen for the whole session — the only
+  // way to ask again was to leave and come back. Pull to refresh is the gesture
+  // people already try; see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => { void loadPhotos(); }, [loadPhotos]));
 
   useEffect(() => {
     let cancelled = false;
@@ -178,7 +183,7 @@ export default function Compare() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>

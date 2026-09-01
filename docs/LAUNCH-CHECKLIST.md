@@ -97,17 +97,30 @@ them to go up anyway. They are the permanent addresses, so each starts working
 by itself the moment that listing publishes — **no edit needed to switch them
 on.**
 
+**Re-checked 1 Sep 2026: still all six.** Three `itunes.apple.com/lookup` calls
+answer `resultCount 0`; three Play pages answer 404. Nothing has published, so
+every callout below stays where it is. This line is here because "the store
+links 404" is the kind of claim that gets inherited rather than tested, and the
+whole point of the item is that nothing announces the day it stops being true.
+
 What DOES need an edit when they are live:
 
 - `web/download.html` — delete the "Being released now" callout near the top.
   It tells people a link that does not open means that app has not finished
   going out, which stops being true.
+- `web/join.html` — the same callout, in the same words, on the page a coach's
+  invite link lands on. Two pages, one fact; the comment at the top of each
+  says so.
 
 Verify rather than assume:
 
 ```bash
 for id in 6790096518 6804358275 6804417240; do
   curl -s "https://itunes.apple.com/lookup?id=$id" | head -c 120; echo
+done
+for p in com.washateria.repple{,.coach,.studio}; do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    "https://play.google.com/store/apps/details?id=$p"
 done
 ```
 
@@ -119,6 +132,18 @@ done
 pending deletion requests "is new and is not in every gym's build yet". True
 today. Once the build carrying `app/(owner)/deletions.tsx` is the one on the
 stores, that sentence is understating the product — reword it.
+
+**Re-checked 1 Sep 2026 and left alone.** `app/(owner)/deletions.tsx` exists,
+is registered in `app/(owner)/_layout.tsx:39` and is linked twice from
+`app/(owner)/settings.tsx`, so the SCREEN is real and has been since 25 Aug.
+That is not what the sentence claims. The condition it is written against is
+the build a gym is actually holding, and by §2 above there is no store build at
+all — Repple Studio's listing still 404s, owners are on TestFlight and internal
+tracks, and nothing in this repo records which binary any given gym installed.
+So the sentence is still true and, more to the point, it errs in the safe
+direction: it tells a member to email as well as tapping the button, and the
+email route is the one that does not depend on somebody else looking. Reword it
+when the listing publishes, not before.
 
 The rest of that page is verified against the schema and should not be touched
 without re-checking: the cascade counts came from `pg_constraint` on the live
@@ -500,12 +525,35 @@ Your account) and `STRIPE_WEBHOOK_SECRET_CONNECT` (Repple Connected Accounts,
 Verified working in test on 31 Aug: `checkout.session.completed` → 200,
 `account.updated` from a connected account → 200.
 
-**Not verified, and it will bite in live:** `accountLinks.create` takes a
-`return_url` and a `refresh_url`, and Stripe says "you can only use HTTPS in
-live mode". The app sends `Linking.createURL('connect/return')`, which is a
-custom scheme — `repplecoach://connect/return` — and a custom scheme is neither
-HTTP nor HTTPS. Nothing has caught this because live Connect onboarding has
-never run. It needs two real pages on the brand web origin, `/connect/return`
-and `/connect/refresh`, that hand off into the coach app; `refresh` must ask the
-server for a fresh link, because account links are single-use and expire in
-minutes. This applies to the Express path too — it is not new with Standard.
+**The HTTPS return URL — FIXED 1 Sep 2026, and it would have broken the first
+live coach.** `accountLinks.create` takes a `return_url` and a `refresh_url`
+and Stripe says "you can only use HTTPS in live mode". The app was sending
+`Linking.createURL('connect/return')`, i.e. `repplecoach://connect/return`,
+which is neither HTTP nor HTTPS. It had never been caught because live Connect
+onboarding had never run, and it would have surfaced as a real coach failing at
+the moment they were handing Stripe their passport and their bank details.
+
+`src/lib/connect.ts:92` now sends `${WEB_ORIGIN}/connect-refresh` and
+`${WEB_ORIGIN}/connect-return`, both from `BRAND.webOrigin`, so a white-label
+chain's coach is not redirected onto their supplier's website halfway through
+setting up their own payouts. The two pages are `web/connect-return.html` and
+`web/connect-refresh.html`, deployed with the rest of `web/`.
+
+Two things about those pages that are load-bearing and easy to undo:
+
+- **`connect-return.html` congratulates nobody, on purpose.** Stripe redirects
+  there when the coach finishes the hosted flow OR abandons it, so reaching the
+  page proves only that they left. The only truthful source is
+  `charges_enabled`, which the payouts screen already reads and
+  `account.updated` already keeps current.
+- **`connect-refresh.html` cannot mint the new link itself.** Account links are
+  single-use and expire in minutes, and the only remedy is a fresh one — but
+  `connect-onboard` identifies the caller by their Supabase JWT, and that page
+  is anonymous. Giving it a credential would put one on a page whose entire
+  audience arrived by redirect from a third party. It points at the app's own
+  button instead.
+
+Still to check the day live Connect first runs: that both pages resolve over
+HTTPS on the apex `repplefitness.com` (which is what `BRAND.webOrigin` is —
+no `www`), because Stripe validates the URLs when the link is created and a
+redirect at that host is not the same thing as a page.

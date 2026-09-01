@@ -143,7 +143,7 @@ export default function Membership() {
   const planState = primary ? planStateOf(primary) : null;
 
   const actions: { label: string; note: string; icon: IconName; route: string; hero?: boolean }[] = [
-    { label: 'Entry Barcode', note: 'Your Repple ID — link it at reception', icon: 'grid', route: '/(client)/access', hero: true },
+    { label: 'Entry Barcode', note: `Your ${appName} ID — link it at reception`, icon: 'grid', route: '/(client)/access', hero: true },
     { label: 'Classes', note: 'Book a group class at your branch', icon: 'calendar', route: '/(client)/classes' },
     { label: 'Personal Training', note: 'Approve sessions your trainer delivered', icon: 'people', route: '/(client)/pt-sessions' },
     { label: 'My Bookings', note: 'Everything you have booked', icon: 'check', route: '/(client)/bookings' },
@@ -152,7 +152,7 @@ export default function Membership() {
     // There is a real offers screen now, where a gym code is redeemed.
     { label: 'Payments', note: 'What your gym has recorded taking from you', icon: 'clock', route: '/(client)/receipts' },
     { label: 'Offers', note: 'Redeem a code from your gym', icon: 'sparkle', route: '/(client)/offers' },
-    { label: 'Refer a Friend', note: 'Share Repple with someone', icon: 'share', route: '/(client)/referral' },
+    { label: 'Refer a Friend', note: `Share ${appName} with someone`, icon: 'share', route: '/(client)/referral' },
   ];
   const heroAction = actions.find((a) => a.hero);
   const G = layout.gutter;

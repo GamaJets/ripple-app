@@ -31,6 +31,7 @@
 // saving it would replace a real disclosure with a blank. The Save control is
 // withheld and says why — the same gesture as src/lib/overwriteGuard.ts.
 import { useEffect, useState, type ReactNode } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import {
   View, Text, ScrollView, Pressable, TextInput, Alert,
 } from 'react-native';
@@ -234,7 +235,7 @@ export default function IntakeScreen() {
 
               <View style={{ marginTop: sp.md }}>
                 <Notice tone={t.s3} kicker="Not medical advice" title="These are screening questions"
-                  note="Repple does not score them and does not interpret them. Your coach sees what you answered, in your words." />
+                  note={`${BRAND.label} does not score them and does not interpret them. Your coach sees what you answered, in your words.`} />
               </View>
 
               {READINESS_QUESTIONS.map((q, i) => {

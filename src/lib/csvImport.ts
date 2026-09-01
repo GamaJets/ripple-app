@@ -13,6 +13,7 @@
 // it would do before it does anything.
 
 import { parseSheet, mapColumns, type Sheet } from './csv';
+import type { CoachedMode } from './types';
 
 /* ── values ────────────────────────────────────────────────────────────────── */
 
@@ -320,6 +321,148 @@ export function previewMembers(text: string, order?: DateOrder): ImportPreview<M
     missingRequired,
     unmatchedColumns: unmatched,
     dateOrder: order ?? detected,
+    rows,
+    ready: missingRequired.length ? [] : rows.filter((r) => r.errors.length === 0).map((r) => r.value!),
+    rejected,
+  };
+}
+
+/* ── a coach's own roster ──────────────────────────────────────────────────── */
+
+/**
+ * Bringing a coach's book across from wherever it is now.
+ *
+ * ── Why this is here and not a second importer ────────────────────────────
+ *
+ * app/(trainer)/dashboard.tsx adds clients one at a time, through a sheet with
+ * a name, a goal, a delivery mode and an optional email. A coach switching from
+ * another product with forty clients types forty of those, and that is the
+ * largest switching cost in the product.
+ *
+ * Everything needed to read the file is already in this module — `parseSheet`,
+ * `mapColumns`, `parseEmail`, the row/preview shapes and, above all, the rule
+ * this file opens with: NEVER GUESS AT AN AMBIGUOUS VALUE. A second importer
+ * living in the coach app would be a second set of aliases, a second dry-run
+ * convention and a second answer to what a blank column means. This is the same
+ * one, with a coach's columns.
+ *
+ * ── What it deliberately does NOT read ────────────────────────────────────
+ *
+ * No dates, no money, no membership status. A coach's `coach_clients` row holds
+ * a name, a goal and a delivery mode, and that is all this can honestly create.
+ * Reading a "joined" column and dropping it would be worse than not offering
+ * it: a coach who sees their start dates matched in a preview believes they
+ * came across.
+ */
+export const COACH_ROSTER_ALIASES: Record<string, string[]> = {
+  name:  ['name', 'full name', 'client', 'client name', 'member', 'customer'],
+  email: ['email', 'e-mail', 'email address'],
+  goal:  ['goal', 'goals', 'objective', 'focus', 'aim', 'target'],
+  mode:  ['mode', 'delivery', 'coaching', 'type', 'format', 'how'],
+};
+
+export interface CoachClientRow {
+  name: string;
+  /** Null when the sheet had no address, which is ordinary — a coach's code
+   *  links a client whoever they are and whatever address they sign up with,
+   *  and is the reliable path. */
+  email: string | null;
+  /** Null when the sheet said nothing. NOT an empty string: `coach_clients.goal`
+   *  renders on the roster and a blank one draws an empty line under a name. */
+  goal: string | null;
+  mode: CoachedMode;
+}
+
+/**
+ * How a delivery mode is written in the wild.
+ *
+ * Only spellings that are unambiguous. This mirrors the reasoning `INTERVALS`
+ * gives below about quarterly plans: a value nobody here recognises is REFUSED
+ * with a reason so a person decides, rather than being defaulted to 'online'
+ * and silently changing which screens a client gets.
+ */
+const MODES: Record<string, CoachedMode> = {
+  online: 'online', remote: 'online', virtual: 'online', app: 'online', 'app only': 'online',
+  inperson: 'inperson', 'in person': 'inperson', 'in-person': 'inperson', gym: 'inperson',
+  'face to face': 'inperson', 'face-to-face': 'inperson', f2f: 'inperson', pt: 'inperson', studio: 'inperson',
+  hybrid: 'hybrid', both: 'hybrid', mixed: 'hybrid', mix: 'hybrid',
+};
+
+/**
+ * Read a coach's client list without writing anything.
+ *
+ * Always a dry run, for `previewMembers`' reason: an import that half-succeeded
+ * and left no record of which half is the worst possible outcome.
+ *
+ * Only `name` is required. A coach's roster of names with nothing else is a
+ * perfectly good import — it is what the Add Client sheet takes — and demanding
+ * an email would refuse the most common file there is.
+ */
+export function previewCoachRoster(text: string): ImportPreview<CoachClientRow> {
+  const sheet = parseSheet(text);
+  const { index, unmatched } = mapColumns(sheet.header, COACH_ROSTER_ALIASES);
+
+  const missingRequired = index.name === undefined ? ['name'] : [];
+
+  const at = (r: string[], f: string): string =>
+    index[f] === undefined ? '' : (r[index[f]] ?? '');
+
+  const rows: RowResult<CoachClientRow>[] = sheet.rows.map((r, i) => {
+    const line = i + 2; // +1 for zero-index, +1 for the header
+    const errors: string[] = [];
+
+    const name = at(r, 'name').trim();
+    if (!name) errors.push('no name');
+
+    let email: string | null = null;
+    const rawEmail = at(r, 'email').trim();
+    if (rawEmail) {
+      const e = parseEmail(rawEmail);
+      if (e.ok) email = e.value; else errors.push(e.reason);
+    }
+
+    // 'online' is what the Add Client sheet starts on, so a file that says
+    // nothing about delivery lands where a coach adding by hand would land. A
+    // file that says something UNRECOGNISED is a different matter and is
+    // refused: quietly filing an in-person client as online changes which
+    // screens they get and what their coach is shown about them.
+    let mode: CoachedMode = 'online';
+    const rawMode = at(r, 'mode').trim().toLowerCase();
+    if (rawMode) {
+      const m = MODES[rawMode];
+      if (!m) errors.push(`delivery "${at(r, 'mode').trim()}" is not one this recognises`);
+      else mode = m;
+    }
+
+    const goal = at(r, 'goal').trim() || null;
+    const value: CoachClientRow = { name, email, goal, mode };
+    return { line, value, errors };
+  });
+
+  // A duplicate email in the file itself would invite one person twice. Flag
+  // the later one; the first keeps the row. Same rule and same wording as the
+  // member import, because it is the same defect.
+  //
+  // Duplicate NAMES are deliberately not flagged: two people called Sam Patel
+  // is a coincidence, not a mistake, and refusing the second would make a coach
+  // hand-add somebody the file already listed.
+  const seen = new Map<string, number>();
+  for (const r of rows) {
+    const e = r.value?.email;
+    if (!e) continue;
+    const first = seen.get(e);
+    if (first !== undefined) r.errors.push(`duplicate of line ${first} (same email)`);
+    else seen.set(e, r.line);
+  }
+
+  const rejected = rows.filter((r) => r.errors.length > 0);
+  return {
+    sheet,
+    missingRequired,
+    unmatchedColumns: unmatched,
+    // No dates are read, so there is no convention to settle and nothing to
+    // ask the coach about. Stated rather than left as a stale 'ambiguous'.
+    dateOrder: 'unknown',
     rows,
     ready: missingRequired.length ? [] : rows.filter((r) => r.errors.length === 0).map((r) => r.value!),
     rejected,

@@ -36,6 +36,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { num } from '../../src/lib/format';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Meter, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
@@ -52,6 +53,10 @@ export default function Challenges() {
   const t = useTheme();
   const router = useRouter();
   const ch = useChallenges();
+  // A failed read used to strand this screen for the whole session — the only
+  // way to ask again was to leave and come back. Pull to refresh is the
+  // gesture people already try; see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => { ch.reload(); }, [ch]));
   const [open, setOpen] = useState<ChallengeRow | null>(null);
   const [board, setBoard] = useState<BoardResult>(EMPTY_BOARD);
   // What went wrong with the last Join or Leave. A write that silently did not
@@ -107,7 +112,7 @@ export default function Challenges() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
@@ -194,9 +199,11 @@ export default function Challenges() {
                         // out as "Joined, button" to somebody about to lose
                         // their place. A button says what it does; the sheet
                         // behind it has always said "Leave Challenge".
-                        <Ghost label="Leave" onPress={() => doLeave(c)} />
+                        <Ghost label="Leave" a11yLabel={`Leave ${c.title}`} onPress={() => doLeave(c)} />
                       ) : (
-                        <Cta label={phase === 'upcoming' ? 'Join Early' : 'Join'} disabled={!canJoin(c)} onPress={() => doJoin(c)} />
+                        <Cta label={phase === 'upcoming' ? 'Join Early' : 'Join'} disabled={!canJoin(c)}
+                          a11yLabel={`${phase === 'upcoming' ? 'Join early' : 'Join'}: ${c.title}`}
+                          onPress={() => doJoin(c)} />
                       )}
                     </View>
                   </View>

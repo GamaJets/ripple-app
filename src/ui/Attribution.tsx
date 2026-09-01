@@ -18,6 +18,7 @@
 // actually renders it. A licence term honoured by everyone remembering is a
 // licence term that lapses the first time somebody rewrites a settings screen.
 import { View, Text, Pressable, Linking } from 'react-native';
+import { BRAND } from '../lib/brands';
 import { useTheme } from './components';
 import { Icon } from './Icon';
 import { sp, radius, type as ty } from '../theme/scale';
@@ -57,7 +58,7 @@ export function RepdbAttribution() {
       {/* Body size, not caption grey. A credit nobody can read is not a credit. */}
       <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{REPDB_CREDIT}</Text>
       <Text style={{ ...ty.caption, color: t.ink2 }}>
-        Exercise descriptions, illustrations and muscle data across Repple come from RepDB.
+        Exercise descriptions, illustrations and muscle data across {BRAND.label} come from RepDB.
         Tap to visit repdb.co.
       </Text>
     </Pressable>

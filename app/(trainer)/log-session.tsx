@@ -31,6 +31,8 @@ import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/t
 import { useAuth } from '../../src/ui/auth';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { logForClient } from '../../src/lib/coachLog';
+import { useFloorQueue } from '../../src/ui/floorQueue';
+import { floorPendingNote, keptOfflineLine } from '../../src/lib/floorQueue';
 import { notifySuccess } from '../../src/ui/haptics';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 
@@ -58,6 +60,10 @@ export default function LogSession() {
   // thinking in pounds typed 135 and wrote 135 kg into a client's history.
   const wu: WeightUnit = useSettings().weightUnit;
   const auth = useAuth();
+  // What this phone is still carrying. Read once per account and flushed on
+  // mount, so a session typed in a basement yesterday goes up as soon as this
+  // screen is opened anywhere with signal.
+  const queue = useFloorQueue(auth.user?.id ?? null);
   const { clientId, name } = useLocalSearchParams<{ clientId?: string; name?: string }>();
   const coachEx = useCoachExercises();
 
@@ -158,14 +164,53 @@ export default function LogSession() {
     setBusy(true);
     setFailure(null);
     const res = await logForClient(clientId, coachId, entries);
+    if (res.ok) {
+      setBusy(false);
+      notifySuccess();
+      Alert.alert(
+        'Session logged',
+        `${res.written} exercise${res.written === 1 ? '' : 's'} added to ${first}'s record. They will see it on their own phone, marked as logged by you, and it counts towards their progress.`,
+        [{ text: 'Done', onPress: () => router.back() }],
+      );
+      return;
+    }
+
+    // ── the write did not land, and there are two very different reasons ──
+    //
+    // Gyms are in basements. Until now both of them produced the same red
+    // banner and the same outcome: an hour of somebody's training, typed set by
+    // set, gone. A coach does not type it again — they remember it wrong a week
+    // later, or they stop using the screen.
+    //
+    // `logForClient` reports the failure it saw, and the one thing this screen
+    // has to decide is whether the server ANSWERED. It did if the failure names
+    // a cause — the roster refusal is a policy decision and will be made again
+    // identically — and it did not if nothing came back at all. Only the second
+    // is worth keeping: the same bytes refused once are refused forever, and a
+    // coach told something is waiting to send when it never will has been given
+    // a worse lie than "it failed".
+    //
+    // `attempt` re-issues the write through the queue, so the ONE round trip a
+    // coach actually waits on is the one above; this second call is what
+    // classifies and keeps it. It is never reported as saved — see rule 1 in
+    // src/lib/floorQueue.ts.
+    const out = await queue.attempt({
+      kind: 'session-log', clientId, clientName: name || null, entries,
+    });
     setBusy(false);
-    if (!res.ok) { setFailure(res.reason); return; }
-    notifySuccess();
-    Alert.alert(
-      'Session logged',
-      `${res.written} exercise${res.written === 1 ? '' : 's'} added to ${first}'s record. They will see it on their own phone, marked as logged by you, and it counts towards their progress.`,
-      [{ text: 'Done', onPress: () => router.back() }],
-    );
+    if (out === 'stored') {
+      notifySuccess();
+      Alert.alert('Session logged',
+        `${entries.length} exercise${entries.length === 1 ? '' : 's'} added to ${first}'s record.`,
+        [{ text: 'Done', onPress: () => router.back() }]);
+      return;
+    }
+    if (out === 'refused') { setFailure(res.reason); return; }
+    // Kept. Said as a sentence and not as a success: the client cannot see this
+    // yet and neither can anybody else.
+    Alert.alert('Kept on this phone',
+      keptOfflineLine('This session'),
+      [{ text: 'Done', onPress: () => router.back() }]);
   };
 
   return (
@@ -191,6 +236,23 @@ export default function LogSession() {
           {failure ? (
             <View style={{ marginBottom: sp.lg }}>
               <Flag tone={t.crit}>{failure}</Flag>
+            </View>
+          ) : null}
+
+          {/* What this phone is still carrying, and the one thing that is not
+              a count of it. A queue that could not be READ is not an empty
+              queue — src/lib/floorQueue.ts, rule 2 — so "nothing waiting" is
+              withheld rather than stated, and nothing is written to the device
+              until a launch that can read it. */}
+          {!queue.queueRead ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Flag tone={t.warn}>
+                What this phone is still carrying could not be read, so whether anything is waiting to go up is not known. Nothing has been lost — it is not being written over either.
+              </Flag>
+            </View>
+          ) : floorPendingNote(queue.unsent) ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Flag tone={t.warn}>{floorPendingNote(queue.unsent)}</Flag>
             </View>
           ) : null}
 

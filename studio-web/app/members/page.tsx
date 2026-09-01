@@ -567,7 +567,17 @@ function Dossier({ d, rec, active, onClose, ccy }: {
                   const m = dwellMinutes(v);
                   return m == null ? <span className="dash">no exit</span> : `${m} min`;
                 } },
-              { key: 'why', header: 'For', value: (v: Visit) => (v.classId ? 'class' : 'gym floor') },
+              // Three answers, not two. `gym_visits` carries both `class_id`
+              // and `pass_id` — 32-door-log.sql added them together "so the two
+              // records reconcile instead of double counting the same person" —
+              // and this column collapsed the pass case into "gym floor",
+              // because until the Door screen was fixed no console visit ever
+              // carried either id and the third answer could not occur. It can
+              // now, and a visit somebody paid a drop-in fee for is not a
+              // member wandering onto the floor: it is the row that reconciles
+              // against the pass ledger.
+              { key: 'why', header: 'For',
+                value: (v: Visit) => (v.classId ? 'class' : v.passId ? 'on a pass' : 'gym floor') },
               { key: 'via', header: 'Via', value: (v: Visit) => v.source },
             ]}
             rowKey={(v: Visit) => v.id}

@@ -22,6 +22,7 @@
 // nothing here offers one, and the confirmation says so before the tap rather
 // than after it.
 import { useCallback, useState } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -236,7 +237,7 @@ export default function ClientCoachDocumentsScreen() {
             <Section>
               <Notice
                 kicker="WHOSE DOCUMENT THIS IS"
-                title="Your coach’s, not Repple’s"
+                title={`Your coach’s, not ${BRAND.label}’s`}
                 note={COACH_DOC_NOT_REPPLE}
               />
             </Section>

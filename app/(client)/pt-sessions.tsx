@@ -159,7 +159,9 @@ export default function PtSessions() {
                 placeholder="Add a comment for your trainer (optional)…" placeholderTextColor={t.ink3}
                 editable={busy !== s.id} multiline
                 style={{ ...ty.label, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginTop: sp.md, marginBottom: sp.md }} />
-              <Cta label={busy === s.id ? 'Approving…' : 'Approve Session'} wide disabled={busy === s.id} onPress={() => approve(s.id)} />
+              <Cta label={busy === s.id ? 'Approving…' : 'Approve Session'} wide disabled={busy === s.id}
+                a11yLabel={`Approve the ${s.durationMin} minute session on ${fmt(s.startsAt)}`}
+                onPress={() => approve(s.id)} />
             </Card>
           ))}
           {/* "Nothing to approve right now" is a claim about the coach's

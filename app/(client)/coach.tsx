@@ -6,6 +6,7 @@
 // conversation, so the bubbles carry the ink and the chrome recedes to a
 // hairline. Every provider, conditional and route is unchanged.
 import { useState, useRef, useEffect } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
@@ -146,7 +147,7 @@ export default function Coach() {
   // not read rather than treating as a zero.
   const knowsAll = logWhole && foodWhole && isWhole(cd.status);
   const [msgs, setMsgs] = useState<ChatMsg[]>([
-    { role: 'assistant', content: `Hi ${cd.name.split(' ')[0]} I'm your Repple coach. ${knowsAll ? 'I know your plan, targets, and latest numbers' : 'I have your plan and whatever of your numbers loaded'} — ask me anything about training or nutrition.` },
+    { role: 'assistant', content: `Hi ${cd.name.split(' ')[0]} I'm your ${BRAND.label} coach. ${knowsAll ? 'I know your plan, targets, and latest numbers' : 'I have your plan and whatever of your numbers loaded'} — ask me anything about training or nutrition.` },
   ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);

@@ -51,6 +51,20 @@ addEventListener('DOMContentLoaded', function () {
   resultCount 0 across the us, ae, gb and sa storefronts, so none of the three
   was public yet. The owner asked for the links to go up regardless. When the
   listings are confirmed live, delete the "Being released now" callout below.
+
+  Re-checked 1 Sep 2026 and NOTHING HAS MOVED. All three `itunes.apple.com/
+  lookup` calls still answer `resultCount 0`, and all three Play pages still
+  return 404. So the callout below is still the truth and stays exactly where
+  it is — this note is here so the next person can see the claim was tested on
+  the day rather than inherited. Re-run it before deleting anything:
+
+      for id in 6790096518 6804358275 6804417240; do
+        curl -s "https://itunes.apple.com/lookup?id=$id" | head -c 120; echo
+      done
+      for p in com.washateria.repple{,.coach,.studio}; do
+        curl -s -o /dev/null -w "%{http_code}\n" \
+          "https://play.google.com/store/apps/details?id=$p"
+      done
 -->
 
 <header class="site">

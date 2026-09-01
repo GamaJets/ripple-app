@@ -33,6 +33,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
@@ -97,6 +98,10 @@ export default function InjuryDoc() {
   }, []);
 
   useEffect(() => { refreshDocs(); }, [refreshDocs]);
+  // A failed read used to strand this screen for the whole session — the only
+  // way to ask again was to leave and come back. Pull to refresh is the gesture
+  // people already try; see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => { void refreshDocs(); }, [refreshDocs]));
 
   const chip = (on: boolean) => ({
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm,
@@ -277,7 +282,7 @@ export default function InjuryDoc() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
-        showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+        showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>

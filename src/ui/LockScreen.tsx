@@ -7,6 +7,7 @@
 // It renders INSTEAD of the app, not over it, so nothing behind can be read
 // from a screenshot, a task switcher card, or a screen recording.
 import { useEffect, useState } from 'react';
+import { BRAND } from '../lib/brands';
 import { View, Text, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from './components';
@@ -41,7 +42,7 @@ export function LockScreen() {
           <Icon name="lock" size={28} color={t.brand} />
         </View>
 
-        <Text style={{ ...ty.title, color: t.ink, textAlign: 'center' }}>Repple Is Locked</Text>
+        <Text style={{ ...ty.title, color: t.ink, textAlign: 'center' }}>{BRAND.label} Is Locked</Text>
         <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', maxWidth: 300 }}>
           {tried
             ? `${label} did not unlock it. Try again, or sign out if this is not your phone.`

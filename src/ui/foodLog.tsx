@@ -48,7 +48,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import type { FoodFigures } from '../lib/entryEdit';
-import type { LoadStatus } from './loadStatus';
+import { isWhole, worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { isPending, localId, mergeLog } from '../lib/wellnessSync';
 import { classifyWrite, forDay, serverRows, staleForDay, todayKey, type WriteOutcome } from '../lib/offlineQueue';
@@ -398,4 +398,151 @@ export function useFoodLog(): FoodLogValue {
   const v = useContext(Ctx);
   if (!v) throw new Error('useFoodLog must be used inside <FoodLogProvider>');
   return v;
+}
+
+/* ── yesterday, and the fortnight before it ────────────────────────────────
+ *
+ * The provider above reads ONE DAY, deliberately: everything it holds feeds
+ * "calories remaining", and a meal from Tuesday counted into Wednesday's
+ * remaining calories is the single worst thing this file could do. That
+ * constraint is right and stays.
+ *
+ * What followed from it was that the app had no yesterday at all. A member
+ * could log a fortnight of meals and had no way to look at any of it — no date
+ * picker, no week, no average — so the food log was a thing you wrote into and
+ * could never read. The one screen that answered "how much do I actually eat"
+ * did not exist.
+ *
+ * So the history is a SEPARATE read with a separate status, which is what keeps
+ * the two apart: nothing below can reach `entries`, `consumed` or the day's
+ * macros, and a failed history read cannot make today's figures wrong.
+ */
+
+/** One day of eating. `kcal` and the macros are sums over `entries`, so a day
+ *  that could not be read whole has no day object at all rather than a short
+ *  one — see `useFoodHistory`. */
+export interface FoodDay {
+  /** Local calendar day, 'YYYY-MM-DD'. */
+  day: string;
+  entries: FoodEntry[];
+  kcal: number; protein: number; carbs: number; fat: number;
+}
+
+export interface FoodHistory {
+  /** Newest day first. Days with nothing logged are ABSENT rather than present
+   *  with zeros: nobody eats nothing, so a zero day is a day nobody wrote in,
+   *  and charting it as a zero would drag every average down towards a fast
+   *  that did not happen. */
+  days: FoodDay[];
+  status: LoadStatus;
+  /** Mean intake across the days that were actually logged, or null when the
+   *  read is not whole or there is nothing to average. `overDays` is how many
+   *  days it is a mean of, and it is not optional — "1,900 kcal a day" over two
+   *  logged days out of fourteen is a different sentence from the same figure
+   *  over fourteen, and the reader has to be given both. */
+  average: { kcal: number; protein: number; carbs: number; fat: number; overDays: number } | null;
+  reload: () => void;
+}
+
+const dayKeyOf = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/**
+ * The last `days` calendar days of eating, today included.
+ *
+ * Today's rows come from the provider rather than from this query, so a meal
+ * logged in a basement with no signal appears in the week view exactly as it
+ * appears in the day view. Without that the history would quietly contradict
+ * the screen above it for anybody eating offline.
+ */
+export function useFoodHistory(days: number = 14): FoodHistory {
+  const authRev = useAuthRevision();
+  const today = useFoodLog();
+  const [rows, setRows] = useState<FoodEntry[]>([]);
+  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!USE_SUPABASE) { setRows([]); setStatus('ready'); return; }
+      setStatus('loading');
+      let id: string | null = null;
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        id = sess?.session?.user?.id ?? null;
+      } catch { /* no local session; treated as signed out below */ }
+      if (cancelled) return;
+      // Signed out is a true answer about an empty history, not a failed read.
+      if (!id) { setRows([]); setStatus('ready'); return; }
+      const from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - (Math.max(1, days) - 1));
+      try {
+        const { data, error } = await supabase.from('food_logs')
+          .select('id, logged_at, name, kcal, protein, carbs, fat, via')
+          .eq('client_id', id).gte('logged_at', from.toISOString())
+          .order('logged_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
+        if (cancelled) return;
+        const got = serverRows<any>(error, data);
+        // The cached day is not reused here. There is no cache of a fortnight,
+        // and inventing one from today's would show a week made of one day.
+        if (got === null) { setStatus('error'); return; }
+        const page = capped(got);
+        setRows(page.rows.map(rowToEntry));
+        // 'partial', not 'ready'. Every figure below is a sum or a mean, and
+        // src/ui/loadStatus.ts is explicit that those may not be computed over
+        // a truncated read — a fortnight cut off at its row limit loses whole
+        // days off the far end and the average would be of the days that fit.
+        setStatus(page.truncated ? 'partial' : 'ready');
+      } catch { if (!cancelled) setStatus('error'); }
+    })();
+    return () => { cancelled = true; };
+  }, [authRev, days, tick]);
+
+  const todayKeyNow = todayKey();
+  const value = useMemo<FoodHistory>(() => {
+    // Today from the provider, every earlier day from the query. Dropping the
+    // query's own today rows rather than merging them: the provider's list
+    // already holds them plus anything unsent, and a merge on id would leave a
+    // meal logged offline showing twice the moment it was accepted.
+    const all = [...today.entries, ...rows.filter((r) => dayKeyOf(r.at) !== todayKeyNow)];
+    const byDay = new Map<string, FoodEntry[]>();
+    for (const e of all) {
+      const k = dayKeyOf(e.at);
+      if (!k) continue;
+      const list = byDay.get(k);
+      if (list) list.push(e); else byDay.set(k, [e]);
+    }
+    const out: FoodDay[] = [...byDay.entries()]
+      .map(([day, list]) => {
+        const sorted = [...list].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+        return {
+          day,
+          entries: sorted,
+          kcal: sorted.reduce((a, e) => a + e.kcal, 0),
+          protein: sorted.reduce((a, e) => a + e.protein, 0),
+          carbs: sorted.reduce((a, e) => a + e.carbs, 0),
+          fat: sorted.reduce((a, e) => a + e.fat, 0),
+        };
+      })
+      .sort((a, b) => b.day.localeCompare(a.day));
+
+    // The whole history is only as trustworthy as its worst half, and today
+    // comes from a different read than the rest of it.
+    const combined = worstStatus(status, today.status);
+    const average = (isWhole(combined) && out.length)
+      ? {
+        kcal: Math.round(out.reduce((a, d) => a + d.kcal, 0) / out.length),
+        protein: Math.round(out.reduce((a, d) => a + d.protein, 0) / out.length),
+        carbs: Math.round(out.reduce((a, d) => a + d.carbs, 0) / out.length),
+        fat: Math.round(out.reduce((a, d) => a + d.fat, 0) / out.length),
+        overDays: out.length,
+      }
+      : null;
+    return { days: out, status: combined, average, reload: () => setTick((n) => n + 1) };
+  }, [rows, today.entries, today.status, status, todayKeyNow]);
+
+  return value;
 }

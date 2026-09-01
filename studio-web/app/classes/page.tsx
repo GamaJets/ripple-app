@@ -219,9 +219,16 @@ export default function Classes() {
     return (
       <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/classes">
         <h1>Not your console</h1>
-        <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
-          Class performance across every coach is an owner's screen. Your own classes and their
-          registers are on the Timetable.
+        {/* This sentence was true about this screen and false about the other
+            one: /timetable was owner-only too, so a coach sent here was sent
+            from one shut door to another and had no register in this console at
+            all. The board admits staff now, so the link goes with the sentence
+            — a refusal that names where to go should be clickable, or the
+            reader has to guess at the URL. */}
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          Class performance across every coach is an owner&rsquo;s screen. Your own classes and their
+          registers are on the <a href="/timetable" style={{ color: 'var(--brand)' }}>Timetable</a>,
+          which is in your menu.
         </p>
       </Shell>
     );
@@ -245,6 +252,11 @@ export default function Classes() {
 
   const emptyPlaces = rated && rated.capacity > 0 ? Math.max(0, rated.capacity - rated.booked) : null;
   const overbooked = rows.filter((r) => r.capacity > 0 && r.booked > r.capacity);
+  // Counted off `classes` rather than `rows`, because ClassSummaryRow is the
+  // shared rate shape and a waiting list is not part of a rate.
+  const waiting = (classes ?? []).reduce((a, c) => a + c.waitlisted, 0);
+  const waitingClasses = (classes ?? []).filter((c) => c.waitlisted > 0).length;
+  const waitingAttended = (classes ?? []).reduce((a, c) => a + c.waitlistAttended, 0);
   const unmarked = (classes ?? []).filter((c) => c.booked > 0 && c.attended === 0);
 
   return (
@@ -346,6 +358,25 @@ export default function Classes() {
           {overbooked.length === 1 ? '1 class took' : `${overbooked.length} classes took`} more
           bookings than {overbooked.length === 1 ? 'its' : 'their'} capacity. Fill can therefore read
           above 100% — it is a real over-sell, not a rounding artefact.
+        </Banner>
+      ) : null}
+
+      {/* Demand the gym did not sell, said separately from what it did.
+          `fetchClasses` used to count a waitlister as a booking — the status
+          filter tested for a value the constraint forbids — so these people
+          were already inside Fill, pushing it over 100% on the classes that
+          were working and taking the banner above with them. They are out of
+          the rate now, which means they are invisible unless something says so,
+          and "eleven people wanted a place we did not have" is the single most
+          actionable number on this screen. */}
+      {waiting > 0 ? (
+        <Banner>
+          {waiting === 1 ? '1 person was' : `${waiting} people were`} on a waiting list across{' '}
+          {waitingClasses === 1 ? 'one class' : `${waitingClasses} classes`}. They are deliberately
+          not in Fill — a place the gym could not sell is not a place it sold — so a full class with
+          a queue behind it reads 100%, and this is the queue. Another occurrence of{' '}
+          {waitingClasses === 1 ? 'that class' : 'those classes'} is the fix a bigger room is not.
+          {waitingAttended > 0 ? ` ${waitingAttended} of them were let in and marked present.` : ''}
         </Banner>
       ) : null}
 

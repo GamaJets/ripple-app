@@ -158,6 +158,18 @@
     "src/lib/startGate.test.ts",
     "src/lib/studioWrites.test.ts",
     "src/lib/workoutQueue.test.ts",
-    "src/lib/directCharges.test.ts"
+    "src/lib/bodyweightSets.test.ts",
+    "src/lib/directCharges.test.ts",
+    "src/lib/coachCurrency.test.ts",
+    "src/lib/coachCheckins.test.ts",
+    "src/lib/coachContacts.test.ts",
+    "src/lib/packageEdit.test.ts",
+    "src/lib/builderProgression.test.ts",
+    "src/lib/floorQueue.test.ts",
+    "src/lib/rosterImport.test.ts",
+    "src/lib/joinPage.test.ts",
+    "src/lib/gymClassFill.test.ts",
+    "src/lib/gymPolicy.test.ts",
+    "src/lib/gymImports.test.ts"
   ]
 }

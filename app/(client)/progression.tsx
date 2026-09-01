@@ -9,10 +9,12 @@
 // rows carrying a <KpiRow>, and the action tag no longer prints itself in a
 // reserved status colour — the status is a coloured mark beside ink text.
 // A list of equal-weight targets is a list, so this screen leads with no hero.
+import { useCallback } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useSettings } from '../../src/ui/settings';
@@ -33,6 +35,11 @@ export default function Progression() {
   const t = useTheme();
   const router = useRouter();
   const { log, status: logStatus, reload } = useWorkoutLog();
+  // A failed read used to strand this screen for the whole session: the only
+  // way to ask again was the Try Again button inside the failure notice, and
+  // there is no such button on a screen that merely went stale. Pull to refresh
+  // is the gesture people already try — see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
   // This screen tells somebody what to load on a bar, so it is the one place
   // in the app where reading the wrong unit is not a cosmetic problem. The
   // double-progression arithmetic stays in kilograms — its 2.5 kg step is a
@@ -46,7 +53,7 @@ export default function Progression() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>

@@ -304,6 +304,9 @@ ok(!skipped.some((c) => c.startsAt.slice(0, 10) === '2026-09-15'), 'the skipped 
 const cls = (booked: number, attended: number, capacity: number): GymClass => ({
   id: 'c' + booked + attended, title: 'Spin', room: null, instructor: null, trainerId: null,
   startsAt: base.startsAt, durationMin: 45, capacity, booked, attended,
+  // Places sold and people waiting are separate counts now — see tallyBookings
+  // in gymSchedule.ts. Zero here because these cases are about the rate maths.
+  waitlisted: 0, waitlistAttended: 0,
 });
 
 const none = summariseAttendance([]);
@@ -794,7 +797,7 @@ ok(!queue.some((q) => q.item.status === 'retired'), 'retired kit never appears i
 const NOW = Date.parse('2026-08-25T12:00:00Z');   // a Tuesday; its Monday is the 24th
 const gc = (startsAt: string, capacity: number, booked: number, attended: number): GymClass => ({
   id: startsAt + capacity, title: 'Conditioning', room: null, instructor: null, trainerId: null,
-  startsAt, durationMin: 45, capacity, booked, attended,
+  startsAt, durationMin: 45, capacity, booked, attended, waitlisted: 0, waitlistAttended: 0,
 });
 
 const w3 = weeklyAttendance([
@@ -1482,7 +1485,8 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   // zero where the row cannot say, and by calling normal sharing a clash.
   const cls = (o: Partial<GymClass>): GymClass => ({
     id: 'c1', title: 'Spin', room: 'Studio 1', instructor: 'Marcus', trainerId: 'tr1',
-    startsAt: '2026-09-01T17:00:00Z', durationMin: 60, capacity: 20, booked: 12, attended: 0, ...o,
+    startsAt: '2026-09-01T17:00:00Z', durationMin: 60, capacity: 20, booked: 12, attended: 0,
+    waitlisted: 0, waitlistAttended: 0, ...o,
   });
   const slot = (o: Partial<PtSlot>): PtSlot => ({
     id: 's1', trainerId: 'tr2', trainerName: 'Priya', clientId: 'cl1', clientName: 'Dana',
@@ -2727,7 +2731,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     { id: 'pay3', memberId: null, memberName: null, amountCents: 1250, currency: 'AED', method: 'other', takenAt: '2026-06-01T00:00:00.000Z', note: 'walk-in, till float' },
   ];
   const clsIn: GymClass[] = [
-    { id: 'c1', title: 'Spin, 45min', room: 'Studio 2', instructor: null, trainerId: 't1', startsAt: '2026-08-01T06:00:00.000Z', durationMin: 45, capacity: 20, booked: 2, attended: 1 },
+    { id: 'c1', title: 'Spin, 45min', room: 'Studio 2', instructor: null, trainerId: 't1', startsAt: '2026-08-01T06:00:00.000Z', durationMin: 45, capacity: 20, booked: 2, attended: 1, waitlisted: 0, waitlistAttended: 0 },
   ];
   const bkIn: MemberBooking[] = [
     { bookingId: 'b1', memberId: 'u1', classId: 'c1', classTitle: 'Spin, 45min', startsAt: '2026-08-01T06:00:00.000Z', status: 'booked', attendedAt: '2026-08-01T06:03:00.000Z' },

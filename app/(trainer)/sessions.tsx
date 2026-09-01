@@ -46,8 +46,10 @@ import { reportError } from '../../src/lib/reportError';
 import { tapLight } from '../../src/ui/haptics';
 import { type PtSession, type SessionOutcome } from '../../src/lib/gymSessions';
 import {
-  MARK_WINDOW_DAYS, awaitingOutcome, clearMyOutcome, fetchMySessions, markMyOutcome, windowStart,
+  MARK_WINDOW_DAYS, awaitingOutcome, clearMyOutcome, fetchMySessions, windowStart,
 } from '../../src/lib/trainerSessions';
+import { useFloorQueue } from '../../src/ui/floorQueue';
+import { floorPendingNote, keptOfflineLine } from '../../src/lib/floorQueue';
 
 /** The four outcomes, in the order a person would consider them. */
 const OUTCOMES: { id: SessionOutcome; label: string; short: string; tone: (t: Theme) => string }[] = [
@@ -105,11 +107,17 @@ export default function TrainerSessions() {
   // sessions. See src/lib/trainerSessions.ts.
   const { user, loading: authLoading } = useAuth();
   const uid = user?.id ?? null;
+  // Named `floor` rather than `queue`: this screen already calls its list of
+  // unmarked sessions `queue`, and two things called that on one screen is how
+  // somebody later flushes the wrong one.
+  const floor = useFloorQueue(uid);
   // The rate to snapshot when an outcome is recorded. A gym's fee where there
   // is a gym, and otherwise the coach's own — an independent trainer's sessions
   // are priced by the rate on their profile, and there is nowhere else for that
-  // figure to come from. Null stays null: `markMyOutcome` then leaves rate_cents
-  // untouched rather than writing a zero that reads as "this was free".
+  // figure to come from. Null stays null: the queue's sender then leaves
+  // rate_cents untouched rather than writing a zero that reads as "this was
+  // free" — `undefined` and null are different instructions and src/ui/floorQueue.ts
+  // carries that distinction through unflattened.
   const { sessionFee: ownFee } = useMyTrainerProfile();
   const feeToSnapshot = tenant?.sessionFee ?? ownFee;
 
@@ -177,11 +185,39 @@ export default function TrainerSessions() {
     setBusy(s.id);
     try {
       // Snapshot the gym's fee at the moment of marking, so a later fee change
-      // cannot rewrite what this session was worth.
-      await markMyOutcome(supabase, uid, s.id, outcome, feeToSnapshot != null ? feeToSnapshot * 100 : undefined);
+      // cannot rewrite what this session was worth. The snapshot is taken HERE
+      // and carried into the queue rather than recomputed at flush time: a
+      // session marked on Tuesday and sent on Thursday is worth what it was
+      // worth on Tuesday, and re-reading the fee would let a rate change in
+      // between quietly rewrite it.
+      const rateCents = feeToSnapshot != null ? feeToSnapshot * 100 : undefined;
+      // ── the outcome, and the room it is recorded in ────────────────────
+      //
+      // This is the same money as the class tick, one session at a time, and
+      // it went straight through: a throw produced "check your connection and
+      // try again", the row stayed in the list, and a coach clearing a day's
+      // sessions in a basement did it three times and got nowhere.
+      //
+      // `markMyOutcome` throws on a zero-row update as well as on a transport
+      // failure, and those are not the same event — one is the session not
+      // being theirs to mark, which will be true again next time. The queue
+      // separates them: `refused` keeps the row in the list and says so,
+      // `unsent` takes it off the list because the coach HAS decided and this
+      // phone now holds that decision, and says the gym cannot see it yet.
+      const out = await floor.attempt({
+        kind: 'session-outcome', sessionId: s.id, clientName: s.clientName ?? null, outcome, rateCents,
+      });
+      if (out === 'refused') {
+        Alert.alert('Not recorded',
+          'That outcome was not saved and is not waiting to send — the session may no longer exist, or it is not yours to mark.');
+        return;
+      }
       setQueue((prev) => (prev ?? []).filter((x) => x.id !== s.id));
       setJustMarked((prev) => [{ s, outcome }, ...prev].slice(0, 8));
       tapLight();
+      if (out === 'unsent') {
+        Alert.alert('Kept on this phone', keptOfflineLine('That outcome'));
+      }
     } catch (e) {
       reportError('sessions.mark', e);
       Alert.alert('Not recorded', 'That outcome was not saved. Check your connection and try again.');
@@ -254,6 +290,23 @@ export default function TrainerSessions() {
               { label: 'Oldest', value: days.length ? days[days.length - 1].day.slice(5) : '—' },
             ]} />
           </Section>
+        ) : null}
+
+        {/* What this phone is still carrying, said above the list rather than
+            inside it: an outcome kept here has already left the list, so a
+            coach who does not see this believes the gym has it — and a gym
+            settles payroll on it. A queue that could not be READ is not an
+            empty one, so "nothing waiting" is withheld rather than claimed. */}
+        {!floor.queueRead ? (
+          <View style={{ paddingTop: sp.sm }}>
+            <Flag tone={t.warn}>
+              What this phone is still carrying could not be read, so whether any outcomes are waiting to go up is not known. Nothing has been lost — it is not being written over either.
+            </Flag>
+          </View>
+        ) : floorPendingNote(floor.unsent) ? (
+          <View style={{ paddingTop: sp.sm }}>
+            <Flag tone={t.warn}>{floorPendingNote(floor.unsent)}</Flag>
+          </View>
         ) : null}
 
         {failed ? (

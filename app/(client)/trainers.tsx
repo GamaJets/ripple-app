@@ -44,6 +44,7 @@
 // <Notice> for the one thing that needs a decision — an invitation. Every
 // query, conditional and route above is untouched.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -441,7 +442,7 @@ export default function FindTrainer() {
     try {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
-      if (!uid) { Alert.alert('Sign in required', 'Sign in to Repple to request coaching.'); return; }
+      if (!uid) { Alert.alert('Sign in required', `Sign in to ${BRAND.label} to request coaching.`); return; }
       // `source` is what makes the coach's attribution add up. The column and
       // its check constraint have allowed 'directory' since part 56 and nothing
       // ever wrote it: this insert left it null, so a client who found their
@@ -509,7 +510,7 @@ export default function FindTrainer() {
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Connect</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Find a Trainer</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Enter your coach's code, or browse everyone coaching on Repple.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Enter your coach's code, or browse everyone coaching on {BRAND.label}.</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
@@ -621,7 +622,7 @@ export default function FindTrainer() {
 
         {/* ── the directory ──────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Coaches on Repple" note={status === 'ready' && coaches.length > 0 ? String(coaches.length) : undefined} />
+          <SectionHead title={`Coaches on ${BRAND.label}`} note={status === 'ready' && coaches.length > 0 ? String(coaches.length) : undefined} />
 
           {/* The read failed, so nothing below this line is a statement about who
               is coaching on Repple. Naming the gap is the whole point: the old
@@ -629,7 +630,7 @@ export default function FindTrainer() {
               no way to tell apart from the truth. */}
           {status === 'error' ? (
             <Notice tone={t.warn} kicker="Directory" title="We couldn’t load the directory"
-              note="This is our end, not an empty directory. Until it loads we can't tell you who is coaching on Repple.">
+              note={`This is our end, not an empty directory. Until it loads we can't tell you who is coaching on ${BRAND.label}.`}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
               </View>

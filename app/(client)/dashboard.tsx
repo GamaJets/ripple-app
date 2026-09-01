@@ -7,6 +7,7 @@
 // of four competing 20px numbers, hairline-separated sections instead of eleven
 // stacked bordered cards, and a card spent only on the thing you can act on.
 import { useState, useEffect, useCallback } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -186,8 +187,11 @@ export default function Home() {
     if (when.getTime() <= Date.now()) when.setTime(Date.now() + 60 * 60 * 1000);
     try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + risk.streak + '-day streak going.', when, { route: '/(client)/workouts' }); } catch { /* ignore */ }
   };
-  const wk = weekStats(log);
-  const prs = personalRecords(log);
+  // Priced with the member's own weight over time, so a pull-up counts. See
+  // src/lib/bodyweightSets.ts — an unweighed member's bodyweight sets are
+  // reported as unpriced rather than silently counted as zero.
+  const wk = weekStats(log, Date.now(), c.weightSeries);
+  const prs = personalRecords(log, c.weightSeries);
   const goalDays = program.days.length || 4;
 
   // ── Getting Started, while it has anything to say ────────────────────────
@@ -457,7 +461,7 @@ export default function Home() {
         {/* Said before the card, because the card is what the reader acts on. */}
         {programUnknown ? (
           <Notice tone={t.warn} kicker="Today" title="We couldn’t check for a coach plan"
-            note="Today's focus below comes from Repple's automatic program. If your coach has assigned you one it takes over as soon as we can read it." />
+            note={`Today's focus below comes from ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it.`} />
         ) : null}
         {!logKnown ? (
           <Notice tone={t.warn} kicker="Today" title="We couldn’t read your training log"

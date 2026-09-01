@@ -9,6 +9,7 @@
 // this device remembers, so clearing the app does not clear the agreement and
 // a fresh install does not ask twice.
 import { useCallback, useEffect, useState } from 'react';
+import { BRAND } from '../lib/brands';
 import { View, Text, ScrollView, Pressable, Modal, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from './components';
@@ -157,7 +158,7 @@ function WaiverScreen({ state, accept, reload, insets }: {
           Read this and agree to carry on
         </Text>
         <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
-          Repple gives you training and nutrition suggestions. It is not medical advice, and
+          {BRAND.label} gives you training and nutrition suggestions. It is not medical advice, and
           nobody here — your coach included — is your doctor. Please read both points and tick
           them only if you agree.
         </Text>

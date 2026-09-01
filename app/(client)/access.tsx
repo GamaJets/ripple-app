@@ -12,6 +12,7 @@
 // which promised a door that opens; it now says what the number is and what has
 // to happen before it works.
 import { useMemo } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -37,7 +38,7 @@ export default function Access() {
           <Icon name="back" size={20} color="#fff" />
         </Pressable>
         <Text style={{ ...ty.title, color: '#fff', marginBottom: 4 }}>{c.name || 'Member'}</Text>
-        <Text style={{ ...ty.body, ...numeric, color: '#8a8a8a', marginBottom: sp.huge }}>Repple ID {memberNo}</Text>
+        <Text style={{ ...ty.body, ...numeric, color: '#8a8a8a', marginBottom: sp.huge }}>{BRAND.label} ID {memberNo}</Text>
 
         <View style={{ backgroundColor: '#fff', borderRadius: radius.md, paddingVertical: sp.xl, paddingHorizontal: sp.xl, alignItems: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'stretch', height: 130 }}>
@@ -48,7 +49,7 @@ export default function Access() {
           <Text style={{ ...value(15), letterSpacing: 3, color: '#000', marginTop: sp.md }}>{memberNo}</Text>
         </View>
 
-        <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.xxl }}>This is your Repple ID, not a membership number your gym issued.{'\n'}Give it to reception once and they can link it to your account — after that the entrance scanner will read it.{'\n'}Turn your screen brightness up for a clean read.</Text>
+        <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.xxl }}>This is your {BRAND.label} ID, not a membership number your gym issued.{'\n'}Give it to reception once and they can link it to your account — after that the entrance scanner will read it.{'\n'}Turn your screen brightness up for a clean read.</Text>
       </ScrollView>
     </SafeAreaView>
   );

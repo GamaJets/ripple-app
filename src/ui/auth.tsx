@@ -4,6 +4,7 @@
 // establishes a persisted session (AsyncStorage), and the session is rehydrated
 // on launch. Screens are unchanged — they just read { authed, user }.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { BRAND } from '../lib/brands';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
 import {
@@ -270,7 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * stays a client when they open the coach app, exactly as the brand does.
    */
   const sendPhoneCode = async (e164: string): Promise<{ ok: true } | { ok: false; reason: string }> => {
-    if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so no code was sent.' };
+    if (!USE_SUPABASE) return { ok: false, reason: `Not connected to ${BRAND.label}, so no code was sent.` };
     try {
       const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser: true, data: { ...brandSignUpMetadata(), role: VARIANT } } });
       if (error) { reportError('auth.sendPhoneCode', error); return { ok: false, reason: phoneAuthError(error.message) }; }
@@ -289,7 +290,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * whatever the sign-in screen happened to have in its field.
    */
   const verifyPhoneCode = async (e164: string, code: string, name?: string): Promise<{ ok: true } | { ok: false; reason: string }> => {
-    if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so the code could not be checked.' };
+    if (!USE_SUPABASE) return { ok: false, reason: `Not connected to ${BRAND.label}, so the code could not be checked.` };
     try {
       const { data, error } = await supabase.auth.verifyOtp({ phone: e164, token: code, type: 'sms' });
       if (error) return { ok: false, reason: phoneAuthError(error.message) };
@@ -338,7 +339,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * OTP and would refuse a token minted by a signup confirmation.
    */
   const confirmEmailCode = async (email: string, code: string): Promise<OtpOutcome> => {
-    if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so the code could not be checked.' };
+    if (!USE_SUPABASE) return { ok: false, reason: `Not connected to ${BRAND.label}, so the code could not be checked.` };
     const address = email.trim();
     try {
       const { data, error } = await supabase.auth.verifyOtp({ email: address, token: digitsOnly(code), type: 'signup' });
@@ -380,7 +381,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * `resend` has no argument for it anyway.
    */
   const resendEmailCode = async (email: string): Promise<OtpOutcome> => {
-    if (!USE_SUPABASE) return { ok: false, reason: 'Not connected to Repple, so no code was sent.' };
+    if (!USE_SUPABASE) return { ok: false, reason: `Not connected to ${BRAND.label}, so no code was sent.` };
     const address = email.trim();
     try {
       const { error } = await supabase.auth.resend({ type: 'signup', email: address });

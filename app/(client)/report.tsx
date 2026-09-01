@@ -74,10 +74,10 @@ export default function WeeklyReport() {
   const wu = st.weightUnit;
   const lu = st.lengthUnit;
 
-  const wk = weekStats(log);
+  const wk = weekStats(log, Date.now(), c.weightSeries);
   const streak = currentStreak(log);
   const milestone = streakMilestone(streak);
-  const prs = personalRecords(log);
+  const prs = personalRecords(log, c.weightSeries);
 
   const wSeries = c.weightSeries;
   const wDelta = wSeries.length > 1 ? +(wSeries[wSeries.length - 1].v - wSeries[0].v).toFixed(1) : 0;

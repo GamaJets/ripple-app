@@ -32,6 +32,7 @@
 // is the one place that maps them, so no two of them can end up sharing a
 // wording.
 import { useState } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -85,7 +86,7 @@ export default function Glucose() {
   /** The alert's title. Four outcomes, four titles, never one shared word. */
   const importTitle = (status: GlucoseReadStatus, added: number): string => {
     if (status === 'unsupported') return 'Nothing to read from';
-    if (status === 'denied') return 'Repple has not been given access';
+    if (status === 'denied') return `${BRAND.label} has not been given access`;
     if (status === 'error') return 'Could not be read';
     return added > 0 ? 'Imported' : 'Up to date';
   };
@@ -151,7 +152,7 @@ export default function Glucose() {
         </View>
 
         <Notice tone={t.s3} kicker="Not medical advice" title="Readings, not recommendations"
-          note={`Repple shows what your monitor recorded. It does not tell you what to eat, and the range shown (${TYPICAL_LOW_MMOL}–${TYPICAL_HIGH_MMOL} mmol/L) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
+          note={`${BRAND.label} shows what your monitor recorded. It does not tell you what to eat, and the range shown (${TYPICAL_LOW_MMOL}–${TYPICAL_HIGH_MMOL} mmol/L) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
 
         {/* ── The window's headline figures ─────────────────────────────── */}
         <Section style={{ marginTop: sp.lg }}>
@@ -314,7 +315,7 @@ export default function Glucose() {
 
                   The list is still empty and the count is still nought; what
                   changes is whose absence it is reported as. */}
-              {known ? `No readings in Repple from the last 14 days. They arrive by importing from ${src.storeName} or by adding one by hand, so an empty list here is Repple’s record rather than a statement about what your monitor saw.`
+              {known ? `No readings in ${BRAND.label} from the last 14 days. They arrive by importing from ${src.storeName} or by adding one by hand, so an empty list here is ${BRAND.label}’s record rather than a statement about what your monitor saw.`
                 : g.status === 'loading' ? 'Still loading.'
                 : 'More on record than we can read at once, so this is not a statement that nothing was recorded.'}
             </Text>

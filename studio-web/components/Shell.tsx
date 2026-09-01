@@ -65,7 +65,18 @@ export const NAV: NavItem[] = [
   // Before Timetable because it is the thing the timetable is made of: a class
   // is defined once, then scheduled many times.
   { href: '/classes', label: 'Classes', roles: ['owner'], context: 'gym' , group: 'Delivery' },
-  { href: '/timetable', label: 'Timetable', roles: ['owner'], context: 'gym' , group: 'Delivery' },
+  // Owner AND trainer, matching app/timetable/page.tsx, which admits both. The
+  // board is the only place in this console a coach can take a register, and
+  // `class_bookings.attended_at` is the single source of attendance for fill
+  // rate, show rate, retention and class pay — nothing infers it from a
+  // booking, and nobody ticks a class from memory three days later. While this
+  // said owner alone the coach standing in the room had no way in, and the
+  // /classes refusal told them to come here.
+  //
+  // What a trainer sees here is the board and the register; adding a class,
+  // booking a one-to-one and removing anything are not rendered for them, and
+  // the database refuses all three independently.
+  { href: '/timetable', label: 'Timetable', roles: ['owner', 'trainer'], context: 'gym' , group: 'Delivery' },
   { href: '/sessions', label: 'Sessions', roles: ['owner'], context: 'gym' , group: 'Delivery' },
   // This was called "Money", one line above a screen called "Revenue", and no
   // label told you which one to click. They are opposite verbs on the same
@@ -109,6 +120,13 @@ export const NAV: NavItem[] = [
   // reach the page by typing the URL and was never offered the link — the same
   // disagreement, in the opposite direction, as the Overview entry above.
   { href: '/equipment', label: 'Equipment', roles: ['owner', 'trainer'], context: 'gym' , group: 'System' },
+  // Last in System and first in importance for a gym that has just opened.
+  // Until this route existed every `.from('tenants')` call in this console was
+  // a select: /money and /import each told the owner to set the currency "on
+  // the gym settings screen", and there was no such screen — so a new gym could
+  // not price a plan, record a payment, import a price book or settle payroll,
+  // and the console said where to go and had nowhere to send them.
+  { href: '/settings', label: 'Gym', roles: ['owner'], context: 'gym' , group: 'System' },
   { href: '/import', label: 'Import', roles: ['owner'], context: 'gym' , group: 'System' },
   // Beside Import deliberately: a gym that can be imported into and not
   // exported out of is a gym that cannot leave.

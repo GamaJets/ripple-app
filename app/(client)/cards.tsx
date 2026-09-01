@@ -60,7 +60,7 @@ export default function Cards() {
 
   const streak = currentStreak(log);
   const best = longestStreak(log);
-  const prs = personalRecords(log).sort((a, b) => b.est1RM - a.est1RM);
+  const prs = personalRecords(log, c.weightSeries).sort((a, b) => b.est1RM - a.est1RM);
   const topPr = prs[0];
   // `weightSeries` is derived from the SCANS, and this file asked the workout
   // log's status about everything and the scans' status about nothing. Under a

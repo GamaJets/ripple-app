@@ -37,9 +37,11 @@
 // `workouts` rows the calendar, the streak, records and the coach all read. The
 // write resolves true only once the server has it, and the sheet says so when
 // it does not, rather than closing on a set that exists on this phone alone.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { GuardedImage } from '../../src/ui/GuardedImage';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
@@ -76,6 +78,11 @@ export default function Library() {
  const [q, setQ] = useState('');
  const [group, setGroup] = useState('All');
  const { videos, status, reload } = useExerciseVideos();
+ // A failed read used to strand this screen for the whole session: the only
+ // way to ask again was the Try Again button inside the failure notice, and
+ // there is no such button on a screen that merely went stale. Pull to refresh
+ // is the gesture people already try — see src/ui/pullToRefresh.tsx.
+ const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
  // The catalogue, which is a different thing from the clips and was never on
  // this screen. 917 movements exist; nought clips do. A screen called Exercise
  // Library that could only ever show the second was empty for every client on
@@ -159,7 +166,7 @@ export default function Library() {
  // screen: one clip described two ways on two screens reads as two facts. A null
  // trainerId is a platform clip belonging to no gym; anything else is here
  // because a coach chose to share it with this client.
- const source = (v: VideoItem) => (v.trainerId ? 'Recorded by your coach' : 'From the Repple library');
+ const source = (v: VideoItem) => (v.trainerId ? 'Recorded by your coach' : `From the ${BRAND.label} library`);
  // `dur` is not a duration and never was — it holds the literal word "clip" or
  // "link", which is how the client came to be reading "Legs · clip". What they
  // can use is whose demonstration it is and whether there is one to play at all.
@@ -247,7 +254,7 @@ export default function Library() {
 
  return (
   <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-   <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+   <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
      <Ghost icon="back" onPress={goBack} />

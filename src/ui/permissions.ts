@@ -35,6 +35,7 @@
 // toggle is. It is the only sanctioned deep link into Settings on iOS and it
 // needs no configuration.
 import { Alert, Linking } from 'react-native';
+import { BRAND } from '../lib/brands';
 import * as ImagePicker from 'expo-image-picker';
 
 export type MediaSource = 'camera' | 'library';
@@ -64,7 +65,7 @@ export async function ensureMediaPermission(
   if (perm.canAskAgain) {
     Alert.alert(
       'Access not granted',
-      `Repple needs ${thing} to ${purpose}. Tap it again and choose Allow.`,
+      `${BRAND.label} needs ${thing} to ${purpose}. Tap it again and choose Allow.`,
     );
     return false;
   }

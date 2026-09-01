@@ -24,7 +24,7 @@ change.** `com.washateria.repple`, `com.washateria.repple.coach` and
 change one and you have not updated an app, you have orphaned it and published a
 new one with no users, no reviews and no history.
 
-So Repple's values are written out longhand in `src/lib/brands.ts:123-134`,
+So Repple's values are written out longhand in `src/lib/brands.ts:160-178`,
 transcribed from `app.config.ts` as it stood before the brand axis, and derived
 from nothing. Do not tidy them, do not template them, do not "simplify" the
 `repple` entry into a base the other brands extend. None of the existing
@@ -43,7 +43,7 @@ before any change to `brands.ts` or `app.config.ts` lands.
 
 ## 1. The registry entry — `src/lib/brands.ts`
 
-One key in `BRANDS`. `example` at `src/lib/brands.ts:148-160` is a worked
+One key in `BRANDS`. `example` at `src/lib/brands.ts:192-205` is a worked
 example built entirely from IANA's reserved `example.com` and `com.example`, so
 nothing in it can collide with a real registered identifier. It deliberately
 does **not** build — the icon paths point at `assets/brands/example/`, which
@@ -62,6 +62,12 @@ Per brand you must decide:
 - **`apps[variant].tile`** — the plate behind the icon; the only difference
   visible between three apps at 60 points.
 - **`joinOrigin`** and **`linkHosts`** — the brand's own domain (§4).
+- **`supportEmail`** — added 1 Sep 2026. The address a member is told to write
+  to when their own data export came back short, when a send failed, when the
+  deletion did not happen. Stated rather than derived from `webOrigin`, because
+  `support@` on the marketing domain is a mailbox somebody has to actually
+  create and a derived address that bounces is worse than the wrong brand on a
+  working one. Read by `src/lib/gdpr.ts` and by `web/join.html` (§4).
 - **`androidGoogleServices`** — the brand's own Firebase file (§5).
 
 `brands.ts` is loaded by **both** `app.config.ts` (in Node, at build time) and
@@ -150,28 +156,62 @@ applies once per brand.
 Failure here is soft and that is the point: an unverified association file means
 the link opens the browser, which is what happens today.
 
-### `web/` is one site for one brand and does not generalise at all
+### `web/` is one site for one brand, with one page that is now an exception
 
-`web/` is Repple's marketing site, hardcoded end to end. This is the largest
-un-generalised thing in the repo.
+`web/` is Repple's marketing site, hardcoded end to end. This is still the
+largest un-generalised thing in the repo. One page has been taken out of it,
+because that page is the top of a coach's funnel and being wrong there is
+worse than being wrong anywhere else on the site.
 
 - `.github/workflows/deploy-web.yml:91` — `pages deploy web --project-name=repple`,
-  one Cloudflare Pages project, one domain. `:45` names the job
-  `web → repplefitness.com`.
-- `web/join.html` — the page a coach's link actually lands on:
-  `:140` `https://apps.apple.com/app/id6790096518`, `:141`
-  `play.google.com/…?id=com.washateria.repple`, `:194`
-  `'repple://join?c='`. **A second brand's coach sending a link to their own
-  domain would land members on a page offering the wrong app**, unless that
-  brand has its own copy of this page. Every `<title>`, every store badge and
-  every `support@repplefitness.com` in `web/*.html` is Repple's.
+  one Cloudflare Pages project. `:45` names the job `web → repplefitness.com`.
+  Note **one PROJECT, not necessarily one domain**: Cloudflare Pages will serve
+  as many custom domains from one project as you point at it, which is what the
+  join page below now relies on.
+- **`web/join.html` — brand-aware since 1 Sep 2026.** The page a coach's link
+  actually lands on used to carry Repple's App Store id, Repple's Play package,
+  `repple://join`, Repple's support address and Repple's name in nine places,
+  so a second brand's coach sending a link to their own domain landed members
+  on a page offering the wrong app. It now resolves a brand and rewrites itself
+  from a JSON table embedded in the page.
+
+  **Host first, `?b=<id>` as an override, default brand as the fallback.** The
+  host is the honest signal: the link was composed from that brand's own
+  `joinOrigin`, so the domain the reader arrived on IS the brand. `?b=` exists
+  so a brand's page can be opened before its DNS is pointed anywhere, and it
+  selects between table entries and nothing else.
+
+  **There is deliberately no build step.** Nothing transforms `web/` on its way
+  to Pages, and a generator that only one file used would be a step nobody
+  runs. The cost is a duplicated table, which is exactly what `brands.ts` warns
+  against — so `src/lib/joinPage.test.ts` parses the block out of the HTML and
+  fails if any field disagrees with `BRANDS`, and also holds the page's own
+  no-JS markup to the default brand's row.
+
+  **Two honest gaps.** With scripting off, a second brand's host renders
+  Repple's words; that is the price of no build step. And `appleAppId` has
+  nowhere to live in the registry — Apple mints it when the listing is created
+  — so it is stated per brand on the page and nothing can check it. A brand
+  with no listing sets it null and the App Store badge is removed rather than
+  pointing at somebody else's app.
+
+- `web/connect-return.html` and `web/connect-refresh.html` — added 1 Sep 2026
+  because Stripe refuses a non-HTTPS `return_url` in live mode (§7). The app
+  builds both from `BRAND.webOrigin`, so the ADDRESS is per brand, but the two
+  pages themselves still say "Repple Coach" and link `repplecoach://`. Same
+  fix as the join page and not yet applied to them.
+- Every other `<title>`, store badge and `support@repplefitness.com` in
+  `web/*.html` is still Repple's.
 - `web/robots.txt:14` and every `<loc>` in `web/sitemap.xml` are absolute
   `https://www.repplefitness.com/…`.
 - `web/styles.css:39-47` — `--brand`, `--client`, `--coach`, `--studio`.
 
-Shipping a brand realistically means a second Pages project from a
-parameterised copy of `web/`, or the brand hosting their own `/join` and
-`/reset-password` pages. Nothing in this change touches that.
+**The deployment decision is still open and is the owner's.** Adding a brand's
+domain to the existing `repple` Pages project is a dashboard action and makes
+the join page work as built. A second Pages project per brand is the other
+answer and needs the parameterised copy this repo does not have. Nothing in
+the code chooses between them; the join page works either way, and the rest of
+`web/` works under neither.
 
 ## 5. Push notifications
 
@@ -223,21 +263,30 @@ nowhere**:
   client ids per profile already. What changed is that the app now asks for the
   right address; only the vendor can agree to it.
 
-- Stripe returns, all defaults inside edge functions the app cannot override
-  unless it passes an explicit URL:
-  `supabase/functions/stripe-portal/index.ts:20` `repple://billing`;
-  `supabase/functions/connect-onboard/index.ts:21-22`;
-  `supabase/functions/stripe-checkout/index.ts:21-22`;
-  `supabase/functions/connect-checkout/index.ts:88`, `:136-137`.
-  A brand's owner finishing Stripe onboarding is returned to an app they do not
-  have installed.
+- **Stripe Connect onboarding — done, 1 Sep 2026.** `src/lib/connect.ts:92`
+  now sends `${WEB_ORIGIN}/connect-refresh` and `${WEB_ORIGIN}/connect-return`
+  with every `connect-onboard` call, so a chain's coach setting up payouts is
+  returned to their own domain. This was forced rather than chosen: Stripe
+  allows only HTTPS return URLs in live mode and the app had been sending
+  `repplecoach://connect/return`, which would have failed on the first real
+  coach. The literals left in `connect-onboard/index.ts:148-149` are now
+  brand-less https fallbacks for a caller that sends neither, not the path any
+  app takes.
 
-- `src/lib/deepLink.ts:28` — `WEB_ORIGIN = 'https://repplefitness.com'`, used by
-  `resetPasswordUrl()` at `:71-73`. **A brand's password-reset email sends its
-  users to Repple's website.** This is the sibling of `joinOrigin` and the
-  obvious next thing to make brand-aware; it was left alone here only because
-  `deepLink.ts` was out of scope. Note the `www` asymmetry when it is done:
-  `deepLink.ts` uses the apex, `joinCode.ts` uses `www`.
+- Stripe returns that are still `repple://`, all defaults inside edge functions
+  the app can override only by passing an explicit URL:
+  `supabase/functions/stripe-portal/index.ts:43` `repple://billing`;
+  `supabase/functions/stripe-checkout/index.ts:21-22`;
+  `supabase/functions/connect-checkout/index.ts:205`, `:274-275`.
+  A brand's member returning from Checkout is sent to an app they do not have
+  installed. Same shape as the onboarding fix and not yet done.
+
+- `src/lib/deepLink.ts:43` — **done.** `WEB_ORIGIN` is now `BRAND.webOrigin`,
+  so `resetPasswordUrl()` at `:87` sends a brand's users to their own site.
+  Repple's `webOrigin` is the apex with no `www`, transcribed character for
+  character from the literal this line used to hold, so no reset URL moved.
+  The `www` asymmetry with `joinCode.ts` is preserved on purpose and is stated
+  in `brands.ts`.
 
 - `src/lib/ics.ts` — **done.** Calendar UIDs were minted at `@repple.app`, a
   domain that appears nowhere else in this repo and that nothing here owns; the
@@ -260,11 +309,24 @@ function reads `STRIPE_SECRET_KEY` from `Deno.env`. What does not generalise is
 structural:
 
 - One Supabase project means **one `STRIPE_SECRET_KEY`, i.e. one Stripe platform
-  account, for all brands.** Every brand's payments settle to Washateria LLC and
-  appear on members' statements as such. Trainer payouts already go through
-  Stripe Connect (`connect-checkout`), so the model exists — but the *platform*
-  is single. A chain that wants to be the merchant of record needs its own
-  Supabase project, which is a fork of the deployment, not a config flag.
+  account, for all brands.** The *platform* is single, and a chain that wants to
+  be the platform needs its own Supabase project, which is a fork of the
+  deployment and not a config flag.
+
+  **What changed on 1 Sep 2026 is who the merchant is.** New coaches are
+  onboarded onto Stripe **Standard** accounts taking **direct charges**, so the
+  charge is created on the coach's own account: they are the merchant of
+  record, the sale appears on the member's statement under the COACH's name,
+  and the dispute, the refund and the negative balance are theirs. That is a
+  materially better white-label story than the one this section used to
+  describe, and it arrived for a liability reason rather than a branding one —
+  Stripe's account-type table puts losses on the platform for Express under
+  every charge type. Existing Express coaches are unchanged and cannot be
+  converted, so both models are live at once; `src/lib/directCharges.ts` is
+  where that is decided and `docs/LAUNCH-CHECKLIST.md` §11 is the story.
+
+  Subscriptions to Repple's own plans are a different flow and still settle to
+  the platform, so a chain's OWNER still pays Washateria LLC and sees it.
 - The plan names `Starter` / `Pro` / `Studio` (`billing.ts:15-17`) mirror the
   `tenants.plan` CHECK constraint at `supabase/parts/01-schema.sql:16` and are
   Repple's commercial packaging, presented to every brand's owners.
@@ -372,9 +434,12 @@ Also per brand:
 - Resend has `repplefitness.com` verified (`docs/LAUNCH-CHECKLIST.md:52`); each
   brand needs its own verified sending domain, or its members get mail from
   their supplier.
-- `support@repplefitness.com` is hardcoded in-app at `src/lib/gdpr.ts:89`,
-  `app/(client)/settings.tsx:188,204,218`, `app/(trainer)/settings.tsx:126,155`
-  and `app/(owner)/settings.tsx:176,280`.
+- `support@repplefitness.com` — **`Brand.supportEmail` exists as of 1 Sep 2026**
+  (§1) and `src/lib/gdpr.ts` reads it, so the address printed into a member's
+  own data export is now the brand's. It is still a literal on six settings
+  screens: `app/(client)/settings.tsx:188,204,218`,
+  `app/(trainer)/settings.tsx:126,155` and `app/(owner)/settings.tsx:176,280`.
+  Those are one-line substitutions now that the field is there.
 
 ## 11. In-app copy
 
@@ -416,9 +481,13 @@ migration for zero user-visible benefit.
 - `ios/ReppleCoach/` — the checked-in native project directory carries the brand
   in its name, as does `ReppleCoach.xcodeproj`. Prebuild regenerates it, but it
   is committed.
-- `supabase/parts/01-schema.sql:3` still reads `-- FitForge — Postgres schema`.
-  A previous rename leaked and was never finished, which is the cheapest
-  available evidence for how thoroughly a brand name spreads.
+- `supabase/parts/01-schema.sql:3` read `-- FitForge — Postgres schema` until
+  1 Sep 2026 — a previous rename that leaked and was never finished, and the
+  cheapest available evidence for how thoroughly a brand name spreads and how
+  little of that spread anything in this repo can see. It is fixed, and the
+  point it was making survives it: it took a person reading line 3 of a file
+  nobody opens. `setup.sql` is generated from the parts, so `npm run db:build`
+  had to be re-run and `db:check` re-passed for a one-line comment.
 
 ---
 
@@ -432,7 +501,10 @@ migration for zero user-visible benefit.
 5. Apple Developer + Google Play accounts; Team ID and Play App Signing SHA-256.
 6. Domain; `/.well-known/apple-app-site-association` (as `application/json`,
    no extension, no redirect) and `/.well-known/assetlinks.json` on it.
-7. A `/join` page and a `/reset-password` page on that domain.
+7. A `/join` page and a `/reset-password` page on that domain. `/join` is
+   solved if the brand's domain is added to the existing Cloudflare Pages
+   project and the brand has a row in the `site-brands` table in
+   `web/join.html` — see §4. `/reset-password` is not.
 8. Supabase dashboard: redirect allow-list entries; the confirmation email
    template (currently shared, currently Repple's).
 9. Resend: verified sending domain.

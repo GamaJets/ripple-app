@@ -61,6 +61,7 @@ import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { buildProgram, type Program } from '../../src/lib/programs';
+import { alreadyAt, progressionOffer, loadTapLabel } from '../../src/lib/builderProgression';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { guardInjuries } from '../../src/lib/injuryGate';
 import { supabase } from '../../src/lib/supabase';
@@ -2067,6 +2068,55 @@ export default function Builder() {
                       <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{(e.loadUnit ?? defaultUnit).toUpperCase()}</Text>
                     </Pressable>
                   </View>
+
+                  {/* ── what this client's own log supports ────────────────
+                      src/lib/progression.ts has been able to answer this since
+                      it was written and its three importers were all in the
+                      CLIENT app: the client's phone told them to add 2.5 kg
+                      while the coach writing next week's programme for that
+                      same person had an empty box and no help at all.
+                      No new read. `reviewLog` is already the client's own
+                      `workouts` rows, held for the programme checks.
+                      Withheld — with a reason — rather than guessed whenever
+                      the log has not established an answer, because "they have
+                      not logged this movement" is a claim about a person and
+                      three different failures produce it. See
+                      src/lib/builderProgression.ts. */}
+                  {(() => {
+                    const offer = progressionOffer({
+                      clientPicked: !!clientId,
+                      log: reviewLog,
+                      status: reviewLogStatus,
+                      exercise: e.name,
+                      reps: e.reps,
+                      // The COACH's unit: this sentence is on the coach's
+                      // screen and read by them. The client reads their own
+                      // copy of the same advice in their own unit.
+                      unit: defaultUnit,
+                    });
+                    if (offer.kind === 'silent') return null;
+                    if (offer.kind === 'gap') {
+                      return <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{offer.note}</Text>;
+                    }
+                    const u = e.loadUnit ?? defaultUnit;
+                    // Rendered through `liftLabel`, the same formatter the box
+                    // above reads back with, so the button and the field cannot
+                    // disagree about the number by a rounding.
+                    const label = loadTapLabel(liftLabel(offer.weightKg, u));
+                    const same = alreadyAt(offer.weightKg, e.loadKg);
+                    return (
+                      <View style={{ marginTop: sp.xs }}>
+                        <Text style={{ ...ty.caption, color: t.ink3 }}>{offer.reason}</Text>
+                        {label && !same ? (
+                          <Pressable onPress={() => patchEx(di, e.key, { loadKg: offer.weightKg, loadUnit: u })}
+                            accessibilityRole="button" accessibilityLabel={`${label} for ${e.name}`}
+                            style={{ alignSelf: 'flex-start', marginTop: sp.xs, paddingHorizontal: sp.md, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                            <Text style={{ ...ty.label, color: t.ink2 }}>{label}</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    );
+                  })()}
                   {/* Turning three identical sets into three rows that can
                       differ. It appends a copy of what is already there, so
                       the fourth set of a 3 × 8-10 at 42.5 is another 8-10 at

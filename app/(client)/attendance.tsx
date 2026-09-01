@@ -135,7 +135,13 @@ export default function Attendance() {
     return (
       <View key={e.key}>
         {!first ? <Rule /> : null}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+        {/* Grouped and spoken whole. The dot is the outcome said in colour —
+            attended, missed, cancelled — and colour is the one thing a screen
+            reader cannot read; without this the row arrived as four fragments
+            led by an unnamed shape. */}
+        <View accessible accessibilityRole="text"
+          accessibilityLabel={[dayLabel(e.at), title, where, o.label].filter(Boolean).join('. ')}
+          style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
           <View style={{ width: 7, height: 7, borderRadius: 4, marginTop: 6, backgroundColor: tone }} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>

@@ -15,6 +15,7 @@
 //     could not be reached. Not "your coach hasn't recorded one" either; that
 //     case is the caller's, because only the caller knows there is no clip.
 import { useEffect, useState } from 'react';
+import { BRAND } from '../lib/brands';
 import { View, Text, Pressable } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from './nativeModules';
@@ -183,7 +184,7 @@ export function ExerciseVideoBlock({
     <View style={{ paddingVertical: sp.sm }}>
       <ExerciseVideo video={video} exerciseName={exerciseName} />
       <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
-        {video.trainerId ? 'Recorded by your coach' : 'From the Repple library'}
+        {video.trainerId ? 'Recorded by your coach' : `From the ${BRAND.label} library`}
       </Text>
     </View>
   );

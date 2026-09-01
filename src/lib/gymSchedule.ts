@@ -22,10 +22,40 @@ export interface GymClass {
   startsAt: string;
   durationMin: number;
   capacity: number;
-  /** Bookings held, filled in by `fetchClasses`. */
+  /**
+   * PLACES SOLD — bookings whose status is `booked`, filled in by
+   * `fetchClasses`. Waitlisters are not in here and never were meant to be.
+   *
+   * This counted every booking row that was not `'cancelled'`, and
+   * `class_bookings.status` is `check (status in ('booked','waitlist'))` — the
+   * constraint FORBIDS the value the filter was looking for, so the filter
+   * matched nothing and every waitlister was counted as a place sold. On a
+   * class of 12 with 5 people waiting, fill read 17/12 = 142% and show read
+   * attended ÷ 17, both wrong, both in the direction that flatters the fill and
+   * damns the coach. /classes then printed a banner over the top asserting "it
+   * is a real over-sell, not a rounding artefact" about a number that was
+   * neither.
+   */
   booked: number;
-  /** Of those, how many were marked present. */
+  /** Of the places sold, how many were marked present. */
   attended: number;
+  /**
+   * People waiting for a place, counted separately because they are a
+   * different fact: demand the gym did not sell. It belongs nowhere near
+   * fill's numerator and everywhere near a decision to put another class on.
+   */
+  waitlisted: number;
+  /**
+   * Waitlisters somebody marked present. The register lists every booking
+   * whatever its status and the tick is one button, so this happens — a place
+   * came free at the door and the coach ticked the row in front of them.
+   *
+   * Kept out of `attended` on purpose: `attended ÷ booked` is "of the places we
+   * sold, how many walked in", and a number that can exceed its own
+   * denominator is not a rate. Counted rather than discarded, because these are
+   * real people who really trained.
+   */
+  waitlistAttended: number;
 }
 
 /**
@@ -148,13 +178,20 @@ export async function fetchClasses(
     for (const b of page) bookings.push(b);
   }
 
-  const booked = new Map<string, number>();
-  const attended = new Map<string, number>();
-  bookings.forEach((b: any) => {
-    if (b.status === 'cancelled') return;
-    booked.set(b.class_id, (booked.get(b.class_id) ?? 0) + 1);
-    if (b.attended_at) attended.set(b.class_id, (attended.get(b.class_id) ?? 0) + 1);
-  });
+  // ── Counted by the status the constraint actually permits ────────────────
+  //
+  // This was `if (b.status === 'cancelled') return;` — a filter for a value
+  // `class_bookings` has never been able to hold. The column is
+  // `check (status in ('booked','waitlist'))`, cancelling is a DELETE
+  // (`cancel_class` in part 02 deletes the row and promotes the next
+  // waitlister), and so the guard matched nothing on every row of every class
+  // and waitlisters were added to `booked` as though they were places sold.
+  //
+  // Testing for the value that IS there rather than the one that is not also
+  // fails in the safe direction if the constraint is ever widened: an
+  // unrecognised status stops being a place sold rather than silently becoming
+  // one. That is the whole difference between the two spellings.
+  const tally = tallyBookings(bookings);
 
   return rows.map((r: any) => ({
     id: r.id,
@@ -165,9 +202,64 @@ export async function fetchClasses(
     startsAt: r.starts_at,
     durationMin: r.duration_min,
     capacity: r.capacity,
-    booked: booked.get(r.id) ?? 0,
-    attended: attended.get(r.id) ?? 0,
+    booked: tally.booked.get(r.id) ?? 0,
+    attended: tally.attended.get(r.id) ?? 0,
+    waitlisted: tally.waitlisted.get(r.id) ?? 0,
+    waitlistAttended: tally.waitlistAttended.get(r.id) ?? 0,
   }));
+}
+
+/** One booking row, as far as the tally is concerned. */
+export interface BookingRow {
+  class_id: string;
+  status: string;
+  attended_at?: string | null;
+}
+
+/** The four per-class counts a booking set yields, keyed by class id. */
+export interface BookingTally {
+  booked: Map<string, number>;
+  attended: Map<string, number>;
+  waitlisted: Map<string, number>;
+  waitlistAttended: Map<string, number>;
+}
+
+/**
+ * Split booking rows into places sold and people waiting.
+ *
+ * Pulled out of `fetchClasses` and exported so it can be asserted on without a
+ * database, because the bug it replaces was a one-line filter that no test
+ * could reach and no reader questioned:
+ *
+ *     if (b.status === 'cancelled') return;
+ *
+ * `class_bookings.status` is `check (status in ('booked','waitlist'))`. There
+ * has never been a cancelled row — cancelling DELETES the booking and promotes
+ * the next person waiting — so that line matched nothing, ever, and every
+ * waitlister was counted as a place sold. Fill rate and show rate were both
+ * wrong on exactly the classes a gym cares most about: the oversubscribed ones.
+ *
+ * Statuses are matched positively. An unrecognised value counts as neither a
+ * place sold nor a person waiting, which is the safe direction: a status added
+ * to the constraint later stops being silently sold rather than silently
+ * becoming a booking.
+ */
+export function tallyBookings(rows: BookingRow[]): BookingTally {
+  const t: BookingTally = {
+    booked: new Map(), attended: new Map(),
+    waitlisted: new Map(), waitlistAttended: new Map(),
+  };
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  for (const b of rows) {
+    if (b.status === 'booked') {
+      bump(t.booked, b.class_id);
+      if (b.attended_at) bump(t.attended, b.class_id);
+    } else if (b.status === 'waitlist') {
+      bump(t.waitlisted, b.class_id);
+      if (b.attended_at) bump(t.waitlistAttended, b.class_id);
+    }
+  }
+  return t;
 }
 
 export interface NewClass {
@@ -314,6 +406,11 @@ export interface AttendanceSummary {
   showRate: number | null;
   /** booked / capacity, or null when no class has capacity recorded. */
   fillRate: number | null;
+  /** People who wanted a place and did not get one, across the window. Demand
+   *  the gym did not sell — never part of fill, which is what it sold. */
+  waitlisted: number;
+  /** Of those, how many were let in and marked present anyway. */
+  waitlistAttended: number;
 }
 
 export function summariseAttendance(classes: GymClass[]): AttendanceSummary {
@@ -326,6 +423,8 @@ export function summariseAttendance(classes: GymClass[]): AttendanceSummary {
     attended,
     showRate: booked > 0 ? attended / booked : null,
     fillRate: capacity > 0 ? booked / capacity : null,
+    waitlisted: classes.reduce((a, c) => a + c.waitlisted, 0),
+    waitlistAttended: classes.reduce((a, c) => a + c.waitlistAttended, 0),
   };
 }
 

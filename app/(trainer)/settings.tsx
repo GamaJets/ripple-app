@@ -65,6 +65,7 @@ import { useAuth } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
 import { useTenant } from '../../src/ui/tenant';
+import { CURRENCY_CHOICES, setCurrencyLine, WHY_NOT_A_REPRICE, type SetCurrencyOutcome } from '../../src/lib/coachCurrency';
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
@@ -159,7 +160,57 @@ export default function TrainerSettings() {
       "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
   };
 
-  const { tenant, loading: tenantLoading } = useTenant();
+  const { tenant, role, status: tenantStatus, loading: tenantLoading, refresh: refreshTenant, updateTenant, setOwnCurrency } = useTenant();
+
+  // ── The currency, and the reason this control is on the COACH's screen ──
+  //
+  // Six screens in this app withhold every money figure when
+  // `tenants.currency` is null — analytics, invoices, payments, profile and two
+  // more — and all six end by telling the coach that "an owner sets one in the
+  // gym settings". Nothing in the product offered the coach any way to fix it,
+  // and for most coaches that sentence names nobody: part 153 measured that
+  // every coach sits ALONE in a personal tenant, and part 99 gave the column no
+  // default, so a coach who signs up today is permanently unpriced. Their
+  // packages cannot be created at all — `createPackage` refuses to insert
+  // without an explicit currency, correctly.
+  //
+  // Two routes, because there are two authorisations and neither covers the
+  // other. An owner writes `tenants` directly under `tenants_owner_rw`, which
+  // is what app/(owner)/ops.tsx already does. A coach cannot: `is_owner_of()`
+  // requires `profiles.role = 'owner'`, so their UPDATE matches zero rows and
+  // PostgREST calls that a success. They go through
+  // `set_my_tenant_currency()` (supabase/parts/164), which is security definer
+  // and grants exactly one thing — the sole occupant of a tenant may name its
+  // currency once.
+  //
+  // `msg` is null until something has been attempted. An empty string and a
+  // sentence are different states here and the screen must not draw a blank
+  // flag when nothing has happened.
+  const [curMsg, setCurMsg] = useState<{ bad: boolean; text: string } | null>(null);
+  const [curBusy, setCurBusy] = useState(false);
+
+  const chooseCurrency = async (code: string) => {
+    if (curBusy) return;
+    setCurBusy(true);
+    setCurMsg(null);
+    let outcome: SetCurrencyOutcome;
+    if (role === 'owner') {
+      // The owner's own route. `updateTenant` counts the rows it wrote, so a
+      // false here is a write that really did not land rather than an RLS
+      // narrowing reported as success.
+      outcome = (await updateTenant({ currency: code })) ? 'set' : 'refused';
+    } else {
+      outcome = await setOwnCurrency(code);
+    }
+    setCurBusy(false);
+    setCurMsg({ bad: outcome !== 'set', text: setCurrencyLine(outcome, code) });
+    // Re-read rather than patch. The provider holds the row and six other
+    // screens read the column for themselves; a local patch here would be a
+    // second copy of the answer written by the one caller with a reason to be
+    // optimistic about it. `setOwnCurrency` refreshes itself, so this is only
+    // the owner branch above catching up.
+    if (outcome === 'set' && role === 'owner') refreshTenant();
+  };
 
   // null = not read yet. `requestedAt: null` inside a loaded object means
   // "read, and there is no request" — a different fact, and it must read
@@ -372,6 +423,64 @@ export default function TrainerSettings() {
               })}
             </View>
           </View>
+        </Section>
+
+        <Rule />
+
+        {/* Currency.
+            The setting six other screens point at and none of them could
+            reach. See the note on `chooseCurrency` above for why there are two
+            write routes and why a coach needed one at all.
+            Ordered deliberately: the read has to be established before
+            anything is said about what is set, because a tenant that could not
+            be read holds an unknown currency and not a missing one — and
+            "your gym has not set a currency" is precisely the sentence
+            src/lib/currencyGap.ts exists to stop being said about a failed
+            read. */}
+        <Section>
+          <SectionHead title="Currency" />
+          {tenantStatus === 'loading' || tenantLoading ? (
+            <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>Reading your gym…</Text>
+          ) : tenantStatus === 'error' ? (
+            // UNKNOWN, not unset. Nothing is offered: a picker drawn over a
+            // failed read would let a coach set a currency onto a tenant that
+            // may already have one, which is the reprice this whole control
+            // refuses to perform.
+            <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+              Your gym could not be read, so what it charges in is not known. That is a read that failed rather than a setting nobody has made, and nothing can be changed until it can be read.
+            </Flag>
+          ) : !tenant ? (
+            <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
+              This account is not attached to a gym, so there is nothing here to price.
+            </Text>
+          ) : tenant.currency ? (<>
+            <Line t={t} first label="Priced in" value={tenant.currency} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>
+          </>) : (<>
+            <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
+              Nobody has said what you charge in, so every amount in this app is withheld rather than guessed at — your analytics, your invoices and the price of anything you sell. Repple is white-labelled and there is no default that would be right for both a London gym and a Dubai one. Choose once and every screen follows.
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+              {CURRENCY_CHOICES.map((c) => (
+                <Pressable key={c} onPress={() => { void chooseCurrency(c); }} disabled={curBusy}
+                  accessibilityRole="button" accessibilityState={{ disabled: curBusy }}
+                  accessibilityLabel={`Price me in ${c}`}
+                  style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: t.surface2, opacity: curBusy ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{c}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>)}
+          {/* Said whichever branch drew it, because 'already set' and 'you
+              share this gym' both arrive after the picker has been replaced by
+              the state they describe. A flag for anything that did not land:
+              a coach who taps a currency and gets a quiet grey line reads it as
+              having worked. */}
+          {curMsg ? (
+            curMsg.bad
+              ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{curMsg.text}</Flag>
+              : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{curMsg.text}</Text>
+          ) : null}
         </Section>
 
         <Rule />

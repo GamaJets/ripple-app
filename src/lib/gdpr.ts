@@ -9,8 +9,37 @@
 // the request. The read is the one call here that throws instead of swallowing
 // — a screen that cannot tell "no request" from "could not check" would show
 // somebody awaiting erasure the ordinary state.
+//
+// ── Whose name is on a member's own data ──────────────────────────────────
+//
+// Everything a person can read out of this file used to say "Repple": the
+// `app` field at the top of the bundle, the note when there is no server, the
+// address to write to when the export came back short. For a member of a
+// white-labelled chain that is their gym's SUPPLIER's name, written onto a copy
+// of their own training records, in a file they keep after they have deleted
+// the account. It is also the only place some of them would ever learn there is
+// a supplier.
+//
+// So all three now come from `src/lib/brands.ts`, which is the same table
+// app.config.ts builds the native identity from — one place, no drift. For any
+// build that exists today `EXPO_PUBLIC_BRAND` is unset, `BRAND` resolves to
+// Repple, and every string below is byte-identical to what it was.
 import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
+import { BRAND } from './brands';
+
+/**
+ * What the export is called on the member's phone.
+ *
+ * Here rather than at the share call, because the file NAME is part of the same
+ * promise the file CONTENTS make: a member of Example Fitness saving
+ * `repple-my-data.json` has been handed a file named after a company they do
+ * not deal with, and it is the name they will search for in two years. Derived
+ * from `BRAND.id`, which is a lowercase registry key and is therefore already a
+ * safe filename on every platform — resolving to exactly `repple-my-data.json`
+ * for every build that exists today.
+ */
+export const MY_DATA_FILENAME = `${BRAND.id}-my-data.json`;
 
 const TABLES = ['profiles', 'clients', 'workouts', 'food_logs', 'measurements', 'check_ins', 'habit_logs', 'scans', 'messages', 'coach_nutrition', 'assigned_programs', 'class_bookings', 'referrals', 'feedback'];
 
@@ -50,9 +79,9 @@ export interface ExportResult {
 }
 
 export async function exportMyDataDetailed(): Promise<ExportResult> {
-  const out: Record<string, unknown> = { app: 'Repple', exportedAt: new Date().toISOString() };
+  const out: Record<string, unknown> = { app: BRAND.label, exportedAt: new Date().toISOString() };
   if (!USE_SUPABASE) {
-    out.note = 'Not connected to Repple — nothing of yours is stored on a server to export.';
+    out.note = `Not connected to ${BRAND.label} — nothing of yours is stored on a server to export.`;
     out.complete = true;
     return { json: JSON.stringify(out, null, 2), complete: true, failed: [] };
   }
@@ -86,7 +115,7 @@ export async function exportMyDataDetailed(): Promise<ExportResult> {
       'THIS EXPORT IS INCOMPLETE. ' + failed.length + ' of ' + TABLES.length +
       ' tables could not be read and are marked with an "error" object rather than data. ' +
       'Do not treat this file as a full copy of your account, and do not delete your ' +
-      'account on the strength of it. Try again, or email support@repplefitness.com.';
+      'account on the strength of it. Try again, or email ' + BRAND.supportEmail + '.';
     out.notExported = failed;
   }
   return { json: JSON.stringify(out, null, 2), complete, failed };

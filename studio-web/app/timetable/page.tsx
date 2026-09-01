@@ -140,14 +140,44 @@ export default function Timetable() {
     );
   }
 
-  if (me.role !== 'owner') {
+  /* ── who may see this board, and who may change it ────────────────────────
+   *
+   * This said `me.role !== 'owner'` → "The timetable is owner-only", and that
+   * sentence was the reason a class could go unregistered for good.
+   *
+   * The register — the Check in button on each class row, which is the only
+   * thing in this console that writes `class_bookings.attended_at` — sat behind
+   * it. So did the one on /classes, which is a cross-coach performance screen
+   * and correctly owner-only, and whose refusal message tells a trainer in as
+   * many words: "Your own classes and their registers are on the Timetable."
+   * They were not. Both doors were shut and one of them pointed at the other.
+   *
+   * The cost of a missed register is not cosmetic and it is not recoverable
+   * later: attendance is `attended_at is not null`, nobody ticks a class three
+   * days afterwards from memory, and fill rate, show rate, the retention
+   * signal, the coach's own delivery record and — where a gym pays per head —
+   * class pay are all computed from it. A coach standing in the room is the
+   * only person who knows, and until now the only surface they had was
+   * app/(trainer)/class-checkin.tsx on a phone.
+   *
+   * So the board is staff-wide, like /door and /equipment, for the same reason
+   * those two are: it is a fact about the building. Editing it is not. Adding a
+   * class, putting up a one-to-one and removing anything from the board stay
+   * with the owner, and are not rendered at all for a trainer rather than
+   * rendered and refused — the database says the same thing independently
+   * (`gym_classes_owner_rw`, `pt_slots`' own policies), so a hand-typed URL
+   * gets an empty result rather than a leak.
+   */
+  const staff = me.role === 'owner' || me.role === 'trainer';
+  if (!staff) {
     return (
       <Shell me={me} gymName={gymName} current="/timetable">
         <h1>Not your console</h1>
-        <p style={{ color: 'var(--ink2)', marginTop: 10 }}>The timetable is owner-only.</p>
+        <p style={{ color: 'var(--ink2)', marginTop: 10 }}>The timetable is for gym staff.</p>
       </Shell>
     );
   }
+  const owner = me.role === 'owner';
 
   const tenantId = me.tenantId!;
   const refresh = () => load(tenantId);
@@ -204,14 +234,21 @@ export default function Timetable() {
               style={linkBtn}
             >Check in</button>
           ) : null}
-          {e.kind === 'one_to_one' ? (
+          {/* Booking somebody onto an hour and taking an hour off the board are
+              the owner's, and the two policies behind them say so. Not rendered
+              for a trainer rather than rendered and refused: a button that
+              silently matches zero rows is the failure this codebase is
+              written against. The register beside them is staff work. */}
+          {owner && e.kind === 'one_to_one' ? (
             <BookTo
               slot={raw?.slots.find((s) => s.id === e.sourceId) ?? null}
               members={members} membersErr={membersErr}
               onDone={(m) => { setErr(m); if (!m) refresh(); }}
             />
           ) : null}
-          <button onClick={() => remove(e)} style={{ ...linkBtn, color: 'var(--crit)' }}>Remove</button>
+          {owner ? (
+            <button onClick={() => remove(e)} style={{ ...linkBtn, color: 'var(--crit)' }}>Remove</button>
+          ) : null}
         </span>
       ) },
   ];
@@ -223,6 +260,7 @@ export default function Timetable() {
           <h1>Timetable</h1>
           <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
             {weekLabel} · classes and one-to-ones on one board
+            {owner ? null : ' · take a register from any class here'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -236,6 +274,22 @@ export default function Timetable() {
         <Banner tone="crit">
           This account is linked to a gym, but its record could not be read — the name is missing
           here, not unset: {gymNameErr}
+        </Banner>
+      ) : null}
+      {/* Said before the figures, not after them. `sessions_trainer` is
+          `trainer_id = auth.uid()`, so a coach reading this board gets every
+          class in the gym and only their OWN one-to-ones — and RLS filters
+          rather than refuses, so the missing hours arrive as an ordinary empty
+          result with no error anywhere. Unsaid, "One-to-ones 2" and
+          "Double-booked 0" read as facts about the gym's week rather than about
+          this coach's, and a clash with a colleague's slot is invisible in the
+          one place built to show clashes. */}
+      {!owner ? (
+        <Banner>
+          Every class in the gym is here; the one-to-ones are <strong style={{ color: 'var(--ink)' }}>yours
+          only</strong> — colleagues&rsquo; hours are not readable from your account, so the
+          one-to-one, floor cover and double-booked figures below describe your week rather than the
+          gym&rsquo;s. Check in is the register and it writes for real.
         </Banner>
       ) : null}
       {err ? <Banner tone="crit">{err}</Banner> : null}
@@ -269,19 +323,32 @@ export default function Timetable() {
 
       <FloorCover board={board} monday={monday} />
 
-      <div style={{ display: 'grid', gap: 22, gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', marginBottom: 22 }}>
-        <AddClass tenantId={tenantId} onChange={refresh} />
-        <AddOneToOne tenantId={tenantId} members={members} membersErr={membersErr} onChange={refresh} />
-      </div>
+      {owner ? (
+        <div style={{ display: 'grid', gap: 22, gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', marginBottom: 22 }}>
+          <AddClass tenantId={tenantId} onChange={refresh} />
+          <AddOneToOne tenantId={tenantId} members={members} membersErr={membersErr} onChange={refresh} />
+        </div>
+      ) : null}
 
       <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)' }}>
         <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
           <h2>This week</h2>
           <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-            Every class and every one-to-one, in the order they happen. A one-to-one can be booked
-            to a member here — for the one who rang up — and freeing one opens the hour to anybody
-            rather than to whoever is first on its waitlist in the app; only the trainer&rsquo;s own
-            screen hands it to them.
+            Every class and every one-to-one, in the order they happen.{' '}
+            {owner ? (
+              <>
+                A one-to-one can be booked to a member here — for the one who rang up — and freeing
+                one opens the hour to anybody rather than to whoever is first on its waitlist in the
+                app; only the trainer&rsquo;s own screen hands it to them.
+              </>
+            ) : (
+              <>
+                Check in marks who turned up. It is the only record of attendance there is — nothing
+                infers it from a booking — so a class left unregistered stays unattended in the fill
+                and show rates, in the gym&rsquo;s retention figures and on your own delivery record.
+                Changing the board itself is the owner&rsquo;s.
+              </>
+            )}
           </p>
         </div>
         {loadFail ? (
@@ -735,6 +802,34 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
   const [duration, setDuration] = useState('45');
   const [capacity, setCapacity] = useState('20');
   const [room, setRoom] = useState('');
+  /**
+   * Who is teaching it, as the trainer's own id.
+   *
+   * `gym_classes.trainer_id` has existed since part 02 and this form has never
+   * written it — it wrote `instructor`, a free-text name, and nothing else. All
+   * three consequences were silent:
+   *
+   *  · /staff reports class hours per coach out of `fetchDemand`, which keys on
+   *    `gym_classes.trainer_id`. Null for every class means every coach's class
+   *    hours read zero, on the screen an owner uses to decide who is
+   *    overworked. Nothing says "unknown"; it says none.
+   *  · /classes groups performance "By coach" and falls back to a name bucket
+   *    when there is no id, so "Sam", "sam" and "Sam T" are three coaches and
+   *    the same person's fill rate is split three ways.
+   *  · `gym_classes_write` is `trainer_id = auth.uid()`. A trainer therefore
+   *    cannot edit, move or delete any class the console created — the policy
+   *    that exists to give them their own timetable can never match a row.
+   *
+   * `instructor` is kept beside it rather than removed, for the visiting
+   * instructor with no Repple account. A name is a label; an id is a join.
+   */
+  const [trainerId, setTrainerId] = useState('');
+  const [trainers, setTrainers] = useState<{ id: string; name: string | null }[] | null>(null);
+  // Null stays null on a failed read: an empty picker must not claim the gym
+  // has no coaches when the query is what failed, because the honest response
+  // to "no coaches" is to type a name into the box beside it — which is exactly
+  // the anonymous class this change exists to stop.
+  const [trainersErr, setTrainersErr] = useState<string | null>(null);
   const [instructor, setInstructor] = useState('');
   const [weeks, setWeeks] = useState('1');
   const [needs, setNeeds] = useState('');
@@ -762,6 +857,9 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
     fetchEquipment(supabase, tenantId)
       .then((rows) => { if (live) { setKit(rows); setKitErr(null); } })
       .catch((e: any) => { if (live) { setKit(null); setKitErr(e?.message ?? 'The equipment register could not be read.'); } });
+    fetchTrainerOptions(supabase, tenantId)
+      .then((rows) => { if (live) { setTrainers(rows); setTrainersErr(null); } })
+      .catch((e: any) => { if (live) { setTrainers(null); setTrainersErr(e?.message ?? 'Could not read your trainers.'); } });
     return () => { live = false; };
   }, [tenantId]);
 
@@ -778,7 +876,13 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
       durationMin: parseInt(duration, 10) || 45,
       capacity: parseInt(capacity, 10) || 0,
       room: room.trim() || null,
-      instructor: instructor.trim() || null,
+      // The picked coach's own name wins over anything typed, so the label and
+      // the join can never name two different people. `instructor` is only ever
+      // free text where there is no id to attach.
+      instructor: trainerId
+        ? (trainers?.find((t) => t.id === trainerId)?.name ?? null)
+        : (instructor.trim() || null),
+      trainerId: trainerId || null,
     };
     try {
       const n = parseInt(weeks, 10) || 1;
@@ -811,7 +915,23 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
         <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
         <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
-        <input value={instructor} onChange={(e) => setInstructor(e.target.value)} placeholder="Instructor" style={{ ...field, width: 130 }} />
+        {/* The picker first, the free-text name second and disabled once a
+            coach is chosen — the same either/or as the one-to-one form above,
+            and for a stronger reason: a typed name is a label nothing can join
+            on, and three screens plus one write policy read the id. */}
+        <select value={trainerId} onChange={(e) => setTrainerId(e.target.value)}
+                style={{ ...field, minWidth: 150 }} aria-label="Which coach is teaching this class">
+          <option value="">
+            {trainersErr ? 'Coaches unread — name below' : trainers === null ? 'Reading coaches…' : 'Visiting — name below'}
+          </option>
+          {(trainers ?? []).map((t) => (
+            <option key={t.id} value={t.id}>{t.name ?? 'Unnamed trainer'}</option>
+          ))}
+        </select>
+        <input value={instructor} onChange={(e) => setInstructor(e.target.value)}
+               disabled={!!trainerId}
+               placeholder={trainerId ? 'On their record' : 'Instructor'}
+               style={{ ...field, width: 130, opacity: trainerId ? 0.5 : 1 }} />
           <input value={needs} onChange={(e) => setNeeds(e.target.value)} placeholder="Equipment needed" style={{ ...field, width: 160 }} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--ink3)', fontSize: 12.5 }}>
           repeat
@@ -823,6 +943,23 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
                  style={{ ...field, width: 210 }} />
         <button type="submit" disabled={busy} style={primaryBtn}>Add</button>
       </form>
+      {/* Said where the choice is made, not discovered a month later on
+          /staff. A class with no coach attached is not a broken class — it is
+          a class no per-coach figure can ever count. */}
+      {trainersErr ? (
+        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>
+          Your coaches could not be read, so this class can only carry a typed name: {trainersErr}.
+          That is a failed query, not a gym with no coaches — a class saved now will not appear in
+          anybody&rsquo;s class hours on Staff, and its own coach will not be able to edit it.
+        </div>
+      ) : !trainerId && trainers !== null && trainers.length > 0 ? (
+        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          No coach attached. The class still goes on the timetable, but a typed name is a label:
+          it counts toward nobody&rsquo;s class hours on Staff, is bucketed separately from that
+          coach&rsquo;s other classes on Classes, and leaves them unable to edit the class in their
+          own app. Pick the coach unless the instructor genuinely has no Repple account.
+        </div>
+      ) : null}
       {kitErr && needs.trim() ? (
         <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>
           The equipment register could not be read, so this capacity is unchecked rather than

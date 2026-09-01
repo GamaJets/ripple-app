@@ -27,6 +27,27 @@ interface Gym {
   currency: string | null;
 }
 
+/**
+ * One settled read, as a line for the banner. Null when it came back fine.
+ *
+ * The same helper /analytics, /equipment and /door carry, and it is here for
+ * the reason they have it: `Promise.allSettled` hands back the rejection and
+ * this page used to drop every one of them on the floor. A rejected read became
+ * `null` rows, `null` rows became a `null` figure, and a `null` figure is what
+ * this page's notes already word as "no payments recorded" and "no capacity
+ * recorded" — two confident statements about the gym, assembled out of a query
+ * that never answered, on the first screen an owner opens every morning.
+ */
+/** The note under a tile whose read was refused. One sentence, in one place,
+ *  so five tiles cannot word the same silence five ways. */
+const UNREAD = 'this read did not come back — unknown, not nil';
+
+function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
+  if (res.status === 'fulfilled') return null;
+  const why = (res.reason as any)?.message;
+  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
+}
+
 export default function Overview() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gym, setGym] = useState<Gym | null>(null);
@@ -60,7 +81,30 @@ export default function Overview() {
     fillRate: number | null;
     visitsToday: number | null;
     inNow: number | null;
+
+    /* ── which departments actually answered ──────────────────────────────
+     *
+     * Every figure above is null for TWO unrelated reasons — the gym has not
+     * recorded the thing, or the query was refused — and the note under each
+     * tile picks its wording from the figure alone. So a payments read that
+     * RLS refused rendered as "no payments recorded" and a refused classes
+     * read as "no capacity recorded": the console telling an owner facts about
+     * their gym that nothing had established. These three bits are what let
+     * each tile say which of the two silences it is in, and they are per
+     * DEPARTMENT rather than one page-wide flag because allSettled exists
+     * precisely so a broken door log does not blank out the revenue beside it.
+     */
+    /** memberships + payments + plans all came back. `summarise` needs all
+     *  three, so one refusal makes every figure it produces unknown. */
+    recordRead: boolean;
+    classesRead: boolean;
+    doorRead: boolean;
   } | null>(null);
+  // Kept apart from `error`, which belongs to the roster read: these are the
+  // five hub reads, and a failure in one of them must be SAID rather than
+  // inferred from a dash. Named one by one, because "could not read" without
+  // saying which query broke leaves an owner unable to tell anyone what is down.
+  const [hubErr, setHubErr] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -122,6 +166,19 @@ export default function Overview() {
       const att = classes ? summariseAttendance(classes) : null;
       const door = visits ? summariseVisits(visits) : null;
 
+      // Named, not swallowed. Each rejection carries the reason PostgREST gave
+      // and the banner prints it: a refused read is something an owner can act
+      // on — reload, or tell whoever runs the database — and a dash on its own
+      // is not.
+      const trouble = [
+        failure(mRes, 'the memberships'),
+        failure(pRes, "the last 30 days' payments"),
+        failure(plRes, 'the price book'),
+        failure(cRes, "the last 30 days' classes"),
+        failure(vRes, "today's door log"),
+      ].filter((s): s is string => s !== null);
+      setHubErr(trouble.length === 0 ? null : trouble.join(' · '));
+
       // Every figure is null rather than 0 when the read failed or the gym has
       // recorded nothing. summarise and summariseAttendance already refuse to
       // invent a denominator; this must not undo that on the way to the screen.
@@ -135,6 +192,9 @@ export default function Overview() {
         fillRate: att?.fillRate ?? null,
         visitsToday: door ? door.visits : null,
         inNow: door ? door.inside : null,
+        recordRead: memberships !== null && payments !== null && plans !== null,
+        classesRead: classes !== null,
+        doorRead: visits !== null,
       });
     })();
     return () => { live = false; };
@@ -244,6 +304,21 @@ export default function Overview() {
 
       {error ? <Notice tone="crit">{error}</Notice> : null}
 
+      {/* The hub reads, when one of them did not answer. Above the tiles rather
+          than beside them, because the tiles are the thing being qualified:
+          anything dashed below with "could not be read" under it is explained
+          here, and nothing on this page is allowed to report a refusal as a
+          gym that has recorded nothing. */}
+      {hubErr ? (
+        <Notice tone="crit">
+          <div>{hubErr}</div>
+          <div style={{ marginTop: 6 }}>
+            The tiles those reads feed are dashed because nobody knows, not because the gym recorded
+            nothing — each one says which underneath it.
+          </div>
+        </Notice>
+      ) : null}
+
 
       {/* The morning glance — the whole operation on one line, so departments
           can be read against each other rather than one screen at a time.
@@ -271,26 +346,60 @@ export default function Overview() {
             money() now withholds a figure it cannot denominate, so both doors
             are safe and this one is simply the clearer of the two. A dash
             naming the unset setting is still the honest tile. */}
-        <Kpi label="Taken · 30d" text={hub ? amount(hub.revenueCents, takenCcy) : null}
-             note={hub && hub.revenueCents == null ? 'no payments recorded'
+        {/* `UNREAD` first in every note below, because it is the only branch
+            that is a statement about the QUERY rather than about the gym. The
+            three that follow it — nothing recorded, no currency set, rows in
+            two currencies — are all facts established by a read that returned,
+            and printing any of them over a read that did not is the defect this
+            page carried: an owner reading "no payments recorded" goes and asks
+            the desk why nobody took any money. */}
+        <Kpi label="Taken · 30d" text={hub && hub.recordRead ? amount(hub.revenueCents, takenCcy) : null}
+             note={hub && !hub.recordRead ? UNREAD
+               : hub && hub.revenueCents == null ? 'no payments recorded'
                : hub && !takenCcy
                  ? (hub.revenueRows > 0 && hub.revenueCurrency === null
                      ? 'these payments are in more than one currency, so there is no one total'
                      : NO_CURRENCY_NOTE)
                : undefined} />
-        <Kpi label="Recurring / mo" text={hub ? amount(hub.mrrCents, mrrCcy) : null}
-             note={hub && hub.mrrCents == null ? 'no priced plan on an active membership'
+        <Kpi label="Recurring / mo" text={hub && hub.recordRead ? amount(hub.mrrCents, mrrCcy) : null}
+             note={hub && !hub.recordRead ? UNREAD
+               : hub && hub.mrrCents == null ? 'no priced plan on an active membership'
                : hub && !mrrCcy
                  ? (hub.mrrCurrency === null
                      ? 'these plans are priced in more than one currency, so there is no one total'
                      : NO_CURRENCY_NOTE)
                : undefined} />
-        <Kpi label="Active members" value={hub?.activeMembers ?? null} />
-        <Kpi label="Class fill" text={hub ? pct(hub.fillRate) : null}
-             note={hub && hub.fillRate == null ? 'no capacity recorded' : 'booked ÷ capacity'} />
-        <Kpi label="In the building" value={hub?.inNow ?? null}
-             note={hub?.visitsToday != null ? `${hub.visitsToday} through the door today` : undefined} />
-        <Kpi label="Cash position" text={null} note="connect accounting" />
+        {/* A member count is the tile most obviously read as a fact, so it is
+            the one that must not carry a 0 out of a refused read. `summarise`
+            already returns a number rather than a null here, so the guard has
+            to be the read itself. */}
+        <Kpi label="Active members" value={hub && hub.recordRead ? hub.activeMembers : null}
+             note={hub && !hub.recordRead ? UNREAD : undefined} />
+        <Kpi label="Class fill" text={hub && hub.classesRead ? pct(hub.fillRate) : null}
+             note={hub && !hub.classesRead ? UNREAD
+               : hub && hub.fillRate == null ? 'no capacity recorded'
+               : 'booked ÷ capacity'} />
+        <Kpi label="In the building" value={hub && hub.doorRead ? hub.inNow : null}
+             note={hub && !hub.doorRead ? UNREAD
+               : hub?.visitsToday != null ? `${hub.visitsToday} through the door today`
+               : undefined} />
+        {/* There is no "Cash position" tile any more, and its removal is the
+            same repair as everything above it.
+
+            It rendered a hardcoded dash under the note "connect accounting" —
+            for every gym, every morning, permanently. Two things were wrong
+            with that. The smaller one is that there is nothing to connect:
+            Repple has no bank feed and no accounting integration, so the note
+            was an instruction to perform an action that does not exist, and an
+            owner who went looking for it found nothing and concluded the
+            console was half-built. The larger one is what a permanent dash does
+            to every other dash on this page. Five tiles beside it use a dash to
+            mean something precise and actionable — this was not recorded, this
+            has no currency, this read was refused — and a sixth that is dashed
+            unconditionally teaches the reader that dashes here are decoration.
+            Cash in and cash out for a finished month, on a stated cash basis,
+            are on /accounting; a bank balance is not something this product
+            holds, and a tile is not the place to say so. */}
       </div>
 
       <div

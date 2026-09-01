@@ -23,6 +23,7 @@ import {
   type PtSession, type SessionOutcome, type PayPolicy, type SettlementMethod,
 } from '@lib/gymSessions';
 import { money } from '@lib/gymRecord';
+import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 
 const DAY = 86400000;
 
@@ -50,10 +51,26 @@ export default function Sessions() {
   // string the page tells everybody to go and set a fee.
   const [gymError, setGymError] = useState<string | null>(null);
 
-  // Whether a no-show is payable is a gym policy, not a default we can assume.
-  // It is a control on the page so the owner states it and can see what it does
-  // to the number, rather than discovering it in a payslip.
-  const [policy, setPolicy] = useState<PayPolicy>(PAY_DELIVERED_ONLY);
+  /**
+   * Whether a no-show is payable is a gym policy, and it is now READ rather
+   * than held here.
+   *
+   * This was `useState<PayPolicy>(PAY_DELIVERED_ONLY)` behind two toggles, and
+   * /staff and /close each had their own identical pair. Nothing saved any of
+   * them. So an owner set the policy here, watched the payable count move,
+   * walked to Close to settle the month — and Close had reset to the
+   * conservative reading, because it was a different component's `useState`.
+   * The figure they settled against was not the figure they had decided on, and
+   * nothing on either screen could have told them. A fourth screen,
+   * /coach/earnings, hardcoded the same constant and told every coach outright
+   * that it could not read the gym's real policy.
+   *
+   * One nullable column on `tenants` and one control on /settings closes all
+   * four. The toggles are gone from here rather than left as a preview: a
+   * control that changes a figure and saves nothing is how the four screens
+   * came to disagree.
+   */
+  const [policyCode, setPolicyCode] = useState<string | null>(null);
   const [settlements, setSettlements] = useState<Settlement[] | null>(null);
   const [settlementsError, setSettlementsError] = useState<string | null>(null);
   const [settling, setSettling] = useState<string | null>(null);
@@ -121,10 +138,11 @@ export default function Sessions() {
       // owner "set a session fee" — sending him to check a setting that is
       // probably already correct, for a read he was never told had failed.
       const { data: t, error } = await supabase
-        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', who.tenantId).single();
       if (live) {
         setGymName(error ? null : (t?.name ?? null));
         setSessionFee(error ? null : (t?.session_fee ?? null));
+        setPolicyCode(error ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
         setCcy(error ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
         setGymError(error ? (error.message || 'Could not read your gym.') : null);
       }
@@ -132,6 +150,23 @@ export default function Sessions() {
     })();
     return () => { live = false; };
   }, [load]);
+
+  /**
+   * The gym's stated policy, and what to do when it has not stated one.
+   *
+   * `payPolicyOf` answers null for a null column and for any value this build
+   * does not recognise, and the FALLBACK is deliberately the conservative
+   * reading rather than a refusal. Withholding payroll outright from every gym
+   * that has not visited /settings would take a working screen away over a
+   * setting that has never existed; paying only for delivered sessions cannot
+   * overpay anybody, and it is the least the gym certainly owes.
+   *
+   * What is NOT allowed is for that fallback to look like an answer. `stated`
+   * is what the screen prints, and where it is null the figures are labelled as
+   * the floor rather than as the number.
+   */
+  const stated = payPolicyOf(policyCode);
+  const policy: PayPolicy = stated ?? PAY_DELIVERED_ONLY;
 
   // Each of these stays null while `sessions` is null, rather than collapsing to
   // an empty list. `sessions ?? []` was doing the same damage as the swallowed
@@ -345,7 +380,8 @@ export default function Sessions() {
           note={total.unmarked > 0 ? 'blocking payroll' : undefined}
         />
         <Kpi label="Payable" text={sessions ? String(total.payable) : null}
-             note={policy.payNoShows ? 'no-shows included' : 'delivered only'} />
+             note={stated === null ? 'delivered only — no policy set'
+               : policy.payNoShows ? 'no-shows included' : 'delivered only'} />
         <Kpi
           label="Payroll, 30 days"
           text={amount(total.cents, ccy)}
@@ -368,23 +404,39 @@ export default function Sessions() {
         </Banner>
       ) : null}
 
+      {/* Stated, not set, and that is the repair.
+          This was two toggles over an unsaved `useState`, and /staff and /close
+          each had their own identical pair. An owner set the policy here,
+          watched the payable count move, and settled the month on Close against
+          a screen that had reset to the conservative reading — three components,
+          three opinions, one ledger. The single stored answer lives on /settings
+          and every screen that prices a session reads it. */}
       <Section
         title="Pay policy"
-        sub="A gym decision, not a default. It changes the payable count and the figure above."
+        sub="A gym decision, stored once. It changes the payable count and the figure above, on every screen that prices a session."
       >
-        <div style={{ padding: 14, display: 'flex', gap: 22, flexWrap: 'wrap' }}>
-          <Toggle
-            label="Pay for no-shows"
-            hint="The trainer held the hour and turned up."
-            on={policy.payNoShows}
-            onChange={(v) => setPolicy((p) => ({ ...p, payNoShows: v }))}
-          />
-          <Toggle
-            label="Pay for late cancellations"
-            hint="Cancelled too late to fill the slot."
-            on={policy.payLateCancellations}
-            onChange={(v) => setPolicy((p) => ({ ...p, payLateCancellations: v }))}
-          />
+        <div style={{ padding: 14, fontSize: 13, color: 'var(--ink2)', maxWidth: '70ch' }}>
+          {gymError ? (
+            <>
+              The gym&rsquo;s record could not be read, so its pay policy is unknown here rather
+              than unset. The figures above price delivered sessions only, which is the least this
+              gym owes — not necessarily what it has decided to pay.
+            </>
+          ) : stated ? (
+            <>
+              <strong style={{ color: 'var(--ink)' }}>{PAY_POLICY_LABEL[policyCode as PayPolicyCode]}.</strong>{' '}
+              Change it on <a href="/settings" style={{ color: 'var(--brand)' }}>Gym</a> and every
+              screen that prices a session moves with it.
+            </>
+          ) : (
+            <>
+              <strong style={{ color: 'var(--ink)' }}>Not set</strong> — {NO_PAY_POLICY_NOTE}. The
+              figures above therefore count delivered sessions only. That is the floor rather than
+              an answer: a coach who held an hour for somebody who did not turn up is not in it.
+              Say what this gym pays for on{' '}
+              <a href="/settings" style={{ color: 'var(--brand)' }}>Gym</a>.
+            </>
+          )}
         </div>
       </Section>
 
@@ -671,19 +723,11 @@ function Marked({ sessions, unread, onClear, ccy }: {
 
 /* ── shared bits (same shapes as the Money and Door screens) ───────────────── */
 
-function Toggle({ label, hint, on, onChange }: {
-  label: string; hint: string; on: boolean; onChange: (v: boolean) => void;
-}) {
-  return (
-    <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', cursor: 'pointer', maxWidth: 300 }}>
-      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} style={{ marginTop: 3 }} />
-      <span>
-        <span style={{ display: 'block', fontSize: 13.5, color: 'var(--ink)' }}>{label}</span>
-        <span style={{ display: 'block', fontSize: 12, color: 'var(--ink3)', marginTop: 2 }}>{hint}</span>
-      </span>
-    </label>
-  );
-}
+// `Toggle` used to live here — two checkboxes that changed this page's payroll
+// figure and saved nothing. It is deleted rather than left unused, because an
+// unreferenced control is exactly what somebody re-wires when they next want a
+// switch, and the whole of D1 is that this particular switch must be stored
+// once and read by four screens instead of held four times.
 
 const linkBtn = {
   background: 'none', border: 'none', padding: 0, cursor: 'pointer',

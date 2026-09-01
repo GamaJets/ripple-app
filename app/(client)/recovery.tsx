@@ -12,6 +12,7 @@
 // source, so `<Text>{''.repeat(quality)}</Text>` painted an empty string and the
 // 1–5 selector was invisible and untappable. Quality is now shown as marks.
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -26,6 +27,7 @@ import { HrZoneChart } from '../../src/ui/HrZoneChart';
 import { ageFromDob, type HrSample } from '../../src/lib/hr';
 import { useWearables } from '../../src/ui/wearables';
 import { useDeviceSleep } from '../../src/ui/deviceSleep';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useReadiness } from '../../src/ui/readiness';
 import { readinessMadeOf } from '../../src/lib/readiness';
 import { connectedProviders } from '../../src/lib/wearables/sleep';
@@ -296,11 +298,16 @@ export default function Recovery() {
  // nice." to somebody who has never set a goal — and zero glasses gives NaN,
  // which the arc draws from.
  const pct = goalCups != null ? Math.min(100, Math.round((cups / goalCups) * 100)) : null;
+ // "Pull down to try again" is a sentence this screen has printed under its own
+ // sleep list for as long as it has existed, over a ScrollView that had no
+ // refresh control on it. Both reads it names are here: the watch data and the
+ // nights the device holds.
+ const pull = usePullToRefresh(useCallback(() => { deviceSleep.refresh(); wear.syncAll(); }, [deviceSleep, wear]));
  const G = layout.gutter;
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -489,7 +496,7 @@ export default function Recovery() {
         with nothing on the screen to doubt it. */}
     {sleepReads.status === 'error' ? (
      <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-      Repple couldn’t reach your devices just now, so the nights above are unknown rather than empty — this is our end, not your watch. Pull down to try again.
+      {BRAND.label} couldn’t reach your devices just now, so the nights above are unknown rather than empty — this is our end, not your watch. Pull down to try again.
      </Flag>
     ) : null}
 
@@ -502,7 +509,7 @@ export default function Recovery() {
     ))}
     {cannotReport.map((r) => (
      <Text key={r.provider} style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-      {r.reason || `${r.provider} cannot report sleep to Repple yet.`}
+      {r.reason || `${r.provider} cannot report sleep to ${BRAND.label} yet.`}
      </Text>
     ))}
 
@@ -516,7 +523,7 @@ export default function Recovery() {
     {appleSilent ? (
      <View style={{ marginTop: sp.md }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>
-       Apple Health was readable and holds no sleep for these nights. If you have been wearing your watch, Sleep sharing is probably switched off for Repple — Health ▸ Sharing ▸ Apps ▸ Repple.
+       Apple Health was readable and holds no sleep for these nights. If you have been wearing your watch, Sleep sharing is probably switched off for {BRAND.label} — Health ▸ Sharing ▸ Apps ▸ {BRAND.label}.
       </Text>
       <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
        {/* Title Case, like every other button on this screen — "Fix in Watch &

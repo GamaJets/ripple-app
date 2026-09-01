@@ -39,7 +39,8 @@ src/ui/              providers, shared components, the design kit (src/ui/kit.ts
 src/theme/           tokens and the type/space scale
 studio-web/          Next.js owner console; imports src/lib from this repo
 supabase/            database and edge functions — start at supabase/README.md
-web/                 the marketing site, /join and /reset-password
+web/                 the marketing site, /join, /reset-password and the Stripe
+                     Connect return pages
 scripts/             the check:* gates, the SQL bundler, submit and publish
 docs/                the long-form ones; read these before changing behaviour
 ```

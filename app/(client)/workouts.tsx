@@ -6,6 +6,7 @@
 // only on the live metric and the primary action.
 // Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState } from 'react-native';
@@ -42,6 +43,7 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import type { WorkoutSample } from '../../src/lib/wearables/types';
 import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { est1RM } from '../../src/lib/streaks';
+import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 // Three outcomes, not two. Since src/ui/workoutLog.tsx was brought onto the
@@ -247,6 +249,23 @@ export default function Train() {
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   const jsToMon = (new Date().getDay() + 6) % 7;
   const [dayIdx, setDayIdx] = useState(jsToMon);
+  // Which week the strip is on, counted back from this one. 0 is this week; -1
+  // is last week.
+  //
+  // There was no such state. `monday0` was derived from today and nothing else,
+  // so the seven days on screen were always the seven days of the current week
+  // and the Month Calendar sheet inherited the same fixed month. A member who
+  // missed Saturday and remembered on Monday had nowhere to put it: the day was
+  // not on the strip, not reachable from the sheet, and there is no other way
+  // into the log on this screen. "Catching up" is the ordinary case for a
+  // training diary, not an edge one.
+  //
+  // Never positive. Selecting a later day INSIDE this week is already possible
+  // and always was — the plan for Saturday is a thing to look at on Tuesday —
+  // but a whole week ahead is a week nobody has trained, and every empty state
+  // in that week would be a confident statement about a session that has not
+  // happened yet.
+  const [weekOffset, setWeekOffset] = useState(0);
   // `?mode=recovery` lets the Recovery screen send somebody straight to the
   // right type, so logging a sauna is one tap from the screen that shows it.
   // Anything unrecognised falls back to the program, which is the default.
@@ -261,7 +280,12 @@ export default function Train() {
   // changed still means the weight that was actually lifted, and `quickLog`
   // (whose suggestion is already metric) can hand a number straight in without
   // being converted a second time.
-  const [logged, setLogged] = useState<Record<string, { reps: string; kg: string }[]>>({});
+  // `bw` is the member saying this set was their own body — see
+  // src/lib/bodyweightSets.ts. Optional on the draft shape rather than
+  // required, because a draft written by a build that predates it is read back
+  // out of AsyncStorage as-is and an absent flag has to mean what it meant
+  // then: an ordinary set.
+  const [logged, setLogged] = useState<Record<string, { reps: string; kg: string; bw?: boolean }[]>>({});
 
   const [cardioLog, setCardioLog] = useState<{ type: string; mins: number; dist: number; unit: string; kcal: number | null }[]>([]);
   const [nlw, setNlw] = useState('');
@@ -392,6 +416,8 @@ export default function Train() {
   const [hrEntry, setHrEntry] = useState<WorkoutEntry | null>(null);
   const [showCal, setShowCal] = useState(false);
   const [selCalDay, setSelCalDay] = useState('');
+  /** Months away from the week the strip is on. Never positive — see `calAtNow`. */
+  const [calShift, setCalShift] = useState(0);
   const [editEntry, setEditEntry] = useState<WorkoutEntry | null>(null);
 
   // Workouts recorded on a watch used to be importable only from Watch &
@@ -477,7 +503,13 @@ export default function Train() {
   // hotel gym is plated in whatever that gym uses, not in what the member reads.
   const [cxUnit, setCxUnit] = useState<WeightUnit>(wu);
   const today0 = new Date();
-  const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon); monday0.setHours(0, 0, 0, 0);
+  const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon + weekOffset * 7); monday0.setHours(0, 0, 0, 0);
+  // `setDate` past the end of a month rolls into the next one, so this arithmetic
+  // survives a week that straddles a month or a year boundary without any help.
+  const sunday0 = new Date(monday0); sunday0.setDate(monday0.getDate() + 6);
+  const weekLabel = weekOffset === 0 ? 'This week'
+    : weekOffset === -1 ? 'Last week'
+    : `${monday0.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${sunday0.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
   const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
   const pad2 = (n: number) => String(n).padStart(2, '0');
   const dstr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -530,10 +562,24 @@ export default function Train() {
     // omit the figure entirely, and `?? 0` defeated that guard — a sauna, which
     // has no derivable burn, would have read "0 kcal". Zero is a measurement.
     .map((l) => ({ type: l.exercise, mins: l.cardio!.mins, dist: l.cardio!.dist, unit: l.cardio!.unit, watts: l.cardio!.watts ?? 0, kcal: l.kcal ?? null }));
-  const calMonth = monday0.getMonth(), calYear = monday0.getFullYear();
+  // The month the sheet is showing, as an offset from the month the strip is on.
+  //
+  // `calMonth` and `calYear` were consts off `monday0` with no setter anywhere,
+  // so the sheet opened on the current month and stayed there — the same defect
+  // as the day strip, one screen deeper. A member could see thirty-one days and
+  // reach none of the ones before them.
+  //
+  // Reset when the sheet is opened, so it always opens on the week you are
+  // looking at rather than wherever it was left three days ago.
+  const calBase = new Date(monday0.getFullYear(), monday0.getMonth() + calShift, 1);
+  const calMonth = calBase.getMonth(), calYear = calBase.getFullYear();
   const firstDow = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-  const monthLabel = monday0.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const monthLabel = calBase.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  // Not past the month we are in. Every day beyond today is a day with nothing
+  // logged, and this sheet's day panel would state that as "Rest day — no
+  // workout logged" for a Tuesday three weeks from now.
+  const calAtNow = calYear > today0.getFullYear() || (calYear === today0.getFullYear() && calMonth >= today0.getMonth());
 
   // What is ALREADY in the log for the weekday the strip is on.
   //
@@ -809,7 +855,7 @@ export default function Train() {
     removed: removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length,
     injuryHidden: injHidden.filter((u) => !injRevealed.includes(u)).length,
   });
-  const logSet = (e: ProgramExercise, reps: string, kg: number | null) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg: kg == null ? '' : String(kg) }] }); tapLight(); };
+  const logSet = (e: ProgramExercise, reps: string, kg: number | null, bw = false) => { if (!reps) return; setLogged({ ...logged, [uid(e)]: [...(logged[uid(e)] || []), { reps, kg: kg == null ? '' : String(kg), ...(bw ? { bw: true } : {}) }] }); tapLight(); };
   // One tap records the set the plan is asking for — TF-27, "can't tap an
   // exercise to log it". This function has existed here unreferenced: the only
   // way to record a set was to expand the row and type the two numbers the app
@@ -910,7 +956,17 @@ export default function Train() {
       // Already kilograms — `LogRow` converted at the keyboard. Converting
       // again here would multiply a pounds member's load by 0.45 twice.
       const setPairs = s.map((x) => [parseInt(x.reps, 10) || 0, parseFloat(x.kg) || 0] as [number, number]);
-      const bestE1 = Math.max(0, ...setPairs.map(([r, kg]) => (r && kg ? est1RM(kg, r) : 0)));
+      // On a bodyweight set the second number is what was ADDED to the person,
+      // not the load — so the flags travel with the pairs or the pairs lie.
+      const bwFlags = s.map((x) => x.bw === true);
+      // The PR claim below still ignores bodyweight sets, deliberately.
+      // `priorBest1RM` lives in src/lib/progression.ts and reads a set's second
+      // number as the load, so a pull-up's history reads as a run of zeros
+      // there — and comparing a real bodyweight load against that would call
+      // every single pull-up session a lifetime record, with confetti. The set
+      // is stored, counted in the tonnage and eligible for the Records board;
+      // only the mid-session claim waits for that function to learn about it.
+      const bestE1 = Math.max(0, ...setPairs.map(([r, kg], i) => (r && kg && !bwFlags[i] ? est1RM(kg, r) : 0)));
       // The same guard SessionRunner carries, for the same reason, on the other
       // path into the same claim. `priorBest1RM` over an unread log returns 0
       // and EVERY set beats it, so a refused read turned an ordinary Tuesday
@@ -920,7 +976,10 @@ export default function Train() {
       // something is a lifetime best — see the note at SessionRunner's
       // `historyWhole`, which this deliberately mirrors line for line.
       if (historyWhole && bestE1 > priorBest1RM(workoutLog, nameOf(e))) pr = true;
-      return { t: nowISO, exercise: nameOf(e), sets: setPairs };
+      // Absent, not an array of false. A row written without the column means
+      // "nobody was asked", which is the honest state for every entry logged
+      // before this existed and the one a screen already knows how to read.
+      return { t: nowISO, exercise: nameOf(e), sets: setPairs, ...(bwFlags.some(Boolean) ? { bw: bwFlags } : {}) };
     }).filter(Boolean) as WorkoutEntry[];
     if (!entries.length) return;
     const out = await logWorkouts(entries);
@@ -1013,7 +1072,7 @@ export default function Train() {
         </View>
         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg }}>
           <View style={{ flex: 1 }}>
-            <Ghost label="Month Calendar" icon="calendar" onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setShowCal(true); }} />
+            <Ghost label="Month Calendar" icon="calendar" onPress={() => { setSelCalDay(dstr(dateFor(dayIdx))); setCalShift(0); setShowCal(true); }} />
           </View>
           <View style={{ flex: 1 }}>
             <Ghost label="Book Session" icon="plus" onPress={() => router.push('/(client)/calendar')} />
@@ -1021,11 +1080,38 @@ export default function Train() {
         </View>
 
         {/* ── day strip ──────────────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.lg }}>
+        {/* Which week these seven days are, and the way out of it. Before this
+            the strip named no week at all, because there was only ever one it
+            could be showing. Now that it can move, saying so is not decoration:
+            a member looking at "12–18" needs to know those are not this week's
+            numbers before they log a session onto one of them. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.lg }}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Previous week"
+            onPress={() => { setWeekOffset((w) => w - 1); tapLight(); }}
+            style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
+            <Icon name="back" size={15} color={t.ink2} />
+          </Pressable>
+          <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'center' }}>{weekLabel}</Text>
+          {/* Absent rather than disabled on the current week. A greyed arrow is
+              a control that says "not now"; there is no later week to go to and
+              there never will be from here. */}
+          {weekOffset < 0 ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Next week"
+              onPress={() => { setWeekOffset((w) => Math.min(0, w + 1)); tapLight(); }}
+              style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
+              <Icon name="chevron" size={15} color={t.ink2} />
+            </Pressable>
+          ) : <View style={{ width: 34 }} />}
+        </View>
+        <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
           {WEEK.map((d, i) => {
-            const on = i === dayIdx; const today = i === jsToMon; const dnum = dateFor(i).getDate(); const worked = workedDates.has(dstr(dateFor(i)));
+            const on = i === dayIdx; const today = i === jsToMon && weekOffset === 0; const dnum = dateFor(i).getDate(); const worked = workedDates.has(dstr(dateFor(i)));
             return (
-              <Pressable key={d} onPress={() => setDayIdx(i)} style={{ flex: 1, paddingVertical: sp.sm, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
+              <Pressable key={d} onPress={() => setDayIdx(i)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`${dateFor(i).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${today ? ', today' : ''}${worked ? ', trained' : ''}`}
+                style={{ flex: 1, paddingVertical: sp.sm, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
                 <Text style={{ ...ty.micro, letterSpacing: 0.3, color: on ? t.ink : today ? t.ink2 : t.ink3 }}>{d}</Text>
                 <Text style={{ ...value(16), color: on ? t.ink : t.ink2, marginTop: 2 }}>{dnum}</Text>
                 <View style={{ width: 4, height: 4, borderRadius: 2, marginTop: 5, backgroundColor: worked ? t.brand : 'transparent' }} />
@@ -1033,12 +1119,22 @@ export default function Train() {
             );
           })}
         </View>
+        {/* One tap back, from anywhere. Six taps on an arrow to get home from
+            March is the kind of thing people simply do not do. */}
+        {weekOffset !== 0 ? (
+          <View style={{ alignItems: 'center', marginTop: sp.sm }}>
+            <Ghost label="Back to This Week" onPress={() => { setWeekOffset(0); setDayIdx(jsToMon); tapLight(); }} />
+          </View>
+        ) : null}
 
         {/* ── the hero: today's session, one number ───────────────────────── */}
         <ScreenHelp screen="train" />
 
         <Hero
-          label={`Today · ${workout.focus}`}
+          /* The DAY the strip is on, not the word "Today". It said "Today" for
+             whichever day was selected, which was already wrong for a Thursday
+             looked at on Tuesday and is now wrong for a whole week at a time. */
+          label={`${weekOffset === 0 && dayIdx === jsToMon ? 'Today' : dateFor(dayIdx).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })} · ${workout.focus}`}
           figure={fig(exercises.length)}
           unit={exercises.length === 1 ? 'exercise' : 'exercises'}
           note={heroNote}
@@ -1327,7 +1423,7 @@ export default function Train() {
                               <Pressable accessibilityRole="button" accessibilityLabel={'Swap ' + nameOf(e) + ' for another movement'} onPress={() => setSwapFor(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
                             ) : null}
                           </View>
-                          <LogRow t={t} unit={wu} onLog={(reps, kg) => logSet(e, reps, kg)} />
+                          <LogRow t={t} unit={wu} onLog={(reps, kg, bw) => logSet(e, reps, kg, bw)} />
                         </View>
                       ) : null}
                     </View>
@@ -1719,7 +1815,24 @@ export default function Train() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCal(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '88%', ...elevation.e2 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
-            <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>{monthLabel}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flex: 1 }}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Previous month"
+                onPress={() => { setCalShift((m) => m - 1); tapLight(); }}
+                style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
+                <Icon name="back" size={15} color={t.ink2} />
+              </Pressable>
+              <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>{monthLabel}</Text>
+              {/* Nothing forward of the month we are in, for the reason at
+                  `calAtNow`: every day after today would be drawn as a rest day
+                  that nobody has had yet. */}
+              {!calAtNow ? (
+                <Pressable accessibilityRole="button" accessibilityLabel="Next month"
+                  onPress={() => { setCalShift((m) => m + 1); tapLight(); }}
+                  style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
+                  <Icon name="chevron" size={15} color={t.ink2} />
+                </Pressable>
+              ) : null}
+            </View>
             <Ghost label="Close" onPress={() => setShowCal(false)} />
           </View>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -1954,12 +2067,22 @@ export default function Train() {
  *
  * What leaves here is kilograms. The unit is a reading and typing convention;
  * the record is metric, and the coach's console reads the same row.
+ *
+ * The third thing it records is whether the set was the member's own body. That
+ * used to be recorded by leaving the box empty and hoping — the alert below
+ * has always said "the box can stay empty for a bodyweight set" — and an empty
+ * box stored a zero that every reader downstream threw away. So an empty box
+ * now says BODYWEIGHT out loud, and the toggle exists for the case an empty box
+ * could never express: a pull-up with twenty kilos on a belt, where the number
+ * typed is what was added to the person rather than what was on a bar.
  */
-function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: string, kg: number | null) => void }) {
+function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: string, kg: number | null, bw: boolean) => void }) {
   const [reps, setReps] = useState(''); const [kg, setKg] = useState('');
+  const [bwOn, setBwOn] = useState(false);
   const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, flex: 1, ...ty.body } as const;
   return (
-    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, alignItems: 'flex-end' }}>
+    <View style={{ marginTop: sp.md }}>
+    <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
       <Field label="Reps">
         <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
       </Field>
@@ -1967,7 +2090,7 @@ function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: 
           in kilos should not have to leave a live session to say so — see
           src/ui/WeightUnitToggle.tsx for why it moves the account setting
           rather than just this box. */}
-      <Field label="Load" accessory={<WeightUnitToggle />} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
+      <Field label={bwOn ? 'Added' : 'Load'} accessory={<WeightUnitToggle />} a11y={bwOn ? (unit === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight') : (unit === 'kg' ? 'Load in kilograms' : 'Load in pounds')}>
         <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad" style={inp} />
       </Field>
       <Pressable accessibilityRole="button" accessibilityLabel="Log set" onPress={() => {
@@ -1983,11 +2106,51 @@ function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: 
         // Left in the box on a refusal, with the reason said, rather than
         // cleared — the number was typed once and the app has no better guess.
         if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
-        onLog(String(r), read.kg); setReps(''); setKg('');
+        // An empty load box IS a bodyweight set, which is what the alert above
+        // has always told people. Recorded rather than inferred later: a stored
+        // 0 cannot be told apart from a load nobody typed, and inferring it at
+        // read time would relabel every old zero as a pull-up.
+        onLog(String(r), read.kg, bwOn || read.kg == null); setReps(''); setKg('');
       }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
         <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log set</Text>
       </Pressable>
     </View>
+    <BodyweightChip t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)} unit={unit} />
+    </View>
+  );
+}
+
+/**
+ * "This set was my own bodyweight."
+ *
+ * One chip, used by both log paths, because the two of them have already drifted
+ * apart once over the same idea — the typed-in screen and the guided runner
+ * each carry their own copy of the reps guard and the load guard, word for word,
+ * with a comment on each saying it mirrors the other.
+ *
+ * It is a checkbox rather than a segmented control because the negative case has
+ * no name a member would recognise. "Bodyweight" versus "External load" reads
+ * like a form; an unticked box beside the load field reads like the ordinary
+ * set it is.
+ */
+function BodyweightChip({ t, on, onToggle, unit }: { t: Theme; on: boolean; onToggle: () => void; unit: WeightUnit }) {
+  return (
+    <Pressable
+      onPress={onToggle}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: on }}
+      accessibilityLabel="Bodyweight set"
+      accessibilityHint={on
+        ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
+        : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm, paddingVertical: 6 }}>
+      <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: hairline, borderColor: on ? t.brand : t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+        {on ? <Icon name="check" size={12} color={t.brandInk} /> : null}
+      </View>
+      <Text style={{ ...ty.caption, color: on ? t.ink : t.ink3 }}>
+        {on ? `Bodyweight set — the box above is what you added, in ${unit}` : 'Bodyweight set'}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -2008,7 +2171,7 @@ function LogRow({ t, unit, onLog }: { t: Theme; unit: WeightUnit; onLog: (reps: 
  * WHOOP user would finish and see "42 min in Zone 2" derived from one number
  * that had nothing to do with the workout.
  */
-function useLiveVitals(age: number | null, restingKcalPerMin: number | null) {
+function useLiveVitals(age: number | null, restingKcalPerMin: number | null, paused = false) {
   const w = useWearables();
   const liveSample = w.today.heartRateLatest;          // a real, current reading
   const liveHr = liveSample ?? w.today.heartRateAvg;   // display only
@@ -2040,8 +2203,22 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null) {
   // a counter would silently under-report — and for a timed session that number
   // is not just a display, it is the duration written to the log.
   const startedAtRef = useRef(Date.now());
+  // Time the member was not training, taken back off the wall clock.
+  //
+  // The clock is deliberately read off the wall rather than counted up, so it
+  // survives a locked phone — and that is exactly why a pause cannot simply
+  // stop the interval. The wall goes on regardless, and a session paused for a
+  // phone call would come back forty minutes longer. `sessionMins` is written
+  // to the health record, so this is a figure that has to be true.
+  const pausedAtRef = useRef<number | null>(null);
+  const pausedMsRef = useRef(0);
+  const pausedRef = useRef(paused);
+  if (paused && pausedAtRef.current == null) { pausedAtRef.current = Date.now(); }
+  if (!paused && pausedAtRef.current != null) { pausedMsRef.current += Date.now() - pausedAtRef.current; pausedAtRef.current = null; }
+  pausedRef.current = paused;
+  const awayMs = () => pausedMsRef.current + (pausedAtRef.current != null ? Date.now() - pausedAtRef.current : 0);
   useEffect(() => {
-    const tick = setInterval(() => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)), 1000);
+    const tick = setInterval(() => setElapsed(Math.max(0, Math.floor((Date.now() - startedAtRef.current - awayMs()) / 1000))), 1000);
     const q = setInterval(() => w.syncAll(), 10000);
     w.syncAll();
     return () => { clearInterval(tick); clearInterval(q); };
@@ -2056,6 +2233,11 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null) {
   hrRef.current = typeof liveSample === 'number' && liveSample > 0 ? liveSample : null;
   useEffect(() => {
     const z = setInterval(() => {
+      // Nothing is banked while the session is paused. Time in zone is minutes
+      // of training, and a member sitting on a bench taking a call is still
+      // wearing the watch — crediting those minutes would put a rest into the
+      // zone breakdown the finish screen prints as effort.
+      if (pausedRef.current) return;
       const bpm = hrRef.current;
       if (!bpm) return; // no reading → bank nothing, rather than crediting zone 1
       setZoneSecs((p) => ({ ...p, [zoneKey(zoneOf(bpm, age))]: p[zoneKey(zoneOf(bpm, age))] + 1 }));
@@ -2368,7 +2550,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
       <View style={{ paddingVertical: sp.sm }}>
         <ExerciseVideo video={clip} exerciseName={name} />
         <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>
-          {clip.trainerId ? 'Recorded by your coach' : 'From the Repple library'}
+          {clip.trainerId ? 'Recorded by your coach' : `From the ${BRAND.label} library`}
         </Text>
       </View>
     );
@@ -2440,15 +2622,28 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
 function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, injuries, videos, videoStatus, preferTrainerId, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
-  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin);
+  // A session can be put down and picked up.
+  //
+  // It could not before. There was no pause anywhere in this runner, so a phone
+  // call in the middle of a session left the clock, the rest countdown and the
+  // time-in-zone all running through it — and the only way out was End, which
+  // is the button that offers to throw the session away. src/ui/StretchRunner.tsx
+  // has had Back, Pause and Skip since it was written; this is that same row,
+  // not a second idea about the same problem.
+  const [paused, setPaused] = useState(false);
+  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin, paused);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
-  const [results, setResults] = useState<{ reps: number; kg: number }[][]>(() => exercises.map(() => []));
+  // `bw` marks a set the member did with their own body; `kg` is then what
+  // they ADDED to it. Optional, so a guided draft restored from a build that
+  // predates the flag reads back as the ordinary sets it recorded.
+  const [results, setResults] = useState<{ reps: number; kg: number; bw?: boolean }[][]>(() => exercises.map(() => []));
   // `load` is TEXT in the member's own unit; `results` is kilograms. The
   // conversion happens at this one keyboard, so everything downstream of the
   // runner — the PR check, the warm-up ramp, the entries written to the log —
   // goes on working in the metric the rest of the app is built on.
   const [reps, setReps] = useState(''); const [load, setLoad] = useState('');
+  const [bwOn, setBwOn] = useState(false);
   const showLoad = (kg: number) => (kg ? plain(liftIn(kg, unit) ?? 0) : '');
   const [rest, setRest] = useState(0);
   // Whether the demonstration is on screen for the current exercise.
@@ -2489,6 +2684,12 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   // to work. Same reasoning as `startedAtRef` in useLiveVitals: the clock is the
   // wall, the interval only decides how often we look at it.
   const restEndsAt = useRef<number | null>(null);
+  // Read by the countdown interval and by the background-alert listener, both
+  // of which are armed once and must see the CURRENT value rather than the one
+  // that was in scope when they were created.
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+  const pausedSinceRef = useRef<number | null>(null);
   // How many seconds the interval saw last time it looked, so a countdown tick
   // fires on the TRANSITION into a second rather than every time that second is
   // observed. The interval runs at 500 ms against a wall clock and therefore
@@ -2543,6 +2744,10 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active') { cancelRestAlert(); return; }
+      // A paused rest has an end instant that is no longer true — `resume` is
+      // what makes it true again — so nothing is scheduled against it. Better
+      // no alert than one that fires while the member is still on the phone.
+      if (pausedRef.current) return;
       const end = restEndsAt.current;
       if (end == null || end <= Date.now()) return;
       const gen = restGen.current;
@@ -2586,6 +2791,11 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
   useEffect(() => {
     if (rest <= 0) { if (rid.current) clearInterval(rid.current); restEndsAt.current = null; prevLeft.current = null; return; }
     rid.current = setInterval(() => {
+      // A paused session does not rest. The countdown is a wall-clock end
+      // instant, so leaving it alone would run it down while the member is on
+      // the phone and chime at them about a set they have not got back to;
+      // `resume` pushes the instant forward by however long they were away.
+      if (pausedRef.current) return;
       const end = restEndsAt.current;
       if (end == null) { setRest(0); return; }
       const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
@@ -2740,8 +2950,20 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     const read = readLift(load, unit);
     if (!read.ok) { Alert.alert('Check that load', read.reason); return; }
     const wkg = read.kg ?? 0;
+    // An empty load box IS a bodyweight set — this screen's own alert two lines
+    // up has said so for as long as it has existed, and until now the app threw
+    // the set away rather than recording what it was told. The toggle carries
+    // the case an empty box cannot say: a dip with a belt on.
+    const bw = bwOn || read.kg == null;
     const name = nameOf(exercises[idx]);
-    const newE1 = wkg && r ? est1RM(wkg, r) : 0;
+    // Zero for a bodyweight set, on purpose. The PR banner below is a claim
+    // about everything this person has ever lifted, and the thing it is checked
+    // against — `priorBest1RM` in src/lib/progression.ts — reads a set's second
+    // number as the load, so a whole history of pull-ups reads there as zeros.
+    // Comparing a real bodyweight load against that would fire "New PR!" on
+    // every set of every calisthenics session forever. The set is recorded and
+    // counted everywhere else; only this banner holds off.
+    const newE1 = wkg && r && !bw ? est1RM(wkg, r) : 0;
     // A personal record is a claim about EVERYTHING this person has ever
     // lifted, so it can only be made when the whole history was read.
     //
@@ -2760,7 +2982,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
       0,
     );
     if (historyWhole && newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`); setConfetti(true); }
-    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg }); return n; });
+    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg, ...(bw ? { bw: true } : {}) }); return n; });
     // Only after the first set of an exercise. By set three they have done the
     // movement three times and do not need it offered again.
     if (done.length === 0) setDemoOpen(true);
@@ -2805,6 +3027,10 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         t: nowISO,
         exercise: nameOf(exercises[i]),
         sets: sets.map((s) => [s.reps, s.kg]) as [number, number][],
+        // Absent rather than an array of false, for the reason on the column
+        // itself: a missing flag means nobody was asked, and that is the only
+        // thing true of every session logged before this existed.
+        bw: sets.some((s) => s.bw) ? sets.map((s) => s.bw === true) : undefined,
         feel: (rpes[i] && rpes[i].length) ? rpes[i] : undefined,
         // No `kcal`. It used to carry `volume / 60 + sets * 8` — an expression
         // with no body weight, no heart rate and no measurement of any kind in
@@ -2885,7 +3111,46 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     if (out !== 'refused') AsyncStorage.removeItem(GUIDED_DRAFT_KEY).catch(() => {});
     if (out === 'stored') { setConfetti(true); tapLight(); }
   };
-  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); startRest(0); } else finish(); };
+  // Bodyweight is a property of the MOVEMENT, so the tick clears when the
+  // movement does. Left on, a member who has just finished a set of pull-ups
+  // walks to the rack and types 60 into a box that now means "sixty kilos on
+  // top of me".
+  const next = () => { if (idx < exercises.length - 1) { setIdx(idx + 1); setBwOn(false); startRest(0); } else finish(); };
+  /**
+   * Back to the movement before this one.
+   *
+   * `setIdx` was written in exactly three places — on mount, on restoring a
+   * draft, and by `next` — so a session only ever went forwards. Forget a set
+   * on exercise two and there was no way back to it: the sets already logged
+   * for that movement are still in `results`, still on their way to the log,
+   * and simply unreachable. The only door out was End, which offers to discard
+   * the session.
+   *
+   * The rest timer is cleared on the way, exactly as `next` clears it. A
+   * countdown belongs to the set that started it, and carrying it backwards
+   * would chime at somebody about a rest between two sets they are no longer
+   * doing.
+   */
+  const back = () => { if (idx > 0) { setIdx(idx - 1); setBwOn(false); startRest(0); tapLight(); } };
+  /**
+   * Stop the clock, and start it again where it stopped.
+   *
+   * Three things are running and all three have to stop, or a pause is a lie
+   * told in three places: the session clock (which becomes `sessionMins` in a
+   * health record), the rest countdown, and the seconds banked against each
+   * heart-rate zone. The first two are wall-clock instants, so neither can be
+   * paused by stopping a timer — the elapsed clock subtracts the away time and
+   * the rest end is pushed forward by it.
+   */
+  const pause = () => { if (paused) return; pausedSinceRef.current = Date.now(); cancelRestAlert(); setPaused(true); tapLight(); };
+  const resume = () => {
+    if (!paused) return;
+    const from = pausedSinceRef.current;
+    pausedSinceRef.current = null;
+    if (from != null && restEndsAt.current != null) restEndsAt.current += Date.now() - from;
+    setPaused(false);
+    tapLight();
+  };
   const loggedSets = results.reduce((a, r) => a + r.length, 0);
   /**
    * The "End" in the header.
@@ -3114,7 +3379,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40, paddingTop: topPad + 4 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Exercise {idx + 1} of {exercises.length}</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Exercise {idx + 1} of {exercises.length}{paused ? ' · paused' : ''}</Text>
           <Ghost label="End" onPress={endSession} />
         </View>
         <View style={{ flexDirection: 'row', gap: 5, marginBottom: sp.xl }}>
@@ -3298,9 +3563,21 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           <SessionDemo t={t} name={nameOf(ex)} videos={videos} videoStatus={videoStatus} preferTrainerId={preferTrainerId} />
         ) : null}
 
+        {/* What a pause actually does, said where the clock is. Somebody comes
+            back to this screen ten minutes later and has to be able to tell a
+            stopped session from a broken one — and the sentence has to name the
+            three things that stopped, because the session length it protects is
+            written into a health record. */}
+        {paused ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Notice kicker="Paused" title="Your session clock is stopped"
+              note="The clock, your rest countdown and your time in each heart-rate zone are all held where they are. Nothing you have logged is affected. Resume when you are back." />
+          </View>
+        ) : null}
+
         {done.length > 0 ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xl }}>
-            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{fig(liftIn(s.kg || null, unit))} {unit}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
+            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
           </View>
         ) : null}
 
@@ -3331,11 +3608,12 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           <Field label="Reps">
             <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
           </Field>
-          <Field label="Load" accessory={<WeightUnitToggle />} a11y={unit === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
+          <Field label={bwOn ? 'Added' : 'Load'} accessory={<WeightUnitToggle />} a11y={bwOn ? (unit === 'kg' ? 'Added load in kilograms, on top of your bodyweight' : 'Added load in pounds, on top of your bodyweight') : (unit === 'kg' ? 'Load in kilograms' : 'Load in pounds')}>
             <TextInput value={load} onChangeText={setLoad} keyboardType="decimal-pad" style={inp} />
           </Field>
           <Pressable accessibilityLabel="Log set" accessibilityRole="button" onPress={logSet} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: 22, justifyContent: 'center' }}><Icon name="check" size={18} color={t.brandInk} /></Pressable>
         </View>
+        <BodyweightChip t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)} unit={unit} />
 
         {pendingFeel != null ? (
           <View style={{ marginTop: sp.xl }}>
@@ -3353,9 +3631,22 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         ) : null}
 
         <View style={{ marginTop: sp.xl }}>
-          {done.length >= plan.length
+          {paused
+            ? <Cta label="Resume Session" wide onPress={resume} />
+            : done.length >= plan.length
             ? <Cta label={idx < exercises.length - 1 ? 'Next Exercise →' : 'Finish Session'} wide onPress={next} />
             : <Ghost label={idx < exercises.length - 1 ? 'Next Exercise →' : 'Finish Session'} onPress={next} />}
+        </View>
+
+        {/* The same row src/ui/StretchRunner.tsx has carried since it was
+            written, in the same order and drawn the same way — Back, then the
+            clock control. There is no Skip here because the button above
+            already is one: "Next Exercise" moves on whether or not the plan is
+            finished, and a second control meaning the same thing is how two
+            paths into one action come to disagree. */}
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: sp.xl, marginTop: sp.lg }}>
+          {idx > 0 ? <Ghost label="Back" onPress={back} /> : null}
+          {!paused ? <Ghost label="Pause" onPress={pause} /> : null}
         </View>
       </ScrollView>
       <Confetti show={confetti} onDone={() => setConfetti(false)} />

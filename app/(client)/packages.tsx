@@ -20,10 +20,12 @@
 //                               purchase whose package has gone is a dash, not
 //                               a number with a dollar sign guessed onto it.
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Meter, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
@@ -96,6 +98,10 @@ export default function ClientPackages() {
   // failure panel further down, never as "0 sessions remaining" to somebody
   // holding ten.
   const balance = useMemo(() => packBalance(rows as PackPurchase[] | null, pkgNames), [rows, pkgNames]);
+  // A failed read used to strand this screen for the whole session — the only
+  // way to ask again was to leave and come back. Pull to refresh is the
+  // gesture people already try; see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => load(), [load]));
   const remaining = balance.left;
   const packLines = useMemo(() => new Map(balance.lines.map((l) => [l.id, l])), [balance]);
   // `balance.lines` is oldest first, the order redeem_pack_session spends them
@@ -152,7 +158,7 @@ export default function ClientPackages() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -212,7 +218,12 @@ export default function ClientPackages() {
                       {fig(pkgPriceLine(s.amount_cents, s.currency || (s.package_id ? cur.get(s.package_id) : null), s.billing_interval))}
                     </Text>
                   </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 5 }}>
+                  {/* The dot says past-due, ending or live in colour alone.
+                      Grouped with the sentence beside it so the state is
+                      spoken rather than only seen. */}
+                  <View accessible accessibilityRole="text"
+                    accessibilityLabel={`${statusLabel(s.status)}${s.cancel_at_period_end ? ', ending at the end of the period' : ''}`}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 5 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'past_due' ? t.crit : s.cancel_at_period_end ? t.warn : t.brand }} />
                     <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
                       {statusLabel(s.status)}
@@ -234,7 +245,9 @@ export default function ClientPackages() {
                   <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
                     {s.cancel_at_period_end
                       ? <Ghost label={busy === s.id ? 'Working…' : 'Keep Subscription'} onPress={() => resume(s)} />
-                      : <Ghost label={busy === s.id ? 'Working…' : 'Cancel'} onPress={() => stop(s)} />}
+                      : <Ghost label={busy === s.id ? 'Working…' : 'Cancel'}
+                          a11yLabel={`Cancel your ${(s.package_id ? pkgNames.get(s.package_id) : null) || 'subscription'} at the end of the period`}
+                          onPress={() => stop(s)} />}
                     <Ghost label="Payment & Invoices" onPress={() => manage(s)} />
                   </View>
                 </View>
@@ -369,7 +382,7 @@ export default function ClientPackages() {
               </View>
             </Section>
 
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Payments are processed securely by Stripe. Repple never stores your card details.</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Payments are processed securely by Stripe. {BRAND.label} never stores your card details.</Text>
           </>
         )}
       </ScrollView>

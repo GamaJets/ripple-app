@@ -50,6 +50,7 @@ import { View, Text, ScrollView, Alert, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
@@ -101,6 +102,11 @@ export default function StandingAppointments() {
   // ordinary booked session in `sessions`, which is why cancelling one needs
   // nothing this screen invented.
   const { sessions, status: sessionsStatus, cancelMyBooking, refresh: refreshSessions } = useSessions();
+  // A failed read used to strand this screen for the whole session: the only
+  // way to ask again was the Try Again button inside the failure notice, and
+  // there is no such button on a screen that merely went stale. Pull to refresh
+  // is the gesture people already try — see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => { void reloadSeries(); refreshSessions(); }, [reloadSeries, refreshSessions]));
   const { policy: cancelPolicy, status: policyStatus } = useCancellationPolicy();
   const cd = useClientData();
 
@@ -276,7 +282,7 @@ export default function StandingAppointments() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>

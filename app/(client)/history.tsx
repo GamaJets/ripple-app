@@ -89,6 +89,8 @@ import {
   prTimeline, volumeArc, MAX_MONTHS, MONTH_LABELS,
   type MonthCell, type YearRow,
 } from '../../src/lib/longView';
+import { tonnageNote } from '../../src/lib/bodyweightSets';
+import { useClientData } from '../../src/ui/clientData';
 import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
 
 /* ── the read ─────────────────────────────────────────────────────────────
@@ -242,6 +244,11 @@ export default function History() {
   // in a different shape. Only the printed figures move.
   const wu = useSettings().weightUnit;
   const unitNote = convertedNote(wu);
+  // The member's weight over time. A bodyweight set is priced at what they
+  // weighed ON OR BEFORE the day of it — never at today's figure carried back
+  // over three years of history, which would redraw every month on this page
+  // the morning somebody steps on a scale. See src/lib/bodyweightSets.ts.
+  const { weightSeries } = useClientData();
 
   // Read through a ref so the fetch is not re-created (and re-run) every time
   // the shared log changes underneath the screen.
@@ -385,8 +392,8 @@ export default function History() {
     );
   }
 
-  const cells = monthlyHistory(log);
-  const life = lifetimeTotals(log)!;
+  const cells = monthlyHistory(log, Date.now(), MAX_MONTHS, weightSeries);
+  const life = lifetimeTotals(log, weightSeries)!;
   const peak = peakVolume(cells);
   const best = bestMonth(cells);
   const active = trainedMonths(cells).length;
@@ -394,9 +401,13 @@ export default function History() {
   const worstGap = longestGap(cells);
   const quiet = monthsSinceLast(cells) ?? 0;
   const arc = volumeArc(cells);
-  const records = prTimeline(log).slice().reverse().slice(0, 12);
+  const records = prTimeline(log, weightSeries).slice().reverse().slice(0, 12);
   const rows = yearRows(cells);
   const headline = volumeHeadline(life.volumeKg, wu);
+  // Said under the lifetime tonnage whenever it is short. A pull-up done before
+  // anybody weighed this member is training the total cannot price, and a
+  // hero figure printed over it looks exactly as measured as one that is whole.
+  const lifeNote = tonnageNote({ kg: life.volumeKg ?? 0, unknownSets: life.unpricedSets });
   const earlier = span.months - cells.length;      // months clipped by MAX_MONTHS
   const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -434,6 +445,7 @@ export default function History() {
       note={whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}
     />
     {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
+    {whole && lifeNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{lifeNote}</Text> : null}
 
     <Rule />
 

@@ -30,6 +30,7 @@ import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 // this page is priced from the gym's session fee and has no currency of its own,
 // so none of them may be written without `tenants.currency`.
 import { fetchSessions, PAY_DELIVERED_ONLY, type PayPolicy, type PayrollLine } from '@lib/gymSessions';
+import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 import { fetchShifts, fetchDemand, type DemandBlock } from '@lib/gymRota';
 import { fetchClientActivity, DRIFT_LABEL, DEFAULT_WINDOWS, type Drift } from '@lib/clientDrift';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
@@ -64,11 +65,18 @@ export default function Staff() {
   const [rec, setRec] = useState<StaffRecord>(EMPTY);
   const [sel, setSel] = useState<string | null>(null);
 
-  // Whether a no-show is payable is a gym policy, not something this screen may
-  // assume. Same control, same default, same wording as /sessions and /close —
-  // three screens holding three opinions about the same money would be worse
-  // than any of them being wrong.
-  const [policy, setPolicy] = useState<PayPolicy>(PAY_DELIVERED_ONLY);
+  /**
+   * Whether a no-show is payable is a gym policy, and this screen now READS it
+   * rather than offering its own switch.
+   *
+   * The comment that stood here said "same control, same default, same wording
+   * as /sessions and /close — three screens holding three opinions about the
+   * same money would be worse than any of them being wrong". Three identical
+   * controls over three separate `useState`s is exactly three opinions: nothing
+   * saved, nothing shared, and each screen back to the conservative reading on
+   * every reload. The answer is stored on `tenants` now and set in one place.
+   */
+  const [policyCode, setPolicyCode] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
     setRec(EMPTY);
@@ -117,19 +125,26 @@ export default function Staff() {
         return;
       }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', who.tenantId).single();
       if (!live) return;
       // Checked, not assumed. supabase-js resolves on a database error, so a
       // null fee from a failed read would price every unrated session at nothing
       // and quietly shrink what the gym owes its staff.
       setGymName(tErr ? null : t?.name ?? null);
       setSessionFee(tErr ? null : t?.session_fee ?? null);
+      setPolicyCode(tErr ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
       setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
       setFeeRead(tErr ? 'failed' : 'ok');
       await load(who.tenantId);
     })();
     return () => { live = false; };
   }, [load]);
+
+  // The gym's stated policy, and the floor to use where it has not stated one.
+  // Delivered-only cannot overpay anybody, so it is safe as a fallback — but it
+  // is labelled as the floor rather than printed as the gym's answer.
+  const stated = payPolicyOf(policyCode);
+  const policy: PayPolicy = stated ?? PAY_DELIVERED_ONLY;
 
   const view: StaffView = useMemo(() => buildStaff(rec, {
     policy,
@@ -178,23 +193,21 @@ export default function Staff() {
         and who is drifting on their book.
       </p>
 
-      <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', margin: '16px 0 4px' }}>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--ink2)', fontSize: 12.5 }}>
-          <input
-            type="checkbox"
-            checked={policy.payNoShows}
-            onChange={(e) => setPolicy((p) => ({ ...p, payNoShows: e.target.checked }))}
-          />
-          Pay no-shows
-        </label>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--ink2)', fontSize: 12.5 }}>
-          <input
-            type="checkbox"
-            checked={policy.payLateCancellations}
-            onChange={(e) => setPolicy((p) => ({ ...p, payLateCancellations: e.target.checked }))}
-          />
-          Pay late cancellations
-        </label>
+      {/* The gym's answer, read rather than offered. Two checkboxes stood here
+          and saved nothing: an owner ticked "Pay no-shows", read a bigger number
+          on this screen, and settled the month on /close against a smaller one. */}
+      <div style={{ margin: '16px 0 4px', color: 'var(--ink2)', fontSize: 12.5, maxWidth: '72ch' }}>
+        {feeRead === 'failed' ? (
+          <>Pay policy unknown — the gym&rsquo;s record could not be read, so the figures below price
+          delivered sessions only.</>
+        ) : stated ? (
+          <>Pays for: <strong style={{ color: 'var(--ink)' }}>{PAY_POLICY_LABEL[policyCode as PayPolicyCode].toLowerCase()}</strong>.{' '}
+          <a href="/settings" style={{ color: 'var(--brand)' }}>Change it on Gym</a>.</>
+        ) : (
+          <>Pay policy not set — {NO_PAY_POLICY_NOTE}, so everything below counts delivered sessions
+          only. That is the floor, not the gym&rsquo;s answer:{' '}
+          <a href="/settings" style={{ color: 'var(--brand)' }}>say what it pays for on Gym</a>.</>
+        )}
       </div>
 
       {view.warning ? <Banner tone="crit">{view.warning}</Banner> : null}

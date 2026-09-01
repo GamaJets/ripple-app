@@ -4,6 +4,7 @@
 // Everything here is deterministic so it unit-tests cleanly and the dashboard
 // can light up confetti on a new milestone.
 import type { WorkoutEntry } from './mockData';
+import { isBodyweightSet, setLoadKg, entryTonnage, type BodyweightHistory } from './bodyweightSets';
 
 const DAY = 86_400_000;
 // LOCAL calendar day (not UTC): an evening workout must count as today for the user even after its ISO timestamp rolls into tomorrow in UTC.
@@ -96,21 +97,59 @@ export function longestStreak(log: WorkoutEntry[]): number {
   return best;
 }
 
-export interface PR { exercise: string; weight: number; reps: number; est1RM: number; at: string }
+export interface PR {
+  exercise: string;
+  /** The kilograms that actually moved. On a bodyweight set that is the
+   *  person's weight on the day plus anything added, not the added part alone —
+   *  a record has to be the load, or the board would rank a belted pull-up
+   *  below an empty bar. */
+  weight: number;
+  reps: number;
+  est1RM: number;
+  at: string;
+  /** True when the record set was the person's own bodyweight. Carried so a
+   *  row can read "bodyweight +20 kg × 8" instead of presenting a figure that
+   *  is partly derived from a weigh-in as though it had been on a bar. */
+  bodyweight?: boolean;
+  /** Kilograms hung, belted or held on top of the body. Only meaningful with
+   *  `bodyweight`; 0 on a plain set. */
+  addedKg?: number;
+}
 
 /** Epley estimated 1-rep-max. */
 export const est1RM = (weight: number, reps: number) => Math.round(weight * (1 + reps / 30));
 
-/** Best set (by estimated 1RM) for each exercise that logs weight × reps. */
-export function personalRecords(log: WorkoutEntry[]): PR[] {
+/**
+ * Best set (by estimated 1RM) for each exercise whose load is known.
+ *
+ * `history` is the member's own weight over time, and it is what lets a
+ * bodyweight set onto this board at all. Without it a pull-up has no load, and
+ * this function did what it had always done: skipped it, silently, so a
+ * calisthenics member's board was empty. With it the set is priced at what they
+ * weighed on or before that day (see src/lib/bodyweightSets.ts) and takes its
+ * place beside the barbell lifts.
+ *
+ * Optional, and an absent history is NOT an error. Plenty of members have never
+ * been scanned and never typed a weight, and for them a bodyweight set still
+ * has no known load — it simply cannot be estimated from, and it belongs on the
+ * reps board (`repRecords`) rather than being given an invented body here.
+ */
+export function personalRecords(log: WorkoutEntry[], history: BodyweightHistory = []): PR[] {
   const best = new Map<string, PR>();
   for (const e of log) {
     if (!e.sets) continue;
-    for (const [reps, weight] of e.sets) {
-      if (!weight || !reps) continue;
+    for (let i = 0; i < e.sets.length; i++) {
+      const [reps] = e.sets[i];
+      if (!reps) continue;
+      const weight = setLoadKg(e, i, e.sets[i], history, e.t);
+      if (weight == null || weight <= 0) continue;
       const e1 = est1RM(weight, reps);
       const cur = best.get(e.exercise);
-      if (!cur || e1 > cur.est1RM) best.set(e.exercise, { exercise: e.exercise, weight, reps, est1RM: e1, at: e.t });
+      if (!cur || e1 > cur.est1RM) best.set(e.exercise, {
+        exercise: e.exercise, weight, reps, est1RM: e1, at: e.t,
+        bodyweight: isBodyweightSet(e, i),
+        addedKg: isBodyweightSet(e, i) ? Math.max(0, e.sets[i][1] || 0) : 0,
+      });
     }
   }
   return [...best.values()].sort((a, b) => b.est1RM - a.est1RM);
@@ -120,27 +159,52 @@ export function personalRecords(log: WorkoutEntry[]): PR[] {
  * Was the given entry a personal record at the time it was logged?
  * Used to flag a fresh PR (and fire confetti) right after logging.
  */
-export function isNewPR(log: WorkoutEntry[], entry: WorkoutEntry): boolean {
+export function isNewPR(log: WorkoutEntry[], entry: WorkoutEntry, history: BodyweightHistory = []): boolean {
   if (!entry.sets) return false;
-  const topNow = Math.max(...entry.sets.map(([r, w]) => (w && r ? est1RM(w, r) : 0)), 0);
+  // One helper for both sides, so a bodyweight set cannot count towards the new
+  // best while being skipped in the old one — which would make every pull-up
+  // session a record the first time this learned to read them.
+  const top = (e: WorkoutEntry) => Math.max(0, ...(e.sets ?? []).map((s, i) => {
+    const w = setLoadKg(e, i, s, history, e.t);
+    return w != null && s[0] ? est1RM(w, s[0]) : 0;
+  }));
+  const topNow = top(entry);
   if (topNow <= 0) return false;
   const prior = log.filter((e) => e !== entry && e.exercise === entry.exercise && e.sets);
-  const priorBest = Math.max(0, ...prior.flatMap((e) => e.sets!.map(([r, w]) => (w && r ? est1RM(w, r) : 0))));
+  const priorBest = Math.max(0, ...prior.map(top));
   return topNow > priorBest;
 }
 
-export interface WeekStats { workouts: number; volumeKg: number; kcal: number; days: number }
+export interface WeekStats {
+  workouts: number;
+  volumeKg: number;
+  kcal: number;
+  days: number;
+  /** Bodyweight sets in the week whose load nobody has recorded, so they are
+   *  not in `volumeKg`. Zero when the week's tonnage is whole. A screen that
+   *  prints the tonnage without checking this is stating a total over a set it
+   *  knows to be short — see src/lib/bodyweightSets.ts. */
+  unpricedSets: number;
+}
 
-/** Totals for the trailing 7 days. Volume = Σ reps × weight across all sets. */
-export function weekStats(log: WorkoutEntry[], now: number = Date.now()): WeekStats {
+/**
+ * Totals for the trailing 7 days. Volume = Σ reps × load across all sets.
+ *
+ * `history` is the member's weight over time; without it a bodyweight set has
+ * no load and lands in `unpricedSets` rather than being counted as zero.
+ */
+export function weekStats(log: WorkoutEntry[], now: number = Date.now(), history: BodyweightHistory = []): WeekStats {
   const since = now - 7 * DAY;
   const recent = log.filter((e) => Date.parse(e.t) >= since);
-  let volume = 0, kcal = 0;
+  let volume = 0, kcal = 0, unpriced = 0;
   for (const e of recent) {
     kcal += e.kcal ?? 0;
-    if (e.sets) for (const [reps, weight] of e.sets) volume += (reps || 0) * (weight || 0);
+    const t = entryTonnage(e, history);
+    volume += t.kg;
+    unpriced += t.unknownSets;
   }
   return {
+    unpricedSets: unpriced,
     workouts: recent.length,
     volumeKg: Math.round(volume),
     kcal: Math.round(kcal),

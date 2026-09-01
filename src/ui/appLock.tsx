@@ -9,6 +9,7 @@
 // layout, so it can ask whether anybody is signed in — a lock over a sign-in
 // screen protects nothing and would only teach people to dismiss it.
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { BRAND } from '../lib/brands';
 import { AppState, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { lockDecision, type LockState } from '../lib/appLock';
@@ -129,7 +130,7 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
     if (!LA) { setState('open'); return true; }
     try {
       const r = await LA.authenticateAsync({
-        promptMessage: 'Unlock Repple',
+        promptMessage: `Unlock ${BRAND.label}`,
         // The passcode is the fallback on purpose: a face that will not read
         // in a dark gym must not lock somebody out of their own training.
         disableDeviceFallback: false,

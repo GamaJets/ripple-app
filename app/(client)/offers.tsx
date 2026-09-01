@@ -12,10 +12,12 @@
 // The Membership screen's "Offers" row used to point at Explore — a list of
 // what else the app can do, which is not an offer. It points here now.
 import { useCallback, useEffect, useState } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
@@ -55,6 +57,10 @@ export default function Offers() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  // A failed read used to strand this screen for the whole session — the only
+  // way to ask again was to leave and come back. Pull to refresh is the gesture
+  // people already try; see src/ui/pullToRefresh.tsx.
+  const pull = usePullToRefresh(useCallback(() => { void refresh(); }, [refresh]));
 
   const redeem = async () => {
     const c = code.trim().toUpperCase();
@@ -81,7 +87,7 @@ export default function Offers() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator={false}>
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
@@ -110,8 +116,8 @@ export default function Offers() {
           </View>
         </Section>
 
-        <Notice tone={t.ink3} kicker="How this works" title="Repple records it, your gym applies it"
-          note="Redeeming tells your gym you have used the code. The discount comes off through their billing, not through the app — Repple never touches the payment." />
+        <Notice tone={t.ink3} kicker="How this works" title={`${BRAND.label} records it, your gym applies it`}
+          note={`Redeeming tells your gym you have used the code. The discount comes off through their billing, not through the app — ${BRAND.label} never touches the payment.`} />
 
         <Rule />
 

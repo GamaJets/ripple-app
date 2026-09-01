@@ -27,6 +27,7 @@ import {
   type PtSession, type PayPolicy, type PayrollLine,
 } from '@lib/gymSessions';
 import { fetchPasses } from '@lib/gymPasses';
+import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 import { assertWhole, capLimit } from '@lib/rowCap';
 import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
@@ -72,11 +73,17 @@ export default function Close() {
     return all[1] ?? monthKeyOf();
   });
 
-  // Whether a no-show is payable is a gym policy, not something this screen may
-  // assume. Same control, same default, same wording as /sessions — a close
-  // that priced no-shows differently from the payroll screen would be a second
-  // opinion about the same money.
-  const [policy, setPolicy] = useState<PayPolicy>(PAY_DELIVERED_ONLY);
+  /**
+   * Whether a no-show is payable is a gym policy, and this screen READS it.
+   *
+   * The comment here used to say that a close pricing no-shows differently from
+   * the payroll screen "would be a second opinion about the same money", and
+   * then held its own unsaved copy — so it was one. An owner ticked the box on
+   * /sessions, walked here to settle the month, and this screen had reset. The
+   * month was closed on a number the owner had already decided against, in the
+   * one place in the console where the figure leaves the building.
+   */
+  const [policyCode, setPolicyCode] = useState<string | null>(null);
 
   const w = useMemo(() => monthWindow(key), [key]);
 
@@ -113,7 +120,7 @@ export default function Close() {
         return;
       }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, session_fee, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', who.tenantId).single();
       if (!live) return;
       // Checked, not assumed. A null session fee from a failed read would price
       // every unrated session at nothing and quietly shrink payroll; the two
@@ -121,6 +128,7 @@ export default function Close() {
       setGymName(tErr ? null : t?.name ?? null);
       setGymCcy(tErr ? null : (((t?.currency ?? '') as string).trim().toUpperCase() || null));
       setSessionFee(tErr ? null : t?.session_fee ?? null);
+      setPolicyCode(tErr ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
       setFeeRead(tErr ? 'failed' : 'ok');
       if (w) await load(who.tenantId, w);
     })();
@@ -136,6 +144,13 @@ export default function Close() {
   // close, not after: the formatter below closes over it, and a `const` read
   // before its own initialiser is a ReferenceError, not a fallback.
   const currency = useMemo(() => currencyOf(rec, gymCcy), [rec, gymCcy]);
+
+  // The gym's stated policy, and the floor where it has not stated one. A close
+  // built on delivered sessions alone cannot pay somebody more than they earned;
+  // it can pay them less, which is why the screen says so rather than implying
+  // the gym chose it.
+  const stated = payPolicyOf(policyCode);
+  const policy: PayPolicy = stated ?? PAY_DELIVERED_ONLY;
 
   const close: MonthClose | null = useMemo(() => {
     if (!w) return null;
@@ -190,23 +205,33 @@ export default function Close() {
             return <option key={m} value={m}>{mw ? mw.label : m}</option>;
           })}
         </select>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--ink2)', fontSize: 12.5 }}>
-          <input
-            type="checkbox"
-            checked={policy.payNoShows}
-            onChange={(e) => setPolicy((p) => ({ ...p, payNoShows: e.target.checked }))}
-          />
-          Pay no-shows
-        </label>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: 'var(--ink2)', fontSize: 12.5 }}>
-          <input
-            type="checkbox"
-            checked={policy.payLateCancellations}
-            onChange={(e) => setPolicy((p) => ({ ...p, payLateCancellations: e.target.checked }))}
-          />
-          Pay late cancellations
-        </label>
+        {/* Read, not offered. Two checkboxes stood beside this month picker and
+            saved nothing, so the close could be settled on a policy the owner
+            had set somewhere else and this screen had forgotten. */}
+        <span style={{ color: 'var(--ink2)', fontSize: 12.5 }}>
+          {feeRead === 'failed' ? (
+            <>Pay policy unknown — the gym record could not be read; delivered sessions only.</>
+          ) : stated ? (
+            <>Pays for {PAY_POLICY_LABEL[policyCode as PayPolicyCode].toLowerCase()} ·{' '}
+            <a href="/settings" style={{ color: 'var(--brand)' }}>Gym</a></>
+          ) : (
+            <>Pay policy not set — delivered sessions only ·{' '}
+            <a href="/settings" style={{ color: 'var(--brand)' }}>set it on Gym</a></>
+          )}
+        </span>
       </div>
+
+      {/* A month is closed here and the figure goes to an accountant, so the
+          floor is said in a banner rather than only in a caption beside a
+          dropdown. */}
+      {feeRead !== 'failed' && !stated ? (
+        <Banner>
+          <strong style={{ color: 'var(--ink)' }}>No pay policy is stored for this gym</strong> —{' '}
+          {NO_PAY_POLICY_NOTE}. Everything below pays delivered sessions only, which is the least
+          this gym owes rather than a figure it has agreed to. A coach who held an hour for somebody
+          who did not turn up is not in the total.
+        </Banner>
+      ) : null}
 
       {!w || !close ? (
         <Banner tone="crit">{key} is not a month this console can open.</Banner>

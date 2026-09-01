@@ -33,13 +33,14 @@ import { searchDishes } from '../../src/lib/restaurant';
 import { mergeFoodResults } from '../../src/lib/foodSearch';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 import { notifySuccess } from '../../src/ui/haptics';
-import { useFoodLog, type FoodEntry } from '../../src/ui/foodLog';
+import { useFoodLog, useFoodHistory, type FoodEntry } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
+import { todayKey } from '../../src/lib/offlineQueue';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { useWearables } from '../../src/ui/wearables';
-import { Rule, Section, SectionHead, Hero, Ghost, ListRow, Flag, Field, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
@@ -265,6 +266,16 @@ export default function FoodLog() {
  // who read that and re-logged their breakfast has now eaten it twice on paper.
  // app/(client)/nutrition.tsx splits the same three states; this is that split.
  const dayReading = fl.status === 'loading';
+ // The fortnight behind today. A separate read with a separate status, so a
+ // failed history cannot touch the day's macros or the calories remaining —
+ // see the note above `useFoodHistory`. Before this the app had no yesterday
+ // at all: the food log was a thing you could write into and never read.
+ const hist = useFoodHistory(14);
+ const [openDay, setOpenDay] = useState<string | null>(null);
+ const histWhole = isWhole(hist.status);
+ // Today is drawn by everything above and does not need a row of its own down
+ // here repeating it.
+ const pastDays = hist.days.filter((d) => d.day !== todayKey());
  const wToday = useWearables().today;
  const burn = target ? dayBurn(target, wToday) : null;
  const burned = burn?.burned ?? 0;
@@ -522,6 +533,80 @@ export default function FoodLog() {
  </View>
  ))}
  </>)}
+ </Section>
+
+ <Rule />
+
+ {/* ── the days behind today ──────────────────────────────────────── */}
+ {/* This screen read exactly one day and offered no way to see any other.
+     A member could log meals for a fortnight and had no picker, no week and
+     no average — so "how much do I actually eat" was a question the app
+     collected the answer to and never showed anybody. */}
+ <Section>
+ <SectionHead title="Recent Days" note={histWhole && hist.average ? `${hist.average.overDays} day${hist.average.overDays === 1 ? '' : 's'} logged` : undefined} />
+ {/* A mean over a fortnight is a figure, and src/ui/loadStatus.ts is
+     explicit that a figure may not be computed over a read that failed or
+     stopped at its row limit. `overDays` goes with it wherever it is
+     printed: "1,900 kcal a day" over two logged days out of fourteen is a
+     different sentence from the same number over fourteen. */}
+ {histWhole && hist.average ? (<>
+  <KpiRow items={[
+   { label: 'Average', value: fig(num(hist.average.kcal)), unit: 'kcal/day' },
+   { label: 'Protein', value: fig(hist.average.protein), unit: 'g' },
+   { label: 'Carbs', value: fig(hist.average.carbs), unit: 'g' },
+   { label: 'Fat', value: fig(hist.average.fat), unit: 'g' },
+  ]} />
+  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+   Averaged over the {hist.average.overDays} day{hist.average.overDays === 1 ? '' : 's'} in the last fortnight you logged
+   something. Days with nothing logged are left out rather than counted as nothing eaten.
+  </Text>
+ </>) : (
+  <Text style={{ ...ty.label, color: t.ink3 }}>
+   {hist.status === 'loading' ? 'Reading the last fortnight…'
+    : hist.status === 'partial' ? 'You have logged more in the last fortnight than this screen can read in one go, so there is no honest average to take over it. The days below are real.'
+    : hist.status === 'error' ? 'We couldn’t read the last fortnight, so we can’t say what you have been eating. Nothing has been lost.'
+    : 'Nothing logged in the last fortnight yet — a few days of meals and your average shows up here.'}
+  </Text>
+ )}
+
+ {pastDays.length ? (
+  <View style={{ marginTop: sp.md }}>
+   {pastDays.map((d) => {
+    const open = openDay === d.day;
+    const [y, m, dd] = d.day.split('-').map(Number);
+    const pretty = new Date(y, m - 1, dd).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
+    return (
+     <View key={d.day}>
+      <Rule />
+      <Pressable
+       onPress={() => setOpenDay(open ? null : d.day)}
+       accessibilityRole="button"
+       accessibilityState={{ expanded: open }}
+       accessibilityLabel={`${pretty}, ${num(d.kcal)} kilocalories over ${d.entries.length} meal${d.entries.length === 1 ? '' : 's'}`}
+       accessibilityHint={open ? 'Hides the meals for this day' : 'Shows the meals for this day'}
+       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+       <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{pretty}</Text>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>P{d.protein} C{d.carbs} F{d.fat} · {d.entries.length} meal{d.entries.length === 1 ? '' : 's'}</Text>
+       </View>
+       <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{num(d.kcal)}</Text>
+       <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
+      </Pressable>
+      {open ? (
+       <View style={{ paddingBottom: sp.md }}>
+        {d.entries.map((fe) => (
+         <View key={fe.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: 6 }}>
+          <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(fe.kcal)} kcal · P{fe.protein} C{fe.carbs} F{fe.fat}</Text>
+         </View>
+        ))}
+       </View>
+      ) : null}
+     </View>
+    );
+   })}
+  </View>
+ ) : null}
  </Section>
 
  </ScrollView>

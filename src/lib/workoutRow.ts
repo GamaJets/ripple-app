@@ -19,6 +19,8 @@ export interface WorkoutRow {
   performed_at: string;
   exercise: string;
   sets?: [number, number][] | null;
+  /** Which sets were bodyweight, aligned to `sets`. See WorkoutEntry.bw. */
+  bw?: boolean[] | null;
   feel?: WorkoutEntry['feel'] | null;
   cardio?: WorkoutEntry['cardio'] | null;
   kcal?: number | null;
@@ -39,6 +41,7 @@ export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   t: r.performed_at,
   exercise: r.exercise,
   sets: r.sets ?? undefined,
+  bw: r.bw ?? undefined,
   feel: r.feel ?? undefined,
   cardio: r.cardio ?? undefined,
   kcal: r.kcal ?? undefined,
@@ -53,6 +56,7 @@ export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
   performed_at: e.t,
   exercise: e.exercise,
   sets: e.sets ?? null,
+  bw: e.bw ?? null,
   feel: e.feel ?? null,
   cardio: e.cardio ?? null,
   kcal: e.kcal ?? null,
@@ -66,6 +70,6 @@ export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
 /** Every field of an entry that is meant to survive a trip to the database.
  *  `id` is excluded: the server assigns it, so a new entry has none yet. */
 export const PERSISTED_FIELDS: (keyof WorkoutEntry)[] =
-  ['t', 'exercise', 'sets', 'feel', 'cardio', 'kcal', 'zones', 'sessionMins', 'loggedBy'];
+  ['t', 'exercise', 'sets', 'bw', 'feel', 'cardio', 'kcal', 'zones', 'sessionMins', 'loggedBy'];
 // `amendedAt` is deliberately absent, for the same reason `id` is: the server
 // assigns it. It comes back on the way in and is never sent on the way out.

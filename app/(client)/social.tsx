@@ -22,6 +22,7 @@
 //    goes out in the unit the client reads. The body-fat figure beside it stays
 //    a percentage, because that is what it is in any unit system.
 import { View, Text, ScrollView, Share } from 'react-native';
+import { BRAND } from '../../src/lib/brands';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -84,8 +85,8 @@ export default function Social() {
  deltaMoved(bfMove) ? `${wayWord(bfMove)} ${Math.abs(bfMove)}% body fat` : null,
  ].filter(Boolean);
  const msg = measured && bits.length
- ? `My Repple progress — ${bits.join(' and ')} so far. Every rep ripples out.`
- : 'I train with Repple. Every rep ripples out.';
+ ? `My ${BRAND.label} progress — ${bits.join(' and ')} so far. Every rep ripples out.`
+ : `I train with ${BRAND.label}. Every rep ripples out.`;
  try { await Share.share({ message: msg }); } catch {}
  };
 
@@ -152,14 +153,14 @@ export default function Social() {
  <Section>
  <SectionHead title="How Sharing Works" />
  <Text style={{ ...ty.body, color: t.ink2 }}>
- Sharing opens your phone's own share sheet, so it goes wherever you send it — a story, a post, a message to one person. Repple has no posting access to any account: nothing is ever posted automatically, and you approve every share.
+ Sharing opens your phone's own share sheet, so it goes wherever you send it — a story, a post, a message to one person. {BRAND.label} has no posting access to any account: nothing is ever posted automatically, and you approve every share.
  </Text>
  </Section>
 
  <Rule />
 
  <Section>
- <Cta label={measured ? 'Share My Progress' : 'Share Repple'} wide onPress={share} />
+ <Cta label={measured ? 'Share My Progress' : `Share ${BRAND.label}`} wide onPress={share} />
  </Section>
 
  </ScrollView>

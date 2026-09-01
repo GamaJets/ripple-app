@@ -22,6 +22,7 @@
 // in-session transport (TF-36, `SessionMusicBar`), which is mounted here as
 // well as in a session so the two agree about what "connected" means.
 import { useState, useEffect, useCallback } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Alert, Linking, ActivityIndicator, Image } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -350,7 +351,7 @@ export default function Music() {
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
  {pl.source === 'spotify'
  ? 'These came from Spotify’s catalogue. Save adds them to your account as a playlist.'
- : 'These are Repple’s built-in list, not your library. Tap any track to find it in Spotify.'}
+ : `These are ${BRAND.label}’s built-in list, not your library. Tap any track to find it in Spotify.`}
  </Text>
  </>
  ) : (

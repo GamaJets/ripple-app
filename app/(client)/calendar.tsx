@@ -62,6 +62,7 @@
 // table, which a client has no row in, so those arrive empty rather than
 // borrowed from the reader.
 import { useState, useEffect, useCallback } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -73,6 +74,7 @@ import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy,
 import { feeAmountLine } from '../../src/lib/booking';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, type WeightUnit } from '../../src/lib/units';
 import type { TrainingSession } from '../../src/lib/types';
@@ -252,6 +254,13 @@ export default function Calendar() {
   // logged training looked empty here while Activity listed all of it. Same log,
   // same day, same words — see `logDetail` above.
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+  // This screen tells the member to pull down in two places — "pull down to
+  // refresh and pick another time" when a slot is taken from under them, and
+  // "nothing has been cancelled — pull down to refresh" when the sessions read
+  // fails — and until now pulling down did nothing at all. Every read those two
+  // sentences are about is refreshed here: the diary, the waiting lists, the
+  // late-cancellation charges and the training log.
+  const pull = usePullToRefresh(useCallback(() => { refresh(); reloadWait(); reloadFees(); reloadLog(); }, [refresh, reloadWait, reloadFees, reloadLog]));
   // Deliberately NOT read from useCoachProfile(). That provider loads the
   // SIGNED-IN user's own `trainers` row, and a client has no row in `trainers`
   // — so on this app it never loads, and `sessionFee` sits at its initial 0
@@ -585,7 +594,7 @@ export default function Calendar() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
@@ -649,7 +658,7 @@ export default function Calendar() {
                   // unreadable name becomes a generic but true title rather
                   // than a dash somebody finds under next Tuesday.
                   const title = coachName ? `Training with ${coachName}` : 'Personal training';
-                  const calName = coachName ? `Repple — ${coachName}` : 'Repple — Personal training';
+                  const calName = coachName ? `${BRAND.label} — ${coachName}` : `${BRAND.label} — Personal training`;
                   const evts = mine.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title }));
                   await shareIcs(buildIcs(evts, calName), 'repple-sessions.ics', 'Add sessions to your calendar');
                 }} />
@@ -1055,7 +1064,7 @@ export default function Calendar() {
                 </Text>
               ) : (<>
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                  Recorded when you cancelled inside your coach’s notice period. Repple doesn’t take these payments — settle them with your coach.
+                  Recorded when you cancelled inside your coach’s notice period. {BRAND.label} doesn’t take these payments — settle them with your coach.
                 </Text>
                 {myFees.map((c, ci) => (
                   <View key={c.id}>

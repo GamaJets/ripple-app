@@ -45,6 +45,7 @@
 // here reconcile with the ones the rest of the app already shows.
 import type { WorkoutEntry } from './mockData';
 import { est1RM } from './streaks';
+import { setLoadKg, isBodyweightSet, type BodyweightHistory } from './bodyweightSets';
 
 const DAY = 86_400_000;
 
@@ -136,6 +137,12 @@ export interface MonthCell {
   kcal: number | null;
   /** Best single-set estimated 1RM anywhere in the month, across all lifts. */
   best1RM: number | null;
+  /** Bodyweight sets in the month whose load nobody has recorded, so they are
+   *  not in `volumeKg`. See src/lib/bodyweightSets.ts: a pull-up done by
+   *  somebody who has never been weighed is real work with no weight on it, and
+   *  a tonnage printed over it without saying so is short by an unknown amount.
+   *  0 on a month whose tonnage is whole, including an untrained one. */
+  unpricedSets: number;
   /** The lift that carried the most volume this month. */
   topLift: string | null;
 }
@@ -145,11 +152,11 @@ function blankCell(key: string): MonthCell {
   return {
     key, year, month, label: MONTH_LABELS[month] ?? key,
     trained: false, sessions: null, days: null, volumeKg: null, kcal: null,
-    best1RM: null, topLift: null,
+    best1RM: null, topLift: null, unpricedSets: 0,
   };
 }
 
-function cellFrom(key: string, entries: WorkoutEntry[]): MonthCell {
+function cellFrom(key: string, entries: WorkoutEntry[], history: BodyweightHistory): MonthCell {
   const cell = blankCell(key);
   if (!entries.length) return cell;
 
@@ -159,15 +166,24 @@ function cellFrom(key: string, entries: WorkoutEntry[]): MonthCell {
   let volume = 0, anyVolume = false;
   let kcal = 0, anyKcal = false;
   let best = 0, anyBest = false;
+  let unpriced = 0;
 
   for (const e of entries) {
     sessions.add(e.t);
     const dk = dayKeyOf(e.t);
     if (dk) days.add(dk);
     if (typeof e.kcal === 'number' && Number.isFinite(e.kcal)) { kcal += e.kcal; anyKcal = true; }
-    for (const set of e.sets ?? []) {
-      const reps = set?.[0] ?? 0, weight = set?.[1] ?? 0;
-      if (!(reps > 0) || !(weight > 0)) continue;
+    for (let i = 0; i < (e.sets?.length ?? 0); i++) {
+      const set = e.sets![i];
+      const reps = set?.[0] ?? 0;
+      if (!(reps > 0)) continue;
+      // The LOAD, which on a bodyweight set is the person plus whatever they
+      // hung off themselves. Reading `set[1]` directly is what this did, and on
+      // a pull-up that number is zero — so a month of calisthenics reported no
+      // tonnage, no top lift and no estimated max, and the grid drew it as an
+      // untrained month with sessions in it.
+      const weight = setLoadKg(e, i, set, history, e.t);
+      if (weight == null || !(weight > 0)) { if (isBodyweightSet(e, i)) unpriced++; continue; }
       const v = reps * weight;
       volume += v; anyVolume = true;
       volByLift.set(e.exercise, (volByLift.get(e.exercise) ?? 0) + v);
@@ -188,6 +204,7 @@ function cellFrom(key: string, entries: WorkoutEntry[]): MonthCell {
     kcal: anyKcal ? Math.round(kcal) : null,
     best1RM: anyBest ? best : null,
     topLift,
+    unpricedSets: unpriced,
   };
 }
 
@@ -205,7 +222,7 @@ function cellFrom(key: string, entries: WorkoutEntry[]): MonthCell {
  * Capped to the most recent `maxMonths`; compare `historySpan().months` against
  * the returned length to tell the member that earlier months exist.
  */
-export function monthlyHistory(log: WorkoutEntry[], now: number = Date.now(), maxMonths: number = MAX_MONTHS): MonthCell[] {
+export function monthlyHistory(log: WorkoutEntry[], now: number = Date.now(), maxMonths: number = MAX_MONTHS, history: BodyweightHistory = []): MonthCell[] {
   const byMonth = new Map<string, WorkoutEntry[]>();
   let first: string | null = null, last: string | null = null;
   for (const e of log) {
@@ -225,7 +242,7 @@ export function monthlyHistory(log: WorkoutEntry[], now: number = Date.now(), ma
 
   const cells: MonthCell[] = [];
   for (let k = first; ; k = nextMonth(k)) {
-    cells.push(cellFrom(k, byMonth.get(k) ?? []));
+    cells.push(cellFrom(k, byMonth.get(k) ?? [], history));
     if (k === end) break;
     // Defensive stop: a clock skewed decades into the future must not spin here.
     if (cells.length > 1200) break;
@@ -420,25 +437,31 @@ export interface Lifetime {
   volumeKg: number | null;
   /** Null when nothing carried a calorie figure — never 0. */
   kcal: number | null;
-  /** Distinct exercises with at least one weighted set. */
+  /** Distinct exercises with at least one set whose load is known. */
   lifts: number;
+  /** Bodyweight sets across the whole history whose load nobody has recorded,
+   *  so they are not in `volumeKg`. See src/lib/bodyweightSets.ts. */
+  unpricedSets: number;
 }
 
 /** Everything, since the beginning. Null when there is no history to total. */
-export function lifetimeTotals(log: WorkoutEntry[]): Lifetime | null {
+export function lifetimeTotals(log: WorkoutEntry[], history: BodyweightHistory = []): Lifetime | null {
   const span = historySpan(log, Date.now());
   if (!span) return null;
   const sessions = new Set<string>(), days = new Set<string>(), lifts = new Set<string>();
-  let volume = 0, anyVolume = false, kcal = 0, anyKcal = false;
+  let volume = 0, anyVolume = false, kcal = 0, anyKcal = false, unpriced = 0;
   for (const e of log) {
     const dk = dayKeyOf(e.t);
     if (!dk) continue;
     sessions.add(e.t);
     days.add(dk);
     if (typeof e.kcal === 'number' && Number.isFinite(e.kcal)) { kcal += e.kcal; anyKcal = true; }
-    for (const set of e.sets ?? []) {
-      const reps = set?.[0] ?? 0, weight = set?.[1] ?? 0;
-      if (!(reps > 0) || !(weight > 0)) continue;
+    for (let i = 0; i < (e.sets?.length ?? 0); i++) {
+      const set = e.sets![i];
+      const reps = set?.[0] ?? 0;
+      if (!(reps > 0)) continue;
+      const weight = setLoadKg(e, i, set, history, e.t);
+      if (weight == null || !(weight > 0)) { if (isBodyweightSet(e, i)) unpriced++; continue; }
       volume += reps * weight; anyVolume = true;
       lifts.add(e.exercise);
     }
@@ -449,6 +472,7 @@ export function lifetimeTotals(log: WorkoutEntry[]): Lifetime | null {
     volumeKg: anyVolume ? Math.round(volume) : null,
     kcal: anyKcal ? Math.round(kcal) : null,
     lifts: lifts.size,
+    unpricedSets: unpriced,
   };
 }
 
@@ -477,7 +501,7 @@ export interface Milestone {
  * most per lift — the best set of the session — so a five-set PR day is one
  * moment rather than five.
  */
-export function prTimeline(log: WorkoutEntry[]): Milestone[] {
+export function prTimeline(log: WorkoutEntry[], history: BodyweightHistory = []): Milestone[] {
   const sorted = log
     .filter((e) => Number.isFinite(Date.parse(e.t)) && e.sets && e.sets.length)
     .sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
@@ -485,9 +509,12 @@ export function prTimeline(log: WorkoutEntry[]): Milestone[] {
   const out: Milestone[] = [];
   for (const e of sorted) {
     let top = 0, topW = 0, topR = 0;
-    for (const set of e.sets ?? []) {
-      const reps = set?.[0] ?? 0, weight = set?.[1] ?? 0;
-      if (!(reps > 0) || !(weight > 0)) continue;
+    for (let i = 0; i < (e.sets?.length ?? 0); i++) {
+      const set = e.sets![i];
+      const reps = set?.[0] ?? 0;
+      if (!(reps > 0)) continue;
+      const weight = setLoadKg(e, i, set, history, e.t);
+      if (weight == null || !(weight > 0)) continue;
       const one = est1RM(weight, reps);
       if (one > top) { top = one; topW = weight; topR = reps; }
     }

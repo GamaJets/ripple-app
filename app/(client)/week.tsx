@@ -6,6 +6,7 @@
 // rows instead of seven bordered cards. Every provider, computation and route is
 // preserved.
 import { View, Text, Pressable, ScrollView } from 'react-native';
+import { BRAND } from '../../src/lib/brands';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -82,7 +83,7 @@ export default function ThisWeek() {
         {programUnknown ? (
           <View style={{ marginTop: sp.lg }}>
             <Notice tone={t.warn} kicker="This week" title="We couldn’t check for a coach plan"
-              note="The week below is Repple's automatic program. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal." />
+              note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
           </View>
         ) : null}
 

@@ -13,9 +13,11 @@
 // reads the day through the edge function, and WHOOP already feeds the workout
 // importer above it. The line described behaviour the code no longer has.
 import { useState, useEffect, useCallback } from 'react';
+import { BRAND } from '../../src/lib/brands';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -128,6 +130,10 @@ export default function Devices() {
  const [wk, setWk] = useState<WorkoutSample[] | null>(null);
  const [wkBusy, setWkBusy] = useState(false);
  const { ids: importedIds, mark: markImported } = useImportedIds();
+ // Every figure on this screen comes off a device that can stop answering, and
+ // the only way to ask again was to leave the screen and come back. Pull to
+ // refresh is the gesture people already try; see src/ui/pullToRefresh.tsx.
+ const pull = usePullToRefresh(useCallback(() => { w.syncAll(); }, [w]));
  // Null, not false, when the log is not whole: "we cannot tell" is a third
  // answer and the row below renders it as one rather than as "not logged yet".
  const alreadyLogged = (sm: WorkoutSample): boolean | null =>
@@ -361,7 +367,7 @@ export default function Devices() {
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -517,7 +523,7 @@ export default function Devices() {
            </Flag>
           ) : (
            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-            {r.reason || 'Cannot report sleep to Repple yet.'}
+            {r.reason || `Cannot report sleep to ${BRAND.label} yet.`}
            </Text>
           )
          ) : lastNight.length === 0 ? (
@@ -545,7 +551,7 @@ export default function Devices() {
   <Section>
    <SectionHead title="Write to Apple Health" note={hkAuth === 'granted' ? 'allowed' : undefined} />
    <Text style={{ ...ty.label, color: t.ink2 }}>
-    Send the sessions you logged in Repple to the Health app, so a gym session sits beside everything your watch recorded. One workout per session: a push day with eight exercises goes in as one entry, not eight.
+    Send the sessions you logged in {BRAND.label} to the Health app, so a gym session sits beside everything your watch recorded. One workout per session: a push day with eight exercises goes in as one entry, not eight.
    </Text>
    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
     What goes in: the activity, when it started, how long it ran, and energy and distance only where those were actually recorded. Nothing is estimated, nothing is written until you tap the button, and each session is written once.
@@ -558,8 +564,8 @@ export default function Devices() {
      <View style={{ marginTop: sp.lg }}>
       <Notice
        kicker="Permission"
-       title="Health is not letting Repple add workouts"
-       note="You said no, and that stands — nothing has been written. To change it: Health ▸ Sharing ▸ Apps ▸ Repple ▸ turn on Workouts."
+       title={`Health is not letting ${BRAND.label} add workouts`}
+       note={`You said no, and that stands — nothing has been written. To change it: Health ▸ Sharing ▸ Apps ▸ ${BRAND.label} ▸ turn on Workouts.`}
       />
      </View>
     ) : null}
@@ -803,7 +809,7 @@ export default function Devices() {
      </View>
      <Text style={{ ...value(34), color: t.ink, marginBottom: sp.md }}>{DETAILS[detail].value}</Text>
      <Text style={{ ...ty.body, color: t.ink2 }}>{DETAILS[detail].blurb}</Text>
-     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Manage what Repple can read in Apple Health ▸ Sharing ▸ Repple.</Text>
+     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Manage what {BRAND.label} can read in Apple Health ▸ Sharing ▸ {BRAND.label}.</Text>
     </>
    ) : null}
   </View>

@@ -466,6 +466,33 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     when: 'subChange() says a payment failed — the client’s half of part 158’s middle band',
     to: 'client', title: 'Your payment did not go through', route: '/(client)/packages', icon: 'trophy',
   },
+  // ── the pack running out (part 163) ──────────────────────────────────────
+  //
+  // `packRunOut()` in src/lib/coachMoney.ts could always say a paid pack was
+  // spent, and exactly one thing rendered it: app/(trainer)/payments.tsx, a
+  // screen a coach opens when they are thinking about money. That is not the
+  // moment this matters. The moment is the session AFTER the last one, when the
+  // coach turns up and delivers something nothing pays for.
+  //
+  // Two rows rather than one, because a notification at zero is late. The
+  // warning at one session left is the cheap conversation; the one at zero is
+  // the fact. Both are downward crossings, so a pack going 2 → 1 → 0 produces
+  // exactly these two and a refund that puts sessions back produces neither.
+  //
+  // Neither carries a figure. `client_purchases.amount_cents` is nullable and
+  // its currency is a separate, often-null column, and part 150 left this
+  // product with no default currency anywhere — so the count is the message and
+  // Payments & Packages is where it is priced.
+  {
+    where: 'supabase/parts/163 · pack_balance_notify',
+    when: 'a paid session pack crosses down to one session left',
+    to: 'trainer', title: 'A session pack is nearly used up', route: '/(trainer)/payments', icon: 'grid',
+  },
+  {
+    where: 'supabase/parts/163 · pack_balance_notify',
+    when: 'a paid session pack reaches none left — including via promote_from_waitlist()',
+    to: 'trainer', title: 'A session pack has run out', route: '/(trainer)/payments', icon: 'grid',
+  },
 ];
 
 /* ── Where a stored row is allowed to send you ─────────────────────────────

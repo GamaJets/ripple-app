@@ -59,19 +59,28 @@ export default function Injuries() {
   // actions. Divided by a hairline rather than boxed.
   const Row = ({ id, areaId, severity, status, note: nt, first }: { id: string; areaId: string; severity: InjurySeverity; status: string; note?: string; first?: boolean }) => (
     <View style={{ paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: status === 'active' ? sevColor(severity) : t.ink3 }} />
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{areaLabel(areaId)}</Text>
-        <Text style={{ ...ty.caption, color: t.ink2, textTransform: 'capitalize' }}>{status === 'active' ? severity : 'recovered'}</Text>
+      {/* One element, one sentence. The dot's colour is the severity said in
+          colour, and colour is the one thing a screen reader cannot read out —
+          so the row is grouped and spoken whole rather than as three fragments
+          with an unnamed shape in front of them. */}
+      <View accessible accessibilityRole="text"
+        accessibilityLabel={`${areaLabel(areaId)}, ${status === 'active' ? `${severity} injury, active` : 'recovered'}${nt ? `. ${nt}` : ''}`}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: status === 'active' ? sevColor(severity) : t.ink3 }} />
+          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{areaLabel(areaId)}</Text>
+          <Text style={{ ...ty.caption, color: t.ink2, textTransform: 'capitalize' }}>{status === 'active' ? severity : 'recovered'}</Text>
+        </View>
+        {nt ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{nt}</Text> : null}
       </View>
-      {nt ? <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{nt}</Text> : null}
+      {/* Named, because "Delete, button" in a list of injuries does not say
+          which one — and this one cannot be undone from here. */}
       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
         {status === 'active' ? (
-          <Ghost label="Mark Recovered" icon="check" onPress={() => c.updateInjury(id, { status: 'recovered' })} />
+          <Ghost label="Mark Recovered" icon="check" a11yLabel={`Mark your ${areaLabel(areaId).toLowerCase()} injury as recovered`} onPress={() => c.updateInjury(id, { status: 'recovered' })} />
         ) : (
-          <Ghost label="Reactivate" onPress={() => c.updateInjury(id, { status: 'active' })} />
+          <Ghost label="Reactivate" a11yLabel={`Mark your ${areaLabel(areaId).toLowerCase()} injury as active again`} onPress={() => c.updateInjury(id, { status: 'active' })} />
         )}
-        <Ghost label="Delete" onPress={() => c.removeInjury(id)} />
+        <Ghost label="Delete" a11yLabel={`Delete your ${areaLabel(areaId).toLowerCase()} injury`} onPress={() => c.removeInjury(id)} />
       </View>
     </View>
   );
@@ -227,8 +236,18 @@ export default function Injuries() {
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Area</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
+              {/* Which of these is chosen was carried by the fill colour alone.
+                  A screen reader was told nothing: no role, no selected state,
+                  so a member using VoiceOver heard nineteen identical buttons
+                  and had no way to know which body part they had picked — on
+                  the form that decides what their coach is allowed to program
+                  for them. `radio` with a selected state is what the OS
+                  announces as "Knee, selected". */}
               {INJURY_AREAS.map((a) => { const on = area === a.id; return (
-                <Pressable key={a.id} onPress={() => setArea(a.id)} style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+                <Pressable key={a.id} onPress={() => setArea(a.id)}
+                  accessibilityRole="radio" accessibilityState={{ selected: on, checked: on }}
+                  accessibilityLabel={a.label} accessibilityHint="The part of your body that is injured"
+                  style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{a.label}</Text>
                 </Pressable>); })}
             </View>
@@ -236,7 +255,10 @@ export default function Injuries() {
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Severity</Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
               {SEVS.map((sv) => { const on = sev === sv.id; return (
-                <Pressable key={sv.id} onPress={() => setSev(sv.id)} style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                <Pressable key={sv.id} onPress={() => setSev(sv.id)}
+                  accessibilityRole="radio" accessibilityState={{ selected: on, checked: on }}
+                  accessibilityLabel={sv.label} accessibilityHint="How bad the injury is"
+                  style={{ flex: 1, paddingVertical: sp.md, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{sv.label}</Text>
                 </Pressable>); })}
             </View>
@@ -246,7 +268,7 @@ export default function Injuries() {
               style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, marginBottom: sp.lg, textAlignVertical: 'top' }} />
 
             <Cta label="Save" onPress={save} wide />
-            <Pressable onPress={() => setOpen(false)} style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+            <Pressable onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Cancel without disclosing an injury" style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
             </Pressable>
           </ScrollView>
