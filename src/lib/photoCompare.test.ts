@@ -37,8 +37,25 @@ const SCANS: ScanReading[] = [
 // A photo is a timestamptz — an instant — not a bare date. These are the two
 // photos taken on the two scan days, written the way uploadProgressPhoto()
 // writes them.
-const PHOTO_A = '2026-08-01T09:14:00.000Z';
-const PHOTO_B = '2026-08-11T08:02:00.000Z';
+//
+// Built from a LOCAL day rather than written as a literal Z-instant, and that
+// is not fussiness. `readingOn` matches a photo to a scan by the photo's own
+// local calendar day, which is correct — but it means a hardcoded instant only
+// lands on the day this file says it does at some offsets. `2026-08-01T09:14Z`
+// is the 1st in London and in Dubai, and it is the 31st of July in Pago Pago
+// (UTC-11); `2026-07-31T10:00Z`, the day this file calls "before the first
+// scan", is already the 1st of August on Kiritimati (UTC+14). Both ends are
+// inhabited, and this suite failed at both while the code under it was right.
+//
+// Noon, so that no offset in the world — +14 to -12 — can push the instant
+// into a neighbouring day.
+const atLocalNoon = (day: string): string => {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toISOString();
+};
+
+const PHOTO_A = atLocalNoon('2026-08-01');
+const PHOTO_B = atLocalNoon('2026-08-11');
 
 /* ── the same-day rule ──────────────────────────────────────────────────── */
 
@@ -76,9 +93,9 @@ ok(readingOn(PHOTO_A, SCANS)?.weightKg === 82.4, 'the photo from 1 Aug picks up 
 ok(readingOn(PHOTO_B, SCANS)?.weightKg === 80.1, 'the photo from 11 Aug picks up the scan dated 11 Aug');
 // The refusal that keeps the panel honest: a day between two scans has no
 // reading of its own, and the nearest scan is a fact about a different day.
-ok(readingOn('2026-08-06T10:00:00.000Z', SCANS) === null,
+ok(readingOn(atLocalNoon('2026-08-06'), SCANS) === null,
   'a photo on a day with no scan gets NO reading — not the nearest one, not the last one carried forward');
-ok(readingOn('2026-07-31T10:00:00.000Z', SCANS) === null, 'a photo the day before the first scan gets nothing');
+ok(readingOn(atLocalNoon('2026-07-31'), SCANS) === null, 'a photo the day before the first scan gets nothing');
 ok(readingOn('2026-08-20T10:00:00.000Z', SCANS) === null, 'a photo after the last scan does not inherit it');
 ok(readingOn(PHOTO_A, null) === null, 'no scan list at all is no reading, not a throw');
 ok(readingOn(PHOTO_A, []) === null, 'an empty scan list is no reading');

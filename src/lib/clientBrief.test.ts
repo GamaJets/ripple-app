@@ -133,11 +133,15 @@ ok(/No live coaching link/.test(photosLine(inbox({ linkActive: false }), false, 
   'no coaching link is a fact about the link, and is kept apart from an empty inbox');
 ok(/hasn't sent you a progress photo/.test(photosLine(inbox(), false, WHO)),
   'a live link and no grants is the one case that IS about the client');
-// 08:00 UTC, not midnight: `stamp` renders an instant in the reader's own zone
-// and the repo runs these tests at UTC-7, UTC+4 and UTC+12. A midnight
-// timestamp lands on three different calendar days across those three, which
-// would make this assertion a test of the machine rather than of the ordering.
-const two = inbox({ photos: [photo('a', '2026-08-20T08:00:00Z'), photo('b', '2026-08-28T08:00:00Z')] });
+// Local noon, not midnight and not a fixed UTC hour. `stamp` renders an instant
+// in the READER's own zone, so a midnight timestamp lands on different calendar
+// days depending on where the process runs, which would make this a test of the
+// machine rather than of the ordering. `08:00Z` was the previous answer and was
+// right for the three zones the suite ran at (UTC-7, UTC+4, UTC+12) — but it is
+// the 27th at UTC-11, so the line reads "27 Aug" and this fails. No UTC hour
+// fixes that: the inhabited offsets span more than a day. Local noon does.
+const noonOn = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12, 0, 0).toISOString();
+const two = inbox({ photos: [photo('a', noonOn(2026, 8, 20)), photo('b', noonOn(2026, 8, 28))] });
 ok(/^2 photos · newest sent 28 Aug 2026\./.test(photosLine(two, false, WHO)),
   'the newest SEND leads, because the send is the act addressed to the coach');
 

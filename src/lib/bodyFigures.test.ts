@@ -107,13 +107,17 @@ eq(daysBetween('2026-08-01', 'not a date'), null, 'and neither does an unreadabl
 
 // A logged weigh-in is a timestamp, not a bare date, and it must be counted
 // from the LOCAL calendar day of that instant — which is what "how long ago did
-// I weigh myself" means to the person holding the phone. 09:00 UTC on the 20th
-// is mid-morning in Los Angeles, evening in Auckland and afternoon in Dubai, so
-// the calendar day is the 20th in all three and the answer is the same ten days
-// everywhere. Subtracting the two instants and flooring gives nine: the
-// clock-time remainder eats a whole day, and a client is told their weigh-in is
-// older than it is.
-eq(daysBetween('2026-08-20T09:00:00.000Z', '2026-08-30'), 10, 'a weigh-in is counted from its own local day, not from its time of day');
+// I weigh myself" means to the person holding the phone. Subtracting the two
+// instants and flooring gives nine: the clock-time remainder eats a whole day,
+// and a client is told their weigh-in is older than it is.
+//
+// The instant is built from local noon on the 20th rather than written as
+// `09:00Z`. That literal was picked because 09:00Z is the 20th in Los Angeles,
+// Auckland and Dubai — true, and not wide enough: it is the 19th at UTC-11.
+// There is no UTC hour that is the same calendar day everywhere, because the
+// inhabited offsets span more than twenty-four hours. Local noon always is.
+const weighedAtNoon = new Date(2026, 7, 20, 12, 0, 0).toISOString();
+eq(daysBetween(weighedAtNoon, '2026-08-30'), 10, 'a weigh-in is counted from its own local day, not from its time of day');
 
 eq(agoLabel('2026-08-30', '2026-08-30'), 'today', 'a reading taken today says today');
 eq(agoLabel('2026-08-29', '2026-08-30'), 'yesterday', 'and one from the day before says yesterday');

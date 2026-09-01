@@ -35,7 +35,7 @@
     "check:attribution": "node scripts/check-attribution.mjs",
     "check:traps": "node scripts/check-runtime-traps.mjs",
     "check:contrast": "node scripts/check-contrast.mjs",
-    "test:zones": "TZ=America/Los_Angeles npm run test && TZ=Pacific/Auckland npm run test && TZ=Asia/Dubai npm run test",
+    "test:zones": "TZ=Pacific/Kiritimati npm run test && TZ=Pacific/Auckland npm run test && TZ=Asia/Dubai npm run test && TZ=UTC npm run test && TZ=America/Los_Angeles npm run test && TZ=Pacific/Midway npm run test",
     "check:reachable": "node scripts/check-reachable.mjs",
     "check:deltas": "node scripts/check-deltas.mjs",
     "check:caps": "node scripts/check-caps.mjs",

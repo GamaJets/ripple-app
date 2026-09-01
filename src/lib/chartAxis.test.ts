@@ -47,13 +47,20 @@ eqJson(readDate('2026-08-14'), { y: 2026, m: 7, day: 14 }, 'a bare date reads as
 // A BARE date and a TIMESTAMP are read differently, and must be — see the
 // header on localDate.ts.
 //
-// 09:00Z is deliberate and the window is narrow. test:zones runs at UTC-7,
-// UTC+4 and UTC+12, so the only UTC hours that land on the same calendar day in
-// all three are 07:00 to 11:00: an hour earlier and Los Angeles is on the 13th,
-// an hour later and Auckland is on the 15th. Picking midday, which reads like
-// the safe choice, fails in Auckland — which is the whole point of running the
-// suite in three zones rather than reasoning about one.
-eqJson(readDate('2026-08-14T09:00:00Z'), { y: 2026, m: 7, day: 14 }, 'a timestamp reads as the local day of its instant');
+// The instant is BUILT from the local day rather than written as a literal Z
+// time, and the history of this line is the argument for it. It used to be
+// `09:00Z`, chosen because 07:00-11:00Z is the only window landing on one
+// calendar day across the three zones test:zones ran — UTC-7, UTC+4, UTC+12.
+// That reasoning was sound and the window was still too narrow: at UTC-11
+// 09:00Z on the 14th is the evening of the 13th, and at UTC+14 it is the 15th.
+// Both are inhabited, test:zones now runs both, and no fixed UTC hour survives
+// a +14 to -12 spread — the span is more than a day wide.
+//
+// Local noon has no such window to get wrong, and it asserts the same thing
+// more directly: whatever instant local noon on the 14th is, `readDate` must
+// call it the 14th.
+const noonOn = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12, 0, 0).toISOString();
+eqJson(readDate(noonOn(2026, 8, 14)), { y: 2026, m: 7, day: 14 }, 'a timestamp reads as the local day of its instant');
 
 // And the case where the two readings genuinely differ. 2026-08-14T20:00:00Z is
 // still the 14th in Los Angeles (1pm) and Dubai (midnight, just), and is the
