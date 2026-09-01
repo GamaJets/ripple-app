@@ -41,6 +41,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, type WeightUnit } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
@@ -164,6 +165,21 @@ export default function Builder() {
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   const [days, setDays] = useState<BDay[]>([]);
+  /**
+   * ── Why a programme in progress is written to the phone ───────────────────
+   *
+   * The whole builder lived in React state and nowhere else. A coach who
+   * locked the screen, took a call, or let the phone sleep while laying out a
+   * six-exercise Push day came back to an empty builder: iOS reclaims a
+   * backgrounded app's memory whenever it likes, and there was nothing on disk
+   * to come back to. Twenty minutes of somebody's work, gone with no error and
+   * nothing to retry.
+   *
+   * `draftLoaded` gates the write for the reason `app/(client)/workouts.tsx`
+   * gives at the same shape: without it the first render saves the empty state
+   * it starts from, straight over the draft it is about to read.
+   */
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [pickerDay, setPickerDay] = useState<number | null>(null);
   const coachEx = useCoachExercises();
   // The whole catalogue, names and groups only — the hook is explicit that it
@@ -321,6 +337,34 @@ export default function Builder() {
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: [...d.exercises, { key: nextKey(), name, group, sets: 3, reps: '10-12' }] } : d)));
   const removeExercise = (di: number, key: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.filter((e) => e.key !== key) } : d)));
+  const DRAFT_KEY = 'repple.builder.draft.v1';
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(DRAFT_KEY);
+        if (!live || !raw) return;
+        const d = JSON.parse(raw) as { title?: string; note?: string; days?: BDay[] };
+        // Only restore a draft with something IN it. An empty one is not worth
+        // resurrecting over whatever the screen has already been given.
+        if (Array.isArray(d.days) && d.days.length) {
+          setTitle(typeof d.title === 'string' ? d.title : '');
+          setNote(typeof d.note === 'string' ? d.note : '');
+          setDays(d.days);
+        }
+      } catch { /* a draft that cannot be parsed is not a draft */ }
+      finally { if (live) setDraftLoaded(true); }
+    })();
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!draftLoaded) return;
+    if (!days.length && !title.trim() && !note.trim()) { AsyncStorage.removeItem(DRAFT_KEY).catch(() => {}); return; }
+    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify({ title, note, days })).catch(() => {});
+  }, [title, note, days, draftLoaded]);
+
   const patchEx = (di: number, key: string, patch: Partial<BEx>) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.map((e) => (e.key === key ? { ...e, ...patch } : e)) } : d)));
   const addDay = () => setDays((ds) => {
