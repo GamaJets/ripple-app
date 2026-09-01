@@ -2665,8 +2665,32 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           </View>
         ) : null}
 
-        <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xl, textTransform: 'capitalize' }}>{nameOf(ex)}</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · {ex.sets} × {ex.reps}{ex.loadKg != null ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : ''}{ex.restSec != null ? ' · ' + restClock(restSecondsFor(ex)) + ' rest' : ''}</Text>
+        {/* The run this movement is in, above its name — "Superset · 1 of 2" —
+            with the words derived from how many movements are in the run rather
+            than stored anywhere. A member reading it is being told the next
+            movement follows immediately, which is the thing they need before
+            they pick the weight up. */}
+        {exGroup ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.xl }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>{exGroup.label} · {exGroup.position} of {exGroup.size}</Text>
+          </View>
+        ) : null}
+        <Text style={{ ...ty.title, color: t.ink, marginTop: exGroup ? sp.xs : sp.xl, textTransform: 'capitalize' }}>{nameOf(ex)}</Text>
+        {/* How the sets are performed. The short marker is what fits beside a
+            movement name; the full label is what a screen reader reads, because
+            "RP" is not a word and nobody should have to know it. */}
+        {exMethod ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
+            <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 3 }}>
+              <Text accessibilityLabel={exMethod.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink2 }}>{exMethod.short}</Text>
+            </View>
+            <Text style={{ ...ty.label, color: t.ink2 }}>{exMethod.label}</Text>
+          </View>
+        ) : null}
+        {/* The rest on this line is the rest that will actually run — a drop set
+            says nothing here, because there is none. */}
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · {ex.sets} × {ex.reps}{ex.loadKg != null ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : ''}{plannedRest > 0 && (ex.restSec != null || restIsMethods) ? ' · ' + restClock(plannedRest) + ' rest' : ''}</Text>
         {(() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
@@ -2707,7 +2731,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
                 anything are looking at the same digits, and only one of them is
                 following a programme — so the fallback names itself rather than
                 borrowing the coach's authority. */}
-            <Text style={{ ...ty.micro, color: t.brandInk, marginTop: sp.xs, opacity: 0.8 }}>{ex.restSec != null ? 'Set by your coach' : `App default of ${DEFAULT_REST_SEC} seconds`}</Text>
+            <Text style={{ ...ty.micro, color: t.brandInk, marginTop: sp.xs, opacity: 0.8 }}>{restIsMethods ? `Part of the ${methodFor(ex.method).method.label.toLowerCase()}` : ex.restSec != null ? 'Set by your coach' : `App default of ${DEFAULT_REST_SEC} seconds`}</Text>
             <Pressable accessibilityRole="button" accessibilityLabel="Skip the rest timer" onPress={() => startRest(0)} hitSlop={8} style={{ marginTop: sp.sm }}><Text style={{ ...ty.label, fontWeight: '500', color: t.brandInk }}>Skip rest</Text></Pressable>
           </View>
         ) : null}
@@ -2737,7 +2761,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
 
         {done.length > 0 ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xl }}>
-            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{fig(liftIn(s.kg || null, unit))} {unit}</Text></View>); })}
+            {done.map((s, i) => { const f = (rpes[idx] || [])[i]; const fc = f === 'easy' ? t.good : f === 'hard' ? t.crit : t.ink3; return (<View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6 }}>{f ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fc }} /> : null}<Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{fig(liftIn(s.kg || null, unit))} {unit}</Text>{/* Every set of this movement was performed the same way, so the marker rides on each chip and reads out in full. */}{exMethod ? <Text accessibilityLabel={exMethod.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{exMethod.short}</Text> : null}</View>); })}
           </View>
         ) : null}
 

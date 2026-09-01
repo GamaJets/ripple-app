@@ -80,11 +80,36 @@ done
 echo
 echo "── publish ──"
 make_pubtree
-for ch in production coach-production owner-production; do
+# ── Six channels, not three ─────────────────────────────────────────────────
+#
+# Every OTA before 1 Sep went to the three PRODUCTION channels only, and on
+# Android that meant every OTA went nowhere.
+#
+# The Android artifacts are split by profile: `production*` builds are .aab
+# Play Store bundles, which Android cannot install directly, and the only
+# installable Android artifacts are the `preview*` APKs. Those APKs listen on
+# `preview` / `coach-preview` / `owner-preview`. A channel maps 1:1 to the
+# branch of the same name, so an update published to `production` is invisible
+# to a device running the `preview` APK — no error, no fallback, nothing. The
+# report was "I don't see any of these updates in the android apps", and it was
+# exactly true.
+#
+# Publishing to both is right rather than a workaround: the preview APKs are
+# how testers get the Android apps at all, and a tester on a build that can
+# never receive an update is a tester reporting bugs that were fixed weeks ago.
+#
+# --environment production for ALL six deliberately. That flag picks which EAS
+# environment's variables are baked in, not which channel is targeted, and
+# `production` is the one confirmed to actually hold EXPO_PUBLIC_SUPABASE_URL.
+# An empty environment is how a whole evening of updates shipped, crashed on
+# launch with "supabaseUrl is required" and rolled back while the publisher
+# reported success. Both channel families talk to the same backend.
+for ch in production coach-production owner-production \
+          preview coach-preview owner-preview; do
   case "$ch" in
-    production)       V=client  ;;
-    coach-production) V=trainer ;;
-    owner-production) V=owner   ;;
+    production|preview)             V=client  ;;
+    coach-production|coach-preview) V=trainer ;;
+    owner-production|owner-preview) V=owner   ;;
   esac
   printf '%-20s ' "$ch"
   # Run FROM the worktree. Nothing an agent does to the working tree between
