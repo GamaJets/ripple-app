@@ -33,7 +33,6 @@ import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Alert, Pressable, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import * as DocumentPicker from 'expo-document-picker';
 import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
@@ -49,6 +48,20 @@ import {
   coachDocPath, shapeDocs, sizeLabel, standingLine, uploadRefusalLine,
   type CoachDoc, type RawCoachDoc,
 } from '../../src/lib/coachDocs';
+import {
+  SEND_IS_ONE_WAY, audienceLine, isAddressed, memberLine, sendBlock, sendBlockLine,
+  sendFailure, sendFailureLine, sendWarning, shapeAudience,
+  type AudienceMember, type RawAudienceRow,
+} from '../../src/lib/coachDocAudience';
+// Not `import * as DocumentPicker from 'expo-document-picker'`, which is what
+// this file used to do. That package's entry point is a bare
+// requireNativeModule call at module scope, so the import THREW on any install
+// made before the dependency landed and took this whole screen with it. The
+// guard answers the same question without the throw — see
+// src/ui/nativeModules.ts.
+import {
+  HAS_NATIVE_DOCUMENT_PICKER, DOCUMENT_PICKER_UNAVAILABLE_NOTE, pickDocument,
+} from '../../src/ui/nativeModules';
 
 const BUCKET = 'coach-docs';
 /** Long enough to read a waiver, short enough that a leaked link is stale. */
@@ -72,6 +85,18 @@ export default function CoachDocumentsScreen() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [standing, setStanding] = useState<Standing[] | null>(null);
   const [standingStatus, setStandingStatus] = useState<LoadStatus>('ready');
+  // Which document's SEND panel is open. Separate from `openId` above on
+  // purpose: "who has accepted it" and "who is it even in front of" are two
+  // questions, and a coach opening the second one has not stopped wanting the
+  // answer to the first.
+  const [sendId, setSendId] = useState<string | null>(null);
+  const [audience, setAudience] = useState<AudienceMember[] | null>(null);
+  const [audienceStatus, setAudienceStatus] = useState<LoadStatus>('ready');
+  /** True when `coach_document_audience` is not on this server — part 156 has
+   *  not been run. A different sentence from a read that failed on the wire,
+   *  and a different thing to do about it. */
+  const [sendOff, setSendOff] = useState(false);
+  const [sendingTo, setSendingTo] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
@@ -110,12 +135,23 @@ export default function CoachDocumentsScreen() {
       Alert.alert('Not signed in', 'Sign in again and your paperwork will be here.');
       return;
     }
-    let picked: DocumentPicker.DocumentPickerResult;
-    try {
-      picked = await DocumentPicker.getDocumentAsync({ type: DOC_MIME_TYPES, copyToCacheDirectory: true });
-    } catch (e) { reportError('coachDocs.pick', e); Alert.alert('That file could not be opened.'); return; }
-    if (picked.canceled || !picked.assets?.length) return;
-    const a = picked.assets[0];
+    const picked = await pickDocument({ type: DOC_MIME_TYPES });
+    // Four answers, and three of them are not "a file". `unavailable` is the
+    // one that used to be impossible to reach because the import crashed first:
+    // this build has no picker at all, and saying so is the only honest thing —
+    // the button is already disabled for it, and this is the second lock.
+    if (picked.outcome === 'unavailable') {
+      Alert.alert('This build cannot open your files', DOCUMENT_PICKER_UNAVAILABLE_NOTE);
+      return;
+    }
+    if (picked.outcome === 'error') {
+      reportError('coachDocs.pick', picked.error);
+      Alert.alert('That file could not be opened.');
+      return;
+    }
+    // Cancelled is the coach changing their mind and is not a failure.
+    if (picked.outcome === 'cancelled') return;
+    const a = picked.file;
 
     // Checked here, before any bytes move. A 413 from storage arrives as an
     // opaque failure, and "that file is too large" is a sentence somebody can
@@ -200,6 +236,88 @@ export default function CoachDocumentsScreen() {
       acceptedAt: r.accepted_at ? String(r.accepted_at) : null,
     })));
     setStandingStatus('ready');
+  }
+
+  /* ── Sending one to a particular client ────────────────────────────────── */
+  //
+  // The half part 135 did not build. Uploading a document made it readable by
+  // the WHOLE roster and there was no way to put one in front of one person —
+  // which is most of what a coach actually sends: a training agreement, a rehab
+  // protocol written after one consultation, a plan somebody paid for.
+  //
+  // `coach_document_audience` and `send_coach_document` are supabase/parts/156.
+  // Until that file has been run they do not exist, and PostgREST answers a call
+  // to a missing function with PGRST202 — which arrives here as an ordinary
+  // error and would draw as "try again in a moment" forever. `sendFailure` picks
+  // that case out so the sentence says what is actually true: nothing was sent,
+  // and every document is still readable by everyone this coach coaches.
+
+  async function openSend(d: CoachDoc) {
+    if (sendId === d.id) { setSendId(null); return; }
+    setSendId(d.id);
+    setAudience(null);
+    setSendOff(false);
+    setAudienceStatus('loading');
+    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id });
+    if (error) {
+      // `returned: true` because this is a READ — there is no boolean to judge,
+      // only whether the function is there at all and whether the wire held.
+      const why = sendFailure({ error, returned: true });
+      setSendOff(why === 'unavailable');
+      if (why !== 'unavailable') reportError('coachDocs.audience', error, { id: d.id });
+      setAudienceStatus('error');
+      return;
+    }
+    setAudience(shapeAudience((data ?? []) as RawAudienceRow[]));
+    setAudienceStatus('ready');
+  }
+
+  function sendTo(d: CoachDoc, m: AudienceMember, addressed: boolean) {
+    const who = m.name ?? 'this client';
+    Alert.alert(
+      `Send “${d.title}” to ${who}?`,
+      `${sendWarning(addressed)}\n\n${SEND_IS_ONE_WAY}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            setSendingTo(m.clientId);
+            try {
+              const { data, error } = await supabase.rpc('send_coach_document', {
+                p_document: d.id, p_client: m.clientId,
+              });
+              // A PostgREST call that a policy refused and one that matched
+              // nothing both come back as a success, so the RETURN VALUE is
+              // what decides this — never the absence of an error.
+              const why = sendFailure({ error, returned: data });
+              if (why) {
+                if (why !== 'unavailable') reportError('coachDocs.send', error, { id: d.id });
+                setSendOff(why === 'unavailable');
+                Alert.alert('Not sent', sendFailureLine(why));
+                return;
+              }
+              // Re-read rather than patching the row in place: the send may have
+              // been the one that narrowed this document, and the line above the
+              // list changes meaning when it does.
+              await openSendRefresh(d);
+            } finally { setSendingTo(null); }
+          },
+        },
+      ],
+    );
+  }
+
+  /** Re-read the audience for a document whose panel is already open. */
+  async function openSendRefresh(d: CoachDoc) {
+    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id });
+    if (error) {
+      reportError('coachDocs.audience', error, { id: d.id });
+      setAudienceStatus('error');
+      return;
+    }
+    setAudience(shapeAudience((data ?? []) as RawAudienceRow[]));
+    setAudienceStatus('ready');
   }
 
   /* ── The two things a coach may change ─────────────────────────────────── */
@@ -297,9 +415,24 @@ export default function CoachDocumentsScreen() {
             )}
 
             <Section>
-              <Cta label={busy ? 'Uploading…' : 'Add a document'} onPress={addDocument} disabled={busy} wide />
+              <Cta label={busy ? 'Uploading…' : 'Add a document'} onPress={addDocument} disabled={busy || !HAS_NATIVE_DOCUMENT_PICKER} wide />
+              {/* Disabled with the reason beside it rather than live and inert.
+                  A button that opens nothing reads as a broken screen, and the
+                  coach's next move is to try it again. */}
+              {!HAS_NATIVE_DOCUMENT_PICKER ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{DOCUMENT_PICKER_UNAVAILABLE_NOTE}</Flag>
+              ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                 A PDF, or a photograph of the page. Up to {sizeLabel(10485760)}.
+              </Text>
+              {/* Said at the point of upload, because it is the thing a coach
+                  gets wrong: what you add here is readable by your whole
+                  roster. Addressing it to one person is a separate act, on the
+                  document itself, and it takes the document away from everybody
+                  else — see sendWarning in src/lib/coachDocAudience.ts. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Everyone you coach can read what you add. To put one in front of a single client, use Send
+                to a Client on the document once it is here.
               </Text>
             </Section>
 
@@ -330,10 +463,72 @@ export default function CoachDocumentsScreen() {
                         </Text>
                       </View>
 
-                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
                         <Ghost label={openId === d.id ? 'Hide' : 'Who’s accepted'} onPress={() => showStanding(d)} />
+                        <Ghost label={sendId === d.id ? 'Hide' : 'Send to a Client'} onPress={() => openSend(d)} />
                         <Ghost label="Retire" onPress={() => retire(d)} />
                       </View>
+
+                      {/* ── Who this is in front of, and sending it to one more
+                          person. The panel is the whole roster rather than only
+                          the people it has been sent to, because the thing a
+                          coach came here to do is pick somebody who has NOT had
+                          it — see the sort in src/lib/coachDocAudience.ts. */}
+                      {sendId === d.id ? (
+                        <View style={{ marginTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, paddingTop: sp.md }}>
+                          {(() => {
+                            const block = sendBlock({
+                              retired: d.retired,
+                              members: audience,
+                              read: audienceStatus === 'error' ? 'failed' : 'ok',
+                            });
+                            if (audienceStatus === 'loading') {
+                              return <Text style={{ ...ty.caption, color: t.ink3 }}>Reading who this is in front of.</Text>;
+                            }
+                            if (block) {
+                              // An empty list under a failed read is "we could
+                              // not ask", never "you have nobody" — a coach with
+                              // twelve clients told the second would go and
+                              // re-add them.
+                              return (
+                                <Flag tone={sendOff || block === 'unread' ? t.warn : t.ink3}>
+                                  {sendOff ? sendFailureLine('unavailable') : sendBlockLine(block)}
+                                </Flag>
+                              );
+                            }
+                            const members = audience ?? [];
+                            const addressed = isAddressed(members);
+                            return (<>
+                              <Text style={{ ...ty.caption, color: t.ink2 }}>{audienceLine(members)}</Text>
+                              {members.map((m) => (
+                                <Pressable key={m.clientId}
+                                  onPress={() => { if (m.sentAt == null) sendTo(d, m, addressed); }}
+                                  disabled={m.sentAt != null || sendingTo != null}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={m.sentAt != null
+                                    ? `${m.name ?? 'A client'} already has ${d.title}`
+                                    : `Send ${d.title} to ${m.name ?? 'this client'}`}
+                                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.sm }}>
+                                  <View style={{ flex: 1 }}>
+                                    {/* An unreadable name is said to be one, and
+                                        never replaced by somebody else's — the
+                                        whole lesson of TF-32. */}
+                                    <Text style={{ ...ty.caption, color: m.name ? t.ink : t.ink3 }}>
+                                      {m.name ?? 'A client whose name could not be read'}
+                                    </Text>
+                                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{memberLine(m, fmtDay)}</Text>
+                                  </View>
+                                  {m.sentAt == null ? (
+                                    <Text style={{ ...ty.caption, fontWeight: '600', color: sendingTo === m.clientId ? t.ink3 : t.brand }}>
+                                      {sendingTo === m.clientId ? 'Sending…' : 'Send'}
+                                    </Text>
+                                  ) : null}
+                                </Pressable>
+                              ))}
+                            </>);
+                          })()}
+                        </View>
+                      ) : null}
 
                       {openId === d.id ? (
                         <View style={{ marginTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, paddingTop: sp.md }}>

@@ -32,7 +32,6 @@ import { View, Text, Pressable, ScrollView, TextInput, ActivityIndicator, Alert,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag } from '../../src/ui/kit';
@@ -49,6 +48,14 @@ import {
   type InjuryDocFile, type InjuryDocRead,
 } from '../../src/ui/injuryDocs';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+// Not `import * as DocumentPicker from 'expo-document-picker'`. That package's
+// entry point is a bare requireNativeModule call at module scope, so on an
+// install made before the dependency landed the import threw and this screen
+// would not render at all — camera route included, which does not need the
+// picker. See src/ui/nativeModules.ts.
+import {
+  HAS_NATIVE_DOCUMENT_PICKER, DOCUMENT_PICKER_UNAVAILABLE_NOTE, pickDocument,
+} from '../../src/ui/nativeModules';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
   { id: 'mild', label: 'Mild' }, { id: 'moderate', label: 'Moderate' }, { id: 'severe', label: 'Severe' },
@@ -120,13 +127,20 @@ export default function InjuryDoc() {
   // A report is usually emailed as a PDF rather than photographed, so Files is
   // a first-class way in rather than a fallback. The reader takes both.
   const pickFile = async () => {
-    const res = await DocumentPicker.getDocumentAsync({
-      type: ['application/pdf', 'image/jpeg', 'image/png'],
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
-    if (res.canceled || !res.assets?.[0]) return;
-    const a = res.assets[0];
+    const res = await pickDocument({ type: ['application/pdf', 'image/jpeg', 'image/png'] });
+    // The button is not offered on a build with no picker, so this branch is
+    // the second lock on that door — and it says which of the two silences it
+    // is rather than leaving the screen looking as though the tap missed.
+    if (res.outcome === 'unavailable') {
+      Alert.alert('This version cannot open your files', `${DOCUMENT_PICKER_UNAVAILABLE_NOTE} A photo of the page works in the meantime and is read the same way.`);
+      return;
+    }
+    if (res.outcome === 'error') {
+      Alert.alert('That file could not be opened', 'Nothing was read and nothing was saved. Try it again, or photograph the page instead.');
+      return;
+    }
+    if (res.outcome === 'cancelled') return;
+    const a = res.file;
     await readFrom({ uri: a.uri, name: a.name, mimeType: a.mimeType });
   };
 
@@ -298,9 +312,19 @@ export default function InjuryDoc() {
                 on the page in front of you. The reader takes a PDF whole and
                 reads every page of it, not just the first. */}
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
-              <View style={{ flex: 1 }}><Ghost label="Choose a File" onPress={pickFile} /></View>
+              {/* Files is dropped rather than offered dead on a build that has
+                  no picker. Every other way in still works, so the screen loses
+                  one route and none of its purpose — and the sentence below
+                  says which route and why, so nobody reads it as the app
+                  forgetting a feature it used to have. */}
+              {HAS_NATIVE_DOCUMENT_PICKER ? (
+                <View style={{ flex: 1 }}><Ghost label="Choose a File" onPress={pickFile} /></View>
+              ) : null}
               <View style={{ flex: 1 }}><Ghost label="Choose an Image" onPress={() => pick(false)} /></View>
             </View>
+            {!HAS_NATIVE_DOCUMENT_PICKER ? (
+              <Flag tone={t.warn}>{DOCUMENT_PICKER_UNAVAILABLE_NOTE} A photo of the page is read the same way.</Flag>
+            ) : null}
           </View>
         )}
 
@@ -341,7 +365,7 @@ export default function InjuryDoc() {
                   // that is true — it only knows it could not find one here.
                   <View style={{ marginTop: sp.lg, flexDirection: 'row', gap: sp.sm }}>
                     <Cta label="Add It Myself" onPress={() => router.replace('/(client)/injuries')} />
-                    <Ghost label="Try a File Instead" onPress={pickFile} />
+                    {HAS_NATIVE_DOCUMENT_PICKER ? <Ghost label="Try a File Instead" onPress={pickFile} /> : null}
                     <Ghost label="Try Another Photo" onPress={() => pick(true)} />
                   </View>
                 )}

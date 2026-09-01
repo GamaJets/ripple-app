@@ -131,6 +131,13 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'social', label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social', icon: 'share', area: 'me', keywords: 'instagram tiktok share social post story sheet' },
   { key: 'packages', label: 'Memberships & Packs', note: 'What you have bought, and what is left', route: '/(client)/packages', icon: 'trophy', area: 'me', keywords: 'package packages pack sessions left remaining credits subscription membership purchase bought paid renew' },
   { key: 'offers', label: 'Offers', note: 'Redeem a code from your gym', route: '/(client)/offers', icon: 'grid', area: 'me', keywords: 'offer offers code promo promotion discount voucher redeem coupon' },
+  // The coach you HAVE, which Explore did not list at all while listing that
+  // coach's DOCUMENTS one line down — so searching "coach" found the paperwork
+  // and not the person. The Me hub has had the row since part 130 made the
+  // screen possible; this is the other way in, and the keywords are what
+  // somebody types when they are looking for a name, a qualification or a way
+  // to reach them rather than for a form.
+  { key: 'my-coach', label: 'Your Coach', note: 'Who is coaching you, and what they can see', route: '/(client)/my-coach', icon: 'people', area: 'me', keywords: 'coach trainer pt my coach personal trainer who qualification qualifications insurance credentials review message contact reach bio' },
   // Your coach's own paperwork, not Repple's. The release signed on joining is
   // a different document belonging to a different party and is not on this
   // screen — see the header of coach-documents.tsx. 'waiver', 'par-q' and

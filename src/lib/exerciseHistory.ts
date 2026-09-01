@@ -110,6 +110,18 @@ export interface ExerciseOuting {
   /** The reps and load of the set that produced `best1RMKg`, so a screen can
    *  print "100 kg × 5" rather than an estimate with nothing behind it. */
   bestSet: { reps: number; loadKg: number } | null;
+  /**
+   * How many separate logging events the day was folded from. One for almost
+   * everybody, and four for the live record that made the folding necessary.
+   *
+   * Carried rather than discarded because folding is not the same as
+   * deduplicating: the four rows above are the same three sets written four
+   * times, and this outing therefore holds twelve sets and 172 reps, which is a
+   * true count of the record and an overstatement of the afternoon. A screen
+   * showing more than one says so instead of leaving a coach to work out why a
+   * set of squats appears four times.
+   */
+  entryCount: number;
 }
 
 /** Entries that are this movement, whatever spelling was typed. Resolution is
@@ -167,6 +179,7 @@ function foldOuting(slug: string, day: string | null, entries: readonly WorkoutE
     topReps,
     best1RMKg: best1RM,
     bestSet,
+    entryCount: entries.length,
   };
 }
 
@@ -224,9 +237,23 @@ export interface ExerciseSummary {
   slug: string;
   /** The most recent spelling on record. */
   name: string;
-  /** Days it was done on, within whatever was read. */
+  /** Days it was logged at all, within whatever was read — sets or no sets. */
   days: number;
-  /** The newest day it was done, or null when no outing of it carries a
+  /**
+   * Of those, the days that carried at least one set, and therefore the length
+   * of the trail `exerciseOutings` returns.
+   *
+   * Zero is the ordinary case for cardio, and it is why this figure is carried
+   * separately rather than folded into `days`. A screen must be able to say
+   * "logged on 15 days, with no sets recorded against it" without either
+   * pretending there are reps to follow or claiming the movement was never
+   * done. The second of those is what the live record forced: one real client's
+   * 31 workouts are 15 cycles, 6 walks, 5 unnamed activities and one squat
+   * session, and a search for "cycling" that answered "nothing logged matches
+   * that" would have been a flat lie about somebody's month.
+   */
+  daysWithSets: number;
+  /** The newest day it was logged, or null when no entry of it carries a
    *  readable date. */
   lastDay: string | null;
   /** The newest timestamp, for ordering. */
@@ -245,6 +272,11 @@ export interface ExerciseSummary {
  * answers is "what has she been doing", and an A–Z puts Ab Wheel above a squat
  * somebody did last night. A search box narrows it when the answer is further
  * down.
+ *
+ * Everything logged is in here, including movements that never carried a set.
+ * The trail behind such a movement is empty and `daysWithSets` says so; leaving
+ * it out of the index altogether would make the search box deny that a client
+ * who has cycled fifteen times has ever cycled.
  */
 export function exerciseIndex(log: readonly WorkoutEntry[]): ExerciseSummary[] {
   const bySlug = new Map<string, WorkoutEntry[]>();
@@ -259,16 +291,33 @@ export function exerciseIndex(log: readonly WorkoutEntry[]): ExerciseSummary[] {
   const out: ExerciseSummary[] = [];
   for (const [slug, entries] of bySlug) {
     const outings = exerciseOutings(entries, entries[0].exercise);
-    if (!outings.length) continue;               // logged with no sets, every time
     let best1RM: number | null = null, topLoad: number | null = null;
-    let lastDay: string | null = null, lastAt: string | null = null;
     for (const o of outings) {
       if (o.best1RMKg != null && (best1RM == null || o.best1RMKg > best1RM)) best1RM = o.best1RMKg;
       if (o.topLoadKg != null && (topLoad == null || o.topLoadKg > topLoad)) topLoad = o.topLoadKg;
-      if (o.day != null && (lastDay == null || o.day > lastDay)) lastDay = o.day;
-      if (lastAt == null || o.at.localeCompare(lastAt) > 0) lastAt = o.at;
     }
-    out.push({ slug, name: outings[0].name, days: outings.length, lastDay, lastAt, best1RMKg: best1RM, topLoadKg: topLoad });
+
+    // Counted over every entry, not over the outings, so a cardio movement has
+    // a real number of days behind it. An entry whose timestamp will not parse
+    // counts as a day of its own rather than being dropped or merged, which is
+    // how `exerciseOutings` treats it too — the two figures must agree.
+    const dayKeys = new Set<string>();
+    let undated = 0;
+    let lastDay: string | null = null, lastAt: string | null = null, name = entries[0].exercise;
+    for (const e of entries) {
+      const day = dayKeyOf(e.t);
+      if (day == null) undated++;
+      else {
+        dayKeys.add(day);
+        if (lastDay == null || day > lastDay) lastDay = day;
+      }
+      if (lastAt == null || e.t.localeCompare(lastAt) > 0) { lastAt = e.t; name = e.exercise; }
+    }
+
+    out.push({
+      slug, name, days: dayKeys.size + undated, daysWithSets: outings.length,
+      lastDay, lastAt, best1RMKg: best1RM, topLoadKg: topLoad,
+    });
   }
 
   return out.sort((a, b) => {

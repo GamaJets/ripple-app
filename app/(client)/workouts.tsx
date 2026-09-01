@@ -989,12 +989,13 @@ export default function Train() {
                         </View>
                       ) : null}
                       {/* The whole row is one button, so anything rendered
-                          inside it is read out as part of its label rather than
-                          on its own — which is why the group and the method are
-                          spelled out here in full. The short marker below is for
-                          the eye; this is the only version a screen reader
-                          gets. */}
-                      <Pressable accessibilityRole="button" accessibilityLabel={(open ? 'Collapse ' : 'Expand ') + nameOf(e) + (grp ? `, ${grp.label.toLowerCase()}, ${grp.position} of ${grp.size}` : '') + (meth ? `, ${meth.label.toLowerCase()}` : '')} onPress={() => setExpanded((p) => ({ ...p, [_id]: !open }))} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                          INSIDE it is read out as part of its label rather than
+                          on its own — which is why the method is spelled out
+                          here in full. The chip below is a short marker for the
+                          eye; this is the only version a screen reader gets.
+                          The group badge is a sibling, above, and is read on its
+                          own, so it is not repeated here. */}
+                      <Pressable accessibilityRole="button" accessibilityLabel={(open ? 'Collapse ' : 'Expand ') + nameOf(e) + (meth ? `, ${meth.label.toLowerCase()}` : '')} onPress={() => setExpanded((p) => ({ ...p, [_id]: !open }))} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                         <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             {done ? <Icon name="check" size={15} color={t.brand} /> : null}

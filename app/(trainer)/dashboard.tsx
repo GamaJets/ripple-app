@@ -100,7 +100,12 @@ import { buildRosterExport, rosterExportBlocker, type RosterExportRow } from '..
 import { shareTextFile, fileExportAvailable, fileShareBlocker } from '../../src/lib/exportShare';
 import { fetchPhotosSharedWithMe, missingSharedFiles, SHARED_URL_TTL_S, type SharedPhoto } from '../../src/lib/photoShare';
 import { inviteMessage, joinLink } from '../../src/lib/joinCode';
-import * as Clipboard from 'expo-clipboard';
+// Not `import * as Clipboard from 'expo-clipboard'`, which is what this line
+// used to be. expo-clipboard's entry point is a single requireNativeModule call
+// evaluated at module scope, so on an Android install made before the
+// dependency landed that import THREW while this file was being loaded — and
+// this file is the coach's home tab. See src/ui/nativeModules.ts.
+import { HAS_NATIVE_CLIPBOARD, CLIPBOARD_UNAVAILABLE_NOTE, copyToClipboard } from '../../src/ui/nativeModules';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -138,6 +143,29 @@ function CodeFig({ t, label, value }: { t: Theme; label: string; value: string }
     <View style={{ flex: 1 }}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
       <Text style={{ ...ty.label, ...numeric, color: t.ink, marginTop: 1 }}>{value}</Text>
+    </View>
+  );
+}
+
+/**
+ * What stands in for Copy Link on a build with no clipboard.
+ *
+ * Not a button that quietly does nothing, and not one that says "copied" over a
+ * clipboard that took nothing: the address itself, selectable, so the coach can
+ * still get it into a bio by hand. `note` is drawn once per sheet rather than
+ * once per code — the sentence is the same for all of them and a coach with six
+ * named campaigns does not need it six times.
+ */
+function JoinLinkFallback({ t, code, note }: { t: Theme; code: string; note?: boolean }) {
+  return (
+    <View style={{ marginTop: sp.sm }}>
+      {/* Selectable is the whole point of this block. A URL nobody can select
+          is a URL nobody can use, and long-press-to-select is off by default on
+          a React Native Text. */}
+      <Text selectable style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{joinLink(code)}</Text>
+      {note ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{CLIPBOARD_UNAVAILABLE_NOTE}</Text>
+      ) : null}
     </View>
   );
 }
@@ -426,9 +454,11 @@ export default function TrainerClients() {
   // sentence, and right for WhatsApp — is unusable in them. Reported, because
   // a coach who is told it copied and then pastes nothing has lost the post.
   const copyJoinLink = async (code: string, label: string) => {
-    try {
-      await Clipboard.setStringAsync(joinLink(code));
-    } catch {
+    // The wrapper reports whether the copy actually landed rather than throwing
+    // on a build with no clipboard at all. The button is not offered on such a
+    // build (see JoinLinkFallback below), so this is the second lock on the same
+    // door — and a coach told "copied" who then pastes nothing has lost the post.
+    if (!(await copyToClipboard(joinLink(code)))) {
       Alert.alert('Not copied', `The link for ${label} could not be copied. It is ${joinLink(code)} — write it down, or use Share instead.`, [{ text: 'OK' }]);
       return;
     }
@@ -2068,12 +2098,16 @@ export default function TrainerClients() {
                     <Text style={{ ...value(30), color: t.ink, letterSpacing: 6 }}>{myCode}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Tap to send it to them</Text>
                   </Pressable>
-                  <View style={{ marginTop: sp.sm }}>
-                    <Ghost label="Copy Link for Your Bio" icon="share" onPress={() => copyJoinLink(myCode, 'your main code')} />
-                  </View>
+                  {HAS_NATIVE_CLIPBOARD ? (
+                    <View style={{ marginTop: sp.sm }}>
+                      <Ghost label="Copy Link for Your Bio" icon="share" onPress={() => copyJoinLink(myCode, 'your main code')} />
+                    </View>
+                  ) : (
+                    <JoinLinkFallback t={t} code={myCode} note />
+                  )}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     They enter this in the Repple app under Find a trainer, at the top. You still approve them before they join your roster.
-                    Tapping the code sends a message with the link in it; Copy Link gives you the bare address, for a bio, a caption,
+                    Tapping the code sends a message with the link in it; {HAS_NATIVE_CLIPBOARD ? 'Copy Link gives you' : 'above it is'} the bare address, for a bio, a caption,
                     or the destination of an ad — which is the one that lets what you spend be matched to who it brought.
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.md }}>
@@ -2145,6 +2179,10 @@ export default function TrainerClients() {
                       // would make it look as though it never ran.
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>Turned off — it takes nobody new.</Text>
                     ) : null}
+                    {/* No clipboard in this binary, so the address goes on
+                        screen where the button would have put it. The sentence
+                        explaining why is drawn once, under the main code. */}
+                    {c.isLive && !HAS_NATIVE_CLIPBOARD ? <JoinLinkFallback t={t} code={c.code} /> : null}
                   </View>
                   <Pressable
                     onPress={() => { Share.share({ message: inviteMessage(c.code) }).catch(() => {}); }}
@@ -2154,7 +2192,7 @@ export default function TrainerClients() {
                     style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8, opacity: c.isLive ? 1 : 0.5 }}>
                     <Text style={{ ...ty.label, ...numeric, color: t.ink, letterSpacing: 2 }}>{c.code}</Text>
                   </Pressable>
-                  {c.isLive ? (
+                  {c.isLive && HAS_NATIVE_CLIPBOARD ? (
                     <Ghost label="Copy Link" icon="share" onPress={() => copyJoinLink(c.code, c.label)} />
                   ) : null}
                   {c.isLive && c.id ? (

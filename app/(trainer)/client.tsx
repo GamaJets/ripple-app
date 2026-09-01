@@ -1128,6 +1128,17 @@ export default function ClientScreen() {
           <ListRow icon="pencil" title={`Write ${who} a Report`}
             note={`The handover document at the end of a block — read from ${who}'s record, not from memory.`}
             onPress={go('/(trainer)/client-report')} />
+          {/* Sending paperwork starts here, on the screen of the person it is
+              for, because that is where a coach is standing when they decide to
+              — the same argument the report row above makes.
+
+              It is a plain push and not `go`: Documents is about the coach's own
+              paperwork and takes no client, and handing it a clientId it does
+              not read would be a parameter that looks like it does something.
+              The picker on that screen names every client, this one included. */}
+          <ListRow icon="pencil" title="Send Them a Document"
+            note="Your own waivers, agreements and forms — pick one and send it to a single client."
+            onPress={() => router.push('/(trainer)/documents')} />
         </Section>
 
         <Rule />

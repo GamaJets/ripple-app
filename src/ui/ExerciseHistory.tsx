@@ -111,14 +111,17 @@ function MovementRow({ e, unit, picked, onPress }: {
         </Text>
       </View>
       {/* An estimate, so it says it is one. A movement nobody has loaded gets
-          no figure at all rather than a nought — a chin-up is not a 0 kg lift. */}
+          no figure at all rather than a nought — a chin-up is not a 0 kg lift,
+          and neither is an hour on a bike. */}
       {best != null ? (
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{num(best)} {unit}</Text>
           <Text style={{ ...ty.caption, color: t.ink3 }}>best est. 1RM</Text>
         </View>
       ) : (
-        <Text style={{ ...ty.caption, color: t.ink3 }}>no load logged</Text>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>
+          {e.daysWithSets === 0 ? 'no sets recorded' : 'no load logged'}
+        </Text>
       )}
     </Pressable>
   );
@@ -161,6 +164,18 @@ function OutingRow({ o, unit, first }: { o: ExerciseOuting; unit: WeightUnit; fi
           bodyweight work reads exactly like this.
         </Text>
       )}
+      {/* Folded, not deduplicated. The live record holds one squat session
+          written as four rows a second apart, and folding them into one day is
+          what stops the trail reading as four sessions — but the sets above
+          are then all twelve of them, which overstates the afternoon. Saying
+          so is the same call app/(trainer)/client-training.tsx makes on the
+          day block: report the shape of the record rather than pick a winner. */}
+      {o.entryCount > 1 ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+          Saved in {o.entryCount} separate entries that day, and the sets above are all of them —
+          if the same work was saved twice, this day reads high.
+        </Text>
+      ) : null}
       {o.bodyweightSets > 0 && top != null ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
           {o.bodyweightSets} of those set{o.bodyweightSets === 1 ? '' : 's'} carried no load, so the volume does not cover
@@ -318,8 +333,28 @@ export function ExerciseHistoryPanel({ log, status, unit, voice }: {
         </Text>
       ) : null}
 
+      {/* ── a movement with nothing to follow ────────────────────────────── */}
+      {/* Cardio arrives here: `workouts` rows with a distance and a duration
+          and no `sets`. There are no reps and no loads to trail, and saying so
+          is the whole job — the alternative is either an empty trail that
+          reads as a movement never done, or the movement missing from the
+          search entirely, which would have told a coach that a client who
+          cycles four times a week has never cycled. */}
+      {chosen && chosen.daysWithSets === 0 ? (
+        <View>
+          <Rule />
+          <SectionHead title={chosen.name} note={`${chosen.days} day${chosen.days === 1 ? '' : 's'}`} />
+          <Text style={{ ...ty.body, color: t.ink2 }}>
+            Logged on {chosen.days} day{chosen.days === 1 ? '' : 's'}
+            {chosen.lastDay ? `, most recently ${dayLabel(chosen.lastDay)}` : ''}, with no sets
+            recorded against any of them — so there are no reps or loads to follow here. Cardio is
+            logged as time and distance rather than as sets, and it reads exactly like this.
+          </Text>
+        </View>
+      ) : null}
+
       {/* ── one movement, followed ───────────────────────────────────────── */}
-      {chosen && trend.state === 'some' && trend.latest ? (
+      {chosen && chosen.daysWithSets > 0 && trend.state === 'some' && trend.latest ? (
         <View>
           <Rule />
           <SectionHead

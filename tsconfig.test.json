@@ -106,6 +106,7 @@
     "src/lib/a11y.test.ts",
     "src/lib/recurring.test.ts",
     "src/lib/coachDocs.test.ts",
+    "src/lib/coachDocAudience.test.ts",
     "src/lib/subscriptionScope.test.ts",
     "src/lib/nudge.test.ts",
     "src/lib/coachInvoice.test.ts",

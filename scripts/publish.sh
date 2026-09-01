@@ -20,7 +20,22 @@
 # Usage:  scripts/publish.sh "the message"
 set -euo pipefail
 
-MSG="${1:?usage: scripts/publish.sh \"update message\"}"
+MSG="${1:?usage: scripts/publish.sh \"update message\" [channel ...]}"
+shift || true
+
+# Which channels. All six by default; naming them narrows it.
+#
+# The reason to narrow is never convenience — it is that an OTA replaces the JS
+# and NOT the binary, so a bundle can reach an install too old to run it. On 1
+# Sep the production builds carried expo-clipboard and expo-document-picker and
+# the preview APKs did not, and both are imported unguarded: the same bundle was
+# safe on one family of installs and fatal on the other. Publishing to the safe
+# ones immediately, and holding the rest until a new build or a guard landed,
+# was the honest thing to do and there was no way to say it.
+CHANNELS=("$@")
+if [ ${#CHANNELS[@]} -eq 0 ]; then
+  CHANNELS=(production coach-production owner-production preview coach-preview owner-preview)
+fi
 cd "$(dirname "$0")/.."
 
 # Where the bundling actually happens. Set below to a detached worktree at HEAD
@@ -104,12 +119,12 @@ make_pubtree
 # An empty environment is how a whole evening of updates shipped, crashed on
 # launch with "supabaseUrl is required" and rolled back while the publisher
 # reported success. Both channel families talk to the same backend.
-for ch in production coach-production owner-production \
-          preview coach-preview owner-preview; do
+for ch in "${CHANNELS[@]}"; do
   case "$ch" in
     production|preview)             V=client  ;;
     coach-production|coach-preview) V=trainer ;;
     owner-production|owner-preview) V=owner   ;;
+    *) echo "unknown channel: $ch"; exit 1 ;;
   esac
   printf '%-20s ' "$ch"
   # Run FROM the worktree. Nothing an agent does to the working tree between

@@ -59,6 +59,9 @@ const tapped = exerciseOutings(doubleTapped, 'Back Squat');
 eq(tapped.length, 1, 'four rows a second apart on one day are one outing, not four');
 eq(tapped[0].setCount, 4, 'and every set of them is kept — the outing is folded, not deduplicated');
 eq(tapped[0].reps, 20, 'with the reps totalled across the rows');
+eq(tapped[0].entryCount, 4,
+  'and the day says how many entries it was folded from, because folding is not deduplicating — '
+  + 'twelve sets of the same three is a true count of the record and an overstatement of the afternoon');
 
 // The same folding under the ordinary version: sets logged, a walk, more sets.
 const splitDay: WorkoutEntry[] = [
@@ -70,6 +73,7 @@ eq(split.length, 1, 'sets logged twice in one day are one outing');
 eq(split[0].setCount, 3, 'holding every set');
 eq(split[0].topLoadKg, 65, 'and the heaviest load of the day, not of the first entry');
 eq(split[0].at, at('2026-03-02', '09:31:00'), 'stamped with the newest moment of the day');
+eq(split[0].entryCount, 2, 'and the ordinary two-goes day carries the same count of entries');
 
 /* ── 2 · a bodyweight day is not a day of nothing ─────────────────────────── */
 
@@ -83,6 +87,7 @@ eq(chinOut.setCount, 2, 'the sets themselves are real and counted');
 eq(chinOut.bodyweightSets, 2, 'and named as the ones carrying no load');
 eq(chinOut.reps, 18, 'with the reps counted, which is the whole record of a chin-up day');
 eq(chinOut.sets[0][1], null, 'the load on a bodyweight set reads as absent rather than as 0 kg');
+eq(chinOut.entryCount, 1, 'and a day logged once says one, so nothing is flagged that does not need it');
 
 // A blank row somebody tabbed past is not a set of no reps.
 const blanks = exerciseOutings([entry('2026-03-05', 'Row', [[0, 40], [10, 40]])], 'Row')[0];
@@ -167,6 +172,28 @@ eq(index[2].best1RMKg, null, 'a bodyweight movement carries no estimated max in 
 // order is settled rather than left to whatever the map happened to hold.
 const sameDay = exerciseIndex([entry('2026-04-01', 'Squat', [[5, 100]]), entry('2026-04-01', 'Bench Press', [[5, 60]])]);
 eq(sameDay[0].name, 'Bench Press', 'movements trained on the same day sort by name rather than by insertion order');
+
+// The live record is the reason this case exists. One real client's 31 logged
+// workouts are 15 cycles, 6 walks, 5 unnamed activities and one squat session
+// saved four times — and `sets` is null on every one of the cardio rows. An
+// index built only out of set-carrying movements would have answered a coach
+// searching "cycling" with "nothing logged matches that", about somebody who
+// cycles four times a week.
+const cardio = exerciseIndex([
+  { t: at('2026-08-25'), exercise: 'Cycling' },
+  { t: at('2026-08-27'), exercise: 'cycling' },
+  { t: at('2026-08-29'), exercise: 'Cycling' },
+  entry('2026-08-30', 'Squats Each S', [[3, 11.5], [15, 11.5], [25, 11.5]]),
+]);
+eq(cardio.length, 2, 'a movement logged without sets is still a movement somebody did');
+eq(matchExercises(cardio, 'cycling').length, 1, 'and is still findable by name');
+eq(matchExercises(cardio, 'cycling')[0].days, 3, 'with the days it was actually done');
+eq(matchExercises(cardio, 'cycling')[0].daysWithSets, 0,
+  'and a separate figure saying none of them carried sets, so no screen has to guess');
+eq(matchExercises(cardio, 'cycling')[0].best1RMKg, null, 'an hour on a bike estimates no 1RM');
+eq(exerciseOutings([{ t: at('2026-08-25'), exercise: 'Cycling' }], 'Cycling').length, 0,
+  'while the reps-and-loads trail behind it is honestly empty rather than padded with nothing');
+eq(matchExercises(cardio, 'squats')[0].daysWithSets, 1, 'a lift that did carry sets says so on the same field');
 
 eq(matchExercises(index, 'bench').length, 1, 'a search narrows to the movement asked for');
 eq(matchExercises(index, 'press bench')[0]?.name, 'BENCH PRESS', 'word order is not part of the question');

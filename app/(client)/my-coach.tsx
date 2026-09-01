@@ -348,6 +348,23 @@ export default function MyCoach() {
               </View>
             ) : null}
 
+            {/* ── the one thing this screen is opened to do ───────────────
+                Reaching the person it is about. It was reachable only from a
+                row called "Message", four sections down, under a heading that
+                is itself below the qualifications and the review box — so on a
+                coach with a bio and six specialities it was off the bottom of
+                the first screen. The row is still there and still says the same
+                words; this is the same destination at the top, where somebody
+                who tapped "Your Coach" in order to talk to them will find it.
+
+                Unconditional, like the standing-appointment row below and for
+                the same reason: the thread exists whether or not anything has
+                been said in it, and a control hidden on a failed read hides the
+                way to speak to the person whose profile is on screen. */}
+            <View style={{ marginTop: sp.lg }}>
+              <Cta label="Message Coach" wide onPress={() => go('/(client)/messages')} />
+            </View>
+
             <Rule />
 
             {/* ── what they say they are qualified to do ──────────────────
@@ -501,7 +518,16 @@ export default function MyCoach() {
 
             <Section>
               <SectionHead title="Reach Them" />
-              <ListRow icon="message" title="Message" note="Your thread with them" onPress={() => go('/(client)/messages')} />
+              {/* "Message" on its own said what the row WAS rather than what
+                  tapping it does, on a screen where three other rows also reach
+                  this person. Reported by the product owner as wanting a
+                  "Message Coach" control on the coach screen, and the same
+                  words are on the button above so the two are recognisably one
+                  thing rather than two. It goes to the real thread —
+                  app/(client)/messages.tsx, keyed by `messages.client_id` with
+                  the coach named through `my_coach()` — and not to a second
+                  messaging surface. */}
+              <ListRow icon="message" title="Message Coach" note="Your thread with them" onPress={() => go('/(client)/messages')} />
               <ListRow icon="calendar" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
               <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
               {/* A standing appointment is an agreement between these two
