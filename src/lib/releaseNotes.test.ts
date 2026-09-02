@@ -163,13 +163,32 @@ for (const r of RELEASES) {
   }
 }
 
-// This release, and that it reached the three apps differently.
-const latest = RELEASES[0];
-eq(latest.version, '1.2.0', 'the newest release listed is the one that shipped today');
+// ── each release, addressed by its own version ────────────────────────────
+//
+// This block used to open `const latest = RELEASES[0]` and assert it was
+// '1.2.0'. Every assertion under it then described 1.2.0's content — so the
+// day 1.3.0 was added, a dozen true statements about a shipped release began
+// failing, and the only way to make them pass was to delete them. A test that
+// has to be rewritten every time the thing it tests is added to is a test that
+// gets deleted instead.
+//
+// Releases are named now. What shipped in 1.2.0 is asserted against 1.2.0 for
+// as long as that entry exists, and a new release adds a block of its own.
+const release = (v: string): Release => {
+  const found = RELEASES.find((r) => r.version === v);
+  ok(!!found, `release ${v} is still listed — these assertions describe it`);
+  return found ?? RELEASES[0];
+};
+// Whatever is newest, every app has to get something out of it: an entry list
+// that reaches two apps and not the third is the shape of a release written
+// with one reader in mind.
 for (const aud of ALL) {
-  ok(releasesFor(aud, [latest]).length === 1, `${aud} got something out of the newest release`);
+  ok(releasesFor(aud, [RELEASES[0]]).length === 1,
+    `${aud} got something out of ${RELEASES[0].version}, the newest release`);
 }
-const titlesFor = (aud: Audience) => releasesFor(aud, [latest]).flatMap((r) => r.entries.map((e) => e.title));
+
+const r120 = release('1.2.0');
+const titlesFor = (aud: Audience) => releasesFor(aud, [r120]).flatMap((r) => r.entries.map((e) => e.title));
 ok(titlesFor('client').some((t) => /injury/i.test(t)), 'a client is told they can disclose an injury');
 ok(titlesFor('trainer').some((t) => /injur/i.test(t)), 'and a coach that it reaches them before they write the plan');
 ok(!titlesFor('owner').some((t) => /injur/i.test(t)), 'a gym owner is not read either — there is no client of theirs to disclose one');
@@ -194,6 +213,25 @@ for (const t of titlesFor('trainer')) {
   ok(!/redeem|promo code/i.test(t), `a coach runs no gym promotions and is not told about them ("${t}")`);
 }
 
+/* ── 1.3.0 ─────────────────────────────────────────────────────────────────
+ *
+ * The rule this release tests hardest: a member whose card number changed has
+ * to be told, in their own app, and it is the only entry here that somebody
+ * has to act on rather than merely notice. */
+const r130 = release('1.3.0');
+const t130 = (aud: Audience) => releasesFor(aud, [r130]).flatMap((r) => r.entries.map((e) => e.title));
+ok(t130('client').some((t) => /member number/i.test(t)), 'a member is told their card number changed');
+ok(!t130('trainer').some((t) => /member number/i.test(t)), 'a coach does not carry one and is not told');
+ok(t130('trainer').some((t) => /chargeback/i.test(t)), 'a coach is told a chargeback now reaches them');
+ok(!t130('client').some((t) => /chargeback/i.test(t)), 'a member does not handle one and is not told');
+ok(t130('owner').some((t) => /export/i.test(t)), 'an owner is told what their export now covers');
+ok(t130('trainer').some((t) => /quiet hours/i.test(t)), 'a coach is told they can hold pushes overnight');
+// Money the coach handles themselves under direct charges. A gym owner has no
+// part in a coach's refund and no screen that would show them one.
+for (const t of t130('owner')) {
+  ok(!/refund you make|chargeback/i.test(t), `an owner is not told about a coach's own money ("${t}")`);
+}
+
 // One release, one sentence per change. Two entries with the same title is the
 // shape a stale note takes when a second person describes what already landed.
 for (const r of RELEASES) {
@@ -206,7 +244,7 @@ for (const r of RELEASES) {
 
 // The same source feeds App Store Connect, and its field has a limit.
 for (const aud of ALL) {
-  const text = storeNotes(aud, latest.version);
+  const text = storeNotes(aud, RELEASES[0].version);
   ok(text.length > 0, `${aud}: the newest release produces store text`);
   ok(text.length <= 4000, `${aud}: store text fits App Store Connect's 4000-character field`);
 }

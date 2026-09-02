@@ -60,6 +60,218 @@ const ALL: Audience[] = ['client', 'trainer', 'owner'];
  */
 export const RELEASES: Release[] = [
   {
+    version: '1.3.0',
+    date: '2026-09-02',
+    headlines: {
+      client:  'Your card number has changed, your AI coach remembers the conversation, and what you write offline now waits and sends itself.',
+      trainer: 'A refund or a chargeback in Stripe now reaches you here, packs can be given a time limit, and your register, attendance and referrals are screens you can open.',
+      owner:   'The export says which period it covers and carries your paperwork, a signature records who actually gave it, and the door asks about the person.',
+    },
+    entries: [
+      /* ── the one every member has to be told ─────────────────────────── */
+      {
+        kind: 'fixed',
+        apps: ['client'],
+        title: 'Your member number has changed',
+        note: 'The old one was not unique — two members could be given the same number, and at a busy gym they were. Yours is new and yours alone. If you have already given the old one to reception, show them this screen again: Access › Member Card.',
+      },
+      /* ── client ──────────────────────────────────────────────────────── */
+      {
+        kind: 'fixed',
+        apps: ['client'],
+        title: 'Your Weekly Report no longer sends your body figures anywhere without asking',
+        note: 'It used to send your name and your measurements to write the summary. Now it asks first, tells you exactly what would travel, and you can change the answer whenever you like.',
+      },
+      {
+        kind: 'new',
+        apps: ['client'],
+        title: 'Your AI coach remembers the conversation',
+        note: 'It used to forget everything the moment you left the screen. The thread is kept on your phone and never on a server, so your coach and your gym cannot read it. Clear it any time from the screen itself.',
+      },
+      {
+        kind: 'new',
+        apps: ['client'],
+        title: 'What you write with no signal now waits and sends itself',
+        note: 'Your goal, your day plan and a glucose reading join messages and measurements in the queue. A day plan you marked for a date that has since passed is dropped rather than sent late, and you are told.',
+      },
+      {
+        kind: 'new',
+        apps: ['client'],
+        title: 'Sign your gym’s waiver yourself',
+        note: 'Me › Connect › Agreements. Read it in full and sign from your own account, so the record shows you gave it rather than that reception typed your name.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['client'],
+        title: 'Bodyweight sets count as work',
+        note: 'Pull-ups and dips used to read as no volume at all. Log a set with the weight box empty and it is counted at your bodyweight, plus anything you added.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['client'],
+        title: 'Progress no longer calls losing weight good when you are trying to gain',
+        note: 'It reads your goal now. If your goal has no opinion on a figure, neither does the arrow.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['client'],
+        title: 'Your streak no longer loses a day when the clocks change',
+      },
+      {
+        kind: 'fixed',
+        apps: ['client'],
+        title: 'Eight screens that search could not find',
+        note: 'Account, Attendance, Compare, Gym Plans, Notices, Receipts, Standing and Intake are all findable from Explore now.',
+      },
+      /* ── trainer ─────────────────────────────────────────────────────── */
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'A refund you make in your own Stripe dashboard now reaches the app',
+        note: 'It used to stay invisible here, so Payments went on showing money you had given back.',
+      },
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'A chargeback arrives with its deadline',
+        note: 'Payments & Packages, above everything else. The date Stripe stops accepting evidence is the first line, because sending nothing loses it by default. The evidence itself still goes in through Stripe.',
+      },
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'A session pack can be given a time limit',
+        note: 'Set the validity when you create or edit a package. Nothing already sold is affected — a pack only ever gets the window that existed on the day it was bought — and if one runs out with sessions left you are told, by name and with the number.',
+      },
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'Move a session instead of cancelling it',
+        note: 'The client keeps their credit and the hour they gave up goes to whoever was waiting for it. Nothing is charged and nothing is drawn twice.',
+      },
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'Quiet hours',
+        note: 'Settings › Notifications. Hold pushes overnight, or over whatever hours you choose. Set on your account rather than this handset, and read in the timezone your phone was in when you set them.',
+      },
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'Your register, your clients’ attendance, and who refers you people',
+        note: 'Three screens over records the app already kept and never showed you. The register counts walk-ins beside the show rate rather than inside it, and a class nobody ticked is counted apart rather than as nobody turning up.',
+      },
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'Search your roster by name',
+        note: 'On Clients. The magnifying glass in the header still searches every screen; the field on the list searches people.',
+      },
+      {
+        kind: 'new',
+        apps: ['trainer'],
+        title: 'Log a Session has a client picker',
+        note: 'You are told who it is for before you type it out, rather than after.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['trainer'],
+        title: 'Set type is a control you can see',
+        note: 'It read “Normal” with nothing to say it was a choice. It now says what the set type is, what that means, and that warm-ups, drop sets, AMRAP and eight others are behind it.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['trainer'],
+        title: 'Revenue counts what you marked delivered, not what the clock passed',
+        note: 'A session nobody marked is priced separately and shown on its own, so a no-show never reads as money.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['trainer'],
+        title: 'Your data export contains your business',
+        note: 'It held only the member-side record. It now carries your packages, invoices, receipts, payouts, costs, enquiries and join codes — and nobody else’s.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['trainer'],
+        title: 'A session fee is converted by its own currency',
+        note: 'Yen and dinar fees were snapshotted at a hundred times or a tenth of what they should have been, on the figure a gym settles payroll from.',
+      },
+      /* ── owner ───────────────────────────────────────────────────────── */
+      {
+        kind: 'new',
+        apps: ['owner'],
+        title: 'The export covers a period you choose, and says so',
+        note: 'Every file name and the top of the README name the dates. It also lists which files the period narrowed and which are whole whatever you asked, so two figures from the bundle are never added together by mistake.',
+      },
+      {
+        kind: 'new',
+        apps: ['owner'],
+        title: 'Waivers, signatures and your filed documents are in the export',
+        note: 'Each signature says whether the member gave it themselves or a member of staff recorded it for them. The files themselves are not in the bundle — a spreadsheet cannot hold a scan — but every one is listed with where it is.',
+      },
+      {
+        kind: 'new',
+        apps: ['owner'],
+        title: 'A signature records who actually gave it',
+        note: 'It used to be a member of staff typing the member’s name, with nothing to say so. Staff can still record one at the desk, and it is now marked as exactly that.',
+      },
+      {
+        kind: 'new',
+        apps: ['owner'],
+        title: 'The door asks about the person',
+        note: 'A cancelled, frozen or ended membership is refused at check-in, and staff can let them in anyway by saying why. Somebody already inside is not checked in twice. Check-ins taken with no signal wait and send themselves.',
+      },
+      {
+        kind: 'new',
+        apps: ['owner'],
+        title: 'Put a walk-in on a class, and tell people when one is called off',
+        note: 'Booking from the desk respects the capacity and the waiting list. Cancelling a class now notifies everyone booked and waitlisted.',
+      },
+      {
+        kind: 'new',
+        apps: ['owner'],
+        title: 'Online orders that need a person',
+        note: 'A new screen for money Stripe took where the membership or pass could not be granted. It was recorded and nobody was looking at it.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['owner'],
+        title: 'The console stops refusing at a thousand rows',
+        note: 'Members, retention, accounting, close and passes all went blank once a gym had enough history. They page now, and the door log is bounded by pass redemptions rather than by footfall.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['owner'],
+        title: 'A promo code you switched off is no longer counted as live',
+        note: 'The count read every code you had ever made. You can also turn one off without deleting it, and an inactive code can no longer be pushed to members.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['owner'],
+        title: 'A gym that changed currency keeps its revenue trend',
+        note: 'The whole thirteen-month history used to be withheld. Each currency now gets its own thirteen months — still never added together, because they do not add.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['owner'],
+        title: 'Churn is a rate, or it is not shown',
+        note: 'Departures were counted against a population they were not in. A month where somebody left with no recorded join date now says so instead of quoting a figure.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['owner'],
+        title: 'Growth says it measures trainers',
+        note: 'It was labelled as though it answered member churn. Nothing records when a membership was cancelled, so no figure was invented — the tab now says what it is.',
+      },
+      {
+        kind: 'fixed',
+        apps: ['owner'],
+        title: 'Taking a member list to a spreadsheet is recorded',
+        note: 'The one-click download of names, emails and phone numbers logged nothing, while the slower export logged everything.',
+      },
+    ],
+  },
+  {
     version: '1.2.0',
     date: '2026-08-31',
     headlines: {
