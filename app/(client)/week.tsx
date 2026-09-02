@@ -44,7 +44,15 @@ export default function ThisWeek() {
   // only when `coachProgram` is set, so the substitution arrived looking exactly
   // like a client who has no coach plan: a bespoke plan replaced by a generic
   // one, with nothing on the screen to prompt a second look.
-  const programUnknown = programStatus === 'error' && coachProgram == null;
+  //
+  // 'loading' is not "known" either. The provider starts at 'loading' under
+  // Supabase (src/ui/assignedPrograms.tsx), so the first frame drew seven days
+  // of a generated programme under "The Plan" with nothing said — and a member
+  // glancing at their week has usually looked away before the real one lands.
+  // 'partial' is the third: the page came back at the row cap, so their
+  // assignment may have been on the part we never read. Anything that is not
+  // 'ready' is a null we cannot read as "no coach plan".
+  const programUnknown = coachProgram == null && programStatus !== 'ready';
   const program = coachProgram ?? buildProgram(c.goal, c.bodyFatPct);
   // The week they are on, and its days. Identical to `program.days` for every
   // one-week programme, which is every programme this app generates and every
@@ -95,8 +103,13 @@ export default function ThisWeek() {
 
         {programUnknown ? (
           <View style={{ marginTop: sp.lg }}>
-            <Notice tone={t.warn} kicker="This week" title="We couldn’t check for a coach plan"
-              note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
+            {programStatus === 'loading' ? (
+              <Notice tone={t.ink3} kicker="This week" title="Still checking for a coach plan"
+                note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as it lands.`} />
+            ) : (
+              <Notice tone={t.warn} kicker="This week" title="We couldn’t check for a coach plan"
+                note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
+            )}
           </View>
         ) : null}
 

@@ -66,7 +66,34 @@ const problems = [];
 // reported as `failed to read file` warnings that scroll past.
 //
 // `import type` is not flagged: it is erased before Deno ever resolves it.
+const REACHED = new Map();
 const VALUE_IMPORT = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)([\s\S]{0,400}?)\s*from\s+['"](\.[^'"]+)['"]/g;
+
+// And the same specifier written in PROSE.
+//
+// The Supabase CLI collects a function's dependencies with a scanner that does
+// NOT strip comments, so a line of documentation containing `from './x'` is
+// read as a real import and reported as `failed to read file: open src/lib/x`.
+// It cost a refused stripe-webhook deploy on 2 Sep: the offending text was the
+// comment in termDates.ts EXPLAINING the leaf-module rule, quoting the broken
+// form it exists to forbid.
+//
+// The gate above cannot see it — its pattern anchors to the start of a line, so
+// a `//` in front hides the match from us and from nobody else. This one scans
+// the raw text and subtracts the spans the real-import pattern already claimed;
+// whatever is left is a specifier only the CLI can see.
+const ANY_SPEC = /from\s+['"](\.[^'"]*)['"]/g;
+
+function prosePecifiers(file, src) {
+  const claimed = [];
+  for (const m of src.matchAll(VALUE_IMPORT)) claimed.push([m.index, m.index + m[0].length]);
+  const out = [];
+  for (const m of src.matchAll(ANY_SPEC)) {
+    if (claimed.some(([a, b]) => m.index >= a && m.index < b)) continue;
+    out.push({ file, spec: m[1], line: src.slice(0, m.index).split('\n').length });
+  }
+  return out;
+}
 
 function reachableFrom(entry) {
   const seen = new Set();
@@ -78,6 +105,7 @@ function reachableFrom(entry) {
     seen.add(file);
     let src;
     try { src = readFileSync(file, 'utf8'); } catch { continue; }
+    REACHED.set(file, src);
     for (const m of src.matchAll(VALUE_IMPORT)) {
       const spec = m[2];
       const target = resolve(dirname(file), spec);
@@ -129,6 +157,15 @@ for (const entry of files) {
       `  ${where}  imports '${b.spec}' with no file extension`
       + (b.via ? `, and is reached from ${relative(ROOT, b.via)}` : '')
       + ` — Deno cannot resolve that, so the function throws on its first request`);
+  }
+}
+
+for (const [file, src] of REACHED) {
+  for (const p of prosePecifiers(file, src)) {
+    problems.push(
+      `  ${relative(ROOT, file)}:${p.line}  the text \`from '${p.spec}'\` appears outside a real import`
+      + ` — the Supabase CLI's dependency scanner does not strip comments, so it will try to read`
+      + ` '${p.spec}' and refuse the deploy. Reword it (a specifier of \`${p.spec}\`) rather than quoting the form.`);
   }
 }
 

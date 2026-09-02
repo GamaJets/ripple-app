@@ -194,13 +194,33 @@ export default function ClientGoals() {
     const [goalRes, scanRes, ciRes, measRes] = await Promise.all([
       supabase.from('goal_targets').select(GOAL_COLS)
         .eq('client_id', id).order('created_at', { ascending: false }).limit(capLimit()),
+      // NEWEST-FIRST, and reversed back into ascending order once the page has
+      // been measured. `ascending: true` with a cap is the pair
+      // src/lib/historyWindow.ts:5-18 documents by name: PostgREST answers with
+      // at most a thousand rows and says nothing, so an ascending read hands
+      // back the OLDEST thousand and stops. A client who weighs in weekly for
+      // twenty years, or daily for three, would have had a chart of their first
+      // thousand readings drawn as their current trend — the same shape as the
+      // screen that told a member "nothing logged since Mar 2023" the morning
+      // after they trained. Reading downward puts the cut at the far end of
+      // their history instead, where a truncated read costs the oldest points
+      // rather than every recent one, and `weighStatus` says it happened.
+      //
+      // The id settles ties for the same reason it settles them on the
+      // measurements read below: a client who is scanned and weighed on the
+      // same instant writes rows the server may order differently on each
+      // request, and an order with ties in it is not an order to cut a page on.
       supabase.from('scans').select(SCAN_COLS)
-        .eq('client_id', id).order('taken_at', { ascending: true }).limit(capLimit()),
+        .eq('client_id', id)
+        .order('taken_at', { ascending: false }).order('id', { ascending: false })
+        .limit(capLimit()),
       supabase.from('check_ins').select(CHECKIN_COLS)
-        .eq('user_id', id).order('at', { ascending: true }).limit(capLimit()),
-      // Newest-first, unlike the two above, because what this one is for is the
-      // latest reading at each site and the one before it — so if the cap bites,
-      // the rows that fall off the end are the oldest and least useful.
+        .eq('user_id', id)
+        .order('at', { ascending: false }).order('id', { ascending: false })
+        .limit(capLimit()),
+      // Newest-first, as the two above now are, because what this one is for is
+      // the latest reading at each site and the one before it — so if the cap
+      // bites, the rows that fall off the end are the oldest and least useful.
       // `taken_at` is a DATE, and a client who measures five sites writes five
       // rows carrying the same one: an order with ties in it is not an order,
       // and at the cap the server may break them differently on each read, so a
@@ -236,7 +256,11 @@ export default function ClientGoals() {
       setScanStatus('error');
     } else {
       const page = capped((scanRes.data ?? []) as unknown as ScanRow[]);
-      scans = page.rows;
+      // Back into ascending order, which is what every chart below reads and
+      // what `seriesFrom` is handed everywhere else. The read is downward so
+      // the cap bites the oldest rows; the ORDER the screen draws in is not the
+      // order the rows have to arrive in.
+      scans = page.rows.slice().reverse();
       setScanStatus(page.truncated ? 'partial' : 'ready');
     }
 
@@ -246,7 +270,7 @@ export default function ClientGoals() {
       setWeighStatus('error');
     } else {
       const page = capped((ciRes.data ?? []) as unknown as WeighInRow[]);
-      weighIns = page.rows;
+      weighIns = page.rows.slice().reverse();
       setWeighStatus(page.truncated ? 'partial' : 'ready');
     }
 

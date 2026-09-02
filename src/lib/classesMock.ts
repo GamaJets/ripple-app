@@ -14,6 +14,16 @@
 
 export type ClassBookingStatus = 'booked' | 'waitlist';
 
+/**
+ * Whether a class is still on, or was called off and KEPT.
+ *
+ * The same two values `ClassStatus` carries in src/lib/gymSchedule.ts, spelt
+ * out again here rather than imported: this module is types only and is pulled
+ * into the client bundle, and gymSchedule.ts brings the row-cap and write
+ * assertions with it.
+ */
+export type ClassStatus = 'scheduled' | 'cancelled';
+
 export interface GymClass {
   id: string;
   title: string;
@@ -39,6 +49,42 @@ export interface GymClass {
    * a coach concluding there is no demand when nobody looked.
    */
   waiting: number | null;
+  /**
+   * Whether this class is still on, or was called off.
+   *
+   * `gym_classes.status`, added by part 195, and the app read `select('*')`
+   * without ever mapping it — so a class the gym cancelled from the console
+   * drew on the coach's phone exactly like one that was going ahead, and the
+   * coach turned up and told the members it was on.
+   *
+   * OPTIONAL, and undefined means scheduled. That is the same reading
+   * `isCancelled` in src/lib/gymSchedule.ts makes and for the same reason: a
+   * row from a database that predates part 195, or one built by hand, is a
+   * class that is ON, which is what it was before the column existed. It is
+   * also the only reading that cannot silently drop a real class off a
+   * timetable.
+   */
+  /**
+   * The coach recorded as teaching it — `gym_classes.trainer_id`.
+   *
+   * The app's own Add a Class writes it; studio-web's wrote free-text
+   * `instructor` and never the id, so part 165 notes that "every class already
+   * on the board has `trainer_id` NULL". Null therefore means UNATTRIBUTED, not
+   * "somebody else's": nothing may conclude from a null that this class is not
+   * the reader's, and nothing may conclude that it is.
+   */
+  trainerId?: string | null;
+  status?: ClassStatus;
+  /** Why it was called off, free text the console captured. Null on a class
+   *  nobody gave a reason for; undefined on a row read before part 195. */
+  cancelReason?: string | null;
+  /**
+   * The weekly series this occurrence belongs to, or null for a one-off.
+   *
+   * Null is a real answer and is not backfilled — a series of one makes "this
+   * class" and "this and every later one" the same button.
+   */
+  seriesId?: string | null;
 }
 
 // Common studio-class formats (chain-agnostic; a gym can add its own).

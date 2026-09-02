@@ -15,6 +15,7 @@
 // "not blocked" while ten were. Both describe a diary that is not the diary.
 import {
   blockDates, summariseBlocks, blockSummaryLine, blockPlanLabel,
+  cancelAndBlockBody, cancelAndBlockLabel, sessionsBlocking,
   MAX_BLOCK_DAYS, MAX_BLOCK_WEEKS,
   type BlockResult,
 } from './blockRange';
@@ -169,6 +170,52 @@ for (const s of [clean, mixed, allBooked, manyBooked, summariseBlocks([])]) {
   ok(!l.includes('!'), 'nothing shouts');
   ok(l.length > 10, 'and every state says something');
 }
+
+/* ── which sessions are actually in the way ─────────────────────────────── */
+
+// Built with LOCAL constructors, so the day each session falls on is the day a
+// coach standing in that zone would call it. Under TZ=Pacific/Kiritimati a 7am
+// session is the previous day in UTC, and matching on a UTC slice would offer
+// the coach Monday's client as the thing blocking Tuesday.
+const at = (y: number, mIdx: number, d: number, h: number) => new Date(y, mIdx, d, h, 0, 0, 0).toISOString();
+const sess = (id: string, startsAt: string, status: string, clientId: string | null = 'c1') =>
+  ({ id, startsAt, status, clientId });
+
+const DAYS = ['2026-09-08', '2026-09-09'];
+const pool = [
+  sess('a', at(2026, 8, 8, 7), 'booked'),
+  sess('b', at(2026, 8, 8, 18), 'booked'),
+  // An OPEN slot in the same period. `block_time` withdraws these itself, and
+  // offering to cancel an hour nobody holds would invent a client.
+  sess('c', at(2026, 8, 8, 12), 'open', null),
+  sess('d', at(2026, 8, 9, 6), 'booked'),
+  // Outside the range entirely.
+  sess('e', at(2026, 8, 10, 7), 'booked'),
+];
+const inWay = sessionsBlocking(DAYS, pool);
+eq(inWay.length, 3, 'only the booked sessions on the blocked days are in the way');
+eq(inWay.map((s) => s.id).join(','), 'a,b,d', 'and they come back soonest first');
+ok(!inWay.some((s) => s.id === 'c'), 'an open slot is never offered as a cancellation');
+ok(!inWay.some((s) => s.id === 'e'), 'nor is a session on a day nobody blocked');
+
+// A timestamp that will not parse is dropped rather than guessed at: it cannot
+// be matched to a day, and a cancellation aimed at the wrong day costs somebody
+// their appointment.
+eq(sessionsBlocking(DAYS, [sess('x', 'not a date', 'booked')]).length, 0,
+  'an unreadable start is never matched to a day');
+eq(sessionsBlocking([], pool).length, 0, 'an empty plan blocks nothing and clashes with nothing');
+
+/* ── and what the coach is asked before it happens ──────────────────────── */
+
+const body1 = cancelAndBlockBody(1, ['Ana 7:00am']);
+ok(body1.includes('Ana 7:00am'), 'the confirm names who is being cancelled');
+ok(/tells that client/.test(body1), 'and says the client is told');
+ok(/waitlist/.test(body1), 'and that the hour goes to the waitlist');
+const body5 = cancelAndBlockBody(5, ['A', 'B', 'C', 'D', 'E']);
+ok(/and 1 more/.test(body5), 'a long list is trimmed rather than run off the alert');
+ok(!/undefined|NaN/.test(body5), 'and never renders a name as a word');
+eq(cancelAndBlockLabel(1), 'Cancel It And Block', 'the button says what it does, in the singular');
+eq(cancelAndBlockLabel(4), 'Cancel 4 And Block', 'and counts when there is more than one');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('blockRange.test.ts — ok');

@@ -146,6 +146,13 @@ export const NAV: NavItem[] = [
   // holds, every document it has filed, and the log of who did what to its
   // record.
   { href: '/compliance', label: 'Compliance', roles: ['owner'], context: 'gym' , group: 'System' },
+  // Directly after Compliance because it is the same obligation with a deadline
+  // on it. `app/(owner)/deletions.tsx` was the only surface in the product that
+  // read the erasure queue, so the console — where an owner does everything
+  // else that is regulated — was the one place a statutory clock could not be
+  // honoured. An owner without the Studio app installed ran the thirty days out
+  // and had no way of knowing.
+  { href: '/deletions', label: 'Erasure', roles: ['owner'], context: 'gym' , group: 'System' },
   { href: '/import', label: 'Import', roles: ['owner'], context: 'gym' , group: 'System' },
   // Beside Import deliberately: a gym that can be imported into and not
   // exported out of is a gym that cannot leave.

@@ -11,7 +11,7 @@
 // (`src/theme/scale`): three bordered stat boxes and four stacked cards became
 // one hero figure plus hairline-separated sections, and the Georgia serif
 // header is gone.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +21,7 @@ import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../
 import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { Fetched } from '../../src/ui/fetched';
 import { gymRollup, cohorts, clientAnalytics, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 
@@ -34,7 +35,11 @@ export default function OwnerGrowth() {
   // returns the hero read "+0 new trainers" over "No trainers yet" and the
   // retention row reported 0% idle. An owner checking whether their growth push
   // worked was shown a month with no signups by a query that had not finished.
-  const { trainers, loading, status: trainersStatus } = usePlatformTrainers();
+  const { trainers, loading, status: trainersStatus, refresh } = usePlatformTrainers();
+  /** When the roster every figure on this screen is a roll-up of last came
+   *  back. 'ready' only — a failed retry must not move the stamp. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => { if (trainersStatus === 'ready') setFetchedAt(Date.now()); }, [trainersStatus]);
   // And having waited on it, the read can still have FAILED — which leaves
   // `trainers` empty with `loading` false, i.e. exactly the state the paragraph
   // above describes, permanently. "+0 new trainers" over "No trainers yet", and
@@ -110,6 +115,7 @@ export default function OwnerGrowth() {
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Acquisition &amp; retention</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Growth</Text>
+          <Fetched at={fetchedAt} onRefresh={refresh} busy={loading} />
         </View>
 
         {/* ── the hero ───────────────────────────────────────────────────── */}

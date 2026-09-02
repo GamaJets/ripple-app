@@ -156,6 +156,39 @@ export function closeBlocker(
   return null;
 }
 
+/**
+ * Why money dated into this month cannot be written, or null.
+ *
+ * ── The door that was left open ───────────────────────────────────────────
+ *
+ * Part 182 locked `gym_payments` and `gym_invoices` against writes into a
+ * closed month and locked nothing else. `payroll_settlements` — the one table
+ * in the product where money LEAVES the building — was unguarded, and /payroll
+ * never read this table at all: the period picker offered a closed month
+ * exactly like an open one and wrote `period_from` straight through. The month
+ * was signed off, and then a settlement landed in it, and /accounting's "Money
+ * out" for a filed month moved underneath the accountant.
+ *
+ * Part 481 attaches the same trigger to `payroll_settlements.period_from`, so
+ * the database refuses it. This is the half that refuses it BEFORE the button
+ * is pressed, because a payroll run that fails at the database is a worse way
+ * to learn the month is closed than being told so with the run on screen.
+ *
+ * `rows` null means the record of closes could not be read. That returns null —
+ * allowed — deliberately: the database is now the backstop and will refuse a
+ * genuine violation, so blocking here on an unreadable read would take payroll
+ * away from a gym over a failure that costs nothing. That is the opposite trade
+ * from `closeBlocker`, where nothing downstream would catch a double close.
+ */
+export function closedMonthBlocker(day: string, rows: MonthCloseRow[] | null): string | null {
+  if (rows == null) return null;
+  const key = (day ?? '').slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(key)) return null;
+  const live = liveCloseFor(key, rows);
+  if (!live) return null;
+  return `${key} is closed. Nothing dated into it can be recorded until it is reopened on the Close screen, with a reason.`;
+}
+
 /** Why a reopen cannot be recorded, or null. */
 export function reopenBlocker(reason: string): string | null {
   if (!reason.trim()) {

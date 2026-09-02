@@ -91,7 +91,7 @@ const lift: WorkoutEntry = {
   id: 'w1', t: '2026-05-04T11:00:00.000Z', exercise: 'Squat',
   sets: [[8, 60], [8, 60], [6, 70]], feel: ['ok', 'ok', 'hard'], kcal: 180,
 };
-const fixed = readWorkoutEdit(lift, { name: 'Back squat', sets: [[10, 60], [8, 60]], mins: '', dist: '', watts: '', kcal: '190' });
+const fixed = readWorkoutEdit(lift, { name: 'Back squat', sets: [{ reps: 10, kg: 60 }, { reps: 8, kg: 60 }], mins: '', dist: '', watts: '', kcal: '190' });
 ok(fixed.ok, 'a corrected lift should read');
 if (fixed.ok) {
   ok(fixed.value.exercise === 'Back squat', 'the rename should carry');
@@ -104,16 +104,68 @@ if (fixed.ok) {
 }
 
 // Blank calories means unknown, and unknown is null — not zero.
-const noKcal = readWorkoutEdit(lift, { name: 'Squat', sets: [[8, 60]], mins: '', dist: '', watts: '', kcal: '' });
+const noKcal = readWorkoutEdit(lift, { name: 'Squat', sets: [{ reps: 8, kg: 60 }], mins: '', dist: '', watts: '', kcal: '' });
 ok(noKcal.ok && 'kcal' in noKcal.value && noKcal.value.kcal === undefined, 'blank calories must clear the figure, not zero it');
-ok(!readWorkoutEdit(lift, { name: 'Squat', sets: [[8, 60]], mins: '', dist: '', watts: '', kcal: 'lots' }).ok,
+ok(!readWorkoutEdit(lift, { name: 'Squat', sets: [{ reps: 8, kg: 60 }], mins: '', dist: '', watts: '', kcal: 'lots' }).ok,
   'unreadable calories must be refused');
 
 // Emptying every set is a delete, and is named as one rather than written.
 ok(!readWorkoutEdit(lift, { name: 'Squat', sets: [], mins: '', dist: '', watts: '', kcal: '' }).ok,
   'a lift with no sets left must be refused');
-ok(!readWorkoutEdit(lift, { name: '  ', sets: [[8, 60]], mins: '', dist: '', watts: '', kcal: '' }).ok,
+ok(!readWorkoutEdit(lift, { name: '  ', sets: [{ reps: 8, kg: 60 }], mins: '', dist: '', watts: '', kcal: '' }).ok,
   'an entry needs an exercise name');
+
+// ── the flags a set carries, through an edit ────────────────────────────────
+//
+// `bw` and `timed` were read by nobody in the sheet and written by nobody in
+// `updateWorkout`, so correcting one set of a calisthenics session converted
+// every set in it into an ordinary weighted set worth nothing to any board —
+// and a 45-second plank opened in a column headed "Reps".
+const holds: WorkoutEntry = {
+  id: 'w3', t: '2026-05-04T11:00:00.000Z', exercise: 'Plank',
+  sets: [[45, 0], [60, 10]], timed: [true, true], feel: ['ok', 'hard'],
+};
+const heldFix = readWorkoutEdit(holds, {
+  name: 'Plank', sets: [{ reps: 50, kg: 0, timed: true }, { reps: 60, kg: 10, timed: true }],
+  mins: '', dist: '', watts: '', kcal: '',
+});
+ok(heldFix.ok, 'a corrected hold reads');
+if (heldFix.ok) {
+  ok(JSON.stringify(heldFix.value.timed) === JSON.stringify([true, true]), 'a hold is still a hold after an edit');
+  ok(heldFix.value.bw === undefined, 'and nothing invents a bodyweight flag it was not given');
+}
+
+const pullups: WorkoutEntry = {
+  id: 'w4', t: '2026-05-04T11:00:00.000Z', exercise: 'Pull-up',
+  sets: [[10, 0], [8, 0], [6, 20]], bw: [true, true, true], feel: ['easy', 'ok', 'hard'],
+};
+// Deleting the FIRST set. Every flag and every effort answer below it has to
+// move up with its own set — the old code sliced `feel` to a length, which left
+// set 2's answer describing set 1.
+const cut = readWorkoutEdit(pullups, {
+  name: 'Pull-up',
+  sets: [{ reps: 0, kg: 0, bw: true }, { reps: 8, kg: 0, bw: true }, { reps: 6, kg: 20, bw: true }],
+  mins: '', dist: '', watts: '', kcal: '',
+});
+ok(cut.ok, 'removing a set reads');
+if (cut.ok) {
+  ok(JSON.stringify(cut.value.sets) === JSON.stringify([[8, 0], [6, 20]]), 'the two surviving sets carry');
+  ok(JSON.stringify(cut.value.bw) === JSON.stringify([true, true]), 'and both are still bodyweight sets');
+  ok(JSON.stringify(cut.value.feel) === JSON.stringify(['ok', 'hard']),
+    'each surviving set keeps its OWN effort answer, not the one above it');
+}
+
+// A bodyweight entry corrected into a weighted one clears the array rather than
+// leaving a stale one describing sets that are no longer bodyweight.
+const nowWeighted = readWorkoutEdit(pullups, {
+  name: 'Lat pulldown', sets: [{ reps: 10, kg: 55 }, { reps: 8, kg: 55 }],
+  mins: '', dist: '', watts: '', kcal: '',
+});
+ok(nowWeighted.ok, 'a bodyweight entry corrected to a weighted one reads');
+if (nowWeighted.ok) {
+  ok('bw' in nowWeighted.value && nowWeighted.value.bw === undefined,
+    'the bodyweight flags are cleared, and cleared explicitly so the write can send null');
+}
 
 const row: WorkoutEntry = {
   id: 'w2', t: '2026-05-04T11:00:00.000Z', exercise: 'Rowing',

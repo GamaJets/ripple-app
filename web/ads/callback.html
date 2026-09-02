@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Returning you to the app — Repple</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="../styles.css?v=276220735b">
+<link rel="icon" href="../favicon.png">
+</head>
+<body>
+
+<!--
+  WHERE META, GOOGLE, TIKTOK AND INSTAGRAM SEND A COACH AFTER THEY SIGN IN.
+
+  ── This page was missing, and four flows depended on it ──────────────────
+
+  `AD_OAUTH_REDIRECT` in src/ui/adSpend.ts has been
+  `https://www.repplefitness.com/ads/callback` since the Meta ad-spend feature
+  shipped. There was no `web/ads/` directory and no callback page, so every
+  coach who completed Meta's consent screen was redirected to a 404 and the
+  authorisation code never reached the app. The ad-spend connect flow has never
+  worked. Nothing caught it because nothing tests a redirect that leaves the
+  app, and the screen's own error is about a missing code rather than a missing
+  page.
+
+  Google Ads, TikTok and Instagram publishing were all then written against the
+  same address, on the reasonable assumption that a shipped feature's redirect
+  existed. One missing file, four broken sign-ins.
+
+  ── What this page does ───────────────────────────────────────────────────
+
+  `openAuthSessionAsync(consentUrl, returnUrl)` closes the browser as soon as it
+  navigates to `returnUrl`, which is a CUSTOM SCHEME belonging to one of the
+  three apps — `repplecoach://ad-spend/callback` for Repple's own coach build,
+  and a different scheme per white-label brand. A provider cannot redirect to a
+  custom scheme, so it redirects here and this page forwards.
+
+  The return URL rides in `state`, as `<nonce>~<returnUrl>` (`adOauthState`), so
+  that one page serves every brand's app without knowing them in advance.
+
+  ── Why the allowlist below is the whole point ────────────────────────────
+
+  `state` is echoed back by the provider and is therefore ATTACKER-CONTROLLED.
+  A crafted consent link could carry `state=abc~https://example.invalid/steal`,
+  and a page that forwarded wherever it was told would hand somebody else's
+  authorisation code to that address. This is a well-known way to turn a
+  callback page into a credential leak.
+
+  So the destination is checked before anything is forwarded: it must be one of
+  the schemes this product's binaries actually register, taken from
+  src/lib/brands.ts. Not "a custom scheme", not "not http" — this list. A
+  destination that is not on it is refused, in words, and the code is discarded
+  rather than sent anywhere.
+
+  The nonce is NOT checked here. It cannot be: this page has no session and no
+  memory. It is checked in the app, which minted it — see `connectAdChannel`.
+
+  ── And why the code is never rendered ────────────────────────────────────
+
+  The authorisation code is forwarded and never written into the DOM, never put
+  in the title, and never logged. A referrer policy and `noindex` keep the query
+  string out of anything downstream that might otherwise record it.
+-->
+<meta name="referrer" content="no-referrer">
+
+<main>
+  <div class="wrap page" style="max-width:620px">
+    <p class="eyebrow">Repple</p>
+    <h1 class="display" id="head">Returning you to the app</h1>
+    <p class="lede" id="say">One moment — this window should close on its own.</p>
+    <p class="btn-row" id="row" hidden>
+      <a class="btn" href="/download">Get the app</a>
+    </p>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  /* Every scheme a binary of this product registers, from src/lib/brands.ts.
+     A brand added there must be added here, and the pair is worth keeping in
+     one commit: a brand missing from this list cannot connect an ad account,
+     and a scheme added here that no binary registers is an open redirect. */
+  var SCHEMES = [
+    'repple', 'repplecoach', 'repplestudio',
+    'examplefitness', 'examplefitnesscoach', 'examplefitnessstudio'
+  ];
+
+  var head = document.getElementById('head');
+  var say  = document.getElementById('say');
+  var row  = document.getElementById('row');
+
+  function stop(title, message) {
+    head.textContent = title;
+    say.textContent = message;
+    row.hidden = false;
+  }
+
+  var q;
+  try { q = new URLSearchParams(location.search || ''); } catch (e) { q = null; }
+  if (!q) { stop('That link could not be read', 'Open the app and start the connection again.'); return; }
+
+  /* TikTok spells it `auth_code` where Meta and Google send `code`. Both are
+     read, because a provider's spelling of the same field is not worth two
+     code paths. `error` is what a provider sends when somebody presses Cancel,
+     and that is not a fault worth an alarming page. */
+  var code  = q.get('code') || q.get('auth_code') || '';
+  var state = q.get('state') || '';
+  var err   = q.get('error') || q.get('error_reason') || '';
+
+  var sep = state.indexOf('~');
+  var dest = sep >= 0 ? state.slice(sep + 1) : '';
+
+  var scheme = '';
+  var colon = dest.indexOf(':');
+  if (colon > 0) scheme = dest.slice(0, colon).toLowerCase();
+
+  if (!dest || SCHEMES.indexOf(scheme) === -1) {
+    /* The refusal that matters. Nothing is forwarded and the code is dropped:
+       if we cannot tell which app asked, we must not tell anybody. */
+    stop('That sign-in did not come from the app',
+         'For your security nothing has been sent on. Open the app and start the connection again.');
+    return;
+  }
+
+  if (err) {
+    /* Forwarded rather than swallowed: the app can then say "you cancelled"
+       instead of "no code arrived", which are different things to be told. */
+    location.replace(dest + (dest.indexOf('?') === -1 ? '?' : '&') + 'error=' + encodeURIComponent(err) + '&state=' + encodeURIComponent(state));
+    return;
+  }
+
+  if (!code) {
+    stop('That sign-in came back without a code',
+         'Nothing was connected. Open the app and try again.');
+    return;
+  }
+
+  location.replace(dest + (dest.indexOf('?') === -1 ? '?' : '&')
+    + 'code=' + encodeURIComponent(code)
+    + '&state=' + encodeURIComponent(state));
+
+  /* If the app is not installed, or the OS refuses the scheme, the redirect
+     above does nothing at all and this page sits on "one moment" for ever.
+     Say so after a beat rather than leaving somebody watching a sentence that
+     has stopped being true. */
+  setTimeout(function () {
+    stop('The app did not open',
+         'Your sign-in worked. Open Repple on this device and the connection will finish there.');
+  }, 4000);
+})();
+</script>
+
+</body>
+</html>

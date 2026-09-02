@@ -35,7 +35,12 @@ import { useMeasurements } from '../../src/ui/measurements';
 import { useCheckIns } from '../../src/ui/checkins';
 import { currentStreak, weekStats, personalRecords, streakMilestone } from '../../src/lib/streaks';
 import { useState, useEffect } from 'react';
-import { askCoach, coachAvailable } from '../../src/lib/coach';
+import { askAboutMyWeek, coachAvailable } from '../../src/lib/coach';
+import { useCoachShare } from '../../src/ui/coachShare';
+import {
+  NEVER_SENT, WHERE_IT_GOES, NOT_MEDICAL_ADVICE,
+  REPORT_CONSENT_TITLE, REPORT_CONSENT_BODY, REPORT_WITHHELD_NOTE,
+} from '../../src/lib/coachShare';
 import { compositionInsights } from '../../src/lib/inbodyMetrics';
 import { isWhole } from '../../src/ui/loadStatus';
 
@@ -103,16 +108,36 @@ export default function WeeklyReport() {
 
   const comp = compositionInsights(isWhole(c.scansStatus) ? c.scans : []);
   // Facts only. A line built from a read that did not land whole is not a
-  // weaker fact, it is a false one — and this list is the model's only input,
-  // so anything left out of it simply is not spoken about, which is the
-  // outcome we want.
-  const factLines = [
+  // weaker fact, it is a false one — and these lists are the model's only
+  // input, so anything left out of them simply is not spoken about, which is
+  // the outcome we want.
+  //
+  // ── the two piles, and why this list is split ────────────────────────
+  //
+  // This screen posted every line below to a language model with the member's
+  // NAME beside it and no consent question anywhere on it. The name is gone —
+  // app/(client)/coach.tsx removed it from its own payload because "the model
+  // was told 'Name: Sarah Whitfield' and then handed her weight, her body fat,
+  // her sleep", and this call was putting it back as the second field — and the
+  // health half now goes only if the member has said it may.
+  //
+  // The allowlist in src/lib/coachShare.ts filters a context OBJECT, and the
+  // sensitive part of this screen is prose in the message. So the partition is
+  // over the fact lines, and it is applied in `weeklyFacts` rather than here,
+  // where a later edit to this list cannot skip it.
+  const fitnessFacts = [
+    `Week of ${range}.`,
     trainingWhole ? `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).` : '',
     trainingWhole ? `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${num(wk.kcal)} kcal.` : '',
     trainingWhole ? `Streak ${streak} day(s).` : '',
     // Said to the model in as many words, so it does not fill the silence with
     // a guess about a quiet week.
     trainingWhole ? '' : 'Their training log could not be read this week. Do not say they did not train, do not mention a streak, and do not comment on volume.',
+  ].filter(Boolean);
+
+  // Everything measured about their body. Weight, body fat, muscle, girths,
+  // sleep and recovery — the same set `HEALTH_KEYS` gates on the AI Coach.
+  const healthFacts = [
     // These lines are the summariser's only source of fact, so they carry the
     // client's own units: a model handed "82 kg" writes back "you're at 82 kg"
     // to somebody who has never used a kilogram in their life.
@@ -128,11 +153,12 @@ export default function WeeklyReport() {
     comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '',
     comp.balance.length ? comp.balance.join(' ') : '',
   ].filter(Boolean);
-  // One string, so the effect below can depend on the FACTS rather than on a
-  // hand-picked five of the values behind them. An array literal is a new
-  // object on every render and would re-ask the model on every render; the
+  // One string per pile, so the effect below can depend on the FACTS rather
+  // than on a hand-picked five of the values behind them. An array literal is a
+  // new object on every render and would re-ask the model on every render; the
   // joined text only changes when something it says has changed.
-  const factText = factLines.join('\n');
+  const fitnessText = fitnessFacts.join('\n');
+  const healthText = healthFacts.join('\n');
   const fallbackNarrative = (() => {
     const bits: string[] = [];
     // "No logged workouts this week" was printed for a failed read as readily
@@ -165,6 +191,11 @@ export default function WeeklyReport() {
   const stillReading = logStatus === 'loading' || c.status === 'loading' || mStatus === 'loading'
     || ciStatus === 'loading' || c.scansStatus === 'loading';
 
+  // The member's answer about sending their body measurements to a model. The
+  // same hook, the same key and the same stored answer the AI Coach screen uses
+  // — asked once, honoured on both screens.
+  const { consent, answer } = useCoachShare();
+
   const [narrative, setNarrative] = useState(fallbackNarrative);
   // The deps used to be `[wk.workouts, wk.days, streak, wDelta, range]`, and
   // `narrative` is seeded from the FIRST render's `fallbackNarrative` — which,
@@ -188,15 +219,20 @@ export default function WeeklyReport() {
     // be answering about a week it has only been told half of, and the reply
     // is written back to the member in the second person as fact.
     if (stillReading || !coachAvailable()) return;
+    // …and nothing at all until the member has answered. 'unknown' is the
+    // window before their stored answer has been read and 'unasked' is a
+    // question still to put; `askAboutMyWeek` refuses on both, and the guard
+    // here only saves a round trip. The gate that matters is in the library.
+    if (consent !== 'yes' && consent !== 'no') return;
     (async () => {
-      const reply = await askCoach(
-        [{ role: 'user', content: 'Write a warm, concise 2-3 sentence weekly summary for this client from the facts below. Speak directly to them ("you"), name the biggest win and one focus for next week. No preamble, no lists.\n\n' + factText }],
-        { week: range, name: c.name }
-      );
-      if (alive && reply && reply.trim()) setNarrative(reply.trim());
+      const res = await askAboutMyWeek({ fitness: fitnessFacts, health: healthFacts }, consent);
+      if (alive && res.ok && res.reply.trim()) setNarrative(res.reply.trim());
     })();
     return () => { alive = false; };
-  }, [fallbackNarrative, factText, stillReading, range, c.name]);
+    // `fitnessText` and `healthText` rather than the arrays: an array literal
+    // is a new object on every render and would re-ask the model on every one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fallbackNarrative, fitnessText, healthText, stillReading, consent]);
 
   const bodyItems = [
     // `good: wDelta <= 0` said that down is better whoever is reading it. A
@@ -277,15 +313,80 @@ export default function WeeklyReport() {
           )}
         </Section>
 
-        {narrative ? (
-          <View>
-            <Rule />
-            <Section>
-              <SectionHead title="Your week in a nutshell" note={reportWhole ? undefined : 'from what loaded'} />
-              <Text style={{ ...ty.body, color: t.ink2 }}>{narrative}</Text>
-            </Section>
-          </View>
-        ) : null}
+        {/* ── the paragraph a third party writes ─────────────────────────
+            This screen posted the week's fact list — weight, body fat, muscle,
+            girths, sleep, check-ins — to a language model with the member's
+            NAME beside it, under a consent question they were never asked, on a
+            screen they opened to read a summary. The AI Coach screen had
+            already been through this: it asks once, it says exactly what goes
+            and what never does, and it works either way.
+
+            Same question, same stored answer, same hook. A member who has
+            already answered on the Coach screen is not asked again here. */}
+        <View>
+          <Rule />
+          <Section>
+            <SectionHead title="Your week in a nutshell" note={reportWhole ? undefined : 'from what loaded'} />
+            {coachAvailable() && consent === 'unknown' ? (
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Checking what you asked us to share…</Text>
+            ) : coachAvailable() && consent === 'unasked' ? (
+              <View>
+                <Notice tone={t.brand} kicker="Your data" title={REPORT_CONSENT_TITLE} note={REPORT_CONSENT_BODY}>
+                  {/* Rendered from the arrays in src/lib/coachShare.ts rather
+                      than typed here, so the list cannot drift from what is
+                      actually sent. A list somebody has read and agreed to that
+                      no longer describes the code is worse than no list. */}
+                  <View style={{ marginTop: sp.md }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>Only sent if you say yes</Text>
+                    {['your weight, body fat and skeletal muscle', 'your waist and other tape measurements', 'your check-in scores, including how you slept'].map((x) => (
+                      <View key={x} style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.xs }}>
+                        <Text style={{ ...ty.label, color: t.brand }}>•</Text>
+                        <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{x}</Text>
+                      </View>
+                    ))}
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Never sent</Text>
+                    {NEVER_SENT.map((x) => (
+                      <View key={x} style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.xs }}>
+                        <Text style={{ ...ty.label, color: t.ink3 }}>•</Text>
+                        <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{x}</Text>
+                      </View>
+                    ))}
+                    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{WHERE_IT_GOES}</Text>
+                  </View>
+                </Notice>
+                <View style={{ marginTop: sp.lg, gap: sp.sm }}>
+                  <Cta label="Yes, Use My Numbers" onPress={() => answer('yes')} wide />
+                  {/* A Cta and not a Ghost. Both answers are real answers and
+                      the report is written either way, so rendering the decline
+                      as a whisper beside a solid Yes would be pressure dressed
+                      up as hierarchy. */}
+                  <Cta label="No, Keep Them Private" onPress={() => answer('no')} tone={t.surface2} wide />
+                </View>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{NOT_MEDICAL_ADVICE}</Text>
+                {narrative ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{narrative}</Text> : null}
+              </View>
+            ) : (
+              <>
+                {narrative ? <Text style={{ ...ty.body, color: t.ink2 }}>{narrative}</Text> : null}
+                {/* An answer given once and then buried is how a consent stops
+                    being one. It is changeable here, on the screen it governs. */}
+                {coachAvailable() && (consent === 'yes' || consent === 'no') ? (
+                  <View style={{ marginTop: sp.lg }}>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      {consent === 'yes'
+                        ? 'Your body measurements, your tape readings and your check-ins are being sent so this paragraph can mention them.'
+                        : REPORT_WITHHELD_NOTE}
+                    </Text>
+                    <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                      <Ghost label={consent === 'yes' ? 'Turn It Off' : 'Turn It On'}
+                        onPress={() => answer(consent === 'yes' ? 'no' : 'yes')} />
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            )}
+          </Section>
+        </View>
 
         {checkIn ? (
           <View>

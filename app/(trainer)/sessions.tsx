@@ -35,7 +35,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -49,7 +49,7 @@ import {
   MARK_WINDOW_DAYS, awaitingOutcome, clearMyOutcome, fetchMySessions, windowStart,
 } from '../../src/lib/trainerSessions';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, keptOfflineLine } from '../../src/lib/floorQueue';
+import { floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/lib/floorQueue';
 // The record, as opposed to the queue. See "What Already Happened" below.
 import {
   pastSessions, pastVerdict, PAST_STATE_LABEL, PAST_STATE_NOTE, type PastState,
@@ -315,6 +315,29 @@ export default function TrainerSessions() {
     } finally { setBusy(null); }
   };
 
+  /**
+   * Send what this phone is still carrying, now.
+   *
+   * The queue is emptied on the app's own two triggers as well — the signal
+   * coming back and the app returning to the foreground, both of which reach it
+   * through the registry in src/lib/offlineQueue.ts. This is the button for the
+   * coach who can see the banner and wants it gone before they walk out.
+   *
+   * All three arms of the result are reported, because they mean three
+   * different things and only one of them is "done". A refused act has been
+   * dropped from the queue rather than kept, and a coach who is not told that
+   * will press this button for the rest of the install.
+   */
+  const [sending, setSending] = useState(false);
+  const sendWaiting = async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      const line = flushResultLine(await floor.flush());
+      if (line) Alert.alert('Sending finished', line);
+    } finally { setSending(false); }
+  };
+
   const undo = async (entry: { s: PtSession; outcome: SessionOutcome }) => {
     if (!uid) return;
     try {
@@ -400,6 +423,16 @@ export default function TrainerSessions() {
         ) : floorPendingNote(floor.unsent) ? (
           <View style={{ paddingTop: sp.sm }}>
             <Flag tone={t.warn}>{floorPendingNote(floor.unsent)}</Flag>
+            {/* The banner used to say something was waiting and offer no way to
+                send it, so a coach standing in reception with four bars had to
+                guess at what would trigger a flush. The app's own reconnect and
+                foreground triggers reach this queue now, and this is the manual
+                one for the coach who wants to watch it happen before they leave
+                the building. */}
+            <View style={{ alignItems: 'flex-start', paddingTop: sp.sm }}>
+              <Ghost label="Send Now" a11yLabel="Send what is waiting on this phone"
+                onPress={() => { void sendWaiting(); }} />
+            </View>
           </View>
         ) : null}
 

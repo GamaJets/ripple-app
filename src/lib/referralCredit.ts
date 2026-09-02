@@ -162,10 +162,19 @@ export const CONVERSION_RULE =
  * A screen that promised "a free session" would be committing somebody else's
  * business to a cost they never agreed, to a member who would hold them to it.
  */
-export const REWARD_NOTE =
-  'Repple records who you brought in and whether they started training. What '
-  + 'that is worth is up to your gym or coach — nothing here is a discount or '
-  + 'a credit, and no reward has been promised on their behalf.';
+/**
+ * `brand` rather than the literal "Repple", and this is the Invite Friends
+ * screen — the one built for showing to other people. A chain's member holding
+ * their phone out to a friend was showing their gym's supplier's name.
+ *
+ * A function rather than a constant for that reason alone; the sentence is
+ * otherwise unchanged, and the rule it states is unchanged too.
+ */
+export function rewardNote(brand: string): string {
+  return `${brand} records who you brought in and whether they started training. What `
+    + 'that is worth is up to your gym or coach — nothing here is a discount or '
+    + 'a credit, and no reward has been promised on their behalf.';
+}
 
 /** What the referrer sees about a friend, and what the friend sees about them.
  *  Held against my_referrals()'s select list by the test beside this file. */

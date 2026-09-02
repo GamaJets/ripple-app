@@ -10,12 +10,24 @@
 // screen protects nothing and would only teach people to dismiss it.
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { BRAND } from '../lib/brands';
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { lockDecision, type LockState } from '../lib/appLock';
+import { lockDecision, defaultLockLabel, type LockPlatform, type LockState } from '../lib/appLock';
 import { reportError } from '../lib/reportError';
 
 const ENABLED_KEY = 'repple.appLock.enabled';
+
+/**
+ * Whose vocabulary the lock is explained in.
+ *
+ * Read once at module load — it cannot change while the app is running — and
+ * passed into `src/lib/appLock.ts`, which holds every sentence and has no
+ * imports on purpose. Every one of those sentences used to name Face ID, Touch
+ * ID and iOS Settings on all three platforms, so an Android member was sent
+ * looking for an Apple feature inside an Apple settings app.
+ */
+export const LOCK_PLATFORM: LockPlatform =
+  Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'other';
 
 /**
  * Loaded lazily and never at module scope.
@@ -53,7 +65,7 @@ const Ctx = createContext<AppLockValue | null>(null);
 export function AppLockProvider({ signedIn, children }: { signedIn: boolean; children: ReactNode }) {
   const [enabled, setEnabledState] = useState(false);
   const [available, setAvailable] = useState(false);
-  const [label, setLabel] = useState('your passcode');
+  const [label, setLabel] = useState(defaultLockLabel(LOCK_PLATFORM));
   const [state, setState] = useState<LockState>('open');
   const backgroundedAt = useRef<number | null>(null);
   const hydrated = useRef(false);
@@ -64,7 +76,7 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
     (async () => {
       const LA = biometrics();
       let can = false;
-      let name = 'your passcode';
+      let name = defaultLockLabel(LOCK_PLATFORM);
       try {
         if (LA) {
           const hardware = await LA.hasHardwareAsync();
@@ -75,8 +87,12 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
           // shipped in. Named rather than numbered where the enum is present.
           const FACE = LA.AuthenticationType?.FACIAL_RECOGNITION ?? 2;
           const TOUCH = LA.AuthenticationType?.FINGERPRINT ?? 1;
-          if (types?.includes(FACE)) name = 'Face ID';
-          else if (types?.includes(TOUCH)) name = 'Touch ID';
+          // "Face ID" and "Touch ID" are Apple's names for these. On Android
+          // the same two capabilities are face unlock and a fingerprint, and
+          // calling them Face ID sends a member looking for a setting that is
+          // not on their handset.
+          if (types?.includes(FACE)) name = LOCK_PLATFORM === 'ios' ? 'Face ID' : 'face unlock';
+          else if (types?.includes(TOUCH)) name = LOCK_PLATFORM === 'ios' ? 'Touch ID' : 'your fingerprint';
         }
       } catch (e) {
         reportError('appLock.capabilities', e);
@@ -91,7 +107,7 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
       setEnabledState(on);
       hydrated.current = true;
       // First decision, once we know all three facts.
-      setState(lockDecision({ enabled: on, available: can, signedIn, backgroundedAt: null, now: Date.now() }).state);
+      setState(lockDecision({ enabled: on, available: can, signedIn, backgroundedAt: null, now: Date.now(), platform: LOCK_PLATFORM }).state);
     })();
     return () => { off = true; };
     // Deliberately once: re-running on every signedIn flip would re-lock the
@@ -116,6 +132,7 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
         enabled, available, signedIn,
         backgroundedAt: backgroundedAt.current,
         now: Date.now(),
+        platform: LOCK_PLATFORM,
       });
       // Only ever tightens on resume. An 'unlocked' answer must not reopen an
       // app that is currently locked and waiting for a face.

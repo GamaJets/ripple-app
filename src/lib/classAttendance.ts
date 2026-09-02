@@ -86,6 +86,10 @@ export async function classSummary(fromISO: string, toISO: string): Promise<Clas
         branch: String(r.branch || '—'), trainerId: String(r.trainer_id || ''), trainerName: String(r.trainer_name || 'Trainer'),
         startsAt: String(r.starts_at || ''), capacity: Number(r.capacity || 0),
           booked: Number(r.booked || 0), attended: Number(r.attended || 0),
+          // Part 460's column. Left UNDEFINED rather than coerced to zero on a
+          // database that does not have it yet: "nobody walked in" is a claim,
+          // and `summariseClassRows` withholds the total rather than making it.
+          waitlistAttended: typeof r.waitlist_attended === 'number' ? r.waitlist_attended : undefined,
       }));
       // No error and no array. `class_attendance_summary` returns SETOF, so this
       // should not happen — but the previous version fell through this branch to

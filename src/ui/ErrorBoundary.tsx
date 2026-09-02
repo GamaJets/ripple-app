@@ -9,6 +9,9 @@ import { Icon } from './Icon';
 import { sp, radius, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+// Plain module, no hook and no context: this component renders after a crash
+// and a class cannot call a hook anyway. See src/ui/crashQueue.ts.
+import { queueCrash } from './crashQueue';
 
 let APP_VERSION = 'unknown';
 try { APP_VERSION = require('expo-constants').default?.expoConfig?.version ?? 'unknown'; } catch { /* not available */ }
@@ -27,18 +30,27 @@ export class ErrorBoundary extends Component<Props, State> {
     // Lightweight crash log → Supabase `app_errors` (owner reviews). No Sentry
     // native SDK needed, so this ships over-the-air. Best-effort; never throws.
     if (!USE_SUPABASE) return;
+    const message = String(error?.message || '').slice(0, 500);
+    const stack = String(error?.stack || '').slice(0, 4000);
+    // The moment it happened, taken here. A crash queued in a basement and sent
+    // three days later must not arrive dated three days late — see
+    // src/lib/crashQueue.ts, which puts this inside the message because the
+    // table's own timestamp is written when the row lands.
+    const at = new Date().toISOString();
+    // The swallow stays: nothing here may throw a second time, and none of it
+    // is shown to the member. What changed is what happens when the insert does
+    // not land. It was dropped where it stood, so a crash on a dead network was
+    // never reported — and those are the crashes worth most. Queued now, and
+    // sent on the same reconnect as everything else.
+    const keep = (uid: string | null) => { void queueCrash({ message, stack, userId: uid, at }); };
     try {
       supabase.auth.getUser().then(({ data }) => {
         const uid = data?.user?.id ?? null;
         supabase.from('app_errors').insert({
-          user_id: uid,
-          message: String(error?.message || '').slice(0, 500),
-          stack: String(error?.stack || '').slice(0, 4000),
-          platform: Platform.OS,
-          app_version: APP_VERSION,
-        }).then(() => {}, () => {});
-      }, () => {});
-    } catch { /* swallow */ }
+          user_id: uid, message, stack, platform: Platform.OS, app_version: APP_VERSION,
+        }).then(({ error: e }: { error: unknown }) => { if (e) keep(uid); }, () => keep(uid));
+      }, () => keep(null));
+    } catch { keep(null); }
   }
 
   reset = () => this.setState({ error: null });

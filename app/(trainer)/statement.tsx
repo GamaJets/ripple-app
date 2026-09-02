@@ -13,16 +13,22 @@
 // them, is a statement of what this app recorded, labelled as exactly that, to
 // hand over beside the Stripe records.
 //
-// ── Why there is no payout schedule on it ──────────────────────────────────
+// ── The payouts that DID happen, and the schedule that still cannot ────────
 //
-// Because there is no data behind one. `connect_accounts` holds four columns —
-// account id, charges enabled, details submitted, updated — and the
-// stripe-webhook subscribes to `customer.subscription.*`, `account.updated`,
-// `checkout.session.completed` and `invoice.*`. No `payout.*` event reaches
-// this app, and no column anywhere could hold a payout date, amount, fee or
-// arrival. A rendered timetable would be a promise about when somebody's rent
-// money lands. The Payouts section says what is actually known and says where
-// the real answer is.
+// This note used to read "no `payout.*` event reaches this app, and no column
+// anywhere could hold a payout date, amount, fee or arrival". Part 194 mirrors
+// `payout.paid`, `payout.failed`, `payout.updated` and `payout.canceled` into
+// `coach_payouts`, so both halves of the one reconciliation an accountant
+// performs — sales against bank receipts — are now in this database, and the
+// document carried only the first of them. What Stripe says ARRIVED is a
+// section of its own, counted on the day it reached the bank.
+//
+// Two things are still refused and always will be. A SCHEDULE: knowing four
+// payouts happened says nothing about when the fifth will be sent, and a
+// rendered timetable would be a promise about when somebody's rent money lands.
+// A SUBTRACTION: a payout is a balance, not the proceeds of a sale, so "taken
+// 4,800, received 4,281, fees 519" is three numbers about three different sets
+// of transactions. The section says both, on the page.
 //
 // ── The three states of an empty screen ────────────────────────────────────
 //

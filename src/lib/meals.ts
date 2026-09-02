@@ -8,6 +8,7 @@
 // screens render these objects; they never reimplement the math.
 import type { Diet, BodyStats } from './types';
 import { macrosFor, applyCoachAdjust, type CoachAdjust } from './nutrition';
+import type { EnergyPlan } from './goalEnergy';
 
 export type Slot = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 export const DEPTS = [
@@ -33,10 +34,37 @@ export const ALLERGENS: { id: Allergen; label: string }[] = [
   { id: 'dairy', label: 'Dairy' }, { id: 'gluten', label: 'Gluten' }, { id: 'nuts', label: 'Nuts' },
   { id: 'shellfish', label: 'Shellfish' }, { id: 'egg', label: 'Egg' }, { id: 'soy', label: 'Soy' },
 ];
+/**
+ * Compound names whose head word is not the thing it looks like.
+ *
+ * The dairy test used to be a bare `/…|butter|milk|…/` with no word boundaries
+ * anywhere in it, so `butternut squash` (a vegetable), `peanut butter`,
+ * `almond butter` and `nut-butter toast` (all nuts) and the three `Soy milk`
+ * breakfasts (a bean) were every one of them tagged dairy. A member who ticked
+ * Dairy silently lost squash, nut butters and the vegan soy-milk meals from
+ * their pool, and where that emptied a pool `allergenGapNote` told them "Your
+ * plan still contains dairy" about a plan that contained none.
+ *
+ * That is the one warning somebody with a real allergy has to be able to read
+ * once and believe, so the fix is in two halves and both are needed. This strip
+ * removes the compounds, and the boundaries below stop `butternut` reading as
+ * `butter`. Boundaries alone would not have been enough: `peanut butter` has a
+ * genuine standalone `butter` in it.
+ *
+ * Deliberately conservative in the direction that matters. It removes only a
+ * named plant word immediately in front of a dairy word; anything it does not
+ * recognise still reaches the dairy test, so a new ingredient errs towards
+ * being flagged rather than towards being fed to somebody.
+ */
+const DAIRY_LOOKALIKE = /\b(peanut|almond|cashew|hazelnut|pistachio|pecan|walnut|macadamia|nut|seed|sunflower|sesame|coconut|soy|soya|oat|rice|hemp|pea|cocoa|shea)[\s-]+(butters?|milks?|creams?|yogurts?|yoghurts?|cheeses?)\b/g;
 function componentAllergens(comp: Comp): Allergen[] {
   const text = (comp.n + ' ' + comp.ing.map((i) => i[0]).join(' ')).toLowerCase();
   const out: Allergen[] = [];
-  if (/milk|yogurt|yoghurt|cheese|whey|butter|cream|greek/.test(text)) out.push('dairy');
+  // `buttermilk` is named because the boundaries that save `butternut` would
+  // otherwise lose it: it is one word, and neither `\bbutter\b` nor `\bmilk\b`
+  // is inside it.
+  if (/\b(milk|buttermilk|yogurt|yoghurt|cheese|whey|butter|creamy?|greek)\b/.test(text.replace(DAIRY_LOOKALIKE, ' ')))
+    out.push('dairy');
   if (/bread|pasta|couscous|wheat|barley|\brye|tortilla|wrap|\bbun|noodle|cracker|\boat|granola|cereal|toast/.test(text)) out.push('gluten');
   if (/almond|walnut|cashew|pecan|macadamia|peanut|hazelnut|pistachio|\bnut|trail mix/.test(text)) out.push('nuts');
   if (/prawn|shrimp|crab|lobster|scallop|mussel|oyster|shellfish/.test(text)) out.push('shellfish');
@@ -374,6 +402,17 @@ export interface PlanInput extends BodyStats {
   mealOverride?: Record<number, number>;
   coachAdjust?: CoachAdjust;
   avoid?: Allergen[];
+  /**
+   * The goal-date energy plan, when the member has a target weight and a date.
+   *
+   * Declared here rather than only reaching `macrosFor` through the structural
+   * type: `buildPlan` hands its whole input straight to it, so this field
+   * decides the calorie figure the meals below are scaled to. It was already
+   * being passed by app/(client)/nutrition.tsx and was invisible on this
+   * interface, which is how the Food Log came to compute the same day without
+   * it. See src/lib/dayTarget.ts.
+   */
+  energyPlan?: EnergyPlan | null;
 }
 
 export function slotsFor(mealsPerDay: number): Slot[] {
@@ -482,35 +521,65 @@ export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, a
 }
 
 // ── Weekly grocery list ──────────────────────────────────────────────────────
-function planForDay(c: PlanInput, dayOffset: number): (GeneratedMeal & { servings: number })[] {
-  const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
-  const slots = slotsFor(c.mealsPerDay);
-  const plan = slots.map((slot, i) => {
-    const av = c.avoid ?? [];
-    const size = catalogSize(c.diet, slot, av);
-    const idx = (mealSeed(c, i) + dayOffset * 17 + i * 3) % size;
-    return mealAt(c.diet, slot, idx, av);
-  });
-  const base = plan.reduce((a, x) => a + x.k, 0) || 1;
-  const scale = target.kcal / base;
-  return plan.map((x) => ({ ...x, servings: Math.max(0.5, Math.round(scale * 4) / 4) }));
+/** How many days a plan week and its grocery list cover. */
+export const PLAN_WEEK_DAYS = 7;
+
+/**
+ * THE WEEK THE MEMBER IS SHOWN — one function, so the list they shop from is
+ * for the meals they are looking at.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * There were two weeks. The screen drew one (`app/(client)/nutrition.tsx`,
+ * week view): the coach's written day where there is one, otherwise today's
+ * plan stepped along the catalogue, `idx + d`. The grocery list was built from
+ * a `planForDay` that read neither — it re-seeded from scratch with
+ * `mealSeed(c, i) + dayOffset * 17 + i * 3` and never looked at
+ * `c.mealOverride` at all.
+ *
+ * So "Grocery List · N items" bought ingredients for meals the member had
+ * already swapped away from, and for a week that was not the coach-written one
+ * printed directly above it. Not a rounding difference — a different week.
+ *
+ * `coachDay` is how the caller supplies the coach's written days without this
+ * file having to know about src/lib/mealPlan.ts, which imports this one. Return
+ * null for a day the coach has not written and the synthetic step is used, day
+ * by day, exactly as the screen draws it.
+ */
+export function planWeek(
+  c: PlanInput,
+  coachDay?: (d: number) => Record<number, number> | null,
+): PlannedMeal[][] {
+  // Day zero of the synthetic week is the plan as it stands, overrides and
+  // swaps included — `idx + d` steps from what is on screen rather than from a
+  // seed nobody can see.
+  const today = buildPlan(c).plan;
+  const out: PlannedMeal[][] = [];
+  for (let d = 0; d < PLAN_WEEK_DAYS; d++) {
+    const written = coachDay ? coachDay(d) : null;
+    if (written) { out.push(buildPlan({ ...c, mealOverride: written }).plan); continue; }
+    const ov: Record<number, number> = {};
+    today.forEach((m) => { ov[m.pos] = m.idx + d; });
+    out.push(buildPlan({ ...c, mealOverride: ov }).plan);
+  }
+  return out;
 }
 
 export interface GroceryItem { item: string; qty: number; unit: string; }
 export interface GroceryData { byDept: Partial<Record<Dept, GroceryItem[]>>; mealCount: number; }
 
-/** Aggregate a 7-day plan into a department-grouped shopping list. */
-export function groceryData(c: PlanInput): GroceryData {
+/** Aggregate an already-built week into a department-grouped shopping list. */
+export function groceryFromWeek(week: readonly (readonly PlannedMeal[])[]): GroceryData {
   const agg: Record<string, number> = {};
   const meals = new Set<string>();
-  for (let d = 0; d < 7; d++) {
-    planForDay(c, d).forEach((meal) => {
+  for (const day of week) {
+    for (const meal of day) {
       meals.add(meal.n);
       meal.ing.forEach(([item, qty, unit, dept]) => {
         const key = `${dept}||${item}||${unit}`;
         agg[key] = (agg[key] || 0) + qty * meal.servings;
       });
-    });
+    }
   }
   const byDept: Partial<Record<Dept, GroceryItem[]>> = {};
   Object.entries(agg).forEach(([key, q]) => {
@@ -523,4 +592,9 @@ export function groceryData(c: PlanInput): GroceryData {
   });
   (Object.values(byDept) as GroceryItem[][]).forEach((list) => list.sort((a, b) => a.item.localeCompare(b.item)));
   return { byDept, mealCount: meals.size };
+}
+
+/** The shopping list for the week this client is shown. */
+export function groceryData(c: PlanInput, coachDay?: (d: number) => Record<number, number> | null): GroceryData {
+  return groceryFromWeek(planWeek(c, coachDay));
 }

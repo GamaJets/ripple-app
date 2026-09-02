@@ -171,6 +171,100 @@ export function seriesDates(dow: number, hour: number, minute = 0, weeks = 8, fr
   return out;
 }
 
+/* ── Which booked sessions belong to THIS arrangement ─────────────────────── */
+
+/**
+ * The weekday, hour and minute an instant falls on IN A NAMED ZONE.
+ *
+ * Null when the zone cannot be read — a bad `tz` string, or a runtime without
+ * ICU. Null is a refusal, not a default: the caller below widens rather than
+ * narrows on it, because filtering with a zone we could not apply would hide
+ * real sessions from a preview about somebody's money.
+ */
+export function zonedSlot(iso: string, tz: string): { dow: number; hour: number; minute: number } | null {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return null;
+  try {
+    // No locale is named, and none is wanted: this is a PARSE, not a sentence.
+    // `numberingSystem: 'latn'` so the parts are digits `Number()` can read on
+    // a handset set to Arabic-Indic numerals, and `calendar: 'gregory'` so a
+    // handset on the Hijri calendar does not hand back a Hijri month. The
+    // weekday is then computed from the date rather than read as a NAME, which
+    // is the only part of this that could have had a language.
+    const parts = new Intl.DateTimeFormat(undefined, {
+      timeZone: tz, calendar: 'gregory', numberingSystem: 'latn',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date(at));
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? '');
+    const y = get('year'); const mo = get('month'); const d = get('day');
+    const hour = get('hour'); const minute = get('minute');
+    if (![y, mo, d, hour, minute].every((n) => Number.isFinite(n))) return null;
+    const dow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+    // `Date.UTC` with a two-digit year maps 0-99 onto 1900-1999, which would
+    // silently move the weekday. Nothing in this app books a session in year 24.
+    if (y < 1000) return null;
+    return { dow, hour: hour % 24, minute };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The booked sessions in a window that plausibly belong to one series.
+ *
+ * ── The defect this exists to end ────────────────────────────────────────
+ *
+ * `app/(client)/standing.tsx` previewed a pause by taking EVERY booked session
+ * of the member's inside the window — no filter on the series, and there could
+ * not be one, because `TrainingSession` in src/lib/types.ts carries no series
+ * id. The count went straight into `pausePreviewLine`, which states as fact how
+ * many sessions will be cancelled and what the late fees come to. A member with
+ * a second standing slot, or a one-off Friday booking, was shown a claim about
+ * money over a set the pause was never going to touch, in the alert immediately
+ * before they pressed confirm.
+ *
+ * ── Why this is a match and not an identity ──────────────────────────────
+ *
+ * With no series id on the row, the strongest thing available is the slot the
+ * series describes: the same coach, the same weekday, the same wall-clock time
+ * IN THE SERIES' OWN ZONE, and the same length. That removes the two cases in
+ * the complaint outright — a second standing slot is a different weekday or a
+ * different hour, and a one-off is almost never both. What it cannot rule out
+ * is a one-off booked with the same coach at exactly the series' slot, which
+ * the server's pause would cancel anyway.
+ *
+ * The zone matters and is not a nicety: `_materialise_session_series` computes
+ * `(date + time) at time zone tz`, so a London Tuesday at 07:00 is a different
+ * instant either side of a daylight-saving change and reading it in the phone's
+ * zone would drop every occurrence after the clocks moved.
+ *
+ * A session whose zone could not be read is INCLUDED. The preview is about
+ * somebody's money and the honest failure is to over-count, not to hide.
+ */
+export function seriesOccurrencesIn(
+  sessions: readonly { clientId: string | null; trainerId: string; startsAt: string; durationMin: number; status: string }[],
+  series: Pick<RecurringSeries, 'trainerId' | 'clientId' | 'dow' | 'hour' | 'minute' | 'durationMin' | 'tz'>,
+  fromMs: number,
+  untilMs: number,
+): { startsAt: string }[] {
+  const out: { startsAt: string }[] = [];
+  for (const x of sessions) {
+    if (x.status !== 'booked') continue;
+    if (x.clientId !== series.clientId) continue;
+    if (x.trainerId !== series.trainerId) continue;
+    const at = Date.parse(x.startsAt);
+    if (!Number.isFinite(at) || at <= fromMs || at >= untilMs) continue;
+    if (x.durationMin !== series.durationMin) continue;
+    const slot = zonedSlot(x.startsAt, series.tz);
+    // Unreadable zone: kept. Over-counting a preview is recoverable; telling
+    // somebody a session will not be cancelled when it will is not.
+    if (slot && !(slot.dow === (((series.dow % 7) + 7) % 7) && slot.hour === series.hour && slot.minute === series.minute)) continue;
+    out.push({ startsAt: x.startsAt });
+  }
+  return out;
+}
+
 /* ── One occurrence, or the whole arrangement ─────────────────────────────── */
 
 export type CancelScope = 'occurrence' | 'series';

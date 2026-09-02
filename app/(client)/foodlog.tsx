@@ -22,7 +22,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useTheme } from '../../src/ui/components';
-import { caloriesLeft, dayBurn, macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
+import { caloriesLeft, dayBurn } from '../../src/lib/nutrition';
+// ONE target, shared with the Meals tab. This screen used to build its own out
+// of `macrosFor` plus the coach's adjust and nothing else, while the Meals tab
+// one tap away passed the goal-date energy plan and the day type into the same
+// function — so a member with a target weight and a date read two different
+// "calories remaining" figures for the same day, and neither said which. See
+// the header of src/lib/dayTarget.ts.
+import { dayTarget } from '../../src/lib/dayTarget';
+import { useGoalTracker } from '../../src/ui/goalTracker';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
@@ -44,8 +52,10 @@ import type { FoodFacts } from '../../src/lib/foodPortion';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   recentFoods, frequentFoods, favouritesKey, readFavourites, writeFavourites,
-  toggleFavourite, isFavourite, type RememberedFood,
+  toggleFavourite, isFavourite, MAX_FAVOURITES,
+  type LoggedFoodLike, type RememberedFood,
 } from '../../src/lib/foodMemory';
+import { useAuthRevision } from '../../src/ui/authRevision';
 import { supabase } from '../../src/lib/supabase';
 import { notifySuccess } from '../../src/ui/haptics';
 import { useToast } from '../../src/ui/toast';
@@ -81,9 +91,18 @@ export default function FoodLog() {
  const _adj = useCoachNutrition().get(cd.id);
  // null until there is a body to scale to — the 70 kg / 20% placeholder that
  // used to stand in produced a target belonging to nobody.
- const target = (cd.weightKg != null && cd.bodyFatPct != null)
-  ? applyCoachAdjust(macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet }), cd.coachingMode === 'solo' ? undefined : (_adj || undefined))
-  : null;
+ const goals = useGoalTracker().goals;
+ // The day type is not offered here. Zero is the Off day the Meals tab's picker
+ // starts on, so the two screens agree for every member who has not moved it —
+ // and a member who has is reading a what-if on the tab that offers it.
+ const target = dayTarget({
+  weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity,
+  goal: cd.goal, diet: cd.diet,
+  coachAdjust: cd.coachingMode === 'solo' ? null : (_adj ?? null),
+  weightGoal: goals.find((g) => g.kind === 'weight' && !g.achievedAtISO) ?? null,
+  weightSeries: cd.weightSeries,
+  nowMs: Date.now(),
+ })?.macros ?? null;
 
  const fl = useFoodLog();
  const toast = useToast();
@@ -375,6 +394,87 @@ export default function FoodLog() {
  // Today is drawn by everything above and does not need a row of its own down
  // here repeating it.
  const pastDays = hist.days.filter((d) => d.day !== todayKey());
+
+ // ── the yogurt somebody eats every morning ──────────────────────────────
+ //
+ // `recentFoods`, `frequentFoods` and the whole pinned list were written,
+ // covered by tests and IMPORTED into this file — and not one of the eight
+ // symbols appeared anywhere below the import line. The module that would stop
+ // a member re-searching the same breakfast three hundred times a year had no
+ // control anywhere in the app. This is that control.
+ //
+ // Recents are derived from the log itself and need no storage; favourites are
+ // pinned on purpose and live on this phone, under a key that carries the
+ // account so a shared gym phone cannot show one member another's food. See
+ // src/lib/foodMemory.ts.
+ const authRev = useAuthRevision();
+ const [uid, setUid] = useState<string | null>(null);
+ const [favs, setFavs] = useState<RememberedFood[]>([]);
+ // Whether the pinned list is what is actually on this phone. Bytes that will
+ // not parse are NOT an empty list, and writing an empty list over them is how
+ // somebody loses the lot — `readFavourites` returns the pair for that reason,
+ // and the star is withheld rather than offered over a read that failed.
+ const [favsRead, setFavsRead] = useState(false);
+ useEffect(() => {
+  let cancelled = false;
+  (async () => {
+   try {
+    // getSession, not getUser: getUser REJECTS when nobody is signed in, and
+    // signed out is a true answer here rather than a failed read.
+    const { data: sess } = await supabase.auth.getSession();
+    const id = sess?.session?.user?.id ?? null;
+    if (cancelled) return;
+    setUid(id);
+    if (!id) { setFavs([]); setFavsRead(false); return; }
+    const raw = await AsyncStorage.getItem(favouritesKey(id));
+    if (cancelled) return;
+    const r = readFavourites(raw);
+    setFavs(r.foods); setFavsRead(r.read);
+   } catch { if (!cancelled) { setFavs([]); setFavsRead(false); } }
+  })();
+  return () => { cancelled = true; };
+ }, [authRev]);
+ // Today plus the fortnight behind it. Both reads, because "the same again" is
+ // most often this morning and sometimes last Tuesday.
+ const remembered = useMemo(() => {
+  const rows: LoggedFoodLike[] = [...entries, ...pastDays.flatMap((d) => d.entries)];
+  return { recent: recentFoods(rows, 8), frequent: frequentFoods(rows, 8) };
+ }, [entries, pastDays]);
+ // What the two derived lists are drawn from, said out loud when it is not
+ // everything. An absence here is silence, never "you have never eaten this".
+ const rememberedShort = !dayWhole || !histWhole;
+ const pinFood = async (f: RememberedFood) => {
+  if (!uid || !favsRead) return;
+  const before = favs;
+  const next = toggleFavourite(favs, f);
+  setFavs(next);
+  try { await AsyncStorage.setItem(favouritesKey(uid), writeFavourites(next)); notifySuccess(); }
+  catch {
+   // Put back. A star that stays lit over a write that did not land is the
+   // screen reading its own guess back to the member.
+   setFavs(before);
+   Alert.alert('Not pinned', 'That could not be saved on this phone, so your pinned list has not changed.');
+  }
+ };
+ // The three groups, in the order somebody reads them: what they pinned, what
+ // they logged last, what they log most. A food already pinned is not repeated
+ // underneath itself.
+ const favRows = useMemo(() => {
+  const pinnedKeys = new Set(favs.map((f) => f.key));
+  const recent = remembered.recent.filter((f) => !pinnedKeys.has(f.key));
+  const recentKeys = new Set(recent.map((f) => f.key));
+  return [
+   { title: 'Pinned', rows: favs },
+   { title: 'Recent', rows: recent.slice(0, 5) },
+   { title: 'Often', rows: remembered.frequent.filter((f) => !pinnedKeys.has(f.key) && !recentKeys.has(f.key)).slice(0, 5) },
+  ];
+ }, [favs, remembered]);
+ /** Open the one review sheet on a remembered food. Re-logging is a new row of
+  *  its own, with the figures exactly as they were logged the first time. */
+ const openRemembered = (f: RememberedFood) => {
+  setPendingTitle(undefined); setPendingNote(null); setPendingPhoto(null); setPendingVia('manual');
+  setPending({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, basis: null });
+ };
  const wToday = useWearables().today;
  const burn = target ? dayBurn(target, wToday) : null;
  const burned = burn?.burned ?? 0;
@@ -519,6 +619,70 @@ export default function FoodLog() {
  </View>
  <ListRow icon="meals" title="Eating Out?" note="Estimate a restaurant meal" onPress={() => router.push('/(client)/restaurant')} />
  </Section>
+
+ {/* ── again, please ──────────────────────────────────────────────── */}
+ {/* Nothing at all until there is something to offer. An empty "Quick Add"
+     heading over three empty lists is a control that looks broken on the one
+     screen somebody opens four times a day. */}
+ {favs.length || remembered.recent.length || remembered.frequent.length ? (<>
+ <Rule />
+ <Section>
+ <SectionHead title="Log It Again"
+   note={favs.length ? `${favs.length} pinned` : undefined} />
+ <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+ Tap to log the same again — the sheet still asks how much. Tap the heart to keep one at the top.
+ </Text>
+ {/* Said when the lists are drawn from less than the whole log. A food
+     missing from a short read has not been "never eaten"; it is a food we
+     could not see. */}
+ {rememberedShort ? (
+ <Flag tone={t.warn}>
+ These are drawn from the part of your log we could read. Something you eat often may be missing from them.
+ </Flag>
+ ) : null}
+ {favRows.map((g) => (g.rows.length ? (
+ <View key={g.title} style={{ marginTop: sp.md }}>
+ <Text style={{ ...ty.micro, color: t.ink3 }}>{g.title}</Text>
+ {g.rows.map((f, i) => (
+ <View key={f.key}>
+ {i > 0 ? <Rule /> : null}
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+ <Pressable onPress={() => openRemembered(f)} accessibilityRole="button"
+   accessibilityLabel={`Log ${f.name} again, ${num(f.kcal)} calories`}
+   accessibilityHint="Opens a sheet to say how much of it you had"
+   style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+ <View style={{ flex: 1 }}>
+ <Text style={{ ...ty.body, color: t.ink }} numberOfLines={1}>{f.name}</Text>
+ <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>
+ {`P ${num(f.protein)} · C ${num(f.carbs)} · F ${num(f.fat)}`}{f.count > 1 ? ` · logged ${num(f.count)} times` : ''}
+ </Text>
+ </View>
+ <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(f.kcal)} kcal</Text>
+ <Icon name="plus" size={16} color={t.brand} />
+ </Pressable>
+ {/* Withheld rather than disabled when there is nobody to pin for, or
+     when the stored list could not be read — a control that silently does
+     nothing is worse than no control. */}
+ {uid && favsRead ? (
+ <Pressable onPress={() => { void pinFood(f); }} hitSlop={8} accessibilityRole="button"
+   accessibilityState={{ selected: isFavourite(favs, f.name) }}
+   accessibilityLabel={isFavourite(favs, f.name) ? `Unpin ${f.name}` : `Pin ${f.name} to the top`}
+   style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center' }}>
+ <Icon name="heart" size={16} filled={isFavourite(favs, f.name)} color={isFavourite(favs, f.name) ? t.brand : t.ink3} />
+ </Pressable>
+ ) : null}
+ </View>
+ </View>
+ ))}
+ </View>
+ ) : null))}
+ {favs.length >= MAX_FAVOURITES ? (
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+ Your pinned list is full at {num(MAX_FAVOURITES)}. Unpin one to pin another.
+ </Text>
+ ) : null}
+ </Section>
+ </>) : null}
 
  <Rule />
 

@@ -173,6 +173,142 @@ export function capacityFor(
   };
 }
 
+/* ── the same fifteen rowers, promised to two classes ──────────────────────── */
+
+/** What this rule needs to know about a class. Deliberately not `GymClass`:
+ *  the arithmetic has no business importing the timetable. */
+export interface KitClass {
+  id: string;
+  title: string;
+  startsAt: string;
+  durationMin: number;
+  /** Places the class is sold as holding. */
+  capacity: number;
+  /** Places actually sold. Confirmed seats only — never waitlisters. */
+  booked: number;
+}
+
+/** A set of classes that are on at the same time, and what they need at once. */
+export interface ConcurrentDemand {
+  /** The overlapping classes, earliest first. Always two or more. */
+  classes: KitClass[];
+  /** When the overlap starts and ends, so a screen can name the hour. */
+  from: string;
+  to: string;
+  /** Units the group needs if every class fills. */
+  unitsIfFull: number;
+  /** Units the group needs for the people who have actually booked. */
+  unitsBooked: number;
+  /** Usable units of the category, across the gym. */
+  usable: number;
+  /**
+   * People already booked who would have no kit, or null when the register
+   * holds nothing of this category and so cannot answer.
+   *
+   * Computed on `booked` rather than on capacity, because this is the number
+   * somebody has to ring: a shortfall against stated capacity is a seat that
+   * may never be sold, and a shortfall against bookings is a person who has
+   * paid and will be turned away.
+   */
+  shortBooked: number | null;
+  /** The same figure if both classes fill. A planning number, not a call list. */
+  shortIfFull: number | null;
+}
+
+const endOf = (c: KitClass): number =>
+  Date.parse(c.startsAt) + Math.max(0, c.durationMin) * 60_000;
+
+/**
+ * Classes that are on at the same time, and whether the gym owns enough kit for
+ * all of them at once.
+ *
+ * ── Why checking one class at a time was not a check ──────────────────────
+ *
+ * `capacityFor` answers "does this class fit the gym's stock", and /equipment
+ * ran it against every class independently. Fifteen rowers therefore came back
+ * green for the 6am and green for the other 6am, because each question was
+ * asked as though the other class did not exist. The second one turns up to a
+ * room with no rowers in it, and the screen that exists to prevent exactly that
+ * had said the week was fine.
+ *
+ * ── How a group is formed ────────────────────────────────────────────────
+ *
+ * By overlap, transitively: a 06:00–07:00 and a 06:30–07:30 are one group, and
+ * a 07:15 class joins it through the second even though it does not touch the
+ * first. That is right for kit, which is carried out of one room and into the
+ * next — the constraint is how many units are in use at once, and a chain of
+ * overlaps is a period where all of them are.
+ *
+ * Adjacency is NOT overlap: a class ending at 07:00 and one starting at 07:00
+ * are consecutive, and treating them as concurrent would report a shortfall at
+ * every gym that runs classes back to back, which is every gym.
+ *
+ * ── What is left alone ───────────────────────────────────────────────────
+ *
+ * A single class on its own never appears here. `capacityFor` already answers
+ * that question and answers it better, and repeating it as a group of one would
+ * put the whole timetable in a table headed "at the same time".
+ *
+ * A cancelled class must be filtered out by the CALLER. This module cannot see
+ * `status` and a called-off class holds no kit — see `isCancelled` in
+ * src/lib/gymSchedule.ts, which is the single place that decision is made.
+ */
+export function concurrentKitDemand(
+  items: Equipment[],
+  category: string,
+  classes: KitClass[],
+  perAttendee = 1,
+): ConcurrentDemand[] {
+  if (!(perAttendee > 0)) return [];
+  const of = items.filter((e) => sameCategory(e.category, category) && e.status !== 'retired');
+  // Null rather than 0 when nothing of the category is registered: an empty
+  // register is a form nobody filled in, not a gym that owns no rowers.
+  const known = of.length > 0;
+  const usable = usableUnits(of);
+
+  const sorted = [...classes]
+    .filter((c) => !Number.isNaN(Date.parse(c.startsAt)))
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt) || a.id.localeCompare(b.id));
+
+  const out: ConcurrentDemand[] = [];
+  let group: KitClass[] = [];
+  let groupEnd = -Infinity;
+
+  const flush = () => {
+    if (group.length < 2) { group = []; return; }
+    const unitsIfFull = group.reduce((n, c) => n + Math.max(0, c.capacity) * perAttendee, 0);
+    const unitsBooked = group.reduce((n, c) => n + Math.max(0, c.booked) * perAttendee, 0);
+    out.push({
+      classes: group,
+      from: group[0].startsAt,
+      to: new Date(Math.max(...group.map(endOf))).toISOString(),
+      unitsIfFull,
+      unitsBooked,
+      usable,
+      // Ceiling, not floor: half a rower short is a person short.
+      shortBooked: known ? Math.max(0, Math.ceil((unitsBooked - usable) / perAttendee)) : null,
+      shortIfFull: known ? Math.max(0, Math.ceil((unitsIfFull - usable) / perAttendee)) : null,
+    });
+    group = [];
+  };
+
+  for (const c of sorted) {
+    const start = Date.parse(c.startsAt);
+    // Strictly less than: a class starting exactly when another ends is the
+    // next class, not a competing one.
+    if (group.length && start < groupEnd) {
+      group.push(c);
+      groupEnd = Math.max(groupEnd, endOf(c));
+    } else {
+      flush();
+      group = [c];
+      groupEnd = endOf(c);
+    }
+  }
+  flush();
+  return out;
+}
+
 export interface RegisterSummary {
   items: number;
   usableUnits: number;

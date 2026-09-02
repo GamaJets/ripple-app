@@ -535,12 +535,20 @@ Deno.serve(async (req) => {
   );
   if (!published.ok) {
     await recordFailure(published.error, containerId);
-    return fail(published.error, { stage: 'publish', containerId, objectRemoved: false });
+    // Safe to remove, and for the reason the section above gives: the status
+    // was FINISHED, so Meta has the bytes and is not coming back for the URL.
+    // A publish that was refused is a reason to take the public copy down
+    // sooner rather than to leave it for the ceiling.
+    const r = await removeCardObject(service, key);
+    await markRemoval(service, key, r);
+    return fail(published.error, { stage: 'publish', containerId, objectRemoved: r.removed });
   }
   const mediaId = String(published.body?.id || '');
   if (!mediaId) {
     await recordFailure('Meta published and returned no media id.', containerId);
-    return fail('Instagram did not say whether the post went up, so Repple will not claim that it did. Check your feed before posting again.', { stage: 'publish', containerId });
+    const r = await removeCardObject(service, key);
+    await markRemoval(service, key, r);
+    return fail('Instagram did not say whether the post went up, so Repple will not claim that it did. Check your feed before posting again.', { stage: 'publish', containerId, objectRemoved: r.removed });
   }
 
   // A permalink is a convenience, not a fact the post depends on. A failure

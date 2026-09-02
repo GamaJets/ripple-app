@@ -15,6 +15,7 @@ import { capLimit, capped } from '../lib/rowCap';
 import { classifyWrite } from '../lib/offlineQueue';
 import { useOutbox } from './outbox';
 import { useAuthRevision } from './authRevision';
+import { dateParts } from '../lib/localDate';
 
 export interface MeasureEntry {
   id: string; at: string;
@@ -63,7 +64,25 @@ export const METRICS: { key: keyof Omit<MeasureEntry, 'id' | 'at'>; label: strin
 
 let SEQ = 1;
 
-const dateOf = (iso: string) => iso.slice(0, 10);
+/**
+ * The LOCAL calendar day a measurement belongs to.
+ *
+ * This was `iso.slice(0, 10)`, which takes the first ten characters of a UTC
+ * timestamp minted by `new Date().toISOString()` — so a member in Dubai taping
+ * at 02:00 was filed under yesterday, and one in New York taping at 20:00 was
+ * filed under tomorrow. `measurements.taken_at` is a bare postgres DATE and
+ * app/(client)/measurements.tsx reads it back through `localDate` precisely
+ * because a bare date means a calendar day in the reader's own life. The write
+ * side has to mean the same thing, or the read renders the wrong day faithfully
+ * and "vs 3 Aug" on the change row is measured from the wrong baseline.
+ *
+ * `dateParts` returns a MONTH INDEX, hence the +1.
+ */
+const dateOf = (iso: string): string => {
+  const p = dateParts(iso);
+  if (!p) return String(iso).slice(0, 10);
+  return `${p[0]}-${String(p[1] + 1).padStart(2, '0')}-${String(p[2]).padStart(2, '0')}`;
+};
 // group flat rows [{taken_at, kind, value}] into MeasureEntry per date
 function rowsToEntries(rows: any[]): MeasureEntry[] {
   const byDate: Record<string, MeasureEntry> = {};

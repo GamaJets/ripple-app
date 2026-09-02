@@ -71,7 +71,7 @@ import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../
 import { Icon } from '../../src/ui/Icon';
 import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
-import { deltaLabel } from '../../src/lib/deltaLabel';
+import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
 import { useGoalTracker } from '../../src/ui/goalTracker';
@@ -1251,8 +1251,18 @@ export default function Scans() {
           <KpiRow
             onPress={(k) => { if (k.route) router.push(k.route as any); }}
             items={[
-              { label: 'Weight', value: fig(weightIn(wNow?.value, wu)), unit: wNow ? wu : undefined, route: '/(client)/body-trends', good: !wWas || (!!wNow && wNow.value <= wWas.value), delta: (wNow && wWas ? dlt(wNow.value, wWas.value) : null) ?? undefined },
-              { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, route: '/(client)/body-trends', good: !mWas || (!!mNow && mNow.value >= mWas.value), delta: (mNow && mWas ? dlt(mNow.value, mWas.value) : null) ?? undefined },
+              // `good` is the accent dot, and it used to be `wNow <= wWas` for
+              // everybody — the same fixed-direction verdict `body-trends.tsx`
+              // replaced when a member training to Build Muscle saw the accent
+              // dot for losing the weight they are working to put on. Their own
+              // goal decides it here too, and `undefined` where the goal has no
+              // opinion paints the neutral mark rather than a verdict.
+              //
+              // `!wWas ||` was the other half of it: with nothing to compare
+              // against, a first-ever reading was congratulated unconditionally.
+              // There is no delta then, so there is nothing to be on track with.
+              { label: 'Weight', value: fig(weightIn(wNow?.value, wu)), unit: wNow ? wu : undefined, route: '/(client)/body-trends', good: wNow && wWas ? movementIsProgress(wNow.value - wWas.value, cd.goal, 'weight') : undefined, delta: (wNow && wWas ? dlt(wNow.value, wWas.value) : null) ?? undefined },
+              { label: 'Muscle', value: fig(weightIn(mNow?.value, wu)), unit: mNow ? wu : undefined, route: '/(client)/body-trends', good: mNow && mWas ? movementIsProgress(mNow.value - mWas.value, cd.goal, 'muscle') : undefined, delta: (mNow && mWas ? dlt(mNow.value, mWas.value) : null) ?? undefined },
               // A count over a read that is not whole is the size of what came
               // back, and `fig(0)` prints "0" rather than a dash.
               { label: 'Scans', value: scansWhole ? fig(scans.length) : fig(null), delta: (scansWhole ? ago : 'not read') ?? undefined },

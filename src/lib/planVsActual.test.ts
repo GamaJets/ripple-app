@@ -8,6 +8,7 @@
 // window, or a movement whose name was spelled differently.
 import {
   WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
+  loadCheck, loadTally, loadLine, LOAD_TOLERANCE,
 } from './planVsActual';
 import type { ProgramDay } from './programs';
 import type { WorkoutEntry } from './mockData';
@@ -167,6 +168,57 @@ ok(/not a statement about Priya/i.test(unreadLine),
   'and an unreadable comparison refuses the collapse in as many words');
 ok(coverageLine(cappedShort, WINDOW_DAYS, 'Priya').includes('cannot be answered for'),
   'a partial read says how many movements it could not answer for rather than counting them as missed');
+
+/* ── the load, not just the presence ─────────────────────────────────────
+ *
+ * P5. The sentence that changes next week's programme is not "they did four of
+ * six sessions", it is "they hit every prescribed load on upper and missed
+ * every one on legs". Every assertion here is aimed at the same bug the rest of
+ * this file is: a coach reads a verdict and acts on it, so a verdict must never
+ * be manufactured out of an absent prescription.
+ */
+
+const mv = (plannedTopKg: number | null, loggedTopKg: number | null) =>
+  ({ name: 'x', slug: 'x', coverage: 'logged' as const, lastDay: null, daysLogged: 1, plannedTopKg, loggedTopKg });
+
+eq(loadCheck(mv(null, 80)).verdict, 'no-plan',
+  'a plan that names no load has nothing to be under or over');
+eq(loadCheck(mv(null, 80)).gapKg, null,
+  'and no gap: a gap against an absent prescription is not a gap');
+eq(loadCheck(mv(100, null)).verdict, 'not-logged',
+  'a prescribed load with nothing logged against it is its own state');
+eq(loadCheck(mv(100, 100)).verdict, 'at', 'the number, hit exactly');
+eq(loadCheck(mv(100, 97.5)).verdict, 'at',
+  'and hit within one pair of the smallest plates on the rack — 2.5 kg off 100 is the instruction carried out');
+eq(loadCheck(mv(100, 95)).verdict, 'under', 'past the tolerance it is short');
+eq(loadCheck(mv(100, 110)).verdict, 'over', 'and above it, which is reported rather than congratulated');
+eq(loadCheck(mv(100, 95)).gapKg, -5, 'the gap is signed, in kilograms, logged minus prescribed');
+
+// The tolerance is a FRACTION and this is why. 2.5 kg off a prescribed 20 kg
+// accessory is an eighth of the load and is a different fact from 2.5 kg off a
+// prescribed 100 kg squat.
+eq(loadCheck(mv(20, 17.5)).verdict, 'under',
+  'the tolerance scales with the prescription rather than being a fixed 2.5 kg');
+ok(LOAD_TOLERANCE > 0 && LOAD_TOLERANCE < 0.1, 'and it is a small fraction, not a licence');
+
+// A zero is never a prescription. `plannedTopKg` is null rather than 0 for
+// bodyweight work precisely so a logged 40 kg cannot render as somebody wildly
+// exceeding a target of nothing.
+eq(loadCheck(mv(0, 40)).verdict, 'no-plan', 'a planned top of zero is not a target of zero');
+eq(loadCheck(mv(100, 0)).verdict, 'not-logged', 'and a logged zero is an absent measurement, not a lift of nothing');
+
+const tally = loadTally([mv(100, 100), mv(100, 80), mv(100, 130), mv(140, null), mv(null, 50)]);
+eq(tally, { compared: 3, at: 1, under: 1, over: 1, notLogged: 1, noPlan: 1 }, 'the tally counts every arm separately');
+
+const ll = loadLine(tally, 'Priya')!;
+ok(!/%/.test(ll), 'there is no percentage in the load line either — it would hide that a fifth of the movements name no load at all');
+ok(/1 at the prescribed load/.test(ll) && /1 under it/.test(ll) && /1 over it/.test(ll), 'each arm is named');
+ok(/names no load at all, which is ordinary and is not a gap/.test(ll),
+  'and a block written in reps and RPE is not reported as a failure');
+eq(loadLine(loadTally([mv(null, 50), mv(null, null)]), 'Priya'), null,
+  'a block that names no loads anywhere gets no line at all rather than one apologising for itself');
+ok(/nothing to compare Priya against/.test(loadLine(loadTally([mv(100, null)]), 'Priya')!),
+  'and a prescription nothing was logged against says so about the record, not about the person');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('planVsActual: ok — matched by slug over a window, never a weekday, never a percentage, and never "not logged" over an unread log');

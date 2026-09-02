@@ -23,14 +23,27 @@
 //
 // ── What it does NOT claim, and says so on its own face ────────────────────
 //
-// IT IS NOT A TAX INVOICE. There is no tax rate on it, no tax amount, no
-// net/gross split, and no VAT or GST registration number — not blank fields,
-// not zeros: the concepts are absent. Tax treatment turns on the coach's
-// country, their registration status, where the client is and what was sold,
-// none of which Repple knows or asks. A "VAT 0.00" line would be a statement
-// about somebody's tax affairs, printed under their name, and it would be
-// wrong for most of them. `INVOICE_TAX` below says this in words on the page,
-// and the test asserts it is on every document this module can build.
+// REPPLE CALCULATES NO TAX. There is no tax amount on it, no net/gross split
+// and no subtotal — not blank fields, not zeros: those concepts are absent.
+// Tax treatment turns on the coach's country, their registration status, where
+// the client is and what was sold, none of which Repple knows or asks. A
+// "VAT 0.00" line would be a statement about somebody's tax affairs, printed
+// under their name, and it would be wrong for most of them.
+//
+// What the document CAN now carry, and could not before, is a tax rate and a
+// registration number the COACH TYPED. Those are not calculations. They are
+// stated facts about the issuer, exactly as `billTo` is a stated fact about the
+// recipient and `description` is a stated fact about what was sold — the same
+// person typed all four, this app checks none of them, and each is printed
+// verbatim. Refusing to print them meant a VAT-registered coach had to keep a
+// second invoicing system, which made the whole money side of this app a
+// duplicate of their real books.
+//
+// So there are two tax sentences and exactly one is on any given document:
+// `INVOICE_TAX` where the coach stated nothing, and `INVOICE_TAX_STATED` where
+// they did. Both say Repple worked nothing out. The test asserts one of them is
+// on every document this module can build, and that no document anywhere
+// carries a tax AMOUNT.
 //
 // IT IS NOT PROOF THAT MONEY MOVED. Repple does not reconcile this against
 // Stripe, a bank, or anything else. Where Stripe did take the payment, Stripe's
@@ -60,7 +73,7 @@ import type { LoadStatus } from '../ui/loadStatus';
 // guessing — and already knows which currencies have no minor unit, so ¥50,000
 // does not print as ¥500. An invoice is the last place in this app that may
 // have a second opinion about how much money something is.
-import { minorMoney, sumTaken, ZERO_DECIMAL, type Taken, type TakenRow } from './coachMoney';
+import { minorMoney, readMinorAmount, sumTaken, type Taken, type TakenRow, type TypedAmount } from './coachMoney';
 // The coach's own mark. `logoImgHtml` returns the empty string for anything it
 // cannot validate, which is what makes "no logo" and "an unreadable logo"
 // produce the same document rather than a broken image on somebody's invoice.
@@ -129,6 +142,24 @@ export interface CoachInvoice {
    *  both read as "not yet chased". */
   reminderCount?: number | null;
   note?: string | null;
+  /**
+   * A tax rate the COACH typed, as a percentage, or null because they stated
+   * none (part 451).
+   *
+   * Printed verbatim and used for nothing else. Repple works no amount out from
+   * it: there is no tax figure on this document, no net/gross split and no
+   * subtotal, because what a rate means for a particular supply depends on a
+   * margin scheme, a flat-rate scheme, a reverse charge and half a dozen other
+   * things this app is not told about.
+   *
+   * ZERO IS NOT NULL. A zero-rated supply is something a registered business
+   * states on purpose, and collapsing it into "stated nothing" would take a
+   * deliberate statement off the page.
+   */
+  taxRatePct?: number | null;
+  /** A tax registration number the COACH typed, or null. Never checked against
+   *  any register, and never inferred from a country or a currency. */
+  taxRegistration?: string | null;
   voidedAt?: string | null;
   voidReason?: string | null;
   clientId?: string | null;
@@ -208,6 +239,29 @@ export const INVOICE_PROVENANCE = [
  */
 export const INVOICE_TAX =
   'No tax has been calculated, added or withheld. The amount shown is the amount charged, flat. This is not a tax invoice, no tax registration number is stated on it, and it should not be used as a tax document without your own accountant confirming what it needs to say.';
+
+/**
+ * The other tax sentence: the one for a document whose issuer stated something.
+ *
+ * `INVOICE_TAX` survives verbatim above and is still the sentence on the great
+ * majority of documents this builds. This is what replaces it when the coach
+ * typed a rate, a registration number, or both — and every clause of it is a
+ * narrowing rather than a softening.
+ *
+ * It still says Repple calculated nothing, because Repple calculated nothing:
+ * the rate and the number were typed by the issuer, are printed exactly as they
+ * typed them, and no amount anywhere on the page was derived from either. What
+ * it stops claiming is the two things that would now be false — that no
+ * registration number is stated, and that no rate appears — because a document
+ * that carried a rate and denied carrying one would be worse than either.
+ *
+ * It still refuses to say the document is sufficient. Whether a rate and a
+ * number are all a particular tax authority wants on an invoice is a question
+ * about the issuer's country and trade, and the accountant is still the person
+ * who answers it.
+ */
+export const INVOICE_TAX_STATED =
+  'The tax rate and registration number on this document were typed by the issuer and are printed exactly as they typed them. Nothing has been calculated from either: there is no tax amount anywhere on this document, no split between a net and a gross figure, and no subtotal. The amount shown is the amount charged, flat. Whether this is everything an invoice has to state where the issuer trades is for their own accountant to confirm.';
 
 /**
  * That the platform is not standing behind the payment.
@@ -622,46 +676,121 @@ export interface InvoiceDraft {
    */
   dueOn?: string | null;
   note?: string | null;
+  /**
+   * A tax rate the coach typed, as a percentage string — "20", "12.5", "0".
+   *
+   * Optional to type and optional to leave out, exactly as `dueOn` is. An empty
+   * box means the coach stated no rate, which is the ordinary case and is a
+   * DIFFERENT document from one stating zero. There is no default: a rate this
+   * app filled in would be a statement about somebody's tax affairs that they
+   * did not make.
+   */
+  taxRateText?: string | null;
+  /** A tax registration number the coach typed, or empty because they stated
+   *  none. Printed verbatim; never validated against a register, because there
+   *  is no register this app could check and a format check would refuse valid
+   *  numbers from countries nobody thought of. */
+  taxRegistration?: string | null;
+}
+
+/** A tax rate as a number, or why what was typed is not one. */
+export type TypedRate = { ok: true; pct: number | null } | { ok: false; reason: string };
+
+/**
+ * The rate the coach typed, as a percentage — or null because they typed
+ * nothing, or a refusal because what they typed is not a rate.
+ *
+ * THREE outcomes and not two, and the middle one is the point: an empty box is
+ * `{ ok: true, pct: null }`, meaning the coach stated no rate. It is not zero.
+ * A registered business stating a zero rate has said something deliberate, and
+ * a business that said nothing has not — collapsing the two would put a "0%"
+ * on the documents of every coach who left the box alone.
+ *
+ * Refused rather than clamped or rounded, like every other money-adjacent
+ * reader in this file: clamping 120 to 100, or rounding 12.55 to 12.6, prints a
+ * rate the coach did not type onto a document about their tax affairs. Three
+ * decimal places, matching the column, which is more than any real rate needs
+ * and is the point at which a typo stops looking like a rate.
+ */
+export function readTaxRate(text: string | null | undefined): TypedRate {
+  const raw = String(text ?? '').trim().replace(/\s/g, '').replace(/%$/, '');
+  if (!raw) return { ok: true, pct: null };
+  if (!/^\d{1,3}([.,]\d{1,3})?$/.test(raw)) {
+    return { ok: false, reason: 'A tax rate is a percentage — 20, or 12.5. Type the number on its own, with no per-cent sign and no currency.' };
+  }
+  const n = Number(raw.replace(',', '.'));
+  if (!Number.isFinite(n)) {
+    return { ok: false, reason: 'That tax rate could not be read as a number.' };
+  }
+  if (n < 0 || n > 100) {
+    return { ok: false, reason: 'A tax rate is a percentage between 0 and 100.' };
+  }
+  return { ok: true, pct: n };
+}
+
+/** The rate as it is printed: the digits the coach typed, with a per-cent sign
+ *  and no trailing noughts added. Null where they stated none — never "0%",
+ *  which is a statement they did not make. */
+export function taxRateLabel(pct: number | null | undefined): string | null {
+  if (pct == null || !Number.isFinite(pct)) return null;
+  return `${Number(pct.toFixed(3))}%`;
+}
+
+/** Whether this document carries anything the coach stated about tax, and so
+ *  which of the two tax sentences belongs on it. A rate of zero counts: it is a
+ *  statement, and `pct != null` is the test rather than truthiness. */
+export function statesTax(i: CoachInvoice): boolean {
+  return (i.taxRatePct != null && Number.isFinite(i.taxRatePct))
+    || !!String(i.taxRegistration ?? '').trim();
 }
 
 /**
- * The typed amount in minor units, or null when it is not an amount.
+ * The typed amount, in minor units — or the reason what was typed is not one.
  *
- * `zeroDecimal` says the currency has no subdivision — there are no fils in a
- * yen — so 50000 JPY is 50000 minor units and not 5,000,000. Getting this
- * backwards on an invoice charges somebody a hundred times too much, which is
- * why it is decided here and asserted rather than done inline on a screen.
+ * ── The factor is not a hundred, and this used to assume it was ───────────
  *
- * A comma decimal separator is accepted: half the world types "45,50", and
- * `Number('45,50')` is NaN, which would have refused the invoice rather than
- * mispricing it — but refusing a perfectly ordinary amount is still a coach
- * who cannot bill their client.
+ * This function held its own conversion: a zero-decimal branch for the yen, and
+ * `Math.round(n * 100)` for everything else. The yen half was right and the
+ * everything-else half was wrong in five currencies. A Kuwaiti dinar has a
+ * THOUSAND fils in it, so a coach in Kuwait invoicing 12.500 issued a document
+ * for 1250 fils — KWD 1.250, a tenth of what they typed — and the amount
+ * printed on the page agreed with the wrong figure, so nothing on the document
+ * contradicted it. The regex made it worse rather than catching it: it admitted
+ * at most two decimal places, so the third digit of a perfectly ordinary dinar
+ * amount was refused as "not money".
+ *
+ * `readMinorAmount` in coachMoney.ts already answers this correctly for all
+ * three families — no minor unit, hundredths, thousandths — and does the
+ * conversion on the DIGITS rather than by multiplying a float, so nothing is
+ * rounded into an amount nobody typed. It also carries Stripe's own rule that a
+ * thousandth-unit amount must end in a nought. There is one place in this app
+ * that decides how many decimal places a currency has, and this is not it.
+ *
+ * A comma decimal separator is still accepted: half the world types "45,50",
+ * and `Number('45,50')` is NaN, which would refuse a perfectly ordinary amount
+ * rather than mispricing it. A thousands separator is still refused rather than
+ * guessed at — "1,234" is one thousand in London and one and a bit in Berlin,
+ * and an invoice is not the place to pick one.
  */
-export function draftMinorUnits(amountText: string, currency: string | null): number | null {
-  const raw = String(amountText ?? '').trim().replace(/\s/g, '');
-  if (!raw) return null;
-  // One separator only, and it is the decimal point. A thousands separator is
-  // not accepted rather than guessed at: "1,234" is one thousand in London and
-  // one and a bit in Berlin, and an invoice is not the place to pick one.
-  if (!/^\d+([.,]\d{1,2})?$/.test(raw)) return null;
-  const n = Number(raw.replace(',', '.'));
-  if (!Number.isFinite(n) || n <= 0) return null;
-  const cur = (currency || '').trim().toLowerCase();
-  if (!cur) return null;
-  const zero = ZERO_DECIMAL_LOWER.has(cur);
-  if (zero) {
-    // No subdivision to hold a fraction. A typed "500.50" in yen is a typo, not
-    // an amount, and rounding it silently would bill a number nobody chose.
-    if (/[.,]/.test(raw)) return null;
-    return Math.round(n);
+export function draftAmount(amountText: string, currency: string | null): TypedAmount {
+  const read = readMinorAmount(amountText, currency);
+  if (!read.ok) return read;
+  // Zero is a valid minor-unit figure and is not a valid invoice. An invoice
+  // for nothing is not an invoice, and a receipt for nothing is not a payment —
+  // so the refusal lives here rather than in the shared reader, which is also
+  // used by the refund box where a nought is simply a nought.
+  if (read.minorUnits <= 0) {
+    return { ok: false, reason: 'Enter an amount greater than zero. A charge of nothing is not a charge.' };
   }
-  return Math.round(n * 100);
+  return read;
 }
 
-/** coachMoney.ts's own list, aliased rather than copied. A second hand-written
- *  set of the currencies with no minor unit is a second thing to get wrong, and
- *  getting it wrong here charges somebody a hundred times too much. */
-const ZERO_DECIMAL_LOWER: ReadonlySet<string> = ZERO_DECIMAL;
+/** The same answer as a number, for the callers that only need the figure.
+ *  Null means "not an amount" and never means zero. */
+export function draftMinorUnits(amountText: string, currency: string | null): number | null {
+  const read = draftAmount(amountText, currency);
+  return read.ok ? read.minorUnits : null;
+}
 
 /**
  * Every reason this draft cannot be issued, in the words the coach reads.
@@ -682,12 +811,16 @@ export function invoiceBlockers(d: InvoiceDraft): string[] {
     out.push('No currency has been set, so there is nothing to price this in. Repple is white-labelled and there is no default that is right for every gym — an owner sets it in the gym settings, or you set one on a package.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so it cannot be printed on an invoice.');
-  } else if (draftMinorUnits(d.amountText, cur) === null) {
-    out.push(
-      ZERO_DECIMAL_LOWER.has(cur.toLowerCase())
-        ? `Enter the amount as a whole number. ${cur.toUpperCase()} has no smaller unit, so there are no decimals to type.`
-        : 'Enter the amount as a number greater than zero, with at most two decimal places. An invoice for nothing is not an invoice.',
-    );
+  } else {
+    // The refusal carries the READER's own reason rather than a sentence
+    // written here, because the reason depends on the currency and there are
+    // three families of it: "JPY has no smaller unit", "KWD has 3 decimal
+    // places and that has 2", "KWD is charged in thousandths and the last place
+    // must be a nought". A single generic line about two decimal places was
+    // wrong for twenty-one currencies and told a coach in Kuwait that a real
+    // amount was not one.
+    const read = draftAmount(d.amountText, cur);
+    if (!read.ok) out.push(read.reason);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.issuedOn ?? ''))) out.push('The date this is issued on could not be read.');
   // A due date is optional and is refused rather than corrected when it is
@@ -702,6 +835,15 @@ export function invoiceBlockers(d: InvoiceDraft): string[] {
     } else if (/^\d{4}-\d{2}-\d{2}$/.test(String(d.issuedOn ?? '')) && due < String(d.issuedOn)) {
       out.push('The due date is before the date this is issued on. An invoice cannot fall due before it exists.');
     }
+  }
+  // What the coach stated about tax, if anything. Both fields are optional and
+  // both are refused rather than corrected when they are wrong — a clamped rate
+  // is a figure the coach did not type, printed on a document about their tax
+  // affairs.
+  const rate = readTaxRate(d.taxRateText);
+  if (!rate.ok) out.push(rate.reason);
+  if (String(d.taxRegistration ?? '').trim().length > 60) {
+    out.push('That tax registration number is longer than any this can print. Check it, or leave the box empty and none is stated on the document.');
   }
   return out;
 }
@@ -821,6 +963,27 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
       T.push(`Due: ${invoiceDayLabel(due)}`);
     }
   }
+  // What the coach stated about tax, if anything, printed exactly as they typed
+  // it and used for nothing else. NOTHING is derived from it — no amount, no
+  // net figure, no subtotal — and the "About this document" section below says
+  // so in the sentence that replaces `INVOICE_TAX` when either field is here.
+  //
+  // Each is printed only where it was stated. An absent rate prints nothing
+  // rather than "none" or "0%", both of which would be statements the coach did
+  // not make; `statesTax` is what decides which of the two tax sentences the
+  // document carries and it treats a stated zero as a statement.
+  {
+    const rate = taxRateLabel(inv.taxRatePct);
+    if (rate) {
+      H.push(`<p><b>Rate stated by the issuer:</b> ${escapeHtml(rate)}</p>`);
+      T.push(`Rate stated by the issuer: ${rate}`);
+    }
+    const reg = String(inv.taxRegistration ?? '').trim();
+    if (reg) {
+      H.push(`<p><b>Issuer’s registration number:</b> ${escapeHtml(reg)}</p>`);
+      T.push(`Issuer’s registration number: ${reg}`);
+    }
+  }
   if (inv.note) {
     H.push(`<p class="lede">Note from the issuer: ${escapeHtml(inv.note)}</p>`);
     T.push(`Note from the issuer: ${inv.note}`);
@@ -830,8 +993,16 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
   H.push('<h2>About this document</h2>');
   T.push('', 'ABOUT THIS DOCUMENT');
   for (const line of INVOICE_PROVENANCE) { H.push(`<p class="lede">${escapeHtml(line)}</p>`); T.push(line); }
-  H.push(`<p class="lede">${escapeHtml(INVOICE_TAX)}</p>`);
-  T.push(INVOICE_TAX);
+  // One of the two, never both and never neither. `INVOICE_TAX` denies that a
+  // registration number is stated, which is true of nearly every document this
+  // builds and false of one carrying the coach's own — and a document that
+  // printed a rate and then denied carrying one would be worse than either
+  // sentence on its own. Both say Repple calculated nothing, because it did.
+  {
+    const taxLine = statesTax(inv) ? INVOICE_TAX_STATED : INVOICE_TAX;
+    H.push(`<p class="lede">${escapeHtml(taxLine)}</p>`);
+    T.push(taxLine);
+  }
   H.push(`<p class="lede">${escapeHtml(INVOICE_NOT_A_RECEIPT)}</p>`);
   T.push(INVOICE_NOT_A_RECEIPT);
   // Said on EVERY document, including the ones with no due date on them. A

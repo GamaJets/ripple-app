@@ -10,16 +10,17 @@
 // became one hero figure, the six bordered cards became hairline-separated
 // sections, and the day grid now reads through weight and the accent rather
 // than through boxes and 800-weight text.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Field, fig } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
-import { insideNoticeWindow, feeAmountLine, noticeLabel, type CancellationPolicy } from '../../src/lib/booking';
+import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Field, Notice, fig } from '../../src/ui/kit';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { insideNoticeWindow, feeAmountLine, noticeLabel, openSlotWindow, slotWindowLine, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
+import { useClasses } from '../../src/ui/classes';
 import { useSessions, useSessionWaitlistCounts, useLateCancelCharges, useMyCancellationPolicy, promoteWaitlist } from '../../src/ui/sessions';
 import { useAvailability, upcomingDates, useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import {
@@ -43,9 +44,11 @@ import { readBoundary, monthCoverage, monthCoverageNote } from '../../src/lib/se
 import { appLocale } from '../../src/lib/locale';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useCoachReminders } from '../../src/ui/coachReminders';
+import { coachMoveRefusalLine, coachMovedLine } from '../../src/lib/reschedule';
 import {
   blockDates, summariseBlocks, blockSummaryLine, blockPlanLabel,
-  type BlockOutcome, type BlockResult,
+  cancelAndBlockBody, cancelAndBlockLabel, sessionsBlocking,
+  type BlockOutcome, type BlockResult, type BlockSummary,
 } from '../../src/lib/blockRange';
 // The phone's own diary, and the two rules the whole feature rests on.
 //
@@ -218,7 +221,7 @@ export default function TrainerSchedule() {
   const t = useTheme();
   const now = new Date();
   const router = useRouter();
-  const { sessions, status: sessionsStatus, addSession, releaseSession, removeSession, refresh } = useSessions();
+  const { sessions, status: sessionsStatus, addSession, releaseSession, removeSession, refresh, rescheduleClientSession } = useSessions();
   // ── The empty diary that was not empty ───────────────────────────────────
   //
   // Every figure and every empty-state sentence below was built straight off
@@ -242,6 +245,21 @@ export default function TrainerSchedule() {
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const { roster, status: rosterStatus } = useRoster();
+  /* ── the group timetable, which this screen never asked about ───────────
+   *
+   * `addSession` checks `overlaps` against the `sessions` list and nothing
+   * else. Classes are rows in `gym_classes` behind a separate provider, so
+   * Generate Open Slots would put a bookable PT hour on top of the class the
+   * coach was running, a client would take it, and both would turn up. The
+   * double-booking guard the whole booking side rests on had a hole the size of
+   * the group timetable.
+   *
+   * `classStatus` is carried for the same reason every other status on this
+   * screen is: an empty class list under 'error' is a read that did not happen,
+   * and the one thing this must not do is report a clear hour it never checked.
+   */
+  const { classes: gymClasses, status: classStatus } = useClasses();
+  const classesKnown = classStatus !== 'error';
   // Who is waiting on which of these hours. A booked slot with somebody behind
   // it is not the same object as one with nobody behind it: cancelling the
   // first hands it straight over, and the coach should be able to see that
@@ -278,6 +296,9 @@ export default function TrainerSchedule() {
   // a session outside it is left alone rather than cancelled on the strength of
   // a query that never asked about it. See src/lib/coachReminders.ts.
   const { user } = useAuth();
+  /** The signed-in coach. Named rather than read inline, because it decides
+   *  which classes on the gym's board are this coach's to be double-booked by. */
+  const coachId = user?.id ?? null;
   const remindable = known
     ? sessions.map((s) => ({
       id: s.id,
@@ -333,6 +354,22 @@ export default function TrainerSchedule() {
    *  the slots listed are real but there are more, so it is still not a set
    *  anything may be counted from or declared empty. */
   const availKnown = isWhole(availStatus);
+  /**
+   * How much bookable diary is left, and whether to say anything about it.
+   *
+   * `known` and not `countable`: a partial read still holds real open slots and
+   * the furthest one it did return is a floor on the window, so the warning it
+   * produces is conservative rather than wrong. Under 'error' the state is
+   * 'unknown' and nothing is drawn at all — an unread calendar is not an empty
+   * one, and this is the screen where that mistake sends a coach to regenerate
+   * a diary that is already full.
+   *
+   * `availKnown` gates the OTHER half: a coach whose weekly times could not be
+   * read has not been shown to have none, so they are not told their generated
+   * slots have run out either.
+   */
+  const slotWindow = openSlotWindow(sessions, { known, hasWeekly: availKnown && availSlots.length > 0 });
+  const slotLine = slotWindowLine(slotWindow);
   const [availOpen, setAvailOpen] = useState(false);
   const [blockOpen, setBlockOpen] = useState(false);
   const [blkFrom, setBlkFrom] = useState(9);
@@ -487,9 +524,19 @@ export default function TrainerSchedule() {
     // booked. Counted apart so each can be said truthfully.
     let clash = 0;
     let alreadyOpen = 0;
+    // Times skipped because the coach is TEACHING then. A third reason, and
+    // until it existed this loop happily opened a bookable hour on top of the
+    // class the coach was running — a client took it and both turned up.
+    let teaching = 0;
+    // Classes at one of these times that nobody is recorded against. Not a
+    // reason to skip, and not a thing to keep quiet about either.
+    let unattributed = 0;
     for (const sl of availSlots) {
       for (const d of upcomingDates(sl.dow, sl.hour, sl.minute, 4)) {
         const iso = d.toISOString();
+        const cl = classClashes(iso, sl.dur, gymClasses, coachId);
+        if (cl.mine.length > 0) { teaching++; continue; }
+        unattributed += cl.unattributed.length;
         const ses: TrainingSession = { id: 'ms' + (SEQ++), trainerId: '', clientId: null, startsAt: iso, durationMin: sl.dur, status: 'available', released: false };
         const res = addSession(ses);
         if (res.ok) { saves.push(res.saved ?? Promise.resolve(false)); continue; }
@@ -511,6 +558,14 @@ export default function TrainerSchedule() {
     ];
     if (alreadyOpen) lines.push(alreadyOpen + ' time' + (alreadyOpen === 1 ? ' was' : 's were') + ' already open on your calendar, so ' + (alreadyOpen === 1 ? 'it was' : 'they were') + ' left as ' + (alreadyOpen === 1 ? 'it is' : 'they are') + '. Nothing was lost.');
     if (clash) lines.push(clash + ' time' + (clash === 1 ? ' was' : 's were') + ' skipped because you already have a session booked or time blocked then.');
+    if (teaching) lines.push(teaching + ' time' + (teaching === 1 ? ' was' : 's were') + ' skipped because you are teaching a class then. Nothing was opened on top of a class you are running.');
+    // Never folded into the count above. One is "we checked and skipped it",
+    // the other is "we could not check", and reporting them as one sentence
+    // would let a coach believe an hour was cleared that was not.
+    {
+      const caveat = classCheckCaveat(classesKnown, unattributed);
+      if (caveat) lines.push(caveat);
+    }
     if (lost) lines.push(lost + ' slot' + (lost === 1 ? '' : 's') + ' could not be saved to the server, so ' + (lost === 1 ? 'it is' : 'they are') + ' not open to anyone. Try generating again.');
     Alert.alert(added ? 'Slots generated' : 'No slots opened', lines.join('\n\n'));
   };
@@ -767,30 +822,7 @@ export default function TrainerSchedule() {
 
     setBlkBusy(true);
     const results: BlockResult[] = [];
-    for (const day of dayList) {
-      const [dy, dm, dd] = day.split('-').map(Number);
-      const dayStart = new Date(dy, dm - 1, dd);
-      dayStart.setHours(blkAllDay ? 0 : blkFrom, 0, 0, 0);
-      let outcome: BlockOutcome = 'failed';
-      let withdrawn = 0;
-      try {
-        const { data, error } = await supabase.rpc('block_time', { p_starts_at: dayStart.toISOString(), p_duration_min: mins });
-        const row = Array.isArray(data) ? data[0] : data;
-        // The server's three answers, kept apart. Only 'failed' means the day
-        // may still be bookable and the coach should try again; the other two
-        // are the server declining for a reason, and reporting either as a
-        // failure would send somebody back to press the same button forever —
-        // which is the exact loop part 113 was written to end, when extending a
-        // block raised a raw exclusion_violation and the coach was told their
-        // time was NOT blocked by the block that was stopping every booking.
-        if (error) outcome = 'failed';
-        else if (row?.ok) { outcome = 'blocked'; withdrawn = Number(row.withdrawn) || 0; }
-        else if (row?.reason === 'booked') outcome = 'booked';
-        else if (row?.reason === 'already-blocked') outcome = 'already-blocked';
-        else outcome = 'failed';
-      } catch { outcome = 'failed'; }
-      results.push({ day, outcome, withdrawn });
-    }
+    for (const day of dayList) results.push(await blockOneDay(day, mins));
     setBlkBusy(false);
 
     // ONE alert for the whole run, naming each kind of outcome. A fortnight
@@ -801,9 +833,113 @@ export default function TrainerSchedule() {
     const summary = summariseBlocks(results);
     setBlockOpen(false);
     await refresh();
+    reportBlock(summary, mins);
+  };
+
+  /**
+   * Ask the server to block one local day, and read its answer honestly.
+   *
+   * Extracted so the "cancel those and block" path below runs the SAME call on
+   * the same days rather than a second copy of it that could drift.
+   */
+  const blockOneDay = async (day: string, mins: number): Promise<BlockResult> => {
+    const [dy, dm, dd] = day.split('-').map(Number);
+    const dayStart = new Date(dy, dm - 1, dd);
+    dayStart.setHours(blkAllDay ? 0 : blkFrom, 0, 0, 0);
+    let outcome: BlockOutcome = 'failed';
+    let withdrawn = 0;
+    try {
+      const { data, error } = await supabase.rpc('block_time', { p_starts_at: dayStart.toISOString(), p_duration_min: mins });
+      const row = Array.isArray(data) ? data[0] : data;
+      // The server's three answers, kept apart. Only 'failed' means the day
+      // may still be bookable and the coach should try again; the other two
+      // are the server declining for a reason, and reporting either as a
+      // failure would send somebody back to press the same button forever —
+      // which is the exact loop part 113 was written to end, when extending a
+      // block raised a raw exclusion_violation and the coach was told their
+      // time was NOT blocked by the block that was stopping every booking.
+      if (error) outcome = 'failed';
+      else if (row?.ok) { outcome = 'blocked'; withdrawn = Number(row.withdrawn) || 0; }
+      else if (row?.reason === 'booked') outcome = 'booked';
+      else if (row?.reason === 'already-blocked') outcome = 'already-blocked';
+      else outcome = 'failed';
+    } catch { outcome = 'failed'; }
+    return { day, outcome, withdrawn };
+  };
+
+  /**
+   * The result of a block, and the way out of the one outcome that used to be a
+   * dead end.
+   *
+   * `blockSummaryLine` names the days that refused and says "Cancel those
+   * yourself — that tells the client — and then block the day." The alert then
+   * offered a single Done. A fortnight away with four standing clients meant
+   * leaving the sheet, finding four separate days in the grid and repeating a
+   * flow this alert could drive from the list it had just printed — and any day
+   * the coach gave up on stayed bookable while they were abroad.
+   *
+   * The second button is only drawn when there is actually something to cancel
+   * ON THIS SCREEN'S OWN READ. Under 'error' the diary is unknown and an empty
+   * clash list would be the app claiming the days are clear; the coach is left
+   * with the sentence they had, which is true.
+   */
+  const reportBlock = (summary: BlockSummary, mins: number) => {
+    const clashes = known ? sessionsBlocking(summary.booked, sessions) : [];
+    const title = summary.blocked === 0 ? 'Nothing blocked' : summary.needsAttention ? 'Partly blocked' : 'Time blocked';
+    if (clashes.length === 0) {
+      Alert.alert(title, blockSummaryLine(summary), [{ text: 'Done' }]);
+      return;
+    }
+    Alert.alert(title, blockSummaryLine(summary), [
+      { text: 'Leave Them', style: 'cancel' },
+      {
+        text: cancelAndBlockLabel(clashes.length),
+        onPress: () => { void confirmCancelAndBlock(clashes, summary.booked, mins); },
+      },
+    ]);
+  };
+
+  /** The second confirm, because the first was about blocking and this cancels
+   *  somebody's appointment. Every consequence is stated before it happens. */
+  const confirmCancelAndBlock = async (clashes: TrainingSession[], days: string[], mins: number) => {
+    const who = clashes.map((c) => `${nameOf(c.clientId)} ${timeLabel(c.startsAt)}`);
+    const go = await new Promise<boolean>((resolve) => {
+      Alert.alert('Cancel these sessions?', cancelAndBlockBody(clashes.length, who), [
+        { text: 'Keep Them', style: 'cancel', onPress: () => resolve(false) },
+        { text: cancelAndBlockLabel(clashes.length), style: 'destructive', onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+    if (!go) return;
+
+    setBlkBusy(true);
+    // Cancelled one at a time and COUNTED, because a release that the server
+    // refused leaves that client booked and that day unblockable — and telling
+    // a coach their holiday is clear when one client is still coming is the
+    // failure this whole flow exists to avoid.
+    let cancelled = 0;
+    const stillBooked: string[] = [];
+    for (const c of clashes) {
+      const r = await cancelOne(c);
+      if (r.freed) cancelled++;
+      else stillBooked.push(`${nameOf(c.clientId)} ${timeLabel(c.startsAt)}`);
+    }
+    // Only now, and only the days that refused before. A day that blocked
+    // cleanly the first time is left alone rather than asked twice.
+    const results: BlockResult[] = [];
+    for (const day of days) results.push(await blockOneDay(day, mins));
+    setBlkBusy(false);
+    await refresh();
+
+    const summary = summariseBlocks(results);
+    const head = cancelled === 0
+      ? 'No session was cancelled.'
+      : `${cancelled} session${cancelled === 1 ? ' was' : 's were'} cancelled and ${cancelled === 1 ? 'that client was' : 'those clients were'} told.`;
+    const tail = stillBooked.length
+      ? ` ${stillBooked.length} did not save, so ${stillBooked.length === 1 ? 'that client is' : 'those clients are'} still booked: ${stillBooked.slice(0, 4).join(', ')}${stillBooked.length > 4 ? '…' : ''}.`
+      : '';
     Alert.alert(
       summary.blocked === 0 ? 'Nothing blocked' : summary.needsAttention ? 'Partly blocked' : 'Time blocked',
-      blockSummaryLine(summary),
+      `${head}${tail} ${blockSummaryLine(summary)}`,
       [{ text: 'Done' }],
     );
   };
@@ -1147,13 +1283,32 @@ export default function TrainerSchedule() {
       startsAt: d.toISOString(), durationMin: addDur,
       status: addClient ? 'booked' : 'available', released: false,
     };
+    // The group timetable, before the sessions list. A class the coach is
+    // recorded as teaching is as booked as any one-to-one, and `addSession`
+    // cannot see one.
+    const clash = classClashes(s.startsAt, s.durationMin, gymClasses, coachId);
+    if (clash.mine.length > 0) {
+      Alert.alert('You are teaching then',
+        `${clash.mine[0].title} runs across ${timeLabel(s.startsAt)} on ${DOW[selDate.getDay()]} ${selD}/${selM + 1}, and you are the coach on it. Pick another time, or call the class off from the Classes screen first.`,
+        [{ text: 'OK' }]);
+      return;
+    }
     const res = addSession(s);
     if (!res.ok) {
       Alert.alert('Time not available', `You already have a session that overlaps ${timeLabel(s.startsAt)} on ${DOW[selDate.getDay()]} ${selD}/${selM + 1}. Pick another time.`, [{ text: 'OK' }]);
       return;
     }
     setAddOpen(false);
-    if (!addClient) return;
+    // Said after the slot is made rather than instead of making it: neither of
+    // these is a reason to refuse, and both are reasons not to let the coach
+    // believe the hour was checked when it was not. Carried into whichever
+    // alert this path ends on rather than raised as a second one, because two
+    // stacked dialogs is how the important half gets dismissed unread.
+    const caveat = classCheckCaveat(classesKnown, clash.unattributed.length);
+    if (!addClient) {
+      if (caveat) Alert.alert('Slot opened', caveat, [{ text: 'OK' }]);
+      return;
+    }
     const who = nameOf(addClient);
     // Two things had to be true for the old alert to be honest and neither was
     // checked: that the session reached the server (until it does, it is on this
@@ -1175,26 +1330,43 @@ export default function TrainerSchedule() {
       `${timeLabel(s.startsAt)} with ${who} is confirmed, and it is now on their calendar in the Repple app.\n\n` +
         (push.ok
           ? `${who} was sent a notification — they will see it if they have notifications on.`
-          : `We couldn't send ${who} a notification${push.error ? ` (${push.error})` : ''}, so message them to let them know.`),
+          : `We couldn't send ${who} a notification${push.error ? ` (${push.error})` : ''}, so message them to let them know.`) +
+        (caveat ? `\n\n${caveat}` : ''),
       [{ text: 'Great' }],
     );
   }
 
-  async function doCancel(s: TrainingSession) {
+  /**
+   * What became of one cancellation. Every arm the alert needs to describe, and
+   * nothing about words: the same act is reported one way when a coach cancels
+   * one session from the day sheet and another way when the block sheet cancels
+   * four in a row, and only one of those may raise four alerts.
+   */
+  interface CancelOutcome {
+    freed: boolean;
+    toldClient: boolean;
+    promoted: string | null;
+    promotedTold: boolean | null;
+    offered: boolean | null;
+    others: string[];
+  }
+
+  /**
+   * Free one booked session, tell the client, and hand the hour on.
+   *
+   * Silent. Extracted from `doCancel` so the block sheet can cancel the
+   * sessions standing in the way of a holiday without four dialogs in a row,
+   * and so that both paths do the SAME three things in the same order. That
+   * order is not arbitrary and the comments below are the reason.
+   */
+  async function cancelOne(s: TrainingSession): Promise<CancelOutcome> {
     const others = roster.filter((c) => c.id !== s.clientId).map((c) => c.name);
     // Free the slot first, and only say so if the server actually freed it.
     // This was fired and forgotten, and the roster was then pushed "first to
     // book it gets it" about a session that was still booked — so the quickest
     // client to respond was the one turned away.
     const freed = await releaseSession(s.id);
-    if (!freed) {
-      Alert.alert(
-        'Not cancelled',
-        `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} is still booked — that did not save, so nothing has changed and nobody has been told. Try again.`,
-        [{ text: 'OK' }],
-      );
-      return;
-    }
+    if (!freed) return { freed: false, toldClient: false, promoted: null, promotedTold: null, offered: null, others };
 
     // The queue, before anybody is broadcast at. A client's own cancellation
     // hands the slot over inside the transaction that frees it; a coach frees
@@ -1221,10 +1393,24 @@ export default function TrainerSchedule() {
         : null;
     }
 
+    return { freed: true, toldClient: toldClient.ok, promoted, promotedTold, offered, others };
+  }
+
+  async function doCancel(s: TrainingSession) {
+    const r = await cancelOne(s);
+    if (!r.freed) {
+      Alert.alert(
+        'Not cancelled',
+        `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} is still booked — that did not save, so nothing has changed and nobody has been told. Try again.`,
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    const { toldClient, promoted, promotedTold, offered, others } = r;
     Alert.alert(
       'Session cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
-      (toldClient.ok
+      (toldClient
         ? `${nameOf(s.clientId)} was sent a notification. `
         : `We couldn’t notify ${nameOf(s.clientId)} — tell them yourself, especially if this session is soon. `) +
       (promoted
@@ -1284,6 +1470,59 @@ export default function TrainerSchedule() {
   // day it asked "cancel 7am with Ana on Tue 1/9?" about a session next Tuesday
   // the 8th, and a coach who checks the date before confirming would have been
   // checking the wrong one.
+  /* ── moving a session, rather than cancelling and rebooking it ──────────
+   *
+   * The coach's only route was `doCancel`, which frees the hour, hands it to
+   * the head of its waitlist and pushes "Session cancelled" at the client — so
+   * moving Ana from 7am to 8am gave Ana's 7am away, told her she was cancelled,
+   * and left the coach to book her back in by hand against a slot anybody could
+   * take in the meantime. supabase/parts/461 does the whole thing in one
+   * transaction, carries the pack credit rather than drawing a second one, and
+   * hands the freed hour on only once Ana is already in her new one.
+   */
+  const [moveFrom, setMoveFrom] = useState<TrainingSession | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+
+  /**
+   * Where a session could go: this coach's own open hours, still ahead of now,
+   * soonest first.
+   *
+   * Read off the same list the grid draws, so what is offered here is what the
+   * screen believes. Under 'error' that list is empty for want of a read rather
+   * than for want of slots, and the sheet says so instead of showing a coach
+   * with a full week "no open slots".
+   */
+  const moveTargets = useMemo(() => sessions
+    .filter((x) => x.status === 'available' && Date.parse(x.startsAt) > Date.now())
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))
+    .slice(0, 40), [sessions]);
+
+  async function doMove(from: TrainingSession, to: TrainingSession) {
+    if (moveBusy) return;
+    const who = nameOf(from.clientId);
+    const fromLabel = `${DOW[new Date(from.startsAt).getDay()]} ${timeLabel(from.startsAt)}`;
+    const toLabel = `${DOW[new Date(to.startsAt).getDay()]} ${timeLabel(to.startsAt)}`;
+    setMoveBusy(true);
+    try {
+      const r = await rescheduleClientSession(from.id, to.id);
+      if (!r.moved) {
+        Alert.alert('Not moved', coachMoveRefusalLine(r, who, fromLabel), [{ text: 'OK' }]);
+        return;
+      }
+      setMoveFrom(null);
+      // Told AFTER the server has moved it, and only the one person whose hour
+      // changed — the client id comes back from the function rather than from
+      // this screen's copy of the row, which the move has just made stale.
+      const told = r.clientId
+        ? await sendPushChecked([r.clientId], 'Your session has moved',
+          `${fromLabel} moved to ${toLabel}. Nothing is charged and your session is still paid for.`,
+          { route: '/(client)/calendar' })
+        : { ok: false };
+      await reloadWaits();
+      Alert.alert('Session moved', coachMovedLine(r, who, fromLabel, toLabel, told.ok), [{ text: 'Done' }]);
+    } finally { setMoveBusy(false); }
+  }
+
   function confirmCancel(s: TrainingSession) {
     const d = new Date(s.startsAt);
     Alert.alert('Cancel this session?', `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} on ${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}.`, [
@@ -1483,6 +1722,26 @@ export default function TrainerSchedule() {
           // contradict it.
           arcLabel="of your slots booked"
         />
+
+        {/* ── the diary running out, said before it does ──────────────────
+            Open slots are written four weeks at a time by a button somebody has
+            to remember to press, and when the window empties the failure is
+            silent and total: every client opens the booking screen, sees
+            nothing, and is told nothing. A coach back from three weeks away
+            reads the empty diary as a demand problem.
+
+            Nothing here is drawn on a calendar that could not be read — an
+            unread diary is 'unknown', not empty, and `generateSlots` refuses
+            to run on one for the same reason. */}
+        {slotLine ? (
+          <View style={{ paddingTop: sp.md }}>
+            <Notice tone={t.warn} kicker="Bookings" title={slotWindow.state === 'empty' ? 'Nobody can book you' : 'Your open slots are running out'} note={slotLine}>
+              <View style={{ marginTop: sp.md }}>
+                <Ghost label="Generate Open Slots" onPress={() => setAvailOpen(true)} />
+              </View>
+            </Notice>
+          </View>
+        ) : null}
 
         <Rule />
 
@@ -1760,6 +2019,11 @@ export default function TrainerSchedule() {
                         and lands in the client's OWN record, so it reaches
                         their app rather than staying on the coach's screen. */}
                     <View style={{ flex: 1 }}><Cta label="Check In" wide onPress={() => checkIn(s)} /></View>
+                    {/* Between Check In and Cancel on purpose. Moving a session
+                        is the commonest thing that happens to a diary and the
+                        coach's only route to it was Cancel, which gave the hour
+                        away and told the client they had been cancelled. */}
+                    <View style={{ flex: 1 }}><Ghost label="Move" onPress={() => setMoveFrom(s)} /></View>
                     <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => confirmCancel(s)} /></View>
                   </>) : s.status === 'blocked' ? (
                     <View style={{ flex: 1 }}><Ghost label="Free This Time Up" onPress={() => removeOpen(s)} /></View>
@@ -2209,6 +2473,55 @@ export default function TrainerSchedule() {
       </Modal>
 
       {/* ── add-session sheet ─────────────────────────────────────────────── */}
+      {/* ── move a booked session ────────────────────────────────────────
+          Open slots only, this coach's own, still ahead of now. Nothing here
+          creates an hour: a move goes into a slot that already exists, which
+          is what makes it one write rather than a cancellation and a booking
+          with a gap in the middle. */}
+      <Modal visible={!!moveFrom} animationType="slide" transparent onRequestClose={() => setMoveFrom(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMoveFrom(null)} />
+        <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, maxHeight: '80%', ...elevation.e2 }}>
+          {moveFrom ? (
+            <>
+              <Text style={{ ...ty.head, color: t.ink }}>Move Session</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                {nameOf(moveFrom.clientId)} · {DOW[new Date(moveFrom.startsAt).getDay()]} {timeLabel(moveFrom.startsAt)}
+              </Text>
+              <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.md }}>
+                Pick one of your open slots. The session moves in one go, nothing is charged, and the credit already on it moves with it. The hour you are leaving goes to whoever is first on its waitlist, once your client is in their new one.
+              </Text>
+              {/* An unread calendar is not a coach with no free hours, and this
+                  is the sheet where believing that would send them back to
+                  Cancel. */}
+              {!known ? (
+                <Flag tone={t.warn}>Your calendar could not be read, so the hours you have free are not known. Nothing is listed below because nothing came back. Pull down to refresh and try again.</Flag>
+              ) : moveTargets.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  You have no open slots ahead of now, so there is nowhere to move this to. Open one from Weekly Availability or Add a Session first.
+                </Text>
+              ) : (
+                <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+                  {moveTargets.map((o) => (
+                    <Pressable key={o.id} disabled={moveBusy} onPress={() => { void doMove(moveFrom, o); }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Move to ${DOW[new Date(o.startsAt).getDay()]} ${new Date(o.startsAt).getDate()} ${MON[new Date(o.startsAt).getMonth()].slice(0, 3)} at ${timeLabel(o.startsAt)}`}
+                      style={{ paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                      <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>
+                        {DOW[new Date(o.startsAt).getDay()]} {new Date(o.startsAt).getDate()} {MON[new Date(o.startsAt).getMonth()].slice(0, 3)}
+                      </Text>
+                      <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(o.startsAt)}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{o.durationMin}min</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
+              <View style={{ height: sp.lg }} />
+              <Ghost label="Cancel" onPress={() => setMoveFrom(null)} />
+            </>
+          ) : null}
+        </View>
+      </Modal>
+
       <Modal visible={addOpen} animationType="slide" transparent onRequestClose={() => setAddOpen(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, ...elevation.e2 }}>

@@ -38,6 +38,9 @@
 import { useEffect, useState } from 'react';
 import { loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+// See studio-web/components/Banner.tsx: the shared banner carries the live
+// region every local copy of this component was missing.
+import { Banner } from '@/components/Banner';
 import {
   isPlatformAdmin, fetchPlatformBook, byPlan, byStatus, sumInvoices, potLabel,
   needsAttention, INVOICE_WINDOW_DAYS,
@@ -50,16 +53,6 @@ import {
  *  that drift apart is how "active" comes to mean two things on one screen. */
 const PAYING = ['active'] as const;
 const NOT_YET_PAYING = ['trialing'] as const;
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13, maxWidth: '72ch',
-    }}>{children}</div>
-  );
-}
 
 function Tile({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
@@ -148,7 +141,7 @@ export default function Platform() {
   if (admin === 'unknown') {
     return shell(<>
       <h1>Repple</h1>
-      <Banner tone="crit">
+      <Banner tone="crit" style={{ maxWidth: '72ch' }}>
         Whether your account may read Repple’s own billing could not be checked, so nothing has been
         loaded. That is a read that failed rather than an answer about you — reload the page.
       </Banner>
@@ -187,7 +180,7 @@ export default function Platform() {
     <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '72ch' }}>{NOT_GYM_MONEY_NOTE}</p>
 
     {subs === null || invs === null ? (
-      <Banner tone="crit">
+      <Banner tone="crit" style={{ maxWidth: '72ch' }}>
         {subs === null && invs === null
           ? `Neither the subscriptions nor the invoices came back. ${UNREAD_NOTE}`
           : subs === null
@@ -195,7 +188,7 @@ export default function Platform() {
             : `The invoices did not come back. ${UNREAD_NOTE}`}
       </Banner>
     ) : subs.length === 0 && invs.length === 0 ? (
-      <Banner>{EMPTY_BOOK_NOTE}</Banner>
+      <Banner style={{ maxWidth: '72ch' }}>{EMPTY_BOOK_NOTE}</Banner>
     ) : null}
 
     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', margin: '18px 0' }}>
@@ -208,7 +201,7 @@ export default function Platform() {
         note={`open, uncollectible, or paid only after a retry — last ${INVOICE_WINDOW_DAYS} days`} />
     </div>
 
-    <Banner>{NO_MRR_NOTE}</Banner>
+    <Banner style={{ maxWidth: '72ch' }}>{NO_MRR_NOTE}</Banner>
 
     <h2 style={{ marginTop: 26 }}>By plan</h2>
     {paying === null ? (
@@ -275,7 +268,7 @@ export default function Platform() {
           </tbody>
         </table>
         {invoiced.unlabelled > 0 || invoiced.unpriced > 0 ? (
-          <Banner>
+          <Banner style={{ maxWidth: '72ch' }}>
             {invoiced.unlabelled > 0 ? `${invoiced.unlabelled} invoice${invoiced.unlabelled === 1 ? '' : 's'} carr${invoiced.unlabelled === 1 ? 'ies' : 'y'} an amount with no currency on it and ${invoiced.unlabelled === 1 ? 'is' : 'are'} in none of the figures above. ` : ''}
             {invoiced.unpriced > 0 ? `${invoiced.unpriced} ha${invoiced.unpriced === 1 ? 's' : 've'} no amount at all.` : ''}
           </Banner>

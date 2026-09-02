@@ -225,7 +225,12 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'clients', label: 'Clients', note: 'Your roster, progress & detail', route: '/(trainer)/dashboard', icon: 'people', keywords: 'roster invite add' },
   { key: 'builder', label: 'Programs', note: 'Build & assign training programs', route: '/(trainer)/builder', icon: 'train', keywords: 'program template workout' },
   { key: 'templates', label: 'Program Templates', note: 'Build once, assign to many clients', route: '/(trainer)/templates', icon: 'grid', keywords: 'template library bulk assign program reuse' },
-  { key: 'schedule', label: 'Schedule', note: 'Calendar, availability & bookings', route: '/(trainer)/calendar', icon: 'calendar', keywords: 'sessions availability booking' },
+  // The keywords are longer than they look like they need to be, and that is
+  // deliberate: for a coach who has said they work online this row is where the
+  // calendar goes when the dashboard stops leading with it. Hidden is not
+  // deleted, and the only thing that makes that true is that the words a coach
+  // types still find it — "calendar", "diary", "my hours", "slots", "in person".
+  { key: 'schedule', label: 'Schedule', note: 'Calendar, availability & bookings', route: '/(trainer)/calendar', icon: 'calendar', keywords: 'sessions availability booking calendar diary slots my hours when i work open hours in person book me appointments week month' },
   { key: 'sessions', label: 'Mark What Happened', note: 'Past sessions nobody has recorded yet', route: '/(trainer)/sessions', icon: 'check', keywords: 'sessions outcome mark attended no show noshow completed queue payroll unrecorded' },
   { key: 'classes', label: 'Classes', note: 'Create and manage group classes', route: '/(trainer)/classes', icon: 'calendar', keywords: 'class classes group schedule branch capacity room instructor hiit spin yoga' },
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
@@ -313,7 +318,11 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'my-nutrition', label: 'My Nutrition', note: 'Your own food log, calories & macros', route: '/(trainer)/my-nutrition', icon: 'meals', keywords: 'my nutrition own food log calories macros diet eating myself' },
   { key: 'my-progress', label: 'My Progress', note: 'Your own body stats, weight trend & scans', route: '/(trainer)/my-progress', icon: 'trending', keywords: 'my progress own body weight scan inbody stats trend myself' },
   { key: 'feedback', label: 'Send Feedback', note: 'Report a bug or share an idea', route: '/(trainer)/feedback', icon: 'message', keywords: 'feedback bug idea report suggest' },
-  { key: 'profile', label: 'Profile', note: 'Your bio, offers & rate', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers public profile' },
+  // 'how i coach', 'online', 'in person' and 'hybrid' are here because Profile
+  // is where the answer is CHANGED (part 410), and a coach who wants their
+  // calendar back, or who has stopped training people in the room, will search
+  // for the situation rather than for the setting.
+  { key: 'profile', label: 'Profile', note: 'Your bio, offers, rate & how you coach', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers public profile how i coach how you coach online in person inperson hybrid remote delivery mode both change how i work set up' },
   // Sign out lives here, and it was findable from nowhere.
   { key: 'settings', label: 'Settings', note: 'Account, sign out, your data & version', route: '/(trainer)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export my data delete account version build units' },
   // The coach's own Getting Started, and it is listed for the same reason the
@@ -321,7 +330,7 @@ export const TRAINER_NAV: NavItem[] = [
   // and a screen reachable only from a row that removes itself is a screen that
   // becomes unreachable by being used. 'tutorial', 'how do i' and 'lost' are
   // here because they are what somebody types when they are.
-  { key: 'getting-started', label: 'Getting Started', note: 'What is set up, and what is still worth doing', route: '/(trainer)/getting-started', icon: 'sparkle', keywords: 'getting started get started setup set up onboarding first run new tutorial guide help how do i where do i begin checklist what next lost confused currency rate stripe package join code availability waiver' },
+  { key: 'getting-started', label: 'Getting Started', note: 'What is set up, and what is still worth doing', route: '/(trainer)/getting-started', icon: 'sparkle', keywords: 'getting started get started setup set up onboarding first run new tutorial guide help how do i where do i begin checklist what next lost confused currency rate stripe package join code availability waiver how i coach online in person hybrid' },
   { key: 'notifications', label: 'Notifications', note: 'Coaching requests, bookings, subscriptions and anything sent to you', route: '/(trainer)/notifications', icon: 'bell', keywords: 'notification notifications inbox alerts push updates announcements unread bell request requests coaching request join code accepted document documents paperwork waiver signed subscription subscriptions payment failed past due churn cancelled ended booking cancellation' },
   // The coach's thread list. It carries 'inbox' and 'unread' as keywords even
   // though the row above does too, and that is deliberate rather than sloppy:
@@ -348,6 +357,10 @@ export const OWNER_NAV: NavItem[] = [
   { key: 'trainers', label: 'Trainers', note: 'Your coaching staff, what they delivered, and invites', route: '/(owner)/trainers', icon: 'people', keywords: 'roster invite staff coach delivered sessions health' },
   { key: 'members', label: 'Members', note: 'Memberships, freezes, cancellations and taking a payment', route: '/(owner)/members', icon: 'people', keywords: 'member membership freeze cancel payment plan renew desk' },
   { key: 'revenue', label: 'Revenue', note: 'Sessions delivered, the trend and value per client', route: '/(owner)/revenue', icon: 'trending', keywords: 'revenue forecast unit economics value per client sessions trend' },
+  // `gym_orders` has been written by the checkout function since part 281 and
+  // read by nothing on the gym's side, so the one question a desk is actually
+  // asked — did my payment go through — had no screen to answer it.
+  { key: 'orders', label: 'Online Orders', note: 'What members bought from your Stripe account, and what needs a person', route: '/(owner)/orders', icon: 'chart', keywords: 'order orders online checkout stripe receipt bought purchase paid refund payout reconcile' },
   { key: 'financials', label: 'Financial Checks', note: 'KPIs and a rule-based read of the figures you enter', route: '/(owner)/financials', icon: 'chart', keywords: 'financial health kpi retention margin expenses review' },
   { key: 'classes', label: 'Classes & Payroll', note: 'Class fill rates, and trainer pay from check-ins', route: '/(owner)/class-analytics', icon: 'calendar', keywords: 'class attendance fill rate payroll pay per attendee analytics' },
   { key: 'brand', label: 'Brand Studio', note: "Your gym's name and colour, saved to the gym", route: '/(owner)/brand', icon: 'palette', keywords: 'white label brand name colour theme palette rename' },

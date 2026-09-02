@@ -237,3 +237,38 @@ export function playlistLine(p: PlaylistRef): string {
   const count = p.trackCount === null ? '— tracks' : `${p.trackCount} track${p.trackCount === 1 ? '' : 's'}`;
   return p.ownerName ? `${count} · ${p.ownerName}` : count;
 }
+
+/* ── what actually landed in the account ─────────────────────────────────── */
+
+/** How a save to Spotify went. `added` is the number of tracks that are really
+ *  in the playlist; `requested` is how many were on screen when Save was tapped. */
+export interface PlaylistSaveReport {
+  url: string;
+  added: number;
+  requested: number;
+  /** How many of the added tracks were matched by SEARCHING for the title and
+   *  artist rather than by the exact track the app already had. A match is a
+   *  recording with the right name; it is not necessarily the same recording. */
+  guessed: number;
+}
+
+/**
+ * The sentence a member is shown after a playlist is saved.
+ *
+ * The screen used to announce "…is in your Spotify library" whatever fraction
+ * arrived. A twenty-track list could land with eleven tracks in it — some of
+ * them different recordings, because the write re-searched every track by
+ * `"${title} ${artist}"` text and kept whatever came back first — and the
+ * member was told the same thing either way.
+ *
+ * Two facts, and only when they are true: how many of the tracks are actually
+ * there, and how many of those were matched by name rather than taken exactly.
+ * A complete, exact save says the short sentence it always said.
+ */
+export function playlistSavedLine(name: string, r: PlaylistSaveReport): string {
+  const head = r.added === r.requested
+    ? `${name} is in your Spotify library.`
+    : `${name} is in your Spotify library with ${r.added} of its ${r.requested} tracks. Spotify had no match for the other ${r.requested - r.added}.`;
+  if (r.guessed === 0) return head;
+  return `${head} ${r.guessed === 1 ? 'One track was' : `${r.guessed} tracks were`} matched by name, so ${r.guessed === 1 ? 'it may be a different recording' : 'some may be different recordings'}.`;
+}

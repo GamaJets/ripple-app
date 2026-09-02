@@ -28,13 +28,27 @@ import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+import { isoDate } from '../../src/lib/format';
+import { Fetched } from '../../src/ui/fetched';
 import {
   fetchEquipment, addEquipment, setStatus, recordService,
   summariseRegister, needsAttention, serviceState, nextServiceDue,
   type Equipment, type ServiceState,
 } from '../../src/lib/gymEquipment';
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+/**
+ * Today, on the calendar the owner is standing in — not UTC's.
+ *
+ * This was `new Date().toISOString().slice(0, 10)`. A service recorded at 5pm
+ * in Los Angeles was dated TOMORROW, and this screen then reads that date back
+ * into a SAFETY CONFIRMATION: "the treadmill will be recorded as serviced on
+ * …". Stating a date to somebody and writing a different one is bad; stating
+ * the wrong date about a machine's service history is the kind of record an
+ * insurer reads afterwards.
+ *
+ * `isoDate` is the local calendar day, and is what the column wants.
+ */
+const todayIso = () => isoDate(new Date());
 
 const STATE_LABEL: Record<ServiceState, string> = {
   overdue: 'Overdue',
@@ -74,12 +88,16 @@ export default function OwnerEquipment() {
   const [category, setCategory] = useState('');
   const [qty, setQty] = useState('1');
   const [interval, setInterval] = useState('');
+  /** When the register last landed. Not moved by a refused read — a service
+   *  board an owner walks past is exactly the figure that must say its age. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!tenant?.id) return;
     try {
       setItems(await fetchEquipment(supabase, tenant.id));
       setFailed(false);
+      setFetchedAt(Date.now());
     } catch (e) {
       reportError('equipment.fetch', e);
       // NOT `setItems([])`. An empty array here would have made a read that
@@ -227,6 +245,11 @@ export default function OwnerEquipment() {
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Equipment</Text>
         </View>
+
+        {/* The pull-to-refresh above already reloads; this says WHEN, which is
+            the half a gesture cannot tell you, and whether the phone can even
+            reach us — a plant room is a basement with weights in it. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} style={{ marginTop: 0, marginBottom: sp.md }} />
 
         <Hero
           label="Needing Attention"

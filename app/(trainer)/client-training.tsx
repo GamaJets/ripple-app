@@ -69,7 +69,7 @@ import { isQueryableId } from '../../src/lib/clientDrift';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { setsSummary } from '../../src/lib/ownTraining';
-import { volumeIn, type WeightUnit } from '../../src/lib/units';
+import { liftLabel, volumeIn, type WeightUnit } from '../../src/lib/units';
 import { num, fmtTime } from '../../src/lib/format';
 import { dayLabel } from '../../src/lib/adherence';
 import {
@@ -77,6 +77,24 @@ import {
   type LoggedSession, type TrainingDay, type Attribution,
 } from '../../src/lib/clientTraining';
 import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHistory';
+// ── the two modules the coach could not reach ──────────────────────────────
+//
+// P1 and P2. `muscleVolume.ts` answers "have I trained legs this week" and its
+// only importer was the CLIENT's own history screen — so the person paid to
+// notice a missing posterior chain was the one person the app did not show it
+// to, while the client, who cannot rewrite the programme, could. `longView.ts`
+// draws twelve months of tonnage and its only importer was the same screen, so
+// the renewal conversation — which is won with an arc, not a fortnight — had
+// nothing behind it.
+//
+// Neither module is changed. Both are pure, both are tested, and this screen
+// reads them exactly as app/(client)/history.tsx does.
+import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
+import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import {
+  monthlyHistory, monthLabel, bestMonth, trainedMonths, longestGap,
+  historySpan, stageOf, lifetimeTotals, volumeArc, tonnes, MAX_MONTHS,
+} from '../../src/lib/longView';
 // ── the four things this screen could not say before ───────────────────────
 //
 // It had the RECORD and nothing to compare it against. The assignment was on a
@@ -101,6 +119,7 @@ import {
 import { isoToday } from '../../src/lib/dayPlan';
 import {
   WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
+  loadCheck, loadTally, loadLine, LOAD_TOLERANCE,
 } from '../../src/lib/planVsActual';
 import { historyBoard, historyLine, blockSpanLine } from '../../src/lib/programHistory';
 import { reviewProgram, checksLine, type Finding } from '../../src/lib/programReview';
@@ -115,6 +134,29 @@ import { reviewProgram, checksLine, type Finding } from '../../src/lib/programRe
 // (GOAL_COLS, SCAN_COLS, ITEM_COLS) for the same reason.
 const WORKOUT_COLS = 'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
 const UNIT_COLS = 'weight_unit';
+
+/**
+ * How far back to read, and why a coach needs to be able to say.
+ *
+ * P3. `capLimit()` is a thousand rows and ONE EXERCISE IS ONE ROW, so a client
+ * training four times a week and logging six movements crosses it in about ten
+ * months. Past that the read is 'partial' for ever, every total on this screen
+ * becomes a dash on purpose, and there was nothing on it offering the fix —
+ * which is simply to ask for less. A coach's best clients were the ones whose
+ * numbers stopped working.
+ *
+ * Every option is longer than `WINDOW_DAYS`, so narrowing the read can never
+ * make the plan-versus-record comparison beneath it answer 'unknown' for a
+ * window the coach can see. `null` is everything, and stays the default: a
+ * screen that quietly showed twelve weeks would be answering a different
+ * question from the one it did yesterday without saying so.
+ */
+const RANGES: { days: number | null; label: string }[] = [
+  { days: 84, label: '12 Weeks' },
+  { days: 182, label: '6 Months' },
+  { days: 365, label: '12 Months' },
+  { days: null, label: 'Everything' },
+];
 
 /** How the attribution reads as a chip: short, and tinted only when it is not
  *  the ordinary case. A client logging their own training is what is supposed
@@ -158,8 +200,11 @@ export default function ClientTraining() {
   // second — one client's training attributed to another, which is worse than
   // showing nothing. Same guard as client-body.tsx.
   const wanted = useRef<string | null>(null);
+  /** How far back the read asks for. Null is everything, which is what this
+   *  screen has always done and stays the default. */
+  const [rangeDays, setRangeDays] = useState<number | null>(null);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, days: number | null) => {
     wanted.current = id;
     setStatus('loading'); setUnitStatus('loading');
     setLog(null); setClientUnit(null);
@@ -179,8 +224,14 @@ export default function ClientTraining() {
       // alone has ties in it by construction — and at the cap the server may
       // break them differently on each read, which would shuffle the exercises
       // of the oldest session on screen between two visits.
-      supabase.from('workouts').select(WORKOUT_COLS)
-        .eq('user_id', id)
+      // The range is a filter on the QUERY, not on what came back. Trimming a
+      // capped page on the phone would leave the read truncated and every total
+      // a dash — the whole point is to bring the read back under the ceiling so
+      // the sums can be stated again.
+      (days == null
+        ? supabase.from('workouts').select(WORKOUT_COLS).eq('user_id', id)
+        : supabase.from('workouts').select(WORKOUT_COLS).eq('user_id', id)
+            .gte('performed_at', new Date(Date.now() - days * 86_400_000).toISOString()))
         .order('performed_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit()),
       // Their own unit. RLS on `clients` is what limits this to the coach's own
@@ -237,10 +288,14 @@ export default function ClientTraining() {
   // keyed on it re-runs whenever the provider re-renders; `load` is a
   // useCallback with no dependencies and `picked` is a piece of state, so this
   // one re-runs when the coach changes client and at no other time.
+  // `rangeDays` is in the dependency list rather than in a second effect of its
+  // own: changing the range is a NEW READ, not a filter over the page already
+  // on screen, and two effects both calling `load` would fire it twice on every
+  // focus.
   useFocusEffect(useCallback(() => {
     if (!USE_SUPABASE || !picked) return;
-    void load(picked);
-  }, [picked, load]));
+    void load(picked, rangeDays);
+  }, [picked, rangeDays, load]));
 
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const fullName = client?.name ?? (typeof params.name === 'string' ? params.name : '') ?? '';
@@ -326,6 +381,67 @@ export default function ClientTraining() {
     const days = board.days;
     return days.length ? days[days.length - 1].day : null;
   }, [board]);
+
+  /* ── which muscles the work landed on ──────────────────────────────────
+   *
+   * P1. Balance is the COACH's job. `muscleVolume.ts` was reachable only from
+   * the client's own history screen, so the member could see that they had
+   * trained quads four times and hamstrings never, and the person who wrote the
+   * programme could not.
+   *
+   * The catalogue read is separate and fails on its own. "They have not trained
+   * their back" over a catalogue that did not come back is an accusation about
+   * a person built out of a broken query — `catalogueWhole` is what gates it,
+   * and it is the one figure on the board that asserts an absence.
+   */
+  const [muscleDays, setMuscleDays] = useState<7 | 28>(28);
+  const cat = useExerciseCatalogue();
+  /** Whether the workout read reached back to the start of the muscle window.
+   *  `capped()` hands back the NEWEST rows, so a truncated read still covers a
+   *  recent window in full — the same reasoning `planVsActual` applies with
+   *  `oldestDay`, and the reason a long-history client is not simply refused. */
+  const muscleWindowRead = useMemo(() => {
+    if (status === 'error' || status === 'loading' || !log) return false;
+    if (status === 'ready') return true;
+    const from = new Date(Date.now() - muscleDays * 86_400_000);
+    const p = (x: number) => (x < 10 ? '0' + x : String(x));
+    const fromDay = `${from.getFullYear()}-${p(from.getMonth() + 1)}-${p(from.getDate())}`;
+    return oldestDay != null && oldestDay <= fromDay;
+  }, [status, log, muscleDays, oldestDay]);
+  const muscles = useMemo(
+    () => muscleBoard(log ?? [], cat.rows, {
+      sinceMs: Date.now() - muscleDays * 86_400_000,
+      // No weigh-in series is read on this screen, so a bodyweight set carries
+      // no load here. `unpricedSets` reports exactly how much work that leaves
+      // out of the tonnage, which is the honest answer rather than a silent one.
+      catalogueWhole: cat.status === 'ready',
+    }),
+    [log, cat.rows, cat.status, muscleDays],
+  );
+  const muscleNote = useMemo(() => unmatchedNote(muscles), [muscles]);
+
+  /* ── the year, not the fortnight ───────────────────────────────────────
+   *
+   * P2. The renewal conversation is won with an arc. Every figure below comes
+   * from `longView.ts`, whose only importer was the client's own screen.
+   *
+   * Withheld entirely under anything but a WHOLE read. A monthly roll-up over a
+   * truncated log draws the oldest months short and the newest months whole,
+   * which is a picture of somebody tailing off backwards — the exact opposite
+   * of what the record says. The range control above is how a coach gets the
+   * read back under the ceiling.
+   */
+  const longWhole = status === 'ready' && log != null;
+  const cells = useMemo(
+    () => (longWhole ? monthlyHistory(log ?? [], Date.now(), MAX_MONTHS) : []),
+    [longWhole, log],
+  );
+  const lifetime = useMemo(() => (longWhole ? lifetimeTotals(log ?? []) : null), [longWhole, log]);
+  const arc = useMemo(() => volumeArc(cells), [cells]);
+  const best = useMemo(() => bestMonth(cells), [cells]);
+  const trainedCells = useMemo(() => trainedMonths(cells), [cells]);
+  const worstGap = useMemo(() => longestGap(cells), [cells]);
+  const stage = useMemo(() => stageOf(longWhole ? historySpan(log ?? []) : null), [longWhole, log]);
 
   const pva = useMemo(() => planVsActual({
     days: compareWeek?.days ?? null,
@@ -608,6 +724,44 @@ export default function ClientTraining() {
               <View>
                 <Rule />
 
+                {/* ── how far back to read ────────────────────────────────
+                    P3. One exercise is one row, so a client training four
+                    times a week and logging six movements crosses the
+                    thousand-row ceiling in about ten months — and past it
+                    every total on this screen is a dash for ever. The fix has
+                    always been to ask for less, and until now the screen did
+                    not offer it, so a coach's longest-standing clients were the
+                    ones whose numbers stopped working.
+
+                    Everything stays the default. A screen that quietly showed
+                    twelve weeks would be answering a different question from
+                    the one it answered yesterday without saying so. */}
+                <Section>
+                  <SectionHead title="How Far Back" note={status === 'partial' ? 'The read is at its limit' : undefined} />
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                    {RANGES.map((rg) => (
+                      <Pressable key={rg.label} onPress={() => setRangeDays(rg.days)}
+                        accessibilityRole="button" accessibilityState={{ selected: rangeDays === rg.days }}
+                        accessibilityLabel={rg.label} style={chip(rangeDays === rg.days)}>
+                        <Text style={{ ...ty.micro, color: rangeDays === rg.days ? t.brandInk : t.ink2 }}>{rg.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  {status === 'partial' ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+                      {who} has more training on record than one request returns, so every total on this
+                      screen is a dash. Ask for a shorter range and the read comes back whole and the
+                      figures come back with it — the training itself is not going anywhere.
+                    </Flag>
+                  ) : (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      {rangeDays == null
+                        ? 'Everything on record. A long history can come back at the row limit, at which point every total here becomes a dash — narrow the range and they come back.'
+                        : `The last ${rangeDays} days only. Sessions before that are still on record and are not in any figure on this screen.`}
+                    </Text>
+                  )}
+                </Section>
+
                 {/* ── what they were asked to do ──────────────────────────
                     Above the record rather than below it, because the reason a
                     coach opens this screen is to reconcile the two — and the
@@ -683,8 +837,66 @@ export default function ClientTraining() {
                             </Text>
                           </View>
                         ))}
+                        {/* ── the load, beneath the presence ──────────────
+                            P5. Both halves have been on the MovementCheck
+                            since it was built and nothing joined them: the
+                            screen compared whether a movement APPEARED, never
+                            what went on the bar. The sentence that changes next
+                            week's programme is the second one.
+
+                            Rendered only where the plan named a load.
+                            "Prescribed 0 kg" is not a prescription, and
+                            `plannedTopKg` is null rather than zero precisely so
+                            this row cannot claim it was. */}
+                        {d.movements.map((m) => {
+                          const lc = loadCheck(m);
+                          if (lc.verdict === 'no-plan') return null;
+                          // Both labels are read before the row is drawn. Where
+                          // one of them will not render there is no sentence to
+                          // print: "— prescribed" is a line with a word missing
+                          // out of it, and the whole row is withheld rather than
+                          // shown broken.
+                          const wrote = liftLabel(lc.plannedKg, unit);
+                          const did = lc.verdict === 'not-logged' ? null : liftLabel(lc.loggedKg, unit);
+                          if (!wrote || (lc.verdict !== 'not-logged' && !did)) return null;
+                          return (
+                            <View key={`load-${m.slug || m.name}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2, paddingLeft: 14 + sp.sm }}>
+                              {/* A 6pt dot beside the caption ink. The tone is
+                                  never the text colour. */}
+                              <View style={{
+                                width: 6, height: 6, borderRadius: 3,
+                                backgroundColor: lc.verdict === 'at' ? t.good
+                                  : lc.verdict === 'under' ? t.warn
+                                  : lc.verdict === 'over' ? t.brand : t.ring,
+                              }} />
+                              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{m.name}</Text>
+                              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                                {did ? `${wrote} prescribed, ${did} logged` : `${wrote} prescribed, nothing logged`}
+                              </Text>
+                            </View>
+                          );
+                        })}
                       </View>
                     )) : null}
+
+                    {/* The load, summed over the week. Counts and never a
+                        percentage: the moment "78% of prescribed loads hit"
+                        exists it is the only thing anybody reads, and it hides
+                        that half the movements named no load at all. */}
+                    {pva.state === 'ready' && loadLine(loadTally(pva.movements), who) ? (
+                      <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed load against what was lifted</Text>
+                        <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>
+                          {loadLine(loadTally(pva.movements), who)}
+                        </Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                          The heaviest WORKING set the programme names, against the heaviest {who} logged in
+                          the window: a ramp's top set, never its warm-up. Within {LOAD_TOLERANCE * 100}% counts as
+                          hitting it, because the finest adjustment anybody can make to a barbell is one pair
+                          of the smallest plates on the rack.
+                        </Text>
+                      </View>
+                    ) : null}
 
                     {/* The other half of the conversation, and the half nothing
                         in this app could see. A client quietly swapping the
@@ -803,9 +1015,185 @@ export default function ClientTraining() {
                     {status === 'partial' ? (
                       <Section>
                         <PartialRead what="training days" shown={board.days.length}
-                          onPress={() => { if (picked) void load(picked); }} />
+                          onPress={() => { if (picked) void load(picked, rangeDays); }} />
                       </Section>
                     ) : null}
+
+                    <Rule />
+
+                    {/* ── which muscles the work landed on ────────────────
+                        P1. Balance is the coach's job, and until now the app
+                        showed it only to the client — who cannot rewrite the
+                        programme. Bars compare the groups with each other and
+                        never with a target: there is no right number of sets
+                        for a back and this screen does not pretend to know one. */}
+                    <Section>
+                      <SectionHead title="By Muscle Group" note={cat.status === 'ready' ? `last ${muscleDays} days` : undefined} />
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+                        {([7, 28] as const).map((dd) => (
+                          <Pressable key={dd} onPress={() => setMuscleDays(dd)}
+                            accessibilityRole="button" accessibilityState={{ selected: muscleDays === dd }}
+                            accessibilityLabel={`Last ${dd} days`} style={chip(muscleDays === dd)}>
+                            <Text style={{ ...ty.micro, color: muscleDays === dd ? t.brandInk : t.ink2 }}>{dd} days</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      {cat.status === 'loading' ? (
+                        <Text style={{ ...ty.label, color: t.ink3 }}>Reading the exercise catalogue&hellip;</Text>
+                      ) : cat.status === 'error' || cat.signedOut ? (
+                        <Text style={{ ...ty.label, color: t.ink3 }}>
+                          The exercise catalogue could not be read, so nothing here can say which muscles
+                          {' '}{who}&rsquo;s sessions worked. Their training is not affected and nothing is missing from it.
+                        </Text>
+                      ) : !muscleWindowRead ? (
+                        <Flag tone={t.warn}>
+                          The read stops before the start of this window, so nothing is said about which muscles
+                          were worked. Narrow the range above and it comes back — an empty board here would be
+                          about the query, not about {who}.
+                        </Flag>
+                      ) : !muscles.groups.length ? (
+                        <Text style={{ ...ty.body, color: t.ink2 }}>
+                          {muscleNote
+                            ? `Nothing in the last ${muscleDays} days could be matched to a muscle group. ${muscleNote}`
+                            : `Nothing logged with sets in the last ${muscleDays} days, so there is no muscle work to break down. Cardio is logged as time and distance rather than as sets and does not appear here.`}
+                        </Text>
+                      ) : (<>
+                        {muscles.groups.map((g) => {
+                          const most = muscles.groups[0].sets;
+                          return (
+                            <View key={g.group} style={{ marginTop: sp.md }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>
+                                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{g.group}</Text>
+                                <Text style={{ ...ty.caption, color: t.ink3 }}>
+                                  {g.sets} set{g.sets === 1 ? '' : 's'}
+                                  {g.volumeKg != null ? ` \u00b7 ${num(volumeIn(g.volumeKg, unit))} ${unit}` : ''}
+                                </Text>
+                              </View>
+                              <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
+                                <View style={{ height: 3, borderRadius: 2, width: `${most ? Math.round((g.sets / most) * 100) : 0}%`, backgroundColor: t.brand }} />
+                              </View>
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                                {g.exercises.slice(0, 3).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                        {/* An absence stated only where the catalogue read can
+                            carry it. This is the line a coach acts on — it is
+                            also the one sentence on the board that is a claim
+                            about a list, so it is withheld unless the list was
+                            read whole. */}
+                        {muscles.untrained && muscles.untrained.length ? (
+                          <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
+                            Nothing logged for {muscles.untrained.slice(0, 6).join(', ')}
+                            {muscles.untrained.length > 6 ? `, and ${muscles.untrained.length - 6} more` : ''} in the
+                            last {muscleDays} days.
+                          </Text>
+                        ) : null}
+                        {muscles.groups.some((g) => g.unpricedSets > 0) ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                            Sets with no load on them are counted on the left and contribute no tonnage. No weigh-in
+                            series is read here, so a bodyweight set carries no weight in these figures.
+                          </Text>
+                        ) : null}
+                        {muscleNote ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{muscleNote}</Text>
+                        ) : null}
+                      </>)}
+                    </Section>
+
+                    <Rule />
+
+                    {/* ── the year ────────────────────────────────────────
+                        P2. The renewal conversation is won with an arc, not a
+                        fortnight, and the module that draws twelve months of
+                        it was reachable only from the client's own phone.
+
+                        An untrained month is a HOLE, never a bar of height
+                        nothing: this app does not know somebody lifted zero
+                        kilograms in March, only that March has no logged
+                        sessions in it. */}
+                    <Section>
+                      <SectionHead title="The Long View" note={longWhole && trainedCells.length ? `${trainedCells.length} months trained` : undefined} />
+                      {!longWhole ? (
+                        <Flag tone={t.warn}>
+                          The read came back at its row limit, so no monthly roll-up is drawn. Over a truncated
+                          log the oldest months come out short and the newest whole, which draws {who} tailing
+                          off backwards — the opposite of what their record says. Narrow the range above.
+                        </Flag>
+                      ) : !lifetime || stage === 'empty' ? (
+                        <Text style={{ ...ty.body, color: t.ink3 }}>
+                          Nothing on record with a readable date, so there is no year to show yet.
+                        </Text>
+                      ) : (<>
+                        <KpiRow items={[
+                          { label: 'Sessions', value: num(lifetime.sessions) },
+                          { label: 'Days', value: num(lifetime.days) },
+                          {
+                            label: 'Lifted',
+                            value: lifetime.volumeKg == null ? '\u2014' : num(tonnes(lifetime.volumeKg)),
+                            unit: lifetime.volumeKg == null ? undefined : 't',
+                          },
+                        ]} />
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                          Everything on record, from {monthLabel(cells.length ? cells[0].key : '')} onward. Tonnage is in
+                          metric tonnes whatever unit the sets are shown in above, because a six-digit figure in
+                          pounds is not a number anybody reads.
+                          {lifetime.unpricedSets > 0
+                            ? ` ${lifetime.unpricedSets} set${lifetime.unpricedSets === 1 ? '' : 's'} carried no load and ${lifetime.unpricedSets === 1 ? 'is' : 'are'} not in it.`
+                            : ''}
+                        </Text>
+
+                        {/* Months as a strip. A trained month carries a bar
+                            scaled against the best one; an untrained month
+                            inside the history is drawn as a rule, not a bar. */}
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 3, marginTop: sp.lg, height: 44 }}>
+                          {cells.map((c) => {
+                            const peak = best?.volumeKg ?? null;
+                            const h = c.trained && c.volumeKg != null && peak
+                              ? Math.max(3, Math.round((c.volumeKg / peak) * 40))
+                              : null;
+                            return (
+                              <View key={c.key} style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end' }}>
+                                {h != null ? (
+                                  <View style={{ width: '100%', height: h, borderRadius: 2, backgroundColor: c.key === best?.key ? t.brand : t.s5 }} />
+                                ) : (
+                                  <View style={{ width: '100%', height: 2, borderRadius: 1, backgroundColor: c.trained ? t.ring : t.surface3 }} />
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: 4 }}>
+                          {cells.length ? `${monthLabel(cells[0].key)} \u2192 ${monthLabel(cells[cells.length - 1].key)}` : ''}
+                          {' \u00b7 '}a flat line is a month with no logged sessions, never a month of nothing lifted
+                        </Text>
+
+                        {best && best.volumeKg != null ? (
+                          <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
+                            Their biggest month was {monthLabel(best.key)}: {num(tonnes(best.volumeKg))} t
+                            across {best.days ?? 0} day{best.days === 1 ? '' : 's'}
+                            {best.topLift ? `, most of it ${best.topLift}` : ''}.
+                          </Text>
+                        ) : null}
+                        {arc && arc.pct != null ? (
+                          <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.sm }}>
+                            From {monthLabel(arc.fromKey)} to {monthLabel(arc.toKey)}, {arc.months} month
+                            {arc.months === 1 ? '' : 's'}, monthly tonnage has moved {arc.pct >= 0 ? 'up' : 'down'} by
+                            {' '}{Math.abs(arc.pct)}%. Two months, not a trend line. The months between them are
+                            in the strip above and some of them may be holes.
+                          </Text>
+                        ) : null}
+                        {worstGap ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                            Their longest break on record runs {worstGap.months} month{worstGap.months === 1 ? '' : 's'}.
+                            {' '}{monthLabel(worstGap.afterKey)} was the last month before it and they came back
+                            in {monthLabel(worstGap.returnKey)}. A gap is kept visible rather than smoothed over: the
+                            return is the part of the story worth having.
+                          </Text>
+                        ) : null}
+                      </>)}
+                    </Section>
 
                     <Rule />
 

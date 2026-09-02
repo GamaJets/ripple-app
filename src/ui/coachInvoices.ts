@@ -36,13 +36,13 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
-import { draftMinorUnits, type CoachInvoice, type InvoiceDraft, type InvoiceKind } from '../lib/coachInvoice';
+import { draftMinorUnits, readTaxRate, type CoachInvoice, type InvoiceDraft, type InvoiceKind } from '../lib/coachInvoice';
 import { invoiceNotification, invoiceReminderNotification } from '../lib/notifyCopy';
 import { recordInbox } from './pushNotifications';
 
 /** Every column the document needs and nothing else. */
 const INVOICE_COLS =
-  'id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, reminded_at, reminder_count, note, voided_at, void_reason, created_at';
+  'id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, reminded_at, reminder_count, note, tax_rate_pct, tax_registration, voided_at, void_reason, created_at';
 
 interface InvoiceRow {
   id: string;
@@ -58,6 +58,8 @@ interface InvoiceRow {
   reminded_at: string | null;
   reminder_count: number | string | null;
   note: string | null;
+  tax_rate_pct: number | string | null;
+  tax_registration: string | null;
   voided_at: string | null;
   void_reason: string | null;
   created_at: string | null;
@@ -101,6 +103,12 @@ function toInvoice(r: InvoiceRow): CoachInvoice {
     // reading that does not claim an act the coach may not have performed.
     reminderCount: Number.isFinite(Number(r.reminder_count)) ? Number(r.reminder_count) : 0,
     note: r.note ?? null,
+    // `numeric` arrives from PostgREST as a STRING, for the same reason a
+    // bigint does. Left alone, `"20.000"` fails `Number.isFinite` downstream
+    // and a rate the coach stated prints as no rate at all — and NULL stays
+    // NULL, because a coach who stated nothing has not stated zero.
+    taxRatePct: r.tax_rate_pct == null || !Number.isFinite(Number(r.tax_rate_pct)) ? null : Number(r.tax_rate_pct),
+    taxRegistration: (r.tax_registration || '').trim() || null,
     voidedAt: r.voided_at ?? null,
     voidReason: r.void_reason ?? null,
     clientId: r.client_id ?? null,
@@ -350,6 +358,11 @@ export async function issueInvoice(draft: InvoiceDraft, clientId?: string | null
   if (!currency) {
     return { ok: false, error: 'No currency has been set, so there is nothing to price this in. An owner sets it in the gym settings.' };
   }
+  // Refused here as well as on the screen, so a rate that was validated and a
+  // rate that is sent cannot differ, and so a caller added later cannot get a
+  // figure onto a tax-bearing document without it passing the same reader.
+  const rate = readTaxRate(draft.taxRateText);
+  if (!rate.ok) return { ok: false, error: rate.reason };
   try {
     const { data, error } = await supabase.rpc('issue_coach_invoice', {
       p_bill_to: draft.billTo.trim(),
@@ -364,6 +377,12 @@ export async function issueInvoice(draft: InvoiceDraft, clientId?: string | null
       // a payment term this app invented would be printed on a document under
       // somebody else's name, so an empty field stays empty all the way down.
       p_due_on: (draft.dueOn || '').trim() || null,
+      // What the coach stated about tax, and nothing this app worked out.
+      // `readTaxRate` answers `pct: null` for an empty box — which is the
+      // ordinary case and is a different document from one stating zero — and
+      // refuses anything that is not a percentage rather than clamping it.
+      p_tax_rate_pct: rate.ok ? rate.pct : null,
+      p_tax_registration: (draft.taxRegistration || '').trim() || null,
     });
     if (error) {
       reportError('coachInvoices.issue', error);

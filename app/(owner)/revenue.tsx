@@ -46,6 +46,11 @@ import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { supabase } from '../../src/lib/supabase';
 import { fetchPayments, sharedCurrency, money, type GymPayment } from '../../src/lib/gymRecord';
 import { reportError } from '../../src/lib/reportError';
+// When these figures were read, whether the phone can reach us, and a way to
+// ask again. This screen's own comment used to end "this screen has no
+// pull-to-refresh, so without a button there is nothing an owner can actually
+// do about it" — that button, and the stamp that says why it matters.
+import { Fetched } from '../../src/ui/fetched';
 
 export default function OwnerRevenue() {
   const t = useTheme();
@@ -134,17 +139,33 @@ export default function OwnerRevenue() {
    */
   const tenantId = tenant?.id ?? null;
   const [takings, setTakings] = useState<GymPayment[] | null | undefined>(undefined);
+  // Bumped by the Refresh control. A counter and not a boolean, because two
+  // taps in a row have to be two reads.
+  const [again, setAgain] = useState(0);
+  // The moment the till read LANDED, not the moment it was asked for. A refused
+  // read leaves this where it was: the figures on screen are still the ones
+  // from the earlier read, and moving the stamp would be the same wrong
+  // sentence one layer up.
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     let on = true;
     if (!tenantId) { setTakings(undefined); return; }
+    setBusy(true);
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
     fetchPayments(supabase, tenantId, since)
-      .then((r) => { if (on) setTakings(r); })
+      .then((r) => { if (on) { setTakings(r); setFetchedAt(Date.now()); } })
       // fetchPayments throws on a PostgREST error and on a truncated read. Both
       // become null, which renders a dash and a sentence — never a zero.
-      .catch((e) => { reportError('ownerRevenue.payments', e); if (on) setTakings(null); });
+      .catch((e) => { reportError('ownerRevenue.payments', e); if (on) setTakings(null); })
+      .finally(() => { if (on) setBusy(false); });
     return () => { on = false; };
-  }, [tenantId]);
+  }, [tenantId, again]);
+
+  // Both halves of the screen, together. The roster comes from the provider and
+  // the till from the effect above, and an owner pressing one control expects
+  // the whole screen to be current afterwards — not half of it.
+  const refreshAll = () => { setAgain((n) => n + 1); refresh(); };
 
   /**
    * The till, and the currency it is honestly in.
@@ -187,6 +208,9 @@ export default function OwnerRevenue() {
               src/ui/trainers.tsx rules is not a gym owner's business at all. */}
           <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>Your gym's revenue, forecast &amp; unit economics</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Revenue</Text>
+          {/* Under the title rather than beside the hero, because it is about
+              the whole screen and not about one figure. */}
+          <Fetched at={fetchedAt} onRefresh={refreshAll} busy={busy} />
         </View>
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
@@ -211,9 +235,9 @@ export default function OwnerRevenue() {
 
         {/* Said once, at the top, rather than left for an owner to infer from a
             screen of dashes: the dashes are unknowns, not a quiet month. The
-            retry is the provider's own `refresh` — this screen has no
-            pull-to-refresh, so without a button there is nothing an owner can
-            actually do about it. */}
+            retry is the provider's own `refresh`, which the Refresh control
+            under the title now also calls; this button is the same action
+            beside the sentence that explains why it is needed. */}
         {trainersUnread ? (
           <Notice tone={t.warn} kicker="Nothing here is your gym's"
             title="Your roster could not be read"
@@ -336,6 +360,20 @@ export default function OwnerRevenue() {
               </View>
             );
           })}
+        </Section>
+
+        <Rule />
+
+        {/* Where the online money is. The till above is what somebody RECORDED
+            receiving; card money taken through the gym's own Stripe account
+            has its own book, including the orders Stripe charged for and the
+            gym never granted. */}
+        <Section>
+          <SectionHead title="Online Orders" note="Stripe" onPress={() => router.push('/(owner)/orders')} />
+          <Text style={{ ...ty.label, color: t.ink3 }}>
+            What members bought from your own Stripe account — what sold, a member&rsquo;s receipt,
+            and any order Stripe charged for that never produced a membership or a pass.
+          </Text>
         </Section>
 
         <Rule />

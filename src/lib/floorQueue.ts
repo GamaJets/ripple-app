@@ -264,3 +264,29 @@ export function refusedLine(what: string, why: string | null): string {
   const tail = why && why.trim() ? ` ${why.trim().replace(/\s*$/, '')}` : '';
   return `${what} was not saved and is not waiting to send — the server read it and declined.${tail}`;
 }
+
+/**
+ * What to say after a coach has pressed the send button and the flush is over.
+ *
+ * Three numbers and they mean three different things, so this never collapses
+ * them into "done". `sent` reached the server. `refused` was read and declined,
+ * and is GONE from the queue rather than waiting, which the coach has to be
+ * told or they will keep pressing a button for something that will never go.
+ * `kept` is still on the phone because nobody answered, which is not a failure
+ * of the tap and must not read as one.
+ *
+ * Null for a flush that had nothing to do, so the caller can stay silent rather
+ * than raise an alert saying nothing happened.
+ */
+export function flushResultLine(r: { sent: number; refused: number; kept: number }): string | null {
+  const parts: string[] = [];
+  if (r.sent > 0) parts.push(`${r.sent} ${r.sent === 1 ? 'change' : 'changes'} went up.`);
+  if (r.refused > 0) {
+    parts.push(`${r.refused} ${r.refused === 1 ? 'was' : 'were'} read by the server and declined, so ${r.refused === 1 ? 'it is' : 'they are'} no longer waiting to send.`);
+  }
+  if (r.kept > 0) {
+    parts.push(`${r.kept} could not be sent because nobody answered, so ${r.kept === 1 ? 'it is' : 'they are'} still on this phone and will be tried again.`);
+  }
+  if (parts.length === 0) return null;
+  return parts.join(' ');
+}

@@ -26,8 +26,9 @@ import {
   fetchLog, addLogEntry, logBlocker, LOG_KINDS, LOG_LABEL,
   type LogEntry, type LogKind,
   nextServiceDue, serviceState, usableUnits, outOfServiceUnits,
-  capacityFor, summariseRegister, needsAttention,
+  capacityFor, concurrentKitDemand, summariseRegister, needsAttention,
   type Equipment, type EquipmentStatus, type ServiceState, type CapacityCheck,
+  type ConcurrentDemand,
 } from '@lib/gymEquipment';
 import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
@@ -574,6 +575,26 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
     : [];
   const short = rows.filter((r) => r.check.supported === false);
 
+  /**
+   * The check the table above cannot make, because it asks about one class at a
+   * time.
+   *
+   * `capacityFor` runs against the gym's whole usable stock independently for
+   * every class, so two 6am classes of twelve both came back green on fifteen
+   * rowers — each answered as though the other were not on. The second class
+   * arrives to a room with no kit in it, and the screen built to prevent that
+   * had said the week was fine.
+   */
+  const concurrent: ConcurrentDemand[] = kit && chosen && perOk
+    ? concurrentKitDemand(kit, chosen, (classes ?? []).map((c) => ({
+        id: c.id, title: c.title, startsAt: c.startsAt,
+        durationMin: c.durationMin, capacity: c.capacity, booked: c.booked,
+      })), per)
+    : [];
+  // Only the groups that cannot all be served. A list of every hour with two
+  // classes in it is a list of an ordinary timetable.
+  const clashingKit = concurrent.filter((g) => (g.shortIfFull ?? 0) > 0);
+
   const cols: Column<Row>[] = [
     { key: 'when', header: 'When', value: (r) => r.c.startsAt,
       render: (r) => new Date(r.c.startsAt).toLocaleString([], {
@@ -583,6 +604,19 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
     { key: 'room', header: 'Room', value: (r) => r.c.room ?? '',
       render: (r) => r.c.room ?? <span className="dash">—</span> },
     { key: 'stated', header: 'Stated', value: (r) => r.c.capacity, numeric: true },
+    // The stated capacity alone made a class with fourteen already booked into
+    // eight working rowers look identical to an empty one, so the owner could
+    // not see who has to be rung and turned away. Confirmed seats only —
+    // waitlisters are demand, not people who will arrive expecting a rower.
+    { key: 'booked', header: 'Booked', value: (r) => r.c.booked, numeric: true,
+      render: (r) => {
+        const overKit = r.check.limit != null && r.c.booked > r.check.limit;
+        return r.c.booked === 0
+          ? <span className="dash">none yet</span>
+          : <span style={{ color: overKit ? 'var(--crit)' : 'var(--ink2)' }}>
+              {r.c.booked}{overKit ? ` — ${r.c.booked - r.check.limit!} with no kit` : ''}
+            </span>;
+      } },
     { key: 'seats', header: 'Kit seats', value: (r) => r.check.limit, numeric: true,
       // Null is "the register cannot answer", which is not zero. Zero would
       // tell an owner the class cannot run on the strength of a form nobody
@@ -634,7 +668,13 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
               {short.length > 0
                 ? `${short.length} of ${rows.length} classes in the next week seat fewer than they advertise.`
                 : rows.length > 0
-                  ? 'Every class in the next week is supported by the kit on the floor.'
+                  ? clashingKit.length > 0
+                    // Never the old sentence while a group is short. Every
+                    // class passing on its own is precisely the state that
+                    // sentence used to describe as a week with nothing wrong
+                    // with it.
+                    ? 'Every class is supported on its own — but not when two of them are on at once, below.'
+                    : 'Every class in the next week is supported by the kit on the floor, on its own and alongside whatever else is on at the time.'
                   : ''}
             </p>
           )}
@@ -644,6 +684,43 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
               kind recorded, so they count towards nothing here — including, possibly, the kit this
               class needs.
             </p>
+          ) : null}
+          {clashingKit.length > 0 ? (
+            <div style={{ margin: '0 14px 14px', border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)', background: 'var(--surface2)' }}>
+              <p style={{ margin: 0, padding: '10px 13px 6px', fontSize: 13, color: 'var(--ink2)', maxWidth: '84ch' }}>
+                <strong style={{ color: 'var(--ink)' }}>
+                  The same {chosen} is promised to more than one class at once.
+                </strong>{' '}
+                The table below checks each class on its own against the whole of the gym&rsquo;s
+                stock, which is the wrong question when two classes are on together — {check?.usable ?? 0} units
+                cannot serve both.
+              </p>
+              <ul style={{ listStyle: 'none', margin: 0, padding: '0 13px 11px' }}>
+                {clashingKit.map((g) => (
+                  <li key={g.from} style={{ fontSize: 12.5, color: 'var(--ink2)', padding: '5px 0' }}>
+                    <span className="mono" style={{ color: 'var(--ink)' }}>
+                      {new Date(g.from).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {' — '}
+                    {g.classes.map((c) => `${c.title} (${c.booked} of ${c.capacity})`).join(' and ')}
+                    {'. '}
+                    {/* Booked first, because that is the number somebody has to
+                        ring. A shortfall against stated capacity is a seat that
+                        may never sell; a shortfall against bookings is a person
+                        who has paid and will be turned away. */}
+                    {(g.shortBooked ?? 0) > 0 ? (
+                      <span style={{ color: 'var(--crit)' }}>
+                        {g.shortBooked} already booked would have no {chosen}.
+                      </span>
+                    ) : (
+                      <span style={{ color: '#f0c04e' }}>
+                        Everyone booked so far is covered; {g.shortIfFull} would not be if both fill.
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
           {classes === null ? (
             <Unresolved state={classesUnread === 'failed' ? 'failed' : 'loading'} what="the coming week's classes" />

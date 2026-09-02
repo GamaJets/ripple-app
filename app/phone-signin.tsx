@@ -24,10 +24,11 @@ import { Icon } from '../src/ui/Icon';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
 import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
 import {
-  COUNTRIES, DEFAULT_COUNTRY, countryFor, flagFor,
+  COUNTRIES, initialCountry, nationalPlaceholder, countryFor, flagFor,
   toE164, isPlausiblePhone, maskedForDisplay,
   OTP_LENGTH,
 } from '../src/lib/phone';
+import { deviceRegion } from '../src/lib/unitPreference';
 
 export default function PhoneSignIn() {
   const t = useTheme();
@@ -35,7 +36,12 @@ export default function PhoneSignIn() {
   const auth = useAuth();
   const { appName } = useBrand();
 
-  const [iso, setIso] = useState(DEFAULT_COUNTRY);
+  // The handset's region, not a country this file picked. `DEFAULT_COUNTRY` is
+  // a last resort inside src/lib/phone.ts and was never an answer about the
+  // person holding the phone: seeding the picker with it sent a UK member's
+  // number out as +9717700900123, with no text and nothing on screen to say
+  // why. Read once, lazily, so the guarded Intl call is not made during render.
+  const [iso, setIso] = useState(() => initialCountry(deviceRegion()));
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [national, setNational] = useState('');
@@ -103,7 +109,7 @@ export default function PhoneSignIn() {
                   keyboardType="phone-pad"
                   autoComplete="tel"
                   textContentType="telephoneNumber"
-                  placeholder="50 767 1842"
+                  placeholder={nationalPlaceholder(countryFor(iso))}
                   placeholderTextColor={t.ink3}
                   accessibilityLabel="Your mobile number"
                   returnKeyType="go"

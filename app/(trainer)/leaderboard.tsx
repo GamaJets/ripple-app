@@ -1,13 +1,37 @@
-// Trainer · Leaderboard. Ranks the roster by a composite of adherence + weight
-// progress toward goal. A lightweight cohort view. Reached from Analytics.
+// Trainer · Leaderboard. Orders the roster by the one figure on it that is a
+// stated measurement, and shows everything else beside that figure rather than
+// inside it. Reached from Analytics.
 //
-// Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
-// (`src/theme/scale`). The scoring, the roster provider, the route behind each
-// row and the empty state are unchanged — only the presentation: the bordered
-// per-client cards became hairline-separated rows, the Georgia serif header is
-// gone, and the `MEDALS` lookup (which held the strings '1','2','3' and was
-// drawn on top of a zero-width, negatively-offset rank label) is now just the
-// rank, rendered once.
+// ── THE COMPOSITE THAT USED TO BE HERE ────────────────────────────────────
+//
+// `Math.round(adherence + Math.max(0, prog ?? 0) * 4)`, where `adherence` is
+// 0–100 and `prog` is a weight delta in KILOGRAMS. Four points per kilogram,
+// added to a percentage. The coefficient was written nowhere, derived from
+// nothing, and could not be — there is no exchange rate between a kilogram and
+// a percentage point, so the number it produced was not a quantity of anything.
+// It was then rendered as `score / maxScore` under a progress bar, which reads
+// as a proportion of something achievable, and printed at the end of the row in
+// the same weight this app prints real figures in.
+//
+// Two clients could not be compared by it either. A client who lost 3 kg toward
+// a fat-loss goal scored twelve points above one who lost none, and a client
+// working on strength who GAINED 3 kg scored the same twelve — for the opposite
+// movement, because `goalScore` flips the sign. That is defensible as a
+// direction and indefensible as an addend: it means the board's order changed
+// by an amount nobody chose, in units that do not exist, on a screen a coach
+// uses to decide who to ring.
+//
+// So there is no composite. The order is the client's own most recent check-in
+// rating and nothing else, the bar is that rating against its own scale rather
+// than against the top of the board, and the weight movement is a fact printed
+// beside the name rather than a term in a sum. Nothing here invents a number.
+//
+// ── AND THE ROW WENT NOWHERE ──────────────────────────────────────────────
+//
+// Every ranked row pushed `/(trainer)/analytics` — the same screen for every
+// client on the board — so a coach who spotted somebody sliding down it tapped
+// their name and landed on a page that says nothing about that person. The
+// unranked rows below already opened that client's own thread. Both do now.
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -27,9 +51,6 @@ export default function Leaderboard() {
   const router = useRouter();
   const { roster, status } = useRoster();
 
-  // Composite: adherence (0-100) + a progress bonus (fat-loss clients rewarded
-  // for negative weightDelta; others for positive).
-  //
   // ── Who can be ranked at all ──────────────────────────────────────────────
   //
   // `adherence` is null when a client has never submitted a check-in, and
@@ -46,27 +67,46 @@ export default function Leaderboard() {
   // client cannot be placed rather than that they came last. They are listed
   // below the board instead, with what is missing, which is also the more
   // useful thing for a coach to see: it names who to chase for a check-in.
-  const goalScore = (c: (typeof roster)[number]) => {
-    const goalDown = /fat|tone/i.test(c.goal);
-    return c.weightDelta == null ? null : (goalDown ? -c.weightDelta : c.weightDelta);
-  };
+  /**
+   * Which way this client's weight moving counts as progress — a DIRECTION,
+   * never a quantity.
+   *
+   * True for a fat-loss or toning goal and false otherwise, so a client working
+   * on strength who has gained is going the way they meant to. It words the
+   * line under the name and draws nothing else: the kilograms it describes are
+   * not added to anything, because there is no rate at which a kilogram becomes
+   * a percentage point.
+   */
+  const wantsLoss = (c: (typeof roster)[number]) => /fat|tone/i.test(c.goal);
 
+  /**
+   * The board, ordered on the client's own last check-in rating.
+   *
+   * `roster.adherence` is that rating and nothing more: the client picked 1 to
+   * 5 on their most recent check-in and `useRoster` scales it to a percentage
+   * because every trainer surface renders it as one. It is a self-report about
+   * one day, it is the only figure on this row two clients can be compared by,
+   * and the header says both of those things rather than letting the word
+   * "leaderboard" imply a measurement nobody took.
+   *
+   * The tie-break is the name, so two clients on the same rating hold a stable
+   * order between renders. Without one the board reshuffles people who have
+   * done nothing, which reads as movement.
+   */
   const scored = roster
     .filter((c) => c.adherence != null)
-    .map((c) => {
-      const prog = goalScore(c);
-      // An absent progress figure earns no bonus, which is the same as a
-      // measured-flat one earns — so the row says which of the two it is
-      // rather than letting the number imply a scan that never happened.
-      return { c, score: Math.round((c.adherence as number) + Math.max(0, prog ?? 0) * 4), scanned: prog != null };
-    })
-    .sort((a, b) => b.score - a.score);
+    .map((c) => ({ c, rating: c.adherence as number, scanned: c.weightDelta != null }))
+    .sort((a, b) => b.rating - a.rating || a.c.name.localeCompare(b.c.name));
 
   // Everyone the board cannot place. Not a failure state and not a ranking —
   // a list of people nothing has been recorded about yet.
   const unplaced = roster.filter((c) => c.adherence == null);
 
-  const maxScore = Math.max(1, ...scored.map((s) => s.score));
+  /** That client's own thread. The same destination the unranked rows below
+   *  have always used, and the one thing a coach who has just spotted somebody
+   *  sliding down the board actually wants. */
+  const openClient = (c: (typeof roster)[number]) =>
+    router.push({ pathname: '/(trainer)/chat', params: { clientId: c.id, name: c.name } });
 
   const G = layout.gutter;
 
@@ -81,12 +121,25 @@ export default function Leaderboard() {
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Adherence + progress toward goal</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Ordered by the last check-in rating each client gave themselves</Text>
 
         <Rule />
 
         <Section>
           <SectionHead title="Ranking" note={scored.length ? `${scored.length} client${scored.length === 1 ? '' : 's'}` : undefined} />
+          {/* What the order is, said before anybody reads it as a score. There
+              is no composite behind this board and nothing on it was measured
+              by the app: it is what each client last said about themselves, and
+              a coach ringing somebody at the bottom of it is entitled to know
+              that is what they are ringing about. */}
+          {scored.length ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+              This is each client’s own rating from their most recent check-in, out of five and shown
+              as a percentage. It is what they said about one day rather than something this app
+              measured, and nothing else is folded into it. Weight movement is printed beside the
+              name and is deliberately not added to it.
+            </Text>
+          ) : null}
 
           {/* An unread roster is not an empty one. Without this the screen tells
               a coach with a full book that they have no clients, which is the
@@ -121,9 +174,9 @@ export default function Leaderboard() {
             </Text>
           ) : null}
 
-          {scored.map(({ c, score, scanned }, i) => (
-            <Pressable key={c.id} onPress={() => router.push('/(trainer)/analytics')}
-              accessibilityRole="button" accessibilityLabel={`${c.name}, rank ${i + 1}, score ${score}`}
+          {scored.map(({ c, rating, scanned }, i) => (
+            <Pressable key={c.id} onPress={() => openClient(c)}
+              accessibilityRole="button" accessibilityLabel={`${c.name}, rank ${i + 1}, last check-in rating ${rating} per cent. Opens their messages.`}
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
               <Text style={{ ...value(15), color: i === 0 ? t.brand : t.ink3, width: 20, textAlign: 'center' }}>{i + 1}</Text>
               <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -137,12 +190,20 @@ export default function Leaderboard() {
                     is converted as a SPAN through `weightDeltaIn`, so a genuine
                     0.4 kg move does not alternate between "0 lb" and "1 lb"
                     week to week off the back of nothing the client did. */}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {`${c.adherence}% adherence`} · {scanned ? deltaLabel(weightDeltaIn(c.weightDelta as number, wu), { since: null, unit: wu, noChange: 'no change', noBaseline: 'no change' }) : 'no scans — progress not counted'}</Text>
+                {/* Three facts, kept as three. Which direction counts as
+                    progress depends on the goal and is said in words, because
+                    it cannot honestly be said in a number. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal} · {`${rating}% last check-in`} · {scanned ? `${deltaLabel(weightDeltaIn(c.weightDelta as number, wu), { since: null, unit: wu, noChange: 'no change', noBaseline: 'no change' })}${wantsLoss(c) ? ', aiming down' : ', aiming up'}` : 'never scanned'}</Text>
+                {/* The bar is the rating against its own scale — a hundred is a
+                    five out of five — and never against the top of the board. A
+                    bar drawn as a fraction of whoever happens to lead reads as a
+                    gap to close, and it moves for everybody the moment one
+                    person's figure changes. */}
                 <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden', marginTop: 7 }}>
-                  <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.round((score / maxScore) * 100)}%` }} />
+                  <View style={{ height: 3, borderRadius: 2, backgroundColor: t.brand, width: `${Math.max(0, Math.min(100, rating))}%` }} />
                 </View>
               </View>
-              <Text style={{ ...value(18), color: t.ink }}>{score}</Text>
+              <Text style={{ ...value(18), color: t.ink }}>{rating}%</Text>
             </Pressable>
           ))}
         </Section>

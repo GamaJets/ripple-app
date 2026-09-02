@@ -66,7 +66,7 @@ import { fetchMemberships } from '@lib/gymRecord';
 import { fetchVisits } from '@lib/gymVisits';
 import { fetchClasses } from '@lib/gymSchedule';
 import { searchRows, searchNote } from '@lib/consoleSearch';
-import { assertWhole, capLimit, readAll } from '@lib/rowCap';
+import { readAll } from '@lib/rowCap';
 import { fetchSessions } from '@lib/gymSessions';
 import { buildDossiers, sliceLoading, sliceReady, sliceFailed, type Slice, type MemberBooking } from '@lib/memberView';
 import { bandTitle, bandNote, DRIFT_LABEL, type ActivityEvent, type Drift } from '@lib/clientDrift';
@@ -505,28 +505,39 @@ async function fetchBookings(tenantId: string, sinceIso: string): Promise<Member
  * — and the "drifting, nobody tried" tile would read as a to-do list. Hence the
  * slice: a failure is a stated failure, never an empty history.
  *
- * Capped through src/lib/rowCap.ts, and it refuses rather than reporting a
- * prefix — the `fetchVisits` standard, because truncation here makes a false
- * statement about a NAMED PERSON rather than a smaller figure. The order is
- * `at desc`, so the rows that would fall away are the OLDEST contacts in the
- * window, and this page's whole purpose is the sentence "nobody has tried this
- * member yet". A gym working its drifting list logs a call per member per week;
- * a busy quarter is past a thousand. The member whose call fell off the end
- * reads as never contacted, appears on the "nobody tried" tile, and gets rung a
- * second time by somebody who has just been told nobody rang — the precise
- * duplicate this table exists to prevent.
+ * Paged rather than capped, and that is a correction rather than a relaxation.
+ *
+ * Refusing was the `fetchVisits` standard and it was chosen for the right
+ * reason: truncation here makes a false statement about a NAMED PERSON rather
+ * than a smaller figure. The order is `at desc`, so the rows that fall away are
+ * the OLDEST contacts in the window, and this page's whole purpose is the
+ * sentence "nobody has tried this member yet". The member whose call fell off
+ * the end reads as never contacted, appears on the "nobody tried" tile, and
+ * gets rung a second time by somebody who has just been told nobody rang.
+ *
+ * What refusing did instead was take the page away. A gym working its drifting
+ * list logs a call per member per week, so a busy quarter is past a thousand —
+ * and at that point every retention band, every cohort and the whole
+ * intervention loop became one error message, permanently, with no date filter
+ * on the screen to work around it. This read is already bounded by
+ * ACTIVITY_DAYS, which is exactly the shape `readAll` exists for: a finite set
+ * the screen genuinely needs all of. The order carries `id` after `at` because
+ * paging needs a total one.
  */
 async function fetchContacts(tenantId: string, sinceIso: string): Promise<Contact[]> {
-  const { data, error } = await supabase
-    .from('member_interventions')
-    .select('id, member_id, at, channel, by_id, by_name, outcome, note')
-    .eq('tenant_id', tenantId)
-    .gte('at', sinceIso)
-    .order('at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('member_interventions')
+      .select('id, member_id, at, channel, by_id, by_name, outcome, note')
+      .eq('tenant_id', tenantId)
+      .gte('at', sinceIso)
+      .order('at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the contacts already made in this period',
+  );
 
-  return assertWhole(data, 'the contacts already made in this period').map((r: any) => ({
+  return rows.map((r: any) => ({
     id: r.id,
     memberId: r.member_id,
     at: r.at,

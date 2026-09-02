@@ -26,12 +26,12 @@
 // month that really was that quiet.
 import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'expo-router';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead } from '../../src/ui/kit';
-import { isWhole, worstStatus } from '../../src/ui/loadStatus';
+import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
@@ -58,8 +58,20 @@ import { useSessions } from '../../src/ui/sessions';
 import { myTenantCurrency } from '../../src/lib/subscriptions';
 import { currencyGapLine, currencyGapOf } from '../../src/lib/currencyGap';
 import { deltaSign } from '../../src/lib/deltaLabel';
-import { wholeMoney } from '../../src/lib/coachMoney';
+import { wholeMoney, minorMoney, since, type TakenRow } from '../../src/lib/coachMoney';
 import { monthWindow } from '../../src/lib/monthlyHistory';
+import {
+  monthToDate, sessionMonth, sessionMonthFor, deliveredValue, unmarkedValue,
+  unmarkedLine, sessionsUnknownLine, takingsStrands,
+  DELIVERED_IS_MARKED, TAKINGS_IS_GROSS, TWO_FIGURES_NEVER_SUM,
+} from '../../src/lib/coachRevenue';
+import { ledger } from '../../src/lib/coachLedger';
+import { useDeliveryFact } from '../../src/ui/coachDelivery';
+import { deliveryNote, showsInPerson, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
+import { fetchClientPurchases, type CoachPurchase } from '../../src/lib/connect';
+import { fetchMySubscriptionPayments, type SubscriptionPayment } from '../../src/lib/subscriptions';
+import { fetchMyReceipts } from '../../src/ui/coachReceipts';
+import type { CoachReceipt } from '../../src/lib/coachReceipts';
 
 export default function TrainerAnalytics() {
   const t = useTheme();
@@ -90,30 +102,56 @@ export default function TrainerAnalytics() {
   const atRisk = roster.filter(atRiskClient);
   const clients = rosterWhole ? roster.length : null;
 
-  // Sessions actually delivered this calendar month: booked, and already
-  // started. This used to be `clients * 4` - an assumption that every client
-  // trains four times a month - multiplied by the rate the trainer typed into
-  // their profile, and rendered as "Monthly revenue". A trainer with five
-  // clients who trained nobody was shown "$1,500 · 20 sessions". The real
-  // sessions were sitting in the same store the calendar screen already reads.
-  const _monthStart = new Date(); _monthStart.setDate(1); _monthStart.setHours(0, 0, 0, 0);
-  const _deliveredMo = sessions.filter((sx) => sx.status === 'booked'
-    && Date.parse(sx.startsAt) >= _monthStart.getTime()
-    && Date.parse(sx.startsAt) <= Date.now());
-  // Null unless the sessions read was whole. A count of the sessions that came
-  // back is not a count of the sessions delivered, and this one is the hero
-  // figure of the screen and the multiplicand of every money figure on it.
-  const sessionsMo = sessionsWhole ? _deliveredMo.length : null;
-  // Still arithmetic, but on a real count and the trainer's own rate, and the
-  // note on screen says exactly that. The $99 "platform fee" that used to be
-  // subtracted here is gone: nothing charges it, and billing.tsx reports that
-  // billing is not switched on while this screen called them a paying Pro
-  // customer.
-  // Null, not 0, when no rate is known — the same rule as `valuePerClient`
-  // below, now enforced by the type rather than by remembering to write
-  // `sessionFee > 0`. `sessionFee` used to be a number starting at 0, so every
-  // figure derived from it was silently zero until the profile loaded.
-  const revenue = sessionFee == null || sessionsMo == null ? null : sessionsMo * sessionFee;
+  /* ── what actually happened this month ──────────────────────────────────
+   *
+   * THE BUG THIS REPLACES, exactly as it shipped:
+   *
+   *     sessions.filter(s => s.status === 'booked' && startsAt <= now).length
+   *
+   * which is the clock and not the record. A no-show is booked and in the past.
+   * So is a session the coach never turned up to, and so is a slot nobody
+   * cancelled. Every one of them was counted as delivered work here, priced at
+   * the coach's rate, printed as the hero of the screen, fed into the at-risk
+   * card and written into the AI digest — and src/lib/gymSessions.ts names that
+   * exact inference in its own header as the thing part 33 was written to end.
+   * It WAS ended, for the gym owner. This screen still had it.
+   *
+   * `sessionMonth` counts by `outcome` instead, in the vocabulary
+   * src/lib/sessionHistory.ts already uses on four other screens, and keeps the
+   * UNMARKED ones as their own state — folded into neither side, and stated
+   * below rather than swept anywhere. See src/lib/coachRevenue.ts.
+   *
+   * `now` is fixed for the render. The window's upper bound is "now", and a
+   * bound that moves on every re-render would recompute a month's figures
+   * against a different instant each time. */
+  const now = useMemo(() => new Date(), []);
+  const { from: monthFrom, to: monthTo } = useMemo(() => monthToDate(now), [now]);
+  const month = useMemo(
+    () => sessionMonth(sessions, sessionsStatus, monthFrom, monthTo),
+    [sessions, sessionsStatus, monthFrom, monthTo],
+  );
+  // Null unless the sessions read was whole — `sessionMonth` enforces that
+  // itself, so no caller can forget. A count of the sessions that came back is
+  // not a count of the sessions delivered.
+  const sessionsMo = month.delivered;
+  // Sessions nobody has said anything about. Its own figure, never added to the
+  // one above and never quietly dropped: an unmarked session is money that is
+  // neither claimed nor denied, and the size of it is the reason to go and mark
+  // them.
+  const unmarkedMo = month.unmarked;
+  // Still arithmetic, but now on sessions that were RECORDED as delivered and
+  // on the trainer's own rate, and the note on screen says exactly that. The
+  // $99 "platform fee" that used to be subtracted here is gone: nothing charges
+  // it, and billing.tsx reports that billing is not switched on while this
+  // screen called them a paying Pro customer.
+  //
+  // Null, not 0, when no rate is known. `sessionFee` used to be a number
+  // starting at 0, so every figure derived from it was silently zero until the
+  // profile loaded.
+  const revenue = deliveredValue(month, sessionFee);
+  /** What the unmarked ones would come to if every one had been delivered.
+   *  Priced apart and never added — see the note on `unmarkedValue`. */
+  const unmarkedWorth = unmarkedValue(month, sessionFee);
   // Null, not 0, with no clients: an average over nobody is undefined, and
   // "$0 / client" reads as a fact about a coaching business that has none.
   const valuePerClient = revenue != null && clients ? Math.round(revenue / clients) : null;
@@ -132,15 +170,24 @@ export default function TrainerAnalytics() {
   const onTrack = rosterWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 85).length : null;
   const watch = rosterWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length : null;
   const riskCount = rosterWhole ? roster.filter((c) => c.adherence != null && c.adherence < 70).length : null;
-  // Sessions those clients actually took this month, at the trainer's rate -
-  // not `at-risk count x rate x 4`, which invented a subscription nobody pays.
-  const _atRiskIds = new Set(atRisk.map((c) => c.id));
-  const _atRiskSessions = _deliveredMo.filter((sx) => sx.clientId && _atRiskIds.has(sx.clientId)).length;
-  // Both sets have to be whole: the sessions being counted, and the roster that
+  // Sessions those clients actually took this month, at the trainer's rate —
+  // not `at-risk count x rate x 4`, which invented a subscription nobody pays,
+  // and no longer "booked and in the past", which counted the no-shows of the
+  // very clients this card is about. A client who books and does not turn up is
+  // exactly the client who ends up here, so the old figure was at its most
+  // wrong precisely where it mattered most.
+  //
+  // `figureStatus` is handed in rather than the sessions status alone: both
+  // sets have to be whole, the sessions being counted AND the roster that
   // decides which clients count. Short either one and this understates the
   // money at risk, which is the one direction that makes the card safe to
   // ignore.
-  const atRiskRevenue = sessionFee == null || !figuresWhole ? null : _atRiskSessions * sessionFee;
+  const _atRiskIds = useMemo(() => new Set(atRisk.map((c) => c.id)), [atRisk]);
+  const atRiskMonth = useMemo(
+    () => sessionMonthFor(sessions, _atRiskIds, figureStatus, monthFrom, monthTo),
+    [sessions, _atRiskIds, figureStatus, monthFrom, monthTo],
+  );
+  const atRiskRevenue = deliveredValue(atRiskMonth, sessionFee);
   // Every money figure on this screen is the coach's own session rate times a
   // count, and every one of them printed a dollar sign. Repple is
   // white-labelled and its live gyms are priced in AED, so the whole screen has
@@ -180,6 +227,98 @@ export default function TrainerAnalytics() {
    *  and never a dollar. `fig()` renders the null as a dash. */
   const priced = (n: number | null | undefined) => wholeMoney(n, gymCur);
 
+  /* ── money that actually moved ──────────────────────────────────────────
+   *
+   * The second half of the fix, and the half that matters most to a coach with
+   * no in-person clients: they sell no sessions, so "sessions × your rate" was
+   * not an inflated figure for them, it was a figure about a business they do
+   * not run. Their money is packages, subscription renewals and whatever was
+   * handed over outside the app, and all three already existed —
+   * app/(trainer)/money.tsx has read them for months.
+   *
+   * Nothing here is a second money rule. `takingsStrands` is the SAME strand
+   * composition the Money screen uses, lifted into src/lib/coachRevenue.ts so
+   * the two screens cannot drift, and `ledger()` is unchanged — which means the
+   * currency rules come with it: two currencies never sum, an amount with no
+   * currency is counted rather than dropped, and there is no default currency.
+   *
+   * Three separate statuses on purpose. They fail independently, and a shared
+   * one would hide a working half behind a broken one. `ledger()` then
+   * withholds the TOTAL the moment any of the three is short, because takings
+   * with the cash half missing is not a smaller number, it is a different
+   * number about a different business. */
+  const [sales, setSales] = useState<{ rows: CoachPurchase[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  const [renewals, setRenewals] = useState<{ rows: SubscriptionPayment[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  const [receipts, setReceipts] = useState<{ rows: CoachReceipt[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  const loadTakings = useCallback(async () => {
+    const [p, r, rec] = await Promise.all([
+      fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyReceipts(),
+    ]);
+    setSales(p); setRenewals(r); setReceipts(rec);
+  }, []);
+  // On focus, not on mount: a coach who records a cash payment and comes
+  // straight back here would otherwise be looking at the figure from before
+  // they recorded it, which reads as the record not having saved.
+  useFocusEffect(useCallback(() => { void loadTakings(); }, [loadTakings]));
+
+  // Each dated by when the MONEY moved, never by when the row was written. A
+  // webhook retried three days late, or a coach writing up three weeks of cash
+  // on a Sunday, must not shift somebody's payment into the wrong month; a
+  // payment with no date passes a value that will not parse, which keeps it out
+  // of every period rather than sweeping it into this one.
+  const takenRows = useMemo(() => ({
+    sale: sales.rows.map((r): TakenRow => ({ amount_cents: r.amount_cents, currency: r.currency, created_at: r.created_at })),
+    renewal: renewals.rows.map((r): TakenRow => ({ amount_cents: r.amount_cents, currency: r.currency, created_at: r.paid_at ?? 'unknown' })),
+    receipt: receipts.rows.map((r): TakenRow => ({ amount_cents: r.amountCents, currency: r.currency, created_at: r.receivedOn })),
+  }), [sales.rows, renewals.rows, receipts.rows]);
+  const takingsReads = useMemo(
+    () => ({ sales: sales.status, renewals: renewals.status, receipts: receipts.status }),
+    [sales.status, renewals.status, receipts.status],
+  );
+  /** What was taken this calendar month, or withheld with the reason. */
+  const takenMonth = useMemo(() => ledger(takingsStrands(takingsReads, {
+    sale: since(takenRows.sale, monthFrom),
+    renewal: since(takenRows.renewal, monthFrom),
+    receipt: since(takenRows.receipt, monthFrom),
+  })), [takingsReads, takenRows, monthFrom]);
+
+  /* ── how this coach works ───────────────────────────────────────────────
+   *
+   * Their own declared answer, WIDENED by their roster and never narrowed by
+   * it. It only reaches 'remote' when the coach said "online", the roster came
+   * back WHOLE, and nobody on it trains in the room; every other combination —
+   * including a roster read that failed, and a question nobody has answered —
+   * resolves to showing everything. src/lib/coachDelivery.ts carries the rule
+   * and coachDelivery.test.ts holds it down.
+   *
+   * On this screen it decides one thing: which figure leads. A coach who sells
+   * packages should not open their analytics on a session count of nought. */
+  const delivery = useDeliveryFact();
+  const sessionsLead = showsInPerson(delivery);
+
+  /* ── the takings figure, and the one thing it may not become ────────────
+   *
+   * A hero is ONE number, and a coach who took AED 6,000 and GBP 400 has not
+   * taken 6,400 of anything. So a single figure is printed only where there is
+   * exactly one currency in the month; with two the hero is a dash and both
+   * pots are listed under it. src/lib/coachMoney.ts refuses the addition at the
+   * source, which is why this is a presentation decision rather than a rule. */
+  const takenPots = takenMonth.total?.pots ?? [];
+  const takenOne = takenMonth.total != null && takenPots.length === 1
+    ? minorMoney(takenPots[0].minorUnits, takenPots[0].currency)
+    : null;
+  /** Payments that are real and are missing from the figure: an amount with no
+   *  currency on it, and an amount Stripe never stated. Counted rather than
+   *  dropped — a short total nobody can see is worse than a stated hole. */
+  const takenHoles = (takenMonth.total?.unlabelled ?? 0) + (takenMonth.total?.unpriced ?? 0);
+  const takenNote = takenMonth.reason
+    ? takenMonth.reason
+    : takenPots.length === 0
+      ? 'Nothing is recorded as taken this month. Packages, subscription renewals and the payments you record yourself all count here.'
+      : takenPots.length > 1
+        ? `Taken in ${takenPots.length} currencies this month, which are never added into one figure: ${takenPots.map((pt) => minorMoney(pt.minorUnits, pt.currency)).filter(Boolean).join(', ')}.`
+        : TAKINGS_IS_GROSS;
+
   const { goals, setGoals, status: goalsStatus } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
   const [gRev, setGRev] = useState('');
@@ -202,11 +341,36 @@ export default function TrainerAnalytics() {
     // currency and dutifully wrote it back to the coach in prose, where no
     // formatter could catch it. It is now told the gym's actual code — or told
     // there is none, and to leave the amount out rather than pick one.
-    const ctx = { sessionsDeliveredThisMonth: sessionsMo, revenueAtOwnRate: revenue ?? 'unknown — no session rate set', currency: gymCur ?? 'unknown — the gym has not set one', clients, avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet', atRiskClients: atRisk.length, onTrack, watch, atRiskLow: riskCount };
+    // Every figure the digest is written from now follows the hero, which is
+    // the whole point of composing it here rather than letting the model infer
+    // one. It used to be handed a session count that included no-shows, so the
+    // paragraph a coach read on a Monday morning congratulated them on work
+    // that had not happened — and prose is the one place no formatter and no
+    // dash can catch it afterwards.
+    //
+    // The unmarked count goes in as its own field and is described as its own
+    // state, because a model given only "delivered: 4" from a month with nine
+    // unmarked sessions would write a sentence about a quiet month.
+    //
+    // Takings go in too, as a formatted STRING or as the reason there is none.
+    // A remote coach's month is packages and renewals; a digest built only from
+    // sessions would tell them their business did nothing.
+    const ctx = {
+      sessionsDeliveredThisMonth: sessionsMo,
+      sessionsStillUnmarked: unmarkedMo,
+      revenueAtOwnRate: revenue ?? 'unknown — no session rate set',
+      takenThisMonth: takenOne ?? (takenMonth.reason ?? 'nothing recorded'),
+      currency: gymCur ?? 'unknown — the gym has not set one',
+      clients,
+      avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet',
+      atRiskClients: atRisk.length,
+      onTrack, watch, atRiskLow: riskCount,
+      howTheyCoach: sessionsLead ? 'in person, or both in person and remotely' : 'entirely online',
+    };
     // `askAboutMyBusiness`, not `askCoach`. Nothing in `ctx` above names a
     // person today, and the filter is what keeps that true the day somebody
     // adds `atRiskNames` to it — see the coach half of src/lib/coachShare.ts.
-    const answer = await askAboutMyBusiness([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers (revenueAtOwnRate is sessions delivered multiplied by the coach own session rate, denominated in the currency given in the currency field — write that ISO code before any amount, never a currency symbol, and if currency is unknown do not state an amount at all): one line on revenue and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific.' }], ctx);
+    const answer = await askAboutMyBusiness([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers: one line on money and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific. RULES. sessionsDeliveredThisMonth counts only sessions whose outcome was recorded as completed — never describe it as sessions booked. sessionsStillUnmarked are sessions that happened and have no outcome recorded: they are neither delivered nor missed, so never add them to the delivered figure, and if there are any, say they are waiting to be marked. revenueAtOwnRate is those delivered sessions multiplied by the coach own session rate and is the coach own arithmetic, not a payout. takenThisMonth is money clients were actually charged across packages, subscription renewals and payments recorded by hand: it is already written in its own currency, quote it exactly as given, and NEVER add it to revenueAtOwnRate, because a package and the sessions delivered out of it are the same money twice. For any other amount write the ISO code from the currency field before the figure, never a currency symbol, and if currency is unknown state no amount at all. If howTheyCoach says entirely online, lead on takenThisMonth and do not suggest anything that needs a room or a booking calendar.' }], ctx);
     setDigestBusy(false);
     setDigest(answer.ok ? answer.reply : 'Could not generate the digest right now — the AI backend may be unavailable.');
   };
@@ -222,7 +386,26 @@ export default function TrainerAnalytics() {
   // its comparison. The CHART still draws six — `Spark` is handed the last six
   // columns — because thirteen labels do not fit on a phone and the trend the
   // chart is for is the recent one. Two questions, one record.
-  const revHist = useMonthlyHistory('repple.trainer.revHistory', revenue, YEAR_WINDOW);
+  //
+  // ── AND THE KEY CHANGED, WHICH IS NOT A DETAIL ────────────────────────────
+  //
+  // 'repple.trainer.revHistory' holds months recorded under the OLD definition:
+  // booked sessions in the past, no-shows included, times the rate. Those
+  // months are real records of what the app said at the time and are not
+  // deleted — but they are not comparable with a month counted from outcomes,
+  // and charting the two together would show every coach a fall in the month
+  // this shipped that has nothing to do with their business. That fall is
+  // exactly the kind of figure nothing later can tell from a real one, which is
+  // the failure the header of src/lib/monthlyHistory.ts is about.
+  //
+  // So the honest thing is a new series on the honest basis. The trend restarts
+  // and says so, rather than being wrong for thirteen months.
+  //
+  // There is deliberately no takings trend beside it. A month's takings is a
+  // LIST of pots, one per currency, and `useMonthlyHistory` stores one number —
+  // so the only way to chart it would be to pick a pot or add them up, and both
+  // are inventions. Two currencies are not one figure and are not one line.
+  const revHist = useMonthlyHistory('repple.trainer.deliveredRevHistory', revenue, YEAR_WINDOW);
   const CHART_MONTHS = 6;
   const chartSeries = revHist.series.slice(-CHART_MONTHS);
   const chartLabels = revHist.labels.slice(-CHART_MONTHS);
@@ -267,6 +450,7 @@ export default function TrainerAnalytics() {
       const file = buildAnalyticsExport({
         currency: gymCur,
         sessionsThisMonth: sessionsMo,
+        sessionsUnmarked: unmarkedMo,
         revenueAtOwnRate: revenue,
         clients,
         avgAdherencePct: avgAdh,
@@ -319,34 +503,110 @@ export default function TrainerAnalytics() {
           <PartialRead what={rosterStatus === 'partial' ? 'clients on your book' : 'sessions in your calendar'} />
         ) : null}
 
+        {/* A coach with an empty book that we KNOW is empty. Deliberately said
+            in the words of the business they told us they run: a remote coach
+            sold nothing rather than delivered nothing, and being told to "run
+            sessions" is being told to do something they do not do. */}
         {clients === 0 ? (
           <Card style={{ marginTop: sp.lg }}>
             <Text style={{ ...ty.label, color: t.ink2 }}>
-              No clients yet — revenue, adherence and roster health populate as you add clients and run sessions.
+              {sessionsLead
+                ? 'No clients yet. Revenue, adherence and roster health fill in as you add clients and mark the sessions you deliver.'
+                : 'No clients yet. Your takings, adherence and roster health fill in as you add clients and they buy a package or start a subscription.'}
             </Text>
           </Card>
         ) : null}
 
-        {/* ── the hero ───────────────────────────────────────────────────── */}
-        <Hero
-          label="Sessions Delivered"
-          figure={fig(sessionsMo)}
-          unit={sessionsMo == null ? undefined : 'this month'}
-          note={sessionsMo == null
-            ? (sessionsStatus === 'loading'
-                ? 'Still reading your sessions.'
-                : sessionsStatus === 'partial'
-                  ? 'Your sessions came back short, so they cannot be counted — a subtotal printed here would be read as a month.'
-                  : 'Your sessions could not be read, so this is not a count of zero.')
-            : revenue != null && sessionFee != null
-              ? (gymCur
-                  ? `${fig(priced(revenue))} at your ${fig(priced(sessionFee))} session rate — Repple does not process this, so it is your own arithmetic, not a payout. What Stripe actually took is on Payments.`
-                  : noCur('there is no unit to price these sessions in'))
-              : 'Set a session rate in your profile to see what that is worth.'}
-          arc={revenue != null && goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
-          arcLabel="of the revenue goal"
-          onPress={() => router.push('/(trainer)/payments')}
-        />
+        {/* ── the hero ─────────────────────────────────────────────────────
+            WHICH figure leads is the one thing `delivery` decides here. A coach
+            who trains people in the room leads on the sessions they delivered;
+            a coach who works remotely sells no sessions at all, so leading on a
+            session count would open their business analytics on a nought. Both
+            figures are on the screen either way and neither is ever removed —
+            the order is what changes.
+
+            Every unknown resolves to the in-person layout, so a coach whose
+            roster failed to load, or who has not answered how they coach, gets
+            the screen they have always had. */}
+        {sessionsLead ? (
+          <Hero
+            label="Sessions Delivered"
+            figure={fig(sessionsMo)}
+            unit={sessionsMo == null ? undefined : 'this month'}
+            note={sessionsMo == null
+              ? sessionsUnknownLine(sessionsStatus)
+              : revenue != null && sessionFee != null
+                ? (gymCur
+                    ? `${fig(priced(revenue))} at your ${fig(priced(sessionFee))} session rate. ${DELIVERED_IS_MARKED} Repple does not process this, so it is your own arithmetic and not a payout.`
+                    : noCur('there is no unit to price these sessions in'))
+                : `Set a session rate in your profile to see what that is worth. ${DELIVERED_IS_MARKED}`}
+            arc={revenue != null && goals.revenue > 0 ? goalPct(revenue, goals.revenue) : undefined}
+            arcLabel="of the revenue goal"
+            onPress={() => router.push('/(trainer)/payments')}
+          />
+        ) : (
+          <Hero
+            label="Taken This Month"
+            figure={fig(takenOne)}
+            note={takenNote}
+            onPress={() => router.push('/(trainer)/money')}
+          />
+        )}
+
+        {/* Sessions nobody has said anything about, on whichever layout. This
+            is the money that used to be swept silently INTO the figure above:
+            the old count was "booked and in the past", which is every one of
+            these. Stating it is the opposite of counting it, and one tap goes
+            to the queue that clears it. */}
+        {unmarkedLine(month) ? (
+          <Card onPress={() => router.push('/(trainer)/sessions')} tone={t.warn} style={{ marginTop: sp.md }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: sp.sm }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Not yet marked</Text>
+            </View>
+            <Text style={{ ...ty.label, color: t.ink2 }}>
+              {unmarkedLine(month)}
+              {unmarkedWorth != null && priced(unmarkedWorth) != null
+                ? ` At your rate that is ${priced(unmarkedWorth)} either way.`
+                : ''}
+            </Text>
+          </Card>
+        ) : null}
+
+        <Rule />
+
+        {/* ── the other figure, always present ───────────────────────────────
+            Whichever led above, the other one is here. They are never added:
+            a package a client paid for and the sessions delivered out of it are
+            the same money counted twice, which is why src/lib/coachRevenue.ts
+            has no function that sums them. */}
+        <Section>
+          {sessionsLead ? (<>
+            <SectionHead title="Taken This Month" note="Money" onPress={() => router.push('/(trainer)/money')} />
+            <Text style={{ ...value(26), color: t.ink }}>{fig(takenOne)}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{takenNote}</Text>
+          </>) : (<>
+            <SectionHead title="Sessions Delivered" note="Mark What Happened" onPress={() => router.push('/(trainer)/sessions')} />
+            <Text style={{ ...value(26), color: t.ink }}>{fig(sessionsMo)}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
+              {sessionsMo == null
+                ? sessionsUnknownLine(sessionsStatus)
+                : revenue != null && priced(revenue) != null
+                  ? `${priced(revenue)} at your session rate. ${DELIVERED_IS_MARKED} ${TWO_FIGURES_NEVER_SUM}`
+                  : `${DELIVERED_IS_MARKED} ${TWO_FIGURES_NEVER_SUM}`}
+            </Text>
+            {/* Said once, on the screen that put something away, because a
+                coach has to be able to believe it. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {deliveryNote(delivery)} {HIDDEN_NOT_GONE}
+            </Text>
+          </>)}
+          {takenHoles > 0 ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+              {takenHoles} payment{takenHoles === 1 ? '' : 's'} this month could not be added to that figure, because no currency or no amount was recorded against {takenHoles === 1 ? 'it' : 'them'}. {takenHoles === 1 ? 'It is' : 'They are'} real and {takenHoles === 1 ? 'is' : 'are'} missing from the total.
+            </Flag>
+          ) : null}
+        </Section>
 
         <Rule />
 
@@ -461,7 +721,7 @@ export default function TrainerAnalytics() {
                       ? (sessionFee == null
                           ? ' Set a session rate in your profile to see what that is worth.'
                           : ' What that is worth cannot be worked out from a read this short.')
-                      : ''}
+                      : ' Counted from the sessions they were marked as having taken, so a booking they did not turn up to is not in it.'}
                   </Text>
                 </View>
                 <Cta label="Review" onPress={() => router.push('/(trainer)/dashboard')} />
@@ -608,7 +868,7 @@ export default function TrainerAnalytics() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
               {priced(yoy.then) == null
                 ? noCur('this month and the same month last year cannot be shown as amounts')
-                : `${monthLabelOf(yoy.monthKey)} against the same month last year, which was ${priced(yoy.then)}. Both figures are sessions delivered at your own rate, so a change in your rate moves this as much as a change in your book.`}
+                : `${monthLabelOf(yoy.monthKey)} against the same month last year, which was ${priced(yoy.then)}. Both figures are sessions you marked as delivered, at your own rate, so a change in your rate moves this as much as a change in your book.`}
             </Text>
           </>) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>{yearOnYearLine(revHist.snapshots, new Date(), revHist.status)}</Text>

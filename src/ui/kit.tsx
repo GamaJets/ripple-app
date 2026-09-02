@@ -145,8 +145,39 @@ export function Hero({
         accessibilityRole={onPress ? 'button' : undefined}>
         <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: sp.sm }}>
-          <Text style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
-          {unit ? <Text style={{ ...ty.head, color: t.ink3, marginLeft: 6, letterSpacing: 0 }}>{unit}</Text> : null}
+          {/* ── One line, shrunk to fit, never wrapped and never clipped ──
+              This is the one number on the screen and it had no guard of any
+              kind: 44pt display type, no `flexShrink`, no `numberOfLines`, in a
+              row beside a 72pt ring. On a 375pt phone "AED 1,284,900.00" wraps
+              MID-NUMBER — a money figure broken across two lines is a figure an
+              owner reads wrong — and at iOS Larger Text it wrapped down into the
+              note beneath it.
+
+              `adjustsFontSizeToFit` and not a font-size cap. src/lib/typeScale.ts
+              is explicit that nothing in this app caps the reader's text size,
+              because a ceiling on somebody's text size is a ceiling on whether
+              they can read the app at all; where a fixed box was the problem the
+              box gives way. Here the box cannot give way — the ring is beside it
+              — so the FIGURE gives up points and everything else on the screen
+              still scales.
+
+              `minimumFontScale` is 0.35 rather than the 0.85 used on a chip
+              label, and the low floor is the whole point: below the floor iOS
+              stops shrinking and ELLIPSISES, and "AED 1,284,9…" is not a smaller
+              rendering of a number, it is a different number. 0.35 of 44pt is
+              15pt, which still fits a six-figure sum in a currency with a
+              three-letter code on the narrowest phone the app supports, at an
+              accessibility text size, next to the ring. */}
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.35}
+            style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}
+          >{figure}</Text>
+          {/* The unit is two or three characters and is what the figure MEANS,
+              so it does not shrink and does not get pushed off — the figure
+              yields first. */}
+          {unit ? <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginLeft: 6, letterSpacing: 0, flexShrink: 0 }}>{unit}</Text> : null}
         </View>
         {note ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>

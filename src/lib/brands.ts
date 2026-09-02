@@ -129,6 +129,25 @@ export type Brand = {
    */
   supportEmail: string;
   /**
+   * The two documents sign-up asserts you agree to.
+   *
+   * `app/welcome.tsx` printed "By continuing you agree to the Terms & Privacy
+   * Policy" and there was no route to either, from that screen or from anywhere
+   * else in the app: consent was asserted to documents the person could not
+   * read before agreeing or afterwards. The only legal text a member could
+   * reach was a four-sentence paraphrase on the Settings screen, written by us.
+   *
+   * Both files ship in `web/` and are served at this brand's own site — the App
+   * Store listing's Privacy Policy URL is `privacy.html` on it. They are stated
+   * per brand rather than derived from `webOrigin` for the same reason
+   * `supportEmail` is: a chain may keep its policies on a different host
+   * entirely, and a derived URL that 404s is worse than one somebody had to
+   * write down. A chain's member must also never be sent to their supplier's
+   * policy, which is what a shared constant would have done.
+   */
+  privacyUrl: string;
+  termsUrl: string;
+  /**
    * This brand's `google-services.json`, or null to use app.json's.
    *
    * Android push is not portable between brands. A Firebase project's
@@ -174,6 +193,10 @@ export const BRANDS: Record<string, Brand> = {
     // screens and across web/. Unchanged, deliberately, for the same reason the
     // bundle ids above are unchanged: this is the address in the wild.
     supportEmail: 'support@repplefitness.com',
+    // The exact URLs already registered as this app's Privacy Policy and Terms
+    // in both store listings, and already served from web/ in this repo.
+    privacyUrl: 'https://repplefitness.com/privacy.html',
+    termsUrl: 'https://repplefitness.com/terms.html',
     androidGoogleServices: null,
   },
 
@@ -201,6 +224,8 @@ export const BRANDS: Record<string, Brand> = {
     webOrigin: 'https://example.com',
     linkHosts: ['example.com', 'www.example.com'],
     supportEmail: 'support@example.com',
+    privacyUrl: 'https://example.com/privacy.html',
+    termsUrl: 'https://example.com/terms.html',
     androidGoogleServices: './google-services.example.json',
   },
 };

@@ -31,6 +31,85 @@ export function fmtDay(iso: string): string {
   return d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+/**
+ * "Today", "Tomorrow", or the day as the reader's own locale writes it.
+ *
+ * The fifth, sixth, seventh and eighth copies of this were four private
+ * `dayLabel` helpers — one each in bookings.tsx, classes.tsx, standing.tsx and
+ * messages.tsx — all of them ending
+ *
+ *     return `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
+ *
+ * with `DOW` a hardcoded English array above them. That string is wrong twice
+ * over for most readers: the weekday is in a language they may not use, and
+ * `9/12` is 9 December in Britain and 12 September in the United States. It was
+ * interpolated into every cancellation confirm and every "not cancelled" alert
+ * on those four screens, which is to say into the sentences where being wrong
+ * about which day it is costs somebody a session and a fee.
+ *
+ * `attendance.tsx` documented removing exactly this pattern from a fifth file.
+ * This is the shared version, so there is no sixth.
+ *
+ * `now` is a parameter so the boundary can be argued with in a test rather than
+ * inferred from whichever machine and whichever hour the test runs on. The
+ * comparison is on the local calendar date, not on a 24-hour difference: 23:00
+ * tonight and 01:00 tomorrow are one day apart to a reader and two hours apart
+ * to arithmetic.
+ *
+ * "Today" and "Tomorrow" stay English words because every string on those four
+ * screens is an English literal and this file cannot translate the sentence
+ * they sit in. The DATE is the reader's own, which is the half that was wrong.
+ */
+export function fmtRelativeDay(iso: string, now: Date = new Date()): string {
+  const d = localDate(iso);
+  if (!d) return '—';
+  const sameLocalDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameLocalDay(d, now)) return 'Today';
+  const tm = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  if (sameLocalDay(d, tm)) return 'Tomorrow';
+  return d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+/**
+ * The twelve short month names, in the reader's own language.
+ *
+ * For a PICKER, which is the one place a list of month names is still the right
+ * shape — a date-of-birth wheel scrolls through months and cannot be a
+ * formatted string. Everywhere else the whole date goes through a formatter and
+ * this should not be reached.
+ *
+ * Indexed the way `Date#getMonth` is: 0 is January. Built from a real date in
+ * each month rather than from an array of literals, because an array of
+ * literals is precisely what two screens in this app carried and neither of
+ * them was in the reader's language.
+ *
+ * Falls back to the English abbreviations only when `Intl` cannot be asked at
+ * all — a Hermes build without ICU — for the same reason `FALLBACK_LOCALE`
+ * exists: something must be written, and this is what the app already wrote.
+ */
+export function monthNamesShort(locale: string = appLocale()): string[] {
+  try {
+    const f = new Intl.DateTimeFormat(locale, { month: 'short' });
+    // Day 15 rather than day 1: no calendar this app is shown in shifts a
+    // mid-month date into a neighbouring month, and a day-1 date in a
+    // non-Gregorian calendar can.
+    return Array.from({ length: 12 }, (_, m) => f.format(new Date(2026, m, 15)));
+  } catch {
+    return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  }
+}
+
+/** A full date with its year — "14 Aug 2026", "Aug 14, 2026" — as the reader
+ *  writes it. Read through `localDate` for the same reason `fmtDay` is: a bare
+ *  `YYYY-MM-DD` parsed as UTC midnight reads back as the day before, west of
+ *  Greenwich, and a date of birth is exactly such a column. */
+export function fmtFullDay(iso: string): string {
+  const d = localDate(iso);
+  if (!d) return '—';
+  return d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 /** A wall-clock time as the reader's own locale writes it. */
 export function fmtTime(iso: string): string {
   const d = new Date(iso);

@@ -322,11 +322,16 @@ export function waitlistLine(position: number, waiting: number): string {
   return `You're ${ordinal(position)} in line of ${waiting}. The slot goes to whoever is in front of you.`;
 }
 
+/** Anything that occupies the coach for a stretch of time. A `TrainingSession`
+ *  is one; so is a class the coach teaches, and the whole point of naming the
+ *  shape is that the guard below cannot tell them apart and must not. */
+export interface BusySpan { startsAt: string; durationMin: number }
+
 /** Whether a proposed slot overlaps any existing session for the trainer. */
 export function overlaps(
   startsAt: string,
   durationMin: number,
-  existing: TrainingSession[]
+  existing: readonly BusySpan[]
 ): boolean {
   const s = Date.parse(startsAt);
   const e = s + durationMin * 60_000;
@@ -335,4 +340,180 @@ export function overlaps(
     const xe = xs + x.durationMin * 60_000;
     return s < xe && xs < e;
   });
+}
+
+/* ── How much bookable diary is left ──────────────────────────────────────
+ *
+ * Open slots are written four weeks at a time by a button a coach has to
+ * remember to press. The standing-appointment feature named this pattern as the
+ * defect it was built to fix — "what a coach did instead was press Generate …
+ * and press Generate again next month" — and fixed it for series only.
+ *
+ * The failure is silent and total. When the window empties, every client opens
+ * the booking screen and sees nothing available, bookings stop, and no screen
+ * anywhere says why. A coach back from three weeks away reads an empty diary as
+ * a demand problem.
+ *
+ * There is still nothing scheduled that extends the window — that needs a job,
+ * and a job is a deploy. What is here is the part that can ship without one:
+ * knowing, and saying, when the window is running out.
+ */
+
+/**
+ * The state of a coach's bookable window.
+ *
+ * 'unknown' is a first-class answer and the reason this returns a union rather
+ * than a number. An empty session list under `LoadStatus 'error'` is a read
+ * that did not happen, and a screen that turned that into "you have no open
+ * slots" would send a coach to regenerate a diary that is already full — which
+ * `generateSlots` itself refuses to do for exactly this reason.
+ *
+ * 'idle' is the coach who has no weekly availability set at all. They are not
+ * relying on generated slots, so nothing here is news to them and nothing is
+ * said.
+ */
+export type SlotWindowState = 'unknown' | 'idle' | 'empty' | 'ending' | 'healthy';
+
+export interface SlotWindow {
+  state: SlotWindowState;
+  /** Open slots from now on. Zero is only meaningful under 'empty'. */
+  open: number;
+  /** When the furthest-ahead open slot starts, or null when there is none. */
+  lastAt: string | null;
+  /** Whole days from now until that slot, or null when there is none. Floored,
+   *  so "runs out in 2 days" is never optimistic. */
+  daysLeft: number | null;
+}
+
+/** How few days of bookable diary counts as running out. A week: long enough
+ *  that a coach who reads it on Monday has the whole week to act, short enough
+ *  that it is not on screen for most of a month and stops being read. */
+export const SLOT_WARN_DAYS = 7;
+
+export function openSlotWindow(
+  sessions: readonly { startsAt: string; status?: string | null }[],
+  opts: { known: boolean; hasWeekly: boolean; now?: number; warnDays?: number },
+): SlotWindow {
+  const now = opts.now ?? Date.now();
+  const warnDays = opts.warnDays ?? SLOT_WARN_DAYS;
+  // Order matters. An unread diary is unknown whatever else is true, and a
+  // coach with no weekly slots is told nothing even when the read succeeded.
+  if (!opts.known) return { state: 'unknown', open: 0, lastAt: null, daysLeft: null };
+  const future = sessions
+    .filter((s) => s.status === 'available')
+    .map((s) => Date.parse(s.startsAt))
+    .filter((ms) => isFinite(ms) && ms >= now)
+    .sort((a, b) => a - b);
+  const open = future.length;
+  const lastMs = open > 0 ? future[future.length - 1] : null;
+  const lastAt = lastMs === null ? null : new Date(lastMs).toISOString();
+  const daysLeft = lastMs === null ? null : Math.floor((lastMs - now) / 86_400_000);
+  if (!opts.hasWeekly) return { state: 'idle', open, lastAt, daysLeft };
+  if (open === 0) return { state: 'empty', open, lastAt, daysLeft };
+  return { state: (daysLeft as number) <= warnDays ? 'ending' : 'healthy', open, lastAt, daysLeft };
+}
+
+/**
+ * What to say about that window, or null when there is nothing worth saying.
+ *
+ * Null for 'unknown' as well as for the two healthy states, and that is the
+ * important one: silence is right where a guess would be wrong. The screen
+ * already tells the coach their calendar could not be read; a second sentence
+ * about a slot count nobody knows would be inventing one.
+ */
+export function slotWindowLine(w: SlotWindow): string | null {
+  if (w.state === 'empty') {
+    return 'You have weekly availability set and no open slots left, so nobody can book you. Clients see an empty booking screen and nothing tells them why.';
+  }
+  if (w.state === 'ending') {
+    const d = w.daysLeft ?? 0;
+    const when = d <= 0 ? 'today' : d === 1 ? 'tomorrow' : `in ${d} days`;
+    return `Your last open slot is ${when}. After that clients see nothing available, and nothing on their screen says why.`;
+  }
+  return null;
+}
+
+/* ── Classes and one-to-ones did not know the other existed ───────────────
+ *
+ * `overlaps` is the double-booking guard the whole booking side rests on, and
+ * `addSession` called it against the `sessions` list alone. Classes live in
+ * `gym_classes` behind a separate provider the coach's calendar never asked, so
+ * `generateSlots` would open a bookable PT hour on top of the class the coach
+ * was running, a client would take it, and both parties would turn up.
+ *
+ * What follows is the selection — which classes are the reader's, and which of
+ * those are in the way. It is deliberately conservative in one direction and
+ * honest about the other:
+ *
+ *   A class recorded against this coach BLOCKS. That is the case the defect is
+ *   about.
+ *
+ *   A class recorded against NOBODY cannot block, and cannot be dismissed
+ *   either. Part 165 states the reason: "Every class already on the board has
+ *   `trainer_id` NULL", because studio-web's Add a class wrote free-text
+ *   `instructor` and never the id. Blocking on those would stop a coach opening
+ *   any hour in which any colleague teaches anything; ignoring them silently
+ *   would be the app claiming a clear hour it has not checked. So they are
+ *   returned separately and the screen says so.
+ */
+
+/** A class as this guard needs to see it. A structural subset of the app's
+ *  `GymClass`, so nothing here imports the whole timetable module. */
+export interface ClassSpan {
+  id: string;
+  title: string;
+  startsAt: string;
+  durationMin: number;
+  trainerId?: string | null;
+  status?: string;
+}
+
+export interface ClassClash {
+  /** Classes this coach is recorded as teaching, in the way. These block. */
+  mine: ClassSpan[];
+  /** Classes in the way that are recorded against nobody. These do not block,
+   *  and the coach is told they could not be ruled out. */
+  unattributed: ClassSpan[];
+}
+
+/**
+ * Which classes stand in the way of a proposed one-to-one.
+ *
+ * A CANCELLED class is not in the way. The room never opened, nobody is
+ * teaching it, and treating it as an obstacle would leave the coach unable to
+ * use an hour the gym gave back to them.
+ */
+export function classClashes(
+  startsAt: string,
+  durationMin: number,
+  classes: readonly ClassSpan[],
+  uid: string | null,
+): ClassClash {
+  const live = classes.filter((c) => c.status !== 'cancelled');
+  const hit = live.filter((c) => overlaps(startsAt, durationMin, [c]));
+  return {
+    mine: uid ? hit.filter((c) => c.trainerId === uid) : [],
+    // Not "everything that is not mine". A colleague's class is their business
+    // and their room; it is the ones NOBODY is recorded against that this
+    // cannot rule in or out.
+    unattributed: hit.filter((c) => !c.trainerId),
+  };
+}
+
+/**
+ * What to say when the class timetable could not be consulted, or when it could
+ * and something unattributed was in the way. Null when there is nothing to add.
+ *
+ * Never claims the hour is clear. That is the whole job: `known` false means the
+ * check did not happen, and a screen that said nothing would be reporting a
+ * clean diary it never read.
+ */
+export function classCheckCaveat(known: boolean, unattributed: number): string | null {
+  if (!known) {
+    return 'Your class timetable could not be read, so this was not checked against the classes you teach.';
+  }
+  if (unattributed > 0) {
+    return `${unattributed} class${unattributed === 1 ? '' : 'es'} at that time ${unattributed === 1 ? 'has' : 'have'} no coach recorded against ${unattributed === 1 ? 'it' : 'them'}, so ${unattributed === 1 ? 'it' : 'they'} could not be ruled in or out.`;
+  }
+  return null;
 }

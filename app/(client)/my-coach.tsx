@@ -46,7 +46,7 @@
 // instead, where their former coach's profile still is.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BRAND } from '../../src/lib/brands';
-import { View, Text, ScrollView, Image, TextInput, Pressable, Alert } from 'react-native';
+import { View, Text, ScrollView, Image, TextInput, Pressable, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -70,6 +70,13 @@ import {
 } from '../../src/lib/reviews';
 import { fetchClientCoachBrand, brandInputFor, type ClientCoachBrand } from '../../src/ui/coachBrand';
 import { clientBrandNote, resolveClientBrand } from '../../src/lib/coachBrand';
+import { EndReasonSheet } from '../../src/ui/EndReasonSheet';
+import {
+  endCoachingWithReason, endCoaching,
+  CLIENT_END_REASONS, CLIENT_END_REASON_LABEL, CLIENT_END_REASON_NOTE, CLIENT_END_EXPLAINER,
+  CLIENT_END_CONFIRM_TITLE, clientEndConfirmBody, clientEndOutcomeLine,
+  type EndReason,
+} from '../../src/lib/endCoaching';
 
 interface CoachProfile {
   id: string;
@@ -113,6 +120,12 @@ export default function MyCoach() {
   const [brand, setBrand] = useState<ClientCoachBrand | null>(null);
 
   const [open, setOpen] = useState(false);
+  // Leaving. `endCoaching` lived only on the Find a Trainer directory — the
+  // marketplace — so a member who wanted out had to open a shop to find the
+  // exit, and it was the one-argument form, so the only churn reason ever
+  // recorded was the coach's belief about somebody nobody had asked.
+  const [leaving, setLeaving] = useState(false);
+  const [leaveBusy, setLeaveBusy] = useState(false);
   const [rating, setRating] = useState<number | null>(null);
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
@@ -225,6 +238,52 @@ export default function MyCoach() {
   };
 
   const go = (route: string) => router.push(route as never);
+
+  /**
+   * Leave, and say why if you want to.
+   *
+   * One server call, not two. `endCoachingWithReason` exists precisely because
+   * two calls have a state between them — ended, unexplained — that every
+   * dropped connection reaches, and the ending is the only moment the question
+   * makes sense. Skipping is a real answer and takes the same path with no
+   * reason attached, through `endCoaching`, so a member who wants out and wants
+   * to say nothing is not held up by a write about their feelings.
+   *
+   * Nothing here is optimistic: the screen is only emptied on the server's own
+   * answer, and `clientEndOutcomeLine` says which of the three things happened.
+   */
+  const doLeave = async (reason: EndReason | null, note: string | null) => {
+    if (leaveBusy) return;
+    setLeaveBusy(true);
+    const res = reason
+      ? await endCoachingWithReason(coach?.id ?? '', reason, note)
+      : await endCoaching(coach?.id ?? '');
+    setLeaveBusy(false);
+    if (!res.ok) {
+      Alert.alert('Not ended', `${res.reason}\n\nThey are still your coach and nothing has changed.`);
+      return;
+    }
+    setLeaving(false);
+    Alert.alert(
+      res.ended ? 'You have left' : 'Nothing to end',
+      clientEndOutcomeLine(res.ended, reason != null, (res as { reasonStored?: boolean }).reasonStored === true),
+      [{ text: 'Done', onPress: () => { setTick((n) => n + 1); void load(); } }],
+    );
+  };
+
+  const confirmLeave = () => {
+    Alert.alert(
+      CLIENT_END_CONFIRM_TITLE,
+      clientEndConfirmBody(coach?.name),
+      [
+        { text: 'Stay', style: 'cancel' },
+        // Straight to the reason sheet rather than ending here. The sheet's own
+        // Skip button is the way out that records nothing, and it is a
+        // different answer from a reason — see src/ui/EndReasonSheet.tsx.
+        { text: 'Continue', style: 'destructive', onPress: () => setLeaving(true) },
+      ],
+    );
+  };
 
   // Whose brand this client's app wears, decided in one place.
   //
@@ -546,6 +605,24 @@ export default function MyCoach() {
               <ListRow icon="pencil" title="Their Documents" note="Waivers and forms they ask you to read" onPress={() => go('/(client)/coach-documents')} />
             </Section>
 
+            {/* ── the way out ────────────────────────────────────────────
+                The only `endCoaching` call in the client app was on
+                app/(client)/trainers.tsx — the marketplace — so a member who
+                wanted to leave had to open a directory of other coaches to find
+                the exit. It is here now, on the screen about the coach they
+                actually have, under everything else on the page rather than
+                beside the things they use every day. */}
+            <Section>
+              <SectionHead title="Ending It" />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                You can stop being coached by them at any time. Nothing you have logged is deleted, and you can be
+                coached by them again later if you both want that.
+              </Text>
+              <View style={{ flexDirection: 'row' }}>
+                <Ghost label="Leave This Coach" onPress={confirmLeave} />
+              </View>
+            </Section>
+
             <Section>
               <SectionHead title="What They Can See" />
               {/* Said here rather than left to be discovered. A client is
@@ -562,6 +639,25 @@ export default function MyCoach() {
           </>
         )}
       </ScrollView>
+
+      {/* The same sheet the coach's side uses, with the member's own wording
+          and the same reason IDS — so a churn list can hold a client's own
+          account beside a coach's guess, which is the distinction
+          `reasonAttribution` exists to keep. */}
+      <Modal visible={leaving} animationType="slide" onRequestClose={() => setLeaving(false)}>
+        <EndReasonSheet
+          name={coach?.name || 'your coach'}
+          heading="Why you are leaving"
+          verb={leaveBusy ? 'Leaving…' : 'Leave and Tell Them Why'}
+          explainer={CLIENT_END_EXPLAINER}
+          notePlaceholder="Anything you want them to know, in your own words."
+          reasons={CLIENT_END_REASONS}
+          labels={CLIENT_END_REASON_LABEL}
+          notes={CLIENT_END_REASON_NOTE}
+          onCancel={() => setLeaving(false)}
+          onDone={(reason, note) => { void doLeave(reason, note); }}
+        />
+      </Modal>
     </SafeAreaView>
   );
 }

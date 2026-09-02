@@ -823,12 +823,58 @@ export async function returnToWaitlist(sb: Queryable, bookingId: string): Promis
   assertWrote('Putting that booking back on the waiting list', r);
 }
 
-/** Put a member on a class at the desk — a walk-in, or someone who phoned. */
-export async function bookOnto(sb: Queryable, classId: string, userId: string): Promise<void> {
-  const { error } = await sb
-    .from('class_bookings')
-    .insert({ class_id: classId, user_id: userId, status: 'booked' });
+/** What the desk is told after putting somebody on a class. */
+export type DeskBooking = 'booked' | 'waitlist';
+
+/**
+ * Put a member on a class at the desk — a walk-in, or someone who phoned.
+ *
+ * ── Why this is an RPC and was a direct insert ───────────────────────────
+ *
+ * The insert never worked. `class_bookings` has no INSERT policy for staff —
+ * `class_bookings_owner_w` is UPDATE only — so this function had no caller
+ * anywhere in the repository and would have been refused by RLS if it had one.
+ * The console could promote somebody off a waiting list it had no way of
+ * putting them on, and every walk-in and phone booking was invisible to fill
+ * rate, show rate and class pay.
+ *
+ * Adding the missing INSERT policy would have been the smaller change and the
+ * wrong one. Capacity is enforced in exactly one place in this product — inside
+ * `book_class`, which counts confirmed seats under a row lock and writes
+ * `waitlist` when the class is full. Nothing else does: there is no constraint
+ * and no trigger. An insert from the console would therefore have written
+ * `status: 'booked'` straight past capacity, so the first walk-in booked at the
+ * desk would silently over-sell a full class and step over the waiting list
+ * that the same screen exists to work.
+ *
+ * `book_class_for` (supabase/parts/492) is `book_class` with the member named
+ * by the desk rather than taken from `auth.uid()`, and the same lock and count
+ * around it.
+ *
+ * ── What it returns, and why the caller has to look ──────────────────────
+ *
+ * 'booked' or 'waitlist'. A desk that assumes the first has told somebody they
+ * have a place on a class that was already full, which is worse than not being
+ * able to book them at all — they will turn up.
+ */
+export async function bookOnto(sb: Queryable, classId: string, userId: string): Promise<DeskBooking> {
+  // `rpc` is optional on `Queryable` because most of this module only reads
+  // tables, and a client that cannot call functions cannot do this at all —
+  // said rather than crashed on a property access.
+  if (typeof sb.rpc !== 'function') {
+    throw new Error('This client cannot call database functions, so nobody was put on that class.');
+  }
+  const { data, error } = await sb.rpc('book_class_for', { p_class: classId, p_user: userId });
   if (error) throw error;
+  if (data === 'booked' || data === 'waitlist') return data;
+  // 'notfound' is a class that is gone or unscoped, and anything else is a
+  // shape this function does not recognise. Both are refusals and neither is a
+  // booking, so neither may be reported as one.
+  throw new Error(
+    data === 'notfound'
+      ? 'That class could not be found, so nobody was put on it.'
+      : 'The gym did not say whether that booking was taken, so it is not being reported as one.',
+  );
 }
 
 /* ── derived ───────────────────────────────────────────────────────────────── */

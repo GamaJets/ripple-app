@@ -19,7 +19,7 @@ import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityInd
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
-  buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryData, slotsFor,
+  buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryFromWeek, planWeek, slotsFor,
   planGaps, mealAllergens, allergenGapNote, allergenLabel,
   DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal,
 } from '../../src/lib/meals';
@@ -30,6 +30,10 @@ import { useClientData } from '../../src/ui/clientData';
 import { useWearables } from '../../src/ui/wearables';
 import { caloriesLeft, caloriesNote, dayBurn, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
 import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
+// The one place the coach's adjust and the day type are folded together. The
+// Food Log reads its target through the same file — see src/lib/dayTarget.ts,
+// which exists because these two screens computed the same day two ways.
+import { dayAdjust } from '../../src/lib/dayTarget';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon } from '../../src/ui/Icon';
@@ -263,6 +267,16 @@ export default function Nutrition() {
   const [pendingNote, setPendingNote] = useState<string | null>(null);
   const [pendingTitle, setPendingTitle] = useState<string | undefined>(undefined);
   const [pendingVia, setPendingVia] = useState<'search' | 'barcode' | 'photo' | 'manual'>('manual');
+  // More described foods waiting their turn behind the one on screen.
+  //
+  // There was no queue here. `setPending(gaps[0])` was the whole of it, so
+  // "2 eggs, toast and a coffee" with a macro missing on each offered ONE sheet
+  // and dropped the other two — along with the text that would have been needed
+  // to type them again. app/(client)/foodlog.tsx has handled the identical case
+  // since it was written, and this is that, not a second idea about it: the
+  // first is on screen, the rest wait behind it, and closing the sheet advances
+  // the queue rather than discarding it.
+  const [queue, setQueue] = useState<FoodFacts[]>([]);
   const photoLog = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera to log a meal by photo.'); return; }
@@ -309,8 +323,9 @@ export default function Nutrition() {
       setPendingVia('manual');
       setPendingPhoto(null);
       setPendingTitle('Check This One');
-      setPendingNote('Read from what you typed. Some of the macros did not come back, so they are blank rather than nought — fill them in and this can be logged.');
+      setPendingNote(`Read from what you typed. Some of the macros did not come back, so they are blank rather than nought — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
       setPending(gaps[0]);
+      setQueue(gaps.slice(1));
     }
     const items = parsed ? parsed.filter((it) => it.protein != null && it.carbs != null && it.fat != null) : null;
     if (items && items.length) {
@@ -342,13 +357,12 @@ export default function Nutrition() {
   // the other two days would come to without the client having to tap each one
   // to find out.
   const CYCLE_KCAL = 250;
-  const adjustFor = (d: typeof dayType) => {
-    const cycleDelta = d === 'training' ? CYCLE_KCAL : d === 'rest' ? -CYCLE_KCAL : 0;
-    return (coachAdjust || cycleDelta)
-      ? { kcalDelta: (coachAdjust?.kcalDelta || 0) + cycleDelta, proteinDelta: coachAdjust?.proteinDelta, carbDelta: coachAdjust?.carbDelta, fatDelta: coachAdjust?.fatDelta }
-      : undefined;
-  };
-  const cyclingAdjust = adjustFor(dayType);
+  // Folded by `dayAdjust` in src/lib/dayTarget.ts rather than here, so the Food
+  // Log applies the coach's adjust the same way this tab does. It is the same
+  // arithmetic it always was; what changed is that there is now one copy of it.
+  const adjustFor = (d: typeof dayType) =>
+    dayAdjust(coachAdjust ?? null, d === 'training' ? CYCLE_KCAL : d === 'rest' ? -CYCLE_KCAL : 0);
+  const cyclingAdjust = useMemo(() => adjustFor(dayType), [coachAdjust, dayType]);
 
   // TF-29. The calorie target is worked back from the client's own target
   // weight and date where they have set one, and falls back to the goal enum —
@@ -357,13 +371,29 @@ export default function Nutrition() {
   // hands its input straight to `macrosFor`: doing it any other way would have
   // scaled the meals below to one calorie figure while the target above them
   // showed another, which is the bug at the foot of src/lib/nutrition.ts.
-  const openWeightGoal = goals.find((g) => g.kind === 'weight' && !g.achievedAtISO) ?? null;
-  const energyPlan = energyPlanFor({
+  const openWeightGoal = useMemo(() => goals.find((g) => g.kind === 'weight' && !g.achievedAtISO) ?? null, [goals]);
+  // ── and why every one of these is memoised ────────────────────────────────
+  //
+  // `input` was an object literal built on every render, so the `useMemo` on
+  // `snackIdeas` below could never hit and the grocery list had no memo at all.
+  // Typing one character into the "Describe it" box calls `setNl`, which
+  // re-renders — and a re-render rebuilt a whole synthetic week of meals plus
+  // the department aggregation, whether or not the grocery sheet was even open,
+  // on the tab a member uses standing in a kitchen.
+  //
+  // The chain has to be memoised end to end or none of it holds: a fresh
+  // `energyPlan` or `coachOverride` object makes `input` fresh, and a fresh
+  // `input` makes everything downstream fresh again. `nowHour` is the only way
+  // the clock gets in — an hourly bucket rather than `Date.now()`, so a
+  // projection that moves by milliseconds cannot re-trigger the week on every
+  // keystroke.
+  const nowHour = Math.floor(Date.now() / 3600000);
+  const energyPlan = useMemo(() => energyPlanFor({
     goal: openWeightGoal,
     weightSeries: c.weightSeries,
     tdeeKcal: maintenanceFor({ weightKg: w, bodyFatPct: bf, activity: c.activity }).tdee,
     nowMs: Date.now(),
-  });
+  }), [openWeightGoal, c.weightSeries, w, bf, c.activity, nowHour]);
   const observedPace = observedRateKg(energyPlan);
 
   // The week the coach composed (part 133 / src/lib/mealPlan.ts). It supersedes
@@ -377,11 +407,12 @@ export default function Nutrition() {
   const coachPlan = coachAdjust?.plan ?? null;
   const coachPlanCurrent = !!coachPlan && !planStale(coachPlan, diet, c.avoid, c.mealsPerDay).stale;
   const coachDay = planDayIndex(new Date().toISOString());
-  const coachOverride = coachPlanCurrent && coachDay != null
+  const coachOverride = useMemo(() => (coachPlanCurrent && coachDay != null
     ? planDayOverride(coachPlan!, coachDay)
-    : (coachAdjust?.mealOverride ?? {});
-  const input = { id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...coachOverride, ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, energyPlan };
-  const { plan, target, tot } = buildPlan(input);
+    : (coachAdjust?.mealOverride ?? {})), [coachPlanCurrent, coachDay, coachPlan, coachAdjust]);
+  const input = useMemo(() => ({ id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...coachOverride, ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, energyPlan }),
+    [c.id, w, bf, c.activity, c.goal, diet, c.mealsPerDay, coachOverride, override, cyclingAdjust, c.avoid, energyPlan]);
+  const { plan, target, tot } = useMemo(() => buildPlan(input), [input]);
   // Snacks are ideas, not plan slots: they do not move the targets or the
   // macro split above, because a snack nobody has eaten yet is not a
   // commitment. Logging one is what counts it, like any other food.
@@ -389,7 +420,16 @@ export default function Nutrition() {
   const planHasSnacks = plan.some((m) => m.slot === 'Snack');
   const coachPick = (pos: number) => coachOverride[pos] != null && override[pos] == null;
   const swap = (pos: number, slot: PlannedMeal['slot'], idx: number) => setOverride({ ...override, [pos]: swapIndex(diet, slot, idx) });
-  const groc = groceryData(input);
+  // The seven days the member is actually shown, decided ONCE and used by both
+  // the week view below and the grocery list. `coachWeekDay` is the coach's
+  // written day where there is one and null where there is not, which is the
+  // rule `planWeek` follows day by day. Before this the list was built from a
+  // private `planForDay` that read neither the coach's week nor the member's
+  // own swaps, so a member shopped for meals nobody had shown them.
+  const coachWeekDay = (d: number): Record<number, number> | null =>
+    (coachPlanCurrent ? planDayOverride(coachPlan!, d) : null);
+  const week = useMemo(() => planWeek(input, coachWeekDay), [input, coachPlanCurrent, coachPlan]);
+  const groc = useMemo(() => groceryFromWeek(week), [week]);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
   const grocKeys = DEPTS.flatMap((d) => (groc.byDept[d] || []).map((it) => d + '|' + it.item));
   const grocChecked = grocKeys.filter((k) => checked[k]).length;
@@ -415,11 +455,9 @@ export default function Nutrition() {
   // `idx + d` was a synthetic week — the same meal shifted along the catalogue
   // one place per day, which is a pattern rather than a plan. Where the coach
   // has written a real week, show theirs.
-  const weekPlans = view === 'week' ? WEEKD.map((_, d) => {
-    if (coachPlanCurrent) return buildPlan({ ...input, mealOverride: planDayOverride(coachPlan!, d) });
-    const ov: Record<number, number> = {}; plan.forEach((m) => { ov[m.pos] = m.idx + d; });
-    return buildPlan({ ...input, mealOverride: ov });
-  }) : [];
+  const weekPlans = view === 'week'
+    ? week.map((p) => ({ plan: p, tot: { K: p.reduce((a, m) => a + m.K, 0) } }))
+    : [];
 
   const G = layout.gutter;
   const eaten = fl.consumed;
@@ -1124,7 +1162,15 @@ export default function Nutrition() {
         photoUri={pendingPhoto}
         title={pendingTitle}
         note={pendingNote}
-        onClose={() => { setPending(null); setPendingPhoto(null); setPendingNote(null); setPendingTitle(undefined); }}
+        onClose={() => {
+          // The next described food that could not be read whole, if there is
+          // one. Closing the sheet on a queue would silently drop the rest of
+          // what somebody typed — see `queue` above.
+          const [next, ...rest] = queue;
+          setPending(next ?? null);
+          setQueue(rest);
+          if (!next) { setPendingPhoto(null); setPendingNote(null); setPendingTitle(undefined); }
+        }}
         onLog={async (f) => {
           // The same three outcomes, said the same way. A row the server
           // refuses is not on the record, and the sheet closing is not an

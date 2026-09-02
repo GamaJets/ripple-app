@@ -114,10 +114,28 @@ else
     CODE="$(curl -s -o /tmp/.fnprobe -w '%{http_code}' -X POST "$URL/functions/v1/$name" \
       -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
       -H "Content-Type: application/json" -d '{}' || echo 000)"
-    if [ "$CODE" -ge 500 ] 2>/dev/null || [ "$CODE" = "000" ]; then
-      printf '   %-20s HTTP %s  %s\n' "$name" "$CODE" "$(head -c 160 /tmp/.fnprobe)" >&2
-      echo "     A 5xx to an empty body is a module that did not evaluate." >&2
+    # A 5xx is only evidence of a dead module when the platform produced it.
+    # A handler that fails CLOSED answers 5xx too — sweep-stale-visits returns
+    # 503 {"ok":false,"error":"not configured"} on an unset secret, which is the
+    # module having evaluated and done exactly the right thing. Reporting that
+    # as a failed deploy is how a guard gets ignored, and an ignored guard is
+    # what let the 2 Sep hand-deploys through in the first place. So: a body
+    # this repo's own json() helper shaped — an object carrying "ok" — means the
+    # handler ran, whatever the status beside it.
+    BODY="$(head -c 400 /tmp/.fnprobe)"
+    HANDLED=0
+    case "$BODY" in *'"ok"'*) HANDLED=1;; esac
+    if [ "$CODE" = "000" ]; then
+      printf '   %-20s no answer at all\n' "$name" >&2
+      echo "     The function could not be reached. Nothing was proved either way." >&2
       FAILED+=("$name")
+    elif [ "$CODE" -ge 500 ] 2>/dev/null && [ "$HANDLED" -eq 0 ]; then
+      printf '   %-20s HTTP %s  %s\n' "$name" "$CODE" "$BODY" >&2
+      echo "     A 5xx that is not the handler's own answer is a module that did not evaluate." >&2
+      FAILED+=("$name")
+    elif [ "$CODE" -ge 500 ] 2>/dev/null; then
+      printf '   %-20s HTTP %s — the handler ran and refused: %s\n' "$name" "$CODE" "$BODY"
+      echo "     Deployed and evaluating. That refusal is the function's own, so read it." >&2
     else
       printf '   %-20s HTTP %s — the handler ran and answered\n' "$name" "$CODE"
     fi

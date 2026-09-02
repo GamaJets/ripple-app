@@ -12,7 +12,31 @@ import { isTimedSet } from './timedSets';
 
 const DAY = 86_400_000;
 // LOCAL calendar day (not UTC): an evening workout must count as today for the user even after its ISO timestamp rolls into tomorrow in UTC.
-const dayKey = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const dayKey = (iso: string) => keyOf(new Date(iso));
+
+/**
+ * A cursor for walking local calendar days backwards.
+ *
+ * Anchored at MIDDAY, not midnight, and stepped with `setDate` rather than by
+ * subtracting `DAY`. Both halves of that matter, and both were wrong.
+ *
+ * Subtracting a fixed 86,400,000 ms from local midnight assumes every local day
+ * is 24 hours long. Twice a year one is 23 and one is 25. On the 23-hour day,
+ * midnight minus a fixed day lands at 23:00 of the day BEFORE yesterday, so
+ * yesterday is never tested and the chain breaks on a day the member trained;
+ * on the 25-hour day the same instant lands at 01:00 of yesterday, which is the
+ * right day by luck rather than by rule. `setDate(getDate() - 1)` asks the
+ * calendar for the previous calendar day and gets it in every zone.
+ *
+ * Midday, because in a handful of zones (Chile, Cuba, Lord Howe) the clock
+ * springs forward AT midnight and 00:00 does not exist that day: `setHours(0)`
+ * silently returns 01:00. That still keys to the right day, but a cursor an
+ * hour from a boundary is a cursor waiting to cross one. Noon is twelve hours
+ * from either edge and no shift on earth is that large.
+ */
+const dayCursor = (now: number): Date => { const d = new Date(now); d.setHours(12, 0, 0, 0); return d; };
+const stepBack = (d: Date): Date => { d.setDate(d.getDate() - 1); return d; };
 
 /** Unique calendar days (YYYY-MM-DD) that have at least one workout, newest first. */
 export function activeDays(log: WorkoutEntry[]): string[] {
@@ -27,12 +51,11 @@ export function activeDays(log: WorkoutEntry[]): string[] {
 export function currentStreak(log: WorkoutEntry[], now: number = Date.now()): number {
   const days = new Set(activeDays(log));
   if (days.size === 0) return 0;
-  const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
-  let cursor = midnight.getTime();
+  const cursor = dayCursor(now);
   // If nothing today, allow the streak to be anchored at yesterday.
-  if (!days.has(dayKey(new Date(cursor).toISOString()))) cursor -= DAY;
+  if (!days.has(keyOf(cursor))) stepBack(cursor);
   let streak = 0;
-  while (days.has(dayKey(new Date(cursor).toISOString()))) { streak++; cursor -= DAY; }
+  while (days.has(keyOf(cursor))) { streak++; stepBack(cursor); }
   return streak;
 }
 
@@ -56,19 +79,22 @@ export function currentStreakFrozen(log: WorkoutEntry[], freezes: number = 0, no
   const daysArr = activeDays(log);
   if (daysArr.length === 0) return { streak: 0, freezesUsed: 0, frozen: [] };
   const days = new Set(daysArr);
-  const minActive = Math.min(...daysArr.map((d) => Date.parse(d + 'T00:00:00')));
-  const kOf = (ts: number) => dayKey(new Date(ts).toISOString());
-  const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
-  let cursor = midnight.getTime();
-  if (!days.has(kOf(cursor))) cursor -= DAY;
+  // `activeDays` sorts newest first, so the last entry is the oldest day on
+  // record. Compared as a key rather than as a parsed timestamp: two YYYY-MM-DD
+  // strings order the same way in every zone, and the previous
+  // `Date.parse(d + 'T00:00:00')` was a local parse being compared against a
+  // cursor that had just been stepped by a fixed 24 hours.
+  const minActiveKey = daysArr[daysArr.length - 1];
+  const cursor = dayCursor(now);
+  if (!days.has(keyOf(cursor))) stepBack(cursor);
   let streak = 0, used = 0, budget = Math.max(0, freezes);
   const frozen: string[] = [];
   while (true) {
-    if (days.has(kOf(cursor))) { streak++; cursor -= DAY; continue; }
+    if (days.has(keyOf(cursor))) { streak++; stepBack(cursor); continue; }
     if (streak === 0) break;          // no active day anchoring the chain yet
     if (budget <= 0) break;           // out of freezes — chain ends here
-    if (cursor <= minActive) break;   // nothing older to reach — don't waste a freeze
-    budget--; used++; frozen.push(kOf(cursor)); cursor -= DAY;
+    if (keyOf(cursor) <= minActiveKey) break; // nothing older to reach — don't waste a freeze
+    budget--; used++; frozen.push(keyOf(cursor)); stepBack(cursor);
   }
   return { streak, freezesUsed: used, frozen };
 }
@@ -80,9 +106,9 @@ export interface StreakRisk { atRisk: boolean; streak: number; trainedToday: boo
  */
 export function streakRisk(log: WorkoutEntry[], now: number = Date.now()): StreakRisk {
   const days = new Set(activeDays(log));
-  const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
-  const todayK = dayKey(new Date(midnight.getTime()).toISOString());
-  const yestK = dayKey(new Date(midnight.getTime() - DAY).toISOString());
+  const cursor = dayCursor(now);
+  const todayK = keyOf(cursor);
+  const yestK = keyOf(stepBack(cursor));
   const trainedToday = days.has(todayK);
   const streak = currentStreak(log, now);
   return { atRisk: !trainedToday && days.has(yestK) && streak >= 2, streak, trainedToday };

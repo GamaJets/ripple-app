@@ -36,7 +36,7 @@
 import type { WorkoutEntry } from './mockData';
 import type { BodyweightHistory } from './bodyweightSets';
 import { longestStreak, personalRecords } from './streaks';
-import { setLoadKg } from './bodyweightSets';
+import { isBodyweightSet, setLoadKg } from './bodyweightSets';
 
 export type BadgeKey =
   | 'first-rep' | 'on-a-roll' | 'week-warrior' | 'two-weeks' | 'unstoppable'
@@ -97,6 +97,15 @@ export interface BadgeFigures {
   hasCardio: boolean;
   /** Kilograms, always. The thresholds are a fixed mass. */
   totalVolumeKg: number;
+  /**
+   * Sets that carry the member's own bodyweight and that `setLoadKg` could not
+   * put a figure on, because the weight history it needed was not there.
+   *
+   * Counted rather than flagged so `badgeState` can tell two different silences
+   * apart: a member who has never done a pull-up loses nothing when the scans
+   * read fails, and a member whose log is pull-ups loses four badges.
+   */
+  unpricedBodyweightSets: number;
 }
 
 /**
@@ -112,13 +121,20 @@ export interface BadgeFigures {
  */
 export function badgeFigures(log: readonly WorkoutEntry[], history: BodyweightHistory = []): BadgeFigures {
   let totalVolumeKg = 0;
+  let unpricedBodyweightSets = 0;
   for (const e of log) {
     if (!e.sets) continue;
     for (let i = 0; i < e.sets.length; i++) {
       const [reps] = e.sets[i];
       if (!reps) continue;
       const kg = setLoadKg(e, i, e.sets[i], history, e.t);
-      if (kg == null || kg <= 0) continue;
+      if (kg == null || kg <= 0) {
+        // A set that IS bodyweight and came back unpriced is the app failing to
+        // read, not the member failing to lift. Counted so the screen can say
+        // "unknown" rather than "locked" about the badges it holds back.
+        if (isBodyweightSet(e, i)) unpricedBodyweightSets++;
+        continue;
+      }
       totalVolumeKg += reps * kg;
     }
   }
@@ -128,8 +144,21 @@ export function badgeFigures(log: readonly WorkoutEntry[], history: BodyweightHi
     prCount: personalRecords(log as WorkoutEntry[], history).length,
     hasCardio: log.some((e) => e.cardio),
     totalVolumeKg,
+    unpricedBodyweightSets,
   };
 }
+
+/**
+ * The badges whose thresholds are computed from set LOADS rather than from set
+ * COUNTS, and which a bodyweight set nobody could price therefore holds back.
+ *
+ * Volume is an obvious one. The two PR badges belong here for the same reason:
+ * `personalRecords` prices a bodyweight set through the same history, so
+ * without it a member's pull-up sessions never set a record at all.
+ */
+const BODYWEIGHT_SENSITIVE: ReadonlySet<BadgeKey> = new Set<BadgeKey>([
+  'one-tonne', 'ten-tonnes', 'record-breaker', 'pr-machine',
+]);
 
 /** Whether one badge's threshold is met by these figures. Monotone in every
  *  input — see the header, which is why 'earned' survives a partial read. */
@@ -158,10 +187,26 @@ export function badgeMet(key: BadgeKey, f: BadgeFigures): boolean {
  * bug this signature exists to make visible: under 'error' the log is empty,
  * every threshold evaluates false, and twelve badges render "Locked" to
  * somebody with a year of training.
+ *
+ * `bodyWhole` is the SECOND read this screen depends on and the one it forgot.
+ * Four of these badges are priced from the weight history, which comes from the
+ * scans; when that read fails the caller passes an empty history, every
+ * bodyweight set contributes nothing, and One Tonne, Ten Tonnes, Record Breaker
+ * and PR Machine all fall back under their thresholds. A whole log made
+ * `whole` true, so they printed as "Locked" — our failed read stated as the
+ * member's shortfall, which is exactly what the three-valued return exists to
+ * prevent.
+ *
+ * It only applies where it is true: a member with no bodyweight sets in the log
+ * loses nothing to a failed scans read, `unpricedBodyweightSets` is 0, and
+ * "Locked" stays an honest statement about them. It defaults to `true` because
+ * a caller that has no second read has nothing to be missing.
  */
-export function badgeState(key: BadgeKey, f: BadgeFigures, whole: boolean): BadgeState {
+export function badgeState(key: BadgeKey, f: BadgeFigures, whole: boolean, bodyWhole: boolean = true): BadgeState {
   if (badgeMet(key, f)) return 'earned';
-  return whole ? 'locked' : 'unknown';
+  if (!whole) return 'unknown';
+  if (!bodyWhole && f.unpricedBodyweightSets > 0 && BODYWEIGHT_SENSITIVE.has(key)) return 'unknown';
+  return 'locked';
 }
 
 /**

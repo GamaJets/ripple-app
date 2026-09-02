@@ -8,7 +8,7 @@
 //
 // Inviting is kept because it is the one action here that was always real: it
 // writes a `trainer_invites` row the invitee accepts in their own app.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,6 +17,7 @@ import { num } from '../../src/lib/format';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
+import { Fetched } from '../../src/ui/fetched';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { parseEmail } from '../../src/lib/csvImport';
@@ -47,6 +48,16 @@ export default function OwnerTrainers() {
   const [invBusy, setInvBusy] = useState(false);
   const [invErr, setInvErr] = useState<string | null>(null);
   const [sel, setSel] = useState<GymTrainer | null>(null);
+  /**
+   * When the roster last came back.
+   *
+   * Derived from the provider's own `status` rather than added to the provider,
+   * because 'ready' is the only moment the rows on screen are known to be
+   * current — `refresh()` puts it back to 'loading' and an error leaves it at
+   * 'error', so a failed retry cannot move the stamp.
+   */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => { if (trainersStatus === 'ready') setFetchedAt(Date.now()); }, [trainersStatus]);
 
   // The sheet closes when the invitation is ON THE SERVER, and not before.
   //
@@ -95,6 +106,7 @@ export default function OwnerTrainers() {
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching staff</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Trainers</Text>
+          <Fetched at={fetchedAt} onRefresh={refresh} busy={loading} />
         </View>
 
         {/* Sessions delivered leads, because it is the number that moves. */}

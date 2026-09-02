@@ -20,7 +20,7 @@
 //
 // The reads had the ordinary version: `sent` and `received` each swallowed their
 // query, so "no pending invitations" and "we could not check" looked the same.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -52,6 +52,11 @@ interface InvitesValue {
    *  `received` and the two accounts are NOT linked — the caller must not
    *  navigate the client onward as though they now have a coach. */
   acceptFailed: string[];
+  /** Ask the server again. Added for app/(client)/dashboard.tsx, whose failed
+   *  read tells the member "pull down to try again" — a sentence that needs
+   *  something behind the gesture. Safe to call at any time: the run it starts
+   *  cancels any older one still in flight. */
+  reload: () => void;
   /** Resolves true only once the invitation is on the server, where the person
    *  being invited can actually see it. */
   sendInvite: (email: string, mode: InviteMode) => Promise<boolean>;
@@ -120,6 +125,10 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
   //
   // It now re-runs whenever the session changes. `gen` guards against an older,
   // slower run finishing after a newer one and overwriting it.
+  // The effect's own `run`, held so `reload` can call it without the effect
+  // having to re-run — re-running it would tear down and re-add the auth
+  // subscription on every pull.
+  const runRef = useRef<() => void>(() => {});
   useEffect(() => {
     let gen = 0;
     let dead = false;
@@ -198,6 +207,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
       } catch { failed = true; /* leave received empty — 'error' below is what stops the screen calling it "no invitations" */ }
       if (!cancelled()) setStatus(failed ? 'error' : truncated ? 'partial' : 'ready');
     };
+    runRef.current = run;
     run();
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       // SIGNED_IN is the one that matters; the others keep the list honest when
@@ -279,7 +289,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ sent, received, status, acceptFailed, sendInvite, revokeInvite, acceptInvite, declineInvite }}>
+    <Ctx.Provider value={{ sent, received, status, acceptFailed, reload: () => runRef.current(), sendInvite, revokeInvite, acceptInvite, declineInvite }}>
       {children}
     </Ctx.Provider>
   );

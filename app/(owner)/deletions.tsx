@@ -42,6 +42,7 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import type { Theme } from '../../src/theme/tokens';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+import { Fetched } from '../../src/ui/fetched';
 
 /** A row of `pending_deletions`. Nulls are kept as nulls — see `fig`. */
 interface Pending {
@@ -99,6 +100,10 @@ export default function OwnerDeletions() {
   const [log, setLog] = useState<Actioned[] | null>(null);          // null = not loaded yet
   const [failed, setFailed] = useState(false);                      // the queue read itself failed
   const [busy, setBusy] = useState<string | null>(null);            // subject id being actioned
+  /** When the QUEUE last came back. The audit log fails independently and does
+   *  not move it: this screen is about a statutory clock, and the clock is the
+   *  queue. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     // The two reads fail INDEPENDENTLY and are handled separately on purpose.
@@ -132,6 +137,7 @@ export default function OwnerDeletions() {
         daysRemaining: typeof r.days_remaining === 'number' ? r.days_remaining : null,
       })));
       setFailed(false);
+      setFetchedAt(Date.now());
     } else {
       reportError('deletions.fetch', q.status === 'rejected' ? q.reason : q.value.error);
       setPending(null);
@@ -218,6 +224,10 @@ export default function OwnerDeletions() {
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Deletion Requests</Text>
         </View>
+
+        {/* A deletion request runs against a statutory clock, so how old this
+            read is, is part of the fact. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} style={{ marginTop: 0, marginBottom: sp.md }} />
 
         <Hero
           label="Waiting on You"

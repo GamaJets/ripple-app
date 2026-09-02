@@ -24,7 +24,7 @@
 //      without implying anybody has read it — the exact line
 //      src/lib/offlineQueue.ts · `unsentNote` walks, for the same reason.
 import {
-  OUTBOX_CAP, addItem, bumpTry, dropItem, inOrder, isOutboxKind, kindNoun, lapsedNote,
+  OUTBOX_CAP, OUTBOX_KINDS, addItem, bumpTry, dropItem, inOrder, isOutboxKind, kindNoun, lapsedNote,
   newItem, ofKind, outboxKey, outboxNote, partitionLapsed, readOutbox, type OutboxItem,
 } from './outbox';
 import { isPending } from './wellnessSync';
@@ -144,6 +144,26 @@ const UID = '11111111-1111-1111-1111-111111111111';
   ok(!/sent to your coach|delivered|read/i.test(one), 'and never implies anybody has seen it');
   ok(one.includes('this phone'), 'while making clear the work is not lost');
   eq(kindNoun('pt-approval').many, 'session approvals', 'every kind has a noun, so no sentence can be assembled without one');
+}
+
+// ── 6. A KIND WITH NO SENTENCE ───────────────────────────────────────────
+//
+// `OUTBOX_KINDS` is what app/(client)/dashboard.tsx walks to draw "still on
+// this phone" and "was not sent". A kind added to the union but not to the list
+// is an intent that queues, lapses and is discarded with nothing on any screen
+// about it — which is the whole failure these sentences were written for, so it
+// is asserted rather than trusted.
+{
+  eq(OUTBOX_KINDS.length, 3, 'the list has one entry per kind in the union');
+  for (const k of OUTBOX_KINDS) {
+    ok(isOutboxKind(k), `${k} is recognised coming back off the disk`);
+    const n = kindNoun(k);
+    ok(!!n.one && !!n.many, `${k} has a singular and a plural to be named by`);
+    ok((outboxNote(1, k) ?? '').includes(n.one), `${k} names itself in the waiting line`);
+    ok(lapsedNote(k).includes(n.one), `${k} names itself in the lapsed line`);
+  }
+  eq(outboxNote(0, 'message'), null, 'nothing waiting draws no line at all');
+  ok(!isOutboxKind('booking'), 'and a booking is still not a kind — see the header for why');
 }
 
 if (errors.length) {

@@ -53,8 +53,9 @@ import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
 import { deviceUnitNote } from '../../src/lib/unitPreference';
 import { useAuth } from '../../src/ui/auth';
-import { useAppLock } from '../../src/ui/appLock';
-import { lockSettingNote } from '../../src/lib/appLock';
+import { useAppLock, LOCK_PLATFORM } from '../../src/ui/appLock';
+import { openLegalDoc } from '../../src/ui/legal';
+import { lockSettingNote, lockMethodsLabel, lockSettingsLabel, defaultLockLabel } from '../../src/lib/appLock';
 import { restSoundNote, type SoundPlatform } from '../../src/lib/restTimer';
 import { SOUNDS_AVAILABLE } from '../../src/ui/sounds';
 import {
@@ -171,12 +172,21 @@ export default function Settings() {
   const st = useSettings();
   const auth = useAuth();
   const lock = useAppLock();
+  // The row's own name. `lock.label` is the real device word once the hardware
+  // has answered; before that, and when there is no hardware, it is the neutral
+  // one for this handset rather than 'Face ID' on a phone that has none.
+  const lockRowLabel = lock.available ? `Require ${lock.label}` : `Require ${defaultLockLabel(LOCK_PLATFORM)}`;
   // Turning the lock ON asks for a face first, inside setEnabled — enabling a
   // lock you cannot open is how somebody gets shut out of their own record.
   const toggleLock = async () => {
     if (!lock.available) {
+      // Was "Set up Face ID, Touch ID or a passcode in iOS Settings" on every
+      // platform — the identical failure SOUND_PLATFORM above exists to stop,
+      // one section down in the same file: an Android member sent looking for
+      // an Apple feature inside an Apple settings app. The vocabulary is the
+      // handset's now; see src/lib/appLock.ts.
       Alert.alert('Not available on this device',
-        'Set up Face ID, Touch ID or a passcode in iOS Settings, then this can be turned on.');
+        `Set up ${lockMethodsLabel(LOCK_PLATFORM)} in ${lockSettingsLabel(LOCK_PLATFORM)}, then this can be turned on.`);
       return;
     }
     const want = !lock.enabled;
@@ -438,10 +448,14 @@ export default function Settings() {
 
         <Section>
           <SectionHead title="Security" />
+          {/* The unavailable label was 'Require Face ID' on every handset. An
+              Android phone has no Face ID, so the row named a feature the
+              member could not have and the note under it told them to go and
+              find it in iOS Settings. */}
           <Row t={t} first
-            label={lock.available ? `Require ${lock.label}` : 'Require Face ID'}
-            sub={lockSettingNote(lock.available, lock.enabled, lock.label)}
-            right={<Toggle t={t} on={lock.enabled} label={lock.available ? `Require ${lock.label}` : 'Require Face ID'} onPress={() => { void toggleLock(); }} />} />
+            label={lockRowLabel}
+            sub={lockSettingNote(lock.available, lock.enabled, lock.label, LOCK_PLATFORM, BRAND.label)}
+            right={<Toggle t={t} on={lock.enabled} label={lockRowLabel} onPress={() => { void toggleLock(); }} />} />
         </Section>
 
         <Rule />
@@ -555,16 +569,43 @@ export default function Settings() {
 
         <Rule />
 
+        {/* ── Legal ──────────────────────────────────────────────────────
+            The four sentences below are a SUMMARY, and they used to be the only
+            legal text reachable anywhere in this product: sign-up asserted
+            agreement to a Terms and a Privacy Policy with no route to either,
+            and this paraphrase — written by us, about ourselves — stood in for
+            both. A summary is the part of a document we thought was worth
+            mentioning; it is not what anybody agreed to.
+
+            The summary stays, because it is genuinely the useful thing to read
+            first. What is new is that it says what it is, and the document
+            itself is one tap under it. See src/ui/legal.ts. */}
         <Section>
           <SectionHead title="Legal" />
           <Pressable onPress={() => setLegal(legal === 'privacy' ? null : 'privacy')}>
             <Row t={t} first label="Privacy Policy" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'privacy' ? '▾' : '›'}</Text>} />
           </Pressable>
-          {legal === 'privacy' ? <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>We store your training, nutrition and body data to power your plan. Health data is never sold or shared with advertisers. You can export or delete your data at any time from your account. Photos and scans are stored securely and visible only to you and your coach.</Text> : null}
+          {legal === 'privacy' ? (
+            <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
+              <Text style={{ ...ty.label, color: t.ink3 }}>In short: we store your training, nutrition and body data to power your plan. Health data is never sold or shared with advertisers. You can export or delete your data at any time from your account. Photos and scans are stored securely and visible only to you and your coach.</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The policy you agreed to is the full document.</Text>
+              <View style={{ flexDirection: 'row' }}>
+                <Ghost label="Read The Privacy Policy" onPress={() => { void openLegalDoc('privacy'); }} />
+              </View>
+            </View>
+          ) : null}
           <Pressable onPress={() => setLegal(legal === 'terms' ? null : 'terms')}>
             <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : '›'}</Text>} />
           </Pressable>
-          {legal === 'terms' ? <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>{BRAND.label} provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text> : null}
+          {legal === 'terms' ? (
+            <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
+              <Text style={{ ...ty.label, color: t.ink3 }}>In short: {BRAND.label} provides fitness and nutrition guidance for general wellness and is not a substitute for medical advice. Consult a physician before starting any program. Coaching is delivered by independent trainers on the platform; billing terms are shown at checkout.</Text>
+              <Text style={{ ...ty.caption, color: t.ink3 }}>That is a summary we wrote. The terms you agreed to are the full document.</Text>
+              <View style={{ flexDirection: 'row' }}>
+                <Ghost label="Read The Terms Of Service" onPress={() => { void openLegalDoc('terms'); }} />
+              </View>
+            </View>
+          ) : null}
         </Section>
 
         <Rule />

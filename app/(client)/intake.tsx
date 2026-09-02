@@ -30,7 +30,7 @@
 // what is on screen is an empty form standing in for one that may be full, and
 // saving it would replace a real disclosure with a blank. The Save control is
 // withheld and says why — the same gesture as src/lib/overwriteGuard.ts.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import {
   View, Text, ScrollView, Pressable, TextInput, Alert,
@@ -43,6 +43,9 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useMyIntake } from '../../src/ui/intake';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
+import { draftDecision } from '../../src/lib/intakeDraft';
 import {
   INTAKE_SECTIONS, READINESS_QUESTIONS, READINESS_NOT_ADVICE, READINESS_SEE_A_DOCTOR,
   TIME_WINDOWS, TRAINING_KINDS, TRAINING_PLACES, TRAINING_YEARS, WORK_KINDS,
@@ -119,27 +122,78 @@ export default function IntakeScreen() {
   const router = useRouter();
   const m = useMyIntake();
 
-  // The draft is seeded from the server's copy ONCE the read lands, and only
+  // The draft is seeded ONCE the read has landed one way or the other, and only
   // then. Seeding an empty document first and letting the answers arrive over
   // the top would let somebody start typing into a form that is about to be
   // replaced under them.
+  //
+  // Where it is seeded FROM is the new part, and it is decided by
+  // src/lib/intakeDraft.ts rather than here.
   const [draft, setDraft] = useState<Intake | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const reach = useReachability();
+  // Which document is on screen, and how it got there.
+  //
+  //   'server'   the read landed and this is what came back.
+  //   'restored' what was typed on this phone, put back without asking because
+  //              there was nothing on the server to lose or because it was
+  //              built from this exact document.
+  //   'local'    the read FAILED and this is a phone-only form. Nothing may be
+  //              sent from here; see the notice, and the header above.
+  const [source, setSource] = useState<'server' | 'restored' | 'local'>('server');
+  // Set only in the one case src/lib/intakeDraft.ts refuses to decide: a draft
+  // started from a blank, and a server document that turns out to hold real
+  // answers. Two accounts of one person, and the app does not get to pick.
+  const [choose, setChoose] = useState(false);
+
+  // Seeded once. Every keystroke writes a draft, which changes `m.draft`, which
+  // re-runs this effect — and without the latch the second run would re-derive
+  // "restored" from a draft the member had just typed, and put a banner about
+  // recovering their answers over a form they never left.
+  const seeded = useRef(false);
   useEffect(() => {
-    if (m.status !== 'ready') return;
-    setDraft((d) => d ?? (m.intake ?? emptyIntake(new Date().toISOString())));
-  }, [m.status, m.intake]);
+    if (m.status === 'loading' || seeded.current) return;
+    seeded.current = true;
+    // The read failed. This used to be the end of it: `status` stayed 'error',
+    // `canSave` was false, and the screen drew a Flag where the form should be
+    // — so a member in a gym reception with no signal could not start the form,
+    // let alone keep it. What is on the phone goes on screen instead, and where
+    // there is nothing on the phone it is a blank marked as one.
+    if (m.status === 'error') {
+      setDraft(m.draft?.intake ?? emptyIntake(new Date().toISOString()));
+      setSource('local');
+      return;
+    }
+    const decision = draftDecision(m.draft, m.intake);
+    setDraft(decision === 'restore' ? m.draft!.intake : (m.intake ?? emptyIntake(new Date().toISOString())));
+    setSource(decision === 'restore' ? 'restored' : 'server');
+    if (decision === 'ask') setChoose(true);
+  }, [m.status, m.intake, m.draft]);
 
   const progress = intakeProgress(draft);
   const yeses = readinessDisclosed(draft);
   // Withheld under anything but a finished read, and under an unknown owner.
   // Both would end with somebody's real answers replaced by an empty form.
-  const canSave = !!draft && m.status === 'ready' && m.mayEdit && !saving;
+  // Unchanged, and deliberately. The screen's own header says it: "It must not
+  // save over a document it could not read." A draft on the phone is a
+  // different act from a write to the server, and keeping one buys nothing that
+  // would justify softening this. Also withheld while the member still has the
+  // two-documents choice in front of them.
+  const canSave = !!draft && m.status === 'ready' && m.mayEdit && !saving && !choose;
 
   const edit = (fn: (d: Intake) => Intake) => {
     setSaved(false);
-    setDraft((d) => (d ? fn({ ...d }) : d));
+    setDraft((d) => {
+      if (!d) return d;
+      const next = fn({ ...d });
+      // Kept on the phone as it is typed. `basedOn` is null whenever the server
+      // document is not what this was typed on top of, which is exactly the
+      // offline case — and it is what stops the draft ever being restored over
+      // a disclosure it never saw. See src/lib/intakeDraft.ts.
+      m.keepDraft(next, source === 'local' ? null : (m.intake?.updatedAt ?? null));
+      return next;
+    });
   };
 
   const save = async () => {
@@ -149,9 +203,15 @@ export default function IntakeScreen() {
     setSaving(false);
     setSaved(ok);
     if (!ok) {
+      // "Check your connection and try again" whatever happened is the sentence
+      // src/lib/reachability.ts exists to replace: one of the two things that
+      // happened is the server having read the request and declined it, and
+      // sending that person to their wifi settings hides the actual answer.
+      // The draft is on the phone either way now, which is what lets the second
+      // half of this be true rather than hopeful.
       Alert.alert(
         'Not saved',
-        'Your answers are still on this screen and are not on the server, so your coach cannot see them. Check your connection and press Save again.',
+        `Your answers are kept on this phone and are not on the server, so your coach cannot see them yet. ${retryLine(reach)}`,
         [{ text: 'OK' }],
       );
     }
@@ -195,9 +255,10 @@ export default function IntakeScreen() {
         ) : m.status === 'error' ? (
           <View style={{ marginTop: sp.lg }}>
             <Flag tone={t.crit}>
-              Your intake could not be read, so this is not your form — it is a blank one standing in
-              for it. Anything typed here now could replace answers you have already given, so saving
-              is held until it loads. Close this and open it again in a moment.
+              Your intake could not be read, so this is not your form. It is what is on this phone,
+              standing in for one that may already be full. Everything you type is kept here and
+              nothing is sent, because saving now could replace answers you have already given.
+              {' '}{retryLine(reach)}
             </Flag>
           </View>
         ) : (
@@ -214,6 +275,45 @@ export default function IntakeScreen() {
         {!m.mayEdit && m.status === 'ready' ? (
           <View style={{ marginTop: sp.md }}>
             <Flag tone={t.warn}>{m.cannotEditBecause}</Flag>
+          </View>
+        ) : null}
+
+        {/* The one case src/lib/intakeDraft.ts refuses to decide for anybody: a
+            form typed on this phone with nothing on the server to type it on
+            top of, and a server document that turns out to hold real answers.
+            Both are shown as what they are and the member picks. Save is
+            withheld until they have. */}
+        {choose && m.draft ? (
+          <View style={{ marginTop: sp.md }}>
+            <Notice tone={t.warn} kicker="Two versions" title="You have answers on this phone that were never sent"
+              note="Your saved intake also has answers in it, and these were not typed on top of it. Nothing has been changed. Choose which one you want to carry on from.">
+              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+                <View style={{ flex: 1 }}>
+                  <Ghost label="Keep Saved" onPress={() => {
+                    setDraft(m.intake ?? emptyIntake(new Date().toISOString()));
+                    m.discardDraft();
+                    setSource('server');
+                    setChoose(false);
+                  }} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Cta label="Use This Phone" wide onPress={() => {
+                    setDraft(m.draft!.intake);
+                    setSource('restored');
+                    setChoose(false);
+                  }} />
+                </View>
+              </View>
+            </Notice>
+          </View>
+        ) : null}
+
+        {source === 'restored' && !choose ? (
+          <View style={{ marginTop: sp.md }}>
+            <Flag tone={t.warn}>
+              Answers you typed on this phone and never sent have been put back. They are still only
+              on this phone. Press Save when you can, and your coach will see them.
+            </Flag>
           </View>
         ) : null}
 
@@ -448,7 +548,8 @@ export default function IntakeScreen() {
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                 You can save a half-finished form and come back — your coach is shown how far you got
-                rather than nothing at all. {READINESS_NOT_ADVICE}
+                rather than nothing at all. Anything you type is kept on this phone as you go, so
+                closing this screen never loses it. {READINESS_NOT_ADVICE}
               </Text>
             </Section>
           </>

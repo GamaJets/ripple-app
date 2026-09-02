@@ -14,7 +14,7 @@
 // stats line under the name ignored all of it and printed "cm" and "kg"
 // regardless. Both now go through src/lib/units.ts, and the unit itself is the
 // account's (src/ui/settings.tsx), the same one the Settings screen sets.
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -33,6 +33,8 @@ import { weightIn, weightLabel, weightToKg, heightIn as heightAs, heightParts, h
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
+import { monthNamesShort, fmtFullDay } from '../../src/lib/format';
+import { localDate } from '../../src/lib/localDate';
 
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat Loss' },
@@ -48,7 +50,9 @@ const DIETS: { id: Diet; label: string }[] = [
   { id: 'meat', label: 'Meat' }, { id: 'vegetarian', label: 'Veggie' }, { id: 'vegan', label: 'Vegan' }, { id: 'paleo', label: 'Paleo' }, { id: 'keto', label: 'Keto' },
 ];
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// This was a second hardcoded English copy of the month names — the first was
+// on the dashboard. Repple is white-label and has no house locale, so the wheel
+// scrolls through the reader's own months. See src/lib/locale.ts.
 const ITEM_H = 44;
 const VISIBLE = 5;
 const YEARS = Array.from({ length: 100 }, (_, i) => 1926 + i);
@@ -83,7 +87,12 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
 }
 
 function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => void; onSave: (iso: string) => void; t: Theme }) {
-  const init = new Date(iso && !isNaN(Date.parse(iso)) ? iso : '1997-06-15');
+  // `localDate`, not `new Date`. A bare `YYYY-MM-DD` parsed as UTC midnight
+  // reads back as the day before west of Greenwich, so the wheel opened one day
+  // off the date it was showing — and saving without touching it wrote that.
+  const init = localDate(iso) ?? new Date(1997, 5, 15);
+  // Twelve Intl calls, once, rather than on every scroll of the wheel.
+  const months = useMemo(() => monthNamesShort(), []);
   const [d, setD] = useState(init.getDate() - 1);
   const [m, setM] = useState(init.getMonth());
   const [y, setY] = useState(Math.max(0, YEARS.indexOf(init.getFullYear())));
@@ -111,7 +120,7 @@ function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => vo
           <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }} />
           <View style={{ flexDirection: 'row' }}>
             <Wheel items={days} index={dayIdx} onChange={setD} t={t} />
-            <Wheel items={MONTHS} index={m} onChange={setM} t={t} />
+            <Wheel items={months} index={m} onChange={setM} t={t} />
             <Wheel items={YEARS.map(String)} index={y} onChange={setY} t={t} />
           </View>
         </View>
@@ -377,11 +386,11 @@ export default function Profile() {
     ? macrosFor({ weightKg: enteredKg, bodyFatPct: _bfForPreview, activity: cd.activity, goal: cd.goal, diet: cd.diet })
     : null;
 
-  const dobLabel = (() => {
-    const dd = new Date(cd.dob);
-    if (isNaN(dd.getTime())) return 'Select date';
-    return `${dd.getDate()} ${MONTHS[dd.getMonth()]} ${dd.getFullYear()}`;
-  })();
+  // `new Date('1990-05-14')` is UTC midnight, which every getter west of
+  // Greenwich reads back as 13 May — a date of birth off by a day, on the
+  // screen where somebody checks it. `fmtFullDay` goes through `localDate` and
+  // writes the date the way the reader's own locale does.
+  const dobLabel = cd.dob && fmtFullDay(cd.dob) !== '—' ? fmtFullDay(cd.dob) : 'Select date';
 
   // Height and weight in the client's own units. This line printed "cm" and
   // "kg" over the stored figures no matter what the Settings screen said,
@@ -474,10 +483,20 @@ export default function Profile() {
         <Section>
           <SectionHead title="Your Goal" />
           <View style={{ flexDirection: 'row', gap: sp.sm }}>
+            {/* The chosen goal was carried by background colour alone, which a
+                screen reader gets nothing of — the same defect `Seg` above
+                names, and the coaching-mode radios below already avoid. This
+                answer and the diet answer decide every calorie and macro
+                figure in the app, so a VoiceOver user not being able to tell
+                which one is set is not a cosmetic gap. */}
             {GOALS.map((g) => {
               const on = cd.goal === g.id;
               return (
-                <Pressable key={g.id} onPress={() => cd.setGoal(g.id)} style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+                <Pressable key={g.id} onPress={() => cd.setGoal(g.id)}
+                  accessibilityRole="radio" accessibilityState={{ selected: on }}
+                  accessibilityLabel={on ? `${g.label}. Your goal.` : `Set your goal to ${g.label}`}
+                  accessibilityHint="Your goal sets your daily calorie and macro targets"
+                  style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{g.label}</Text>
                 </Pressable>
               );
@@ -637,8 +656,15 @@ export default function Profile() {
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, marginBottom: sp.lg }}>
+              {/* Same as the goal above, and for the same reason: the diet
+                  decides the macro split, and background colour is not an
+                  answer a screen reader can read. */}
               {DIETS.map((d) => (
-                <Pressable key={d.id} onPress={() => cd.setDiet(d.id)} style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: cd.diet === d.id ? t.brand : t.surface2 }}>
+                <Pressable key={d.id} onPress={() => cd.setDiet(d.id)}
+                  accessibilityRole="radio" accessibilityState={{ selected: cd.diet === d.id }}
+                  accessibilityLabel={cd.diet === d.id ? `${d.label}. Your diet.` : `Set your diet to ${d.label}`}
+                  accessibilityHint="Your diet sets how your daily target is split between protein, carbs and fat"
+                  style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: cd.diet === d.id ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.label, fontWeight: cd.diet === d.id ? '600' : '500', color: cd.diet === d.id ? t.brandInk : t.ink2 }}>{d.label}</Text>
                 </Pressable>
               ))}

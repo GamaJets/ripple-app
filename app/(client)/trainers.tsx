@@ -84,13 +84,17 @@ import {
 // by a hundred is the bug at the other end of this one.
 import { wholeMoney } from '../../src/lib/coachMoney';
 import { currencyGapOfStatus, currencyGapLineAbout } from '../../src/lib/currencyGap';
+import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type SessionFee } from '../../src/lib/sessionFee';
 
 interface Coach {
   id: string;
   name: string;
   tagline: string;
   specialties: string[];
-  sessionFee: number;
+  /** Three different nothings, kept apart. See src/lib/sessionFee.ts — this
+   *  field used to be a `number` that read every one of them as zero, and the
+   *  row below renders a zero as no fee at all. */
+  sessionFee: SessionFee;
   bio: string;
 }
 
@@ -407,7 +411,7 @@ export default function FindTrainer() {
             name: (nameById.get(r.id) || '').trim(),
             tagline: typeof r.tagline === 'string' ? r.tagline : '',
             specialties: Array.isArray(r.specialties) ? r.specialties : [],
-            sessionFee: r.session_fee != null && !Number.isNaN(Number(r.session_fee)) ? Number(r.session_fee) : 0,
+            sessionFee: readSessionFee(r.session_fee),
             bio: typeof r.bio === 'string' ? r.bio : '',
           }))
           // A coach with no name has not set up a profile — don't show a blank card.
@@ -796,12 +800,19 @@ export default function FindTrainer() {
                     and a directory of twenty coaches carrying twenty of them is
                     unreadable — while the sheet is where somebody actually
                     decides. */}
-                {c.sessionFee > 0 ? (
+                {/* Three different nothings used to render as one blank slot:
+                    charges nothing, has not stated a rate, and we could not
+                    read the rate. `sessionFeeShort` keeps them apart in two or
+                    three words — the sentence is in the sheet below, because
+                    twenty of them stacked down a directory is unreadable. */}
+                {sessionFeeAmount(c.sessionFee) != null ? (
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ ...value(17), color: t.ink }}>{feeMoney(c.id, c.sessionFee) ?? c.sessionFee}</Text>
+                    <Text style={{ ...value(17), color: t.ink }}>{feeMoney(c.id, sessionFeeAmount(c.sessionFee)!) ?? sessionFeeAmount(c.sessionFee)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>/ session</Text>
                   </View>
-                ) : null}
+                ) : (
+                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'right', flexShrink: 1 }}>{sessionFeeShort(c.sessionFee)}</Text>
+                )}
                 <Icon name="chevron" size={16} color={t.ink3} />
               </Pressable>
             </View>
@@ -827,24 +838,37 @@ export default function FindTrainer() {
               {/* Same rule as the list row above, and the same reason: the app
                   has never been told what this figure is denominated in, so it
                   states the number and not a currency nobody chose. */}
-              {sel.sessionFee > 0 ? (
-                <View style={{ marginBottom: sp.lg }}>
+              <View style={{ marginBottom: sp.lg }}>
+                {sessionFeeAmount(sel.sessionFee) != null ? (
                   <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                     <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
-                    <Text style={{ ...value(20), color: t.ink }}>{feeMoney(sel.id, sel.sessionFee) ?? sel.sessionFee}</Text>
+                    <Text style={{ ...value(20), color: t.ink }}>{feeMoney(sel.id, sessionFeeAmount(sel.sessionFee)!) ?? sessionFeeAmount(sel.sessionFee)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 4 }}>/ session</Text>
                   </View>
+                ) : (
+                  <>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 2 }}>Session fee</Text>
+                    {/* The one field on this sheet that could not say it was
+                        unknown. An unreadable rate is flagged; a rate nobody has
+                        stated, and a rate of nothing, are facts rather than
+                        faults and read as ordinary caption. */}
+                    {sel.sessionFee.kind === 'unreadable' ? (
+                      <Flag tone={t.warn}>{sessionFeeNote(sel.sessionFee, sel.name)}</Flag>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{sessionFeeNote(sel.sessionFee, sel.name)}</Text>
+                    )}
+                  </>
+                )}
                   {/* The screen where somebody decides is the screen that owes
                       them the explanation. Four causes, four sentences, and
                       only one of them says nobody has stated a currency — the
                       other three are reads that did not answer, and printing
                       the confident sentence for those is the defect
                       src/lib/currencyGap.ts exists to stop. */}
-                  {feeGap(sel.id) ? (
+                  {sessionFeeAmount(sel.sessionFee) != null && feeGap(sel.id) ? (
                     <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{feeGap(sel.id)}</Flag>
                   ) : null}
-                </View>
-              ) : null}
+              </View>
 
               {sel.bio ? <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{sel.bio}</Text> : null}
 

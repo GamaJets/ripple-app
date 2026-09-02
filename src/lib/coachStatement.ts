@@ -6,16 +6,32 @@
 // nothing summarises a year". Half of that cannot be built from this repo and
 // the other half must not be called what it was called.
 //
-// PAYOUTS. Nothing in this app is ever told about one. `connect_accounts` holds
-// four columns — `trainer_id`, `stripe_account_id`, `charges_enabled`,
-// `details_submitted` — and the stripe-webhook subscribes to
-// `customer.subscription.*`, `account.updated`, `checkout.session.completed`
-// and `invoice.*`. There is no `payout.*` handler, no `balance.*`, no
-// `transfer.*`, no `application_fee.*`, and no column anywhere that could hold
-// a payout id, an arrival date, a fee or a balance. So a payout schedule cannot
-// be rendered from this data, and a rendered one would be invented. What this
-// file produces instead is `payoutFacts()`, which says what is actually known
-// and says where the real answer lives.
+// PAYOUTS. This paragraph used to read "nothing in this app is ever told about
+// one … no column anywhere that could hold a payout id, an arrival date, a fee
+// or a balance", and it stopped being true at part 194. The stripe-webhook
+// mirrors `payout.paid`, `payout.failed`, `payout.updated` and
+// `payout.canceled` into `coach_payouts`, which carries the amount, the
+// currency, Stripe's own status and the arrival date. So the statement handed
+// to an accountant was missing HALF of the one reconciliation an accountant
+// actually performs — sales against bank receipts — while the data for the
+// other half sat in this database and was rendered on the Money screen.
+//
+// Payouts that Stripe says ARRIVED are therefore now a section of their own,
+// counted on the day they reached the bank. Two things are still refused:
+//
+//   · A SCHEDULE. Knowing four payouts happened says nothing about when the
+//     fifth will be sent, and a rendered timetable would be a promise about
+//     when somebody's rent money lands. `payoutFacts()` still says so.
+//   · A SUBTRACTION. A payout is a BALANCE — many charges at once, less
+//     Stripe's fees, less the platform's, less refunds, on Stripe's own
+//     schedule — so it does not correspond to any sale on this document, and
+//     "sold 4,800 · received 4,281 · fees 519" would be three numbers about
+//     three different sets of transactions. Nothing here subtracts one from the
+//     other and the section says why.
+//
+// A payout in transit is NOT counted. Money on its way to a bank is not money
+// in one, and it is the arrived figure a coach reconciles a bank statement
+// against.
 //
 // A TAX EXPORT. Tax treatment turns on the coach's country, their registration
 // status, where their client is and what was sold — none of which this app
@@ -28,13 +44,15 @@
 //
 // ── What the statement claims ──────────────────────────────────────────────
 //
-// Five sections, each with its period named and its source named:
+// Seven sections, each with its period named and its source named:
 //
 //   sessions delivered      counted, never priced — see `SESSIONS_NOT_MONEY`
 //   packs and memberships   what Stripe told this app it charged
 //   subscription renewals   the same, one row per paid invoice
+//   payments recorded here  cash and transfers, the coach's own word (part 170)
 //   invoices issued         the coach's own documents, their own claim
 //   late-cancellation fees  recorded here, charged by nobody here
+//   payouts that arrived    what Stripe says reached the bank, never netted
 //
 // ── What it refuses to claim ───────────────────────────────────────────────
 //
@@ -77,6 +95,11 @@ import { minorMoney, wholeMoney, sumTaken, combineTaken, ZERO_DECIMAL, type Take
 // The same five replacements the invoice uses, rather than a fifth private
 // copy. Every value on this page that a person typed goes through it.
 import { escapeHtml } from './coachInvoice';
+// Which Stripe status words mean the money is actually in a bank. Imported
+// rather than repeated: a second reading of 'in_transit' living here is a
+// second thing to get wrong, and getting it wrong puts money that has not
+// arrived into a figure an accountant reconciles a bank statement against.
+import { payoutState } from './coachPayouts';
 
 /* ── the period ───────────────────────────────────────────────────────────── */
 
@@ -470,6 +493,27 @@ export interface StatementCharge {
   waivedAt: string | null;
 }
 
+/**
+ * One payout Stripe told this app about (part 194).
+ *
+ * `status` is STRIPE'S OWN WORD, verbatim and uncoerced. Only 'paid' is counted
+ * as money that reached a bank: a payout in transit is not in an account, a
+ * failed one never got there, and a status this app has not seen before is not
+ * quietly read as arrival. `payoutState` in src/lib/coachPayouts.ts is the one
+ * place that decides which is which, and it is imported rather than repeated.
+ *
+ * `arrivalOn` is a `YYYY-MM-DD` calendar day and is the date this section is
+ * counted on, because it is the date a bank statement carries. Null is its own
+ * answer: a payout with no arrival date is in no period at all rather than
+ * being swept into this one.
+ */
+export interface StatementPayout {
+  amountCents: number | null;
+  currency: string | null;
+  status: string;
+  arrivalOn: string | null;
+}
+
 /** Everything this app knows about a coach's Connect account. Four columns. */
 export interface PayoutKnowledge {
   status: LoadStatus;
@@ -511,6 +555,18 @@ export interface StatementInput {
   invoices: Read<StatementInvoice>;
   lateCancellations: Read<StatementCharge>;
   payouts: PayoutKnowledge;
+  /**
+   * The payouts themselves (part 194) — what Stripe says left its balance and
+   * reached the coach's bank.
+   *
+   * Required rather than optional, for the reason `receipts` is. An optional
+   * field defaulting to an empty 'ready' read would print "no payout reached
+   * your bank in this period" on a statement built by a caller that simply
+   * forgot to pass it, and that sentence, on a document handed to an
+   * accountant, is a claim about somebody's banking that nothing behind it
+   * supports. A missing argument is a compile error instead.
+   */
+  payoutsPaid: Read<StatementPayout>;
   /** When it was built, ISO. Printed, because a statement of a period is only
    *  ever "as this app held it at" a moment. */
   generatedAt: string;
@@ -552,6 +608,38 @@ export const STATEMENT_NOT_THE_WHOLE_BOOK =
  */
 export const RECEIPTS_ARE_YOUR_WORD =
   'These are payments you told this app about after the fact. Nothing behind them has been checked against a bank or a card processor, this app was not involved in any of them, and there is no second record anywhere to reconcile them against. They may also describe the same money as a sale above, if a payment was recorded twice — nothing here can tell.';
+
+/**
+ * That a payout is a balance and not the proceeds of a sale.
+ *
+ * The single most important line in the payouts section, and the reason it took
+ * a section of its own rather than a column beside the sales. Every reader of
+ * this document — the coach, and more dangerously their accountant — will be
+ * tempted to subtract: "packs and renewals came to 4,800, the bank received
+ * 4,281, so the fees were 519." All three of those numbers are about different
+ * sets of transactions over different spans, because Stripe pays out a BALANCE
+ * on its own schedule and a payout inside this period may be settling charges
+ * from before it. The subtraction is not done here, and the reason is printed
+ * rather than left to be worked out.
+ *
+ * The long form is `PAYOUT_IS_NOT_A_SALE` in src/lib/coachPayouts.ts, which the
+ * Money screen carries. This is the same rule stated for a document.
+ */
+export const PAYOUTS_ARE_NOT_NETTED =
+  'A payout is your Stripe balance reaching your bank, not the proceeds of any sale listed above. It is many charges at once, less what Stripe and the platform took and anything refunded, on Stripe’s own schedule — so a payout counted in this period may be settling charges made before it, and the two figures are deliberately never subtracted from each other. Do not read the gap between them as fees.';
+
+/**
+ * That only arrived payouts are counted, and that an empty section is not a
+ * statement about a bank account.
+ *
+ * An empty payouts section is much more likely to mean the Connect webhook
+ * destination has never been subscribed to `payout.*` than that Stripe paid the
+ * coach nothing — part 194's deployment note is explicit about it — and a
+ * document that quietly showed nothing would be read by an accountant as
+ * evidence of no bank receipts at all.
+ */
+export const PAYOUTS_ONLY_ARRIVED =
+  'Only payouts Stripe reported as PAID are counted, on the day Stripe said they would reach the bank. One still in transit is not money in an account and is not in the figures. Nothing appears here at all unless Stripe has told this app about a payout, so an empty section is not a statement that you were paid nothing — your Stripe dashboard and your bank statement are the record.';
 
 /** That Stripe, not this app, is the authority on money that moved. */
 export const STATEMENT_STRIPE_IS_THE_RECORD =
@@ -654,7 +742,7 @@ export function sumCharges(rows: readonly StatementCharge[]): ChargeTotals {
 
 /* ── the sections ─────────────────────────────────────────────────────────── */
 
-export type SectionKey = 'sessions' | 'packs' | 'subscriptions' | 'receipts' | 'invoices' | 'lateCancellations';
+export type SectionKey = 'sessions' | 'packs' | 'subscriptions' | 'receipts' | 'invoices' | 'lateCancellations' | 'payoutsPaid';
 
 /** One line of money, ready to print. */
 export interface MoneyLine { label: string; amount: string }
@@ -766,6 +854,7 @@ export function statementCaveats(input: StatementInput): string[] {
   say(input.receipts.status, 'Payments you recorded yourself', 'the cash and transfers you have written down');
   say(input.invoices.status, 'Invoices issued', 'the documents you issued');
   say(input.lateCancellations.status, 'Late-cancellation fees', 'the fees recorded against your clients');
+  say(input.payoutsPaid.status, 'Payouts that reached your bank', 'what Stripe paid out to you');
   if (input.payouts.status !== 'ready') {
     out.push('Your payout account: its state could not be read, so this statement says nothing about whether you are set up to be paid.');
   }
@@ -803,8 +892,8 @@ export function payoutFacts(k: PayoutKnowledge): { title: string; lines: string[
   // Deliberately still no timetable. Knowing that four payouts happened says
   // nothing about when the fifth will, and a rendered schedule would be a
   // promise about when somebody's rent money lands.
-  lines.push('Payouts that have already happened are recorded on the Money screen, mirrored from Stripe as each one is made. What is NOT here is a schedule: this app is not told when the next payout will be sent, what fee came off any of them, or what your Stripe balance is, so there is no timetable on this statement because there is no data behind one.');
-  lines.push('A payout is a balance reaching your bank rather than the proceeds of a sale — many charges at once, less what Stripe and Repple took and anything refunded — so it does not correspond to any figure above and nothing here subtracts one from the other.');
+  lines.push('The payouts themselves are listed above, under what reached your bank, mirrored from Stripe as each one was made. What is NOT here is a schedule: this app is not told when the next payout will be sent, what fee came off any of them, or what your Stripe balance is, so there is no timetable on this statement because there is no data behind one.');
+  lines.push('A payout is a balance reaching your bank rather than the proceeds of a sale — many charges at once, less what Stripe and Repple took and anything refunded — so it does not correspond to any sales figure above and nothing here subtracts one from the other.');
   lines.push('Your payouts live with Stripe. Stripe emails the address you signed up with each time one is sent, and the dashboard set up for you when you onboarded is where the schedule and the arrival dates are. This app cannot open it for you — it holds no link to your account, and inventing one would send you somewhere that is not it.');
   return { title: 'Payouts', lines };
 }
@@ -976,6 +1065,57 @@ export function coachStatement(input: StatementInput): Statement {
     notes: feeNotes,
   };
 
+  /* ── payouts that reached the bank ─────────────────────────────────────── */
+  //
+  // The other half of the one reconciliation an accountant actually does. The
+  // sections above are what clients were CHARGED; this is what Stripe says
+  // arrived. Both halves have been in this database since part 194 and the
+  // document carried only the first.
+  //
+  // Counted by `arrival_on`, a Postgres `date`, so it goes through `splitByDay`
+  // rather than the instant range — the same argument the invoices section
+  // makes. A payout arriving on the first of the period would otherwise fall
+  // outside it for every coach west of Greenwich.
+  //
+  // ONLY 'paid'. `payoutState` is the single place that reads Stripe's status
+  // word, and everything that is not an arrival is counted separately and named
+  // rather than being added to a bank figure or dropped from the page.
+  const payoutSplit = splitByDay(input.payoutsPaid.rows, (p) => p.arrivalOn, input.period);
+  const arrived = payoutSplit.inside.filter((p) => payoutState(p.status) === 'arrived');
+  const notArrived = payoutSplit.inside.length - arrived.length;
+  const payTaken = sumTaken(arrived.map((p): TakenRow => ({
+    amount_cents: p.amountCents,
+    currency: p.currency,
+    created_at: p.arrivalOn ?? '',
+  })));
+  const payReady = input.payoutsPaid.status === 'ready';
+  const payNotes = [PAYOUTS_ARE_NOT_NETTED, PAYOUTS_ONLY_ARRIVED];
+  if (payReady) {
+    for (const n of takenNotes(payTaken, 'payout')) payNotes.push(n);
+    if (notArrived > 0) {
+      payNotes.push(`${notArrived} payout${notArrived === 1 ? '' : 's'} dated in this period ${notArrived === 1 ? 'has' : 'have'} a status other than paid — still on the way, failed, or a word Stripe uses that this app does not recognise — so ${notArrived === 1 ? 'it is' : 'they are'} counted here and in no figure above. A failed payout is money that stayed in your Stripe balance; the Money screen carries Stripe's own reason for each one.`);
+    }
+    if (payoutSplit.undated > 0) {
+      payNotes.push(`${payoutSplit.undated} payout${payoutSplit.undated === 1 ? '' : 's'} carry no arrival date and ${payoutSplit.undated === 1 ? 'is' : 'are'} in no period at all, including this one.`);
+    }
+  }
+  const payoutsSection: StatementSection = {
+    key: 'payoutsPaid',
+    title: 'Payouts That Reached Your Bank',
+    source: 'Mirrored from Stripe as each payout was made, on the date Stripe said it would arrive. Stripe’s own record and your bank statement are the authority; this is what this app was told at the time.',
+    status: input.payoutsPaid.status,
+    count: payReady ? arrived.length : null,
+    countLabel: arrived.length === 1 ? 'payout that arrived' : 'payouts that arrived',
+    lines: payReady
+      ? payTaken.pots.map((p) => ({
+        label: `${p.count} ${p.count === 1 ? 'payout' : 'payouts'} in ${p.currency}`,
+        amount: minorMoney(p.minorUnits, p.currency) ?? '—',
+      }))
+      : [],
+    withheld: withheldReason(input.payoutsPaid.status, 'payouts'),
+    notes: payNotes,
+  };
+
   /* ── the one combination this statement makes ──────────────────────────── */
   //
   // Only when BOTH halves came back whole. A sum over a page of a longer list
@@ -1004,7 +1144,7 @@ export function coachStatement(input: StatementInput): Statement {
     issuerStatus: input.issuer.status,
     brand: (input.issuer.brand || '').trim() || null,
     generatedAt: input.generatedAt,
-    sections: [sessionsSection, packsSection, subsSection, receiptsSection, invoicesSection, feesSection],
+    sections: [sessionsSection, packsSection, subsSection, receiptsSection, invoicesSection, feesSection, payoutsSection],
     salesTotal,
     salesWithheld,
     payouts: payoutFacts(input.payouts),

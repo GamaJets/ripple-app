@@ -178,6 +178,24 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // happens to be right, and the next person to add a fallback for unknown
   // routes would change this notification without knowing they had.
   ['/(trainer)/nudges', 'bell'],
+  // ── and the screen part 470 sends a coach to ─────────────────────────────
+  //
+  // Same rule again: the icon TRAINER_NAV already gives the screen. Enquiries
+  // is 'message' in src/lib/features.ts, and it is the right shape for the
+  // notification as well as for the nav — an enquiry IS somebody writing to
+  // the coach, and the only difference from a chat row is that this person has
+  // no account yet. Without the entry the row would fall through to 'bell',
+  // which is this list's way of saying "we have no idea what this is".
+  ['/(trainer)/leads', 'message'],
+  // ── and the screen part 471 sends a coach to ─────────────────────────────
+  //
+  // Programs is 'train' in TRAINER_NAV and 'train' is not one of the eleven
+  // shapes this inbox draws, so the nav's answer cannot simply be inherited
+  // here. 'dumbbell' is the same substitution '/(trainer)/client-training'
+  // already makes and for the same reason: it is the shape this table gives
+  // training, and the bell would say "we have no idea what this is" over a
+  // notification whose whole content is a block of training ending.
+  ['/(trainer)/builder', 'dumbbell'],
   // Working Toward is 'target' in TRAINER_NAV and `InboxIcon` has no 'target' —
   // it is a deliberately short list, and widening it for one row would put a
   // shape in coach inboxes that appears nowhere else. 'trophy' rather than the
@@ -544,6 +562,40 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     // a named person that opens a list of everybody.
     to: 'trainer', title: 'A client has hit a goal',
     route: '/(trainer)/client-goals?clientId=00000000-0000-0000-0000-000000000000', icon: 'trophy',
+  },
+  // ── the enquiry nobody was told about (part 470) ─────────────────────────
+  //
+  // `coach_leads` was written by an unauthenticated form and sat there until
+  // the coach happened to open the Leads screen. An enquiry is a person who
+  // raised their hand and is, at that moment, also enquiring with three other
+  // coaches, so it is the one row in that table whose value decays in hours.
+  //
+  // The body carries the enquirer's NAME and nothing else: not their contact
+  // details, not their message and not the join code. A push is rendered on a
+  // lock screen, and all three of those are strings a stranger typed into a
+  // public form.
+  {
+    where: 'supabase/parts/470 · coach_lead_notify',
+    when: 'somebody fills in a coach’s enquiry form — the anon write path from part 157',
+    to: 'trainer', title: 'A new enquiry', route: '/(trainer)/leads', icon: 'message',
+  },
+  // ── the block that ran out and told nobody (part 471) ────────────────────
+  //
+  // `programStart.ts` has defined the 'after' phase since it was written and
+  // computed it only when a screen asked. Nothing computed it when nobody was
+  // looking, and nothing broke visibly on either side: `clientBlock.ts` holds
+  // the client on the block's LAST week rather than emptying their Train tab,
+  // so they go on repeating week eight and the coach finds out when they
+  // mention it.
+  //
+  // The body says nothing about whether the client DID any of it. Nothing in
+  // the database knows that — planVsActual.ts refuses to say a session was
+  // completed with the whole log in front of it — and "they finished your
+  // block" is the one sentence this pass must never produce.
+  {
+    where: 'supabase/parts/471 · run_block_ended_notices',
+    when: 'a client reaches the end of the last week of their assigned block — starts_on plus weeks × 7',
+    to: 'trainer', title: 'A block has run out', route: '/(trainer)/builder', icon: 'dumbbell',
   },
   {
     where: 'supabase/parts/202 · run_credential_expiry_notices',

@@ -18,7 +18,7 @@
 // that says "£6,180 across 84 sessions, with 12 still unmarked" is useful. One
 // that says £7,060 because it counted the twelve is a dispute.
 
-import { assertWhole, capLimit } from './rowCap';
+import { assertWhole, capLimit, ROW_CAP } from './rowCap';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
@@ -559,6 +559,21 @@ export async function recordSettlement(
      * caller reintroducing it.
      */
     currency: string;
+    /**
+     * How much of `amountCents` was a reimbursement rather than pay.
+     *
+     * Optional, and undefined is written as NULL, which means "this run did not
+     * say" — the honest answer for a caller that has not worked it out and for
+     * every settlement recorded before supabase/parts/482. It is NOT zero: zero
+     * is the claim that the run looked and none of it was, and reading a silence
+     * as zero would report a run as wholly taxable pay on no evidence.
+     *
+     * A bonus and a reimbursement both add to what a coach is handed and only
+     * one of them is pay. `ADJUSTMENT_LABEL` in src/lib/gymPay.ts has said so
+     * since the kinds existed, and the run then flattened all four into one
+     * figure at the one moment the distinction mattered.
+     */
+    reimbursementCents?: number | null;
   },
 ): Promise<string> {
   const { data, error } = await sb.from('payroll_settlements').insert({
@@ -567,6 +582,7 @@ export async function recordSettlement(
     period_from: run.periodFrom,
     period_to: run.periodTo,
     amount_cents: run.amountCents,
+    reimbursement_cents: run.reimbursementCents ?? null,
     sessions_count: run.sessionIds.length,
     method: run.method,
     note: run.note ?? null,
@@ -606,17 +622,45 @@ export async function recordSettlement(
   return id;
 }
 
+/**
+ * Every payroll run this gym has settled.
+ *
+ * ── The fifty that were silently dropped ───────────────────────────────────
+ *
+ * This read was `.limit(50)` with no probe row and no `assertWhole`, and both
+ * callers render what comes back as a COMPLETE history: /sessions labels an
+ * empty result "No payroll has been settled yet." A gym with ten coaches paid
+ * monthly passes fifty runs in five months, and from then on "already paid for
+ * July" reads as nothing having been paid — so the owner pays a coach twice for
+ * a period that scrolled off the end of a cap nothing on the screen mentioned.
+ * It was the one money read in the console exempt from the rule src/lib/rowCap
+ * exists to enforce.
+ *
+ * Now capped like every other money read: one row past the cap is requested, so
+ * a full page and a truncated one do not look identical, and `assertWhole`
+ * refuses rather than handing back a partial history that a screen would
+ * present as the whole one. A refusal an owner can see is recoverable; a
+ * quietly short list is a coach paid twice.
+ *
+ * `cap` is a parameter so a caller that genuinely wants a window can say so and
+ * be refused at ITS OWN size rather than at the default. Nothing passes one
+ * today, which is the point: the default is the honest answer.
+ */
 export async function fetchSettlements(
-  sb: Queryable, tenantId: string, limit = 50,
+  sb: Queryable, tenantId: string, cap: number = ROW_CAP,
 ): Promise<Settlement[]> {
   const { data, error } = await sb
     .from('payroll_settlements')
     .select('id, trainer_id, period_from, period_to, amount_cents, currency, sessions_count, method, note, settled_at')
     .eq('tenant_id', tenantId)
     .order('settled_at', { ascending: false })
-    .limit(limit);
+    // A total order. `settled_at` alone ties — two runs recorded in the same
+    // click are two rows Postgres may return in either order, and the row that
+    // falls off the end of a capped read would then be arbitrary.
+    .order('id', { ascending: false })
+    .limit(capLimit(cap));
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+  return assertWhole(data, 'this gym’s payroll history', cap).map((r: any) => ({
     id: r.id,
     trainerId: r.trainer_id,
     periodFrom: r.period_from,

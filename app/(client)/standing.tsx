@@ -55,7 +55,7 @@ import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } fro
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import {
-  cancelOptions, seriesLabel, RECURRING_CREDIT_NOTE, SERIES_HORIZON_DAYS,
+  cancelOptions, seriesLabel, seriesOccurrencesIn, RECURRING_CREDIT_NOTE, SERIES_HORIZON_DAYS,
   type CancelOption, type RecurringSeries,
 } from '../../src/lib/recurring';
 import {
@@ -71,28 +71,20 @@ import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
 import type { TrainingSession } from '../../src/lib/types';
 import type { CancellationPolicy } from '../../src/lib/booking';
-
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 
 // The reader's own clock, deliberately. `nextAt` is an instant — the moment the
 // session starts — and the member is being told when to turn up, which is a
 // time where they are standing. The WEEKLY hour beside it is the opposite case
 // and is handled the opposite way: see `seriesLabel` and the zone line below.
-const timeLabel = (iso: string) => {
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '—';
-  let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am';
-  h = h % 12 || 12;
-  return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`;
-};
-const dayLabel = (iso: string) => {
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '—';
-  const today = new Date(); const tm = new Date(); tm.setDate(today.getDate() + 1);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === tm.toDateString()) return 'Tomorrow';
-  return `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
-};
+//
+// The clock and the day are the reader's LOCALE's as well as their zone's now.
+// `DOW` was a hardcoded English array and the fallback wrote day-before-month,
+// so a member in the United States read "Wed 9/12" as 12 September when the
+// session was 9 December — in the sentence above a cancel button. See
+// `fmtRelativeDay` and `fmtClock` in src/lib/format.ts.
+const timeLabel = (iso: string) => fmtTime(iso);
+const dayLabel = (iso: string) => fmtRelativeDay(iso);
 
 export default function StandingAppointments() {
   const t = useTheme();
@@ -249,10 +241,17 @@ export default function StandingAppointments() {
    * before the tap and the account given after it cannot drift apart.
    */
   const doPause = (s: RecurringSeries, days: number, label: string) => {
-    const untilMs = Date.now() + days * 86_400_000;
-    const inRange = sessions.filter((x) =>
-      x.clientId === cd.id && x.status === 'booked'
-      && Date.parse(x.startsAt) > Date.now() && Date.parse(x.startsAt) < untilMs);
+    const now = Date.now();
+    const untilMs = now + days * 86_400_000;
+    // Matched to THIS series by its slot, not "every booking in the window".
+    // The old filter took every booked session of the member's inside the
+    // range with no filter on the series — and there could not be one, because
+    // `TrainingSession` carries no series id — then handed the count to
+    // `pausePreviewLine`, which stated as fact how many sessions would be
+    // cancelled and what the late fees came to. A member with a second standing
+    // slot, or a one-off Friday booking, was shown a money claim over a set the
+    // pause was never going to touch. See `seriesOccurrencesIn`.
+    const inRange = seriesOccurrencesIn(sessions, s, now, untilMs);
     const notice = noticeHoursOf(policyStatus === 'ready' ? cancelPolicy : null);
     const late = inRange.filter((x) => insideNoticeWindow(x.startsAt, notice)).length;
     // A policy that could not be read is passed as null, never softened into

@@ -23,7 +23,8 @@ import {
   statementFileStem, statementShareBlurb, statementCaveats, payoutFacts, withheldReason,
   STATEMENT_NOT, STATEMENT_IS, STATEMENT_NOT_THE_WHOLE_BOOK, STATEMENT_STRIPE_IS_THE_RECORD,
   PERIOD_IS_YOURS, SESSIONS_NOT_MONEY, INVOICES_NOT_ADDED, LATE_FEES_NOT_TAKINGS, LATE_FEES_ONLY_CURRENT_CLIENTS,
-  type StatementInput, type StatementInvoice, type StatementCharge,
+  PAYOUTS_ARE_NOT_NETTED, PAYOUTS_ONLY_ARRIVED,
+  type StatementInput, type StatementInvoice, type StatementCharge, type StatementPayout,
 } from './coachStatement';
 import { escapeHtml } from './coachInvoice';
 import type { TakenRow } from './coachMoney';
@@ -57,6 +58,12 @@ const invoice = (o: Partial<StatementInvoice> = {}): StatementInvoice => ({
 const fee = (o: Partial<StatementCharge> = {}): StatementCharge =>
   ({ amount: 25, currency: 'GBP', createdAt: at(2026, 6, 11), waivedAt: null, ...o });
 
+/** One payout Stripe told this app about. `arrivalOn` is a calendar day, so it
+ *  is a bare `YYYY-MM-DD` and never an instant — the day a bank statement
+ *  carries, not the day a webhook fired. */
+const payout = (o: Partial<StatementPayout> = {}): StatementPayout =>
+  ({ amountCents: 42810, currency: 'GBP', status: 'paid', arrivalOn: '2026-07-09', ...o });
+
 function input(over: Partial<StatementInput> = {}): StatementInput {
   return {
     period: Y26,
@@ -74,6 +81,11 @@ function input(over: Partial<StatementInput> = {}): StatementInput {
     invoices: { status: 'ready', rows: [invoice()] },
     lateCancellations: { status: 'ready', rows: [fee()] },
     payouts: { status: 'ready', hasAccount: true, chargesEnabled: true, detailsSubmitted: true },
+    // Part 194: what Stripe says actually reached the bank. Required for the
+    // same reason `receipts` is — an optional default would print "no payout
+    // reached your bank in this period" on a document handed to an accountant,
+    // built by a caller that simply forgot to pass it.
+    payoutsPaid: { status: 'ready', rows: [payout()] },
     generatedAt: '2027-01-04T09:00:00.000Z',
     ...over,
   };
@@ -559,6 +571,81 @@ ok(!(withheldReason('error', 'sales') ?? '').includes('had not finished loading'
     .lines[0].includes('not connected a payout account'), 'a coach with no account is told that plainly');
   ok(payoutFacts({ status: 'error', hasAccount: false, chargesEnabled: false, detailsSubmitted: false })
     .lines[0].includes('could not be read'), 'and a failed read is never rendered as "no account"');
+}
+
+/* ── 13b. the payouts that actually arrived ───────────────────────────────
+   The other half of the one reconciliation an accountant does: sales against
+   bank receipts. Both halves have been in this database since part 194 and the
+   document carried only the first. What must NOT happen is the subtraction. */
+
+{
+  const s = coachStatement(input());
+  const p = sec(s, 'payoutsPaid');
+  eq(p.count, 1, 'a paid payout dated inside the period is counted');
+  eq(p.lines[0]?.amount, 'GBP 428.10', 'and printed in the currency Stripe stated');
+  ok(p.notes.includes(PAYOUTS_ARE_NOT_NETTED), 'the section says a payout is not the proceeds of a sale');
+  ok(p.notes.includes(PAYOUTS_ONLY_ARRIVED), 'and that only arrived payouts are in the figure');
+
+  // The whole reason this is a section and not a column beside the sales. A
+  // "fees" line anywhere here would be the difference between two figures about
+  // different transactions over different spans.
+  const doc = statementDoc(s);
+  ok(/Payouts That Reached Your Bank/.test(doc.html), 'the document carries the section');
+  ok(doc.text.includes('PAYOUTS THAT REACHED YOUR BANK'), 'and so does the text fallback');
+  // The subtraction, named as a number rather than as a word. The fixture sells
+  // GBP 480.00 in packs and GBP 600.00 in renewals and receives a GBP 428.10
+  // payout, so a document that netted anything would print 651.90 (sales less
+  // the payout) or 1,080.00 minus it under some other label. Neither appears,
+  // and neither may: they would be differences between figures covering
+  // different transactions over different spans.
+  ok(!doc.text.includes('651.90') && !doc.html.includes('651.90'),
+    'and neither nets the payout against the sales above it');
+  ok(doc.text.includes(PAYOUTS_ARE_NOT_NETTED), 'the document says so on its own face');
+
+  // Only 'paid'. In transit is not money in a bank, failed never got there, and
+  // a status this app has not seen is not quietly read as arrival.
+  const mixed = coachStatement(input({
+    payoutsPaid: {
+      status: 'ready',
+      rows: [
+        payout(),
+        payout({ status: 'in_transit', amountCents: 90000 }),
+        payout({ status: 'failed', amountCents: 90000 }),
+        payout({ status: 'something_stripe_added_later', amountCents: 90000 }),
+      ],
+    },
+  }));
+  const pm = sec(mixed, 'payoutsPaid');
+  eq(pm.count, 1, 'only the arrived one is counted');
+  eq(pm.lines[0]?.amount, 'GBP 428.10', 'and the total is the arrived one alone');
+  ok(pm.notes.some((n) => n.includes('3 payouts dated in this period have a status other than paid')),
+    'the other three are counted and named rather than dropped or added');
+
+  // An undated payout is in no period at all, including this one.
+  const undated = coachStatement(input({
+    payoutsPaid: { status: 'ready', rows: [payout(), payout({ arrivalOn: null, amountCents: 90000 })] },
+  }));
+  const pu = sec(undated, 'payoutsPaid');
+  eq(pu.count, 1, 'a payout with no arrival date is not swept into the current period');
+  ok(pu.notes.some((n) => n.includes('no arrival date')), 'and the statement says how many there were');
+
+  // A failed read is never a bank account with nothing in it.
+  const failed = coachStatement(input({ payoutsPaid: { status: 'error', rows: [] } }));
+  const pf = sec(failed, 'payoutsPaid');
+  eq(pf.count, null, 'a refused read states no count');
+  eq(pf.lines.length, 0, 'and no figure');
+  ok((pf.withheld ?? '').includes('could not be read'), 'and says which of the two silences it is');
+  ok(failed.caveats.some((c) => c.includes('Payouts that reached your bank')),
+    'and it reaches the caveat list, so the file names itself INCOMPLETE');
+  ok(statementFileStem(failed).includes('INCOMPLETE'), 'which it does');
+
+  // A payout arriving on the first day of the period is INSIDE it. `arrival_on`
+  // is a Postgres date, so it goes through splitByDay — through the instant
+  // range it would fall outside for every coach west of Greenwich.
+  const edge = coachStatement(input({
+    payoutsPaid: { status: 'ready', rows: [payout({ arrivalOn: '2026-01-01' })] },
+  }));
+  eq(sec(edge, 'payoutsPaid').count, 1, 'a payout dated the first day of the period is in the period');
 }
 
 /* ── 14. a typed name cannot break the document ───────────────────────────

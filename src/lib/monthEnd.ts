@@ -40,6 +40,10 @@
 //    nowhere and the answer is a dash.
 
 import type { GymPayment, Membership, InvoiceStatus } from './gymRecord';
+// The one rule about what a set of rows is denominated in, and the one
+// normalisation behind it. Imported rather than restated: this module used to
+// group money by method alone and had no opinion about currency at all.
+import { sharedCurrency, normaliseCurrency } from './gymRecord';
 import type { PtSession, PayrollLine, PayrollTotal, PayPolicy } from './gymSessions';
 import { payrollByTrainer, payrollTotal, settlementBlocker } from './gymSessions';
 import type { GymPass } from './gymPasses';
@@ -186,9 +190,32 @@ export function isOverdue(inv: Pick<GymInvoice, 'status' | 'dueOn'>, today: stri
 
 /* ── what came in ──────────────────────────────────────────────────────────── */
 
+/**
+ * One row of a money breakdown, and a SUM OF LIKE THINGS.
+ *
+ * `currency` is on the line rather than on the table because that is the whole
+ * fix. `incomeOf` used to group by method alone: a gym holding pounds and
+ * dirhams got one "Card" line with both added together, and /close rendered it
+ * with `money(l.cents, currency)` — one currency printed over a figure that was
+ * two. The same blended lines went into the month-end CSV under a front matter
+ * stating a single currency, which is the document an accountant works from.
+ *
+ * So a line is now one method (or one attribution) in ONE currency, and a gym
+ * with two currencies gets two lines rather than one wrong one. A gym with one
+ * — which is almost all of them — sees exactly the table it saw before.
+ */
 export interface Line {
+  /** Unique in its table: the id below and the currency, joined. Two
+   *  currencies are two rows because they are two sums. */
   key: string;
+  /** The method or the attribution on its own, without the currency. What a
+   *  caller tests when it wants "the cash line" regardless of denomination. */
+  id: string;
   label: string;
+  /** What every payment in this line is denominated in. Null only when the
+   *  rows themselves state nothing, which renders as a dash rather than as the
+   *  gym's own currency — nobody said, and that is not the same as agreeing. */
+  currency: string | null;
   cents: number;
   count: number;
 }
@@ -206,6 +233,11 @@ export interface Income {
   /** Payments with nobody's name on them. Reported, never hidden in the total. */
   unattributed: number;
   unattributedCents: number;
+  /** What that figure is in, or null when those rows do not agree on one. The
+   *  count is always sayable; the amount is not, and a screen holding a null
+   *  here must withhold the figure rather than label it with the gym's own
+   *  currency. */
+  unattributedCurrency: string | null;
 }
 
 const METHOD_LABEL: Record<string, string> = {
@@ -216,30 +248,41 @@ const METHOD_LABEL: Record<string, string> = {
   other: 'Other',
 };
 
-/** What the gym took, and how. Rows must already be narrowed to the month. */
+/**
+ * What the gym took, and how. Rows must already be narrowed to the month.
+ *
+ * Grouped by method AND currency. See the note on `Line`: grouping by method
+ * alone put dirhams and pounds in one figure, and both this screen and the
+ * month-end CSV then printed a single currency over it.
+ */
 export function incomeOf(payments: GymPayment[]): Income {
   const byMethod = new Map<string, Line>();
   const currencies = new Set<string>();
+  const unattributedRows: GymPayment[] = [];
   let cents = 0;
-  let unattributed = 0;
   let unattributedCents = 0;
 
   for (const p of payments) {
     currencies.add(p.currency);
     cents += p.amountCents;
     if (!p.memberId) {
-      unattributed += 1;
+      unattributedRows.push(p);
       unattributedCents += p.amountCents;
     }
-    const key = p.method ?? 'other';
-    const l = byMethod.get(key) ?? { key, label: METHOD_LABEL[key] ?? key, cents: 0, count: 0 };
+    const id = p.method ?? 'other';
+    const currency = normaliseCurrency(p.currency);
+    const key = `${id}|${currency ?? ''}`;
+    const l = byMethod.get(key)
+      ?? { key, id, label: METHOD_LABEL[id] ?? id, currency, cents: 0, count: 0 };
     l.cents += p.amountCents;
     l.count += 1;
     byMethod.set(key, l);
   }
 
+  const unattributed = unattributedRows.length;
   const mixed = currencies.size > 1;
   return {
+    unattributedCurrency: sharedCurrency(unattributedRows),
     // No payments is not zero income — nobody recorded anything, which is a
     // different claim and renders as a dash.
     takenCents: payments.length === 0 || mixed ? null : cents,
@@ -286,19 +329,30 @@ export function purposeOf(
     held.add(m.memberId);
   }
 
-  const lines: Record<Purpose, Line> = {
-    membership: { key: 'membership', label: PURPOSE_LABEL.membership, cents: 0, count: 0 },
-    no_membership: { key: 'no_membership', label: PURPOSE_LABEL.no_membership, cents: 0, count: 0 },
-    unattributed: { key: 'unattributed', label: PURPOSE_LABEL.unattributed, cents: 0, count: 0 },
-  };
+  // By attribution AND currency, for the same reason `incomeOf` is. This table
+  // sits directly under that one on /close and was rendered with the same
+  // single `currency` prop over it, so a gym holding two currencies read one
+  // "Against a membership" figure that was two sums added together.
+  const lines = new Map<string, Line>();
+  const ORDER: Purpose[] = ['membership', 'no_membership', 'unattributed'];
 
   for (const p of payments) {
-    const k: Purpose = !p.memberId ? 'unattributed' : held.has(p.memberId) ? 'membership' : 'no_membership';
-    lines[k].cents += p.amountCents;
-    lines[k].count += 1;
+    const id: Purpose = !p.memberId ? 'unattributed' : held.has(p.memberId) ? 'membership' : 'no_membership';
+    const currency = normaliseCurrency(p.currency);
+    const key = `${id}|${currency ?? ''}`;
+    const l = lines.get(key)
+      ?? { key, id, label: PURPOSE_LABEL[id], currency, cents: 0, count: 0 };
+    l.cents += p.amountCents;
+    l.count += 1;
+    lines.set(key, l);
   }
 
-  return [lines.membership, lines.no_membership, lines.unattributed].filter((l) => l.count > 0);
+  // The three attributions keep their fixed order — it is an argument, read top
+  // to bottom — and the currencies within one of them sort by size.
+  return [...lines.values()].sort((a, b) =>
+    ORDER.indexOf(a.id as Purpose) - ORDER.indexOf(b.id as Purpose)
+    || b.cents - a.cents
+    || a.key.localeCompare(b.key));
 }
 
 /* ── what is still owed ────────────────────────────────────────────────────── */

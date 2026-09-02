@@ -29,7 +29,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
-import { classifyWrite, type WriteOutcome } from '../lib/offlineQueue';
+import { classifyWrite, registerFlush, type WriteOutcome } from '../lib/offlineQueue';
 import { entryToRow } from '../lib/workoutRow';
 import type { WorkoutEntry } from '../lib/mockData';
 import {
@@ -179,6 +179,56 @@ async function flushAll(uid: string): Promise<{ sent: number; refused: number; k
   await persist();
   announce();
   return { sent, refused, kept };
+}
+
+/* ── joining the app's one flush ────────────────────────────────────────── */
+
+// Every other queue in this app is emptied by src/ui/offlineFlush.tsx on the
+// two moments worth flushing on — the signal coming back, and the app coming
+// back to the foreground. This one was not, and it holds the three writes a gym
+// is paid on: attendance ticks, session outcomes and logged sessions. Before
+// this line the only thing that emptied it was a coach happening to reopen one
+// of the three screens that own it, which is the exact defect offlineFlush.tsx
+// was built to end, one portal later.
+//
+// Registered at MODULE scope rather than from an effect, and that is the whole
+// point. The six client queues register from providers mounted at the root, so
+// their registration lives as long as the app does; these three are screens a
+// coach navigates away from. A registration torn down on unmount would leave
+// the queue unreachable again the moment the coach closed the register — which
+// is precisely when they put the phone in their pocket and walk upstairs into
+// signal.
+//
+// The flusher closes over NOTHING. It reads the module's `owner` at the moment
+// it runs, so a change of account cannot leave one trainer's attendance being
+// flushed under the next trainer's name — the same rule `resetFor` holds for
+// the state itself.
+registerFlush('floorQueue', () => (owner && loaded ? flushAll(owner) : undefined));
+
+/**
+ * Read this coach's queue off the device, so a cold launch can flush it.
+ *
+ * Renders nothing. Mounted in app/(trainer)/_layout.tsx, because the module
+ * above cannot flush a queue it has never read, and the read happens inside
+ * `useFloorQueue` — on three screens the coach may not open for hours. With
+ * this mounted, entering the coach app at all is enough: the device is read
+ * once, `owner` is set, and last night's attendance is on the server before
+ * the coach has chosen a tab.
+ *
+ * Deliberately NOT `useFloorQueue`: this has no UI to keep in step, and
+ * subscribing the tab bar to every queue change would re-render the whole
+ * portal on each tick a coach makes in a basement.
+ */
+export function FloorQueueSync({ uid }: { uid: string | null }): null {
+  useEffect(() => {
+    let live = true;
+    void loadFloorQueue(uid).then(() => {
+      if (!live || !uid) return;
+      void flushAll(uid);
+    });
+    return () => { live = false; };
+  }, [uid]);
+  return null;
 }
 
 /* ── the hook the three screens use ─────────────────────────────────────── */

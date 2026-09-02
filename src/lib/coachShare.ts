@@ -275,6 +275,62 @@ export const CONSENT_BODY =
 export const WITHHELD_NOTE =
   'Your coach will not know your weight, your body fat, your sleep or your recovery, so it cannot tell you to train lighter on a bad night or judge whether your targets still fit you. It will not know about your injuries either, so it may suggest a movement that loads one — check anything it gives you against your own limitations, or turn this back on.';
 
+/* ── the Weekly Report's half of the same door ─────────────────────────────
+ *
+ * app/(client)/report.tsx posted the week's fact list to the model with
+ * `{ week: range, name: c.name }` beside it and no consent question anywhere on
+ * the screen. It was a step WORSE than the coach screen had been: the name had
+ * already been taken out of the AI Coach payload, precisely because "the model
+ * was told 'Name: Sarah Whitfield' and then handed her weight, her body fat,
+ * her sleep", and this call put it back as the second field.
+ *
+ * The allowlist above cannot reach it, because the sensitive half of that
+ * screen is not a context object — it is prose, in the message itself: "Weight
+ * 82.4 kg (down 1.2 kg overall), body fat 19%, muscle 34.1 kg." So the
+ * partition for this screen is over the FACT LINES, and the screen hands them
+ * over already sorted into the two piles.
+ *
+ * Same shape as `shareableContext` and the same refusals: null on 'unknown' and
+ * on 'unasked', because in one we have not read the answer and in the other
+ * there is no answer, and sending on either is sending before being allowed to.
+ */
+
+/**
+ * The fact lines a weekly summary may be written from.
+ *
+ * Null when nothing may be sent at all. `fitness` is the training half —
+ * counts, volume, streak — and `health` is everything measured about the
+ * member's body: weight, body fat, muscle, girths, sleep, recovery.
+ *
+ * Blank lines are dropped here rather than by the caller. The screen builds its
+ * list with `cond ? line : ''` throughout, and an empty string reaching the
+ * model as a fact line is a blank fact.
+ */
+export function weeklyFacts(
+  fitness: readonly string[],
+  health: readonly string[],
+  consent: ShareConsent,
+): string[] | null {
+  if (consent !== 'yes' && consent !== 'no') return null;
+  const lines = consent === 'yes' ? [...fitness, ...health] : [...fitness];
+  return lines.map((l) => String(l ?? '').trim()).filter(Boolean);
+}
+
+/** What the member is told the weekly summary loses when the answer is no.
+ *  Specific, like `WITHHELD_NOTE`: the report is still written, from the
+ *  training half, and saying so is the difference between a feature that is off
+ *  and a feature that appears broken. */
+export const REPORT_WITHHELD_NOTE =
+  'Your summary is written from your training only. It will not mention your weight, your body fat, your muscle, your measurements or your check-ins, because those are not being sent. Every figure on this screen is still yours to read.';
+
+/** The heading over the consent question on the Weekly Report. Its own sentence
+ *  rather than `CONSENT_TITLE`, because that one is about a conversation and
+ *  this screen has none — somebody opened it to read a summary. */
+export const REPORT_CONSENT_TITLE = 'Before we write your summary';
+
+export const REPORT_CONSENT_BODY =
+  'The paragraph at the top of this report is written by a language model from the figures below it. Your body measurements, your sleep and your check-ins are health information, so they do not go anywhere until you say they can. Either answer still gets you a summary, and every figure on this screen is yours to read whatever you choose.';
+
 /** The same disclaimer the Injuries and Injury Document screens carry, in the
  *  same words, on the screen that actually sends the injuries somewhere. */
 export const NOT_MEDICAL_ADVICE =

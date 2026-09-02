@@ -55,14 +55,58 @@ import {
   CLASS_PAY_LABEL,
   type PayIndex, type ClassPayLine, type ClassPayKind,
 } from '../../src/lib/gymPay';
+// The console's own month boundary, so "This month" on the phone and the
+// August run on the laptop are the same period rather than two numbers under
+// one label. Local midnight, not UTC's — see the header of monthEnd.ts.
+import { monthWindow, monthKeyOf } from '../../src/lib/monthEnd';
+import { Fetched } from '../../src/ui/fetched';
 
 type Range = 'week' | 'month' | 'season';
-const RANGES: [Range, string, number][] = [['week', 'This week', 7], ['month', 'This month', 30], ['season', 'Season', 90]];
+const RANGES: [Range, string][] = [['week', 'This week'], ['month', 'This month'], ['season', 'Season']];
 
-function rangeFrom(days: number): { from: string; to: string } {
-  // Fixed "now" isn't available deterministically here; use Date at call time.
-  const now = new Date(); const to = new Date(now); const from = new Date(now); from.setDate(from.getDate() - days);
-  return { from: from.toISOString(), to: to.toISOString() };
+/**
+ * ── "This month" is the CALENDAR month, and it did not used to be ─────────
+ *
+ * This was `['month', 'This month', 30]` and a rolling thirty days. The console
+ * disagrees, in writing: studio-web/app/payroll/page.tsx opens "An owner pays
+ * people against a period — August, not 'the last thirty days'."
+ *
+ * So the phone's "This month" hero and the console's August payroll run were
+ * different numbers wearing the same label, on a screen titled "Classes &
+ * Payroll" whose own copy tells the owner the money "still leaves the account
+ * from Payroll in the console". The owner reconciles one against the other and
+ * they never agree — in mid-September a rolling thirty days is most of August.
+ *
+ * The month is built from `monthWindow`, the same helper /accounting and
+ * /close use, so the boundary is the local calendar's midnight and not UTC's:
+ * the evening of the 31st does not fall into next month because Greenwich says
+ * so. `to` is capped at NOW rather than the end of the month — a month still
+ * running has no classes in its future, and quoting a period that has not
+ * happened is how a fill rate comes to look like a collapse on the 2nd.
+ *
+ * `week` and `season` stay rolling on purpose. Nobody is paid against them and
+ * "the last 7 days" is what an owner means by "this week" when they are asking
+ * how the timetable is doing, not which Monday it started on.
+ */
+function rangeBounds(r: Range, now: Date = new Date()): { from: string; to: string; label: string } {
+  const to = now.toISOString();
+  if (r === 'month') {
+    const w = monthWindow(monthKeyOf(now));
+    // `monthWindow` returns null only on a malformed key, and `monthKeyOf`
+    // cannot build one. The fallback is the rolling month rather than a throw:
+    // a payroll screen that renders nothing is worse than one whose window
+    // slipped, and the label below stops saying "August" if it ever happens.
+    if (!w) return { from: rollingFrom(now, 30), to, label: 'the last 30 days' };
+    return { from: w.fromIso, to, label: `${w.label} so far` };
+  }
+  const days = r === 'week' ? 7 : 90;
+  return { from: rollingFrom(now, days), to, label: `the last ${days} days` };
+}
+
+function rollingFrom(now: Date, days: number): string {
+  const from = new Date(now);
+  from.setDate(from.getDate() - days);
+  return from.toISOString();
 }
 
 /**
@@ -187,22 +231,30 @@ export default function OwnerClassAnalytics() {
   const [writeErr, setWriteErr] = useState<string | null>(null);
   /** Which coach's rate is open for editing, by trainer id. */
   const [editing, setEditing] = useState<string | null>(null);
+  /** Bumped by the Refresh control. A counter, so two taps are two reads. */
+  const [tick, setTick] = useState(0);
+  /** When the attendance read landed, and whether one is in flight. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [reading, setReading] = useState(false);
 
   useEffect(() => {
     let on = true;
-    const days = RANGES.find((r) => r[0] === range)?.[2] ?? 7;
-    const { from, to } = rangeFrom(days);
+    const { from, to } = rangeBounds(range);
     // Cleared first: without this the previous range's rows stayed on screen
     // while the new range loaded, so a payroll total for the season sat under
     // the heading "This week" — a number an owner might pay against.
     setRows(null);
+    setReading(true);
     classSummary(from, to)
-      .then((r) => { if (on) setRows(r); })
+      // The stamp moves on a read that LANDED. A refused one leaves it where it
+      // was, because what is on screen is still the earlier read's.
+      .then((r) => { if (on) { setRows(r); setFetchedAt(Date.now()); } })
       // A bare .then left a rejection unhandled and the screen showing whatever
       // it had. There is nothing to show after a failed read, so say so.
-      .catch((e) => { reportError('classAnalytics.summary', e); if (on) setRows(null); });
+      .catch((e) => { reportError('classAnalytics.summary', e); if (on) setRows(null); })
+      .finally(() => { if (on) setReading(false); });
     return () => { on = false; };
-  }, [range]);
+  }, [range, tick]);
 
   // The pay rates and the lines already raised. Their own read and their own
   // failure: the attendance figures above are not money and stand perfectly
@@ -354,6 +406,40 @@ export default function OwnerClassAnalytics() {
     } finally { setBusy(null); }
   };
 
+  /**
+   * The period this screen is reporting, in words.
+   *
+   * Recomputed on render rather than stored, so the label cannot drift from the
+   * bounds the read used. "September 2026 so far" is a different claim from
+   * "the last 30 days" and the owner is about to reconcile it against a payroll
+   * run named after a month.
+   */
+  const periodLabel = rangeBounds(range).label;
+
+  /**
+   * Lines queued and NOT settled.
+   *
+   * `settlementId` is null until a payroll run in the console picks the line
+   * up, so this is money an owner has decided somebody is owed and that has
+   * not left the account. Queuing every class on the phone looks exactly like
+   * paying everybody, and nothing on this screen said otherwise except one
+   * clause at the bottom of a caption below the fold.
+   */
+  const queued = useMemo(() => {
+    if (!paid) return null;
+    const open = paid.filter((l) => l.settlementId == null);
+    if (!open.length) return null;
+    // Two currencies never sum. A gym that changed its currency has both in its
+    // pay lines, and adding them is not a total — the count is still true, so
+    // the sentence keeps the count and drops the amount.
+    const cs = new Set(open.map((l) => l.currency));
+    return {
+      count: open.length,
+      cents: cs.size === 1 ? open.reduce((a, l) => a + l.amountCents, 0) : null,
+      currency: cs.size === 1 ? [...cs][0] : null,
+    };
+  }, [paid]);
+
   const putOnPayroll = async (r: ClassSummaryRow) => {
     if (!tenantId || !cur) return;
     const own = pay?.get(r.trainerId);
@@ -393,6 +479,11 @@ export default function OwnerClassAnalytics() {
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Attendance drives pay</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes & Payroll</Text>
+            {/* Attendance and payroll both. The pay reload rides along, because
+                an owner pressing one control expects the whole screen to be
+                current afterwards, not half of it. */}
+            <Fetched at={fetchedAt} busy={reading}
+              onRefresh={() => { setTick((n) => n + 1); setPayTick((n) => n + 1); }} />
           </View>
         </View>
 
@@ -450,10 +541,23 @@ export default function OwnerClassAnalytics() {
             ].filter(Boolean).join(' · ')}
           />
 
+          {/* Queued is not paid, said where the figure is rather than in a
+              caption under the fold. `Flag` puts the tone in a 6pt dot beside
+              ink-coloured text — a status colour is never text colour here. */}
+          {queued ? (
+            <Flag tone={t.warn}>
+              {queued.cents != null && queued.currency
+                ? `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll — ${money(queued.cents, queued.currency)} — and none of it has left the account. A payroll run in the console is what hands it over.`
+                : `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll, in more than one currency, so there is no one total to state. None of it has left the account — a payroll run in the console is what hands it over.`}
+            </Flag>
+          ) : null}
+
           <Rule />
 
           <Section>
-            <SectionHead title="This Range" />
+            {/* Named, not "This Range". The console pays against August; this
+                screen now reads the same August, and says which. */}
+            <SectionHead title="This Range" note={periodLabel} />
             <KpiRow items={[
               { label: 'Classes', value: fig(totals.classes) },
               { label: 'Check-ins', value: fig(totals.attended) },

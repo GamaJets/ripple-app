@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
+import { useBrand } from '../src/ui/brand';
 import { sp, layout, type as ty } from '../src/theme/scale';
 import { rememberJoinCode } from '../src/ui/pendingJoinCode';
 import { isPlausibleReferralCode, normaliseReferralCode } from '../src/lib/referralLink';
@@ -25,6 +26,7 @@ import { USE_SUPABASE } from '../src/lib/config';
 
 export default function JoinLanding() {
   const t = useTheme();
+  const { appName } = useBrand();
   const router = useRouter();
   // Two parameters, two meanings, and they are never tried as one another.
   //
@@ -94,9 +96,15 @@ export default function JoinLanding() {
     <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.gutter }}>
       <ActivityIndicator color={t.brand} />
       <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, textAlign: 'center' }}>
+        {/* This is the FIRST screen a member sees after tapping their gym's
+            invitation link, and it named the supplier rather than the gym. This
+            is a white-label build and the app on this phone may not be called
+            Repple at all — app/welcome.tsx reads the same `useBrand()` two
+            screens later, which is how the two came to disagree on the app's
+            own name inside one journey. */}
         {badCode
-          ? 'That link was missing a usable code — opening Repple so you can enter the code yourself.'
-          : 'Opening Repple…'}
+          ? `That link was missing a usable code — opening ${appName} so you can enter the code yourself.`
+          : `Opening ${appName}…`}
       </Text>
     </View>
   );

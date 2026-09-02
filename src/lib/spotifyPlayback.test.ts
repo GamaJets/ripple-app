@@ -5,7 +5,7 @@
 // 404 because nothing is playing. Both used to be swallowed.
 import {
   classifySpotifyResponse, networkFailure, nowPlayingFrom, msLabel, progressLine,
-  playlistsFrom, playlistLine, ALLOWLIST_ADVICE,
+  playlistsFrom, playlistLine, playlistSavedLine, ALLOWLIST_ADVICE,
 } from './spotifyPlayback';
 
 const errors: string[] = [];
@@ -97,4 +97,27 @@ ok(playlistLine({ ...lists[0], trackCount: 1 }) === '1 track · Tim', 'one track
 
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'SPOTIFY PLAYBACK FAILURES:\n' + errors.join('\n') : 'ALL SPOTIFY PLAYBACK TESTS PASSED');
+
+// ── what actually landed in the account ──
+//
+// The screen announced "is in your Spotify library" whatever fraction arrived:
+// a twenty-track list could land with eleven tracks in it, some of them
+// different recordings, and the sentence was identical.
+const whole = playlistSavedLine('Leg Day', { url: 'u', added: 20, requested: 20, guessed: 0 });
+ok(/is in your Spotify library\.$/.test(whole), `a complete exact save says so and stops — got ${whole}`);
+
+const short = playlistSavedLine('Leg Day', { url: 'u', added: 11, requested: 20, guessed: 0 });
+ok(/11 of its 20/.test(short), `a partial save counts what is really there — got ${short}`);
+ok(/other 9/.test(short), 'and says how many are missing');
+
+const guessy = playlistSavedLine('Leg Day', { url: 'u', added: 20, requested: 20, guessed: 4 });
+ok(/4 tracks were/.test(guessy), 'tracks matched by name are counted');
+ok(/different recordings/.test(guessy), 'and the member is told they may not be the same recording');
+ok(!/different recordings/.test(whole), 'while an exact save claims nothing of the kind');
+ok(/One track was/.test(playlistSavedLine('Leg Day', { url: 'u', added: 20, requested: 20, guessed: 1 })),
+  'one is singular');
+
+const both = playlistSavedLine('Leg Day', { url: 'u', added: 11, requested: 20, guessed: 3 });
+ok(/11 of its 20/.test(both) && /3 tracks were/.test(both), 'both facts survive together');
+
 if (errors.length) process.exit(1);

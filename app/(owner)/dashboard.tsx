@@ -18,6 +18,7 @@ import { sp, layout, hairline, type as ty, numeric, value } from '../../src/them
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { num } from '../../src/lib/format';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { Fetched } from '../../src/ui/fetched';
 import { gymRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { riskLabel } from '../../src/lib/status';
 import { HealthPill } from '../../src/ui/charts';
@@ -45,6 +46,11 @@ export default function OwnerOverview() {
   // retry of any kind. Revenue and Trainers both offer the provider's own
   // `refresh` behind a button; this is that, here.
   const { trainers, loading, status: trainersStatus, sessions30, payroll30, refresh } = usePlatformTrainers();
+  /** When the roster every figure on this console is a roll-up of last came
+   *  back. Derived from the provider's `status`, so a refresh that FAILED
+   *  leaves the stamp on the read the figures actually came from. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => { if (trainersStatus === 'ready') setFetchedAt(Date.now()); }, [trainersStatus]);
   // `loading` covered the in-flight case. It does not cover the read having
   // FAILED — that also leaves `trainers` empty, and every roll-up below then
   // computes a confident 0 over it. Same wrong sentence, arrived at a second
@@ -147,6 +153,10 @@ export default function OwnerOverview() {
                   thing the hero is asking them to do. */}
               {tenant?.name?.trim() || 'Name your gym in Brand'}
             </Text>
+            {/* The console's own age. Every figure below is a roll-up of one
+                read, and until now nothing on the page said when it happened
+                or whether the phone could still reach us. */}
+            <Fetched at={fetchedAt} onRefresh={refresh} busy={loading} />
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
             <Ghost icon="search" onPress={() => router.push('/(owner)/explore')} />

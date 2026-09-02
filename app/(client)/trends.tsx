@@ -103,14 +103,24 @@ export default function Trends() {
   const [sel, setSel] = useState<string | null>(null);
   const selName = sel || exercises[0] || null;
 
-  const series = useMemo(() => {
+  // Every session of this movement that was read, oldest first. The `.slice`
+  // that used to end this build is now on the CHART only.
+  const allSessions = useMemo(() => {
     if (!selName) return [] as { t: string; v: number }[];
     return log.filter((e) => e.exercise === selName && e.sets && e.sets.length)
       .map((e) => ({ t: e.t, v: bestOf(e, weightSeries) }))
-      .sort((a, b) => +new Date(a.t) - +new Date(b.t))
-      .slice(-12);
+      .sort((a, b) => +new Date(a.t) - +new Date(b.t));
   }, [log, selName, weightSeries]);
-  const maxE = Math.max(1, ...series.map((s) => s.v));
+  // How many points the sparkline draws. Twelve is a chart decision — a line
+  // through forty points on a phone is a smudge — and it was silently a
+  // FIGURE decision too: "Sessions" printed the length of the sliced array and
+  // "Best" was the best of those twelve, so a lifter with forty logged bench
+  // sessions was told "Sessions 12" and shown a personal best that was only the
+  // best of the last quarter of their training. Neither line named the window.
+  const CHART_SESSIONS = 12;
+  const series = useMemo(() => allSessions.slice(-CHART_SESSIONS), [allSessions]);
+  // Over everything read, not over the twelve on the chart.
+  const maxE = Math.max(1, ...allSessions.map((s) => s.v));
   const first = series.length ? series[0].v : 0;
   const last = series.length ? series[series.length - 1].v : 0;
   const delta = last - first;
@@ -254,8 +264,17 @@ export default function Trends() {
                         : logKnown ? undefined : 'not all read',
                     },
                     { label: 'Best', value: logKnown ? fig(est1RMIn(maxE, wu)) : fig(null), unit: logKnown ? wu : undefined },
-                    { label: 'Sessions', value: logKnown ? fig(series.length) : fig(null) },
+                    { label: 'Sessions', value: logKnown ? fig(allSessions.length) : fig(null) },
                   ]} />
+                  {/* Said only when the chart is showing less than the two
+                      figures above it count. Without it the line and the
+                      numbers describe two different spans of training and
+                      nothing on the screen says so. */}
+                  {logKnown && allSessions.length > series.length ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      Best and Sessions count all {allSessions.length} sessions of this movement in your log. The chart below draws the last {series.length}.
+                    </Text>
+                  ) : null}
                   {series.length >= 2 ? (<>
                     <View style={{ height: sp.lg }} />
                     {/* The hand-rolled end labels that used to sit here are

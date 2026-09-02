@@ -54,15 +54,21 @@ import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs, type IcsEvent } from '../../src/lib/exportShare';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
+import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
 // Because every client shared the literal 'c1', sessions booked by one client
 // matched every other client's filter — so two people would see each other's
 // bookings, and the trainer side (which stores real user ids) never matched at all.
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const timeLabel = (iso: string) => { const d = new Date(iso); let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`; };
-const dayLabel = (iso: string) => { const d = new Date(iso); const t = new Date(); const tm = new Date(); tm.setDate(t.getDate() + 1); if (d.toDateString() === t.toDateString()) return 'Today'; if (d.toDateString() === tm.toDateString()) return 'Tomorrow'; return `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
+// The weekday name and the date order were this file's own. `DOW` was a
+// hardcoded English array and the fallback read `${d.getDate()}/${d.getMonth() + 1}`,
+// which a member in the United States reads as month-first: "Wed 9/12" is 9
+// December here and 12 September there, and that string went into every cancel
+// confirmation on this screen. Both are the reader's now — see
+// `fmtRelativeDay` and `fmtClock` in src/lib/format.ts.
+const timeLabel = (iso: string) => fmtTime(iso);
+const dayLabel = (iso: string) => fmtRelativeDay(iso);
 
 // `onCancel` resolves TRUE only when the server actually took the cancellation.
 //

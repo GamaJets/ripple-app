@@ -55,7 +55,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
-import { memberNoFrom } from '../../src/lib/membership';
+import { memberNoFrom, MEMBER_NO_CHANGED_NOTE } from '../../src/lib/membership';
 import {
   amount, fetchMyMemberships, isCurrent, planStateOf, primaryMembership, renewalNote,
   standingLabel, standingOf, todayIso, type MemberMembership,
@@ -100,7 +100,10 @@ export default function Membership() {
   // come back at all. `isWhole` is the gate loadStatus.ts asks for and excludes
   // 'loading' and 'partial' as well.
   const logKnown = isWhole(logStatus);
-  const memberNo = memberNoFrom(c.name, c.id);
+  // The brand's prefix, not the literal 'RPL'. This line already prints the
+  // gym's name beside the number, so a chain's member read their gym's name and
+  // their gym's supplier's initials in one string. See src/lib/membership.ts.
+  const memberNo = memberNoFrom(c.name, c.id, appName);
 
   const { visits, last } = useMemo(() => {
     const now = new Date();
@@ -204,6 +207,10 @@ export default function Membership() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Membership</Text>
             <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>{c.name || 'Member'} · {memberNo}</Text>
+            {/* The number widened, so it changed. Somebody who gave reception
+                the old one and says nothing would be refused at the door with
+                no idea why. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_NO_CHANGED_NOTE}</Text>
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>

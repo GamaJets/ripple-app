@@ -105,7 +105,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, Flag, ListRow, PartialRead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { minorMoney, wholeMoney, sumTaken, since, monthStart, type Taken, type TakenRow } from '../../src/lib/coachMoney';
+import { minorMoney, wholeMoney, since, monthStart, type Taken, type TakenRow } from '../../src/lib/coachMoney';
+import { takingsStrands } from '../../src/lib/coachRevenue';
 import {
   ledger, sumMajor, sumSpend, denominate, ledgerEmptyLine,
   NO_NET_NOTE, STRIPE_AUTHORITY_NOTE, PERIOD_NOTE,
@@ -130,6 +131,8 @@ import {
   PAYOUT_IS_NOT_A_SALE, PAYOUT_STRIPE_IS_THE_RECORD, type CoachPayout,
 } from '../../src/lib/coachPayouts';
 import { receiptsTaken, receiptsEmptyLine, RECEIPT_MAY_DOUBLE_COUNT, type CoachReceipt } from '../../src/lib/coachReceipts';
+import { fetchMyCosts } from '../../src/ui/coachCosts';
+import { costsTaken, costsEmptyLine, COSTS_ARE_NEVER_NETTED, type CoachCost } from '../../src/lib/coachCosts';
 import {
   clientValue, rankByValue, currenciesIn, unattributedReceipts, unattributedLine,
   valueSpanLine, valueEmptyLine, VALUE_IS_PAST, VALUE_NEEDS_YOUR_RECORDS,
@@ -166,11 +169,16 @@ export default function CoachMoney() {
   // the charges it partly consists of would count the same money twice. It is
   // its own section and the two are never subtracted from each other.
   const [payouts, setPayouts] = useState<{ rows: CoachPayout[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  // What the coach's own business costs them (part 450). Its own state and its
+  // own status, and it is NEVER a strand of anything on the Coming In side:
+  // nothing on this screen subtracts what goes out from what came in, and
+  // `COSTS_ARE_NEVER_NETTED` says so where the figure is drawn.
+  const [costs, setCosts] = useState<{ rows: CoachCost[]; status: LoadStatus }>({ rows: [], status: 'loading' });
 
   const fees = useLateCancelCharges();
 
   const load = useCallback(async () => {
-    const [p, r, sub, inv, cr, ca, docs, rec, pay] = await Promise.all([
+    const [p, r, sub, inv, cr, ca, docs, rec, pay, cost] = await Promise.all([
       fetchClientPurchases(),
       fetchMySubscriptionPayments(),
       fetchMySubscription(),
@@ -180,6 +188,7 @@ export default function CoachMoney() {
       fetchMyInvoices(),
       fetchMyReceipts(),
       fetchMyPayouts(),
+      fetchMyCosts(),
     ]);
     setSales(p);
     setRenewals(r);
@@ -195,6 +204,7 @@ export default function CoachMoney() {
     setIssued({ count: docs.rows.length, status: docs.status });
     setReceipts(rec);
     setPayouts(pay);
+    setCosts(cost);
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -271,16 +281,23 @@ export default function CoachMoney() {
     [receipts.rows],
   );
 
-  const strandsFor = (rows: { sale: TakenRow[]; renewal: TakenRow[]; receipt: TakenRow[] }): Strand[] => ([
-    { key: 'sales', label: 'one-off sales', status: sales.status, taken: sumTaken(rows.sale) },
-    { key: 'renewals', label: 'subscription renewals', status: renewals.status, taken: sumTaken(rows.renewal) },
-    // A third strand rather than a separate figure, because it is the same
-    // question: what came in. `ledger()` withholds the whole total the moment
-    // any strand is not whole, which is exactly right here — a coach's takings
-    // with the cash half missing is not a smaller number, it is a wrong one,
-    // and for most coaches it is the larger half that would be missing.
-    { key: 'receipts', label: 'payments you recorded yourself', status: receipts.status, taken: sumTaken(rows.receipt) },
-  ]);
+  // Three strands rather than three figures, because they are one question:
+  // what came in. `ledger()` withholds the whole total the moment any strand is
+  // not whole, which is exactly right here — a coach's takings with the cash
+  // half missing is not a smaller number, it is a wrong one, and for most
+  // coaches it is the larger half that would be missing.
+  //
+  // The composition itself lives in src/lib/coachRevenue.ts. It was written out
+  // here, and then app/(trainer)/analytics.tsx needed the same three strands to
+  // state what a remote coach actually earns — at which point two screens would
+  // have been stating a coach's takings from two copies of one rule, which is
+  // how this codebase keeps finding it has two money rules. One function, both
+  // callers, same labels, so `Ledger.reason` reads identically on both screens.
+  const strandsFor = (rows: { sale: TakenRow[]; renewal: TakenRow[]; receipt: TakenRow[] }): Strand[] =>
+    takingsStrands(
+      { sales: sales.status, renewals: renewals.status, receipts: receipts.status },
+      rows,
+    );
 
   const monthIn = useMemo(
     () => ledger(strandsFor({ sale: since(saleRows, from), renewal: since(renewalRows, from), receipt: since(receiptRows, from) })),
@@ -310,6 +327,13 @@ export default function CoachMoney() {
 
   const spend = useMemo(() => sumSpend(codes.rows), [codes.rows]);
   const owed = dues ?? [];
+
+  // What the coach recorded their own business costing them. Through
+  // `costsTaken`, which is `sumTaken` under the same two rules everything else
+  // on this screen obeys — currencies never merge, and an amount with no unit
+  // is counted rather than dropped. Dated by the day the coach says the money
+  // went out, never by the day the row was written.
+  const costTaken = useMemo(() => costsTaken(costs.rows), [costs.rows]);
 
   /* ── which channels worked, which is a different question ──────────────── */
 
@@ -606,6 +630,53 @@ export default function CoachMoney() {
           <ListRow icon="trending" title="Ad Spend"
             note="Connect an ad account, and see the spend that matched no code"
             onPress={() => router.push('/(trainer)/ad-spend')} />
+        </Section>
+
+        {/* ── WHAT THE BUSINESS COSTS ────────────────────────────────────
+            Rent or a chair fee, insurance, CPD, equipment, kit, travel, an
+            accountant. Part 450, and until it existed the outgoing half of
+            this screen was the Repple plan and ad spend and nothing else —
+            which for a self-employed coach leaves out the largest single line
+            of their year and makes the Statement of Record one-sided.
+
+            NOTHING HERE IS SUBTRACTED FROM ANYTHING. There is no profit figure
+            on this screen and there must never be one: the takings above are
+            gross of Stripe's fee and the platform's, both sides are only as
+            complete as what the coach wrote down, and the two can be in
+            currencies this app holds no rate between. `NO_NET_NOTE` has been
+            the rule since before this table existed and this is the feature
+            that makes breaking it possible for the first time. */}
+        <Section>
+          <SectionHead title="What Your Business Costs" note="What you have recorded going out" />
+          {costs.status === 'error' ? (
+            <Flag>{costsEmptyLine('error')}</Flag>
+          ) : costs.status === 'partial' ? (
+            <PartialRead what="recorded costs" shown={costs.rows.length} onPress={load} />
+          ) : costTaken.pots.length ? (
+            <View>
+              {costTaken.pots.map((p) => potRow(
+                p.currency,
+                `${p.count} ${plural(p.count, 'cost', 'costs')} in ${p.currency}`,
+                minorMoney(p.minorUnits, p.currency),
+              ))}
+              {costTaken.pots.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  These are separate amounts of money and are deliberately not added together.
+                </Flag>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{costsEmptyLine(costs.status)}</Text>
+          )}
+          {costTaken.unlabelled > 0 || costTaken.unpriced > 0 ? (
+            <Flag style={{ marginTop: sp.sm }}>
+              {costTaken.unlabelled + costTaken.unpriced} recorded {plural(costTaken.unlabelled + costTaken.unpriced, 'cost has', 'costs have')} an amount this app cannot put a currency on, so {plural(costTaken.unlabelled + costTaken.unpriced, 'it is', 'they are')} in no figure above.
+            </Flag>
+          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{COSTS_ARE_NEVER_NETTED}</Text>
+          <ListRow icon="grid" title="What It Costs You"
+            note="Rent, insurance, courses, equipment, kit, travel, your accountant"
+            onPress={() => router.push('/(trainer)/costs')} />
         </Section>
 
         <Rule />

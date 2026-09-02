@@ -60,7 +60,13 @@ import { lookupBarcode, normalizeBarcode } from '../lib/openfoodfacts';
 import { radius, elevation, sp, type as ty, numeric } from '../theme/scale';
 
 export interface LoggedFood {
-  name: string; kcal: number; protein: number; carbs: number; fat: number;
+  name: string; kcal: number;
+  /** Null where Open Food Facts recorded nothing for it. These were `number`,
+   *  and a product with only an energy figure arrived as protein 0, carbs 0,
+   *  fat 0 — so `missingMacros` never fired and the log sheet pre-filled three
+   *  zeros for the member to confirm. See `OffProduct` in
+   *  src/lib/openfoodfacts.ts and the rule at the top of src/lib/foodPortion.ts. */
+  protein: number | null; carbs: number | null; fat: number | null;
   /** What those figures are FOR — '100 g', '1 serving', '330 ml' — exactly as
    *  Open Food Facts described the basis it used.
    *
@@ -124,20 +130,31 @@ export function BarcodeSheet({
       return;
     }
     setBusy(true);
-    const p = await lookupBarcode(raw);
+    const out = await lookupBarcode(raw);
     setBusy(false);
-    if (!p) {
-      // Not found is a fact about this barcode, not about the app. Say which.
-      Alert.alert('Not found',
-        from === 'camera'
-          ? `That barcode read as ${raw}, and there is no match for it in the Open Food Facts database. Try “Describe it” instead.`
-          : 'No match in the Open Food Facts database for that barcode. Try “Describe it” instead.',
+    if (!out.ok) {
+      // Five different things, and they used to be one sentence blaming the
+      // database. "We could not ask" and "there is no such product" are not the
+      // same fact, and on a supermarket's bad signal it was always the first
+      // one being reported as the second.
+      const scanned = from === 'camera' ? `That barcode read as ${raw}. ` : '';
+      const said = out.reason === 'busy'
+        ? { title: 'Could not check', body: `${scanned}The food database is busy right now, so we could not look this up. That says nothing about whether the product is in there — try again in a moment, or use “Describe it”.` }
+        : out.reason === 'offline'
+        ? { title: 'Could not check', body: `${scanned}We could not reach the food database, so we could not look this up. Nothing has been logged, and this says nothing about whether the product is in there. Try again when you have signal, or use “Describe it”.` }
+        : out.reason === 'no-nutrition'
+        ? { title: 'No figures for it', body: `${scanned}That product is in the Open Food Facts database, but it has no nutrition recorded — so there is nothing to log from it. Enter it with “Describe it” instead.` }
+        : out.reason === 'bad-code'
+        ? { title: 'Not a barcode', body: 'That is not an 8 to 13 digit barcode. Type the number printed under the bars.' }
+        : { title: 'Not found', body: `${scanned}There is no match for it in the Open Food Facts database. Try “Describe it” instead.` };
+      Alert.alert(said.title, said.body,
         // Cleared on the way out, or the camera would refuse to try the same
         // pack twice — and "it did nothing the second time" is how a member
         // concludes the scanner is broken.
         [{ text: 'OK', onPress: () => setSeen(null) }]);
       return;
     }
+    const p = out.product;
     onLogged({ name: p.name, kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat, basis: p.serving || null });
     close();
   };

@@ -454,6 +454,27 @@ export function useThread(clientId: string | null, role: ChatRole) {
   /** Bumped to re-read the thread. See the effect below: the only thing that
    *  bumps it is a queued message of ours having gone. */
   const [reloadTick, setReloadTick] = useState(0);
+  /**
+   * Whether there is more thread ABOVE what is on screen.
+   *
+   * The read below is newest-first with `capLimit()`, so a relationship longer
+   * than the cap arrives with its own beginning missing. That was reported as
+   * `status: 'partial'` and nothing more: no screen said the word, and there
+   * was no `loadOlder` anywhere in this file — so a long coaching relationship
+   * lost its own start, unreadable in the product, with nothing admitting it.
+   *
+   * Set from the first page's `truncated` flag and re-set from every older page
+   * afterwards, which is why it is separate from `status`: after one successful
+   * step back the thread is still a prefix of itself, and 'partial' has to
+   * remain true while "there is a button to press" changes.
+   */
+  const [hasOlder, setHasOlder] = useState(false);
+  /** An older page in flight. Its own flag rather than `status`, because the
+   *  thread on screen is fine and the composer must stay usable. */
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  /** The failure of a step back, or null. Never folded into `status`: the
+   *  thread that IS on screen was read successfully and is not in doubt. */
+  const [olderError, setOlderError] = useState<string | null>(null);
   const coachId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -485,6 +506,11 @@ export function useThread(clientId: string | null, role: ChatRole) {
     seen.current = new Set();
     setReady(false);
     setStatus('loading');
+    // Goes with the rest of it. A `hasOlder` left over from the previous thread
+    // offers a step back into a conversation that is not this one.
+    setHasOlder(false);
+    setLoadingOlder(false);
+    setOlderError(null);
     let cancelled = false;
     let channel: any = null;
     (async () => {
@@ -565,6 +591,10 @@ export function useThread(clientId: string | null, role: ChatRole) {
           // somebody else's conversation.
           setMessages(rows.map(rowToMsg));
           setStatus(page.truncated ? 'partial' : 'ready');
+          // The same fact, said as something the member can act on. `status`
+          // stays 'partial' for as long as the thread is a prefix; this is what
+          // decides whether there is anything left to fetch.
+          setHasOlder(page.truncated);
           setCachedAt(null);
           // …and this is now what a basement gets. The raw rows are cached
           // rather than the ThreadMessage objects, so the cache round-trips
@@ -810,6 +840,66 @@ export function useThread(clientId: string | null, role: ChatRole) {
   };
 
   /**
+   * One page further back into the conversation.
+   *
+   * Keyset, not offset. The cursor is the oldest row we hold — its timestamp
+   * AND its id — because two messages can share a `created_at` and an offset
+   * over a thread that is still being written to would skip or repeat rows the
+   * moment a new one arrives. The compound predicate is the same tiebreak the
+   * first page ordered by, read backwards.
+   *
+   * Prepends. `seen` is extended with what arrives so the realtime handler
+   * still cannot double-append, and the guard against re-entry is
+   * `loadingOlder` rather than a ref, because the button that calls this is
+   * disabled from the same flag.
+   *
+   * A failure here is reported through `olderError` and never through `status`:
+   * the messages already on screen were read successfully, and turning the
+   * whole thread into an error because a step back was refused would take away
+   * the part that worked.
+   */
+  const loadOlder = useCallback(async () => {
+    if (!USE_SUPABASE) return;
+    const cid = tid.current;
+    if (!cid || loadingOlder || !hasOlder) return;
+    const oldest = messages[0];
+    // Nothing held means there is no cursor, and "load older than nothing" is
+    // the first read, not this one.
+    if (!oldest) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const { data, error } = await supabase.from('messages').select('*')
+        .eq('client_id', cid)
+        .or(`created_at.lt.${oldest.createdAt},and(created_at.eq.${oldest.createdAt},id.lt.${oldest.id})`)
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
+        .limit(capLimit());
+      if (error) {
+        reportError('messaging.older', error);
+        setOlderError('We could not read any further back just now. What is above is still the rest of the conversation, not the whole of it.');
+        return;
+      }
+      const page = capped(data);
+      const rows = page.rows.slice().reverse();
+      const fresh = rows.filter((r: any) => !seen.current.has(String(r.id)));
+      for (const r of fresh) seen.current.add(String(r.id));
+      // An empty page means we have reached the beginning after all — the first
+      // read's probe row said there was more and there is not, which happens
+      // when the extra rows were deleted between the two reads.
+      setHasOlder(fresh.length > 0 && page.truncated);
+      if (fresh.length) setMessages((prev) => [...fresh.map(rowToMsg), ...prev]);
+      // `status` is only cleared when the whole thread is now on screen. While
+      // any of it is still above, the screen keeps saying so.
+      if (!(fresh.length > 0 && page.truncated)) setStatus((st) => (st === 'partial' ? 'ready' : st));
+    } catch (e) {
+      reportError('messaging.older', e);
+      setOlderError('We could not read any further back just now. What is above is still the rest of the conversation, not the whole of it.');
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [messages, loadingOlder, hasOlder]);
+
+  /**
    * The thread, plus whatever this device is still holding for it.
    *
    * Without this, a message typed with no signal is invisible the moment the
@@ -863,6 +953,16 @@ export function useThread(clientId: string | null, role: ChatRole) {
     /** The sentence for a thread read off this device rather than the server,
      *  or null when it was confirmed. Goes with `status === 'error'`. */
     cachedNote: cachedAtLine(cachedAt),
+    /** True while there is conversation above what is drawn. The screen's cue
+     *  to offer `loadOlder`, and the thing `status: 'partial'` never had. */
+    hasOlder,
+    /** An older page is on its way. The composer stays usable throughout. */
+    loadingOlder,
+    /** Why the last step back did not happen, or null. Distinct from `status`,
+     *  which describes the thread that IS on screen. */
+    olderError,
+    /** One page further back. Safe to call when there is nothing to fetch. */
+    loadOlder,
   };
 }
 

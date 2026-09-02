@@ -17,7 +17,7 @@ import {
   FALLBACK_LOCALE, appLocale, isWellFormedLocale, localeNote, localeSource,
   normaliseLocale, prefers12Hour, resolveLocale, setAppLocale,
 } from './locale';
-import { fmtAxisDay, fmtClock, fmtDay, fmtPointDay, isoDate, num, num1 } from './format';
+import { fmtAxisDay, fmtClock, fmtDay, fmtFullDay, fmtPointDay, fmtRelativeDay, monthNamesShort, isoDate, num, num1 } from './format';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -133,6 +133,89 @@ setAppLocale('en-US');
 const us = fmtAxisDay(2026, 7, 14);
 ok(gb.indexOf('14') < gb.search(/[A-Za-z]/), `a British axis label leads with the day — got ${gb}`);
 ok(us.search(/[A-Za-z]/) < us.indexOf('14'), `an American one leads with the month — got ${us}`);
+
+/* ── "Today", "Tomorrow", and the four copies that were neither ─────────── */
+
+// Four screens carried a private `dayLabel` ending
+// `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`, with DOW a hardcoded
+// English array. "Wed 9/12" is 9 December to a British reader and 12 September
+// to an American one, and that string went into every cancel confirmation on
+// those screens.
+const NOON = new Date(2026, 8, 2, 12, 0, 0);          // Wed 2 Sep 2026, local
+const LATE = new Date(2026, 8, 2, 23, 30, 0);
+const iso = (y: number, m: number, d: number, h = 9) => new Date(y, m, d, h).toISOString();
+
+setAppLocale('en-GB');
+eq(fmtRelativeDay(iso(2026, 8, 2), NOON), 'Today', 'the day the reader is in is named, not dated');
+eq(fmtRelativeDay(iso(2026, 8, 3), NOON), 'Tomorrow', 'and so is the next one');
+
+// The comparison is on the local calendar date, not on a 24-hour difference.
+// 23:30 tonight and 01:00 tomorrow are two hours apart and one day apart, and
+// it is the day the reader means.
+eq(fmtRelativeDay(iso(2026, 8, 3, 1), LATE), 'Tomorrow',
+  'ninety minutes after midnight is tomorrow, not today');
+eq(fmtRelativeDay(iso(2026, 8, 2, 1), LATE), 'Today',
+  'and twenty-two hours earlier the same date is still today');
+
+// The defect itself: the day number, the month and their ORDER all follow the
+// reader. 9 December must not read as 12 September.
+setAppLocale('en-GB');
+const dGB = fmtRelativeDay(iso(2026, 11, 9), NOON);
+setAppLocale('en-US');
+const dUS = fmtRelativeDay(iso(2026, 11, 9), NOON);
+ok(!/\d+\/\d+/.test(dGB), `no bare numeric date survives — got ${dGB}`);
+ok(!/\d+\/\d+/.test(dUS), `in either locale — got ${dUS}`);
+ok(dGB.indexOf('9') < dGB.search(/Dec/), `a British reader gets the day first — got ${dGB}`);
+ok(dUS.search(/Dec/) < dUS.indexOf('9'), `an American reader gets the month first — got ${dUS}`);
+
+setAppLocale('fr-FR');
+const dFR = fmtRelativeDay(iso(2026, 11, 9), NOON);
+ok(!/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/.test(dFR),
+  `no English weekday is glued onto a French date — got ${dFR}`);
+
+setAppLocale('en-GB');
+eq(fmtRelativeDay('not a date', NOON), '—', 'an unreadable date is a dash, not "Today"');
+
+// Bare `YYYY-MM-DD` goes through localDate for the same reason fmtDay does:
+// `new Date('2026-08-01')` is UTC midnight and reads back as 31 July west of
+// Greenwich, and test:zones runs this file under America/Los_Angeles.
+ok(/\b1\b/.test(fmtRelativeDay('2026-08-01', NOON)),
+  `a bare date keeps its day number — got ${fmtRelativeDay('2026-08-01', NOON)}`);
+
+/* ── the month names a picker scrolls through ───────────────────────────── */
+
+// Two screens carried their own hardcoded English `MONTHS` array — the
+// dashboard's date line and the date-of-birth wheel. The wheel is the one place
+// a LIST of month names is still the right shape, so it gets one, in the
+// reader's language.
+setAppLocale('en-GB');
+const mEN = monthNamesShort();
+eq(mEN.length, 12, 'twelve months, indexed the way Date#getMonth is');
+ok(/Jan/.test(mEN[0]), `January is index 0 — got ${mEN[0]}`);
+ok(/Dec/.test(mEN[11]), `and December is index 11 — got ${mEN[11]}`);
+
+setAppLocale('fr-FR');
+const mFR = monthNamesShort();
+eq(mFR.length, 12, 'still twelve in another language');
+ok(mFR[7] !== mEN[7], `and they are not the English ones — got ${mFR[7]} for August`);
+eq(new Set(mFR).size >= 11, true, 'and they are distinct from each other');
+
+/* ── a date of birth, which is a bare date column ───────────────────────── */
+
+setAppLocale('en-GB');
+ok(/\b14\b/.test(fmtFullDay('1990-05-14')),
+  `a bare date keeps its day number — got ${fmtFullDay('1990-05-14')}`);
+ok(!/\b13\b/.test(fmtFullDay('1990-05-14')),
+  `and does not slip to the day before west of Greenwich — got ${fmtFullDay('1990-05-14')}`);
+ok(/1990/.test(fmtFullDay('1990-05-14')), 'a date of birth carries its year');
+eq(fmtFullDay('not a date'), '—', 'and an unreadable one is a dash');
+
+setAppLocale('en-US');
+const bUS = fmtFullDay('1990-05-14');
+setAppLocale('en-GB');
+const bGB = fmtFullDay('1990-05-14');
+ok(bGB.indexOf('14') < bGB.search(/[A-Za-z]/), `a British reader gets the day first — got ${bGB}`);
+ok(bUS.search(/[A-Za-z]/) < bUS.indexOf('14'), `an American one gets the month first — got ${bUS}`);
 
 /* ── the one thing that is NOT the reader's ──────────────────────────────── */
 

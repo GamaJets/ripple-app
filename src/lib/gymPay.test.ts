@@ -11,6 +11,7 @@ import {
   rateForSession, withResolvedRates, payCurrency, parseRate, payRateBlocker,
   classPayAmount, classPayBlocker, adjustmentSign, adjustmentBlocker,
   runTotal, runCurrencyBlocker, reversalReasonBlocker,
+  adjustmentsTotal, runScopeOf, scopedToRun,
   ADJUSTMENT_KINDS,
   type PayIndex, type TrainerPay,
 } from './gymPay';
@@ -179,6 +180,71 @@ eq(runCurrencyBlocker([null, null]), null, 'nothing stated is nothing to disagre
 
 ok(reversalReasonBlocker('') != null, 'taking a payroll run back needs a reason');
 eq(reversalReasonBlocker('Paid before the transfer cleared'), null, 'and a reason is a reason');
+
+/* ── adjustments are not one figure unless they are one currency ──────────
+ *
+ * /payroll's Adjustments column reduced `amountCents` across the rows and
+ * printed the gym's currency over the answer, so a euro reimbursement plus a
+ * sterling bonus read as one sterling figure — on the number the owner reads
+ * BEFORE deciding whether to press Settle. `runCurrencyBlocker` does stop the
+ * button, but only after the figure has been believed.
+ */
+{
+  const adj = (kind: 'bonus' | 'deduction' | 'reimbursement' | 'advance', amountCents: number, currency: string | null) =>
+    ({ kind, amountCents, currency } as const);
+
+  const one = adjustmentsTotal([adj('bonus', 5000, 'GBP'), adj('deduction', -1500, 'GBP')]);
+  eq(one.cents, 3500, 'adjustments in one currency add up');
+  eq(one.currency, 'GBP', 'and the total states that currency');
+
+  const two = adjustmentsTotal([adj('bonus', 5000, 'GBP'), adj('reimbursement', 4000, 'EUR')]);
+  eq(two.cents, null, 'a euro reimbursement and a sterling bonus are not one figure');
+  eq(two.currency, null, 'and there is no currency to label a figure that does not exist');
+  eq(two.currencies.join(','), 'EUR,GBP', 'the screen is told which two, so it can say so');
+  eq(two.count, 2, 'and how many rows it is refusing to add');
+
+  const split = adjustmentsTotal([
+    adj('bonus', 5000, 'GBP'), adj('reimbursement', 2000, 'GBP'), adj('advance', -1000, 'GBP'),
+  ]);
+  eq(split.cents, 6000, 'the run total is still every line');
+  eq(split.taxableCents, 4000, 'but pay and a reimbursement are reported apart');
+  eq(split.reimbursementCents, 2000, 'because one is taxable and one is money handed back');
+
+  eq(adjustmentsTotal([]).cents, null, 'no adjustments is not an adjustment of nothing');
+  eq(adjustmentsTotal([adj('bonus', 100, null)]).cents, null,
+    'and an adjustment stating no currency is not silently the gym’s');
+  eq(adjustmentsTotal([adj('bonus', 100, ' gbp ')]).currency, 'GBP',
+    'spacing and case are one currency, not two — the same normalisation sharedCurrency does');
+}
+
+/* ── a run pays for its own period ────────────────────────────────────────
+ *
+ * `fetchClassPay` is tenant-wide and `applies_on` was never consulted, so every
+ * unsettled line in the gym's history joined whichever run was on screen and
+ * was stamped with that run's period_from. Opening July paid for September.
+ */
+{
+  const AUG = { fromDate: '2026-08-01', toDate: '2026-08-31' };
+  eq(runScopeOf('2026-08-15', AUG), 'on', 'a line dated inside the period is on the run');
+  eq(runScopeOf('2026-08-01', AUG), 'on', 'the first day is inside it');
+  eq(runScopeOf('2026-08-31', AUG), 'on', 'and so is the last');
+  eq(runScopeOf('2026-09-01', AUG), 'later',
+    'a bonus deliberately dated 1 September is not August’s cost');
+  eq(runScopeOf('2026-07-30', AUG), 'earlier',
+    'an unsettled line from before the period has no other run coming, so it joins this one');
+  eq(runScopeOf(null, AUG), 'undated', 'a line whose date could not be read is placed in no period');
+  eq(runScopeOf('', AUG), 'undated', 'and neither is an empty one');
+  eq(runScopeOf('not a date', AUG), 'undated', 'nor a value that is not a date at all');
+
+  const rows = [
+    { id: 'a', on: '2026-08-04' },
+    { id: 'b', on: '2026-09-02' },
+    { id: 'c', on: '2026-06-19' },
+    { id: 'd', on: null },
+  ];
+  eq(scopedToRun(rows, (r) => r.on, AUG).map((r) => r.id).join(','), 'a,c',
+    'the run takes the period’s own lines and the stranded earlier ones, and nothing from the future');
+}
 
 if (errors.length) {
   console.error(`gymPay: ${errors.length} failed\n` + errors.map((e) => '  · ' + e).join('\n'));

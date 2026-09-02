@@ -57,6 +57,14 @@ eq(minorMoney(1234567, 'gbp'), 'GBP 12,345.67', 'four digits and up carry a thou
 eq(wholeMoney(75, 'aed'), 'AED 75.00', 'a rate somebody typed is already in whole units');
 eq(wholeMoney(5000, 'jpy'), 'JPY 5,000', 'a whole-unit zero-decimal amount is left alone too');
 eq(wholeMoney(75.5, 'gbp'), 'GBP 75.50', 'a typed rate keeps its half');
+// `gymMoney` in src/ui/tenant.tsx is a one-line delegate to this, and it used
+// to convert a whole-unit figure UP by a hundred and let `minorMoney` divide it
+// back down. That round trip is exact in the currencies that have a hundred
+// minor units and in no others, so a JPY 6,300 session fee printed as
+// "JPY 630,000" and a KWD 40 one as "KWD 4.000". This is the line that has to
+// stay true for the owner console's payroll figures.
+eq(wholeMoney(6300, 'jpy'), 'JPY 6,300', 'a whole-unit yen figure is neither multiplied nor divided');
+eq(wholeMoney(40, 'kwd'), 'KWD 40.000', 'and a whole-unit dinar keeps its own three places rather than losing a factor of ten');
 
 // The half that matters in a white-label product. There is no currency this
 // code could fall back to that is not wrong for one of the gyms running it.

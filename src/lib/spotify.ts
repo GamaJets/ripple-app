@@ -29,6 +29,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   classifySpotifyResponse, networkFailure, nowPlayingFrom, playlistsFrom,
   type SpotifyFailure, type SpotifyFailureKind, type NowPlaying, type PlaylistRef,
+  type PlaylistSaveReport,
 } from './spotifyPlayback';
 import { BRAND } from './brands';
 
@@ -403,28 +404,65 @@ export async function spotifySearchTracks(queries: string[], want: number, salt:
   return out;
 }
 
-/** Create a playlist in the account from {title, artist} tracks. Returns its URL. */
-export async function createSpotifyPlaylist(name: string, tracks: { title: string; artist: string }[]): Promise<string> {
+/**
+ * Create a playlist in the account from the tracks on screen.
+ *
+ * ── The description ─────────────────────────────────────────────────────
+ *
+ * It was the literal 'Built by Repple'. This is a white-label product and the
+ * playlist is written into the MEMBER'S OWN Spotify account, where it stays for
+ * good and where the gym cannot edit it — so a chain's member was permanently
+ * stamping their gym's supplier's name inside their own library. Every other
+ * member-visible string on app/(client)/music.tsx already reads `BRAND.label`.
+ *
+ * ── The tracks ──────────────────────────────────────────────────────────
+ *
+ * `uri` is used when the caller has one, and the caller usually does: a
+ * Spotify-sourced playlist carries the exact `spotify:track:…` of every track it
+ * found. This function used to discard it and re-search every track by
+ * `"${title} ${artist}"` text, keeping whatever came back first — so a track
+ * the app had already identified exactly could be replaced by a live version, a
+ * remaster or a cover, and a track with no text match was dropped silently.
+ *
+ * The text search remains for the built-in curated lists, which carry no uri.
+ * What is new is that the two are counted separately and reported, so the
+ * screen can say what actually landed instead of announcing a whole playlist
+ * whatever fraction of it arrived.
+ */
+export async function createSpotifyPlaylist(
+  name: string,
+  tracks: { title: string; artist: string; uri?: string | null }[],
+): Promise<PlaylistSaveReport> {
   const me = await api<any>('/me');
   if (!me?.id) raise({ kind: 'unknown', message: 'Spotify did not return a profile id.' });
   const pl = await api<any>(`/users/${encodeURIComponent(me.id)}/playlists`, {
-    method: 'POST', body: { name, description: 'Built by Repple', public: false },
+    method: 'POST', body: { name, description: `Built by ${BRAND.label}`, public: false },
   });
   if (!pl?.id) raise({ kind: 'unknown', message: 'Spotify did not return a playlist id.' });
 
   const uris: string[] = [];
+  let guessed = 0;
   for (const tr of tracks) {
+    // The exact track, when we already have it. No search, no second opinion.
+    if (typeof tr.uri === 'string' && tr.uri.startsWith('spotify:track:')) { uris.push(tr.uri); continue; }
     const q = encodeURIComponent(`${tr.title} ${tr.artist}`);
     const s = await api<any>(`/search?q=${q}&type=track&limit=1`);
     const uri = s?.tracks?.items?.[0]?.uri;
-    if (uri) uris.push(uri);
+    // Counted as a guess, because a recording with the right name is not
+    // necessarily the right recording.
+    if (uri) { uris.push(uri); guessed++; }
   }
   // Say so rather than reporting a saved playlist that has nothing in it.
   if (!uris.length) {
     raise({ kind: 'unknown', message: `“${name}” was created but Spotify matched none of its ${tracks.length} tracks, so it is empty.` });
   }
   await api(`/playlists/${encodeURIComponent(pl.id)}/tracks`, { method: 'POST', body: { uris } });
-  return pl.external_urls?.spotify || `https://open.spotify.com/playlist/${pl.id}`;
+  return {
+    url: pl.external_urls?.spotify || `https://open.spotify.com/playlist/${pl.id}`,
+    added: uris.length,
+    requested: tracks.length,
+    guessed,
+  };
 }
 
-export type { NowPlaying, PlaylistRef };
+export type { NowPlaying, PlaylistRef, PlaylistSaveReport };

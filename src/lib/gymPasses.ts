@@ -12,7 +12,7 @@
 // counting it as zero, because a gym reading "pass revenue: 0" when it took
 // cash all week will make a worse decision than one reading a dash.
 
-import { assertWhole, capLimit } from './rowCap';
+import { assertWhole, capLimit, readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
@@ -389,22 +389,35 @@ export async function setPassTypeActive(
  *     convert, so the rate would come out flattering, in the direction that
  *     stops a gym chasing the people it should.
  *
- * There is no honest prefix of this set, so the read refuses and the screens
- * say the passes could not be read.
+ * There is no honest prefix of this set — so it is not prefixed. It is FINISHED.
+ *
+ * Refusing was the first answer and it was the wrong one for this read, for the
+ * reason the first bullet above already states: /door is the screen the desk
+ * works from, and a refusal there does not merely withhold a figure, it takes
+ * the check-in bar and the pass desk away with it. A gym selling twenty
+ * drop-ins a week crosses a thousand inside a year, which is a gym doing well
+ * at the exact thing this table records. `readAll` pages the set instead
+ * (src/lib/rowCap.ts); PAGE_CEILING is what still stops a query that lost its
+ * tenant filter. `id` after `issued_on` because paging needs a TOTAL order and
+ * two passes sold on the same day are two rows Postgres may return either way
+ * round.
  */
 export async function fetchPasses(sb: Queryable, tenantId: string): Promise<GymPass[]> {
-  const { data, error } = await sb
-    .from('gym_passes')
-    .select(
-      'id, pass_type_id, holder_id, holder_name, host_member_id, issued_on, expires_on, ' +
-        'uses_total, uses_spent, paid_cents, currency, note, ' +
-        'gym_pass_types(name, kind, covers), profiles!gym_passes_holder_id_fkey(full_name)',
-    )
-    .eq('tenant_id', tenantId)
-    .order('issued_on', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  return assertWhole(data, "this gym's passes").map(rowToPass);
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_passes')
+      .select(
+        'id, pass_type_id, holder_id, holder_name, host_member_id, issued_on, expires_on, ' +
+          'uses_total, uses_spent, paid_cents, currency, note, ' +
+          'gym_pass_types(name, kind, covers), profiles!gym_passes_holder_id_fkey(full_name)',
+      )
+      .eq('tenant_id', tenantId)
+      .order('issued_on', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    "this gym's passes",
+  );
+  return rows.map(rowToPass);
 }
 
 function rowToPass(r: any): GymPass {

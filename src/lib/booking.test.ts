@@ -22,6 +22,8 @@ import {
   isLateCancellation, insideNoticeWindow, noticeHoursOf, lateCancelFee,
   feeAmountLine, unstatedCurrency, noticeLabel, cancelWarningLine, feeRecordedLine,
   waitlistOrder, nextWaitlistClaim, waitlistPosition, waitlistLine, ordinal,
+  openSlotWindow, slotWindowLine, SLOT_WARN_DAYS,
+  classClashes, classCheckCaveat, overlaps,
   type CancellationPolicy, type WaitlistEntry,
 } from './booking';
 
@@ -261,6 +263,123 @@ eq(ordinal(12), '12th', '12th, not 12nd');
 eq(ordinal(13), '13th', '13th, not 13rd');
 eq(ordinal(21), '21st', '21st');
 eq(ordinal(22), '22nd', '22nd');
+
+/* ── how much bookable diary is left ────────────────────────────────────── */
+
+{
+  const NOW = Date.parse('2026-09-01T09:00:00.000Z');
+  const DAY = 86_400_000;
+  const slot = (offsetDays: number, status = 'available') =>
+    ({ startsAt: new Date(NOW + offsetDays * DAY).toISOString(), status });
+
+  // THE one that must not be got wrong. An empty list under a failed read is a
+  // read that did not happen, and turning it into "you have no open slots"
+  // sends a coach to regenerate a diary that is already full.
+  const unread = openSlotWindow([], { known: false, hasWeekly: true, now: NOW });
+  eq(unread.state, 'unknown', 'an unread calendar is unknown, never empty');
+  eq(slotWindowLine(unread), null, 'and nothing is said about a diary nobody read');
+
+  // A coach with no weekly availability is not relying on generated slots.
+  eq(openSlotWindow([], { known: true, hasWeekly: false, now: NOW }).state, 'idle',
+    'a coach with no weekly slots is told nothing');
+
+  const empty = openSlotWindow([slot(-3)], { known: true, hasWeekly: true, now: NOW });
+  eq(empty.state, 'empty', 'slots that have all been and gone are an empty window');
+  eq(empty.open, 0, 'and a past slot is not counted as open');
+  ok((slotWindowLine(empty) ?? '').includes('nobody can book you'), 'which says what it costs');
+
+  // A booked session is not a bookable one. A coach whose four weeks are fully
+  // booked has nothing left to sell and must be told so.
+  eq(openSlotWindow([slot(20, 'booked'), slot(25, 'blocked')], { known: true, hasWeekly: true, now: NOW }).state, 'empty',
+    'a full diary is an empty bookable window');
+
+  const ending = openSlotWindow([slot(1), slot(3)], { known: true, hasWeekly: true, now: NOW });
+  eq(ending.state, 'ending', 'a window inside the warning period is running out');
+  eq(ending.daysLeft, 3, 'counted to the furthest slot, not the nearest');
+  eq(ending.open, 2, 'and every future open slot is counted');
+  ok((slotWindowLine(ending) ?? '').includes('in 3 days'), 'and the sentence says when');
+
+  eq(openSlotWindow([slot(SLOT_WARN_DAYS + 1)], { known: true, hasWeekly: true, now: NOW }).state, 'healthy',
+    'a window past the warning period says nothing');
+  eq(slotWindowLine(openSlotWindow([slot(28)], { known: true, hasWeekly: true, now: NOW })), null,
+    'and a healthy window has no line at all');
+
+  // The boundary itself warns rather than staying silent: the day it is exactly
+  // a week away is the last day the warning is any use.
+  eq(openSlotWindow([slot(SLOT_WARN_DAYS)], { known: true, hasWeekly: true, now: NOW }).state, 'ending',
+    'the boundary day warns');
+
+  // Floored, so "runs out in 2 days" is never optimistic, and the two short
+  // horizons read as words rather than as a number.
+  const soon = openSlotWindow([{ startsAt: new Date(NOW + DAY + 20 * 3600_000).toISOString(), status: 'available' }],
+    { known: true, hasWeekly: true, now: NOW });
+  eq(soon.daysLeft, 1, 'a day and twenty hours is one whole day, not two');
+  ok((slotWindowLine(soon) ?? '').includes('tomorrow'), 'and one day reads as tomorrow');
+  const today = openSlotWindow([{ startsAt: new Date(NOW + 3600_000).toISOString(), status: 'available' }],
+    { known: true, hasWeekly: true, now: NOW });
+  ok((slotWindowLine(today) ?? '').includes('today'), 'and the last hour of the window reads as today');
+
+  // An unparseable start is dropped rather than counted: it cannot be placed in
+  // time, and counting it would hold the warning back on a diary that is empty.
+  eq(openSlotWindow([{ startsAt: 'not a date', status: 'available' }], { known: true, hasWeekly: true, now: NOW }).state,
+    'empty', 'an unreadable start is not a bookable slot');
+}
+
+/* ── classes and one-to-ones now know the other exists ──────────────────── */
+
+{
+  const ME = 'coach-1';
+  const cls = (id: string, startsAt: string, durationMin: number, over: Partial<{ trainerId: string | null; status: string }> = {}) =>
+    ({ id, title: id, startsAt, durationMin, trainerId: ME, status: 'scheduled', ...over });
+
+  const SIX = '2026-09-08T18:00:00.000Z';
+  const mine = cls('spin', SIX, 45);
+
+  // THE defect: `generateSlots` opened a bookable PT hour on top of the class
+  // the coach was running.
+  const hit = classClashes(SIX, 60, [mine], ME);
+  eq(hit.mine.length, 1, 'a class this coach teaches is in the way of a one-to-one');
+  eq(hit.unattributed.length, 0, 'and it is not counted twice');
+
+  // Touching is not overlapping. A class that ends at six and a session that
+  // starts at six are two things one person can do.
+  eq(classClashes('2026-09-08T18:45:00.000Z', 60, [mine], ME).mine.length, 0,
+    'a session starting as the class ends is not a clash');
+  eq(classClashes('2026-09-08T17:00:00.000Z', 60, [mine], ME).mine.length, 0,
+    'nor is one that ends as it begins');
+
+  // A cancelled class is not an obstacle. The room never opened, and treating
+  // it as one would lose the coach an hour the gym handed back.
+  eq(classClashes(SIX, 60, [cls('off', SIX, 45, { status: 'cancelled' })], ME).mine.length, 0,
+    'a called-off class does not block the hour it was going to use');
+
+  // Part 165: every class the console created has trainer_id NULL. Those can
+  // neither block nor be dismissed.
+  const nobody = classClashes(SIX, 60, [cls('board', SIX, 45, { trainerId: null })], ME);
+  eq(nobody.mine.length, 0, 'a class with no coach recorded does not block');
+  eq(nobody.unattributed.length, 1, 'but it is not silently ignored either');
+  ok((classCheckCaveat(true, 1) ?? '').includes('could not be ruled'),
+    'and the coach is told it could not be ruled out');
+
+  // A colleague's class is their business and their room.
+  const theirs = classClashes(SIX, 60, [cls('theirs', SIX, 45, { trainerId: 'coach-2' })], ME);
+  eq(theirs.mine.length, 0, 'a colleague class is not this coach being double-booked');
+  eq(theirs.unattributed.length, 0, 'and it is not an unknown either — somebody is recorded');
+
+  // Signed out: nothing is anybody's, and the guard says so rather than
+  // claiming the hour is free.
+  eq(classClashes(SIX, 60, [mine], null).mine.length, 0, 'with no account, no class is "mine"');
+
+  // The one sentence that must exist: an unread timetable is never silence.
+  ok((classCheckCaveat(false, 0) ?? '').includes('could not be read'),
+    'an unchecked timetable is said out loud');
+  eq(classCheckCaveat(true, 0), null, 'and a clean, whole check says nothing extra');
+
+  // `overlaps` now takes any busy span, which is what let a class be handed to
+  // the guard the whole booking side already rested on.
+  ok(overlaps(SIX, 60, [{ startsAt: SIX, durationMin: 45 }]), 'a bare span overlaps');
+  ok(!overlaps(SIX, 60, []), 'and an empty diary never does');
+}
 
 if (errors.length) {
   console.error(`booking.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);

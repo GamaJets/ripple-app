@@ -38,8 +38,8 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
-  fetchPlans, fetchMemberships, money,
-  type MembershipPlan, type Membership, type PlanInterval,
+  fetchPlans, fetchMemberships, money, sharedCurrency,
+  type MembershipPlan, type Membership, type PlanInterval, type PaymentKind,
 } from '@lib/gymRecord';
 import { assertWhole, capLimit } from '@lib/rowCap';
 // The PT ledger is added up by the same code the coach's own earnings screen
@@ -95,6 +95,23 @@ interface Taking {
   currency: string | null;
   method: string;
   takenAt: string;
+  /**
+   * 'payment' unless this row takes another one back.
+   *
+   * This screen selected neither `kind` nor `reverses_payment_id` — the two
+   * columns supabase/parts/180 added precisely so a correction is legible — so
+   * a negative refund row was counted as one of the "N payments" and read as a
+   * sale. There was no gross-versus-refunds view anywhere here, so an owner
+   * comparing a month with three refunds against a month with none was
+   * comparing two figures that mean different things under the same label.
+   *
+   * The netting itself is right and is not changed: part 180's whole argument
+   * is that a correction is a negative ROW so that every existing SUM comes out
+   * at the true figure without learning a new predicate. What was missing was
+   * the ability to SAY so.
+   */
+  kind: PaymentKind;
+  reversesPaymentId: string | null;
 }
 
 /**
@@ -640,8 +657,19 @@ interface Bucket {
 
 interface CashView {
   byMethod: Bucket[];
+  /** What the gym holds: sales less refunds. The figure this page has always
+   *  shown, and still the only one it calls the total. */
   totalCents: number | null;
+  /** Sales alone, before anything was handed back. Null under the same
+   *  conditions as `totalCents` — a gross figure across two currencies is not a
+   *  figure. */
+  grossCents: number | null;
+  /** What was handed back, as a POSITIVE amount, or null when nothing was. */
+  refundedCents: number | null;
+  /** How many rows were corrections rather than sales. */
+  refunds: number;
   currency: string | null;
+  /** Sales, not rows. A refund is not a payment and used to be counted as one. */
   count: number;
   unpriced: number;
   reason: string | undefined;
@@ -659,6 +687,12 @@ function buildCash(rows: Taking[]): CashView {
   const priced = rows.filter((r) => r.amountCents != null);
   const currency = oneCurrency(priced);
   const totalCents = totalOf(rows);
+  // Sales and corrections, apart. `kind` is the record's own word for it and is
+  // read in preference to the sign: a negative row with no kind on it predates
+  // supabase/parts/180 and is still a correction, which the second test catches.
+  const sales = rows.filter((r) => r.kind === 'payment' && !((r.amountCents ?? 0) < 0));
+  const corrections = rows.filter((r) => !sales.includes(r));
+  const refundedTotal = corrections.length ? totalOf(corrections) : null;
 
   const groups = new Map<string, Taking[]>();
   for (const r of rows) {
@@ -678,8 +712,13 @@ function buildCash(rows: Taking[]): CashView {
   return {
     byMethod,
     totalCents,
+    grossCents: totalOf(sales),
+    // Positive, because it is read as an amount handed back rather than as a
+    // negative amount taken. The sign lives in the ledger, not in the sentence.
+    refundedCents: refundedTotal == null ? null : Math.abs(refundedTotal),
+    refunds: corrections.length,
     currency,
-    count: rows.length,
+    count: sales.length,
     unpriced: rows.filter((r) => r.amountCents == null).length,
     // Three different silences, and the order matters: an empty priced set makes
     // `currency` null too, so "more than one currency" must be the last thing
@@ -742,6 +781,18 @@ function Cash({ c, state }: { c: CashView | null; state: Unread }) {
                 <strong>{money(c.totalCents, ccy)}</strong> across {c.count} payment
                 {c.count === 1 ? '' : 's'}. This is money the gym holds, and it is
                 the only figure on this page that is.
+                {/* Gross and refunds, named. Without this the refund was simply
+                    one of the payments and the total was smaller for a reason
+                    the screen never gave — so two months with different refund
+                    histories read as the same kind of figure. */}
+                {c.refunds ? (
+                  <>
+                    {' '}That is {money(c.grossCents, ccy) ?? 'the sales'} taken less{' '}
+                    {money(c.refundedCents, ccy) ?? 'what was handed back'} across {c.refunds}{' '}
+                    refund{c.refunds === 1 ? '' : 's'} and correction{c.refunds === 1 ? '' : 's'},
+                    which are not counted as payments above.
+                  </>
+                ) : null}
                 {c.unpriced ? ` ${c.unpriced} payment${c.unpriced === 1 ? ' carries' : 's carry'} no amount and ${c.unpriced === 1 ? 'is' : 'are'} left out of it rather than added as nothing.` : ''}
               </>
             )}
@@ -1037,7 +1088,7 @@ function Promos({ rows, state }: { rows: Promo[] | null; state: Unread }) {
 async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[]> {
   const { data, error } = await supabase
     .from('gym_payments')
-    .select('id, member_id, membership_id, amount_cents, currency, method, taken_at')
+    .select('id, member_id, membership_id, amount_cents, currency, method, taken_at, kind, reverses_payment_id')
     .eq('tenant_id', tenantId)
     .gte('taken_at', sinceIso)
     .order('taken_at', { ascending: false })
@@ -1066,6 +1117,12 @@ async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[
     currency: r.currency ?? null,
     method: r.method ?? 'other',
     takenAt: r.taken_at,
+    // Read back exactly as gymRecord.fetchPayments reads it: a value the CHECK
+    // does not permit is a 'payment' on a positive row, and on a negative one
+    // the amount already says what it is. Nothing on this screen decides that
+    // from the label alone.
+    kind: r.kind === 'refund' || r.kind === 'correction' ? r.kind : 'payment',
+    reversesPaymentId: r.reverses_payment_id ?? null,
   }));
 }
 
@@ -1171,15 +1228,19 @@ async function fetchPromos(tenantId: string): Promise<Promo[]> {
 
 /* ── arithmetic that is allowed to refuse ──────────────────────────────────── */
 
-/** The one currency these rows share, or null when they share none — because a
- *  sum across two currencies is not a sum, it is a bigger number. */
-function oneCurrency(rows: { currency: string | null }[]): string | null {
-  // A row with no currency of its own is not a row that agrees with the others
-  // — it is a row that cannot be added to them — so it collapses the answer to
-  // null exactly as a genuine disagreement does.
-  const set = new Set(rows.map((r) => r.currency));
-  return set.size === 1 ? [...set][0] : null;
-}
+/**
+ * The one currency these rows share, or null when they share none — because a
+ * sum across two currencies is not a sum, it is a bigger number.
+ *
+ * This was nine lines of its own and they were `sharedCurrency` in gymRecord.ts
+ * written a second time. The export says so in its own doc comment: a rule
+ * about money that exists twice will eventually be two rules, and this copy had
+ * already drifted — it compared the raw column, so ' gbp ' and 'GBP' were two
+ * currencies and every total across them was withheld for no reason. Kept as a
+ * name because six call sites below read better for it.
+ */
+const oneCurrency = (rows: { currency: string | null }[]): string | null =>
+  sharedCurrency(rows);
 
 /** Integer minor units only, and null wherever a total would be a claim rather
  *  than a fact: nothing readable to add, or more than one currency in the pile. */

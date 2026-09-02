@@ -87,11 +87,19 @@ export default function GymPlans() {
   const [mships, setMships] = useState<MemberMembership[]>([]);
   const [mStatus, setMStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [orders, setOrders] = useState<GymOrder[]>([]);
+  // The orders read carries a status like every other read on this screen, and
+  // for the sharpest reason of the four: this list is the ONLY place a member
+  // is told that their card was charged and the membership was never granted
+  // (`orderNote` on a 'failed' order). `if (o.ok) setOrders(o.value)` was the
+  // whole of the old handling, so a refused read left `orders` empty, the
+  // section gated itself away, and the person whose money had gone opened the
+  // screen built to tell them and found nothing on it.
+  const [orderStatus, setOrderStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!USE_SUPABASE) { setFactStatus('ready'); setPlanStatus('ready'); setPassStatus('ready'); setMStatus('ready'); return; }
-    if (!uid) { if (!auth.loading) { setFactStatus('error'); setPlanStatus('error'); setPassStatus('error'); setMStatus('error'); } return; }
+    if (!USE_SUPABASE) { setFactStatus('ready'); setPlanStatus('ready'); setPassStatus('ready'); setMStatus('ready'); setOrderStatus('ready'); return; }
+    if (!uid) { if (!auth.loading) { setFactStatus('error'); setPlanStatus('error'); setPassStatus('error'); setMStatus('error'); setOrderStatus('error'); } return; }
 
     const [f, p, x, m, o] = await Promise.all([
       fetchGymPaymentFacts(supabase as any),
@@ -119,7 +127,11 @@ export default function GymPlans() {
     if (m.ok) { setMships(m.value); setMStatus('ready'); }
     else { reportError('gymPlans.memberships', new Error(m.reason)); setMStatus('error'); }
 
-    if (o.ok) setOrders(o.value);
+    // Not cleared on failure, same as the memberships above: an order we read a
+    // moment ago is still the last thing we knew, and the sentence below says
+    // the list is short rather than pretending it is complete.
+    if (o.ok) { setOrders(o.value); setOrderStatus('ready'); }
+    else { reportError('gymPlans.orders', new Error(o.reason)); setOrderStatus('error'); }
   }, [uid, auth.loading]);
   useEffect(() => { void load(); }, [load]);
 
@@ -138,7 +150,7 @@ export default function GymPlans() {
   const canSell = sell?.ok === true;
 
   const waiting = useMemo(() => orders.filter(orderIsLive), [orders]);
-  const overall = worstStatus(factStatus, planStatus, passStatus);
+  const overall = worstStatus(factStatus, planStatus, passStatus, orderStatus);
   const G = layout.gutter;
 
   const buy = async (label: string, req: Parameters<typeof startGymCheckout>[1]) => {
@@ -327,12 +339,22 @@ export default function GymPlans() {
             A purchase is confirmed by Stripe, not by the tap, so an order can
             sit here for a moment. A FAILED one is the important case: the money
             moved and the entitlement did not, and saying nothing would leave
-            somebody who has paid looking at a screen with nothing on it. */}
-        {waiting.length ? (
+            somebody who has paid looking at a screen with nothing on it.
+
+            Which is why the section is drawn on a FAILED read too, with no
+            rows in it. An empty `waiting` under 'error' means unknown, never
+            "there is nothing pending", and this is the one screen in the app
+            where that difference is somebody's money. */}
+        {waiting.length || orderStatus === 'error' ? (
           <>
             <Rule />
             <Section>
-              <SectionHead title="Waiting On Stripe" note={String(waiting.length)} />
+              <SectionHead title="Waiting On Stripe" note={orderStatus === 'ready' ? String(waiting.length) : undefined} />
+              {orderStatus === 'error' ? (
+                <Flag tone={t.crit}>
+                  We couldn’t read your purchases, so we can’t say whether any are still with Stripe. This is not a statement that none are. If you have paid for something that has not appeared, show your card statement to reception and they can put it right.
+                </Flag>
+              ) : null}
               {waiting.map((o, i) => (
                 <View key={o.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md }}>

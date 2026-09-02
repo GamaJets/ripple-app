@@ -44,7 +44,7 @@ import { myReferralCode, myReferrals, myReferralSummary } from '../../src/lib/re
 import { referralLink, referralMessage } from '../../src/lib/referralLink';
 import { copyToClipboard, HAS_NATIVE_CLIPBOARD } from '../../src/ui/nativeModules';
 import {
-  CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, REWARD_NOTE, friendLine, shapeReferrals,
+  CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, rewardNote, friendLine, shapeReferrals,
   summaryLine, type ReferralRow,
 } from '../../src/lib/referralCredit';
 import type { LoadStatus } from '../../src/ui/loadStatus';
@@ -271,7 +271,7 @@ export default function Referral() {
         {/* ── what is and is not being promised ───────────────────────────── */}
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{CONVERSION_RULE}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REWARD_NOTE}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{rewardNote(appName)}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFERRAL_PRIVACY_NOTE}</Text>
         </Section>
 

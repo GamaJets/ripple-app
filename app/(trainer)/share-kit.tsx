@@ -96,13 +96,12 @@
 //
 // ── registration ────────────────────────────────────────────────────────────
 //
-// This route is NOT declared in app/(trainer)/_layout.tsx, which means
-// `check:tabs` fails on it and — worse — it would appear as a TAB. It needs:
-//
-//     <Tabs.Screen name="share-kit" options={{ href: null, title: 'Share Kit' }} />
-//
-// That file is owned by another change tonight, so the line is reported rather
-// than added.
+// Declared in app/(trainer)/_layout.tsx as
+// `<Tabs.Screen name="share-kit" options={{ href: null, title: 'Share Kit' }} />`,
+// which is what keeps it off the tab bar, and reached from the Go To grid via
+// COACH_FEATURES in src/lib/features.ts. This note used to say the line was
+// still owed by another change; it has since landed, and `check:tabs` and
+// `check:reachable` both hold it.
 import { useEffect, useMemo, useRef, useState } from 'react';
 // React Native's own <Image>, which is in every binary ever built. The
 // thumbnails here are still photographs and nothing needs an animated format,
@@ -136,7 +135,8 @@ import {
 } from '../../src/lib/photoPublish';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import {
-  WHY_NO_PHOTOGRAPHS, checkPublishable, connectionNote, outcomeNote, reviewRefusalNote,
+  PHOTO_KEEPS_THE_SHARE_SHEET, WHY_NO_PHOTOGRAPHS, checkPublishable, connectionNote,
+  outcomeNote, reviewRefusalNote,
 } from '../../src/lib/instagramPublish';
 import {
   chooseInstagramPage, connectInstagram, disconnectInstagram, publishCardToInstagram,
@@ -421,11 +421,46 @@ export default function ShareKit() {
    * Recomputed from the card and the export size every render rather than held
    * in state, so there is no arrangement of taps that leaves a stale yes behind
    * a card that has since grown a photograph or changed shape.
+   *
+   * ── the pick, not the pixels ────────────────────────────────────────────
+   *
+   * `pickedId` counts as a photograph even before `pickedUri` has resolved, and
+   * that is the whole point of this line. `choosePhoto` sets the id and THEN
+   * fetches the bytes, so for the second or so in between, `build.card.photo`
+   * is null while a photograph is on its way onto the card. A gate reading only
+   * the built card would say yes in that window, and the capture a moment later
+   * would rasterise the photograph that had since arrived.
+   *
+   * So the moment a coach picks a photo, this path is closed, and it reopens
+   * when they take it off. `mode` is in the condition because the pick belongs
+   * to the client-result card and a week card has no photo half at all.
    */
   const igGate = useMemo(
-    () => checkPublishable(build.ok ? { ...build.card, width: size.w, height: size.h } : null),
-    [build, size.w, size.h],
+    () => checkPublishable(build.ok
+      ? {
+        ...build.card,
+        width: size.w,
+        height: size.h,
+        photo: build.card.photo ?? (mode === 'result' && pickedId ? { source: 'client-photo' } : null),
+      }
+      : null),
+    [build, size.w, size.h, mode, pickedId],
   );
+
+  /**
+   * The same question, readable from inside an async handler.
+   *
+   * `igGate` above is captured by the closure at the moment the button is
+   * pressed, and a publish is not instantaneous: rasterising the card takes a
+   * moment, and a coach can tap a photo during it. This ref is written on every
+   * render, so it is the answer as of the last commit rather than as of the
+   * press, and `postToInstagram` reads it AFTER the capture has come back.
+   *
+   * Belt to the gate's braces. The gate is what makes the refusal structural;
+   * this is what makes it true at the instant the bytes exist.
+   */
+  const photoOnCardRef = useRef(false);
+  photoOnCardRef.current = !!(build.ok && build.card.photo) || (mode === 'result' && !!pickedId);
 
   const connect = async () => {
     setIgBusy(true);
@@ -479,6 +514,14 @@ export default function ShareKit() {
     if (!igGate.ok) { Alert.alert('Not posted', igGate.why); return; }
     setIgBusy(true);
     const png = await capture();
+    // The bytes now exist and this is the last moment before they could leave.
+    // If a photograph reached the card while the card was being rasterised,
+    // those bytes have it in them and nothing else in this function would know.
+    if (photoOnCardRef.current) {
+      setIgBusy(false);
+      Alert.alert('Not posted', PHOTO_KEEPS_THE_SHARE_SHEET);
+      return;
+    }
     const r = await publishCardToInstagram(igGate.card, png ?? '', build.ok ? build.card.kind : 'week');
     setIgBusy(false);
 
@@ -809,7 +852,16 @@ export default function ShareKit() {
             </>
           ) : ig.state === 'not-connected' ? (
             <>
-              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{connectionNote('not-connected')}</Text>
+              {/* Authorised, with no account settled on. A real state and its
+                  own sentence: telling this coach they are not connected would
+                  have them wondering what happened to the sign-in they just
+                  completed. Signing in again is what produces the list to
+                  choose from, so the button is the same one. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                {ig.account
+                  ? 'You are signed in to Meta and no Instagram account has been chosen yet, so there is nowhere for a card to go. Sign in again and pick the account you post from.'
+                  : connectionNote('not-connected')}
+              </Text>
               <Cta label={igBusy ? 'Connecting…' : 'Connect Instagram'} wide disabled={igBusy}
                 a11yLabel="Connect your Instagram account" onPress={() => { void connect(); }} />
             </>

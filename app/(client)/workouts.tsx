@@ -27,7 +27,7 @@ import { badgeFor, countsToVolume, methodFor, restAfter } from '../../src/lib/se
 // drop-set last one. Read through `expandSets` rather than off the fields, so a
 // programme that never got a table still reads as `sets` copies of one spec and
 // every screen below behaves as it did. See src/lib/setRows.ts.
-import { expandSets, hasSetRows, setCount } from '../../src/lib/setRows';
+import { expandSets, hasSetRows, readRepSpan, setCount } from '../../src/lib/setRows';
 // ── the block, the week of it this client is on, and the three fields a set
 //    prescribes beyond reps and load ─────────────────────────────────────────
 // `weekLabel` is imported under another name because this screen already has a
@@ -58,7 +58,7 @@ import type { WorkoutSample } from '../../src/lib/wearables/types';
 import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { announcePersonalBest } from '../../src/lib/prNotifyStore';
 import { est1RM } from '../../src/lib/streaks';
-import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
+import { bodyweightAtKg, bodyweightSetLabel, type BodyweightHistory } from '../../src/lib/bodyweightSets';
 // A hold is a set whose first number is seconds. The programme builder writes
 // '45 sec' planks and '30 sec/side' side planks, so the prescription is read
 // here to decide which box this screen opens with — see src/lib/timedSets.ts.
@@ -121,7 +121,7 @@ import { STRETCH_ROUTINES, routineSummary, type StretchRoutine } from '../../src
 import { buildRoutine, BUILD_MINUTES, STRETCH_FOCUS } from '../../src/lib/stretchBuilder';
 import { StretchRunner } from '../../src/ui/StretchRunner';
 import { attributionLine } from '../../src/lib/workoutAttribution';
-import { dayKeyOf, instantForDay, readWorkoutEdit } from '../../src/lib/entryEdit';
+import { dayKeyOf, instantForDay, readWorkoutEdit, type WorkoutDraftSet } from '../../src/lib/entryEdit';
 import { useSettings } from '../../src/ui/settings';
 import { WeightUnitToggle } from '../../src/ui/WeightUnitToggle';
 import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, readNumber, type WeightUnit } from '../../src/lib/units';
@@ -263,7 +263,8 @@ export default function Train() {
   const pageScroll = useRef<ScrollView>(null);
   const router = useRouter();
   const cd = useClientData();
-  const _cp = useAssignedPrograms().getProgram(cd.id);
+  const { getProgram, status: programStatus } = useAssignedPrograms();
+  const _cp = getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
   const { log: loggedWorkouts, status: workoutLogStatus, unsent: unsentWorkouts, logWorkouts, flushWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
@@ -297,6 +298,19 @@ export default function Train() {
   // typed, through src/lib/units.ts.
   const wu = useSettings().weightUnit;
   const loadNote = convertedNote(wu);
+  // A null from `getProgram` only means "your coach has not assigned you one"
+  // once the read has finished and succeeded. Under 'loading' we have not
+  // finished asking, under 'error' we asked and could not find out, and under
+  // 'partial' the page came back at the row cap so their assignment may have
+  // been on the part we never saw. In all three the `??` below hands the member
+  // a GENERATED session, drawn under the generic programme title at the header
+  // — indistinguishable from a member who has no coach plan at all. This is the
+  // same defect app/(client)/week.tsx names, and the reason
+  // src/ui/assignedPrograms.tsx was given a `status` at all.
+  //
+  // 'solo' is excluded because there is no coach to have written one: the null
+  // is deliberate there and saying otherwise would be the opposite lie.
+  const programUnknown = coachProgram == null && cd.coachingMode !== 'solo' && programStatus !== 'ready';
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   /**
    * WHICH WEEK OF THE BLOCK THEY ARE ON.
@@ -992,11 +1006,35 @@ export default function Train() {
   // A movement prescribed in seconds is quick-logged as the hold it asks for,
   // not as a rep count parsed off the front of '45 sec'. Without this the one
   // tap the plan offers recorded forty-five repetitions of a plank.
+  //
+  // ── and why it is not offered for every prescription ──────────────────────
+  //
+  // The rep count was `parseInt(e.reps, 10) || 8`. "AMRAP" and "Max" parse to
+  // NaN and became EIGHT; a range parsed to its first number, so "8-10" was
+  // recorded as eight whatever was done. That is a rep count the member did not
+  // perform, written by the fastest control in the app into the log that feeds
+  // their records, their tonnage and next session's target — and the button's
+  // own accessibility label read the prescription out verbatim while doing it.
+  //
+  // `readRepSpan` (src/lib/setRows.ts) already decides this for the coach's
+  // side and it decides it here: a single number is a definite count, and a
+  // range, a hold and an AMRAP are all "not known in advance". Where it is not
+  // known there is no one-tap — the LogSetRow under every row takes the number
+  // the member actually did, which is the only place it can come from.
+  const quickReps = (reps: string | null | undefined): number | null => {
+    const span = readRepSpan(reps);
+    return span && span.low === span.high && span.low > 0 ? span.low : null;
+  };
+  /** Whether one tap can record this movement without inventing a figure. */
+  const canQuickLog = (e: ProgramExercise): boolean =>
+    prescribedSeconds(e.reps) != null || quickReps(e.reps) != null;
   const quickLog = (e: ProgramExercise) => {
     const sg = suggestForExercise(workoutLog, nameOf(e), e.reps, 2.5, wu);
     const secs = prescribedSeconds(e.reps);
     if (secs != null) { logSet(e, { value: secs, kg: sg ? sg.weight : null, bw: sg == null, timed: true }); return; }
-    logSet(e, { value: parseInt(e.reps, 10) || 8, kg: sg ? sg.weight : null, bw: false, timed: false });
+    const r = quickReps(e.reps);
+    if (r == null) return;
+    logSet(e, { value: r, kg: sg ? sg.weight : null, bw: false, timed: false });
   };
   // One write path for every non-strength session, whether it was timed live in
   // the runner below or typed in afterwards. History, the calendar and the
@@ -1206,6 +1244,22 @@ export default function Train() {
           <Text style={{ ...ty.micro, color: t.ink3 }} numberOfLines={1}>{coachProgram ? 'Coach plan' : program.title}</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Train</Text>
         </View>
+
+        {/* The sentence that stops a generated session passing for the coach's.
+            Everything below this line — the day strip, the plan rows, Start
+            Workout — is drawn from `program`, and when the read did not land
+            that is the automatic programme wearing the same layout. */}
+        {programUnknown ? (
+          <View style={{ marginTop: sp.lg }}>
+            {programStatus === 'loading' ? (
+              <Notice tone={t.ink3} kicker="Your plan" title="Still checking for a coach plan"
+                note={`Today’s session below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as it lands.`} />
+            ) : (
+              <Notice tone={t.warn} kicker="Your plan" title="We couldn’t check for a coach plan"
+                note={`Today’s session below is ${BRAND.label}'s automatic program, not one your coach wrote. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
+            )}
+          </View>
+        ) : null}
 
 
         {/* One tip, at most once every twenty hours. Renders nothing the rest
@@ -1693,10 +1747,21 @@ export default function Train() {
                                 {/* Tap the suggestion to take it. The row it
                                     fills in is still below, so a different
                                     weight is still one edit away. */}
-                                <Pressable accessibilityRole="button" accessibilityLabel={`Log ${e.reps} reps at ${fig(liftLabel(sug.weight, wu))} of ${nameOf(e)}`} onPress={() => quickLog(e)}
-                                  style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 6 }}>
-                                  <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand }}>Log this</Text>
-                                </Pressable>
+                                {/* Only where one tap can say what was done.
+                                    The label names the figure that will be
+                                    written rather than repeating the
+                                    prescription, so the spoken sentence and the
+                                    row it creates are the same set. */}
+                                {canQuickLog(e) ? (
+                                  <Pressable accessibilityRole="button"
+                                    accessibilityLabel={prescribedSeconds(e.reps) != null
+                                      ? `Log a ${prescribedSeconds(e.reps)} second hold of ${nameOf(e)}`
+                                      : `Log ${quickReps(e.reps)} reps at ${fig(liftLabel(sug.weight, wu))} of ${nameOf(e)}`}
+                                    onPress={() => quickLog(e)}
+                                    style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 6 }}>
+                                    <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand }}>Log this</Text>
+                                  </Pressable>
+                                ) : null}
                               </View>
                             ) : <View style={{ flex: 1 }} />}
                             {/* Opens the movement's own screen — the animation, the steps,
@@ -2289,7 +2354,7 @@ export default function Train() {
             a shared handset can belong to whoever used it last, and a coach
             congratulating the wrong person by name is worse than one told "a
             client". */}
-        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -2847,7 +2912,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, injuries, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
+function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   // A session can be put down and picked up.
@@ -3500,7 +3565,39 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
     // 45 seconds under a 10 kg plate has not lifted 450 kg. See
     // src/lib/timedSets.ts, which keeps every reader of a set agreeing about
     // what its first number means.
-    const volume = results.reduce((a, r, i) => a + r.reduce((x, st, j) => x + (counts(i, j) && !st.timed ? st.reps * st.kg : 0), 0), 0);
+    //
+    // ── and why a bodyweight set is not a zero ──────────────────────────────
+    //
+    // On a bodyweight set `st.kg` is what was ADDED to the body, not the load —
+    // 0 for a plain pull-up. `reps × kg` therefore priced an hour of pull-ups
+    // and dips at nothing, and this card printed "Volume 0t" over it as a hero
+    // figure with nothing saying the total could not price the work.
+    //
+    // Priced the way every other tonnage in this app is priced, by
+    // src/lib/bodyweightSets.ts: the member's own weight as recorded on or
+    // before today, plus whatever they hung off it. Where there is no such
+    // weigh-in the set has NO KNOWN LOAD — it is counted and named below,
+    // never valued at zero and never priced against an invented body.
+    const bodyToday = bodyweightAtKg(weightHistory, new Date().toISOString());
+    let volume = 0;
+    let unpricedSets = 0;
+    for (let i = 0; i < results.length; i++) {
+      for (let j = 0; j < results[i].length; j++) {
+        const st = results[i][j];
+        if (!counts(i, j) || st.timed) continue;
+        if (st.bw) {
+          if (bodyToday == null) { if (st.reps > 0) unpricedSets++; continue; }
+          volume += st.reps * (bodyToday + Math.max(0, st.kg || 0));
+          continue;
+        }
+        volume += st.reps * st.kg;
+      }
+    }
+    // A total of nothing over sets that exist is not a total. When every set
+    // this card could have priced was a bodyweight one it could not, the
+    // figure is unknown rather than zero — the same rule the rest of the
+    // screen follows about an empty read.
+    const volumeKnown = volume > 0 || unpricedSets === 0;
     const workingSets = results.reduce((a, r, i) => a + r.filter((_, j) => counts(i, j)).length, 0);
     // Sets that happened and are saved, but are not part of either figure
     // above. Said out loud below rather than silently subtracted: a member who
@@ -3577,8 +3674,18 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
               // See volumeHeadline: tonnes for a metric reader, pounds for an imperial
       // one, because a short ton is 10% off a tonne and would read as the same
       // unit to anybody comparing this with a coach's console.
-      { label: 'Volume', value: `${volumeHeadline(volume, unit)!.figure.toLocaleString()}${unit === 'kg' ? 't' : ''}`, unit: unit === 'lb' ? 'lb' : undefined },
+      { label: 'Volume', value: volumeKnown ? `${volumeHeadline(volume, unit)!.figure.toLocaleString()}${unit === 'kg' ? 't' : ''}` : fig(null), unit: volumeKnown && unit === 'lb' ? 'lb' : undefined },
             ]} />
+            {/* The work this figure could not price, named. A member who did
+                nothing but pull-ups is owed the reason the number is short —
+                and the thing they can do about it — rather than a measured
+                looking zero. Same sentence as `tonnageNote`, in the runner's
+                own voice because the fix is one weigh-in away. */}
+            {unpricedSets > 0 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {unpricedSets === 1 ? 'One bodyweight set is' : `${num(unpricedSets)} bodyweight sets are`} not in the volume above, because your own weight is not recorded for today. Add your weight and {unpricedSets === 1 ? 'it counts' : 'they count'}.
+              </Text>
+            ) : null}
             {/* Only when there is something to explain. A member who warmed up
                 did the work and it is saved; this says where it went rather
                 than leaving them to find the arithmetic themselves. */}
@@ -4079,11 +4186,23 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
 }) {
   const [name, setName] = useState(entry.exercise);
   // Reps and load as TEXT, in the member's unit, converted once on the way in
-  // and once on the way out. A blank load is a bodyweight set and stays blank.
-  const [rows, setRows] = useState<{ reps: string; load: string }[]>(() =>
-    (entry.sets ?? []).map(([r, kg]) => ({
+  // and once on the way out.
+  //
+  // `bw` and `timed` come in WITH the row, and that is the fix. The sheet built
+  // its rows from the `[reps, kg]` pair alone and wrote the pair back, so it
+  // could not see a hold or a bodyweight set: a 45-second plank opened in a
+  // column headed "Reps" showing 45, a pull-up opened showing no load, and
+  // saving dropped both flags off the entry entirely — turning a session of
+  // calisthenics into weighted sets worth nothing to any board. Carrying the
+  // flags on the row rather than in arrays beside it is also what stops adding
+  // or removing a row leaving the survivors describing different sets. See
+  // src/lib/entryEdit.ts.
+  const [rows, setRows] = useState<{ reps: string; load: string; bw: boolean; timed: boolean }[]>(() =>
+    (entry.sets ?? []).map(([r, kg], i) => ({
       reps: r ? String(r) : '',
       load: kg ? plain(liftIn(kg, unit) ?? 0) : '',
+      bw: entry.bw?.[i] === true,
+      timed: entry.timed?.[i] === true,
     })));
   const [mins, setMins] = useState(entry.cardio ? String(entry.cardio.mins) : '');
   const [dist, setDist] = useState(entry.cardio ? String(entry.cardio.dist) : '');
@@ -4100,6 +4219,8 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
   const replacing = trimmed !== '' && trimmed.toLowerCase() !== entry.exercise.trim().toLowerCase();
   const setAt = (i: number, key: 'reps' | 'load', v: string) =>
     setRows((prev) => prev.map((r, k) => (k === i ? { ...r, [key]: v } : r)));
+  const flagAt = (i: number, key: 'bw' | 'timed') =>
+    setRows((prev) => prev.map((r, k) => (k === i ? { ...r, [key]: !r[key] } : r)));
 
   // What to offer. Narrowed by whatever has been typed — but only once the
   // name has actually been changed. Filtering on the untouched name would open
@@ -4128,11 +4249,16 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
     // The loads go back to kilograms here, one row at a time, so a refusal can
     // name the row it came from. `readLift` states its bound in the unit on the
     // keyboard, and a blank box is a bodyweight set rather than a refusal.
-    const sets: [number, number][] = [];
+    const sets: WorkoutDraftSet[] = [];
     for (let i = 0; i < rows.length; i++) {
       const read = readLift(rows[i].load, unit);
       if (!read.ok) { Alert.alert(`Check set ${i + 1}`, read.reason); return; }
-      sets.push([parseInt(rows[i].reps, 10) || 0, read.kg ?? 0]);
+      sets.push({
+        reps: parseInt(rows[i].reps, 10) || 0,
+        kg: read.kg ?? 0,
+        bw: rows[i].bw,
+        timed: rows[i].timed,
+      });
     }
     const read = readWorkoutEdit(entry, { name, sets, mins, dist, watts, kcal });
     if (!read.ok) { Alert.alert('Check that', read.reason); return; }
@@ -4221,7 +4347,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                       readWorkoutEdit refuses that and names the delete button,
                       because an entry with nothing in it still counts as a
                       session in the calendar and the streak. */}
-                  <Ghost label="Clear the Sets and Retype Them" onPress={() => { setRows([{ reps: '', load: '' }]); tapLight(); }} />
+                  <Ghost label="Clear the Sets and Retype Them" onPress={() => { setRows([{ reps: '', load: '', bw: false, timed: false }]); tapLight(); }} />
                 </View>
               ) : null}
             </View>
@@ -4256,27 +4382,52 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Sets</Text>
               {/* A heading over the whole block named the units once; these name
                   the two columns, and stay put once there are numbers in them. */}
+              {/* The first column is headed per ROW now, because a set of ten
+                  and a forty-five second hold sit in the same table and one
+                  heading over both is how a plank came to read as reps. */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: 6 }}>
                 <View style={{ width: 22 }} />
-                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps</Text>
+                <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps or seconds</Text>
                 <Text style={{ ...ty.caption, color: 'transparent' }}>×</Text>
                 <View style={{ flex: 1 }}><WeightUnitToggle compact /></View>
                 <View style={{ width: 24 }} />
               </View>
               {rows.map((r, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
-                  <Text style={{ ...ty.caption, color: t.ink3, width: 22 }}>{i + 1}</Text>
-                  <TextInput value={r.reps} onChangeText={(v) => setAt(i, 'reps', v)} keyboardType="numeric" placeholder="Reps" placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
-                  <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
-                  <TextInput value={r.load} onChangeText={(v) => setAt(i, 'load', v)} keyboardType="decimal-pad" placeholder={unit} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
-                  <Pressable accessibilityLabel={`Remove set ${i + 1}`} hitSlop={8} onPress={() => setRows((p) => p.filter((_, k) => k !== i))} style={{ padding: 4 }}>
-                    <Icon name="minus" size={16} color={t.crit} />
-                  </Pressable>
+                <View key={i} style={{ marginBottom: sp.md }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink3, width: 22 }}>{i + 1}</Text>
+                    <TextInput value={r.reps} onChangeText={(v) => setAt(i, 'reps', v)} keyboardType="numeric"
+                      accessibilityLabel={r.timed ? `Set ${i + 1}, seconds held` : `Set ${i + 1}, reps`}
+                      placeholder={r.timed ? 'Secs' : 'Reps'} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
+                    <TextInput value={r.load} onChangeText={(v) => setAt(i, 'load', v)} keyboardType="decimal-pad"
+                      accessibilityLabel={r.bw ? `Set ${i + 1}, load added on top of your bodyweight in ${unit === 'kg' ? 'kilograms' : 'pounds'}` : `Set ${i + 1}, load in ${unit === 'kg' ? 'kilograms' : 'pounds'}`}
+                      placeholder={r.bw ? `+${unit}` : unit} placeholderTextColor={t.ink3} style={{ ...inp, flex: 1 }} />
+                    <Pressable accessibilityLabel={`Remove set ${i + 1}`} hitSlop={8} onPress={() => setRows((p) => p.filter((_, k) => k !== i))} style={{ padding: 4 }}>
+                      <Icon name="minus" size={16} color={t.crit} />
+                    </Pressable>
+                  </View>
+                  {/* What the set WAS, and it is per set: a movement's first set
+                      can be a hold and its next three ordinary. Both flags are
+                      the ones the runner writes, so a set edited here reads back
+                      to every board exactly as a set logged live does. */}
+                  <View style={{ flexDirection: 'row', gap: sp.lg, paddingLeft: 22 + sp.sm }}>
+                    <SetKindChip t={t} on={r.bw} onToggle={() => { flagAt(i, 'bw'); tapLight(); }}
+                      label={`Set ${i + 1} bodyweight`} onLabel={`Set ${i + 1} bodyweight`}
+                      a11yHint={r.bw
+                        ? `The load box beside it is what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
+                        : 'Turn this on for a pull-up, a dip or a press-up.'} />
+                    <SetKindChip t={t} on={r.timed} onToggle={() => { flagAt(i, 'timed'); tapLight(); }}
+                      label={`Set ${i + 1} timed`} onLabel={`Set ${i + 1} timed`}
+                      a11yHint={r.timed
+                        ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
+                        : 'Turn this on for a plank or a wall sit, where the set is a length of time rather than a count.'} />
+                  </View>
                 </View>
               ))}
-              <Ghost label="Add Set" onPress={() => setRows((p) => [...p, { reps: '', load: p.length ? p[p.length - 1].load : '' }])} />
+              <Ghost label="Add Set" onPress={() => setRows((p) => [...p, { reps: '', load: p.length ? p[p.length - 1].load : '', bw: p.length ? p[p.length - 1].bw : false, timed: p.length ? p[p.length - 1].timed : false }])} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Leave a load empty for a bodyweight set — it is recorded as no external load rather than as zero.
+                Tick Bodyweight for a set you did with your own body — the load box is then whatever you added on top. Tick Timed for a hold, and the first box counts seconds.
               </Text>
             </View>
           )}

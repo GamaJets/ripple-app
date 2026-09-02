@@ -53,7 +53,7 @@ import {
   AGREEMENT_KINDS, AGREEMENT_LABEL, AGREEMENT_NOTE, DOCUMENT_KINDS, DOCUMENT_LABEL,
   type Agreement, type AgreementKind, type Signature, type GymDocument, type DocumentKind,
 } from '@lib/gymDocs';
-import { assertWhole, capLimit } from '@lib/rowCap';
+import { capLimit, readAll } from '@lib/rowCap';
 import { isoDate } from '@lib/format';
 
 /**
@@ -95,6 +95,24 @@ export default function Compliance() {
   const [gymErr, setGymErr] = useState<string | null>(null);
   const [ccy, setCcy] = useState<TenantCurrency>(null);
 
+  /**
+   * How long this gym keeps a financial record, per its own jurisdiction.
+   *
+   * `tenants.record_retention_years` was added by supabase/parts/184 with a
+   * 1-to-30 check and a comment saying, in as many words, that NULL means the
+   * gym has not said, that records are then kept indefinitely, and that "the
+   * compliance screen states that". Nothing in the repository read the column
+   * and nothing offered a way to set it, so a gym in a seven-year jurisdiction
+   * and a gym in a three-year one were treated identically and the statement
+   * the schema promised was made nowhere.
+   *
+   * Four states, and they are all different: still reading, the read failed,
+   * the gym has not said, and a number. `undefined` is in flight, null inside
+   * a settled read is the gym's own silence.
+   */
+  const [retentionYears, setRetentionYears] = useState<number | null | undefined>(undefined);
+  const [retentionErr, setRetentionErr] = useState<string | null>(null);
+
   const [agreements, setAgreements] = useState<Read<Agreement>>(reading);
   const [signatures, setSignatures] = useState<Read<Signature>>(reading);
   const [documents, setDocuments] = useState<Read<GymDocument>>(reading);
@@ -120,6 +138,27 @@ export default function Compliance() {
     setFeed(landed(fRes, 'the activity log'));
   }, []);
 
+  /**
+   * Read separately from `readTenant`, which is shared with five other screens
+   * and has no business growing a column only this one asks about. The error is
+   * read off the result rather than dropped: supabase-js resolves on a database
+   * error, and a refused read arriving as `data: null` would be
+   * indistinguishable from a gym that has not stated a period — which is the
+   * one distinction this whole section is about.
+   */
+  const readRetention = useCallback(async (tenantId: string) => {
+    const { data, error } = await supabase
+      .from('tenants').select('record_retention_years').eq('id', tenantId).single();
+    if (error) {
+      setRetentionYears(undefined);
+      setRetentionErr((error as any)?.message ?? 'The retention period could not be read.');
+      return;
+    }
+    setRetentionErr(null);
+    const raw = (data as { record_retention_years?: number | null } | null)?.record_retention_years;
+    setRetentionYears(typeof raw === 'number' ? raw : null);
+  }, []);
+
   useEffect(() => {
     let live = true;
     (async () => {
@@ -130,10 +169,11 @@ export default function Compliance() {
       const t = await readTenant(supabase, who.tenantId);
       if (!live) return;
       setGymName(t.name); setCcy(t.currency); setGymErr(t.error);
+      await readRetention(who.tenantId);
       await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+  }, [load, readRetention]);
 
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
@@ -176,6 +216,11 @@ export default function Compliance() {
         to produce when somebody asks — an insurer, a regulator, or the member themselves.
       </p>
 
+      <Retention
+        years={retentionYears} why={retentionErr} tenantId={tenantId}
+        onChange={() => readRetention(tenantId)}
+      />
+
       <Agreements
         agreements={agreements} signatures={signatures} members={members}
         tenantId={tenantId} me={me} onChange={refresh}
@@ -188,6 +233,133 @@ export default function Compliance() {
 
       <Feed feed={feed} />
     </Shell>
+  );
+}
+
+/* ── how long the record is kept ───────────────────────────────────────────── */
+
+/** The range `tenants_retention_sane` permits. Stated here so the form cannot
+ *  offer a number the database will refuse without saying why. */
+const RETENTION_MIN = 1;
+const RETENTION_MAX = 30;
+
+/**
+ * The statement supabase/parts/184 said this screen would make.
+ *
+ * ── Why there is no default ──────────────────────────────────────────────
+ *
+ * Because no number this product invented would be the law anywhere in
+ * particular. Six years in England, five in the UAE, seven in much of the
+ * United States, three in parts of the EU — a product that picked one would be
+ * telling a gym its legal obligation, wrongly, on the screen it opens when a
+ * regulator asks. So the unset state is stated rather than filled in, and what
+ * it means is stated with it: records are kept indefinitely until the gym says
+ * otherwise, which is the safe direction to be wrong in.
+ */
+function Retention({ years, why, tenantId, onChange }: {
+  years: number | null | undefined; why: string | null; tenantId: string; onChange: () => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  const save = async (value: number | null) => {
+    setBusy(true); setMsg(null);
+    // Counted, because an UPDATE matching zero rows is not an error — see
+    // src/lib/wroteRows.ts. `tenants_owner_rw` is the only write policy on this
+    // table, so a trainer who reached this form changes nothing and would
+    // otherwise be told the period was saved.
+    const { error, count } = await supabase
+      .from('tenants')
+      .update({ record_retention_years: value }, { count: 'exact' })
+      .eq('id', tenantId);
+    setBusy(false);
+    if (error) {
+      setMsg(`That was NOT saved: ${error.message}. The period is unchanged.`);
+      return;
+    }
+    if (!count) {
+      setMsg('That was NOT saved — the database refused the write and said nothing was changed. The period is unchanged.');
+      return;
+    }
+    setMsg(null); setEditing(false); setDraft('');
+    onChange();
+  };
+
+  const n = Number(draft);
+  const blocker = draft.trim() === ''
+    ? 'Type a number of years.'
+    : !Number.isInteger(n) || n < RETENTION_MIN || n > RETENTION_MAX
+      ? `A retention period is a whole number of years between ${RETENTION_MIN} and ${RETENTION_MAX}. The database refuses anything else.`
+      : null;
+
+  return (
+    <Section
+      title="How long this gym keeps its records"
+      sub="A financial record is kept for as long as the gym's own jurisdiction requires. Nothing here deletes anything on a date — an erasure request is actioned by a person, and this is the period they judge it against."
+    >
+      {why ? <Banner tone="crit">Could not read the retention period: {why}</Banner> : null}
+      {msg ? <Banner tone="crit">{msg}</Banner> : null}
+
+      <p style={{ margin: 0, padding: '12px 14px', fontSize: 13, color: 'var(--ink2)', maxWidth: '84ch' }}>
+        {years === undefined && !why ? 'Reading…'
+          : why ? 'Unknown — the read failed, which is not the same as a gym that has not said.'
+          : years === null ? (
+            <>
+              <strong style={{ color: 'var(--ink)' }}>This gym has not stated a retention period,
+              so its records are kept indefinitely.</strong>{' '}
+              That is deliberate rather than a gap: no number this product invented would be the law
+              anywhere in particular, and keeping too much is the safe direction to be wrong in.
+              Six years in England, five in the UAE, three in parts of the EU — say which applies
+              here and every invoice and payment carries the date it may be destroyed after.
+            </>
+          ) : (
+            <>
+              <strong style={{ color: 'var(--ink)' }}>
+                {years} {years === 1 ? 'year' : 'years'}
+              </strong>{' '}
+              from the date a record was raised. An invoice or a payment reaches the end of that
+              period and becomes destroyable; nothing destroys it automatically, and nothing here is
+              a timer.
+            </>
+          )}
+      </p>
+
+      <div style={{ ...formRow, borderBottom: 'none' }}>
+        {editing || years === null ? (
+          <>
+            <input
+              value={draft} onChange={(e) => setDraft(e.target.value)}
+              inputMode="numeric" placeholder="Years"
+              aria-label="How many years this gym keeps its records"
+              style={{ ...field, width: 100 }}
+            />
+            <button disabled={busy || !!blocker} onClick={() => void save(n)} style={primaryBtn}>
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+            {years !== null && years !== undefined ? (
+              <button onClick={() => { setEditing(false); setDraft(''); setMsg(null); }}
+                      style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
+            ) : null}
+            {blocker && draft.trim() ? (
+              <span style={{ fontSize: 12.5, color: '#f0c04e', maxWidth: '60ch' }}>{blocker}</span>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <button onClick={() => { setEditing(true); setDraft(String(years ?? '')); }} style={primaryBtn}>
+              Change it
+            </button>
+            {/* Clearing it is not a deletion, it is the gym withdrawing a
+                statement — and what follows is stated rather than implied. */}
+            <button disabled={busy} onClick={() => void save(null)} style={{ ...linkBtn, color: 'var(--ink3)' }}>
+              Say nothing instead, and keep records indefinitely
+            </button>
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -480,6 +652,22 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /**
+   * The document Remove is waiting to be confirmed on.
+   *
+   * Remove used to delete on the first click. It is the most destructive
+   * control on the screen — since supabase/parts/390 it takes the OBJECT out of
+   * the bucket as well as the index row, which is the fix for a file that
+   * outlived the entry pointing at it, and it means there is now nothing left
+   * to recover from. A signed contract or an insurance schedule removed by a
+   * mis-aimed click in a table row is gone, and the register that says the gym
+   * holds it is gone with it.
+   *
+   * Two clicks rather than a `confirm()`: the browser dialog is dismissed by
+   * reflex, cannot say which document it is about in the gym's own words, and
+   * is the same shape as every cookie banner anybody has ever clicked through.
+   */
+  const [removing, setRemoving] = useState<GymDocument | null>(null);
 
   const today = isoDate(new Date());
   const soon = documents.rows ? expiring(documents.rows, today) : null;
@@ -559,17 +747,27 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
     { key: 'when', header: 'Filed', value: (d) => d.uploadedAt,
       render: (d) => new Date(d.uploadedAt).toLocaleDateString() },
     { key: 'act', header: '', value: () => 0, align: 'right',
-      render: (d) => (
-        <button
-          style={{ ...linkBtn, color: 'var(--ink3)' }}
-          // The file goes with the entry. `deleteDocument` deletes the OBJECT
-          // first and refuses to report success unless it observed the bytes
-          // go — so the sentence below is whatever it says happened, not a
-          // guess that the document is still on file. It might not be.
-          onClick={() => deleteDocument(supabase, d)
-            .then(() => { setErr(null); onChange(); })
-            .catch((e: any) => { setErr(e?.message ?? 'That document was not removed.'); onChange(); })}
-        >
+      render: (d) => removing?.id === d.id ? (
+        <span style={{ display: 'inline-flex', gap: 9, alignItems: 'baseline' }}>
+          <button
+            style={{ ...linkBtn, color: 'var(--crit)' }}
+            // The file goes with the entry. `deleteDocument` deletes the OBJECT
+            // first and refuses to report success unless it observed the bytes
+            // go — so the sentence below is whatever it says happened, not a
+            // guess that the document is still on file. It might not be.
+            onClick={() => {
+              setRemoving(null);
+              deleteDocument(supabase, d)
+                .then(() => { setErr(null); onChange(); })
+                .catch((e: any) => { setErr(e?.message ?? 'That document was not removed.'); onChange(); });
+            }}
+          >
+            Delete it
+          </button>
+          <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={() => setRemoving(null)}>Keep</button>
+        </span>
+      ) : (
+        <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={() => { setErr(null); setRemoving(d); }}>
           Remove
         </button>
       ) },
@@ -584,6 +782,18 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
     >
       {documents.why ? <Banner tone="crit">{documents.why}</Banner> : null}
       {err ? <Banner tone="crit">{err}</Banner> : null}
+
+      {removing ? (
+        <Banner tone="crit">
+          <strong style={{ color: 'var(--ink)' }}>Delete &ldquo;{removing.title}&rdquo;?</strong>{' '}
+          The file is taken out of the bucket as well as the register, so there is nothing left to
+          recover it from — not the entry, and not the document.
+          {removing.memberAttached
+            ? ' This one is filed against a member, and it may be the only copy of something they signed.'
+            : ''}
+          {' '}Use the row&rsquo;s Delete it to go ahead, or Keep to leave it on file.
+        </Banner>
+      ) : null}
 
       {soon && soon.length ? (
         <Banner tone="crit">
@@ -717,21 +927,30 @@ function Feed({ feed }: { feed: Read<Activity> }) {
  * Bounded by DATE and not by row count. `app/(owner)/ops.tsx` reads the same
  * table capped at a hundred rows, which answers "what happened lately"
  * differently at a quiet gym and a busy one — and the busy one is the gym being
- * audited. Capped as well, and refusing: a truncated audit log is one that has
+ * audited.
+ *
+ * It is also PAGED rather than refused. A truncated audit log is one that has
  * silently lost its oldest entries, which on this screen is the half somebody
- * came looking for.
+ * came looking for — but refusing loses all of them, and this feed is written
+ * by triggers on every payment, price change, cancellation, export and document
+ * opened. A gym of any size crosses a thousand of those inside ninety days, so
+ * the audit feed was an error message on precisely the gyms that have something
+ * to audit. The window is already bounded, which is the shape `readAll` is for.
+ * `id` after `created_at` because paging needs a total order.
  */
 async function fetchActivity(tenantId: string): Promise<Activity[]> {
   const since = new Date(Date.now() - FEED_DAYS * DAY).toISOString();
-  const { data, error } = await supabase
-    .from('gym_events')
-    .select('id, kind, summary, actor_id, created_at')
-    .eq('tenant_id', tenantId)
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  const rows = assertWhole(data, `this gym's activity in the last ${FEED_DAYS} days`);
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_events')
+      .select('id, kind, summary, actor_id, created_at')
+      .eq('tenant_id', tenantId)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    `this gym's activity in the last ${FEED_DAYS} days`,
+  );
   if (!rows.length) return [];
 
   const ids = [...new Set(rows.map((r: any) => r.actor_id).filter((x: any): x is string => !!x))];

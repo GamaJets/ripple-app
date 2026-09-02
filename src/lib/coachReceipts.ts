@@ -61,7 +61,7 @@ import { sumTaken, type Taken, type TakenRow } from './coachMoney';
 // one. A coach typing "45,50" into two different money fields in this app must
 // not get two different amounts out, and getting the zero-decimal rule wrong
 // charges somebody a hundred times too much.
-import { draftMinorUnits } from './coachInvoice';
+import { draftAmount } from './coachInvoice';
 
 /* ── how the money arrived ────────────────────────────────────────────────── */
 
@@ -179,8 +179,14 @@ export function receiptBlockers(d: ReceiptDraft): string[] {
     out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym — an owner sets it in the gym settings, or you set one on a package.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so no amount can be recorded in it.');
-  } else if (draftMinorUnits(d.amountText, cur) === null) {
-    out.push('Enter the amount as a number greater than zero. A payment of nothing is not a payment, and an amount that cannot be read is refused rather than rounded to one that can.');
+  } else {
+    // The reader's own reason, not a sentence written here. A coach in Kuwait
+    // typing 12.345 is told that the last place must be a nought, and a coach
+    // in Japan typing 500.50 is told a yen has no smaller unit — where a single
+    // generic line would have sent both of them back to the same box with no
+    // idea what was wrong with what they had typed.
+    const read = draftAmount(d.amountText, cur);
+    if (!read.ok) out.push(read.reason);
   }
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.receivedOn ?? ''))) {

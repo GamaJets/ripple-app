@@ -410,3 +410,148 @@ export function coverageLine(pva: PlanVsActual, windowDays: number, who: string)
     : '';
   return head + tail + off;
 }
+
+/* ── the load, not just the presence ───────────────────────────────────────
+ *
+ * P5. Everything above compares PRESENCE: which prescribed movements appear in
+ * the log at all. That is not the sentence that changes next week's programme.
+ * "They did four of six sessions" tells a coach almost nothing; "they hit every
+ * prescribed load on upper and missed every one on legs" tells them what to
+ * write.
+ *
+ * Both halves have been on the `MovementCheck` since it was built —
+ * `plannedTopKg` is the heaviest WORKING set the coach wrote, `loggedTopKg` is
+ * the heaviest the client actually put on the bar inside the window — and
+ * nothing has ever joined them.
+ *
+ * ── What this refuses ─────────────────────────────────────────────────────
+ *
+ * It does not produce an adherence figure over load, for the reason refusal 3
+ * at the top of this file gives about percentages. It reports one verdict per
+ * movement, with both numbers beside it, so a coach who disagrees can point at
+ * the row.
+ *
+ * It does not compare a top set against a top set where the plan names no
+ * load. A prescription of "3×10, choose your own" met at 40 kg is not somebody
+ * exceeding anything, and `plannedTopKg` is null rather than 0 precisely so
+ * this cannot be read as a target of nothing.
+ */
+
+/**
+ * How close the heaviest logged set came to the heaviest prescribed one.
+ *
+ *   'no-plan'     the plan names no load for this movement. Bodyweight work,
+ *                 and work the coach left to the client's judgement.
+ *   'not-logged'  there is a prescribed load and nothing in the window carried
+ *                 one to compare it against. NOT "they lifted nothing" — see
+ *                 `MovementCheck.coverage`, which says whether the movement was
+ *                 logged at all.
+ *   'at'          within `LOAD_TOLERANCE`. The prescription was carried out.
+ *   'under'       below it by more than the tolerance.
+ *   'over'        above it by more than the tolerance. Reported rather than
+ *                 congratulated: a client 20 kg over a prescribed top set is
+ *                 either stronger than the block assumes or is doing something
+ *                 the coach did not ask for, and both are worth a look.
+ */
+export type LoadVerdict = 'no-plan' | 'not-logged' | 'at' | 'under' | 'over';
+
+/**
+ * What counts as having hit the number.
+ *
+ * The smallest pair of plates on most racks is 1.25 kg a side, so the finest
+ * adjustment a client can actually make to a barbell is 2.5 kg. Against a
+ * prescribed 100 that is 2.5%, and a client who racked 97.5 carried out the
+ * instruction — calling that a miss would fill a coach's screen with rows
+ * about the plate rack rather than about the training. A FRACTION and not a
+ * fixed kilogram, because 2.5 kg off a prescribed 20 kg accessory is an eighth
+ * of the load and is a different fact entirely.
+ */
+export const LOAD_TOLERANCE = 0.025;
+
+export interface LoadCheck {
+  verdict: LoadVerdict;
+  /** Kilograms, as the plan and the log hold them. The screen converts. */
+  plannedKg: number | null;
+  loggedKg: number | null;
+  /** Logged minus prescribed, in kilograms. Negative is short. Null unless both
+   *  numbers exist — a gap against an absent prescription is not a gap. */
+  gapKg: number | null;
+}
+
+/** One movement's load, judged. Pure, and takes the check rather than the whole
+ *  board so a screen can call it per row. */
+export function loadCheck(m: MovementCheck): LoadCheck {
+  const planned = Number.isFinite(m.plannedTopKg as number) && (m.plannedTopKg as number) > 0
+    ? (m.plannedTopKg as number) : null;
+  const logged = Number.isFinite(m.loggedTopKg as number) && (m.loggedTopKg as number) > 0
+    ? (m.loggedTopKg as number) : null;
+  if (planned == null) return { verdict: 'no-plan', plannedKg: null, loggedKg: logged, gapKg: null };
+  if (logged == null) return { verdict: 'not-logged', plannedKg: planned, loggedKg: null, gapKg: null };
+  const gap = logged - planned;
+  const tol = planned * LOAD_TOLERANCE;
+  const verdict: LoadVerdict = Math.abs(gap) <= tol ? 'at' : gap < 0 ? 'under' : 'over';
+  return { verdict, plannedKg: planned, loggedKg: logged, gapKg: gap };
+}
+
+export interface LoadTally {
+  /** Movements with a prescribed load that could be compared at all. */
+  compared: number;
+  at: number;
+  under: number;
+  over: number;
+  /** Prescribed a load, nothing logged against it in the window. */
+  notLogged: number;
+  /** No load prescribed, so nothing to compare. */
+  noPlan: number;
+}
+
+/**
+ * The tally over a set of movements — a whole week, or one prescribed day.
+ *
+ * Counts and nothing else. There is no rate here for the same reason there is
+ * no coverage percentage: the moment "78% of prescribed loads hit" exists it is
+ * the only thing anybody reads, and it hides that half the movements had no
+ * prescribed load at all.
+ */
+export function loadTally(movements: readonly MovementCheck[]): LoadTally {
+  const out: LoadTally = { compared: 0, at: 0, under: 0, over: 0, notLogged: 0, noPlan: 0 };
+  for (const m of movements) {
+    const c = loadCheck(m);
+    switch (c.verdict) {
+      case 'no-plan': out.noPlan++; break;
+      case 'not-logged': out.notLogged++; break;
+      case 'at': out.at++; out.compared++; break;
+      case 'under': out.under++; out.compared++; break;
+      case 'over': out.over++; out.compared++; break;
+    }
+  }
+  return out;
+}
+
+/**
+ * The sentence above the rows, or null when there is nothing load-shaped to
+ * say.
+ *
+ * Null rather than "0 movements carried a prescribed load", because a block
+ * written in reps and RPE alone is an ordinary block and a line apologising for
+ * it every time the screen opens is furniture.
+ */
+export function loadLine(tally: LoadTally, who: string): string | null {
+  if (tally.compared === 0 && tally.notLogged === 0) return null;
+  if (tally.compared === 0) {
+    return `${tally.notLogged} prescribed movement${tally.notLogged === 1 ? ' names a load' : 's name a load'} `
+      + `and nothing logged in the window carried one, so there is nothing to compare ${who} against.`;
+  }
+  const parts: string[] = [];
+  if (tally.at) parts.push(`${tally.at} at the prescribed load`);
+  if (tally.under) parts.push(`${tally.under} under it`);
+  if (tally.over) parts.push(`${tally.over} over it`);
+  let out = `Of ${tally.compared} movement${tally.compared === 1 ? '' : 's'} that could be compared on load: ${parts.join(', ')}.`;
+  if (tally.notLogged) {
+    out += ` ${tally.notLogged} more name${tally.notLogged === 1 ? 's' : ''} a load that nothing in the window carried.`;
+  }
+  if (tally.noPlan) {
+    out += ` ${tally.noPlan} name${tally.noPlan === 1 ? 's' : ''} no load at all, which is ordinary and is not a gap.`;
+  }
+  return out;
+}

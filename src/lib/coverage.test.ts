@@ -13,10 +13,10 @@ import { reconcile, reconcileNote, unreadable } from './finReconcile';
 import { VARIANT_ACCENT, VARIANT_TILE, VARIANT_LABEL } from './variant';
 import { tipsFor, nextTip, markShown, isDue, tipToShow, EMPTY_TIP_STATE, type TipState } from './tips';
 import { buildIcs } from './ics';
-import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, summariseRegister, needsAttention, type Equipment } from './gymEquipment';
+import { serviceState, nextServiceDue, usableUnits, outOfServiceUnits, capacityFor, concurrentKitDemand, summariseRegister, needsAttention, type Equipment, type KitClass } from './gymEquipment';
 import { parseCsv, parseSheet, sniffDelimiter, mapColumns } from './csv';
 import { parseMoneyCents, parseDate, detectDateOrder, previewMembers, previewPayments, previewPlans, describePreview, MEMBER_ALIASES } from './csvImport';
-import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
+import { classEntry, ptEntry, mergeTimetable, overlapping, entriesAt, floorAt, floorByHour, clashes, isHardClash, summariseBoard, slotBlocker, type PtSlot } from './gymPtSchedule';
 import { mergeExerciseLists } from './coachExerciseList';
 import { coverageFor, coverageLine } from './videoCoverage';
 import { lockDecision, lockSettingNote, GRACE_MS } from './appLock';
@@ -25,7 +25,7 @@ import { RECOVERY_ACTIVITIES, isRecoveryActivity } from './recoveryActs';
 import { normaliseCode, isPlausibleCode, joinErrorMessage, CODE_ALPHABET, CODE_LENGTH } from './joinCode';
 import { passwordRules, passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_MIN } from './passwordRules';
 import { RELEASES, releasesFor, unseenReleases, compareVersions, storeNotes } from './releaseNotes';
-import { toE164, stripTrunkZero, isPlausiblePhone, formatNational, maskedForDisplay, phoneAuthError, COUNTRIES, flagFor } from './phone';
+import { toE164, stripTrunkZero, isPlausiblePhone, formatNational, maskedForDisplay, phoneAuthError, COUNTRIES, flagFor, initialCountry, nationalPlaceholder, countryFor, DEFAULT_COUNTRY } from './phone';
 import { readinessScore } from './readiness';
 import { cohorts } from './ownerAnalytics';
 import { dateParts, localDate } from './localDate';
@@ -447,7 +447,11 @@ ok(vsum.visits === 4, 'every visit is counted, identified or not');
 ok(vsum.anonymous === 1, 'anonymous visits are reported separately');
 ok(vsum.uniqueMembers === 2, 'summary counts distinct members');
 ok(vsum.visitsPerMember === 1.5, `visits per member excludes anonymous (got ${vsum.visitsPerMember})`);
-ok(vsum.inside === 4, 'visits with no exit are counted as still inside');
+// Three, not four. `currentlyInside` folds a member's repeat open visits into
+// one — a headcount is people, not scans — and m1 is in this list twice. The
+// anonymous visit is NOT folded: two head-counts nobody could name are two
+// different people, and collapsing them would under-count the evacuation list.
+ok(vsum.inside === 3, `one member scanned twice is one person inside (got ${vsum.inside})`);
 ok(summariseVisits([visit({ memberId: null })]).visitsPerMember === null, 'no identified members gives null, not a divide by zero');
 ok(summariseVisits([]).peak === null, 'no visits means no peak hour');
 
@@ -788,6 +792,73 @@ ok(capacityFor([kit({ category: 'Rowers' })], 'rower', 1).limit === 1, 'case and
 // Retired kit cannot prop up a capacity claim.
 ok(capacityFor([kit({ quantity: 20, status: 'retired' })], 'rower', 14).limit === null,
    'a register holding only retired kit reads as nothing registered');
+
+// ── the same fifteen rowers, promised to two classes ──────────────────────
+//
+// `capacityFor` above answers about ONE class against the gym's whole stock.
+// Run independently over a timetable, two 6am classes of twelve both came back
+// green on fifteen rowers, and the second one arrived to an empty room.
+{
+  const rowers = [kit({ category: 'rower', quantity: 15, status: 'in_service' })];
+  const klass = (over: Partial<KitClass>): KitClass => ({
+    id: 'k', title: 'Row', startsAt: '2026-09-07T06:00:00Z', durationMin: 60,
+    capacity: 12, booked: 12, ...over,
+  });
+
+  const both = concurrentKitDemand(rowers, 'rower', [
+    klass({ id: 'a', title: 'Row A' }),
+    klass({ id: 'b', title: 'Row B' }),
+  ]);
+  ok(both.length === 1, 'two classes at the same hour are one group, not two independent questions');
+  ok(both[0].unitsIfFull === 24, `the group needs both capacities at once (got ${both[0]?.unitsIfFull})`);
+  ok(both[0].shortBooked === 9, `nine already booked would have no rower (got ${both[0]?.shortBooked})`);
+  ok(capacityFor(rowers, 'rower', 12).supported === true,
+     'and each class on its own still says it is fine — which is exactly why the group check had to exist');
+
+  // Back to back is not at the same time. Otherwise every gym in the world is
+  // permanently short of kit.
+  const consecutive = concurrentKitDemand(rowers, 'rower', [
+    klass({ id: 'a', startsAt: '2026-09-07T06:00:00Z' }),
+    klass({ id: 'b', startsAt: '2026-09-07T07:00:00Z' }),
+  ]);
+  ok(consecutive.length === 0, 'a class starting when another ends is the next class, not a competing one');
+
+  // A chain: kit is carried between rooms, so the constraint is what is in use
+  // at once and a chain of overlaps is a period where all of it is.
+  const chain = concurrentKitDemand(rowers, 'rower', [
+    klass({ id: 'a', startsAt: '2026-09-07T06:00:00Z', capacity: 5, booked: 5 }),
+    klass({ id: 'b', startsAt: '2026-09-07T06:30:00Z', capacity: 5, booked: 5 }),
+    klass({ id: 'c', startsAt: '2026-09-07T07:15:00Z', capacity: 8, booked: 8 }),
+  ]);
+  ok(chain.length === 1 && chain[0].classes.length === 3,
+     'a third class overlapping only the second still joins the group');
+  ok(chain[0].shortBooked === 3, `and the shortfall is over all three (got ${chain[0]?.shortBooked})`);
+
+  // One class alone is capacityFor's question, and repeating it here would put
+  // the whole timetable under a heading about simultaneity.
+  ok(concurrentKitDemand(rowers, 'rower', [klass({})]).length === 0, 'a lone class is not a group of one');
+
+  // The empty register again. Nobody filled the form in; the gym has not said
+  // it owns no rowers.
+  const unknown = concurrentKitDemand([], 'rower', [klass({ id: 'a' }), klass({ id: 'b' })]);
+  ok(unknown.length === 1 && unknown[0].shortBooked === null,
+     'an unregistered category cannot answer, and null is not zero people short');
+
+  // Booked and stated are two different questions and the answer names both.
+  const empty = concurrentKitDemand(rowers, 'rower', [
+    klass({ id: 'a', capacity: 12, booked: 0 }),
+    klass({ id: 'b', capacity: 12, booked: 0 }),
+  ]);
+  ok(empty[0].shortBooked === 0 && empty[0].shortIfFull === 9,
+     'nobody has to be rung yet, and nine seats cannot be sold — the call list and the plan are not the same list');
+
+  // Half a rower short is a person short.
+  const rigs = concurrentKitDemand([kit({ category: 'rig', quantity: 5 })], 'rig', [
+    klass({ id: 'a', capacity: 6, booked: 6 }),
+    klass({ id: 'b', capacity: 6, booked: 5 }),
+  ], 0.5);
+  ok(rigs[0].shortBooked === 1, `a shortfall rounds up to whole people (got ${rigs[0]?.shortBooked})`);
+}
 
 // Summary and the maintenance queue.
 const today = '2026-08-25';
@@ -1583,13 +1654,22 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   );
   ok(clashes(twoSams).length === 0, 'two people called Sam are not one double-booked trainer');
 
-  // A room clash needs a class in it; `sessions` records no room capacity, so
-  // calling two one-to-ones on the main floor a clash would invent a limit.
+  // Two one-to-ones in one room are REPORTED and are not counted as a
+  // double-booking. `sessions` records no room capacity, so asserting that the
+  // room is over-full would invent a limit — but saying nothing invented one
+  // too, and the board printed "Double-booked 0" over the most common clash a
+  // small gym has: two coaches and one spare room.
   const twoPt = mergeTimetable([], [
     slot({ id: 'a', trainerId: 't1', trainerName: 'A', room: 'Main floor' }),
     slot({ id: 'b', trainerId: 't2', trainerName: 'B', room: 'Main floor' }),
   ]);
-  ok(clashes(twoPt).length === 0, 'two one-to-ones sharing the main floor is not a clash');
+  const shared = clashes(twoPt);
+  ok(shared.length === 1 && shared[0].reason === 'room-shared',
+     'two one-to-ones sharing a room are surfaced, as shared rather than as a double-booking');
+  ok(shared.filter(isHardClash).length === 0,
+     'and the headline double-booked figure does not count them');
+  ok(summariseBoard(twoPt).clashes === 0 && summariseBoard(twoPt).sharedRooms === 1,
+     'the board reports the two apart, so a gym whose trainers all write "main floor" has no false alarms');
   const ptInStudio = mergeTimetable(
     [cls({ room: 'Studio 1' })],
     [slot({ trainerId: 't5', trainerName: 'B', room: 'studio 1' })],
@@ -1763,7 +1843,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(lockDecision({ ...base, backgroundedAt: base.now - 1 }).state === 'unlocked',
        'but glancing at a notification does not — a lock people switch off protects nobody');
 
-    const noHw = lockDecision({ ...base, available: false });
+    const noHw = lockDecision({ ...base, available: false, platform: 'ios' });
     ok(noHw.state === 'open' && noHw.reason !== null && noHw.reason.includes('passcode'),
        'a device with nothing enrolled says WHY it is not asking, rather than silently not locking');
 
@@ -1773,6 +1853,32 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
        'off states the risk plainly rather than describing the feature');
     ok(lockSettingNote(true, true, 'Face ID').includes('stays signed in either way'),
        'and on makes clear this is a lock, not a second sign-in');
+
+    // ── the sentence an Android member used to be shown ──────────────────
+    // Every string in appLock.ts named Face ID, Touch ID and iOS Settings on
+    // every platform, so an Android member was sent looking for an Apple
+    // feature inside an Apple settings app. Same defect as SOUND_PLATFORM in
+    // app/(client)/settings.tsx, one section down in the same file.
+    const droid = lockDecision({ ...base, available: false, platform: 'android' });
+    ok(droid.reason !== null && !/Face ID|Touch ID|iOS/.test(droid.reason),
+       `an Android handset is never told to find an Apple feature — got ${droid.reason}`);
+    ok(droid.reason !== null && /Settings/.test(droid.reason),
+       'but is still told where to go');
+
+    const droidNote = lockSettingNote(false, false, 'your screen lock', 'android');
+    ok(!/Face ID|Touch ID/.test(droidNote), `nor in Settings — got ${droidNote}`);
+    ok(/does not have/.test(droidNote), 'and the sentence is grammatical rather than assembled');
+
+    // Absent platform is the NEUTRAL wording, never the iOS wording: a caller
+    // that has not been updated must not be the one place the bug survives.
+    const neutral = lockSettingNote(false, false, 'your screen lock');
+    ok(!/Face ID|Touch ID|iOS/.test(neutral), `an unspecified platform says nothing Apple — got ${neutral}`);
+
+    // White-label: the app on this phone may not be called Repple at all.
+    ok(lockSettingNote(true, false, 'Face ID', 'ios', 'Example Fitness').includes('Example Fitness'),
+       'the lock note carries the brand it was given');
+    ok(!lockSettingNote(true, true, 'Face ID', 'ios', 'Example Fitness').includes('Repple'),
+       'and never the supplier’s name');
   }
 
   // How full a class is, for the mark beside the exact count.
@@ -2448,9 +2554,17 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     junePay('c', 5000, { method: 'cash', memberId: null, memberName: null }),
   ]);
   ok(inc.takenCents === 50000 && inc.count === 3, 'what came in is the sum of what was recorded');
-  ok(inc.byMethod[0].key === 'card' && inc.byMethod[0].cents === 30000,
+  ok(inc.byMethod[0].id === 'card' && inc.byMethod[0].cents === 30000,
      'and it is broken down by how it arrived, largest first');
-  ok(inc.byMethod.find((l) => l.key === 'cash')!.cents === 20000, 'with the two cash payments added together');
+  ok(inc.byMethod.find((l) => l.id === 'cash')!.cents === 20000, 'with the two cash payments added together');
+  // `key` is the method AND the currency, because a line is a sum of like
+  // things: grouping by method alone put dirhams and pounds in one figure that
+  // /close then printed a single currency over. `id` is the method on its own.
+  ok(inc.byMethod.every((l) => l.currency === 'AED' && l.key === `${l.id}|AED`),
+     'and every line states the one currency it is a sum of');
+  const twoWays = incomeOf([junePay('a', 30000), junePay('b', 30000, { currency: 'GBP' })]);
+  ok(twoWays.byMethod.length === 2 && twoWays.byMethod.every((l) => l.cents === 30000),
+     'a card line in dirhams and a card line in pounds are two lines, never one blended figure');
   ok(inc.unattributed === 1 && inc.unattributedCents === 5000,
      'money with nobody\'s name on it is counted in the total and named separately, never hidden in it');
 
@@ -2466,11 +2580,11 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     [mem('m1', '2026-01-01', null)],
     JUNE,
   )!;
-  ok(purpose.find((l) => l.key === 'membership')!.cents === 30000, 'a payer holding a membership is attributed to it');
-  ok(purpose.find((l) => l.key === 'no_membership')!.cents === 20000, 'and one who does not is not quietly folded in');
-  ok(purposeOf([junePay('a', 100)], [mem('m1', '2026-01-01', '2026-06-20')], JUNE)![0].key === 'membership',
+  ok(purpose.find((l) => l.id === 'membership')!.cents === 30000, 'a payer holding a membership is attributed to it');
+  ok(purpose.find((l) => l.id === 'no_membership')!.cents === 20000, 'and one who does not is not quietly folded in');
+  ok(purposeOf([junePay('a', 100)], [mem('m1', '2026-01-01', '2026-06-20')], JUNE)![0].id === 'membership',
      'a membership that ended mid-month was still a membership for the month being closed');
-  ok(purposeOf([junePay('a', 100)], [mem('m1', '2026-01-01', '2026-05-31')], JUNE)![0].key === 'no_membership',
+  ok(purposeOf([junePay('a', 100)], [mem('m1', '2026-01-01', '2026-05-31')], JUNE)![0].id === 'no_membership',
      'one that ended before it started was not');
 
   // ── what is still owed ──
@@ -4172,6 +4286,29 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
  * is broken. For them it would be.
  */
 {
+  // ── which country the picker opens on ──
+  // It opened on the UAE for everybody, so a UK member typed their number the
+  // way they always write it and it went out as +9717700900123 — no text
+  // arrived and nothing on screen explained why.
+  ok(initialCountry('GB') === 'GB', 'a handset set to the UK opens on the UK');
+  ok(initialCountry('us') === 'US', 'and a lower-case region is still a region');
+  ok(initialCountry('AE') === 'AE', 'a Gulf handset is not moved off the country it was already right about');
+  ok(initialCountry(null) === DEFAULT_COUNTRY, 'a handset that will not say falls back rather than throwing');
+  ok(initialCountry('') === DEFAULT_COUNTRY, 'so does an empty region');
+  ok(initialCountry('XX') === DEFAULT_COUNTRY, 'and a country this list does not carry is not invented');
+  ok(initialCountry('en-GB') === DEFAULT_COUNTRY, 'a full locale tag is not a region and is refused rather than parsed twice');
+  for (const c of COUNTRIES) {
+    ok(initialCountry(c.iso) === c.iso, `every country on the list can be opened on — ${c.iso}`);
+  }
+
+  // The empty field said "50 767 1842" — a UAE mobile — to everybody.
+  ok(nationalPlaceholder(countryFor('GB')) === '10 digits', 'the placeholder states the digits this country actually needs');
+  ok(nationalPlaceholder(countryFor('AE')) === '9 digits', 'and it differs by country');
+  ok(nationalPlaceholder(countryFor('DE')).indexOf('–') > -1, 'a country with a range says so');
+  for (const c of COUNTRIES) {
+    ok(!/\d{4,}/.test(nationalPlaceholder(c)), `no country's placeholder is a phone number — ${c.iso}`);
+  }
+
   ok(toE164('0507671842', 'AE') === '+971507671842', 'a UAE mobile with its trunk zero becomes E.164 without it');
   ok(toE164('507671842', 'AE') === '+971507671842', 'and without the zero it is the same number');
   ok(toE164('07700900123', 'GB') === '+447700900123', 'a UK mobile drops its trunk zero too');

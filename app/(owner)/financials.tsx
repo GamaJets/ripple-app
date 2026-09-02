@@ -54,6 +54,9 @@ import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { readNumber } from '../../src/lib/units';
+// When the register was read, whether the phone can reach us, and a way to ask
+// again — the three things nineteen of the twenty owner screens did without.
+import { Fetched } from '../../src/ui/fetched';
 
 const KEY = 'repple.owner.financials';
 // One formatter for the whole owner app, rather than 'AED ' typed here and '$'
@@ -141,15 +144,44 @@ export default function Financials() {
    */
   const [derivedFailed, setDerivedFailed] = useState(false);
 
+  // Bumped by the Refresh control under the title. A counter, so two taps are
+  // two reads.
+  const [again, setAgain] = useState(0);
+  /** When the register read LANDED. A refused read leaves it alone — the
+   *  figures beside it are still from the earlier read. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+
   useEffect(() => {
     let live = true;
     (async () => {
       if (!tenant?.id) return;
+      setBusy(true);
       try {
+        /**
+         * ── The payments read is BOUNDED, and this is why ──────────────────
+         *
+         * It used to be `fetchPayments(supabase, tenant.id)` — every payment
+         * the gym has ever taken — to compute a THIRTY-DAY figure. src/lib/
+         * gymRecord.ts caps that read at a thousand rows and throws past it, so
+         * on a gym that crosses a thousand payments (a 600-member gym does that
+         * in under two months) the catch below fired, `derivedFailed` went
+         * true, and ALL FOUR reconciliation checks went dead — on the screen
+         * whose only job is checking the owner's typed P&L against the
+         * register, at exactly the gym size where checking it starts to matter.
+         *
+         * Every use of `payments` on this screen is inside the thirty-day
+         * window: `summarise` takes it for `takenCents`, which this screen does
+         * not read (MRR comes off the memberships and the price book), and the
+         * revenue check filters to `since` two lines later. So the read now
+         * asks for the window it always wanted, which is a bounded set that
+         * cannot outgrow the cap the way "all of history" does.
+         */
+        const since = new Date(Date.now() - 30 * 86400000).toISOString();
         const [plans, memberships, payments] = await Promise.all([
           fetchPlans(supabase, tenant.id),
           fetchMemberships(supabase, tenant.id),
-          fetchPayments(supabase, tenant.id),
+          fetchPayments(supabase, tenant.id, since),
         ]);
         if (!live) return;
         const sum = summarise(payments, memberships, plans);
@@ -159,9 +191,11 @@ export default function Financials() {
         setDerivedMrr(sum.mrrCents == null ? null : Math.round(sum.mrrCents / 100));
         setDerivedMembers(memberships.length ? sum.activeMembers : null);
 
-        // Thirty days back, in whole days, so the window does not slide by the
-        // hour of day the screen happened to be opened.
-        const since = new Date(Date.now() - 30 * 86400000).toISOString();
+        // `since` above is thirty days back in whole days, so the window does
+        // not slide by the hour of day the screen happened to be opened. The
+        // filter is kept even though the read is now bounded by the same
+        // instant: the two must agree, and the cheapest way to guarantee that
+        // is for them to be the same value.
         const recent = payments.filter((p) => p.takenAt >= since);
         // The currency has to AGREE before there is a total: a gym that changed
         // its currency has two in its ledger and adding them is not a sum. Null
@@ -173,6 +207,7 @@ export default function Financials() {
         const sinceDay = since.slice(0, 10);
         setDerivedNew(memberships.length ? memberships.filter((m) => m.startedOn >= sinceDay).length : null);
         setDerivedFailed(false);
+        setFetchedAt(Date.now());
       } catch (e) {
         reportError('financials.derived', e);
         // The figures already on screen are from a read that no longer holds,
@@ -180,10 +215,12 @@ export default function Financials() {
         if (!live) return;
         setDerivedMrr(null); setDerivedMembers(null);
         setDerivedRevenue(null); setDerivedNew(null); setDerivedFailed(true);
+      } finally {
+        if (live) setBusy(false);
       }
     })();
     return () => { live = false; };
-  }, [tenant?.id]);
+  }, [tenant?.id, again]);
 
   // `unreadable` rather than `reconcile(..., null)`: only this screen knows the
   // query threw, and it is the one piece of information that separates "your
@@ -292,6 +329,9 @@ export default function Financials() {
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Checks</Text>
+            {/* The typed figures are on this phone; the register they are
+                checked against is not. This line is about the register. */}
+            <Fetched at={fetchedAt} onRefresh={() => setAgain((n) => n + 1)} busy={busy} />
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>

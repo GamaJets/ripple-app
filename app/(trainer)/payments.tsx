@@ -223,7 +223,12 @@ import {
 } from '../../src/lib/refunds';
 import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
 import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, currencyDecimals, readMinorAmount, majorFromMinor, feeMismatches, type Pot, type TakenRow } from '../../src/lib/coachMoney';
-import { readNumber } from '../../src/lib/units';
+// Deliberately no `readNumber` on this screen. It is the house reader for a
+// typed figure and it is right for a load or a distance, where leniency costs
+// nothing — but it replaces the FIRST comma with a point and calls parseFloat,
+// so "1,234.50" reads as 1.234. Every money box here goes through
+// `readMinorAmount`, which takes the decimal comma itself and refuses the
+// ambiguous separator rather than choosing a reading of somebody's price.
 import { accountTypeOf, accountForObject } from '../../src/lib/directCharges';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
@@ -415,12 +420,14 @@ export default function TrainerPayments() {
   const onboard = async () => { setBusy(true); const r = await startTrainerOnboarding(); setBusy(false); if (!r.ok) Alert.alert('Payouts setup', r.error || 'Could not start setup. Make sure Stripe Connect is enabled.'); };
 
   const addPkg = async () => {
-    // `readNumber`: the price box is a decimal pad, and a decimal comma is
-    // what it offers on a European phone. 49,50 read by `parseFloat` is 49,
-    // and the package would be sold for fifty cents less than it says.
-    const nm = name.trim(); const amount = readNumber(price) ?? 0;
+    const nm = name.trim();
     if (!nm) { Alert.alert('Name it', 'Give the package a name.'); return; }
-    if (!(amount > 0)) { Alert.alert('Set a price', 'Enter a price greater than 0.'); return; }
+    // The currency check comes BEFORE the price, because without one the price
+    // cannot be interpreted at all — a yen has no minor unit and a dinar has a
+    // thousand — and because "your gym has not set a currency" is a different
+    // problem with a different fix. `invoiceBlockers` orders the same two
+    // refusals the same way for the same reason.
+    //
     // Nothing is priced in a currency nobody chose. There is no sensible
     // default in a white-label product — see tenants.currency, part 99.
     if (!currency) {
@@ -433,15 +440,26 @@ export default function TrainerPayments() {
     // 97 and the guard in createPackage both refuse it, and the form does not
     // offer the field at all, so this is belt and braces on a typed value.
     const sess = interval ? null : sessions.trim() ? parseInt(sessions, 10) : null;
-    // `readMinorAmount`, not `× 100`. Two currencies in three make that
-    // multiplier wrong: a yen has no minor unit at all and a Kuwaiti dinar has
-    // a thousand fils, so a coach in Kuwait typing 5 was storing 500 — a
-    // package priced at a tenth of what they meant, written into the database
-    // and charged to every client who ever bought it. The refund box further
-    // down this same screen already reads amounts this way.
-    const read = readMinorAmount(String(amount), currency);
+    // `readMinorAmount` on WHAT THE COACH TYPED, not on a float derived from it.
+    //
+    // Two things, and the second is why `readNumber` is gone from this line.
+    // The multiplier is not a hundred: a yen has no minor unit at all and a
+    // Kuwaiti dinar has a thousand fils, so a coach in Kuwait typing 5 was
+    // storing 500 — a package priced at a tenth of what they meant, written
+    // into the database and charged to every client who ever bought it.
+    //
+    // And the typed string went through `readNumber` first, which replaces the
+    // FIRST comma with a point and calls parseFloat. That is right for the
+    // decimal comma a European decimal pad offers — "49,50" is 49.5 — and it
+    // is silently wrong for a thousands separator: `parseFloat('1.234.50')` is
+    // 1.234, so a coach typing 1,234.50 put a package on sale for one pound
+    // twenty-three. `readMinorAmount` takes the comma decimal itself and
+    // REFUSES the ambiguous one with a sentence naming the fix, which is the
+    // whole reason it exists — so nothing is parsed before it any more.
+    const read = readMinorAmount(price, currency);
     if (!read.ok) { Alert.alert('Set a price', read.reason); return; }
     const cents = read.minorUnits;
+    if (!(cents > 0)) { Alert.alert('Set a price', 'Enter a price greater than 0. A package that costs nothing is not one clients can buy.'); return; }
     // The last thing before a recurring price goes on sale is the coach reading
     // it back in the currency it will actually be charged in. A subscription
     // priced by accident in the wrong currency is not one wrong sale, it is a
@@ -1014,11 +1032,17 @@ export default function TrainerPayments() {
   );
   // The typed price read back in the gym's currency, or null when either half
   // is missing. Never a number with a unit put on it for the look of the thing.
-  // The same reader `addPkg` uses, so the price echoed under the box is the
-  // price the button is about to charge.
-  const typed = readNumber(price) ?? 0;
-  const echoRead = currency ? readMinorAmount(String(typed), currency) : null;
-  const priceEcho = echoRead?.ok ? pkgMoney(echoRead.minorUnits, currency) : null;
+  //
+  // The same reader `addPkg` uses, on the same string, with nothing in front of
+  // it — so the price echoed under the box is exactly the price the button is
+  // about to charge. It used to go through `readNumber` first, and so did
+  // `addPkg`, which meant the two AGREED about a wrong figure: a coach typing
+  // 1,234.50 was shown "GBP 1.23" under the box and the package was created at
+  // 123 pence, and nothing on the screen contradicted it. `readMinorAmount`
+  // refuses the ambiguous separator rather than picking a reading of it, so the
+  // echo now goes blank and the button says why.
+  const echoRead = currency ? readMinorAmount(price, currency) : null;
+  const priceEcho = echoRead?.ok && echoRead.minorUnits > 0 ? pkgMoney(echoRead.minorUnits, currency) : null;
 
   // ── the refund sheet's own arithmetic ──────────────────────────────────────
   //

@@ -38,7 +38,7 @@
 // `cancel_my_session` per occurrence, so there is one answer to "what does this
 // cost" in the whole product.
 
-import { insideNoticeWindow, noticeHoursOf, feeAmountLine, type CancellationPolicy } from './booking';
+import { insideNoticeWindow, noticeHoursOf, feeAmountLine, unstatedCurrency, type CancellationPolicy } from './booking';
 
 /* ── moving one session ───────────────────────────────────────────────────── */
 
@@ -215,19 +215,29 @@ export interface PauseReport {
  * server counts again and the report afterwards is the authority.
  */
 export function pausePreviewLine(upcoming: number, late: number, policy: CancellationPolicy | null): string {
-  if (upcoming === 0) return 'Nothing is booked in those dates yet, so nothing will be cancelled.';
+  if (upcoming === 0) return 'Nothing of this arrangement is booked in those dates, so we do not expect anything to be cancelled. Your coach’s calendar is the authority and is checked when you confirm.';
+  // "will be cancelled" was stated as fact over a set counted on this device.
+  // The device cannot see the series a booking belongs to — `TrainingSession`
+  // carries no series id — so `seriesOccurrencesIn` matches on the slot instead
+  // and this sentence says what kind of answer that is. The server counts
+  // again and `pauseOutcomeLines` is the account that is true.
   const head = upcoming === 1
-    ? 'One session is booked in those dates and it will be cancelled.'
-    : `${upcoming} sessions are booked in those dates and they will be cancelled.`;
+    ? 'One session of this arrangement is booked in those dates, and we expect it to be cancelled.'
+    : `${upcoming} sessions of this arrangement are booked in those dates, and we expect them to be cancelled.`;
   if (!policy) {
     return `${head} We could not read your coach’s cancellation policy, so we cannot say whether any of them would cost a fee.`;
   }
   if (!policy.applies) return `${head} Your coach does not charge for late cancellations, so this costs nothing.`;
   if (late === 0) return `${head} All of them are outside your coach’s notice period, so this costs nothing.`;
-  const each = policy.fee != null && policy.fee > 0 ? ` of ${feeAmountLine(policy.fee, policy.currency)}` : '';
+  // A sentence that names a figure has to name its currency, or say it cannot.
+  // src/lib/booking.ts: "A slot may print the figure alone; a sentence may not."
+  // This is a sentence, and it sits immediately above a confirm button.
+  const priced = policy.fee != null && policy.fee > 0;
+  const each = priced ? ` of ${feeAmountLine(policy.fee!, policy.currency)}` : '';
+  const ccy = priced ? unstatedCurrency(policy.currency) : '';
   return late === 1
-    ? `${head} One of them is inside your coach’s notice period and would carry their late fee${each}.`
-    : `${head} ${late} of them are inside your coach’s notice period and would each carry their late fee${each}.`;
+    ? `${head} One of them is inside your coach’s notice period and would carry their late fee${each}.${ccy}`
+    : `${head} ${late} of them are inside your coach’s notice period and would each carry their late fee${each}.${ccy}`;
 }
 
 /** What a pause actually did. Same rule as everywhere else in this codebase:
@@ -247,7 +257,7 @@ export function pauseOutcomeLines(r: PauseReport): string[] {
     // different currencies are never summed.
     lines.push(`${r.charged} of them were inside your coach’s notice period and carried a late fee. They are not in the same currency, so they are not added up here. Your fees are listed on your bookings screen.`);
   } else {
-    lines.push(`${r.charged === 1 ? 'One of them was' : `${r.charged} of them were`} inside your coach’s notice period, so your coach’s late fee was recorded: ${feeAmountLine(r.fees, r.currency)} in total.`);
+    lines.push(`${r.charged === 1 ? 'One of them was' : `${r.charged} of them were`} inside your coach’s notice period, so your coach’s late fee was recorded: ${feeAmountLine(r.fees, r.currency)} in total.${unstatedCurrency(r.currency)}`);
   }
   if (r.notFreed > 0) {
     lines.push(`${r.notFreed} could not be cancelled, which usually means somebody already cancelled ${r.notFreed === 1 ? 'it' : 'them'} somewhere else. Check your calendar for those dates.`);
@@ -279,4 +289,102 @@ export function resumedLine(created: number): string {
   return created === 1
     ? 'That pause is lifted and one session has been booked back in.'
     : `That pause is lifted and ${created} sessions have been booked back in.`;
+}
+
+/* ── The coach's side of the same act ─────────────────────────────────────
+ *
+ * `rescheduleMyBooking` is the MEMBER moving their own session and
+ * `reschedule_my_session` scopes on `client_id = auth.uid()`, so a coach
+ * calling it is refused. The coach's only route was `releaseSession`, then a
+ * waitlist promotion, then a "Session cancelled" push, then booking the client
+ * back in by hand — which hands the client's own hour to whoever was first in
+ * line before they have been put anywhere, tells them they were cancelled, and
+ * draws a second pack credit for one hour of training.
+ *
+ * supabase/parts/461 is the atomic version. What is here is the reading of its
+ * report, and the sentences a coach is shown afterwards.
+ */
+
+/** Why a coach's move did not happen. A strict subset of the member's list:
+ *  there is no notice window on this path and nothing is ever charged. */
+export type CoachMoveRefusal =
+  | 'same_slot'
+  /** Not this coach's session, not booked, or nobody in it. */
+  | 'not_yours'
+  /** The destination is gone — taken, removed, or never theirs. */
+  | 'taken'
+  | 'already_started'
+  /** The client already has something with this coach across the new hour. */
+  | 'clash'
+  /** The call itself did not land. The only one where nobody knows whether
+   *  anything happened, so it is the one that says to check. */
+  | 'unreachable';
+
+export interface CoachMoveReport {
+  moved: boolean;
+  reason: CoachMoveRefusal | null;
+  /** The client whose hour moved, so exactly one person is told and only about
+   *  their own session. Null on every refusal. */
+  clientId: string | null;
+  /** Somebody was waiting for the hour that was freed, and now has it. */
+  promoted: boolean;
+  /** How many are still in line for it afterwards. */
+  waiting: number;
+}
+
+export const COACH_NOT_MOVED: CoachMoveReport = {
+  moved: false, reason: 'unreachable', clientId: null, promoted: false, waiting: 0,
+};
+
+/**
+ * What to say when a coach's move did not happen.
+ *
+ * Every branch ends with the state of the world, because a refusal is
+ * indistinguishable from a failure unless somebody says so — and the one thing
+ * a coach must not walk away believing is that a client's hour has changed when
+ * it has not. `who` and `at` are the client and the old time in the coach's own
+ * words; both may be absent and neither is required for the sentence to be
+ * true.
+ */
+export function coachMoveRefusalLine(r: CoachMoveReport, who: string | null, at: string | null): string {
+  const subject = who && at ? `${who}'s ${at} session` : who ? `${who}'s session` : at ? `The ${at} session` : 'That session';
+  const still = `${subject} has not moved and is still booked as it was.`;
+  switch (r.reason) {
+    case 'taken':
+      return `That slot is no longer open — somebody booked it, or it was removed. ${still} Pick another time.`;
+    case 'clash':
+      return `${who ?? 'That client'} already has a session with you across that hour. ${still} Pick another time.`;
+    case 'already_started':
+      return `That session has already begun, so there is nothing to move. ${still} Mark what happened instead.`;
+    case 'not_yours':
+      return `${still} It may have been cancelled or moved from the client's own phone since this screen loaded. Pull down to refresh and look again.`;
+    case 'same_slot':
+      return `${still} That is the hour it is already in.`;
+    case 'unreachable':
+    default:
+      // The honest one. Nothing here claims the move failed, because nobody
+      // knows: the request may have landed and the answer been lost.
+      return `The move did not reach the server, so it may or may not have happened. Do not tell ${who ?? 'the client'} anything yet. Pull down to refresh and check where the session is before trying again.`;
+  }
+}
+
+/**
+ * And what to say when it worked.
+ *
+ * Names the hour that was handed on, because a coach who does not know their
+ * old slot went to somebody else will offer it to a second person.
+ */
+export function coachMovedLine(
+  r: CoachMoveReport, who: string, from: string, to: string, toldClient: boolean,
+): string {
+  const head = `${who} moved from ${from} to ${to}.`;
+  const told = toldClient
+    ? ` ${who} was sent a notification.`
+    : ` ${who} could NOT be notified, so tell them yourself — they are expecting ${from}.`;
+  const hour = r.promoted
+    ? ` ${from} went straight to the next client on its waitlist.`
+    : r.waiting > 0
+      ? ` ${from} is open again on your calendar.`
+      : ` ${from} is open again on your calendar and nobody was waiting for it.`;
+  return `${head}${told}${hour}`;
 }

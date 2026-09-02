@@ -5,17 +5,18 @@
 // Every provider, computation and route is preserved — the five bordered stat
 // tiles became one hero figure plus a hairline-divided KPI row, and the heatmap
 // lost its box.
-import { useCallback } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { useCallback, useState } from 'react';
+import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, hairline, grown, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { currentStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
+import { heatmapDayLabel, heatmapColumnLabel, heatmapSummary } from '../../src/lib/heatmap';
 
 const WEEKS = 12;
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -80,6 +81,11 @@ export default function Consistency() {
   const freezes = freezeBudget(log);
   const streak = currentStreakFrozen(log, freezes).streak;
   const best = longestStreak(log);
+
+  // Which square the reader tapped, so the date under the grid is the one they
+  // asked about. Null is the ordinary state — the grid says what it is in its
+  // own summary and does not need a readout until somebody wants one.
+  const [picked, setPicked] = useState<Date | null>(null);
 
   const cell = (d: Date) => {
     const c = counts[key(d)] || 0;
@@ -170,20 +176,54 @@ export default function Consistency() {
               blank square, which is the same claim the hero was making. It
               cannot say much in a heading, but it can say it is not finished. */}
           <SectionHead title="Training Days" note={logStatus === 'loading' ? 'Still reading' : `${WEEKS} weeks`} />
+          {/* ── what the grid is, said once ──────────────────────────────
+              Eighty-four squares with nothing above them and nothing spoken is
+              a picture only a sighted reader can use, and only roughly: a gap
+              was visible and undatable. The summary frames the whole thing, the
+              month row gives the columns an axis, and every square now carries
+              its own date and its own count. See src/lib/heatmap.ts. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{heatmapSummary(WEEKS, known)}</Text>
           <View style={{ flexDirection: 'row' }}>
-            <View style={{ justifyContent: 'space-between', marginRight: 6, paddingVertical: 2 }}>
-              {DOW.map((d) => <Text key={d} style={{ ...ty.micro, color: t.ink3, height: 16 }}>{d[0]}</Text>)}
+            {/* The weekday initials. `grown` rather than a pinned 16: a fixed
+                strip holding one line of text clips that line the moment the
+                reader turns their text up, and this app has no ceiling on
+                text size on purpose (src/theme/scale.ts). */}
+            <View style={{ marginRight: 6, paddingVertical: 2 }}>
+              <View style={{ height: grown(13), marginBottom: 4 }} />
+              {DOW.map((d, i) => (
+                <Text key={d} accessibilityLabel={d}
+                  style={{ ...ty.micro, color: t.ink3, height: 14, lineHeight: 14, marginBottom: i === DOW.length - 1 ? 0 : 4 }}>{d[0]}</Text>
+              ))}
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', gap: 4 }}>
-                {cols.map((col, ci) => (
-                  <View key={ci} style={{ gap: 4 }}>
-                    {col.map((d, di) => <View key={di} style={[{ width: 14, height: 14, borderRadius: 3 }, cell(d)]} />)}
-                  </View>
-                ))}
+                {cols.map((col, ci) => {
+                  const month = heatmapColumnLabel(col, ci === 0 ? null : cols[ci - 1]);
+                  return (
+                    <View key={ci} style={{ gap: 4 }}>
+                      {/* The axis. Labelled only where the month changes, so
+                          twelve columns carry three words rather than twelve. */}
+                      <Text numberOfLines={1} style={{ ...ty.micro, color: t.ink3, height: grown(13), width: 14 }}>{month ?? ''}</Text>
+                      {col.map((d, di) => (
+                        <Pressable key={di}
+                          onPress={() => setPicked(d)}
+                          accessibilityRole="button"
+                          accessibilityLabel={heatmapDayLabel(d, known ? (counts[key(d)] || 0) : null, today)}
+                          hitSlop={2}
+                          style={[{ width: 14, height: 14, borderRadius: 3 }, cell(d)]} />
+                      ))}
+                    </View>
+                  );
+                })}
               </View>
             </ScrollView>
           </View>
+          {/* The date of the square that was tapped. A sighted member could see
+              a gap and could not tell which week it was; this is the answer to
+              that, in the same words the screen reader gets. */}
+          <Text style={{ ...ty.caption, color: picked ? t.ink2 : t.ink3, marginTop: sp.md }}>
+            {picked ? heatmapDayLabel(picked, known ? (counts[key(picked)] || 0) : null, today) : 'Tap a square to read its date.'}
+          </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Less</Text>
             <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }} />

@@ -278,6 +278,88 @@ export const END_REASON_NOTE: Record<EndReason, string> = {
   other: 'none of the above. The note is the whole of the record.',
 };
 
+/* ── the same nine reasons, asked of the person who is leaving ─────────────
+ *
+ * The only `endCoaching` call in the client app was on the FIND A TRAINER
+ * directory — the marketplace — and it was the one-argument form, so the only
+ * churn reason ever recorded was the coach's belief about somebody who was
+ * never asked. app/(client)/my-coach.tsx, the screen built for the coach you
+ * actually have, contained no `endCoaching`, no `Leave` and no `leave`.
+ *
+ * The ids are the SAME ids. A churn list that cannot compare a client's own
+ * answer with a coach's guess is two lists, and the whole argument in
+ * `reasonAttribution` — that a belief and a client's own words must be told
+ * apart — depends on them being the same question answered by two people.
+ *
+ * Two of the nine are not offered to a client and they are the two that could
+ * only ever be false coming from one:
+ *
+ *   · 'coach-ended' is "you ended it, for your own reasons", said by a coach
+ *     about themselves. A client cannot answer it.
+ *   · 'unsaid' is "they were asked and did not want to say", which is a fact
+ *     about the coach's asking. A client who does not want to say has the
+ *     Skip button, which records nothing — the distinction the sheet's own
+ *     header is built on.
+ */
+export const CLIENT_END_REASONS: EndReason[] = [
+  'cost', 'schedule', 'moved', 'results', 'goal-reached', 'health', 'other',
+];
+
+/** Title Case, first person: these are the labels the member picks from. */
+export const CLIENT_END_REASON_LABEL: Record<string, string> = {
+  cost: 'The Cost',
+  schedule: 'The Times Did Not Work',
+  moved: 'I Moved or Changed Gym',
+  results: 'I Was Not Getting What I Wanted',
+  'goal-reached': 'I Got What I Came For',
+  health: 'Injury or Health',
+  other: 'Something Else',
+};
+
+/** Sentence case, first person. Deliberately plain: a member reading a list of
+ *  reasons to leave somebody should not have to decode any of them. */
+export const CLIENT_END_REASON_NOTE: Record<string, string> = {
+  cost: 'it costs more than you want to spend on it.',
+  schedule: 'the times on offer stopped fitting your week.',
+  moved: 'you are training somewhere else now, or nowhere near them.',
+  results: 'it was not working for you. This is the one worth a note.',
+  'goal-reached': 'a finished block rather than a falling out.',
+  health: 'an injury, an illness, a pregnancy. Nothing about what it was.',
+  other: 'none of the above. The note is the whole of the record.',
+};
+
+/** What the member is told before they answer, in as many words. They are
+ *  writing about a person they know, and they are entitled to know who reads
+ *  it — the server files it as theirs, so it will show as their own account and
+ *  not as their coach's belief. */
+export const CLIENT_END_EXPLAINER =
+  'Your coach sees this. It is the only thing that will ever tell them why people leave, and it is filed as your own words rather than as their guess. You can skip it and still leave.';
+
+/** The heading over the confirmation, and what it does and does not do. */
+export const CLIENT_END_CONFIRM_TITLE = 'Leave this coach?';
+
+export function clientEndConfirmBody(name: string | null | undefined): string {
+  const who = (name || '').trim() || 'this coach';
+  return `${who} stops being your coach. They can no longer see your training, your check-ins, your scans or anything you have disclosed, and their screens empty of you.
+
+`
+    + 'Nothing you have logged is deleted and nothing you have bought is refunded here — sessions you have already paid for and anything still on your account are settled with them directly. You can be coached by them again later if you both want that.';
+}
+
+/** What actually happened, said without overclaiming. `reasonStored` false with
+ *  `ended` true is "you have left and nothing was recorded about why", and it
+ *  is a real outcome of `endCoachingWithReason` rather than a failure. */
+export function clientEndOutcomeLine(ended: boolean, reasonGiven: boolean, reasonStored: boolean): string {
+  if (!ended) {
+    return 'We found no coaching relationship to end, so nothing was changed. If you still have a coach on this screen, pull to refresh and try again.';
+  }
+  const head = 'You are no longer being coached by them. They can no longer see your training or anything you have disclosed.';
+  if (!reasonGiven) return `${head} Nothing was recorded about why.`;
+  return reasonStored
+    ? `${head} Your reason has been passed on to them.`
+    : `${head} Your reason could not be recorded, so they have not been told why — the ending itself did happen.`;
+}
+
 /** Longest note the server stores against an ending. */
 export const MAX_END_NOTE = 500;
 
@@ -508,4 +590,84 @@ export async function fetchEndRecord(otherId: string, meId: string): Promise<End
     report('endCoaching.readReason', e, { otherId: id });
     return null;
   }
+}
+
+/* ── the answers, counted ──────────────────────────────────────────────────
+ *
+ * R3. Every departure reason in this product was collected and none of them was
+ * ever counted. `fetchEndRecord` above had no caller anywhere in `app/` or
+ * `src/`, and the only read of the column was the Unexplained Departures card,
+ * which filters `end_reason is null` — it reads the UNANSWERED ones in order to
+ * keep asking. The card patiently gathered the cheapest true thing a coaching
+ * business can know about itself and put it in a column nothing read back.
+ *
+ * Pure, and counts only. There is no rate here and there will not be one: a
+ * percentage over the four people who left a coach's book this quarter is
+ * noise, and `MIN_COHORT_FOR_RATE` exists in src/lib/gymRetention.ts because
+ * somebody already reached for one. Counts survive a small book; a percentage
+ * over it is a claim about a business that has not happened yet.
+ */
+
+/** One ended relationship, reduced to what a tally depends on. */
+export interface EndedRelationship {
+  /** As stored. Anything this build does not recognise, and a null, land in
+   *  `unrecorded` rather than being dropped or guessed at. */
+  reason: unknown;
+  /** ISO, or null where nobody recorded when. */
+  endedAt: string | null;
+}
+
+export interface DepartureTally {
+  /** Every ending in the window, whether or not anybody said why. */
+  total: number;
+  /** Reasons with at least one ending against them, commonest first. Ties are
+   *  broken by `END_REASONS` order so the list does not reshuffle between two
+   *  reads of the same book. */
+  counts: { reason: EndReason; n: number }[];
+  /**
+   * Endings with nothing recorded against them.
+   *
+   * Kept separate and never folded in with 'unsaid'. "They were asked and did
+   * not want to say" and "nobody asked" are opposite facts about the coach's
+   * own record-keeping, and only one of them is something they can fix.
+   */
+  unrecorded: number;
+}
+
+/**
+ * Count the reasons. Null in, null out: an unread list of endings is not a
+ * coach nobody has left, and a card printing "0 departures" over a refused read
+ * is the one sentence that stops them looking.
+ */
+export function departureTally(rows: readonly EndedRelationship[] | null): DepartureTally | null {
+  if (rows == null) return null;
+  const by = new Map<EndReason, number>();
+  let unrecorded = 0;
+  for (const r of rows) {
+    if (isEndReason(r.reason)) by.set(r.reason, (by.get(r.reason) ?? 0) + 1);
+    else unrecorded++;
+  }
+  const counts = [...by.entries()]
+    .map(([reason, n]) => ({ reason, n }))
+    .sort((a, b) => b.n - a.n || END_REASONS.indexOf(a.reason) - END_REASONS.indexOf(b.reason));
+  return { total: rows.length, counts, unrecorded };
+}
+
+/**
+ * The sentence over the tally, or null when there is nothing to say.
+ *
+ * Null on an empty book rather than "0 people have left you", which is a
+ * sentence that reads as a compliment on a book that has never had anybody on
+ * it. `windowDays` is stated because the whole figure is about a period.
+ */
+export function departureLine(tally: DepartureTally | null, windowDays: number): string | null {
+  if (tally == null || tally.total === 0) return null;
+  const people = `${tally.total} ${tally.total === 1 ? 'person has' : 'people have'} left your book in the last ${windowDays} days`;
+  if (tally.counts.length === 0) {
+    return `${people}, and nothing is recorded about why any of them did. Every one of those answers is still gettable, and none of them will be in March.`;
+  }
+  const top = tally.counts[0];
+  const lead = `${people}. The commonest reason recorded is ${END_REASON_LABEL[top.reason].toLowerCase()}, against ${top.n} of them.`;
+  if (tally.unrecorded === 0) return lead;
+  return `${lead} ${tally.unrecorded} ${tally.unrecorded === 1 ? 'has' : 'have'} nothing recorded at all, which is not the same as ${END_REASON_LABEL.unsaid.toLowerCase()}.`;
 }

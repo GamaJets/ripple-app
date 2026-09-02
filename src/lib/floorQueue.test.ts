@@ -11,8 +11,8 @@
 //   · a refused write kept in the queue forever, retried on every launch and
 //     counted as "waiting to send" for the life of the install.
 import {
-  actLine, dropSent, enqueueAct, floorPendingNote, floorQueueKey, keptOfflineLine,
-  readFloorQueue, refusedLine, supersedeKey, type FloorAct, type QueuedAct,
+  actLine, dropSent, enqueueAct, floorPendingNote, floorQueueKey, flushResultLine,
+  keptOfflineLine, readFloorQueue, refusedLine, supersedeKey, type FloorAct, type QueuedAct,
 } from './floorQueue';
 
 const errors: string[] = [];
@@ -157,6 +157,34 @@ eq(actLine({ kind: 'class-attendance', classId: 'c', userId: 'u', memberName: ' 
 eq(actLine(OUTCOME('s1', 'no_show')), 'Sam’s session marked no show', 'an outcome reads as words, not as a column value');
 eq(actLine({ kind: 'session-outcome', sessionId: 's', clientName: null, outcome: 'completed' }), 'A session marked completed',
   'and names the session when it cannot name the client');
+
+/* ── what a pressed send button reports ─────────────────────────────────── */
+
+// Nothing to do says nothing at all, rather than raising an alert about it.
+eq(flushResultLine({ sent: 0, refused: 0, kept: 0 }), null, 'an empty flush is silent');
+
+const allSent = flushResultLine({ sent: 3, refused: 0, kept: 0 }) ?? '';
+ok(/3 changes went up/.test(allSent), 'a clean flush says how many reached the server');
+ok(!/phone/.test(allSent), 'and does not mention a phone that is now carrying nothing');
+eq(flushResultLine({ sent: 1, refused: 0, kept: 0 }), '1 change went up.', 'counted in the singular');
+
+// The one that must not read as "still waiting". A refused act has been dropped
+// and pressing send again will never move it.
+const dropped = flushResultLine({ sent: 0, refused: 2, kept: 0 }) ?? '';
+ok(/declined/.test(dropped), 'a refusal says the server answered');
+ok(/no longer waiting to send/.test(dropped), 'and that it is not queued any more');
+
+// And the one that must not read as a failure of the tap.
+const still = flushResultLine({ sent: 0, refused: 0, kept: 1 }) ?? '';
+ok(/nobody answered/.test(still), 'an unreachable server is named as such');
+ok(/still on this phone/.test(still), 'and the work is said to be kept');
+ok(/tried again/.test(still), 'and that it will be retried');
+
+// All three at once keeps all three, because they happened to different acts.
+const mixedFlush = flushResultLine({ sent: 1, refused: 1, kept: 1 }) ?? '';
+ok(/went up/.test(mixedFlush) && /declined/.test(mixedFlush) && /nobody answered/.test(mixedFlush),
+  'a mixed flush reports every arm rather than the most recent one');
+ok(!/undefined|NaN/.test(mixedFlush), 'and never renders a count as a word');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('floorQueue: ok');

@@ -382,9 +382,16 @@ export default function InjuryDoc() {
         )}
 
         {/* ── what came back ──────────────────────────────────────────────
-            Three outcomes, three different sentences. An empty list under a
+            Four outcomes, four different sentences. An empty list under a
             failed read would say "your report mentions no injuries", which is
-            the one thing a failure must never be allowed to claim. */}
+            the one thing a failure must never be allowed to claim.
+
+            The fourth is 'unsupported-script': a report in Greek, Cyrillic,
+            Hebrew or CJK that OCR read perfectly. It used to score zero
+            "readable letters" — the counter looked for `[a-z]` and called it
+            letters — and be reported as a photograph we could not make out, so
+            the member was told to re-photograph a page that had been read fine.
+            The sentence comes from `outcomeMessage` like the other three. */}
         {result && result.read === 'error' ? (
           <View>
             <Rule />

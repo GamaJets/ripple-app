@@ -205,6 +205,35 @@ export const MAX_COOLDOWN_DAYS = 28;
 export const DEFAULT_COOLDOWN_DAYS = 14;
 
 /**
+ * How many days of activity a caller must read before any of this can be
+ * judged, and why it is not the drift window.
+ *
+ * `assessFollowUp` measures a member against their own settled pattern AS IT
+ * STOOD ON THE DAY OF THE CALL, so a contact made ninety days ago needs the
+ * drift history sitting BEHIND that day, not in front of it. A caller who read
+ * only `DriftWindows.historyDays` would get `outside-the-read` on every contact
+ * older than eight weeks — which is honest, and is also every contact old
+ * enough to have an answer, so the loop would be permanently empty.
+ *
+ * 180 days is `FOLLOW_UP_CONTACT_DAYS` of contacts plus `DEFAULT_WINDOWS.
+ * historyDays` of pattern behind the oldest of them, rounded up. It is a read
+ * size and nothing is inferred from it: a caller still passes `readFromMs`, and
+ * a contact older than the read is still refused by name rather than judged
+ * against a baseline nobody read.
+ */
+export const FOLLOW_UP_READ_DAYS = 180;
+
+/**
+ * How far back a screen should look for contacts to judge.
+ *
+ * Older contacts are not wrong, they are simply about a person the coach has
+ * had four months of subsequent contact with, and stacking them into one tally
+ * says less each time it grows. Kept strictly inside `FOLLOW_UP_READ_DAYS` so
+ * every contact offered for judgement has its own baseline inside the read.
+ */
+export const FOLLOW_UP_CONTACT_DAYS = 120;
+
+/**
  * The coach's own bound on how often the app may raise the same person.
  *
  * The constants above are one set of numbers for every coach, and there is no

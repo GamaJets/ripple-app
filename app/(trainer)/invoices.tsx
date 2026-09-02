@@ -94,6 +94,16 @@ export default function Invoices() {
   const [dueText, setDueText] = useState('');
   const [kind, setKind] = useState<InvoiceKind>('requested');
   const [note, setNote] = useState('');
+  // What the coach states about tax, if anything (part 451). Both empty by
+  // default and both stay empty unless the coach types: a rate this app filled
+  // in would be a statement about their tax affairs printed under their name,
+  // and an empty rate box is a DIFFERENT document from one stating zero.
+  //
+  // Nothing here is calculated from either. There is no tax amount on the
+  // document, no net figure and no subtotal, and `INVOICE_TAX_STATED` says so
+  // on the page of any document that carries them.
+  const [taxRateText, setTaxRateText] = useState('');
+  const [taxRegistration, setTaxRegistration] = useState('');
   const [busy, setBusy] = useState(false);
   // The invoice being voided, and the reason typed for it. Its own flag rather
   // than a shared one: check-runtime-traps flags sibling modals whose `visible`
@@ -137,14 +147,38 @@ export default function Invoices() {
   // less late than it is, which is the wrong side of a chasing decision.
   const ageing = useMemo(() => ageingBook(rows, status, today), [rows, status, today]);
 
+  /**
+   * What this coach last stated about tax, from their own book.
+   *
+   * Not stored on the trainer and not a setting. It is read back off the most
+   * recent invoice that carried either field, so a registered coach types their
+   * registration number once rather than every time — and what is SAVED is
+   * still what was on that document, snapshotted, because a coach who
+   * deregisters next year has not changed what they issued this year.
+   *
+   * Only under a read that came back. Under 'error' `rows` is empty for a
+   * reason that has nothing to do with what the coach has stated before, and
+   * pre-filling from it would be inventing a blank.
+   */
+  const lastTax = useMemo(() => {
+    if (status !== 'ready' && status !== 'partial') return null;
+    return rows.find((i) => i.taxRatePct != null || !!String(i.taxRegistration ?? '').trim()) ?? null;
+  }, [rows, status]);
+
   const draft = (): InvoiceDraft => ({
     billTo, description, amountText, currency: ccy.currency, kind, issuedOn: today,
     dueOn: dueText.trim() || null, note: note.trim() || null,
+    taxRateText: taxRateText.trim() || null,
+    taxRegistration: taxRegistration.trim() || null,
   });
   const blockers = invoiceBlockers(draft());
   const canIssue = blockers.length === 0 && !busy;
 
-  const reset = () => { setBillTo(''); setClientId(null); setDescription(''); setAmountText(''); setDueText(''); setKind('requested'); setNote(''); };
+  // The tax fields are cleared too, and are re-offered from `lastTax` by the
+  // "Use What I Stated Last Time" control rather than being silently carried
+  // over. A rate that reappeared on its own would be a statement the coach did
+  // not make on THIS document.
+  const reset = () => { setBillTo(''); setClientId(null); setDescription(''); setAmountText(''); setDueText(''); setKind('requested'); setNote(''); setTaxRateText(''); setTaxRegistration(''); };
 
   const onIssue = async () => {
     const d = draft();
@@ -643,9 +677,38 @@ export default function Invoices() {
                 placeholder="Block booked, to be used within 12 weeks." placeholderTextColor={t.ink3}
                 accessibilityLabel="Note" style={[inp, { minHeight: 70, textAlignVertical: 'top' }]} />
 
+              {/* ── what YOU state about tax ──────────────────────────────
+                  Optional, empty by default, and printed exactly as typed.
+                  Repple works nothing out from either field: there is no tax
+                  amount on the document, no net figure and no subtotal, because
+                  what a rate means for a particular supply depends on a margin
+                  scheme, a flat-rate scheme, a reverse charge and half a dozen
+                  other things this app is not told about. What it stops doing
+                  is refusing to print a fact the coach stated, which is why a
+                  registered coach had to keep a second invoicing system. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Tax rate you state, as a percentage (optional)</Text>
+              <TextInput value={taxRateText} onChangeText={setTaxRateText} keyboardType="decimal-pad"
+                placeholder="20, or leave it empty" placeholderTextColor={t.ink3}
+                accessibilityLabel="Tax rate you state" style={inp} />
+
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Your tax registration number (optional)</Text>
+              <TextInput value={taxRegistration} onChangeText={setTaxRegistration} autoCapitalize="characters" autoCorrect={false}
+                placeholder="GB123456789, or leave it empty" placeholderTextColor={t.ink3}
+                accessibilityLabel="Your tax registration number" style={inp} />
+
+              {lastTax && !taxRateText.trim() && !taxRegistration.trim() ? (
+                <View style={{ marginTop: sp.sm }}>
+                  <Ghost label="Use What I Stated Last Time"
+                    onPress={() => {
+                      setTaxRateText(lastTax.taxRatePct != null ? String(lastTax.taxRatePct) : '');
+                      setTaxRegistration(String(lastTax.taxRegistration ?? ''));
+                    }} />
+                </View>
+              ) : null}
+
               <View style={{ marginTop: sp.lg }}>
                 <Flag tone={t.ink3}>
-                  No tax is calculated or added, and the document says so on its face. If you are registered for tax, check with your accountant what your invoices need to carry.
+                  Anything you type in those two boxes is printed on the document word for word and nothing is worked out from it. Repple calculates no tax amount, shows no net figure and no subtotal, and never will. Whether a rate and a number are all your invoices have to carry where you trade is a question for your accountant.
                 </Flag>
               </View>
 

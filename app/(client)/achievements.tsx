@@ -65,7 +65,8 @@ export default function Achievements() {
   // could never earn One Tonne, Ten Tonnes, Record Breaker or PR Machine. Only
   // offered when the scan read was whole: a shorter weight history under-counts
   // volume, which would hold a badge back.
-  const figures = badgeFigures(log, isWhole(cd.scansStatus) ? cd.weightSeries : []);
+  const scansWhole = isWhole(cd.scansStatus);
+  const figures = badgeFigures(log, scansWhole ? cd.weightSeries : []);
   // The threshold stays a fixed mass — 1,000 kg is 1,000 kg however it is read
   // — and only the figure describing it converts, so a pounds reader is not
   // left chasing a target stated in a unit they do not train in. The TITLES do
@@ -76,9 +77,21 @@ export default function Achievements() {
     key: b.key,
     title: b.title,
     desc: typeof b.desc === 'function' ? b.desc(volumeLabel) : b.desc,
-    state: badgeState(b.key, figures, countable) as BadgeState,
+    // Both reads, not one. `countable` is the log; `scansWhole` is the weight
+    // history the four load-priced badges are computed from. With a whole log
+    // and a failed scans read every bodyweight set is unpriced, so One Tonne,
+    // Ten Tonnes, Record Breaker and PR Machine fell under their thresholds and
+    // were printed as Locked — our failure rendered as the member's shortfall.
+    // They read "unknown" now, and only where the log actually holds bodyweight
+    // sets to be missing.
+    state: badgeState(b.key, figures, countable, scansWhole) as BadgeState,
   }));
   const earnedCount = badges.filter((b) => b.state === 'earned').length;
+  // True only where the failed scans read actually costs this member something:
+  // a badge left at 'unknown' that a whole weight history might have unlocked.
+  // "N left to earn" is a claim about how far they have to go, and it is not one
+  // this screen can make while four of the twelve are unreadable.
+  const bodyUnknown = !scansWhole && badges.some((b) => b.state === 'unknown') && countable;
 
   // ── The celebration ────────────────────────────────────────────────────
   //
@@ -118,13 +131,18 @@ export default function Achievements() {
         {/* ── the hero: how much of the set is unlocked ───────────────────── */}
         <Hero
           label="Unlocked"
-          figure={countable ? fig(earnedCount) : fig(null)}
+          // Withheld under `bodyUnknown` for the same reason it is withheld
+          // under a partial log: the count can only be an under-count while
+          // four of the twelve are unreadable, and a figure that is silently
+          // low is worse than a blank with a sentence under it.
+          figure={countable && !bodyUnknown ? fig(earnedCount) : fig(null)}
           unit={`of ${badges.length}`}
-          arc={countable ? earnedCount / badges.length : undefined}
+          arc={countable && !bodyUnknown ? earnedCount / badges.length : undefined}
           arcLabel="of badges earned"
           note={logStatus === 'loading' ? 'Reading your training log…'
             : !logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
             : !countable ? 'You have trained more times than this screen can read in one go, so the count is left blank. Anything marked Earned below really is.'
+            : bodyUnknown ? 'Your weight history could not be read, so the badges priced from your bodyweight sets are left blank rather than shown as locked.'
             : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
         />
 
@@ -132,6 +150,11 @@ export default function Achievements() {
 
         <Section>
           <SectionHead title="Badges" />
+          {bodyUnknown ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+              A pull-up or a dip is priced from your bodyweight on the day, and that history could not be read just now. The badges that depend on it are blank rather than locked. Nothing you have earned is gone.
+            </Text>
+          ) : null}
           {badges.map((b, bi) => {
             // 'earned' | 'locked' | 'unknown' from the module, which encodes
             // what this screen used to work out from two separate booleans:

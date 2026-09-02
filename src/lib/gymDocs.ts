@@ -44,7 +44,7 @@
 // Framework-agnostic like the rest of src/lib: the client arrives as an
 // argument, so the console and the phone can both use this.
 
-import { assertWhole, capLimit } from './rowCap';
+import { assertWhole, capLimit, readAll } from './rowCap';
 import { writeFailure } from './wroteRows';
 
 type Queryable = { from: (table: string) => any; storage?: any };
@@ -153,15 +153,42 @@ export async function fetchAgreements(sb: Queryable, tenantId: string): Promise<
   }));
 }
 
+/**
+ * Every signature this gym holds.
+ *
+ * ── Why this is paged rather than capped ─────────────────────────────────
+ *
+ * It used to be `capLimit()` plus `assertWhole`, and that is the right shape
+ * for a read whose truncation would make a figure wrong. This one is different:
+ * the screen subtracts these rows from the roster to produce the list of people
+ * TRAINING WITHOUT A WAIVER, and there is no window on it to narrow.
+ *
+ * The arithmetic is unforgiving. A gym requiring three agreements crosses a
+ * thousand signatures at 334 members, and at 600 members it holds 1800 — so
+ * /compliance went to a permanent error at a gym size that is ordinary, on the
+ * one screen whose whole purpose is answering what the gym can produce when
+ * somebody asks. Not a wrong number: no screen at all, with nothing an owner
+ * could do about it.
+ *
+ * A signature is also never deleted, so the set only grows. `readAll` finishes
+ * the read; `PAGE_CEILING` in src/lib/rowCap.ts is still there to stop a
+ * predicate that lost its tenant filter walking the whole table.
+ *
+ * The order carries `id` after `signed_at` because paging needs a TOTAL order:
+ * two people signing in the same second are two rows Postgres may hand back in
+ * either order, and a tie across a page boundary drops rows silently.
+ */
 export async function fetchSignatures(sb: Queryable, tenantId: string): Promise<Signature[]> {
-  const { data, error } = await sb
-    .from('gym_agreement_signatures')
-    .select('id, agreement_id, member_id, signed_name, signed_at, version_signed, guardian_name, guardian_relationship, note')
-    .eq('tenant_id', tenantId)
-    .order('signed_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  const rows = assertWhole(data, 'the signatures this gym holds');
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_agreement_signatures')
+      .select('id, agreement_id, member_id, signed_name, signed_at, version_signed, guardian_name, guardian_relationship, note')
+      .eq('tenant_id', tenantId)
+      .order('signed_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the signatures this gym holds',
+  );
   if (!rows.length) return [];
   const names = await namesFor(sb, rows.map((r: any) => r.member_id));
   return rows.map((r: any) => ({
@@ -419,15 +446,26 @@ export function documentPath(tenantId: string, fileName: string): string {
   return `${tenantId}/${stamp}-${rand}-${clean}`;
 }
 
+/**
+ * The filing cabinet.
+ *
+ * Paged for the same reason as the signatures above: this is the register of
+ * what the gym holds, `expiring()` is computed over all of it, and a cabinet
+ * that refuses to open past a thousand files is a compliance screen that goes
+ * dark at exactly the gym that has been trading long enough to be audited.
+ * Nothing here is ever deleted on a schedule, so the set only grows.
+ */
 export async function fetchDocuments(sb: Queryable, tenantId: string): Promise<GymDocument[]> {
-  const { data, error } = await sb
-    .from('gym_documents')
-    .select('id, member_id, member_attached, equipment_id, kind, title, storage_path, mime, size_bytes, expires_on, note, uploaded_by, uploaded_at')
-    .eq('tenant_id', tenantId)
-    .order('uploaded_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  const rows = assertWhole(data, "this gym's documents");
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_documents')
+      .select('id, member_id, member_attached, equipment_id, kind, title, storage_path, mime, size_bytes, expires_on, note, uploaded_by, uploaded_at')
+      .eq('tenant_id', tenantId)
+      .order('uploaded_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    "this gym's documents",
+  );
   if (!rows.length) return [];
   const names = await namesFor(sb, rows.map((r: any) => r.uploaded_by));
   return rows.map((r: any) => ({

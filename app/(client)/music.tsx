@@ -33,7 +33,7 @@ import {
   connectSpotify, spotifyStatus, spotifyDisconnect, createSpotifyPlaylist, spotifySearchTracks,
   spotifyMyPlaylists, spotifyPlay, SpotifyError, type PlaylistRef,
 } from '../../src/lib/spotify';
-import { playlistLine } from '../../src/lib/spotifyPlayback';
+import { playlistLine, playlistSavedLine } from '../../src/lib/spotifyPlayback';
 import { reportError } from '../../src/lib/reportError';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
@@ -224,8 +224,13 @@ export default function Music() {
    if (conn.spotify && !needsReconnect) {
      setSpotifyBusy(true);
      try {
-       const url = await createSpotifyPlaylist(pl.title, pl.tracks.map((tr) => ({ title: tr.title, artist: tr.artist })));
-       Alert.alert('Saved to Spotify', pl.title + ' is in your Spotify library.', [{ text: 'Open', onPress: () => Linking.openURL(url).catch(() => {}) }, { text: 'Done' }]);
+       // `tr.uri` is passed rather than dropped. A Spotify-sourced playlist
+       // already holds the exact track for every row on screen, and the write
+       // used to throw all of them away and re-search by title and artist text
+       // — which is how a twenty-track list could land with eleven tracks in it,
+       // some of them different recordings, announced as saved.
+       const saved = await createSpotifyPlaylist(pl.title, pl.tracks.map((tr) => ({ title: tr.title, artist: tr.artist, uri: tr.uri })));
+       Alert.alert('Saved to Spotify', playlistSavedLine(pl.title, saved), [{ text: 'Open', onPress: () => Linking.openURL(saved.url).catch(() => {}) }, { text: 'Done' }]);
        loadMine();
      } catch (e) { Alert.alert('Spotify', spotifyMessage(e, 'Could not save the playlist.')); }
      finally { setSpotifyBusy(false); }

@@ -73,6 +73,17 @@ import { LOCAL_PREFIX } from './wellnessSync';
  */
 export type OutboxKind = 'message' | 'measurement' | 'pt-approval';
 
+/**
+ * The same three kinds as a list, for a caller that has to walk them.
+ *
+ * The union is the authority and this is derived from it by hand, which is the
+ * one thing worth watching: `src/lib/outbox.test.ts` asserts every member of
+ * the union has an entry here, so a fourth kind added to the type without being
+ * added to this list fails the suite rather than going quietly unrendered — the
+ * exact failure mode of the sentences this list exists to draw.
+ */
+export const OUTBOX_KINDS: readonly OutboxKind[] = ['message', 'measurement', 'pt-approval'];
+
 export interface OutboxItem {
   /** Device-local and unique. Prefixed like every other unsent id in this app
    *  (src/lib/wellnessSync.ts) so it can never be mistaken for a server key. */
@@ -178,8 +189,10 @@ export function readOutbox(raw: string | null | undefined): { items: OutboxItem[
   }
 }
 
-const KINDS: readonly string[] = ['message', 'measurement', 'pt-approval'];
-export const isOutboxKind = (s: string): s is OutboxKind => KINDS.includes(s);
+// The same list as `OUTBOX_KINDS`, deliberately, rather than a second one: a
+// private copy here was how a fourth kind could become readable from storage
+// without ever being drawn on a screen.
+export const isOutboxKind = (s: string): s is OutboxKind => (OUTBOX_KINDS as readonly string[]).includes(s);
 
 /**
  * Add one intent.

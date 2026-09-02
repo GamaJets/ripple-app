@@ -20,6 +20,7 @@ import {
   FITNESS_KEYS, HEALTH_KEYS,
   ALWAYS_SENT, SENT_WITH_PERMISSION, NEVER_SENT,
   WITHHELD_NOTE, NOT_MEDICAL_ADVICE, WHERE_IT_GOES,
+  weeklyFacts, REPORT_WITHHELD_NOTE, REPORT_CONSENT_TITLE, REPORT_CONSENT_BODY,
   type ShareConsent,
 } from './coachShare';
 import type { Injury } from './injuries';
@@ -165,6 +166,70 @@ ok(/doctor|physio/i.test(NOT_MEDICAL_ADVICE), 'the disclaimer sends people to a 
 // representable and both have to produce a working coach.
 const both: ShareConsent[] = ['yes', 'no'];
 for (const c of both) ok(shareableContext(FULL, c) != null, `${c} is a usable answer, not just the one we wanted`);
+
+
+/* ── the Weekly Report's half of the same door ──────────────────────────────
+ *
+ * app/(client)/report.tsx posted the week's fact list to a language model with
+ * `{ week: range, name: c.name }` beside it and no consent question anywhere on
+ * the screen — a step worse than the coach screen had been, because the name
+ * had already been taken out of that payload for exactly this reason.
+ */
+
+const FITNESS = [
+  'Week of 26 Aug – 1 Sep.',
+  'Trained 4 time(s) across 3 active day(s).',
+  'Streak 9 day(s).',
+];
+const HEALTH = [
+  'Weight 82.4 kg (down 1.2 kg overall), body fat 19%, muscle 34.1 kg.',
+  'Waist 84 cm (down 1 cm since the previous tape reading).',
+  'Check-in energy 4/5, sleep 3/5, mood 4/5, adherence 5/5.',
+];
+
+eq(weeklyFacts(FITNESS, HEALTH, 'unknown'), null,
+  'nothing is written from a week before the stored answer has been read');
+eq(weeklyFacts(FITNESS, HEALTH, 'unasked'), null,
+  'and nothing before the question has been put at all');
+
+const noWeek = weeklyFacts(FITNESS, HEALTH, 'no')!;
+const yesWeek = weeklyFacts(FITNESS, HEALTH, 'yes')!;
+
+ok(noWeek.length === FITNESS.length, 'a declined answer sends the training half and only that');
+for (const h of HEALTH) {
+  ok(!noWeek.includes(h), `no health line survives a declined answer — ${h}`);
+}
+ok(!noWeek.join(' ').includes('82.4'), 'no weight reaches a model that was told not to have it');
+ok(!noWeek.join(' ').includes('19%'), 'nor a body fat percentage');
+ok(!noWeek.join(' ').includes('sleep'), 'nor how they slept');
+
+for (const line of [...FITNESS, ...HEALTH]) {
+  ok(yesWeek.includes(line), `a yes sends everything the screen offered — ${line}`);
+}
+
+// Every branch of the screen's list is `cond ? line : ''`, so an empty string
+// is a normal value here and a blank fact line is not.
+const withBlanks = weeklyFacts(['a fact.', '', '   '], ['', 'another.'], 'yes')!;
+eq(withBlanks.length, 2, 'blank lines are dropped rather than sent as facts');
+
+// The name. This is the whole of the item: `askAboutMyWeek` sends no context
+// object at all, so the only way a name could travel is inside a fact line, and
+// nothing in this function puts one there.
+const named = weeklyFacts(['Sarah trained 4 times.'], [], 'yes')!;
+eq(named.length, 1, 'this function does not invent or strip prose — the screen owns what it writes');
+ok(!JSON.stringify(weeklyFacts(FITNESS, HEALTH, 'yes')).includes('name'),
+  'and nothing keyed "name" is added on the way through');
+
+ok(/training only/i.test(REPORT_WITHHELD_NOTE),
+  'declining says the summary is still written, from the training half');
+ok(/yours to read/i.test(REPORT_WITHHELD_NOTE),
+  'and that the figures on the screen are unaffected');
+ok(!/personalis|personaliz/i.test(REPORT_WITHHELD_NOTE),
+  'and does not hide behind "less personalised"');
+ok(String(REPORT_CONSENT_TITLE).length > 10 && String(REPORT_CONSENT_BODY).length > 80,
+  'the question put on the report is a real explanation rather than a label');
+ok(/language model/i.test(REPORT_CONSENT_BODY),
+  'and it names what the paragraph actually is before anybody agrees to it');
 
 if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);

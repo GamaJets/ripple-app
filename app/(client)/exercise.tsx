@@ -434,6 +434,19 @@ export default function ExerciseScreen() {
               voice={{ they: 'You', their: 'your', have: 'have' }}
               history={weightSeries}
             />
+          ) : logStatus === 'partial' ? (
+            // 'partial' had no arm and fell into "You have not logged this
+            // movement yet" — said on the movement's own page to a lifter whose
+            // squats all predate the row cap. A truncated read holds the newest
+            // thousand sessions and nothing behind them, so an absence in it is
+            // silence rather than a fact. Same arm records.tsx and
+            // progression.tsx already carry, for the reason written on
+            // src/lib/rowCap.ts: a confident empty state is strictly worse than
+            // a failed read.
+            <Flag tone={t.warn}>
+              You have logged more sessions than this screen can read in one go, and none of the ones
+              it read were this movement. That is not a statement that you have never done it.
+            </Flag>
           ) : (
             <Text style={{ ...ty.body, color: t.ink2 }}>
               You have not logged this movement yet. The first set you log above starts the trail —

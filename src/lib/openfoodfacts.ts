@@ -6,16 +6,33 @@
 export interface OffProduct {
   name: string;
   kcal: number;
-  protein: number;
-  carbs: number;
-  fat: number;
+  /**
+   * Null where Open Food Facts recorded nothing for it.
+   *
+   * These were `number`, and `num()` turned every absent field into 0 — so a
+   * branded product with only an energy figure came back as protein 0, carbs 0,
+   * fat 0, `missingMacros` (src/lib/foodPortion.ts) never fired, and the log
+   * sheet pre-filled three zeros for a member to confirm. That is the exact
+   * rule foodPortion.ts was written against: A ZERO IS A MEASUREMENT, and "we
+   * were not told" is not a zero — reintroduced on the one path whose figures a
+   * member trusts most, because a barcode feels like a fact.
+   */
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
   serving: string; // human label of the basis we used
 }
 
-const num = (v: any): number => {
+/** A recorded number, or null. Blank, absent and unparseable are all null — the
+ *  three of them mean "not told", and only a real figure means a figure. */
+const num = (v: any): number | null => {
+  if (v === undefined || v === null || v === '') return null;
   const n = typeof v === 'string' ? parseFloat(v) : v;
-  return Number.isFinite(n) ? n : 0;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
 };
+/** Scale a recorded figure, keeping null null. */
+const scale = (v: number | null, k: number): number | null => (v == null ? null : v * k);
+const round = (v: number | null): number | null => (v == null ? null : Math.round(v));
 
 // Only digits; UPC-A is 12, EAN-13 is 13, EAN-8 is 8. Accept 8–14 to be lenient.
 export function normalizeBarcode(raw: string): string | null {
@@ -23,18 +40,55 @@ export function normalizeBarcode(raw: string): string | null {
   return d.length >= 8 && d.length <= 14 ? d : null;
 }
 
-export async function lookupBarcode(raw: string): Promise<OffProduct | null> {
+/**
+ * What a barcode lookup came back as.
+ *
+ * ── Why this is an outcome and not `OffProduct | null` ────────────────────
+ *
+ * It was null for all five of these, and src/ui/BarcodeSheet.tsx rendered that
+ * one null as `Alert.alert('Not found', … 'there is no match for it in the Open
+ * Food Facts database')`. So on a supermarket's bad signal a member was told
+ * their yoghurt is not in the database, rather than that we could not ask.
+ *
+ * That is the failed-read-as-empty-state this codebase refuses everywhere else
+ * — and `searchProducts`, directly below in this same file, already goes to the
+ * trouble of returning `{ ok: false, reason: 'busy' | 'offline' }` so the
+ * screen can tell a throttle from an empty result. This is that, on the scan
+ * side.
+ *
+ *   bad-code      the digits are not a barcode this database is keyed on
+ *   not-found     we asked, and there is genuinely no such product
+ *   no-nutrition  the product is there and its figures are not
+ *   busy          throttled or a server error — ask again in a moment
+ *   offline       we could not reach it at all
+ */
+export type LookupOutcome =
+  | { ok: true; product: OffProduct }
+  | { ok: false; reason: 'bad-code' | 'not-found' | 'no-nutrition' | 'busy' | 'offline' };
+
+export async function lookupBarcode(raw: string): Promise<LookupOutcome> {
   const code = normalizeBarcode(raw);
-  if (!code) return null;
+  if (!code) return { ok: false, reason: 'bad-code' };
   const url = `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,brands,nutriments,serving_size,serving_quantity`;
   let json: any;
   try {
     const res = await fetch(url, { headers: { 'User-Agent': 'Repple/1.0 (fitness app)' } });
-    if (!res.ok) return null;
+    // A 404 is the database answering: there is no such product. Everything
+    // else in the 4xx/5xx range is us failing to ask it properly, and the same
+    // split `searchProducts` makes two functions down.
+    if (res.status === 404) return { ok: false, reason: 'not-found' };
+    if (res.status === 429 || res.status >= 500) return { ok: false, reason: 'busy' };
+    if (!res.ok) return { ok: false, reason: 'offline' };
     json = await res.json();
-  } catch { return null; }
-  if (!json || json.status !== 1 || !json.product) return null;
-  return toProduct(json.product);
+  } catch { return { ok: false, reason: 'offline' }; }
+  // `status: 0` is Open Food Facts' own "product not found" on a 200.
+  if (!json) return { ok: false, reason: 'offline' };
+  if (json.status !== 1 || !json.product) return { ok: false, reason: 'not-found' };
+  const product = toProduct(json.product);
+  // The barcode matched. What it matched has no nutrition on file, which is a
+  // different sentence from "no match" and is the member's cue to describe it
+  // instead of scanning it again.
+  return product ? { ok: true, product } : { ok: false, reason: 'no-nutrition' };
 }
 
 /**
@@ -48,9 +102,9 @@ function toProduct(p: any): OffProduct | null {
   const nu = p.nutriments || {};
 
   // Prefer per-serving values if present, else scale per-100g by serving qty.
-  const servingG = num(p.serving_quantity);
-  const hasServing = num(nu['energy-kcal_serving']) > 0 || num(nu.proteins_serving) > 0;
-  let kcal: number, protein: number, carbs: number, fat: number, basis: string;
+  const servingG = num(p.serving_quantity) ?? 0;
+  const hasServing = (num(nu['energy-kcal_serving']) ?? 0) > 0 || (num(nu.proteins_serving) ?? 0) > 0;
+  let kcal: number | null, protein: number | null, carbs: number | null, fat: number | null, basis: string;
   if (hasServing) {
     kcal = num(nu['energy-kcal_serving']);
     protein = num(nu.proteins_serving);
@@ -59,10 +113,10 @@ function toProduct(p: any): OffProduct | null {
     basis = p.serving_size ? String(p.serving_size) : (servingG ? `${servingG} g` : '1 serving');
   } else if (servingG > 0) {
     const k = servingG / 100;
-    kcal = num(nu['energy-kcal_100g']) * k;
-    protein = num(nu.proteins_100g) * k;
-    carbs = num(nu.carbohydrates_100g) * k;
-    fat = num(nu.fat_100g) * k;
+    kcal = scale(num(nu['energy-kcal_100g']), k);
+    protein = scale(num(nu.proteins_100g), k);
+    carbs = scale(num(nu.carbohydrates_100g), k);
+    fat = scale(num(nu.fat_100g), k);
     basis = p.serving_size ? String(p.serving_size) : `${servingG} g`;
   } else {
     kcal = num(nu['energy-kcal_100g']);
@@ -86,20 +140,19 @@ function toProduct(p: any): OffProduct | null {
   // for being a diet drink. Water, black coffee, sweeteners and every zero-
   // calorie mixer failed the same way, and the message blamed the database.
   //
-  // Presence of the FIELD is the question, not its value. If Open Food Facts
-  // recorded nothing at all under any of these keys, there is nothing to log.
-  const RECORDED = [
-    'energy-kcal_serving', 'proteins_serving', 'carbohydrates_serving', 'fat_serving',
-    'energy-kcal_100g', 'proteins_100g', 'carbohydrates_100g', 'fat_100g',
-  ];
-  const anyRecorded = RECORDED.some((k) => nu[k] !== undefined && nu[k] !== null && nu[k] !== '');
-  if (!anyRecorded) return null;
+  // Presence of the FIELD is the question, not its value — which is now what
+  // `num` answers, so a recorded 0 survives and an absent field is null all the
+  // way to the sheet. ENERGY is what decides whether there is a row at all: a
+  // food log entry is `kcal` plus three optional macros, so a product with no
+  // energy on file is not loggable, and the caller says "we have the product
+  // but not its figures" rather than "no match".
+  if (kcal == null) return null;
   return {
     name,
     kcal: Math.round(kcal),
-    protein: Math.round(protein),
-    carbs: Math.round(carbs),
-    fat: Math.round(fat),
+    protein: round(protein),
+    carbs: round(carbs),
+    fat: round(fat),
     serving: basis,
   };
 }

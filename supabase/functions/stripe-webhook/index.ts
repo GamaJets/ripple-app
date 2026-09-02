@@ -79,6 +79,10 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 // screen and its server cannot disagree about what a renewal or an upgrade does
 // to somebody's membership. Both are asserted in src/lib/memberBuy.test.ts.
 import { renewalIsContiguous, supersedeRow } from '../../../src/lib/termDates.ts';
+// The ledger row an online gym sale leaves behind, and the two refusals it can
+// answer with. Also a leaf, for the same reason. Asserted in
+// src/lib/gymOrderPayment.test.ts.
+import { gymOrderPaymentRow, isClosedMonthRefusal } from '../../../src/lib/gymOrderPayment.ts';
 
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
 
@@ -649,6 +653,98 @@ Deno.serve(async (req) => {
               if (passErr) return fail('gym_passes', passErr.message);
               passId = made?.id ?? null;
               if (!passId) problem = 'The pass could not be recorded.';
+            }
+          }
+
+          // ── THE MONEY ───────────────────────────────────────────────────
+          //
+          // Written here, between the entitlement and the closing of the order,
+          // and it used to be written nowhere at all. `gym_orders` records that
+          // Stripe took the money; `gym_payments` is the LEDGER, and it is the
+          // only table /money, /revenue, /accounting and /close count. Without
+          // this insert a gym selling online reconciled its bank statement
+          // against a figure short by every online sale it had ever made.
+          //
+          // WHAT KEYS IT. `gym_payments.gym_order_id`, added by part 480 with a
+          // partial UNIQUE index, exactly as part 281 keyed the entitlement.
+          // One order, at most one payment. A retried delivery finds the row
+          // the first delivery wrote instead of recording the sale twice, and
+          // if two ever race the index refuses the second rather than doubling
+          // a month's takings. It cannot be keyed on the amount: two members on
+          // the same plan pay the same money in the same minute.
+          //
+          // WHY IT IS ORDERED HERE. The order is marked 'paid' only after this
+          // has landed, so 'paid' means the entitlement AND the money were
+          // recorded. A transient failure answers Stripe with a 500, the order
+          // stays 'pending', and the retry re-enters this branch, finds the
+          // entitlement by its `gym_order_id` and writes only what is missing.
+          //
+          // NOTHING IS DOUBLE COUNTED. `gym_orders` is read by the member's own
+          // purchase history and by nothing that adds money up. The pass figure
+          // on /close comes from `gym_passes.paid_cents` and is reported beside
+          // the takings rather than inside them, which is already true of every
+          // pass sold at the desk.
+          if (!problem) {
+            const { data: paid, error: paidErr } = await service.from('gym_payments')
+              .select('id').eq('gym_order_id', orderId).maybeSingle();
+            if (paidErr) return fail('gym_payments lookup', paidErr.message);
+
+            if (!paid?.id) {
+              // Named `ledgerRow` and not `row`: `writeConnectSub` above holds a
+              // `const row` of client_subscriptions columns, and
+              // scripts/check-schema.mjs resolves `.insert(row)` by name — it
+              // read those columns as gym_payments ones and failed the gate.
+              const ledgerRow = gymOrderPaymentRow({
+                orderId,
+                order: {
+                  tenantId: order.tenant_id,
+                  memberId: order.member_id,
+                  amountCents: order.amount_cents,
+                  currency: order.currency,
+                },
+                session: {
+                  amountTotal: sess.amount_total,
+                  currency: sess.currency,
+                  methodTypes: sess.payment_method_types ?? null,
+                  sessionId: sess.id,
+                  paymentIntent: pi,
+                },
+                // The hard link between money and what it was for, written at
+                // the one moment anything knows both. /accounting's 45-day
+                // amount-and-member guess exists because this column was always
+                // empty; an online sale now arrives already attributed.
+                membershipId: order.kind === 'membership' ? membershipId : null,
+                takenAt: eventAt,
+              });
+
+              if (!ledgerRow) {
+                // Refused rather than guessed. The only way here is a sale that
+                // states no currency or no amount anywhere, and there is no
+                // honest fallback for either: a currency invented here is a
+                // permanent wrong stamp on a row an accountant files.
+                console.error('stripe-webhook: gym order ' + orderId + ' was paid and could not be written to the ledger — the session and the order both state no usable amount or currency. Session ' + sess.id + '. The entitlement stands; the money is recorded only in Stripe.');
+              } else {
+                const { error: payErr } = await service.from('gym_payments').insert(ledgerRow);
+                if (payErr && String(payErr.code ?? '') === '23505') {
+                  // Two deliveries raced and the index did its job. The payment
+                  // is recorded once, which is the whole point of the key.
+                  console.warn('stripe-webhook: gym order ' + orderId + ' already had a ledger row when this delivery tried to write one. The unique index refused the second.');
+                } else if (payErr && isClosedMonthRefusal(payErr)) {
+                  // The owner has signed off the month this sale falls in.
+                  // Final, not transient: every retry is refused identically,
+                  // so answering with a 500 would spend Stripe's retry budget
+                  // and then abandon the delivery with nothing recorded.
+                  //
+                  // The entitlement stands and the order is still closed as
+                  // paid. The gap is visible rather than silent: a paid order
+                  // with no payment pointing at it is what the reconciliation
+                  // screen lists, and reopening the month and recording it is a
+                  // decision for a person.
+                  console.error('stripe-webhook: gym order ' + orderId + ' was paid into a month this gym has closed, so the ledger refused it: ' + payErr.message + ' The membership or pass stands. Reopen the month on /close and record the payment against the order.');
+                } else if (payErr) {
+                  return fail('gym_payments', payErr.message);
+                }
+              }
             }
           }
 

@@ -146,6 +146,20 @@ export default function ClientNutrition() {
   // told "there is nothing to scale a plan to… they set every one of them in
   // their own app", which blames them for our connection.
   const [scansUnread, setScansUnread] = useState(false);
+  /**
+   * The same two facts about the CHECK-IN read, which used to be neither.
+   *
+   * `weighIns = capped(...).rows` took the rows and dropped `.truncated` on the
+   * floor, three lines below a scans read that carries it. Both matter here and
+   * one of them matters more than it looks: the weigh-ins go into `series`,
+   * `series.weight` goes into `energyPlanFor`, and the energy plan is what the
+   * composed week is built on. So a client who has checked in weekly for twenty
+   * years had their week planned off their FIRST thousand weigh-ins, drawn as a
+   * current trend, with nothing on screen to say the read stopped — the exact
+   * pair src/lib/historyWindow.ts names.
+   */
+  const [weighUnread, setWeighUnread] = useState(false);
+  const [weighShort, setWeighShort] = useState(false);
   const [series, setSeries] = useState<{ weight: { t: string; v: number }[] } | null>(null);
   const [goals, setGoals] = useState<ReturnType<typeof readGoals>['goals']>([]);
   const [goalStatus, setGoalStatus] = useState<LoadStatus>('ready');
@@ -182,10 +196,25 @@ export default function ClientNutrition() {
     // about who may be seen.
     const [cliRes, scanRes, ciRes, goalRes] = await Promise.all([
       supabase.from('clients').select(CLIENT_COLS).eq('id', id).limit(1),
+      // NEWEST-FIRST, and reversed back into ascending order once the page has
+      // been measured. `ascending: true` with a cap is the pair
+      // src/lib/historyWindow.ts:5-18 documents by name: PostgREST answers with
+      // at most a thousand rows and says nothing, so an ascending read hands
+      // back the OLDEST thousand and stops. A client who checks in weekly for
+      // twenty years, or daily for three, crosses that — and their coach was
+      // then shown the first thousand weigh-ins drawn as a current trend, which
+      // is the same shape as the screen that told a member "nothing logged
+      // since Mar 2023" the morning after they trained. Reading downward puts
+      // the cut at the far end of their history instead.
+      //
+      // The id settles ties, exactly as it does on client-goals.tsx: a client
+      // weighed twice on the same instant writes rows the server may order
+      // differently on each request, and an order with ties in it is not an
+      // order a page boundary can be drawn on.
       supabase.from('scans').select(SCAN_COLS).eq('client_id', id)
-        .order('taken_at', { ascending: true }).limit(capLimit()),
+        .order('taken_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit()),
       supabase.from('check_ins').select(CHECKIN_COLS).eq('user_id', id)
-        .order('at', { ascending: true }).limit(capLimit()),
+        .order('at', { ascending: false }).order('id', { ascending: false }).limit(capLimit()),
       supabase.from('goal_targets').select(GOAL_COLS).eq('client_id', id)
         .order('created_at', { ascending: false }).limit(capLimit()),
     ]);
@@ -200,12 +229,31 @@ export default function ClientNutrition() {
       scanFailed = true;
     } else {
       const page = capped((scanRes.data ?? []) as unknown as ScanRow[]);
-      scans = page.rows; scanTruncated = page.truncated;
+      // Back into ascending order. The read is downward so the cap bites the
+      // oldest rows; the order the chart draws in is not the order the rows
+      // have to arrive in.
+      scans = page.rows.slice().reverse(); scanTruncated = page.truncated;
     }
 
+    // The weigh-ins carry their own truncation and their own failure, and both
+    // used to be discarded: this was `weighIns = capped(...).rows`, taking the
+    // rows and dropping `.truncated` on the floor three lines under a scans
+    // read that carries it. So the weight chart could be built from an unknown
+    // fraction of a client's record with nothing on screen saying the read was
+    // short — and `profileStatus`, which gates Send, said 'ready' about it.
+    // Both are named here for the same reason `scanFailed` is: "came back
+    // short" and "did not come back" are different things to tell a coach, and
+    // neither of them is "here is your client's weight trend".
     let weighIns: WeighInRow[] = [];
-    if (ciRes.error) reportError('clientNutrition.checkIns', ciRes.error, { clientId: id });
-    else weighIns = capped((ciRes.data ?? []) as unknown as WeighInRow[]).rows;
+    let weighTruncated = false;
+    let weighFailed = false;
+    if (ciRes.error) {
+      reportError('clientNutrition.checkIns', ciRes.error, { clientId: id });
+      weighFailed = true;
+    } else {
+      const page = capped((ciRes.data ?? []) as unknown as WeighInRow[]);
+      weighIns = page.rows.slice().reverse(); weighTruncated = page.truncated;
+    }
 
     setSeries(seriesFrom(scans, weighIns));
 
@@ -259,7 +307,14 @@ export default function ClientNutrition() {
     // says which of the two it was, because "came back short" and "did not come
     // back" are different things to tell a coach.
     setScansUnread(scanFailed);
-    setProfileStatus(scanFailed || scanTruncated ? 'partial' : 'ready');
+    setWeighUnread(weighFailed);
+    setWeighShort(weighTruncated);
+    // The check-in read counts towards this for the same reason the scan read
+    // does, and it is not a lesser reason: `series.weight` is what
+    // `energyPlanFor` reads, so a short or refused weigh-in history changes the
+    // energy the composed week is built on. A plan sent on it would be scaled
+    // to a trend taken from an unknown fraction of the client's record.
+    setProfileStatus(scanFailed || scanTruncated || weighFailed || weighTruncated ? 'partial' : 'ready');
   }, []);
 
   useEffect(() => {
@@ -471,7 +526,11 @@ export default function ClientNutrition() {
                     <Flag tone={t.warn}>
                       {scansUnread
                         ? `Their scans could not be read, so this screen does not know what ${who} weighs. Any weight shown below is one they typed themselves, and their own Meals tab scales to their newest scan — so the two can be different bodies. The week can be read; it should not be sent on this, and an empty scan record here is not a claim that they have never been scanned.`
-                        : 'Their scans came back at the row limit, so the weight this plan is scaled to was taken from an unknown fraction of their record. The week can be read; it should not be sent on this.'}
+                        : weighUnread
+                          ? `Their check-ins could not be read, so the weight trend this week is planned against is missing entirely. What is charted below is scans alone. The week can be read; it should not be sent on this, and an empty chart here is not a claim that ${who} has stopped weighing in.`
+                          : weighShort
+                            ? 'Their check-ins came back at the row limit, so the weight trend this week is planned against was taken from part of their record rather than all of it. The week can be read; it should not be sent on this.'
+                            : 'Their scans came back at the row limit, so the weight this plan is scaled to was taken from an unknown fraction of their record. The week can be read; it should not be sent on this.'}
                     </Flag>
                   </Section>
                 ) : null}

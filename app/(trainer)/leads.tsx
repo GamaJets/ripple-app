@@ -61,7 +61,7 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import { num } from '../../src/lib/format';
 import { useLeads } from '../../src/ui/leads';
 import {
-  FOLLOW_UP_IS_MANUAL, MISTYPED_CODE_NOTE, LEAD_STATE_LABEL, LEAD_STATE_NOTE, MAX_FOLLOW_UP,
+  FOLLOW_UP_IS_MANUAL, ENQUIRY_IS_ANNOUNCED, MISTYPED_CODE_NOTE, LEAD_STATE_LABEL, LEAD_STATE_NOTE, MAX_FOLLOW_UP,
   FOLLOW_UP_LABEL, FOLLOW_UP_WHEN, followUpDraft, followUpLink, followUpRecord,
   type LeadRow, type LeadState, type FollowUpKind,
 } from '../../src/lib/leads';
@@ -355,6 +355,15 @@ export default function TrainerLeads() {
         <View style={{ marginTop: sp.xl }}>
           <Notice tone={t.warn} kicker="Nothing is sent" title="Following these up is you, by hand" note={FOLLOW_UP_IS_MANUAL} />
         </View>
+
+        {/* R5, and its own sentence rather than a clause on the one above.
+            Until supabase/parts/470 an enquiry was written by an unauthenticated
+            form and sat here until the coach happened to open this screen, so
+            the app was not even telling them there was something to follow up.
+            "You will be told" and "nothing is sent to them" are two facts, and
+            a coach who read them as one would believe the enquirer had been
+            acknowledged by something. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{ENQUIRY_IS_ANNOUNCED}</Text>
 
         {/* What the words on the rows below actually mean — an enquiry is not a
             client, the code is the attribution, and "contacted" is a note to

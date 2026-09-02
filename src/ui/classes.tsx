@@ -60,7 +60,10 @@ interface ClassesValue {
   /** `waiting` is excluded alongside `booked` for the same reason: both are
    *  counted by `class_counts()` on read and neither is a property of the class
    *  the coach is creating. A new class has nobody in it and nobody waiting. */
-  addClass: (c: Omit<GymClass, 'id' | 'booked' | 'waiting'>) => Promise<boolean>;
+  /** `status`, `cancelReason` and `seriesId` are excluded for the same reason:
+   *  a class being created is scheduled, belongs to no series and was called
+   *  off by nobody. All three are the server's to say on the next read. */
+  addClass: (c: Omit<GymClass, 'id' | 'booked' | 'waiting' | 'status' | 'cancelReason' | 'seriesId' | 'trainerId'>) => Promise<boolean>;
   refresh: () => void;
   /** The initial load has settled — unchanged, screens branch on it to stop a
    *  spinner. It says nothing about whether the load worked; `status` does. */
@@ -97,6 +100,27 @@ const rowToClass = (r: any): GymClass => ({
   id: String(r.id), title: r.title, kind: r.kind ?? '', instructor: r.instructor ?? '',
   branch: r.branch ?? '', room: r.room ?? '', startsAt: r.starts_at, durationMin: r.duration_min ?? 45,
   capacity: r.capacity ?? 12, booked: 0,
+  // Part 195's two columns, which this mapper dropped on the floor. The select
+  // above is `*`, so both have been arriving in the payload since the day the
+  // migration ran; nothing read them, `GymClass` had nowhere to put them, and
+  // every row drew identically. A coach then turned up to a class the gym had
+  // called off and told the members it was on.
+  //
+  // Narrowed here rather than passed through: the column is free text with a
+  // check constraint, and anything that is not the one value meaning "called
+  // off" is a class that is ON. A row from a database without the column reads
+  // undefined, which `isCancelled` in src/lib/gymSchedule.ts already treats as
+  // scheduled — the only reading that cannot drop a real class off a timetable.
+  // Null and not the empty string. A class with no trainer recorded is
+  // UNATTRIBUTED, and the coach's calendar treats that as "cannot tell" rather
+  // than as "not yours" — see the note on the field.
+  trainerId: typeof r.trainer_id === 'string' && r.trainer_id ? r.trainer_id : null,
+  status: r.status === 'cancelled' ? 'cancelled' : 'scheduled',
+  cancelReason: typeof r.cancel_reason === 'string' ? r.cancel_reason : null,
+  // Null and not the empty string: a one-off belongs to no series, and a series
+  // of one would make "this class" and "this and every later one" the same
+  // button on the screens that offer both.
+  seriesId: typeof r.series_id === 'string' && r.series_id ? r.series_id : null,
   // Null and not 0. `class_counts()` gained a `waiting` column in part 210, and
   // a build talking to a database without it reads `undefined` — which must
   // NEVER settle to zero, because "nobody is waiting" is exactly the claim that
@@ -373,7 +397,14 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
     // Zero and not null: a class this device has just created genuinely has
     // nobody waiting for it, which is a settled answer rather than an unread
     // one. It is replaced by the server's own count on the next load.
-    const local: GymClass = { ...c, id: 'local-' + Date.now(), booked: 0, waiting: 0 };
+    // 'scheduled' and not undefined: a class this device has just created is
+    // one somebody means to run, which is a settled answer rather than a column
+    // nobody read. It is replaced by the server's own row on the next load.
+    const local: GymClass = { ...c, id: 'local-' + Date.now(), booked: 0, waiting: 0, status: 'scheduled', cancelReason: null, seriesId: null,
+      // The insert below writes `trainer_id: uid`, so the row this stands in
+      // for is the signed-in coach's. Anything else here would make the phone
+      // and the server disagree for the length of one load.
+      trainerId: uid };
     setClasses((p) => [...p, local].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)));
     if (!USE_SUPABASE || !uid) return false;
     try {

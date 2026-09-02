@@ -17,6 +17,7 @@ import {
   DOW_NAMES, RECURRING_CLASH_NOTE, RECURRING_CREDIT_NOTE, RECURRING_END_RULE,
   SERIES_HORIZON_DAYS, cancelOptions, clashLine, clockLabel, createdLine,
   occurrenceDetail, seriesDates, seriesDetail, seriesLabel, shapeSeries,
+  seriesOccurrencesIn, zonedSlot,
   type RawSeries,
 } from './recurring';
 import type { CancellationPolicy } from './booking';
@@ -322,6 +323,84 @@ ok(/next session stays booked/i.test(seriesDetail(3, inWindow)),
 // the empty string is what they pass.
 ok(!/stays booked/i.test(pick(cancelOptions({ startsAt: '', policy: policy(), upcoming: 0, now: NOW }), 'series').detail),
   'and the option built for a series with no next occurrence carries no such promise either');
+
+
+/* ── which booked sessions a pause is actually about ────────────────────────
+ *
+ * The pause preview took EVERY booked session of the member's inside the
+ * window — no filter on the series, and none was possible, because
+ * `TrainingSession` carries no series id — and handed the count to
+ * `pausePreviewLine`, which states as fact how many sessions will be cancelled
+ * and what the late fees come to. A member with a second standing slot or a
+ * one-off Friday booking was shown a money claim over an unfiltered set, in the
+ * alert immediately before the confirm button.
+ */
+{
+  const SERIES = {
+    trainerId: 'tr1', clientId: 'cl1',
+    dow: 2, hour: 7, minute: 0, durationMin: 60, tz: 'Europe/London',
+  };
+  const base = { clientId: 'cl1', trainerId: 'tr1', durationMin: 60, status: 'booked' };
+  // Tuesdays at 07:00 London. 1 Sep 2026 is a Tuesday; BST, so 06:00Z.
+  const tue1 = '2026-09-01T06:00:00.000Z';
+  const tue2 = '2026-09-08T06:00:00.000Z';
+  // The same arrangement AFTER the clocks go back — 07:00 London is 07:00Z in
+  // GMT. Reading the slot in the phone's zone would drop this one.
+  const tueGMT = '2026-11-03T07:00:00.000Z';
+  const from = Date.parse('2026-08-30T00:00:00.000Z');
+  const until = Date.parse('2026-11-30T00:00:00.000Z');
+
+  const mine = seriesOccurrencesIn([
+    { ...base, startsAt: tue1 },
+    { ...base, startsAt: tue2 },
+    { ...base, startsAt: tueGMT },
+  ], SERIES, from, until);
+  eq(mine.length, 3, 'every occurrence of the arrangement is counted, across a daylight-saving change');
+
+  // The two cases in the complaint.
+  const secondSlot = { ...base, startsAt: '2026-09-03T17:00:00.000Z' };   // Thu 6pm
+  const oneOff = { ...base, startsAt: '2026-09-04T09:00:00.000Z' };       // Fri
+  const withOthers = seriesOccurrencesIn([
+    { ...base, startsAt: tue1 }, secondSlot, oneOff,
+  ], SERIES, from, until);
+  eq(withOthers.length, 1, 'a second standing slot and a one-off are not counted as this arrangement');
+
+  // A different coach at the same time is a different arrangement.
+  eq(seriesOccurrencesIn([{ ...base, trainerId: 'tr2', startsAt: tue1 }], SERIES, from, until).length, 0,
+    'and neither is the same slot with somebody else');
+  eq(seriesOccurrencesIn([{ ...base, clientId: 'cl2', startsAt: tue1 }], SERIES, from, until).length, 0,
+    'nor somebody else’s booking');
+  eq(seriesOccurrencesIn([{ ...base, durationMin: 30, startsAt: tue1 }], SERIES, from, until).length, 0,
+    'nor a half-hour session in the same hour');
+
+  // Status and window.
+  eq(seriesOccurrencesIn([{ ...base, status: 'cancelled', startsAt: tue1 }], SERIES, from, until).length, 0,
+    'a cancelled session is not going to be cancelled again');
+  eq(seriesOccurrencesIn([{ ...base, startsAt: tue1 }], SERIES, Date.parse(tue1), until).length, 0,
+    'the window is exclusive at the near end — a session at "now" is not in the future');
+  eq(seriesOccurrencesIn([{ ...base, startsAt: tueGMT }], SERIES, from, Date.parse(tueGMT)).length, 0,
+    'and exclusive at the far end');
+
+  // The zone is read in the SERIES' zone, not the reader's. Asserted through a
+  // series that is explicitly somewhere else.
+  const tokyo = { ...SERIES, tz: 'Asia/Tokyo', dow: 2, hour: 7, minute: 0 };
+  // Tue 1 Sep 2026, 07:00 Tokyo = Mon 31 Aug 22:00Z.
+  eq(seriesOccurrencesIn([{ ...base, startsAt: '2026-08-31T22:00:00.000Z' }], tokyo, from, until).length, 1,
+    'a Tokyo arrangement is matched in Tokyo’s clock');
+  eq(seriesOccurrencesIn([{ ...base, startsAt: '2026-08-31T22:00:00.000Z' }], SERIES, from, until).length, 0,
+    'and the same instant is not a London Tuesday morning');
+
+  // An unreadable zone widens rather than narrows: over-counting a preview is
+  // recoverable, telling somebody a session will survive when it will not is not.
+  eq(zonedSlot(tue1, 'Not/AZone'), null, 'a zone that cannot be read says so');
+  eq(zonedSlot('not a date', 'Europe/London'), null, 'and so does an unreadable instant');
+  eq(seriesOccurrencesIn([{ ...base, startsAt: tue1 }, oneOff], { ...SERIES, tz: 'Not/AZone' }, from, until).length, 2,
+    'and a series whose zone cannot be read counts everything rather than hiding a cancellation');
+
+  const slot = zonedSlot(tue1, 'Europe/London');
+  eq(slot?.dow, 2, 'Tuesday is 2');
+  eq(slot?.hour, 7, 'and 06:00Z in BST is 07:00 London');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`recurring: ok (${sweep} end-series combinations swept, none of them charged)`);

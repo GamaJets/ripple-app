@@ -292,11 +292,21 @@ export function floorByHour(
 /* ── what only a merged board can see ──────────────────────────────────────── */
 
 export interface Clash {
-  reason: 'room' | 'trainer';
+  /**
+   * 'room' and 'trainer' are certainties: the room is taken, or one person is
+   * in two places. 'room-shared' is the third case and it is deliberately not
+   * called a double-booking — see `clashes` below.
+   */
+  reason: 'room' | 'trainer' | 'room-shared';
   /** The room, or the trainer's name, that the two share. */
   what: string;
   a: TimetableEntry;
   b: TimetableEntry;
+}
+
+/** A clash the board is certain about, and counts as a double-booking. */
+export function isHardClash(c: Clash): boolean {
+  return c.reason !== 'room-shared';
 }
 
 const roomKey = (r: string | null) => (r ?? '').trim().toLowerCase();
@@ -312,11 +322,28 @@ const roomKey = (r: string | null) => (r ?? '').trim().toLowerCase();
  *     worth of "Sam" would collide, and one person typed two ways would not —
  *     so a name is never treated as an identity here.
  *
- *   * A room is a clash only when at least one side is a class. A class takes
- *     the room; anything else in it at the same time is displaced. Two
- *     one-to-ones sharing a room is normal — the main floor holds several at
- *     once — and `sessions` records no room capacity, so calling that a clash
- *     would be inventing a limit the data does not know.
+ *   * A room is a hard clash when at least one side is a class. A class takes
+ *     the room; anything else in it at the same time is displaced.
+ *
+ *   * TWO ONE-TO-ONES IN THE SAME ROOM ARE REPORTED, as 'room-shared'. This
+ *     used to raise nothing at all, and the reasoning was sound as far as it
+ *     went: the main floor holds several one-to-ones at once, and `sessions`
+ *     records no room capacity, so calling it a double-booking would invent a
+ *     limit the data does not know.
+ *
+ *     What that reasoning missed is that saying NOTHING also invents something.
+ *     Two coaches and one spare room is the most common clash in a small gym,
+ *     and the board reported "Double-booked 0" over a week where two trainers
+ *     had both put a client in Studio 2 at 18:00. The owner read a clean week
+ *     off a check that could not see the thing they were checking for, and
+ *     found out when both clients were standing in the doorway.
+ *
+ *     So it is surfaced and it is kept separate. `isHardClash` is what the
+ *     headline figure counts, so a gym whose trainers all write "main floor"
+ *     does not get a KPI full of false alarms; the shared rooms are listed
+ *     beside it with their own sentence, which is the honest position — the
+ *     board can see that two things are in one room and genuinely cannot know
+ *     whether that room holds two.
  */
 export function clashes(entries: TimetableEntry[]): Clash[] {
   const out: Clash[] = [];
@@ -330,8 +357,9 @@ export function clashes(entries: TimetableEntry[]): Clash[] {
       }
 
       const ra = roomKey(a.room);
-      if (ra && ra === roomKey(b.room) && (a.kind === 'class' || b.kind === 'class')) {
-        out.push({ reason: 'room', what: (a.room ?? b.room)!.trim(), a, b });
+      if (ra && ra === roomKey(b.room)) {
+        const hard = a.kind === 'class' || b.kind === 'class';
+        out.push({ reason: hard ? 'room' : 'room-shared', what: (a.room ?? b.room)!.trim(), a, b });
       }
     }
   }
@@ -347,7 +375,12 @@ export interface BoardSummary {
   /** Places held across everything on the board. Null when nothing on it can
    *  report a number. */
   booked: number | null;
+  /** Clashes the board is certain about: a room a class has taken, or one
+   *  trainer in two places. This is the "Double-booked" figure. */
   clashes: number;
+  /** Two one-to-ones in the same named room. Counted apart because the board
+   *  cannot know whether that room holds two — see `clashes`. */
+  sharedRooms: number;
 }
 
 export function summariseBoard(entries: TimetableEntry[]): BoardSummary {
@@ -359,7 +392,16 @@ export function summariseBoard(entries: TimetableEntry[]): BoardSummary {
     oneToOnes: entries.filter((e) => e.kind === 'one_to_one').length,
     openSlots: entries.filter((e) => e.kind === 'one_to_one' && e.slotStatus === 'available').length,
     booked,
-    clashes: clashes(entries).length,
+    // Computed once and split, rather than calling `clashes` twice: it is
+    // O(n²) over the week's board and the two figures must agree about the
+    // same list.
+    ...(() => {
+      const all = clashes(entries);
+      return {
+        clashes: all.filter(isHardClash).length,
+        sharedRooms: all.length - all.filter(isHardClash).length,
+      };
+    })(),
   };
 }
 

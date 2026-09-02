@@ -80,6 +80,17 @@ export default function Activity() {
   // `isNewPR` compares against the rest of the log, and a log that is a prefix
   // (or empty because the read failed) makes every set look like a first.
   const prsKnown = isWhole(logStatus);
+  // A pull-up, a dip and a push-up carry the member's own bodyweight, and
+  // `isNewPR` can only price them when it is handed the weight history —
+  // app/(client)/cards.tsx:157 and app/(client)/achievements.tsx pass it, and
+  // this feed did not. So a calisthenics member could hold a Record Breaker
+  // badge and a Top Lift card while the list they scroll every day had never
+  // once said "New PR" to them.
+  //
+  // Only when the scans read was whole, on the same reasoning as those two
+  // screens: a short weight history under-prices the earlier sets and would
+  // invent a record out of a failed read.
+  const bwHistory = isWhole(cd.scansStatus) ? cd.weightSeries : [];
 
   const events: Event[] = [];
 
@@ -96,7 +107,7 @@ export default function Activity() {
 
   // Workouts + PR flags
   for (const e of log) {
-    const pr = prsKnown && isNewPR(log, e);
+    const pr = prsKnown && isNewPR(log, e, bwHistory);
     if (e.sets) {
       events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map(setText).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
     } else if (e.cardio) {

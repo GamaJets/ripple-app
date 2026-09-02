@@ -344,6 +344,87 @@ export async function fetchPayments(
   }));
 }
 
+/* ── what the gym sold online ──────────────────────────────────────────────── */
+
+/**
+ * One online purchase, as the reconciliation screen needs it.
+ *
+ * `gym_orders` was read by exactly one file in the whole product —
+ * src/lib/memberBuy.ts, the member's OWN purchase history. No console route and
+ * no owner screen read it at all, so an order the webhook marked 'failed'
+ * existed only in a `console.error` and in a row nobody looked at. The money
+ * had left the member's card, the entitlement had not been granted, and the gym
+ * found out when the member turned up and was refused at the door.
+ */
+export interface OnlineOrder {
+  id: string;
+  memberId: string;
+  memberName: string | null;
+  kind: string;
+  status: string;
+  amountCents: number | null;
+  currency: string | null;
+  failureNote: string | null;
+  paidAt: string | null;
+  /** Whether a `gym_payments` row names this order — see part 480. False on a
+   *  paid order is money Stripe took that this ledger does not have. */
+  inLedger: boolean;
+}
+
+/**
+ * Online orders that ended in money moving, in a window, with whether each one
+ * reached the ledger.
+ *
+ * Only 'paid' and 'failed'. A 'pending' order is a checkout somebody opened and
+ * an 'abandoned' one is a checkout they closed; neither is money and listing
+ * them would bury the two states that are.
+ *
+ * The ledger check is a second query rather than an embed, for the same reason
+ * `namesFor` is: a join this module cannot assert without a live database, in
+ * exchange for nothing. A failure there is not swallowed — a screen that showed
+ * "not in the ledger" because a lookup failed would raise an exception against
+ * every online sale the gym made.
+ */
+export async function fetchOnlineOrders(
+  sb: Queryable, tenantId: string, sinceISO: string, untilISO: string,
+): Promise<OnlineOrder[]> {
+  const { data, error } = await sb
+    .from('gym_orders')
+    .select('id, member_id, kind, status, amount_cents, currency, failure_note, paid_at')
+    .eq('tenant_id', tenantId)
+    .in('status', ['paid', 'failed'])
+    .gte('paid_at', sinceISO)
+    .lt('paid_at', untilISO)
+    .order('paid_at', { ascending: false })
+    .limit(capLimit());
+  if (error) throw error;
+  const rows = assertWhole(data, 'this gym\u2019s online orders');
+  if (!rows.length) return [];
+
+  const ids = rows.map((r: any) => r.id);
+  const { data: paid, error: paidErr } = await sb
+    .from('gym_payments')
+    .select('gym_order_id')
+    .eq('tenant_id', tenantId)
+    .in('gym_order_id', ids);
+  if (paidErr) throw paidErr;
+  const inLedger = new Set((paid ?? []).map((p: any) => p.gym_order_id));
+
+  const names = await namesFor(sb, rows.map((r: any) => r.member_id).filter(Boolean));
+  return rows.map((r: any) => ({
+    id: r.id,
+    memberId: r.member_id,
+    memberName: (r.member_id ? names.get(r.member_id) : undefined) ?? null,
+    kind: r.kind,
+    status: r.status,
+    amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
+    currency: r.currency ?? null,
+    failureNote: r.failure_note ?? null,
+    paidAt: r.paid_at ?? null,
+    inLedger: inLedger.has(r.id),
+  }));
+}
+
 /* ── correcting money ──────────────────────────────────────────────────────── */
 
 export type CorrectionKind = 'refund' | 'correction';
@@ -566,12 +647,27 @@ export interface RevenueSummary {
  */
 export function sharedCurrency(rows: Array<{ currency?: string | null }>): string | null {
   if (!rows.length) return null;
-  // Empty string is normalised to null for the same reason money() refuses it:
-  // "" and null are the same fact — nobody has said — and letting "" through as
-  // a shared value would hand a caller a truthy-looking answer that prints as a
-  // leading space in front of somebody's money.
-  const seen = new Set(rows.map((r) => (r.currency ?? '').trim().toUpperCase() || null));
+  const seen = new Set(rows.map((r) => normaliseCurrency(r.currency)));
   return seen.size === 1 ? ([...seen][0] ?? null) : null;
+}
+
+/**
+ * One currency code, as this product stores and compares them, or null for
+ * "nobody has said".
+ *
+ * Empty string is normalised to null for the same reason `money()` refuses it:
+ * "" and null are the same fact, and letting "" through as a stated value hands
+ * a caller a truthy-looking answer that prints as a leading space in front of
+ * somebody's money. Case and spacing are normalised because ' gbp ' and 'GBP'
+ * are one currency, and a comparison that says otherwise withholds a total the
+ * gym is entitled to.
+ *
+ * Exported because `sharedCurrency` is not the only place this question is
+ * asked — `incomeOf` in src/lib/monthEnd.ts groups by it — and a rule about
+ * money that exists twice will eventually be two rules.
+ */
+export function normaliseCurrency(currency: string | null | undefined): string | null {
+  return (currency ?? '').trim().toUpperCase() || null;
 }
 
 export function summarise(

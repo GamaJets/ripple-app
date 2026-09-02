@@ -16,7 +16,7 @@
 // promises no order between tied rows. Every page function below therefore
 // orders on its date column AND on `id`.
 //
-// ── Six reads, six statuses ────────────────────────────────────────────────
+// ── Eight reads, eight statuses ────────────────────────────────────────────
 //
 // They fail independently and they are reported independently. One refused read
 // must not blank the other five, and it must not be rendered as a zero: telling
@@ -38,7 +38,7 @@ import type { TakenRow } from '../lib/coachMoney';
 import {
   periodBoundsIso,
   type PayoutKnowledge, type StatementCharge, type StatementInput,
-  type StatementInvoice, type StatementPeriod, type StatementSession,
+  type StatementInvoice, type StatementPayout, type StatementPeriod, type StatementSession,
 } from '../lib/coachStatement';
 // The coach's own name, read once for the whole app. Reusing it rather than
 // writing a second `profiles.full_name` read is what stops the statement and
@@ -66,8 +66,11 @@ async function paged<T>(what: string, page: (from: number, to: number) => Promis
   }
 }
 
-/** The coach's Connect account, which is four columns and nothing about a
- *  payout. Its own read and its own status. */
+/** The coach's Connect account, which is four columns and says only whether
+ *  they are set up to be paid. The payouts THEMSELVES are a separate read —
+ *  `fetchStatementPayouts` below — with its own status, because "your account
+ *  is connected" and "GBP 428.10 reached your bank on 9 July" are different
+ *  facts from different tables and either can fail on its own. */
 export async function fetchPayoutKnowledge(uid: string): Promise<PayoutKnowledge> {
   const none: PayoutKnowledge = { status: 'error', hasAccount: false, chargesEnabled: false, detailsSubmitted: false };
   try {
@@ -115,6 +118,7 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
     invoices: { status, rows: [] },
     lateCancellations: { status, rows: [] },
     payouts: { status, hasAccount: false, chargesEnabled: false, detailsSubmitted: false },
+    payoutsPaid: { status, rows: [] },
     generatedAt,
   });
 
@@ -126,7 +130,7 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
   const uid = auth?.user?.id;
   if (!uid) return nothing('error');
 
-  const [issuer, sessions, packs, subs, receipts, invoices, fees, payouts] = await Promise.all([
+  const [issuer, sessions, packs, subs, receipts, invoices, fees, payouts, payoutsPaid] = await Promise.all([
     fetchInvoiceIssuer(),
 
     // Sessions. Counted, never priced — `rate_cents` is a gym payroll rate and
@@ -216,6 +220,8 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
       .then((r) => ({ status: r.status, rows: (r.rows as any[]).map(toCharge) })),
 
     fetchPayoutKnowledge(uid),
+
+    fetchStatementPayouts(period.from, period.to),
   ]);
 
   return {
@@ -228,8 +234,76 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
     invoices,
     lateCancellations: fees,
     payouts,
+    payoutsPaid,
     generatedAt,
   };
+}
+
+/**
+ * The payouts themselves (part 194), plus the ones this app cannot date.
+ *
+ * `arrival_on` is a Postgres `date` and is compared as a CALENDAR DAY, both
+ * here and in `splitByDay` — which is why the bounds passed are the period's own
+ * `from`/`to` strings rather than the instant range the timestamp columns use.
+ * A payout arriving on the first of the period would otherwise fall outside it
+ * for every coach west of Greenwich.
+ *
+ * It is also NULLABLE — Stripe does not always state an arrival — and a server
+ * filter on a range silently excludes every null. A payout this app was told
+ * about but never given a date for would vanish from every statement of every
+ * period, and from every count of what is missing. So the undated rows are read
+ * too and handed to the pure module with their empty date intact:
+ * `splitByDay` puts them in no period and counts them, and the statement says
+ * how many there were.
+ *
+ * Every status is read, not just 'paid'. Which ones count as money in a bank is
+ * `payoutState`'s decision and it is made in the pure module, where it is
+ * asserted — filtering here would hide the ones that failed, and a failed
+ * payout is the single most useful thing on this section for a coach who is not
+ * being paid and does not know it.
+ *
+ * No `.eq('coach_id', uid)`: `coach_payouts_owner_read` is `coach_id =
+ * auth.uid()` and there is no other read policy on the table.
+ */
+async function fetchStatementPayouts(from: string, to: string): Promise<{ status: LoadStatus; rows: StatementPayout[] }> {
+  const what = 'the payouts that reached your bank in this period';
+  const cols = 'amount_cents, currency, status, arrival_on';
+  type Row = { amount_cents: number | string | null; currency: string | null; status: string | null; arrival_on: string | null };
+  const [inRange, undated] = await Promise.all([
+    paged<Row>(what, (f, t) => supabase
+      .from('coach_payouts')
+      .select(cols)
+      .gte('arrival_on', from)
+      .lte('arrival_on', to)
+      .order('arrival_on', { ascending: true })
+      .order('id', { ascending: true })
+      .range(f, t) as unknown as PromiseLike<{ data: any[] | null; error: unknown }>),
+    paged<Row>(what, (f, t) => supabase
+      .from('coach_payouts')
+      .select(cols)
+      .is('arrival_on', null)
+      .order('id', { ascending: true })
+      .range(f, t) as unknown as PromiseLike<{ data: any[] | null; error: unknown }>),
+  ]);
+
+  // Either half failing means no figure, exactly as it does for renewals. A
+  // total over the dated rows alone, with the undated ones unread and therefore
+  // uncounted, is a total that looks whole and is short by an unknown amount.
+  const status: LoadStatus = inRange.status === 'ready' && undated.status === 'ready'
+    ? 'ready'
+    : (inRange.status === 'error' || undated.status === 'error') ? 'error' : 'partial';
+
+  const rows: StatementPayout[] = [...inRange.rows, ...undated.rows].map((r): StatementPayout => ({
+    amountCents: toInt(r.amount_cents),
+    currency: (r.currency || '').trim() || null,
+    // Stripe's own word, verbatim and uncoerced. A status this app does not
+    // recognise reads as "not stated" in the pure module rather than as "paid".
+    status: String(r.status ?? ''),
+    // A `date` column arrives as a bare `YYYY-MM-DD` and stays one. Null keeps
+    // the payout out of every period rather than sweeping it into this one.
+    arrivalOn: (r.arrival_on || '').slice(0, 10) || null,
+  }));
+  return { status, rows };
 }
 
 /**

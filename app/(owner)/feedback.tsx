@@ -23,6 +23,7 @@ import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale
 import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
 import { reportError } from '../../src/lib/reportError';
+import { Fetched } from '../../src/ui/fetched';
 
 const CAT_COLOR = (t: any, c: string | null) => c === 'Bug' ? t.crit : c === 'Praise' ? t.brand : c === 'Confusing' ? t.warn : t.ink3;
 
@@ -51,6 +52,8 @@ export default function OwnerFeedback() {
    * withheld, which is what src/ui/loadStatus.ts already asks of 'partial'.
    */
   const [truncated, setTruncated] = useState(false);
+  /** When the inbox last came back. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
   const load = async () => {
     // The awaits are wrapped because a rejection used to skip every line after
@@ -65,6 +68,10 @@ export default function OwnerFeedback() {
       // Under a failed read there is no page to be truthful about, so the flag
       // is cleared rather than left standing from the previous attempt.
       setTruncated(page?.truncated ?? false);
+      // Only on a page that actually came back. `page == null` IS the failed
+      // read — `setUnread(page == null)` two lines up is the same test — and
+      // stamping it would put a fresh time on rows nobody re-read.
+      if (page != null) setFetchedAt(Date.now());
     } catch (e) {
       reportError('ownerFeedback.load', e);
       setUnread(true);
@@ -95,6 +102,10 @@ export default function OwnerFeedback() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Feedback</Text>
           </View>
         </View>
+
+        {/* The pull-to-refresh reloads; this says when it last worked, and
+            whether the phone can reach us at all. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void onRefresh(); }} busy={refreshing || loading} />
 
         {/* ── the hero: the one number that summarises the inbox ─────────── */}
         <Hero

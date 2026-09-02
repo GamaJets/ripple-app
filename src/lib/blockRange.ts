@@ -203,3 +203,76 @@ export function blockPlanLabel(plan: BlockPlan): string | null {
   if (days.length === 1) return 'Block This Day';
   return `Block ${days.length} Days`;
 }
+
+/* ── The days that refused, and what to do about them ─────────────────────
+ *
+ * `blockSummaryLine` names the booked days and then says "Cancel those
+ * yourself — that tells the client — and then block the day." Every word of
+ * that is true and the alert it sits in has one button on it. A fortnight away
+ * with four standing clients therefore means leaving the sheet, finding four
+ * separate days in the grid, and repeating a flow the alert could have driven
+ * from the list it had just printed. Any day the coach gives up on stays
+ * bookable while they are abroad.
+ *
+ * What is here is the SELECTION, which is the part that can be got wrong
+ * quietly: which sessions are actually in the way. The cancelling itself stays
+ * on the screen, because it notifies a client and promotes a waitlist and both
+ * of those are the coach's calls to make, not a library's.
+ */
+
+/** The local `YYYY-MM-DD` an instant falls on, in the reader's own zone.
+ *
+ *  Local getters and not `toISOString().slice(0, 10)`: a 7am session in
+ *  Kiritimati is the previous day in UTC, and a coach blocking Tuesday would be
+ *  shown Monday's client as the thing in the way. */
+function localDayOf(iso: string): string | null {
+  const ms = Date.parse(iso);
+  if (!isFinite(ms)) return null;
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * The booked sessions standing in the way of a block, soonest first.
+ *
+ * Only `booked`. An OPEN slot inside the period is not in anybody's way and is
+ * never in this list: `block_time` withdraws those itself as it writes, and
+ * `BlockResult.withdrawn` is how many it took. Offering to "cancel" an hour
+ * nobody holds would invent a client.
+ *
+ * A session whose timestamp will not parse is dropped rather than guessed at.
+ * It cannot be matched to a day, and a cancellation aimed at the wrong day is
+ * the one outcome here that costs somebody their appointment.
+ */
+export function sessionsBlocking<T extends { startsAt: string; status?: string | null }>(
+  days: readonly string[], sessions: readonly T[],
+): T[] {
+  const want = new Set(days);
+  return sessions
+    .filter((s) => s.status === 'booked')
+    .filter((s) => { const k = localDayOf(s.startsAt); return !!k && want.has(k); })
+    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+}
+
+/**
+ * What the confirm says before the app cancels somebody's session for them.
+ *
+ * It states all three consequences, because a coach reaching for a shortcut out
+ * of an alert has not necessarily thought about any of them: the client is
+ * told, the hour goes back on the market, and only then is the day blocked.
+ */
+export function cancelAndBlockBody(n: number, who: readonly string[]): string {
+  const shown = who.slice(0, 4);
+  const rest = who.length - shown.length;
+  const names = rest > 0 ? `${shown.join(', ')} and ${rest} more` : shown.join(', ');
+  const head = n === 1
+    ? `1 session is in the way: ${names}.`
+    : `${n} sessions are in the way: ${names}.`;
+  return `${head} Cancelling ${n === 1 ? 'it' : 'them'} tells ${n === 1 ? 'that client' : 'each client'}, and the hour goes to whoever is next on its waitlist. Those days are then blocked so nobody can book across them.`;
+}
+
+/** The label on that confirm, so the coach reads what they are about to do
+ *  rather than a generic verb. */
+export function cancelAndBlockLabel(n: number): string {
+  return n === 1 ? 'Cancel It And Block' : `Cancel ${n} And Block`;
+}

@@ -61,15 +61,37 @@ import { appLocale } from '../lib/locale';
  * difference decides whether the coach's next move is to ask better questions
  * or to stop asking.
  */
-export function EndReasonSheet({ name, verb, onCancel, onDone }: {
+export function EndReasonSheet({
+  name, verb, onCancel, onDone,
+  reasons = END_REASONS,
+  labels = END_REASON_LABEL,
+  notes = END_REASON_NOTE,
+  explainer = 'This is kept on your own record of the coaching and is the only thing that will ever tell you why people leave you. Nothing here is sent to them.',
+  notePlaceholder = 'What they actually said, in their words if you have them.',
+  heading = 'Why it ended',
+}: {
   name: string;
   /** What pressing the primary button will do, in the coach's words. Differs
    *  between "end this and record why" and "record why this ended", and a
    *  shared sheet that guessed would promise the wrong one. */
   verb: string;
   onCancel: () => void;
-  /** `reason` null means the coach chose to record nothing. */
+  /** `reason` null means the person chose to record nothing. */
   onDone: (reason: EndReason | null, note: string | null) => void;
+  /* ── the client's side of the same question ──────────────────────────────
+   * Everything below is optional and defaults to the coach's wording, which is
+   * what this sheet was written for. app/(client)/my-coach.tsx passes the
+   * member's version: the same reason IDS — so a churn list can compare a
+   * client's own answer with a coach's guess, which is the whole argument in
+   * `reasonAttribution` — with first-person labels, without the two reasons
+   * only a coach can answer, and with an explainer that says who reads it.
+   * Two sheets would be two vocabularies, and two vocabularies drift. */
+  reasons?: readonly EndReason[];
+  labels?: Record<string, string>;
+  notes?: Record<string, string>;
+  explainer?: string;
+  notePlaceholder?: string;
+  heading?: string;
 }) {
   const t = useTheme();
   const [reason, setReason] = useState<EndReason | null>(null);
@@ -81,20 +103,17 @@ export function EndReasonSheet({ name, verb, onCancel, onDone }: {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={onCancel} a11yLabel="Close without recording anything" />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Why it ended</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>{heading}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{name}</Text>
           </View>
         </View>
 
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          This is kept on your own record of the coaching and is the only thing that will ever tell you why people
-          leave you. Nothing here is sent to them.
-        </Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{explainer}</Text>
 
         <Section>
           <SectionHead title="Pick one" />
           <View>
-            {END_REASONS.map((r, i) => {
+            {reasons.map((r, i) => {
               const on = reason === r;
               return (
                 <Pressable
@@ -102,7 +121,7 @@ export function EndReasonSheet({ name, verb, onCancel, onDone }: {
                   onPress={() => setReason(on ? null : r)}
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
-                  accessibilityLabel={`${END_REASON_LABEL[r]}. ${END_REASON_NOTE[r]}`}
+                  accessibilityLabel={`${labels[r]}. ${notes[r]}`}
                   style={{
                     paddingVertical: sp.md, paddingHorizontal: sp.md,
                     borderTopWidth: i ? hairline : 0, borderTopColor: t.ring,
@@ -120,11 +139,11 @@ export function EndReasonSheet({ name, verb, onCancel, onDone }: {
                       borderWidth: on ? 0 : hairline, borderColor: t.ring,
                     }} />
                     <Text style={{ ...ty.body, fontWeight: on ? '600' : '400', color: t.ink, flex: 1 }}>
-                      {END_REASON_LABEL[r]}
+                      {labels[r]}
                     </Text>
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2, marginLeft: 16 }}>
-                    {END_REASON_NOTE[r]}
+                    {notes[r]}
                   </Text>
                 </Pressable>
               );
@@ -140,7 +159,7 @@ export function EndReasonSheet({ name, verb, onCancel, onDone }: {
             multiline
             maxLength={MAX_END_NOTE}
             accessibilityLabel="A note about why this ended"
-            placeholder="What they actually said, in their words if you have them."
+            placeholder={notePlaceholder}
             placeholderTextColor={t.ink3}
             style={{
               ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
@@ -156,8 +175,8 @@ export function EndReasonSheet({ name, verb, onCancel, onDone }: {
             <Ghost label="Skip and Record Nothing" onPress={() => onDone(null, null)} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Skipping records nothing at all, which is a different answer from “they did not say” — one of those is
-            a question nobody asked and the other is a question that was answered.
+            Skipping records nothing at all, which is a different answer from a reason — one of those is a
+            question nobody answered and the other is a question that was.
           </Text>
         </Section>
       </ScrollView>

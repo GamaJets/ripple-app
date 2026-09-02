@@ -51,6 +51,17 @@ export interface AnalyticsSnapshot {
    *  thinking in. */
   currency: string | null;
   sessionsThisMonth: number | null;
+  /**
+   * Sessions that happened this month with no outcome recorded against them.
+   *
+   * Optional so that a caller which has not established it writes no row rather
+   * than a zero — and it is exported at all because the figure above is
+   * meaningless beside it. "12 delivered" out of a month with nine sessions
+   * nobody marked is not a quiet month, and a spreadsheet is precisely where
+   * that distinction is lost: a reader adds up a column and nothing on the
+   * page says what is missing from it. Null is an empty cell, never a nought.
+   */
+  sessionsUnmarked?: number | null;
   /** Sessions delivered × the coach's own session rate. Not takings, not
    *  earnings, and the file says so on its own face. */
   revenueAtOwnRate: number | null;
@@ -111,7 +122,7 @@ export function analyticsGapWarning(reads: AnalyticsReads): string | null {
 /** What the figures are, said in the file. A coach mails this on, and by then
  *  the screen's own caveats are not in the room. */
 export const EXPORT_BASIS =
-  'Sessions are the ones recorded as delivered in this calendar month. The revenue figure is that count multiplied by the session rate on your own profile — it is not what anybody has paid you, it is not net of any fee, and nothing here has been reconciled against Stripe or a bank. Cash and transfers you have recorded are not in it.';
+  'Sessions are the ones whose outcome you RECORDED as delivered in this calendar month. A booking whose time has passed is not one of them, and a session nobody has marked is counted neither as delivered nor as missed — it is on its own row. The revenue figure is the delivered count multiplied by the session rate on your own profile — it is not what anybody has paid you, it is not net of any fee, and nothing here has been reconciled against Stripe or a bank. Cash and transfers you have recorded are not in it, and neither are packages or subscription renewals: those are on the Money screen.';
 
 export interface AnalyticsExport {
   csv: string;
@@ -154,6 +165,7 @@ export function buildAnalyticsExport(
     ['Currency', cur || 'not set — amounts below have no unit', ''],
     ['', '', ''],
     ['Sessions delivered this month', snap.sessionsThisMonth, ''],
+    ['Sessions this month still to be marked', snap.sessionsUnmarked ?? null, ''],
     ['Revenue at your own session rate', snap.revenueAtOwnRate, cur],
     ['Clients', snap.clients, ''],
     ['Average adherence %', snap.avgAdherencePct, ''],

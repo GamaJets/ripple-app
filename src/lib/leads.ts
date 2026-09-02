@@ -161,6 +161,23 @@ export const FOLLOW_UP_IS_MANUAL =
   'Repple does not contact these people. Nothing has been sent to them and nothing will be — following one of these up is you, in your own phone, today. What you record here is a note to yourself.';
 
 /**
+ * That the coach is TOLD one arrived, which is a different promise entirely.
+ *
+ * R5. Until part 470 a `coach_leads` row was written by an unauthenticated form
+ * and sat there until the coach happened to open this screen, so the app was
+ * not even telling them there was something to follow up. An enquiry is a
+ * person who raised their hand and is at that moment also enquiring with three
+ * other coaches.
+ *
+ * Kept as its OWN sentence rather than folded into `FOLLOW_UP_IS_MANUAL`,
+ * which stays literally true and stays on the screen beside it. "You will be
+ * told" and "nothing is sent to them" are two facts and a coach who read them
+ * as one would believe the enquirer had been acknowledged.
+ */
+export const ENQUIRY_IS_ANNOUNCED =
+  'You are told the moment one of these arrives, on whatever device you are signed in on. The notification carries their name and nothing else — not their number, not what they wrote — because it is drawn on a lock screen.';
+
+/**
  * Said on the form, and repeated here so the app and the web page agree.
  *
  * The server drops an enquiry whose code resolves to nobody, because a row with

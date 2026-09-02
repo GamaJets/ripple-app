@@ -14,7 +14,8 @@
 // to the server on a debounce — an intake riding along in that blob would be
 // re-sent on every unrelated profile edit, and a save the client never made is
 // exactly what a disclosure must not have.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -25,6 +26,9 @@ import {
   INTAKE_VERSION, askIntakeMessage, intakeOwnership, intakeProgress, intakeState,
   parseIntake, type Intake, type IntakeProgress, type IntakeState,
 } from '../lib/intake';
+import {
+  draftHasContent, intakeDraftKey, parseIntakeDraft, serialiseIntakeDraft, type IntakeDraft,
+} from '../lib/intakeDraft';
 
 /** The one column, named once. `scripts/check-schema.mjs` follows a named
  *  select list inside the file that names it, so both reads spell it out here
@@ -50,6 +54,28 @@ export interface MyIntake {
   /** Resolves true only once the row is on the server. A caller must not tell
    *  somebody their answers are saved on anything less. */
   save: (next: Intake) => Promise<boolean>;
+  /**
+   * What was typed on this phone and never sent, or null.
+   *
+   * Read once, alongside the server document, so the screen can decide between
+   * them with `src/lib/intakeDraft.ts` · `draftDecision` rather than guessing.
+   * Null while the read is still in flight as well as when there is none — the
+   * screen waits for `status` either way.
+   */
+  draft: IntakeDraft | null;
+  /**
+   * Keep what is on screen, on this device.
+   *
+   * Fire and forget: it is called on every keystroke and must never make the
+   * member wait or throw at them. `basedOn` is the `updatedAt` of the server
+   * document this was typed on top of, or null when there was none to type on
+   * top of — offline, that is the case, and it is what stops the draft ever
+   * being treated as a continuation of a document it never saw.
+   */
+  keepDraft: (next: Intake, basedOn: string | null) => void;
+  /** Forget it. Called once the answers are actually on the server, and when
+   *  the member chooses the server's copy over this one. */
+  discardDraft: () => void;
 }
 
 export function useMyIntake(): MyIntake {
@@ -57,6 +83,11 @@ export function useMyIntake(): MyIntake {
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
+  const [draft, setDraft] = useState<IntakeDraft | null>(null);
+  // The uid the draft belongs to, held in a ref so `keepDraft` can write
+  // without being rebuilt on every render. Per account, because a shared phone
+  // must not hand one person's half-finished medical history to the next.
+  const draftUid = useRef<string | null>(null);
   const authRev = useAuthRevision();
 
   useEffect(() => {
@@ -72,6 +103,17 @@ export function useMyIntake(): MyIntake {
         if (cancelled) return;
         const u = sess?.session?.user?.id ?? null;
         setUid(u);
+        draftUid.current = u;
+        // What is on this phone, read BEFORE the server is asked and kept
+        // whatever the answer is. This is the half that was missing: the read
+        // below can fail, and when it does the screen used to have nothing at
+        // all to put in front of somebody who had already typed for ten
+        // minutes.
+        try {
+          const raw = await AsyncStorage.getItem(intakeDraftKey(u));
+          if (!cancelled) setDraft(parseIntakeDraft(raw));
+        } catch { /* no draft is the same as an unreadable one here: the form is still on the server */ }
+        if (cancelled) return;
         if (!u) { setIntake(null); setStatus('ready'); return; }
 
         const { data, error } = await supabase
@@ -133,6 +175,11 @@ export function useMyIntake(): MyIntake {
       // Only after the write landed.
       setIntake(doc);
       setSaveFailed(false);
+      // And only then is the device copy no longer the only copy. Cleared here
+      // rather than optimistically, for the same reason `setIntake` is: a draft
+      // discarded on a write that was never answered is the loss this whole
+      // mechanism exists to prevent.
+      discardDraft();
       return true;
     } catch (e) {
       reportError('intake.mine.write', e);
@@ -141,6 +188,22 @@ export function useMyIntake(): MyIntake {
     }
   }, [uid]);
 
+  const keepDraft = useCallback((next: Intake, basedOn: string | null) => {
+    // An empty form is not worth writing to the disk on every keystroke that
+    // clears the last field, and it is certainly not worth offering to restore
+    // over a real document later.
+    if (!draftHasContent(next)) return;
+    const d: IntakeDraft = { at: new Date().toISOString(), basedOn, intake: next };
+    setDraft(d);
+    AsyncStorage.setItem(intakeDraftKey(draftUid.current), serialiseIntakeDraft(d))
+      .catch(() => { /* the session is correct this run either way */ });
+  }, []);
+
+  const discardDraft = useCallback(() => {
+    setDraft(null);
+    AsyncStorage.removeItem(intakeDraftKey(draftUid.current)).catch(() => { /* nothing to do about it */ });
+  }, []);
+
   const own = intakeOwnership(uid, uid);
   return {
     status, intake, uid,
@@ -148,6 +211,9 @@ export function useMyIntake(): MyIntake {
     cannotEditBecause: own.reason,
     saveFailed,
     save,
+    draft,
+    keepDraft,
+    discardDraft,
   };
 }
 

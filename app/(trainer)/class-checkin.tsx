@@ -57,7 +57,8 @@ import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useAuth } from '../../src/ui/auth';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
+import { floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
+import { countRegister, registerArc, registerLine } from '../../src/lib/classRegister';
 
 export default function ClassCheckin() {
   const t = useTheme();
@@ -84,6 +85,26 @@ export default function ClassCheckin() {
   // screen is used standing in a studio, which is where the signal is worst.
   const auth = useAuth();
   const queue = useFloorQueue(auth.user?.id ?? null);
+  // Send what this phone is still carrying, now. The queue is also emptied on
+  // the app's own two triggers (signal back, app foregrounded) through the
+  // registry in src/lib/offlineQueue.ts; this is the one a coach can press.
+  // All three arms of the result are reported, because a refused tick has been
+  // DROPPED rather than kept and a coach not told that will press this forever.
+  //
+  // Reported in a Flag rather than an Alert, because this screen deliberately
+  // says everything else inline: a coach with a phone in one hand and a room in
+  // front of them should not have to dismiss a dialog to get back to the
+  // register.
+  const [sending, setSending] = useState(false);
+  const [sentNote, setSentNote] = useState<string | null>(null);
+  const sendWaiting = async () => {
+    if (sending) return;
+    setSending(true);
+    setSentNote(null);
+    try {
+      setSentNote(flushResultLine(await queue.flush()));
+    } finally { setSending(false); }
+  };
   const [loading, setLoading] = useState(true);
   // Per-attendee pay, as the coach typed it. UNITLESS — see the header. The
   // string is what is on screen; `coach_prefs.class_rate` is what is stored.
@@ -170,13 +191,33 @@ export default function ClassCheckin() {
   // house rule is a dash with a reason, never a zero: a coach glancing at the
   // figure and not the note reads an unread class as an empty one.
   const counted = !unlinked && !readFailed && roster !== null;
-  const present = useMemo(() => (roster ?? []).filter((m) => m.attended).length, [roster]);
-  const booked = useMemo(() => (roster ?? []).filter((m) => m.status === 'booked').length, [roster]);
+  // ── one filter, not two ────────────────────────────────────────────────
+  //
+  // `present` counted EVERY ticked row and `booked` counted only the rows
+  // holding a place. `classRoster` returns waitlist rows too and every row here
+  // is tappable — deliberately, because a place comes free at the door and the
+  // coach ticks the person in front of them — so two walk-ins pushed the two
+  // numbers level while two people who had paid were still missing, and the
+  // hero printed "Everyone booked is here." The ring was `present / booked` and
+  // could draw more than a full circle.
+  //
+  // src/lib/classRegister.ts holds the counting and is tested under node. The
+  // walk-ins are not discarded to fix the rate: they are real people who really
+  // trained and the gym pays for them, so they are counted beside it.
+  const reg = useMemo(() => countRegister(roster ?? []), [roster]);
+  const present = reg.present;
+  const booked = reg.booked;
   // Null unless BOTH halves are known: a rate that parses, and a check-in count
   // from a roster that was actually read. `counted` is what makes the second
   // true — see the note on the estimate below.
   const parsedRate = parseRate(rate);
-  const pay = payEstimate(parsedRate.kind === 'value' ? parsedRate.value : null, counted ? present : null);
+  // EVERYBODY who trained, not the show-rate numerator. The hero above counts
+  // booked members against booked places because that is the only honest
+  // reading of a rate — but a coach is paid per attendee, and somebody who came
+  // off the waitlist at the door did an hour in the room. Splitting the two
+  // counts would have quietly cut this figure if it were taken from the rate.
+  const attendeesPaidFor = reg.present + reg.walkIns;
+  const pay = payEstimate(parsedRate.kind === 'value' ? parsedRate.value : null, counted ? attendeesPaidFor : null);
   // Only shown while the stored rate is in flight or could not be read. Under
   // 'ready' an empty box speaks for itself.
   const rateNote = rate.trim() ? null : rateFieldNote(rateStatus);
@@ -237,8 +278,8 @@ export default function ClassCheckin() {
           label="Checked In"
           figure={fig(counted ? present : null)}
           unit={counted ? '/ ' + booked : undefined}
-          note={unlinked ? 'No class was passed to this screen — this is not a count.' : loading ? 'Still reading the roster.' : !counted ? 'The roster could not be read — this is not a count of zero.' : booked === 0 ? 'No bookings on this class yet.' : present === booked ? 'Everyone booked is here.' : `${booked - present} still to arrive`}
-          arc={!counted || booked === 0 ? undefined : present / booked}
+          note={unlinked ? 'No class was passed to this screen — this is not a count.' : loading ? 'Still reading the roster.' : registerLine(reg, counted)}
+          arc={!counted ? undefined : registerArc(reg) ?? undefined}
           arcLabel="of those booked checked in"
         />
 
@@ -267,7 +308,7 @@ export default function ClassCheckin() {
               `pay` is null in that case rather than 0, so there is nothing to
               print by accident. */}
           {pay != null ? (
-            <Text style={{ ...ty.label, ...numeric, color: t.ink2, marginTop: sp.md }}>{rate.trim()} × {present} checked in = {pay}</Text>
+            <Text style={{ ...ty.label, ...numeric, color: t.ink2, marginTop: sp.md }}>{rate.trim()} × {attendeesPaidFor} checked in = {pay}</Text>
           ) : rate.trim() && parsedRate.kind === 'invalid' ? (
             // Said rather than left blank: the box looks filled in, and without
             // this the missing total reads as a broken screen rather than as a
@@ -303,7 +344,20 @@ export default function ClassCheckin() {
             What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost — it is not being written over either.
           </Flag>
         ) : floorPendingNote(queue.unsent) ? (
-          <Flag tone={t.warn} style={{ paddingTop: sp.sm }}>{floorPendingNote(queue.unsent)}</Flag>
+          <>
+            <Flag tone={t.warn} style={{ paddingTop: sp.sm }}>{floorPendingNote(queue.unsent)}</Flag>
+            {/* The banner said something was waiting and gave no way to send
+                it. The app's reconnect and foreground triggers reach this queue
+                now; this is the button for a coach who has walked up out of the
+                basement and wants the register gone before they forget. */}
+            <View style={{ alignItems: 'flex-start', paddingTop: sp.sm }}>
+              <Ghost label="Send Now" a11yLabel="Send what is waiting on this phone"
+                onPress={() => { void sendWaiting(); }} />
+            </View>
+          </>
+        ) : null}
+        {sentNote ? (
+          <Flag tone={t.warn} style={{ paddingTop: sp.sm }}>{sentNote}</Flag>
         ) : null}
         {saveFailed ? (
           <Flag tone={t.crit} style={{ paddingTop: sp.sm }}>{saveFailed}</Flag>

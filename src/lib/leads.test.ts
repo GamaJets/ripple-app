@@ -42,7 +42,7 @@
 // rather than on this module, so they are recorded here instead of chased.
 import {
   contactKind, shapeLeads, shapeFollowUps, leadCountLine, leadProblem, followUpProblem,
-  LEAD_STATES, LEAD_STATE_LABEL, FOLLOW_UP_IS_MANUAL, MISTYPED_CODE_NOTE,
+  LEAD_STATES, LEAD_STATE_LABEL, FOLLOW_UP_IS_MANUAL, ENQUIRY_IS_ANNOUNCED, MISTYPED_CODE_NOTE,
   FOLLOW_UP_LABEL, FOLLOW_UP_WHEN, followUpDraft, followUpLink, followUpRecord,
   senderName, type FollowUpKind,
   MAX_LEAD_NAME, MAX_LEAD_CONTACT, MAX_LEAD_NOTE, MAX_FOLLOW_UP,
@@ -331,6 +331,18 @@ ok(/nothing will be/i.test(FOLLOW_UP_IS_MANUAL),
   'and that it is not going to start — there is no email channel to start it with');
 ok(!/(sequence|automat|schedul|drip)/i.test(FOLLOW_UP_IS_MANUAL),
   'and it does not use a word that implies one');
+
+// R5 — being TOLD one arrived is a different promise from one being answered,
+// and the two live in two sentences on purpose. A coach who read them as one
+// would believe the enquirer had been acknowledged by something.
+ok(String(ENQUIRY_IS_ANNOUNCED) !== String(FOLLOW_UP_IS_MANUAL),
+  'the notification sentence is its own, and does not replace the one saying nothing is sent');
+ok(!/(sent to them|reply|replied|acknowledg|respond)/i.test(ENQUIRY_IS_ANNOUNCED),
+  'and it never implies the enquirer has heard anything');
+ok(/name/i.test(ENQUIRY_IS_ANNOUNCED) && /lock screen/i.test(ENQUIRY_IS_ANNOUNCED),
+  'it says what the notification carries and why it carries no more: a push is drawn on a lock screen and the contact string is a stranger\u2019s typing');
+ok(!/(sequence|automat|schedul|drip)/i.test(ENQUIRY_IS_ANNOUNCED),
+  'and it promises no sequence either');
 ok(/no coach to give them to/i.test(MISTYPED_CODE_NOTE),
   'the cost of dropping an unresolvable code is stated rather than hidden');
 

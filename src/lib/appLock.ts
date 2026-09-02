@@ -37,6 +37,53 @@ export interface LockDecision {
   reason: string | null;
 }
 
+/**
+ * Which handset's vocabulary to use.
+ *
+ * The same shape and the same reason as `SOUND_PLATFORM` in
+ * app/(client)/settings.tsx, which exists because a note "used to name the MUTE
+ * SWITCH on every platform and Android phones do not have one, so the only
+ * sentence explaining a silent chime sent Android members hunting for a control
+ * that is not on their handset."
+ *
+ * This file had the identical failure one section down. Every sentence about
+ * the lock named Face ID, Touch ID and iOS Settings — so an Android member was
+ * told to go and set up an Apple feature inside an Apple settings app that is
+ * not on their phone.
+ *
+ * A string rather than a `Platform` import, because the whole point of this
+ * file is that it has no imports and can be asserted on without a device.
+ */
+export type LockPlatform = 'ios' | 'android' | 'other';
+
+/** What the device's own unlock security is CALLED on this handset. */
+export function lockMethodsLabel(p: LockPlatform): string {
+  switch (p) {
+    case 'ios': return 'Face ID, Touch ID or a passcode';
+    // Android vendors name the biometric differently on every skin, so this
+    // names the capability rather than a brand: "face unlock" and "fingerprint"
+    // are what the OS itself calls them, and "screen lock" is the Settings entry
+    // a PIN, a pattern and a password all live under.
+    case 'android': return 'a fingerprint, face unlock or a screen lock';
+    case 'other': return 'a screen lock';
+  }
+}
+
+/** Where the person actually goes to set one up. */
+export function lockSettingsLabel(p: LockPlatform): string {
+  switch (p) {
+    case 'ios': return 'iOS Settings';
+    case 'android': return 'your phone’s Settings';
+    case 'other': return 'your device settings';
+  }
+}
+
+/** What to call the lock when the device has not told us which kind it has.
+ *  "your passcode" is an iOS word; Android calls the same thing a screen lock. */
+export function defaultLockLabel(p: LockPlatform): string {
+  return p === 'ios' ? 'your passcode' : 'your screen lock';
+}
+
 export interface LockInputs {
   /** The user has turned the lock on in Settings. */
   enabled: boolean;
@@ -47,6 +94,9 @@ export interface LockInputs {
   /** When the app last went to the background, or null on a cold start. */
   backgroundedAt: number | null;
   now: number;
+  /** Whose vocabulary to explain an unavailable lock in. Optional, and absent
+   *  means the neutral wording — never the iOS wording, which is the defect. */
+  platform?: LockPlatform;
 }
 
 /**
@@ -60,9 +110,10 @@ export function lockDecision(i: LockInputs): LockDecision {
   if (!i.signedIn) return { state: 'open', reason: null };
   if (!i.enabled) return { state: 'open', reason: null };
   if (!i.available) {
+    const p = i.platform ?? 'other';
     return {
       state: 'open',
-      reason: 'This device has no Face ID, Touch ID or passcode set up, so the lock cannot be applied. Setting a passcode in iOS Settings turns it on.',
+      reason: `This device does not have ${lockMethodsLabel(p)} set up, so the lock cannot be applied. Setting one up in ${lockSettingsLabel(p)} turns it on.`,
     };
   }
   // Cold start: no record of backgrounding, so lock.
@@ -72,12 +123,29 @@ export function lockDecision(i: LockInputs): LockDecision {
   return { state: 'unlocked', reason: null };
 }
 
-/** What the Settings row should say underneath the toggle. */
-export function lockSettingNote(available: boolean, enabled: boolean, label: string): string {
+/**
+ * What the Settings row should say underneath the toggle.
+ *
+ * `brand` rather than the literal "Repple". This is a white-label build and the
+ * app on this phone may not be called Repple at all — the same sentence
+ * app/(client)/settings.tsx's push handler already carries about itself, five
+ * lines above where this string is rendered.
+ *
+ * Both trailing parameters are optional and their absent forms are the neutral
+ * ones, so a caller that has not been updated gets wording that is true
+ * everywhere rather than wording that is true on iOS.
+ */
+export function lockSettingNote(
+  available: boolean,
+  enabled: boolean,
+  label: string,
+  platform: LockPlatform = 'other',
+  brand = 'this app',
+): string {
   if (!available) {
-    return 'Unavailable — this device has no Face ID, Touch ID or passcode set up.';
+    return `Unavailable — this device does not have ${lockMethodsLabel(platform)} set up.`;
   }
   return enabled
-    ? `${label} is needed to open Repple after a minute away. Your training stays signed in either way; this only decides who can see it.`
-    : `Anyone who picks up this phone can open Repple. Turn on to require ${label}.`;
+    ? `${label} is needed to open ${brand} after a minute away. Your training stays signed in either way; this only decides who can see it.`
+    : `Anyone who picks up this phone can open ${brand}. Turn on to require ${label}.`;
 }

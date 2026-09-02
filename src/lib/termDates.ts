@@ -5,8 +5,9 @@
 //
 //   A MODULE AN EDGE FUNCTION IMPORTS MUST BE A LEAF. No relative imports.
 //
-// Deno resolves an import specifier literally. `from './coachMoney'` is a file
-// called `coachMoney` with no extension, which does not exist, so the module
+// Deno resolves an import specifier literally. A specifier of `./coachMoney`
+// names a file called `coachMoney` with no extension, which does not exist, so
+// the module
 // throws the moment it is evaluated — not when the function is deployed, and
 // not when it is called, but on the first request, as a 500 with a resolution
 // error and nothing on any screen to explain it.

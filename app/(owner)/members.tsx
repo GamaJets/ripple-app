@@ -27,13 +27,33 @@ import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+import { isoDate } from '../../src/lib/format';
+import { Fetched } from '../../src/ui/fetched';
 import {
   fetchPlans, fetchMemberships, fetchPayments, createMembership,
   setMembershipStatus, recordPayment, summarise, money,
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
 
-const today = () => new Date().toISOString().slice(0, 10);
+/**
+ * Today, on the CALENDAR THE PERSON IS STANDING IN.
+ *
+ * This was `new Date().toISOString().slice(0, 10)`, which is the UTC day. A
+ * membership opened at 5pm in Los Angeles was filed as starting TOMORROW — so
+ * the billing anniversary is a day out, the member is counted in the wrong
+ * month's joiners, and a gym east of Greenwich gets the same error in the other
+ * direction before 8am.
+ *
+ * `isoDate` reads the local calendar and writes the `YYYY-MM-DD` the column
+ * holds. It is the same helper /accounting already uses and it is deliberately
+ * not localised — this is a storage key, not a sentence.
+ *
+ * The wider question — that "local" here means the phone's timezone and not the
+ * GYM's, because `tenants` has no timezone column at all — is a separate item
+ * and a schema change. This is strictly the half that is wrong for everybody
+ * outside UTC, including an owner standing in their own gym.
+ */
+const today = () => isoDate(new Date());
 
 const STATUS_TONE = (t: Theme, s: MembershipStatus) =>
   s === 'active' ? t.brand : s === 'frozen' ? t.s3 : t.ink3;
@@ -41,6 +61,11 @@ const STATUS_TONE = (t: Theme, s: MembershipStatus) =>
 const STATUS_LABEL: Record<MembershipStatus, string> = {
   active: 'Active', frozen: 'Frozen', cancelled: 'Cancelled', expired: 'Expired',
 };
+
+/** How far back the payments read goes. The figure it feeds is a desk count,
+ *  not a ledger — /accounting and the console's own screens are where a gym's
+ *  full payment history is read, and both of them page rather than cap. */
+const PAYMENTS_WINDOW_DAYS = 30;
 
 const METHODS: PaymentMethod[] = ['card', 'cash', 'transfer', 'direct_debit', 'other'];
 const METHOD_LABEL: Record<PaymentMethod, string> = {
@@ -89,16 +114,40 @@ export default function OwnerMembers() {
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('card');
 
+  /** When the three reads last LANDED, and whether one is in flight. Not moved
+   *  by a refresh that failed: the rows on screen are still the earlier read's. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [reloading, setReloading] = useState(false);
+
   const load = useCallback(async () => {
     if (!tenant?.id) return;
+    setReloading(true);
     try {
+      /**
+       * ── The payments read is BOUNDED now ──────────────────────────────
+       *
+       * It was `fetchPayments(supabase, tenant.id)` — every payment the gym
+       * has ever taken — inside a `Promise.all` whose catch runs
+       * `setRows(null); setFailed(true)`. src/lib/gymRecord.ts caps that read
+       * at a thousand rows and throws past it, and a 600-member gym crosses a
+       * thousand payments in under two months. After that, an owner standing
+       * at the desk could not freeze or cancel anybody, because the MEMBERSHIP
+       * list was blanked by an unrelated five-year payments read being too big.
+       *
+       * Thirty days, and the KPI beside it says thirty days. The old label was
+       * "Payments Logged" over a lifetime count, and swapping the window
+       * underneath a label that does not say so would trade a dead screen for
+       * a quietly wrong figure — which is the worse of the two.
+       */
+      const since = new Date(Date.now() - PAYMENTS_WINDOW_DAYS * 86400000).toISOString();
       const [p, m, pay] = await Promise.all([
         fetchPlans(supabase, tenant.id),
         fetchMemberships(supabase, tenant.id),
-        fetchPayments(supabase, tenant.id),
+        fetchPayments(supabase, tenant.id, since),
       ]);
       setPlans(p); setRows(m); setPayments(pay);
       setFailed(false);
+      setFetchedAt(Date.now());
     } catch (e) {
       reportError('members.fetch', e);
       // NOT `setRows([])`. That flipped `loaded` true with nothing behind it,
@@ -110,6 +159,8 @@ export default function OwnerMembers() {
       // from "we asked and the register is empty".
       setRows(null);
       setFailed(true);
+    } finally {
+      setReloading(false);
     }
   }, [tenant?.id]);
 
@@ -248,6 +299,11 @@ export default function OwnerMembers() {
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Members</Text>
         </View>
 
+        {/* When the register was read, whether this phone can reach us, and a
+            way to ask again. An owner at a desk in a basement was reading a
+            roster with nothing on the page saying how old it was. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={reloading} style={{ marginTop: 0, marginBottom: sp.md }} />
+
         <Hero
           label="Recurring Revenue (monthly)"
           figure={money(sum.mrrCents, cur) ?? "—"}
@@ -272,7 +328,10 @@ export default function OwnerMembers() {
           <KpiRow items={[
             { label: 'Active', value: !loaded ? '—' : String(sum.activeMembers) },
             { label: 'Frozen', value: !loaded ? '—' : String(frozen) },
-            { label: 'Payments Logged', value: !loaded ? '—' : String(sum.payments) },
+            // Says its window. The read behind it is thirty days, and a label
+            // reading "Payments Logged" over a thirty-day count is a figure an
+            // owner would reconcile against a lifetime total.
+            { label: 'Payments · 30 Days', value: !loaded ? '—' : String(sum.payments) },
           ]} />
         </Section>
 

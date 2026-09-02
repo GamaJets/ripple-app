@@ -97,6 +97,46 @@ const zero = badgeFigures([]);
   ok(!earnedKeys(blind).includes('one-tonne'), 'neither of which happens without the history — this is the gap being closed');
 }
 
+// ── a failed SCANS read must not print as the member's shortfall ─────────
+//
+// The screen has two reads, not one. With a whole training log and a refused
+// scans read, the caller passes an empty history, every bodyweight set is
+// unpriced, and One Tonne, Ten Tonnes, Record Breaker and PR Machine all fall
+// under their thresholds. `whole` was true, so all four rendered "Locked" —
+// our failed read stated as a fact about the member, which is precisely what
+// the three-valued return exists to prevent.
+{
+  const pullups = Array.from({ length: 5 }, (_, i) => entry({
+    t: day(i + 1), exercise: 'Pull-Up', sets: [[10, 0], [10, 0], [10, 0]], bw: [true, true, true],
+  } as Partial<WorkoutEntry> & { t: string }));
+  const blind = badgeFigures(pullups);
+
+  ok(blind.unpricedBodyweightSets > 0, 'the unpriced sets are counted, not just dropped');
+
+  for (const k of ['one-tonne', 'ten-tonnes', 'record-breaker', 'pr-machine'] as BadgeKey[]) {
+    eq(badgeState(k, blind, true, false), 'unknown',
+      `${k} is unknown while the weight history could not be read, not locked`);
+    eq(badgeState(k, blind, true, true), 'locked',
+      `${k} is a statement about the member only once BOTH reads are whole`);
+  }
+  // The badges that are counted rather than weighed are unaffected: a failed
+  // scans read tells us nothing new about how many sessions somebody logged.
+  eq(badgeState('fifty-club', blind, true, false), 'locked',
+    'a session count owes nothing to the weight history');
+  eq(badgeState('first-rep', blind, true, false), 'earned', 'and an earned badge stays earned');
+
+  // And where there is nothing to be missing, "Locked" stays honest: a member
+  // with no bodyweight sets loses nothing to a failed scans read.
+  const barbell = badgeFigures([entry({ t: day(1) })]);
+  eq(barbell.unpricedBodyweightSets, 0, 'a barbell log has no unpriced bodyweight sets');
+  eq(badgeState('one-tonne', barbell, true, false), 'locked',
+    'so One Tonne is still locked rather than hedged into nothing');
+
+  // The default keeps every existing caller where it was.
+  eq(badgeState('one-tonne', blind, true), badgeState('one-tonne', blind, true, true),
+    'omitting the second read means there is no second read to be missing');
+}
+
 // ── what counts as new ───────────────────────────────────────────────────
 {
   const now: BadgeKey[] = ['first-rep', 'ten-sessions', 'fifty-club'];

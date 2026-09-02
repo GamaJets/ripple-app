@@ -91,6 +91,12 @@ const STALE_HOURS = 12;
  *  the same row look unswept to one surface and swept to the other. */
 const SWEEP_NOTE = 'auto-closed: no exit recorded';
 
+/** The prefix a staff override writes. Byte-identical to `OVERRIDE_PREFIX` in
+ *  src/lib/gymVisits.ts and to the `like` pattern in supabase/parts/490 and
+ *  491 — three spellings of one string is three chances for the sweep to erase
+ *  the audit note it is meant to leave alone. */
+const OVERRIDE_PREFIX = 'admitted anyway: ';
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
@@ -128,6 +134,12 @@ Deno.serve(async (req: Request) => {
     .is('exited_at', null)
     .lt('entered_at', cutoff)
     .or(`note.is.null,note.neq."${SWEEP_NOTE}"`)
+    // The one desk note a sweep may not overwrite. A note beginning
+    // `admitted anyway: ` records that the gym admitted somebody against its
+    // own record and why a member of staff decided to — see supabase/parts/490
+    // and OVERRIDE_PREFIX in src/lib/gymVisits.ts. Every other desk note is
+    // worth less than an accurate count of what is still open; this one is not.
+    .not('note', 'like', `${OVERRIDE_PREFIX}%`)
     // Only the id. This response ends up in a log; a member id or a name does
     // not belong in one.
     .select('id');

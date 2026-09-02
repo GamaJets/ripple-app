@@ -15,17 +15,18 @@
 //                       subject, they are the one at risk, and the health half
 //                       of the context does not go until they have said it may.
 //                       See src/lib/coachShare.ts for the whole argument.
+//   askAboutMyWeek      the Weekly Report's summary paragraph. Same subject and
+//                       the same gate; it takes fact LINES rather than a
+//                       context object because that screen's sensitive half is
+//                       prose in the message. It used to be an `askCoach` call
+//                       carrying `{ week, name }` and the whole fact list, with
+//                       no consent question anywhere on the screen.
 //   askCoach            the older, unfiltered call. Its remaining callers are
 //                       the coach's own screens — app/(trainer)/dashboard.tsx
 //                       and app/(trainer)/analytics.tsx, where the subject is a
-//                       client the coach already has the record of — and
-//                       app/(client)/report.tsx, WHICH IS THE SAME DEFECT AS
-//                       THE ONE FIXED HERE AND IS NOT YET FIXED. That screen
-//                       posts a member's own figures with no consent line, and
-//                       it belongs to a different change; this comment is here
-//                       so whoever picks it up finds the gate already built.
+//                       client the coach already has the record of.
 import { supabase } from './supabase';
-import { shareableContext, businessAskContext, clientAskContext, type ShareConsent } from './coachShare';
+import { shareableContext, weeklyFacts, businessAskContext, clientAskContext, type ShareConsent } from './coachShare';
 
 export type ChatMsg = { role: 'user' | 'assistant'; content: string };
 
@@ -95,12 +96,58 @@ export async function askCoachForMember(
   return reply == null ? { ok: false, reason: 'failed' } : { ok: true, reply };
 }
 
+/** The instruction the weekly summary is written under. Here rather than in the
+ *  screen so that what is asked of a third party about a member is in the file
+ *  that owns what reaches one. */
+export const WEEKLY_SUMMARY_PROMPT =
+  'Write a warm, concise 2-3 sentence weekly summary for this person from the facts below. '
+  + 'Speak directly to them ("you"), name the biggest win and one focus for next week. '
+  + 'No preamble, no lists. Do not invent anything the facts do not state.';
+
+/**
+ * The Weekly Report's summary paragraph.
+ *
+ * `consent` is REQUIRED and has no default, for the reason `askCoachForMember`
+ * gives: a default would be a decision about somebody's medical data taken by a
+ * function signature.
+ *
+ * NO NAME, and no context object at all. app/(client)/coach.tsx removed `name`
+ * from its payload because "the model was told 'Name: Sarah Whitfield' and then
+ * handed her weight, her body fat, her sleep"; the Weekly Report was passing it
+ * as the second field of `{ week, name }` while posting the same figures. The
+ * week's date range travels as a fact line instead, where it belongs and where
+ * it identifies nobody.
+ *
+ * The two fact lists are kept apart by the CALLER and merged here, so a line
+ * added to the health list cannot reach the model without going past
+ * `weeklyFacts` — the same reason the context filter lives at this end rather
+ * than at the screen's.
+ */
+export async function askAboutMyWeek(
+  facts: { fitness: readonly string[]; health: readonly string[] },
+  consent: ShareConsent,
+): Promise<CoachAnswer> {
+  const lines = weeklyFacts(facts.fitness, facts.health, consent);
+  // Null means the member has not answered, or this process has not read their
+  // answer yet. Neither is permission.
+  if (!lines) return { ok: false, reason: 'no-consent' };
+  if (!coachAvailable()) return { ok: false, reason: 'unavailable' };
+  // A summary written from nothing would be invented, so it is not asked for.
+  if (!lines.length) return { ok: false, reason: 'failed' };
+  const reply = await invoke(
+    [{ role: 'user', content: `${WEEKLY_SUMMARY_PROMPT}\n\n${lines.join('\n')}` }],
+    {},
+  );
+  return reply == null ? { ok: false, reason: 'failed' } : { ok: true, reply };
+}
+
 /**
  * The unfiltered call. See the header for who still uses it and why.
  *
- * Unchanged in signature and behaviour on purpose: three screens outside this
- * change call it, and breaking them to make a point about a fourth would be a
- * worse outcome than leaving the sentence above for whoever fixes report.tsx.
+ * Unchanged in signature and behaviour on purpose: two coach screens outside
+ * this change call it, and breaking them to make a point would be a worse
+ * outcome than leaving them to their own lane. Its client-side caller —
+ * app/(client)/report.tsx — is gone: it now goes through `askAboutMyWeek`.
  */
 export async function askCoach(messages: ChatMsg[], context: Record<string, unknown>): Promise<string | null> {
   if (!coachAvailable()) return null;
@@ -122,10 +169,10 @@ export async function askCoach(messages: ChatMsg[], context: Record<string, unkn
  * screen cannot skip it and a field added to a context object without anybody
  * reading src/lib/coachShare.ts is simply not transmitted.
  *
- * `askCoach` is deliberately left in place and unchanged. Removing it would
- * break app/(client)/report.tsx, which is a separate unfixed defect and is
- * flagged as one at the top of this file; changing its signature to make a
- * point about a screen it does not belong to would cost more than it is worth.
+ * `askCoach` is deliberately left in place and unchanged. Its remaining callers
+ * are two coach screens belonging to a different change; changing its signature
+ * to make a point about screens it does not belong to would cost more than it
+ * is worth.
  */
 
 /**

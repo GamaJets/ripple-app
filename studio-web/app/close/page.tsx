@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
-import { fetchMemberships, fetchPayments, money } from '@lib/gymRecord';
+import { fetchMemberships, fetchPayments, money, sharedCurrency } from '@lib/gymRecord';
 import {
   fetchSessions, isAwaitingOutcome, PAY_DELIVERED_ONLY,
   type PtSession, type PayPolicy, type PayrollLine,
@@ -645,10 +645,14 @@ function Handoff({ c, rec, currency, gymName, monthKey }: {
       false,
     ));
 
+    // Each line carries its OWN currency, and not the one in the front matter
+    // above. This table used to be exported blended across currencies into a
+    // file that states a single Currency at the top, which is the one figure on
+    // the close an accountant breaks the month down by.
     parts.push('\nWHAT CAME IN, BY METHOD\n');
     parts.push(c.income
-      ? toCsv(['How it arrived', 'Payments', 'Amount (minor units)'],
-              c.income.byMethod.map((l) => [l.label, l.count, l.cents]), false)
+      ? toCsv(['How it arrived', 'Currency', 'Payments', 'Amount (minor units)'],
+              c.income.byMethod.map((l) => [l.label, l.currency, l.count, l.cents]), false)
       : 'NOT EXPORTED — the payments could not be read. This is unknown, not nil.\n');
 
     parts.push('\nSTILL OWED AT THE MONTH END\n');
@@ -698,19 +702,36 @@ function slugOf(name: string | null): string {
 function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
   // Null for either of `money()`'s two silences — no amount, or no currency —
   // and the sentence below has to hold together under both.
-  const unattributed = c.income ? money(c.income.unattributedCents, currency) : null;
+  // The unattributed figure is denominated by the ROWS that make it up, not by
+  // the gym's own currency. `unattributedCurrency` is null when those rows
+  // disagree, and `money()` then returns null and the sentence below says why —
+  // which is the same handling a missing gym currency already got.
+  const unattributed = c.income ? money(c.income.unattributedCents, c.income.unattributedCurrency) : null;
+
+  // ── every line prints the currency it is a sum of ──────────────────────────
+  //
+  // Both of these tables used to render `money(l.cents, currency)` against
+  // lines that `incomeOf` and `purposeOf` had blended across currencies, so a
+  // gym holding dirhams and pounds read one "Card" figure with a single
+  // currency printed over it — on the close, which is the document an
+  // accountant works from, and in the CSV below it. The grouping now splits by
+  // currency, so each line is a sum of like things and states its own.
   const cols: Column<Line>[] = [
     { key: 'label', header: 'How it arrived', value: (l) => l.label },
+    { key: 'currency', header: 'Currency', value: (l) => l.currency,
+      render: (l) => l.currency ?? <span className="dash">not stated</span> },
     { key: 'count', header: 'Payments', value: (l) => l.count, numeric: true },
     { key: 'cents', header: 'Amount', value: (l) => l.cents, numeric: true,
-      render: (l) => money(l.cents, currency) },
+      render: (l) => money(l.cents, l.currency) },
   ];
 
   const purposeCols: Column<Line>[] = [
     { key: 'label', header: 'What it was for', value: (l) => l.label },
+    { key: 'currency', header: 'Currency', value: (l) => l.currency,
+      render: (l) => l.currency ?? <span className="dash">not stated</span> },
     { key: 'count', header: 'Payments', value: (l) => l.count, numeric: true },
     { key: 'cents', header: 'Amount', value: (l) => l.cents, numeric: true,
-      render: (l) => money(l.cents, currency) },
+      render: (l) => money(l.cents, l.currency) },
   ];
 
   return (
@@ -759,7 +780,13 @@ function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
             {c.income.unattributed === 1 ? 'ies' : 'y'} nobody&rsquo;s name
             {unattributed ? <> &mdash; {unattributed}</> : null}. Counted in the total, and
             named here because it cannot be chased, refunded or explained later.
-            {unattributed ? null : <> What they come to cannot be stated because {NO_CURRENCY_NOTE}.</>}
+            {/* Two different silences now reach this sentence and they are not
+                the same fact. The rows themselves may disagree about what money
+                they are, which is a thing about the payments; or nothing states
+                a currency at all, which is a thing about the gym. */}
+            {unattributed ? null : c.income && c.income.unattributedCurrency == null
+              ? <> What they come to cannot be stated because those payments do not all state the same currency.</>
+              : <> What they come to cannot be stated because {NO_CURRENCY_NOTE}.</>}
           </p>
         ) : null}
       </div>
@@ -1154,12 +1181,16 @@ function sumOrNull(a: number | null, b: number | null): number | null {
  *
  * Only ever used for rendering; no total is asserted across currencies anywhere.
  */
-function agreedCurrency(rows: Array<{ currency: string | null }>): TenantCurrency {
-  // A row with no currency of its own does not agree with the others — it is
-  // silent, and silence is not consent to whatever the rest of them say.
-  const seen = new Set(rows.map((r) => r.currency));
-  return seen.size === 1 ? ([...seen][0] ?? null) : null;
-}
+/*
+ * `agreedCurrency` used to live here, as five lines that were `sharedCurrency`
+ * in gymRecord.ts written a second time — and written without its
+ * `.trim().toUpperCase()`, so ' gbp ' and 'GBP' were two currencies and this
+ * close withheld a total the gym was entitled to. That export exists precisely
+ * so a rule about money does not exist twice; /revenue had a third copy called
+ * `oneCurrency` and it is gone for the same reason.
+ */
+const agreedCurrency = (rows: Array<{ currency: string | null }>): TenantCurrency =>
+  sharedCurrency(rows);
 
 function currencyOf(rec: CloseRecord, gym: TenantCurrency): TenantCurrency {
   if (rec.payments.state === 'ready' && rec.payments.rows.length) {

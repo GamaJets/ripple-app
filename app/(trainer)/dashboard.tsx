@@ -37,6 +37,7 @@ import {
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
+import { capLimit, capped } from '../../src/lib/rowCap';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, Switch, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -118,8 +119,14 @@ import { useCoachSetup } from '../../src/ui/coachSetup';
 import { coachSetupRows, coachSetupLeft, coachSetupNext, showCoachSetup } from '../../src/lib/coachFirstRun';
 import { useDeliveryFact } from '../../src/ui/coachDelivery';
 import { deliveryNote, showsInPerson, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
-import { EndReasonSheet, UnexplainedDepartures } from '../../src/ui/EndReasonSheet';
-import type { EndReason } from '../../src/lib/endCoaching';
+import { EndReasonSheet, UnexplainedDepartures, DEPARTURE_WINDOW_DAYS } from '../../src/ui/EndReasonSheet';
+// R3. The tally the answers were never put into. `END_REASON_LABEL` is the same
+// vocabulary the sheet asks with, so the card that collects a reason and the
+// card that counts it cannot come to call it two different things.
+import {
+  departureTally, departureLine, END_REASON_LABEL,
+  type EndReason, type EndedRelationship,
+} from '../../src/lib/endCoaching';
 import { promptUnmarkedBacklog } from '../../src/ui/coachReminders';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
@@ -339,6 +346,14 @@ function UnmarkedSessions({ n, failed, hasGym }: { n: number | null; failed: boo
     </Card>
   );
 }
+
+
+// R3's select list, written out here on one line rather than imported. Same
+// reason every other screen in this group declares its own: check-schema.mjs
+// resolves a named select list only within the file that names it, so a shared
+// constant is a select list nothing compares against the SQL or the live
+// database.
+const ENDED_COLS = 'client_id, ended_at, end_reason';
 
 export default function TrainerClients() {
   const t = useTheme();
@@ -820,6 +835,60 @@ export default function TrainerClients() {
 
   const unmarked = mySessions === null ? null : awaitingOutcome(mySessions).length;
 
+  /* ── why they left, counted ───────────────────────────────────────────
+   *
+   * R3. The Unexplained Departures card above asks about every ending with no
+   * reason on it. Until now the answers went into `coaching_relationships.
+   * end_reason` and NOTHING read them back: `fetchEndRecord` had no caller
+   * anywhere in the app, and the only read of the column filtered
+   * `is('end_reason', null)` in order to keep asking.
+   *
+   * The same window as the card, deliberately. Two windows on one screen would
+   * have the card asking about four people and the tally counting six, and a
+   * coach would have to work out which of the two was lying.
+   *
+   * Null on a failed read and never an empty tally. "Nobody has left you" is a
+   * lovely sentence and this screen must not produce it out of a refusal.
+   */
+  const [ended, setEnded] = useState<EndedRelationship[] | null>(null);
+  useEffect(() => {
+    if (authLoading) return;
+    let live = true;
+    if (!coachId) { setEnded(null); return; }
+    setEnded(null);
+    (async () => {
+      const since = new Date(Date.now() - DEPARTURE_WINDOW_DAYS * 86_400_000).toISOString();
+      const { data, error } = await supabase
+        .from('coaching_relationships')
+        .select(ENDED_COLS)
+        .eq('coach_id', coachId).eq('status', 'ended')
+        .gte('ended_at', since)
+        .order('ended_at', { ascending: false })
+        .limit(capLimit());
+      if (!live) return;
+      if (error) {
+        // Includes 42703 on a database that has not had part 168 applied.
+        // Both that and a refusal are unread, and unread draws no card.
+        reportError('dashboard.departureReasons', error);
+        setEnded(null); return;
+      }
+      const page = capped(data);
+      // A truncated read is treated as unread. A tally over a prefix is not a
+      // smaller tally, it is a different one, and the reason that came out on
+      // top would be a fact about the row cap.
+      setEnded(page.truncated ? null : page.rows.map((r: any) => ({
+        reason: r.end_reason ?? null,
+        endedAt: typeof r.ended_at === 'string' ? r.ended_at : null,
+      })));
+    })();
+    return () => { live = false; };
+  }, [coachId, authLoading]);
+
+  const departures = useMemo(() => departureTally(ended), [ended]);
+  const departureNote = useMemo(
+    () => departureLine(departures, DEPARTURE_WINDOW_DAYS), [departures],
+  );
+
   // ── Nothing prompted the coach to clear this ────────────────────────────
   //
   // The queue exists on app/(trainer)/sessions.tsx and the card above counts
@@ -904,6 +973,20 @@ export default function TrainerClients() {
       ? [{ key: 'drifting', label: 'Drifting', n: segN(bands.drifting) },
          { key: 'nodata', label: 'Nothing Recorded', n: segN(bands.unknown) }]
       : [{ key: 'atrisk', label: 'At-risk', n: segN(atRisk) }]),
+    // ── who is waiting on a reply ─────────────────────────────────────────
+    // R6. This row already draws "3 unread" on it and the segment list could
+    // not filter to it, so a coach with forty clients had recency-only ordering
+    // on the messages screen and no queue anywhere — which is the exact defect
+    // messages.tsx's own header says it was built to close at twenty.
+    //
+    // The count has a stricter guard than `segN` alone. A roster whose read was
+    // whole can still carry rows whose `unread` is null, and one of those is a
+    // client who might be waiting; counting them as nought would put a caption
+    // saying "Unanswered 0" over a list that is missing them. `null` renders as
+    // a dash and the chip still selects, which is the same bargain every other
+    // chip on this row makes.
+    { key: 'unanswered', label: 'Unanswered',
+      n: roster.some((c) => c.unread == null) ? null : segN(roster.filter((c) => (c.unread ?? 0) > 0).length) },
     // One segment per delivery, built from the vocabulary rather than listed by
     // hand — a book with no hybrid clients simply shows a zero, the same as the
     // other two, instead of quietly filing them under Online.
@@ -914,6 +997,12 @@ export default function TrainerClients() {
     : seg === 'drifting' ? driftFor(c)?.status === 'at_risk'
     : seg === 'nodata' ? driftFor(c)?.status === 'idle'
     : seg === 'atrisk' ? atRiskClient(c)
+    // A row whose unread count could not be read is NOT in this list. The
+    // segment is a queue a coach works through, and a client who may or may not
+    // have written is not something to answer — the chip's own dash says the
+    // figure is unknown, and putting an unknown row in the queue would make the
+    // list disagree with the caption above it.
+    : seg === 'unanswered' ? (c.unread ?? 0) > 0
     : (COACHED_MODES as readonly string[]).includes(seg) ? c.mode === seg
     : tagsFor(c.id).includes(seg);
   // A drift segment cannot be honoured once the read is gone; fall back to the
@@ -1354,6 +1443,57 @@ export default function TrainerClients() {
             four honest warnings and a fifth saying "we could not check whether
             anybody left" is noise. src/ui/EndReasonSheet.tsx. */}
         <UnexplainedDepartures />
+
+        {/* ── and the answers, counted ────────────────────────────────────
+            R3. The card above has been collecting departure reasons since it
+            shipped and nothing has ever read one back: `fetchEndRecord` had no
+            caller anywhere in the app, and the only read of the column filters
+            for the UNANSWERED ones in order to keep asking. Churn reasons are
+            the cheapest true thing a coaching business can know about itself
+            and this product collected them and buried them.
+
+            Counts, never a rate. A percentage over the four people who left a
+            coach's book this quarter is noise, which is what
+            `MIN_COHORT_FOR_RATE` exists to say elsewhere in the app.
+
+            Renders nothing when the read failed or came back truncated, on the
+            same argument the card above makes: a fifth warning on this screen
+            saying "we could not count why anybody left" is noise, and a tally
+            over a prefix would put a reason on top because of the row cap. */}
+        {departures && departureNote ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Why People Have Left" note={`Last ${DEPARTURE_WINDOW_DAYS} days`} />
+            <Text style={{ ...ty.label, color: t.ink2 }}>{departureNote}</Text>
+            <View style={{ marginTop: sp.md }}>
+              {departures.counts.map((c, i) => (
+                <View key={c.reason} style={{
+                  flexDirection: 'row', justifyContent: 'space-between', gap: sp.md,
+                  paddingVertical: sp.sm,
+                  borderTopWidth: i ? hairline : 0, borderTopColor: t.ring,
+                }}>
+                  <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{END_REASON_LABEL[c.reason]}</Text>
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{num(c.n)}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Kept out of the list rather than filed under "They Did Not Say".
+                Nobody having asked and somebody declining to answer are opposite
+                facts about the coach's own record-keeping, and only one of them
+                is something they can still fix. */}
+            {departures.unrecorded > 0 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {num(departures.unrecorded)} of {num(departures.total)} {departures.unrecorded === 1 ? 'has' : 'have'} nothing
+                recorded against {departures.unrecorded === 1 ? 'it' : 'them'} and {departures.unrecorded === 1 ? 'is' : 'are'} in
+                none of the counts above. The card above is where they get an answer.
+              </Text>
+            ) : null}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              Counts, not percentages. Over a book this size a share would move by twenty points because one
+              person moved house, and it would read as a trend.
+            </Text>
+          </Section>
+        </>) : null}
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>

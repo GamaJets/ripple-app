@@ -65,6 +65,8 @@ import { catalogueValue as cap, num } from '../../src/lib/format';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, readLift } from '../../src/lib/units';
+// The sentence a bodyweight set reads as, in the one place it is written.
+import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
 
@@ -182,7 +184,17 @@ export default function Library() {
  // row at a time because a `workouts` row IS an exercise with its sets — three
  // separate rows for three sets of the same lift would read as three exercises
  // in the calendar and count triple towards the day.
- const [banked, setBanked] = useState<[number, number][]>([]);
+ // The third element is the member SAYING this set was their own body, and it
+ // is the whole reason this is a triple rather than a pair. `readLift` hands
+ // back a null load for a blank box, and this path used to flatten that to
+ // `load.kg ?? 0` and send the pairs with no `bw` array at all — so a pull-up
+ // logged from the library reached `setLoadKg` as an ordinary set with nothing
+ // on the bar, which is priced at NULL: counted in no tonnage, absent from
+ // `unknownSets`, and never on the bodyweight bests board. Months of
+ // calisthenics read back as an empty history, which is the exact failure
+ // src/lib/bodyweightSets.ts was written to end. `bw[i] === true` is the
+ // contract there, and app/(client)/exercise.tsx already sends it.
+ const [banked, setBanked] = useState<[reps: number, kg: number, bw: boolean][]>([]);
  const [saving, setSaving] = useState(false);
  const addSet = () => {
   const r = parseInt(reps, 10) || 0;
@@ -204,7 +216,10 @@ export default function Library() {
   // bodyweight set, and states its bound in the unit on screen.
   const load = readLift(kg, wu);
   if (!load.ok) { Alert.alert('Check that load', load.reason); return; }
-  setBanked((p) => [...p, [r, load.kg ?? 0]]);
+  // A blank box is testimony, not a zero: `readLift` returns a null load for it
+  // and that null is what says "my own bodyweight". A typed load on top of it
+  // is what was ADDED — the belt — exactly as `setLoadKg` reads it.
+  setBanked((p) => [...p, [r, load.kg ?? 0, load.kg == null]]);
   setReps(''); setKg('');
   tapLight();
  };
@@ -217,14 +232,21 @@ export default function Library() {
   // stored in the wrong unit — the hardest kind of wrong figure to ever notice.
   const trailing = readLift(kg, wu);
   if (!trailing.ok) { Alert.alert('Check that load', trailing.reason); return; }
-  const pending = (parseInt(reps, 10) || 0) > 0 ? [...banked, [parseInt(reps, 10), trailing.kg ?? 0] as [number, number]] : banked;
+  const pending = (parseInt(reps, 10) || 0) > 0 ? [...banked, [parseInt(reps, 10), trailing.kg ?? 0, trailing.kg == null] as [number, number, boolean]] : banked;
   if (!pending.length) { Alert.alert('Nothing to log', 'Add a set first — reps, and the weight if there was one.'); return; }
   setSaving(true);
   // No `kcal`. Train derives an energy estimate across a whole session's work;
   // one set logged on its own has no session around it to derive from, and the
   // log renders an absent figure as a dash rather than as a zero somebody could
   // read as "this burned nothing".
-  const out = await logWorkouts([{ t: new Date().toISOString(), exercise: open.name, sets: pending }]);
+  // `bw` is sent only when there is one to send, so an entry of ordinary
+  // weighted sets round-trips byte for byte as it always has.
+  const out = await logWorkouts([{
+   t: new Date().toISOString(),
+   exercise: open.name,
+   sets: pending.map((s) => [s[0], s[1]] as [number, number]),
+   ...(pending.some((s) => s[2]) ? { bw: pending.map((s) => s[2]) } : {}),
+  }]);
   setSaving(false);
   if (out === 'unsent') {
    // Kept rather than lost, so the sheet closes and the banked sets are
@@ -484,7 +506,7 @@ export default function Library() {
        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: sp.md, alignItems: 'center' }}>
         {banked.map((s, i) => (
          <Pressable key={i} onPress={() => setBanked((p) => p.filter((_, k) => k !== i))} hitSlop={6}
-          accessibilityRole="button" accessibilityLabel={`Remove set ${i + 1}, ${s[0]} reps at ${s[1] > 0 ? liftLabel(s[1], wu) : 'bodyweight'}`}
+          accessibilityRole="button" accessibilityLabel={`Remove set ${i + 1}, ${s[2] ? bodyweightSetLabel(s[0], s[1], s[1] > 0 ? liftLabel(s[1], wu) : null) : `${s[0]} reps at ${liftLabel(s[1], wu)}`}`}
           style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           {/* 0 kg is a bodyweight set, not a missing weight — so it is named
               rather than printed as "0kg", which reads like a lost figure.
@@ -495,7 +517,7 @@ export default function Library() {
               this comment was the only true half of that sentence — the chip
               converted and the box did not, so the two disagreed by a factor
               of 2.2 and the chip was reporting the bug every time. */}
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{s[1] > 0 ? liftLabel(s[1], wu) : 'bodyweight'}</Text>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{s[2] ? (s[1] > 0 ? `bodyweight +${liftLabel(s[1], wu)}` : 'bodyweight') : liftLabel(s[1], wu)}</Text>
           <Text style={{ ...ty.caption, color: t.ink3 }}>×</Text>
          </Pressable>
         ))}

@@ -28,6 +28,21 @@ import {
 
 const DAY = 86400000;
 
+/**
+ * How far back the payment list can reach.
+ *
+ * A year is the longest offered and it is deliberate: a chargeback can be
+ * disputed months after the sale, and the whole point of this control is
+ * reaching the row. Beyond that the read would be refused by the row cap on any
+ * gym busy enough to care, which is an honest refusal but not a useful screen.
+ */
+const PAYMENT_WINDOWS: ReadonlyArray<{ days: number; label: string }> = [
+  { days: 30, label: '30 days' },
+  { days: 90, label: '90 days' },
+  { days: 180, label: '6 months' },
+  { days: 365, label: 'a year' },
+];
+
 export default function Money() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
@@ -55,6 +70,23 @@ export default function Money() {
   const [passTypesErr, setPassTypesErr] = useState<string | null>(null);
 
   /**
+   * How far back the payment list reaches.
+   *
+   * Thirty days was hard-coded and was the whole of the reason a payment older
+   * than a month could not be refunded or corrected ANYWHERE in the product:
+   * the correct control only renders for rows in this list. A card chargeback
+   * arrives sixty days after the sale, and the ledger kept the payment while
+   * the bank did not.
+   *
+   * Longer windows are offered rather than made the default because the read
+   * is capped: `fetchPayments` refuses a set it cannot read whole rather than
+   * silently truncating it, and a busy gym asking for a year would be told so.
+   * Thirty days is what the desk wants; the rest is there when somebody is
+   * looking for a specific payment to put right.
+   */
+  const [windowDays, setWindowDays] = useState(30);
+
+  /**
    * Read the price book, the memberships and the payments taken.
    *
    * allSettled, not all: one failing read must not take the others with it.
@@ -64,11 +96,18 @@ export default function Money() {
    * month with no income rather than as a query that never came back. A read
    * that failed stays null, and every figure drawn from it shows a dash.
    */
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string, windowDays: number) => {
     const [pRes, mRes, payRes, ptRes] = await Promise.allSettled([
       fetchPlans(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
-      fetchPayments(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
+      // The window is the OWNER's choice, and it used to be thirty days with no
+      // way to change it. "Refund or correct" only renders for rows in the
+      // window, so a card chargeback landing sixty days after the sale had
+      // nowhere in Repple to be recorded at all: the ledger kept the original
+      // payment and the bank did not. The correction machinery from
+      // supabase/parts/180 existed and was unreachable for exactly the payments
+      // that most need it.
+      fetchPayments(supabase, tenantId, new Date(Date.now() - windowDays * DAY).toISOString()),
       fetchPassTypes(supabase, tenantId),
     ]);
 
@@ -105,10 +144,14 @@ export default function Money() {
         setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
         setGymNameErr(tErr ? (tErr.message || 'Could not read the gym name.') : null);
       }
-      await load(who.tenantId);
+      await load(who.tenantId, windowDays);
     })();
     return () => { live = false; };
-  }, [load]);
+    // `windowDays` deliberately re-runs this: changing the window is a fresh
+    // READ, not a filter over rows already in hand. Filtering would show a
+    // longer window that is still only thirty days of rows, with nothing on
+    // screen to say the rest was never fetched.
+  }, [load, windowDays]);
 
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
@@ -143,7 +186,7 @@ export default function Money() {
   // is what makes `amount()` withhold the figure rather than pick a side.
   const takenCcy = sum == null || sum.payments === 0 ? ccy : sum.takenCurrency;
   const mrrCcy = sum == null || sum.mrrCents == null ? ccy : sum.mrrCurrency;
-  const refresh = () => load(tenantId);
+  const refresh = () => load(tenantId, windowDays);
 
   // summarise needs all three reads, so any one of them failing leaves every
   // figure above the tables unknown. Name the reads that did not arrive: a bare
@@ -196,7 +239,10 @@ export default function Money() {
             and the tile said GBP. `takenCurrency`/`mrrCurrency` are null
             exactly when the contributing rows disagree, and a total that cannot
             be denominated is withheld rather than labelled with a guess. */}
-        <Kpi label="Taken (30 days)" text={amount(sum?.takenCents, takenCcy)}
+        {/* The label follows the window the owner chose. It said "30 days"
+            whatever was read, and a tile naming a period it is not a figure for
+            is the same class of mistake as a currency nobody chose. */}
+        <Kpi label={`Taken (${windowDays} days)`} text={amount(sum?.takenCents, takenCcy)}
              note={sum?.takenCents == null ? (unread ?? 'nothing recorded yet')
                : takenCcy ? `${sum.payments} payments`
                : sum && sum.takenCurrency === null && sum.payments > 0
@@ -215,7 +261,11 @@ export default function Money() {
       <Plans plans={plans} readErr={plansErr} tenantId={tenantId} ccy={ccy} onChange={refresh} />
       <PassTypes types={passTypes} readErr={passTypesErr} tenantId={tenantId} ccy={ccy} onChange={refresh} />
       <Members members={members} readErr={membersErr} plans={plans} tenantId={tenantId} onChange={refresh} />
-      <Payments payments={payments} readErr={paymentsErr} members={members} tenantId={tenantId} me={me} ccy={ccy} onChange={refresh} />
+      <Payments
+        payments={payments} readErr={paymentsErr} members={members} tenantId={tenantId}
+        me={me} ccy={ccy} onChange={refresh}
+        windowDays={windowDays} onWindow={setWindowDays}
+      />
     </Shell>
   );
 }
@@ -735,9 +785,10 @@ function MembershipDates({ m, onDone, onErr }: {
 
 /* ── payments ──────────────────────────────────────────────────────────────── */
 
-function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
+function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, windowDays, onWindow }: {
   payments: GymPayment[] | null; readErr: string | null; members: Membership[] | null;
   tenantId: string; me: Me; ccy: TenantCurrency; onChange: () => void;
+  windowDays: number; onWindow: (days: number) => void;
 }) {
   const [amount, setAmount] = useState('');
   const [memberId, setMemberId] = useState('');
@@ -863,7 +914,24 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
   const memberships = (members ?? []).filter((m) => !memberId || m.memberId === memberId);
 
   return (
-    <Section title="Payments taken" sub="Last 30 days. A payment appears here because somebody recorded it — never because it was inferred.">
+    <Section
+      title="Payments taken"
+      sub={`The last ${windowDays} days. A payment appears here because somebody recorded it, never because it was inferred. A payment can only be refunded or corrected while it is on this list, so reach further back to put an older one right.`}
+    >
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink2)' }}>
+        <label htmlFor="pay-window">Reaching back</label>
+        <select
+          id="pay-window"
+          value={String(windowDays)}
+          onChange={(e) => onWindow(Number(e.target.value))}
+          style={field}
+        >
+          {PAYMENT_WINDOWS.map((w) => <option key={w.days} value={w.days}>{w.label}</option>)}
+        </select>
+        <span style={{ color: 'var(--ink3)' }}>
+          A chargeback lands weeks after the sale. The correction it needs is on the row itself.
+        </span>
+      </div>
       <form onSubmit={add} style={formRow}>
         {/* Names the currency this figure is STORED in, not the one the reader
             assumes. The Members screen's twin of this form had its label

@@ -51,6 +51,12 @@
 
 import { assertWhole, capLimit } from './rowCap';
 import { assertWrote } from './wroteRows';
+import { sharedCurrency } from './gymRecord';
+// A timestamp read as the day it fell on IN THE GYM'S OWN TIMEZONE. Slicing the
+// ISO string would give the UTC day, and a class at nine on the last evening of
+// the month in a gym west of Greenwich is a UTC row for the 1st — filed, and
+// paid, in the following month's run.
+import { isoDate } from './format';
 import type { PtSession } from './gymSessions';
 
 type Queryable = { from: (table: string) => any };
@@ -281,6 +287,17 @@ export interface ClassPayLine {
   currency: string;
   settlementId: string | null;
   createdAt: string;
+  /**
+   * When the class was TAUGHT, as a bare local date, or null when the class row
+   * could not be read.
+   *
+   * Not `createdAt`, which is when somebody typed the line in. A class taught on
+   * 30 August and costed on 2 September is August's cost, and /payroll had no
+   * date at all to scope a run by — every unsettled line in the gym's history
+   * joined whichever run was on screen and was stamped with that run's
+   * `period_from`.
+   */
+  taughtOn: string | null;
 }
 
 /**
@@ -319,6 +336,17 @@ export function classPayBlocker(
   return null;
 }
 
+/**
+ * Every class-pay line this gym has, with the date its class was taught.
+ *
+ * The date is read separately from `gym_classes` rather than embedded, for the
+ * same reason `namesFor` is a second query: an embed is a join this module
+ * cannot assert without a live database, and a class-pay line whose class row
+ * fails to load must come back with `taughtOn: null` rather than not come back.
+ *
+ * `taughtOn` is what /payroll scopes a run by. Without it the run had no date
+ * on these lines at all — see the note on `ClassPayLine.taughtOn`.
+ */
 export async function fetchClassPay(
   sb: Queryable, tenantId: string,
 ): Promise<ClassPayLine[]> {
@@ -332,7 +360,9 @@ export async function fetchClassPay(
   const rows = assertWhole(data, 'the class pay lines') as any[];
   if (!rows.length) return [];
   const names = await namesFor(sb, rows.map((r) => r.trainer_id));
+  const taught = await classDatesFor(sb, rows.map((r) => r.class_id));
   return rows.map((r) => ({
+    taughtOn: taught.get(r.class_id) ?? null,
     id: r.id,
     classId: r.class_id,
     trainerId: r.trainer_id,
@@ -485,6 +515,124 @@ export async function addAdjustment(
   if (error) throw error;
 }
 
+/**
+ * One coach's adjustments added up, and what they are denominated in.
+ *
+ * ── Why this is a function and not a `reduce` ─────────────────────────────
+ *
+ * /payroll's Adjustments column was `r.adjustments.reduce((a, x) => a +
+ * x.amountCents, 0)` rendered as `amount(cents, ccy)` — the gym's currency
+ * printed over a sum that had just added a euro reimbursement to a sterling
+ * bonus. `runCurrencyBlocker` guards the Settle button and only the Settle
+ * button, so the blocker fired AFTER the owner had already read the number.
+ *
+ * `cents` is therefore null whenever the rows do not share one currency, which
+ * is the same answer `summarise` gives for the same reason, and the caller
+ * withholds the figure and says which currencies are in it.
+ *
+ * ── The split, which is not the same question ─────────────────────────────
+ *
+ * `taxableCents` and `reimbursementCents` are reported apart because a bonus
+ * and a reimbursement are not the same money: one is pay and one is the gym
+ * handing back what the coach spent, and whoever files the payroll needs them
+ * separately. `ADJUSTMENT_LABEL` above has said so since these kinds existed
+ * and nothing recorded it. Both are null under the same condition as `cents` —
+ * a split of two currencies is two splits.
+ */
+export interface AdjustmentSum {
+  cents: number | null;
+  /** Pay: bonuses, less deductions and advances against pay. */
+  taxableCents: number | null;
+  /** Money spent by the coach and handed back. Not pay. */
+  reimbursementCents: number | null;
+  /** The one currency, or null when they disagree. */
+  currency: string | null;
+  /** Every distinct currency present, sorted, so a screen can name them. */
+  currencies: string[];
+  count: number;
+}
+
+export function adjustmentsTotal(
+  rows: Array<{ kind: AdjustmentKind; amountCents: number; currency: string | null }>,
+): AdjustmentSum {
+  const currency = sharedCurrency(rows);
+  const currencies = [...new Set(rows.map((r) => (r.currency ?? '').trim().toUpperCase()).filter(Boolean))].sort();
+  const sum = (only: (k: AdjustmentKind) => boolean) =>
+    rows.filter((r) => only(r.kind)).reduce((a, r) => a + r.amountCents, 0);
+  if (!rows.length || !currency) {
+    return { cents: null, taxableCents: null, reimbursementCents: null, currency, currencies, count: rows.length };
+  }
+  return {
+    cents: sum(() => true),
+    taxableCents: sum((k) => k !== 'reimbursement'),
+    reimbursementCents: sum((k) => k === 'reimbursement'),
+    currency,
+    currencies,
+    count: rows.length,
+  };
+}
+
+/* ── which period a pay line belongs to ────────────────────────────────────── */
+
+/**
+ * Where a dated pay line sits relative to the run on screen.
+ *
+ *   'on'       inside the period.
+ *   'earlier'  before it, and still unsettled — so it joins this run rather
+ *              than being stranded, which is the design part 36 chose for
+ *              sessions and part 183 restated for classes.
+ *   'later'    AFTER the period. Never on this run.
+ *   'undated'  the date could not be read. Not on the run, and counted, because
+ *              a line stamped into a period nobody can place is the failure
+ *              this function exists to stop.
+ */
+export type RunScope = 'on' | 'earlier' | 'later' | 'undated';
+
+/**
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * /payroll built each run from `(classPay ?? []).filter((x) => x.settlementId
+ * == null)` and the same line for adjustments. `fetchClassPay` is tenant-wide
+ * with no date bound at all, and `applies_on` — captured on the adjustment form
+ * precisely so somebody could say when a bonus applies — was never consulted.
+ * So opening the July run paid for September's classes and September's bonuses,
+ * and stamped every one of them with July's `period_from`.
+ *
+ * The coach is eventually paid the right total against the wrong month, which
+ * is worse than being paid late: the cash-basis month on /accounting, the
+ * coach's own earnings screen and any filing built from `period_from` all
+ * disagree, and a bonus deliberately dated 1 September is filed as August's
+ * cost.
+ *
+ * ── Why 'earlier' is paid and 'later' is not ──────────────────────────────
+ *
+ * They are not symmetrical. A line from a month already settled has no other
+ * run coming for it — settlement is per line, and refusing it here would leave
+ * it unpayable forever. A line dated in the FUTURE has its own run coming, by
+ * construction, and putting it on this one is the defect.
+ */
+export function runScopeOf(
+  dated: string | null | undefined,
+  period: { fromDate: string; toDate: string },
+): RunScope {
+  const d = (dated ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return 'undated';
+  if (d > period.toDate) return 'later';
+  if (d < period.fromDate) return 'earlier';
+  return 'on';
+}
+
+/** The lines a run for this period may pay: the period's own, plus anything
+ *  still unsettled from before it. Never anything dated after it. */
+export function scopedToRun<T>(
+  rows: T[], dateOf: (row: T) => string | null | undefined, period: { fromDate: string; toDate: string },
+): T[] {
+  return rows.filter((r) => {
+    const s = runScopeOf(dateOf(r), period);
+    return s === 'on' || s === 'earlier';
+  });
+}
+
 /* ── what a run comes to ───────────────────────────────────────────────────── */
 
 export interface RunLines {
@@ -634,6 +782,31 @@ export async function stampRunExtras(
 
 function numOrNull(v: unknown): number | null {
   return v == null || !Number.isFinite(Number(v)) ? null : Number(v);
+}
+
+/**
+ * When each of these classes was taught, as a bare local date.
+ *
+ * `gym_classes.starts_at` is a timestamp and this returns the DAY of it,
+ * because a payroll period is a run of calendar days and comparing a timestamp
+ * against `period.toDate` is how a class on the last evening of the month falls
+ * into the next one.
+ *
+ * A class this cannot read comes back absent, which the caller renders as an
+ * unknown date rather than as a class taught at the epoch.
+ */
+async function classDatesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter((x): x is string => !!x))];
+  if (!unique.length) return new Map();
+  // no-error-ok: an unreadable class date leaves the line undated, which the
+  // payroll run reports rather than silently scoping the line in or out
+  const { data } = await sb.from('gym_classes').select('id, starts_at').in('id', unique).limit(capLimit());
+  return new Map((data ?? [])
+    .map((c: any) => {
+      const t = Date.parse(String(c?.starts_at ?? ''));
+      return Number.isFinite(t) ? ([c.id, isoDate(new Date(t))] as [string, string]) : null;
+    })
+    .filter((x: [string, string] | null): x is [string, string] => x !== null));
 }
 
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {

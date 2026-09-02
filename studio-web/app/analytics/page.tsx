@@ -49,8 +49,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+// The console's banner, with the live region it never had. The local copy of
+// this component that used to sit at the bottom of this file — and still sits
+// at the bottom of eighteen other page files — rendered every sentence this
+// screen produces into a plain <div>, which a screen reader never reads out.
+import { Banner } from '@/components/Banner';
 import { DataTable, type Column } from '@/components/DataTable';
-import { fetchMemberships, type Membership } from '@lib/gymRecord';
+import { type Membership } from '@lib/gymRecord';
 import { fetchVisits, type Visit } from '@lib/gymVisits';
 import { fetchClasses, pct, type GymClass } from '@lib/gymSchedule';
 import { summariseClassRows, type ClassRates, type ClassSummaryRow } from '@lib/classRates';
@@ -309,7 +314,16 @@ export default function Analytics() {
     const moneySince = new Date(now - 400 * DAY).toISOString();
 
     const [mRes, vRes, cRes, dRes, pRes] = await Promise.allSettled([
-      fetchMemberships(supabase, tenantId),
+      // PAGED, for the same reason the two reads below it are. `fetchMemberships`
+      // caps at a thousand and throws, and its own comment in
+      // src/lib/gymRecord.ts says why that ceiling is low: it returns EVERY
+      // membership in the gym's history, not the live ones, so a three-year-old
+      // gym of four hundred members crosses it without ever having been large.
+      // Every cohort, every joiners-and-leavers month and the whole retention
+      // grid on this page is made of this one read, and past the cap the
+      // analytics screen went permanently dark for exactly the gyms with enough
+      // history to analyse.
+      pageMemberships(tenantId),
       // PAGED, not capped-and-refused. `fetchVisits` asks for one row past the
       // ceiling and THROWS on getting it, which is right for a figure and wrong
       // for this page: thirty days of door scans crosses a thousand at about
@@ -1267,6 +1281,63 @@ function Frequency({ buckets, rosterSize, rosterState, anonVisits, seenNotOnRost
 interface MoneyRow { id: string; memberId: string | null; amountCents: number; currency: string; takenAt: string }
 
 /**
+ * Every membership the gym has ever written, PAGED.
+ *
+ * `readAll`'s contract is a TOTAL order. `started_on` is a DATE — a whole gym's
+ * January intake shares one value — so it cannot be the only key, and `id` is
+ * the tie-break. Without it a page boundary landing inside a busy join day
+ * would drop members silently, and a dropped membership on this page is not a
+ * smaller number: it is a person who reads as never having joined.
+ *
+ * The names are resolved here rather than by `fetchMemberships`'s own helper
+ * because that helper sends every id in one `.in(...)`, and a thousand uuids is
+ * a forty-kilobyte query string the gateway rejects. Chunked at the same 150
+ * /export uses. An unreadable name is a null and a dash, never a dropped row —
+ * the membership is real whether or not the profile read came back.
+ *
+ * `planName` is left null on purpose. This page never prints a plan, and
+ * resolving one would be a second chunked read for a field nothing displays.
+ */
+const ANALYTICS_ID_CHUNK = 150;
+
+async function pageMemberships(tenantId: string): Promise<Membership[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('memberships')
+      .select('id, member_id, member_label, plan_id, started_on, ends_on, status')
+      .eq('tenant_id', tenantId)
+      .order('started_on', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the memberships',
+  );
+  if (!rows.length) return [];
+
+  const ids = [...new Set(rows.map((r: any) => r.member_id).filter(Boolean))] as string[];
+  const names = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += ANALYTICS_ID_CHUNK) {
+    // no-error-ok: an unreadable name becomes null and renders as a dash; the
+    // membership it labels is still real and still counted.
+    const { data } = await supabase
+      .from('profiles').select('id, full_name').in('id', ids.slice(i, i + ANALYTICS_ID_CHUNK));
+    for (const p of (data ?? []) as any[]) names.set(p.id, (p.full_name || '').trim());
+  }
+
+  return rows.map((r: any) => ({
+    id: r.id,
+    memberId: r.member_id,
+    // The live name while there is one, then the label supabase/parts/172
+    // snapshots at erasure — the same order src/lib/gymRecord.ts uses.
+    memberName: names.get(r.member_id) || r.member_label || null,
+    planId: r.plan_id ?? null,
+    planName: null,
+    startedOn: r.started_on,
+    endsOn: r.ends_on ?? null,
+    status: r.status,
+  }));
+}
+
+/**
  * Thirteen months of payments, PAGED.
  *
  * `fetchPayments` caps and refuses, which is right for a figure somebody is
@@ -1382,16 +1453,6 @@ function Kpi({ label, text, note, tone }: {
       </div>
       {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
     </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
   );
 }
 

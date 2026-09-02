@@ -16,7 +16,7 @@
 // other. Most of the assertions below are about keeping those two numbers apart
 // and about not promising a reward nobody has agreed to.
 import {
-  CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, REWARD_NOTE, friendLine, joinedLabel,
+  CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, rewardNote, friendLine, joinedLabel,
   shapeReferrals, summaryLine, type RawReferral, type ReferralRow,
 } from './referralCredit';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -137,8 +137,16 @@ ok(!/\d{4}/.test(joinedLabel('2026-08-12T21:30:00Z')), 'no year: a recent date i
 ok(/first workout/i.test(CONVERSION_RULE), 'the rule names a first workout as the bar');
 ok(/signing up/i.test(CONVERSION_RULE), 'and says explicitly that a signup is not enough');
 // The one thing this feature must never do: invent a reward.
+const REWARD_NOTE = rewardNote('Repple');
 ok(/gym or coach/i.test(REWARD_NOTE), 'the reward note leaves the reward to the business');
 ok(/no reward has been promised/i.test(REWARD_NOTE), 'and says plainly that none has been promised');
+
+// White-label. This is the Invite Friends screen — the one built for showing to
+// other people — and it opened with the supplier's name on a build that may not
+// be called Repple at all.
+const branded = rewardNote('Example Fitness');
+ok(/^Example Fitness records/.test(branded), `the note carries the brand it was given — got ${branded}`);
+ok(!/Repple/.test(branded), 'and never the supplier’s name');
 ok(!/free session|% off|voucher|points|credit balance/i.test(REWARD_NOTE),
   'and offers nothing nobody agreed to');
 ok(/first name/i.test(REFERRAL_PRIVACY_NOTE), 'the privacy note says a first name is what is shown');

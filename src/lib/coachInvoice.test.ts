@@ -25,6 +25,9 @@ import {
   money,
   kindLabel,
   INVOICE_TAX,
+  INVOICE_TAX_STATED,
+  readTaxRate,
+  statesTax,
   INVOICE_NOT_A_RECEIPT,
   INVOICE_PROVENANCE,
   INVOICE_VOID_NOTICE,
@@ -102,6 +105,88 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
   ok(d.text.includes(INVOICE_NOT_A_RECEIPT), 'and still says it is not a receipt');
 }
 
+/* ── 1b. what the COACH states about tax ──────────────────────────────────
+   Part 451. A rate and a registration number the coach typed are stated facts
+   about the issuer, exactly as `billTo` is a stated fact about the recipient —
+   printed verbatim, checked by nothing. What must NOT appear is anything
+   Repple worked out: no tax amount, no net figure, no subtotal. */
+
+{
+  // The reader, on its own. THREE outcomes and not two.
+  const r = (s: string | null | undefined) => readTaxRate(s);
+  eq(r('').ok && r('').ok === true ? (r('') as { ok: true; pct: number | null }).pct : 'x', null,
+    'an empty box means the coach stated no rate');
+  eq((r('20') as { ok: true; pct: number }).pct, 20, 'a whole rate is read as one');
+  eq((r('12.5') as { ok: true; pct: number }).pct, 12.5, 'and a fractional one keeps its half');
+  eq((r('12,5') as { ok: true; pct: number }).pct, 12.5, 'a comma decimal is accepted — half the world types it');
+  eq((r('20%') as { ok: true; pct: number }).pct, 20, 'and a typed per-cent sign is not a refusal');
+  // A stated zero is NOT the same as an empty box. A registered business
+  // stating a zero rate has said something deliberate.
+  eq((r('0') as { ok: true; pct: number }).pct, 0, 'a stated zero is a statement, not an absence');
+  ok(!r('120').ok, 'a rate above a hundred is refused rather than clamped to it');
+  ok(!r('-5').ok, 'and so is a negative one');
+  ok(!r('twenty').ok, 'and a word');
+  ok(!r('20.0005').ok, 'and more places than the column can hold');
+
+  eq(statesTax(INV), false, 'an invoice with neither field states nothing about tax');
+  eq(statesTax({ ...INV, taxRatePct: 0 }), true, 'a stated zero rate IS a statement');
+  eq(statesTax({ ...INV, taxRatePct: null, taxRegistration: 'GB123456789' }), true, 'and so is a number on its own');
+  eq(statesTax({ ...INV, taxRegistration: '   ' }), false, 'a blank registration number is not one');
+
+  // The document. Both fields print verbatim and NOTHING is derived from them.
+  const d = coachInvoiceDoc(withInv({ taxRatePct: 20, taxRegistration: 'GB123456789', amountCents: 48000, currency: 'GBP' }));
+  ok(d.text.includes('20%'), 'the stated rate is on the document');
+  ok(d.text.includes('GB123456789'), 'and so is the registration number');
+  ok(d.html.includes('GB123456789'), 'in the HTML as well as the text');
+  ok(d.text.includes(INVOICE_TAX_STATED), 'and the tax sentence is the one for a document that states something');
+  ok(!d.text.includes(INVOICE_TAX),
+    'never both: the old sentence denies that a registration number is stated, and this document states one');
+  ok(INVOICE_TAX_STATED.includes('no tax amount anywhere on this document'),
+    'and it still says Repple calculated nothing, because Repple calculated nothing');
+
+  // THE assertion. 20% of GBP 480.00 is GBP 96.00 and the net would be GBP
+  // 400.00. Neither figure may appear anywhere, in either rendering, ever.
+  // The standing statement is cut out before the scan, for the reason section 1
+  // cuts INVOICE_TAX out of its own: `INVOICE_TAX_STATED` uses the word
+  // "subtotal" precisely in order to deny there is one, and scanning it would
+  // make the rule fail on its own disclaimer.
+  let derivedProse = d.text + '\n' + d.html;
+  for (const stated of [INVOICE_TAX_STATED, INVOICE_NOT_A_RECEIPT, ...INVOICE_PROVENANCE]) {
+    derivedProse = derivedProse.split(stated).join(' ').split(escapeHtml(stated)).join(' ');
+  }
+  for (const derived of ['96.00', '400.00', '384.00', 'Subtotal', 'subtotal', 'Net', 'VAT']) {
+    ok(!derivedProse.includes(derived),
+      `nothing is derived from the stated rate — found "${derived}"`);
+  }
+  // The only money on the page is still the flat amount charged, twice: once
+  // against the description and once as the total.
+  eq(d.text.split('GBP 480.00').length - 1, 2, 'the amount charged appears as the line and as the total, and nowhere else');
+
+  // A rate on its own, and a number on its own, are each enough to switch the
+  // sentence — and a stated zero rate prints as a zero rather than vanishing.
+  ok(coachInvoiceDoc(withInv({ taxRatePct: 0 })).text.includes('0%'), 'a stated zero rate is printed');
+  ok(coachInvoiceDoc(withInv({ taxRatePct: 0 })).text.includes(INVOICE_TAX_STATED), 'and carries the stated sentence');
+  ok(!coachInvoiceDoc(withInv({})).text.includes('Rate stated by the issuer'),
+    'an invoice stating no rate prints no rate line rather than "none" or "0%"');
+  ok(!coachInvoiceDoc(withInv({})).text.includes('registration number:'),
+    'and no registration line either');
+
+  // A typed registration number is a person's typed string and goes through
+  // escaping like every other one. Without it a number containing an angle
+  // bracket takes the rest of the document with it.
+  const nasty = coachInvoiceDoc(withInv({ taxRegistration: 'GB<script>1</script>' }));
+  ok(!nasty.html.includes('<script>'), 'a typed registration number cannot break the markup');
+  ok(nasty.html.includes('&lt;script&gt;'), 'it is escaped rather than stripped');
+
+  // And the blockers refuse a rate rather than correcting one.
+  const good: InvoiceDraft = { billTo: 'Dana', description: '8 sessions', amountText: '480', currency: 'GBP', kind: 'requested', issuedOn: '2026-08-31' };
+  eq(invoiceBlockers({ ...good, taxRateText: '20' }).length, 0, 'a stated rate does not block an invoice');
+  eq(invoiceBlockers({ ...good, taxRateText: '' }).length, 0, 'nor does an empty one — both fields are optional');
+  eq(invoiceBlockers({ ...good, taxRateText: '120' }).length, 1, 'a rate above a hundred is refused');
+  eq(invoiceBlockers({ ...good, taxRegistration: 'X'.repeat(61) }).length, 1, 'and a registration number longer than the column');
+  eq(invoiceBlockers({ ...good, taxRegistration: 'X'.repeat(60) }).length, 0, 'but not one that fits');
+}
+
 /* ── 2. no figure without its currency ─────────────────────────────────────
    Repple is white-labelled: tenants.currency is nullable on purpose and null
    means "nobody has told us". A bare number on an invoice is not an amount of
@@ -150,6 +235,37 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
   eq(draftMinorUnits('1,234', 'GBP'), null, 'a thousands separator is refused, not guessed at — "1,234" is two different amounts in two countries');
   eq(draftMinorUnits('45.50', null), null, 'and nothing at all is computed without a currency');
   eq(draftMinorUnits('', 'GBP'), null, 'an empty box is not zero');
+
+  // The other end of the same mistake, and the half this function used to get
+  // wrong. A Kuwaiti dinar has a THOUSAND fils in it, so 12.500 is 12500 minor
+  // units. Multiplied by a hundred it was 1250 — KWD 1.250, a tenth of the
+  // amount, printed on a document under the coach's own name.
+  eq(draftMinorUnits('12.500', 'KWD'), 12500, 'a three-decimal currency is multiplied by a THOUSAND, not a hundred');
+  eq(draftMinorUnits('12.500', 'kwd'), 12500, 'and the code is read case-insensitively');
+  eq(draftMinorUnits('12.5', 'KWD'), 12500, 'a short fraction is padded to the currency’s own places, not read as hundredths');
+  eq(draftMinorUnits('12', 'BHD'), 12000, 'and a whole dinar is a thousand fils');
+  eq(draftMinorUnits('12.345', 'KWD'), null, 'Stripe charges thousandths in tens, so a fils in the last place is refused rather than rounded');
+  eq(draftMinorUnits('12.5000', 'KWD'), null, 'four places is not an amount in a three-place currency');
+  eq(draftMinorUnits('40.00', 'OMR'), 40000, 'and the same holds for every one of the five');
+  eq(draftMinorUnits('0.000', 'KWD'), null, 'a nought is still not an amount to invoice, whatever the currency');
+}
+
+/* ── 3b. the refusal carries the reason, and the reason names the currency ─
+   A coach in Kuwait told "at most two decimal places" about a three-place
+   currency goes back to the box with no idea what is wrong with what they
+   typed. The blocker quotes the reader rather than a sentence written here. */
+
+{
+  const kw: InvoiceDraft = { billTo: 'Nasser', description: 'Ten pack', amountText: '12.345', currency: 'KWD', kind: 'requested', issuedOn: '2026-08-31' };
+  const b = invoiceBlockers(kw);
+  eq(b.length, 1, 'one blocker, about the amount');
+  ok(/KWD/.test(b[0]), 'and it names the currency it is talking about');
+  ok(!/two decimal/i.test(b[0]), 'and never says "two decimal places" about a three-place currency');
+  eq(invoiceBlockers({ ...kw, amountText: '12.500' }).length, 0, 'a real dinar amount is not blocked');
+
+  const jp = invoiceBlockers({ ...kw, currency: 'JPY', amountText: '500.50' });
+  eq(jp.length, 1, 'a decimal in yen is one blocker');
+  ok(/JPY/.test(jp[0]), 'and it says which currency has no smaller unit');
 }
 
 /* ── 4. what stops an invoice being issued ────────────────────────────────

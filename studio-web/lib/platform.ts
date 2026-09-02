@@ -59,6 +59,18 @@ import { supabase } from './supabase';
 // platform's book — the one place on the product where the currencies are
 // whatever Stripe billed rather than whatever one gym set.
 import { minorMoney } from '@lib/coachMoney';
+// Repple's own book obeys Repple's own rule. Both reads below are FINISHED with
+// `readAll` rather than sent bare: PostgREST stops at a thousand rows and says
+// nothing, and every figure on /platform is a count or a sum over one of these
+// arrays. The moment there are a thousand and one subscriptions the page would
+// have reported a flat thousand, with no dash and nothing to doubt, on the one
+// screen used to decide whether the business is growing.
+//
+// `readAll`, not `assertWhole`. These are the shape its header describes — a
+// read the caller has already bounded (the whole subscription book is finite by
+// construction; the invoice read carries a ninety-day window) where the screen
+// genuinely needs all of it and refusing would take the screen away for no gain.
+import { readAll } from '@lib/rowCap';
 
 /** Whether the signed-in account may read the platform's own book.
  *
@@ -118,22 +130,67 @@ export interface PlatformBook {
  *  size. A screen that needs more than this needs a warehouse, not a browser. */
 export const INVOICE_WINDOW_DAYS = 90;
 
+/**
+ * One read, paged to the end, or `null`.
+ *
+ * The `null`-on-failure contract this file has always kept is why this wrapper
+ * exists. `readAll` THROWS — on a PostgREST error and on overshooting the page
+ * ceiling — and an unhandled throw out of `fetchPlatformBook` would take all
+ * three reads down together, so a subscriptions blip would blank the invoice
+ * figures too. Caught per read, each one keeps its own outcome, and a
+ * truncation is now a `null` (a dash on the page) instead of a confident
+ * thousand.
+ */
+async function pagedOrNull<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: unknown }>,
+  what: string,
+): Promise<T[] | null> {
+  try {
+    return (await readAll<any>(page, what)) as T[];
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchPlatformBook(): Promise<PlatformBook> {
   const since = new Date(Date.now() - INVOICE_WINDOW_DAYS * 86400000).toISOString();
   const [subs, invs, custs] = await Promise.all([
-    supabase.from('subscriptions').select('plan, status, current_period_end, cancel_at_period_end'),
-    supabase.from('invoices').select('id, amount_due, currency, status, attempt_count, created_at')
-      .gte('created_at', since).order('created_at', { ascending: false }),
+    // `readAll`'s contract is a TOTAL order — one that cannot tie — because
+    // every page is a separate HTTP request. `subscriptions.trainer_id` is the
+    // primary key (supabase/parts/20-billing.sql:15), so it cannot tie. It is
+    // not in the select list and does not need to be: PostgREST orders on the
+    // column, and this screen deliberately carries no identity for anybody.
+    pagedOrNull<any>(
+      (from, to) => supabase.from('subscriptions')
+        .select('plan, status, current_period_end, cancel_at_period_end')
+        .order('trainer_id', { ascending: true })
+        .range(from, to),
+      'the platform\u2019s subscriptions',
+    ),
+    // Ninety days is a bound, not a cap: a busy quarter can still cross a
+    // thousand invoices, and the page sums `amount_due` over this array. `id`
+    // is the Stripe invoice id and the primary key, so it breaks the tie that
+    // `created_at` alone leaves — two invoices raised in the same millisecond
+    // are two rows Postgres may return in either order.
+    pagedOrNull<any>(
+      (from, to) => supabase.from('invoices')
+        .select('id, amount_due, currency, status, attempt_count, created_at')
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, to),
+      'the platform\u2019s invoices in this window',
+    ),
     supabase.from('billing_customers').select('trainer_id', { count: 'exact', head: true }),
   ]);
   return {
-    subscriptions: subs.error ? null : (subs.data ?? []).map((r: any) => ({
+    subscriptions: subs == null ? null : subs.map((r: any) => ({
       plan: r.plan ?? null,
       status: r.status ?? null,
       currentPeriodEnd: r.current_period_end ?? null,
       cancelAtPeriodEnd: r.cancel_at_period_end === true,
     })),
-    invoices: invs.error ? null : (invs.data ?? []).map((r: any) => ({
+    invoices: invs == null ? null : invs.map((r: any) => ({
       id: String(r.id),
       amountDue: typeof r.amount_due === 'number' ? r.amount_due : (Number.isFinite(Number(r.amount_due)) ? Number(r.amount_due) : null),
       currency: (r.currency ?? '').trim() || null,

@@ -30,7 +30,7 @@ import {
 import { VARIANT } from '../lib/variant';
 import type { TrainingSession } from '../lib/types';
 import type { DisputeKind } from '../lib/sessionDispute';
-import { NOT_MOVED, type RescheduleRefusal, type RescheduleReport } from '../lib/reschedule';
+import { NOT_MOVED, COACH_NOT_MOVED, type RescheduleRefusal, type RescheduleReport, type CoachMoveRefusal, type CoachMoveReport } from '../lib/reschedule';
 // Named explicitly. Without the import `reportError` resolves to the DOM global
 // of the same name, which takes ONE argument and swallows the context string —
 // so every report from this file would have arrived unattributable.
@@ -119,6 +119,23 @@ interface SessionsValue {
    * rather than priced — supabase/parts/243 has the argument in full.
    */
   rescheduleMyBooking: (fromId: string, toId: string) => Promise<RescheduleReport>;
+  /**
+   * The COACH moving one of their booked sessions into another of their own
+   * open slots, atomically.
+   *
+   * Separate from `rescheduleMyBooking` because the server functions are
+   * separate and must be: `reschedule_my_session` scopes on
+   * `client_id = auth.uid()`, so a coach calling it is refused as `not_yours`,
+   * and widening it would let a member move somebody else's booking.
+   * supabase/parts/461 is the coach's, scoped on `trainer_id`.
+   *
+   * Never charges, and never draws or returns a pack credit — the credit
+   * follows the member and travels with the booking. The freed hour goes to the
+   * head of its waitlist inside the same transaction, so it is never observable
+   * as bookable while somebody is waiting, and the client being moved is
+   * already in their new slot before anybody else is offered the old one.
+   */
+  rescheduleClientSession: (fromId: string, toId: string) => Promise<CoachMoveReport>;
   /** Client confirms a delivered session, with an optional comment for the trainer.
    *  Goes through the `approve_session` RPC — a client has no write access to
    *  `sessions` or `session_approvals` directly. */
@@ -602,6 +619,36 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const rescheduleClientSession: SessionsValue['rescheduleClientSession'] = async (fromId, toId) => {
+    if (!USE_SUPABASE) return COACH_NOT_MOVED;
+    try {
+      const { data, error } = await supabase.rpc('reschedule_client_session', { p_from: fromId, p_to: toId });
+      // Checked, and it has to be. A refused RPC resolves with `data: null`,
+      // and falling through to a report that reads as a plain refusal would
+      // have the coach tell a client their hour did not move when nobody knows.
+      if (error || !data) {
+        reportError('sessions.rescheduleClient', error ?? new Error('reschedule_client_session returned nothing'));
+        return COACH_NOT_MOVED;
+      }
+      const r = data as any;
+      const report: CoachMoveReport = {
+        moved: !!r.moved,
+        reason: (r.reason ?? null) as CoachMoveRefusal | null,
+        clientId: typeof r.client === 'string' ? r.client : null,
+        promoted: !!r.promoted,
+        waiting: Number(r.waiting) || 0,
+      };
+      // Two rows on this device are now wrong at once and both are the point of
+      // the screen. Re-read rather than patched: the freed hour may already
+      // belong to whoever was first in line for it.
+      if (report.moved) await hydrate();
+      return report;
+    } catch (e) {
+      reportError('sessions.rescheduleClient', e);
+      return COACH_NOT_MOVED;
+    }
+  };
+
   const approveSession: SessionsValue['approveSession'] = async (id, note) => {
     const trimmed = (note || '').trim();
     if (!USE_SUPABASE) return { ok: false, error: 'Not signed in to the server.' };
@@ -667,7 +714,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   // a stored one would go on saying "4 minutes ago" while the screen stays open.
   const cachedNote = cachedAtLine(cachedAt);
 
-  return <Ctx.Provider value={{ sessions, status, cachedNote, refresh: () => hydrate(), addSession, bookSession, releaseSession, cancelMyBooking, removeSession, approveSession, disputeSession, rescheduleMyBooking }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ sessions, status, cachedNote, refresh: () => hydrate(), addSession, bookSession, releaseSession, cancelMyBooking, removeSession, approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession }}>{children}</Ctx.Provider>;
 }
 
 export function useSessions(): SessionsValue {

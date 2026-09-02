@@ -8,7 +8,8 @@
 import {
   canOfferMove, rescheduleRefusalLine, rescheduleLines, moveConfirm, noSlotsLine,
   pausePreviewLine, pauseOutcomeLines, pausedRangeLine, resumeConfirm, resumedLine,
-  NOT_MOVED, type RescheduleReport, type RescheduleRefusal, type PauseReport,
+  NOT_MOVED, COACH_NOT_MOVED, coachMoveRefusalLine, coachMovedLine,
+  type RescheduleReport, type RescheduleRefusal, type PauseReport, type CoachMoveReport,
 } from './reschedule';
 import type { CancellationPolicy } from './booking';
 
@@ -124,8 +125,19 @@ ok(/no other open times/.test(noSlotsLine('ready')), 'and only a completed one c
 
 /* ── pausing: the preview ──────────────────────────────────────────────── */
 
-eq(pausePreviewLine(0, 0, charges), 'Nothing is booked in those dates yet, so nothing will be cancelled.',
+ok(/do not expect anything to be cancelled/.test(pausePreviewLine(0, 0, charges)),
   'an empty range promises nothing');
+ok(/authority/.test(pausePreviewLine(0, 0, charges)),
+  'and does not claim the device has the last word on the coach’s calendar');
+
+// The preview counts what THIS DEVICE can see, matched to the series by its
+// slot — `TrainingSession` carries no series id — so it may not be the set the
+// server acts on. It used to say "will be cancelled" as fact over every booked
+// session in the window, including a second standing slot and a one-off.
+ok(/of this arrangement/.test(pausePreviewLine(4, 0, charges)),
+  'the preview names the arrangement it is about rather than the whole diary');
+ok(/we expect/.test(pausePreviewLine(4, 0, charges)),
+  'and states an expectation rather than a fact about somebody’s coach’s calendar');
 ok(/costs nothing/.test(pausePreviewLine(4, 0, charges)),
   'four sessions all outside the window cost nothing, and it says so');
 ok(/does not charge/.test(pausePreviewLine(4, 2, free)),
@@ -136,6 +148,17 @@ const preview = pausePreviewLine(4, 2, charges);
 ok(/2 of them/.test(preview), 'the ones inside the window are counted');
 ok(/GBP 30/.test(preview), 'and priced in the currency they are in');
 ok(/One of them is inside/.test(pausePreviewLine(3, 1, charges)), 'one of them is singular');
+
+// A sentence that names a figure names its currency, or says it cannot. The
+// pause preview quoted "their late fee of 25" to a gym with no currency set and
+// let the member price it in whatever money they happened to think in.
+const pauseNoCcy: CancellationPolicy = { applies: true, noticeHours: 24, fee: 25, currency: null };
+const previewNoCcy = pausePreviewLine(4, 2, pauseNoCcy);
+ok(/hasn’t set a currency/.test(previewNoCcy), 'an unstated currency is said out loud in the preview');
+ok(!/hasn’t set a currency/.test(preview), 'and never when the currency is known');
+ok(!/hasn’t set a currency/.test(pausePreviewLine(4, 2, { ...pauseNoCcy, fee: null })),
+  'nor when there is no figure to be in doubt about');
+
 
 /* ── pausing: what it actually did ─────────────────────────────────────── */
 
@@ -153,6 +176,10 @@ ok(/starts again by itself/.test(nothing), 'and that it comes back on its own');
 const priced = pauseOutcomeLines({ ...base, freed: 2, charged: 1, fees: 30, currency: 'GBP' }).join(' ');
 ok(/2 sessions/.test(priced), 'the freed sessions are counted');
 ok(/GBP 30\.00 in total/.test(priced), 'and the fee is totalled in one currency, to the minor unit');
+const outcomeNoCcy = pauseOutcomeLines({ ...base, freed: 2, charged: 1, fees: 25, currency: null }).join(' ');
+ok(/hasn’t set a currency/.test(outcomeNoCcy), 'and the same of the total afterwards');
+ok(!/hasn’t set a currency/.test(priced), 'which a stated currency does not carry');
+
 
 // The rule that must never bend. AED 30 plus GBP 30 is not 60 of anything.
 const mixed = pauseOutcomeLines({ ...base, freed: 3, charged: 2, fees: null, currency: null, mixedCurrencies: true }).join(' ');
@@ -179,6 +206,47 @@ ok(/no sessions were booked back in/.test(resumedLine(0)),
   'lifting a pause that had nothing left in it says so rather than implying a failure');
 ok(/one session has been booked back in/.test(resumedLine(1)), 'one is singular');
 ok(/3 sessions have been booked back in/.test(resumedLine(3)), 'and more than one is not');
+
+/* ── the coach moving a client's hour ───────────────────────────────────── */
+
+const moveRep = (over: Partial<CoachMoveReport> = {}): CoachMoveReport =>
+  ({ moved: false, reason: null, clientId: null, promoted: false, waiting: 0, ...over });
+
+// Every refusal ends with where the session actually is, because a coach who
+// walks away believing an hour has changed will not be there for it.
+for (const reason of ['taken', 'clash', 'already_started', 'not_yours', 'same_slot'] as const) {
+  const line = coachMoveRefusalLine(moveRep({ reason }), 'Ana', '7am');
+  ok(/has not moved/.test(line), `a ${reason} refusal says the session did not move`);
+  ok(!/undefined|null/.test(line), `and a ${reason} refusal never renders a gap as a word`);
+}
+
+// The one that must NOT claim anything either way. A request that did not reach
+// the server may still have landed.
+const lost = coachMoveRefusalLine(COACH_NOT_MOVED, 'Ana', '7am');
+ok(/may or may not/.test(lost), 'an unreachable move claims neither outcome');
+ok(/Do not tell Ana/.test(lost), 'and says not to tell the client yet');
+ok(!/has not moved/.test(lost), 'and never states the session stayed put, which nobody knows');
+
+// A refusal with no client and no time still says the important half.
+const bare = coachMoveRefusalLine(moveRep({ reason: 'taken' }), null, null);
+ok(/has not moved/.test(bare), 'the sentence survives a missing name and a missing time');
+ok(!/undefined|null/.test(bare), 'without rendering either as a word');
+
+// And the success line. It names where the freed hour went, because a coach who
+// does not know will offer it to a second person.
+const promoted = coachMovedLine(moveRep({ moved: true, promoted: true, waiting: 1 }), 'Ana', '7am', '8am', true);
+ok(/Ana moved from 7am to 8am/.test(promoted), 'the move is stated plainly');
+ok(/waitlist/.test(promoted), 'and the freed hour is accounted for');
+ok(/was sent a notification/.test(promoted), 'and the client is said to have been told');
+
+const untold = coachMovedLine(moveRep({ moved: true }), 'Ana', '7am', '8am', false);
+ok(/could NOT be notified/.test(untold), 'a failed push is said out loud');
+ok(/expecting 7am/.test(untold), 'with what the client still believes');
+ok(/nobody was waiting/.test(untold), 'and an empty waitlist is stated rather than left blank');
+
+const openAgain = coachMovedLine(moveRep({ moved: true, waiting: 2 }), 'Ana', '7am', '8am', true);
+ok(/open again/.test(openAgain), 'an unpromoted hour is reported as open');
+ok(!/nobody was waiting/.test(openAgain), 'and is not called empty while two people are in line');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('reschedule.test.ts — ok');

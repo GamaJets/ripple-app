@@ -38,12 +38,13 @@ import {
   fetchTrainerPay, saveTrainerPay, withResolvedRates, payRateBlocker, parseRate,
   fetchAdjustments, addAdjustment, adjustmentBlocker, adjustmentSign,
   fetchClassPay, reverseSettlement, reversalReasonBlocker, stampRunExtras,
-  runTotal, runCurrencyBlocker, payCurrency,
+  runTotal, runCurrencyBlocker, payCurrency, adjustmentsTotal, scopedToRun, runScopeOf,
   ADJUSTMENT_KINDS, ADJUSTMENT_LABEL, CLASS_PAY_LABEL,
   type PayIndex, type TrainerPay, type Adjustment, type AdjustmentKind,
   type ClassPayLine, type ClassPayKind,
 } from '@lib/gymPay';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
+import { fetchCloses, closedMonthBlocker, type MonthCloseRow } from '@lib/gymClose';
 import { money } from '@lib/gymRecord';
 import { isoDate } from '@lib/format';
 
@@ -152,6 +153,9 @@ export default function Payroll() {
    *  a reversed run put back. */
   const [classPay, setClassPay] = useState<ClassPayLine[] | null>(null);
   const [adjustments, setAdjustments] = useState<Adjustment[] | null>(null);
+  // Every close and reopen this gym has recorded. null is "not read", which is
+  // not the same as "no month is closed" — see the note where it is set.
+  const [closes, setCloses] = useState<MonthCloseRow[] | null>(null);
 
   const [sessions, setSessions] = useState<PtSession[] | null>(null);
   const [trainers, setTrainers] = useState<GymTrainer[] | null>(null);
@@ -193,13 +197,17 @@ export default function Payroll() {
     // sessions — so a screen whose only fault was not knowing what had already
     // been paid instead reported a month with no work in it, and the two wrong
     // facts pointed opposite ways.
-    const [sRes, tRes, rRes, pRes, cRes, aRes] = await Promise.allSettled([
+    const [sRes, tRes, rRes, pRes, cRes, aRes, closesRes] = await Promise.allSettled([
       fetchSessions(supabase, tenantId, p.fromIso, p.toIso),
       fetchGymTrainers(supabase, tenantId),
       fetchSettlements(supabase, tenantId),
       fetchTrainerPay(supabase, tenantId),
       fetchClassPay(supabase, tenantId),
       fetchAdjustments(supabase, tenantId),
+      // Which months this gym has signed off. This screen never asked, so the
+      // period picker offered a closed month exactly like an open one and the
+      // run wrote `period_from` into it — see `closedMonthBlocker`.
+      fetchCloses(supabase, tenantId),
     ]);
 
     if (stale()) return;
@@ -212,6 +220,11 @@ export default function Payroll() {
     // rather than showing a payroll that merely looks unremarkable.
     if (pRes.status === 'fulfilled') { setPay(pRes.value); setPayErr(null); }
     else { setPay(null); setPayErr(failure(pRes, 'what this gym pays each coach')); }
+    // null is "not read", and it deliberately does NOT block: part 481 attaches
+    // the closed-month trigger to `payroll_settlements`, so the database is the
+    // backstop, and refusing payroll over a failed read of the close record
+    // would cost more than it protects.
+    setCloses(closesRes.status === 'fulfilled' ? closesRes.value : null);
     setClassPay(cRes.status === 'fulfilled' ? cRes.value : null);
     setAdjustments(aRes.status === 'fulfilled' ? aRes.value : null);
 
@@ -432,7 +445,19 @@ export default function Payroll() {
     // after its month was settled joins the next run instead of being lost or
     // paid twice, which is the argument supabase/parts/36 makes about sessions
     // and which applies unchanged to anything else a run pays for.
-    for (const c of (classPay ?? []).filter((x) => x.settlementId == null)) {
+    // ── scoped to the period, which they never were ──────────────────────
+    //
+    // `fetchClassPay` is tenant-wide with no date bound, and adjustments carry
+    // an `applies_on` this screen collected and never read. So every unsettled
+    // line in the gym's history joined whichever run was on screen and was
+    // stamped with that run's `period_from`: opening July paid for September's
+    // classes, and a bonus deliberately dated 1 September was filed as August's
+    // cost. `scopedToRun` keeps the period's own lines and anything still
+    // unsettled from BEFORE it — which has no other run coming — and refuses
+    // anything dated after it, which does.
+    for (const c of scopedToRun(
+      (classPay ?? []).filter((x) => x.settlementId == null), (x) => x.taughtOn, period,
+    )) {
       const row = byTrainer.get(c.trainerId);
       if (row) row.classes.push(c);
       else byTrainer.set(c.trainerId, {
@@ -440,7 +465,9 @@ export default function Payroll() {
         outstanding: [], classes: [c], adjustments: [], blocker: null, onRoster: false,
       });
     }
-    for (const a of (adjustments ?? []).filter((x) => x.settlementId == null)) {
+    for (const a of scopedToRun(
+      (adjustments ?? []).filter((x) => x.settlementId == null), (x) => x.appliesOn, period,
+    )) {
       const row = byTrainer.get(a.trainerId);
       if (row) row.adjustments.push(a);
       else byTrainer.set(a.trainerId, {
@@ -465,9 +492,16 @@ export default function Payroll() {
       // answered "Nothing outstanding for this trainer" and left them unpaid.
       const anything = r.outstanding.length + r.classes.length + r.adjustments.length;
       const sessionSide = settleBlocker(r.outstanding, r.line?.unmarked ?? 0);
+      const closedSide = closedMonthBlocker(period.fromDate, closes);
       r.blocker =
         (r.line?.unmarked ?? 0) > 0 ? sessionSide
         : anything === 0 ? 'Nothing outstanding for this trainer.'
+        // A month that is closed stays closed. The run's `period_from` is what
+        // /accounting buckets "Money out" by, so a settlement dated into a
+        // filed month moves a figure the accountant already has. Part 481 makes
+        // the database refuse it; this is the refusal with the run still on
+        // screen, which is a much better place to learn it.
+        : closedSide ? closedSide
         : !ccy ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
         // Two currencies on one run is not a smaller run, it is one nobody can
         // hand over. A coach whose class rate is in EUR and whose gym pays in
@@ -539,6 +573,11 @@ export default function Payroll() {
         // the database rather than stored as a negative payment; that is the
         // right refusal and the screen says so before the button is pressed.
         amountCents: rowOwed(r) ?? 0,
+        // Of which, money the coach spent and is getting back rather than pay.
+        // Null when the adjustments do not agree on a currency — the split is
+        // then two splits and this run has no single figure for either, which
+        // is the same answer the Adjustments column gives.
+        reimbursementCents: adjustmentsTotal(r.adjustments).reimbursementCents,
         sessionIds: r.outstanding.map((s) => s.id),
         // Said, never defaulted — see the note on `method` above.
         method,
@@ -558,6 +597,24 @@ export default function Payroll() {
       setErr(e?.message ?? 'Could not record that settlement.');
     } finally { setSettling(null); }
   };
+
+  // Unsettled extras this run deliberately leaves alone. Counted over the same
+  // rows the run is built from, so the two cannot disagree about what "held
+  // back" means.
+  const heldBack = (() => {
+    const unsettled = [
+      ...(classPay ?? []).filter((x) => x.settlementId == null).map((x) => x.taughtOn),
+      ...(adjustments ?? []).filter((x) => x.settlementId == null).map((x) => x.appliesOn),
+    ];
+    let later = 0;
+    let undated = 0;
+    for (const d of unsettled) {
+      const scope = runScopeOf(d, period);
+      if (scope === 'later') later += 1;
+      else if (scope === 'undated') undated += 1;
+    }
+    return { later, undated };
+  })();
 
   return (
     <Shell me={me} gymName={gymName} current="/payroll">
@@ -594,6 +651,29 @@ export default function Payroll() {
           {period.fromDate} → {period.toDate}
         </span>
       </div>
+
+      {/* What this run is NOT paying, and why. A line held back is invisible
+          otherwise, and an owner who cannot see it reads the run as everything
+          outstanding — which is how the scoping fix would itself become a
+          coach quietly unpaid. */}
+      {heldBack.later || heldBack.undated ? (
+        <p style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '72ch' }}>
+          {heldBack.later ? (
+            <>
+              {heldBack.later} unsettled line{heldBack.later === 1 ? '' : 's'} dated after {period.toDate}{' '}
+              {heldBack.later === 1 ? 'is' : 'are'} not on this run. {heldBack.later === 1 ? 'It belongs' : 'They belong'}{' '}
+              to a later period and will be paid by that period&rsquo;s run.{' '}
+            </>
+          ) : null}
+          {heldBack.undated ? (
+            <>
+              {heldBack.undated} unsettled line{heldBack.undated === 1 ? '' : 's'} carr
+              {heldBack.undated === 1 ? 'ies' : 'y'} no readable date, so {heldBack.undated === 1 ? 'it is' : 'they are'}{' '}
+              left off rather than stamped into a period nobody can place.
+            </>
+          ) : null}
+        </p>
+      ) : null}
 
       <div
         style={{
@@ -1130,15 +1210,34 @@ function Run({ rows, unread, rosterUnread, settling, onSettle, method, onMethod,
         : <span title={r.classes.map((c) => `${c.payKind === 'per_attendee' ? `${c.attendees ?? '?'} × ` : ''}${c.rateCents / 100}`).join(', ')}>
             {r.classes.length}
           </span> },
-    { key: 'adjust', header: 'Adjustments', value: (r) => (r.adjustments.length ? r.adjustments.reduce((a, x) => a + x.amountCents, 0) : null), numeric: true,
+    { key: 'adjust', header: 'Adjustments', value: (r) => adjustmentsTotal(r.adjustments).cents, numeric: true,
       // Signed and coloured, because a deduction and a bonus of the same size
       // are the same digits and opposite money.
+      //
+      // And denominated by the ADJUSTMENTS, not by the gym. This cell used to
+      // reduce `amountCents` across the rows and print `amount(cents, ccy)`
+      // over the result, so a euro reimbursement and a sterling bonus came out
+      // as one sterling figure — on the number the owner reads BEFORE deciding
+      // whether to press Settle. `runCurrencyBlocker` does stop the button, but
+      // it fires after the figure has already been believed.
       render: (r) => {
         if (!r.adjustments.length) return <span className="dash">—</span>;
-        const cents = r.adjustments.reduce((a, x) => a + x.amountCents, 0);
+        const t = adjustmentsTotal(r.adjustments);
+        if (t.cents == null) {
+          return (
+            <span className="dash" title={`${t.count} adjustments in ${t.currencies.join(' and ')}`}>
+              {t.currencies.join(' and ')} — not added
+            </span>
+          );
+        }
         return (
-          <span style={{ color: cents < 0 ? 'var(--crit)' : 'var(--good)' }}>
-            {amount(cents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>}
+          <span
+            style={{ color: t.cents < 0 ? 'var(--crit)' : 'var(--good)' }}
+            title={t.reimbursementCents
+              ? `${amount(t.taxableCents, t.currency) ?? '—'} pay, ${amount(t.reimbursementCents, t.currency) ?? '—'} reimbursed`
+              : undefined}
+          >
+            {amount(t.cents, t.currency) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>}
           </span>
         );
       } },

@@ -158,11 +158,39 @@ export function foodChanged(before: FoodFigures, after: FoodFigures): boolean {
  */
 export type WorkoutPatch = Omit<Partial<WorkoutEntry>, 't' | 'id' | 'loggedBy' | 'amendedAt'>;
 
+/**
+ * One row of the edit sheet's set table.
+ *
+ * ── Why this is an object and not `[reps, kg]` ────────────────────────────
+ *
+ * It was the pair, and the pair cannot say what a set WAS. A 45-second plank
+ * opened in a column headed "Reps" showing 45, and a pull-up opened showing a
+ * load of nothing — because `bw` and `timed` were read by nobody here and
+ * written by nobody either. Saving the entry then dropped both flags off it,
+ * so correcting a typo in one set of a calisthenics session quietly converted
+ * every set in it into an ordinary weighted set worth nothing to any board.
+ *
+ * The flags travel ON the row rather than in arrays beside it, and that is the
+ * whole point: `sets`, `bw`, `timed` and `feel` are four arrays that have to
+ * stay aligned, and adding or removing a row is exactly when they stopped
+ * being. One object per set cannot come apart.
+ */
+export interface WorkoutDraftSet {
+  reps: number;
+  /** Kilograms. On a bodyweight set this is what was ADDED — the belt — which
+   *  is what `setLoadKg` in src/lib/bodyweightSets.ts reads it as. */
+  kg: number;
+  /** The member saying this set was their own body. */
+  bw?: boolean;
+  /** The set was HELD: `reps` is then SECONDS. See src/lib/timedSets.ts. */
+  timed?: boolean;
+}
+
 /** The edit sheet's fields as they stand. `sets` is already numeric because the
  *  sheet edits it as a list of rows rather than as text. */
 export interface WorkoutDraft {
   name: string;
-  sets: [number, number][];
+  sets: WorkoutDraftSet[];
   mins: string;
   dist: string;
   watts: string;
@@ -205,14 +233,27 @@ export function readWorkoutEdit(entry: WorkoutEntry, draft: WorkoutDraft): Edit<
     if (watts > 0) cardio.watts = Math.round(watts); else delete cardio.watts;
     patch.cardio = cardio;
   } else {
-    const kept = draft.sets.filter((s) => s[0] > 0);
-    if (!kept.length) {
+    // Which rows survive, BY INDEX, so everything aligned to `sets` can be
+    // rebuilt against the same decision. `feel` used to be `slice(0, kept
+    // .length)` — a length, not a mapping — so deleting the first of four sets
+    // left set 2's effort answer describing set 1, set 3's describing set 2,
+    // and set 4's answer dropped. A row removed in the middle shifted every
+    // testimony below it onto a different set.
+    const keptIdx = draft.sets.map((s, i) => (s.reps > 0 ? i : -1)).filter((i) => i >= 0);
+    if (!keptIdx.length) {
       return { ok: false, reason: 'Keep at least one set, or delete the entry instead — an entry with nothing in it still counts as a session.' };
     }
-    patch.sets = kept.map((s) => [Math.round(s[0]), s[1]] as [number, number]);
+    const kept = keptIdx.map((i) => draft.sets[i]);
+    patch.sets = kept.map((s) => [Math.round(s.reps), s.kg] as [number, number]);
+    // Written only when there is something to say, and CLEARED when there is
+    // not — an entry whose last bodyweight set was corrected away must not keep
+    // a stale `bw` array describing sets that are no longer there.
+    patch.bw = kept.some((s) => s.bw) ? kept.map((s) => s.bw === true) : undefined;
+    patch.timed = kept.some((s) => s.timed) ? kept.map((s) => s.timed === true) : undefined;
     // Perceived effort is recorded per set, so a set that no longer exists must
-    // not keep carrying somebody's answer for it.
-    if (entry.feel) patch.feel = entry.feel.slice(0, kept.length);
+    // not keep carrying somebody's answer for it — and a surviving set must
+    // keep its own.
+    if (entry.feel) patch.feel = keptIdx.map((i) => entry.feel![i]).filter((f) => f !== undefined);
   }
 
   if (draft.kcal.trim() === '') {

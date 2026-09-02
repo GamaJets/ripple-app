@@ -16,6 +16,7 @@ import { useTheme, PasswordField, PasswordRules } from '../src/ui/components';
 import { passwordMeetsLocalRules, passwordErrorMessage, PASSWORD_MIN } from '../src/lib/passwordRules';
 import { useAuth } from '../src/ui/auth';
 import { useBrand } from '../src/ui/brand';
+import { openLegalDoc } from '../src/ui/legal';
 import { USE_SUPABASE } from '../src/lib/config';
 import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
@@ -322,7 +323,27 @@ export default function Welcome() {
               over-the-air update. Put the buttons back in the same commit that
               finishes that, and not before. */}
 
-          <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>{USE_SUPABASE ? 'Your account is securely stored. By continuing you agree to the Terms & Privacy Policy.' : 'Not connected to Repple — any email/password works and stays on this device. Real accounts activate when the backend is connected.'}</Text>
+          {/* ── the two documents this sentence asserts agreement to ───────
+              This read "By continuing you agree to the Terms & Privacy Policy"
+              and there was no route to either — not from here, and not from
+              anywhere else in the app. Consent to a document nobody can open is
+              not consent. Both now open in a sheet over this screen, so a
+              half-filled sign-up form is still here afterwards. The URLs are the
+              BRAND's; see src/lib/brands.ts. */}
+          {USE_SUPABASE ? (
+            <View style={{ marginTop: sp.xl }}>
+              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
+                Your account is securely stored. By continuing you agree to the{' '}
+                <Text accessibilityRole="link" style={{ color: t.brand, textDecorationLine: 'underline' }}
+                  onPress={() => { void openLegalDoc('terms'); }}>Terms of Service</Text>
+                {' '}and the{' '}
+                <Text accessibilityRole="link" style={{ color: t.brand, textDecorationLine: 'underline' }}
+                  onPress={() => { void openLegalDoc('privacy'); }}>Privacy Policy</Text>.
+              </Text>
+            </View>
+          ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>Not connected to {appName} — any email/password works and stays on this device. Real accounts activate when the backend is connected.</Text>
+          )}
           </>
           )}
         </ScrollView>

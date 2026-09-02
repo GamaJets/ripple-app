@@ -47,6 +47,33 @@
 // calendar as much as a coach with forty, so 'hybrid' and 'inperson' produce
 // the same app. Only an entirely remote book, declared remote, is remote.
 //
+// ── THE TAB BAR IS DELIBERATELY NOT TOUCHED ───────────────────────────────
+//
+// Schedule is one of the six tabs, and narrowing the bar for a remote coach is
+// the obvious next move. It is not made here, for two reasons written down so
+// nobody has to rediscover them:
+//
+//   1. src/lib/guide.ts DERIVES the first-run tour from the tab list, one card
+//      per tab, and its header is an account of what happened last time those
+//      two came apart: "it came to tell coaches they had five tabs while the bar
+//      had six." A bar narrowed by this fact and a tour still derived from the
+//      full list would put that bug straight back, on a brand-new coach's very
+//      first run, walking them through a calendar they had just been told they
+//      do not have. GUIDE_INTRO and TOUR_INTRO in guideContent.ts spell "Six
+//      tabs" out in words as well.
+//   2. The fact settles ASYNCHRONOUSLY. Both halves of it are reads, so the
+//      first paint is always the widest answer and the narrow one arrives a
+//      moment later — which in a tab bar is six items becoming five under a
+//      coach's thumb.
+//
+// Either could be handled. Neither is worth handling for one tab, when the
+// screens BEHIND the bar can respond honestly and reversibly instead: the
+// analytics hero leads with the figure that describes the coach's actual
+// business, the dashboard's in-person tools drop below the rest with the reason
+// on them, and the setup checklist stops asking for published hours nobody can
+// book. A coach who takes their first in-person client gets all of that back
+// with no bar having flickered at anybody.
+//
 // ── And what "put away" is allowed to mean ─────────────────────────────────
 //
 // De-emphasised. Never deleted, never unsearchable, never unreachable.

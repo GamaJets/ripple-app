@@ -14,6 +14,9 @@ import {
   outcomeMessage,
   segments,
   readableLetters,
+  ideographCount,
+  looksNonLatin,
+  documentWasRead,
   severityRank,
   AREA_TERMS,
 } from './injuryExtract';
@@ -159,6 +162,52 @@ ok(/not a diagnosis/i.test(outcomeMessage('candidates').note),
 eq(segments('One line.\nTwo; three. Four').length, 4, 'segments split on newlines and on sentence ends');
 eq(segments('   ').length, 0, 'and whitespace is not a segment');
 eq(readableLetters('a1b2c3 !!'), 3, 'readable length counts letters, not characters');
+
+/* ── a document in an alphabet this file cannot read ───────────────────── */
+//
+// `readableLetters` was `/[a-z]/gi` — the letters of ONE alphabet, called
+// "letters". A Greek, Cyrillic, Hebrew or CJK report that OCR read perfectly
+// scored zero, landed on 'unreadable', and the member was told to take a
+// straighter, brighter photo of a page that had been read fine. On the one
+// screen in this app that touches a medical document.
+
+const GREEK = 'Έκθεση φυσικοθεραπείας. Ο ασθενής αναφέρει πόνο στο δεξί γόνατο μετά από τραυματισμό.';
+const CYRILLIC = 'Заключение врача. Пациент жалуется на боль в правом колене после травмы.';
+const HEBREW = 'דוח פיזיותרפיה. המטופל מדווח על כאב בברך ימין לאחר פציעה בעת אימון.';
+const JAPANESE = '理学療法報告書。患者は右膝の痛みを訴えている。';
+
+ok(readableLetters(GREEK) > 24, `Greek letters are letters — counted ${readableLetters(GREEK)}`);
+ok(readableLetters(CYRILLIC) > 24, `so are Cyrillic ones — counted ${readableLetters(CYRILLIC)}`);
+ok(readableLetters(HEBREW) > 24, `and Hebrew ones — counted ${readableLetters(HEBREW)}`);
+ok(ideographCount(JAPANESE) >= 8, `and a Japanese report is read as read — counted ${ideographCount(JAPANESE)}`);
+
+for (const [what, text] of [['Greek', GREEK], ['Cyrillic', CYRILLIC], ['Hebrew', HEBREW], ['Japanese', JAPANESE]] as const) {
+  const r = extractFromDocument(text);
+  ok(r.outcome !== 'unreadable',
+    `a ${what} report that scanned perfectly is not reported as a bad photograph — got ${r.outcome}`);
+  eq(r.outcome, 'unsupported-script',
+    `and it is not reported as a document describing no injury either — ${what}`);
+}
+
+// A genuinely unreadable page is still unreadable, in either script.
+eq(extractFromDocument('|| >< 8# ~~ ^^').outcome, 'unreadable', 'punctuation is still not text');
+eq(extractFromDocument('。、。、').outcome, 'unreadable', 'and neither is CJK punctuation on its own');
+
+ok(looksNonLatin(GREEK), 'a Greek page is judged non-Latin');
+ok(!looksNonLatin(SHOPPING), 'an English one is not');
+// A letterhead in English on a Greek report does not make the report English.
+ok(looksNonLatin('Athens Sports Clinic ' + GREEK), 'nor does an English letterhead over a Greek body');
+ok(!looksNonLatin(''), 'and nothing at all is not a script judgement');
+ok(documentWasRead(JAPANESE), 'a short Japanese report clears the floor written for an alphabet');
+
+const script = outcomeMessage('unsupported-script');
+ok(/only read English/i.test(script.title), 'the sentence says what the limit actually is');
+ok(/Nothing is wrong with your photo/i.test(script.note),
+  'and clears the member of a fault that was never theirs');
+ok(script.title !== failed.title && script.title !== none.title,
+  'three different facts, three different sentences');
+ok(/only understands English/i.test(none.note),
+  'and a Latin-script report in French or Spanish is told the limit too, since nothing can detect it');
 
 ok(!AREA_TERMS.some((t) => t.area === 'other'),
   '"other" is never proposed — its label is a word that appears in ordinary prose');

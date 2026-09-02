@@ -38,6 +38,7 @@ import {
 } from '../../src/lib/wearables/appleHealthWrite';
 import { reportError } from '../../src/lib/reportError';
 import { readSleepFromDevices } from '../../src/lib/wearables/sleep';
+import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/wearables/liveNotes';
 // One answer to "is this connected", shared with Recovery. See
 // src/lib/wearableLink.ts — this screen and that one used to compute it
 // separately and contradict each other in front of the same client.
@@ -333,6 +334,18 @@ export default function Devices() {
  const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.totalKcal != null || w.today.heartRateAvg != null || w.today.steps != null);
 
  const devicesWord = connected.length === 1 ? 'device' : 'devices';
+ // The panel below is gated on ANY provider being connected, and its empty
+ // state was written for one: "Wear your Apple Watch", "Comes from your
+ // iPhone", and a footnote saying heart rate and calories need an Apple Watch.
+ // src/lib/wearables/registry.ts lists Google Fit / Health Connect as a
+ // connectable provider reading all five metrics, so an Android member was
+ // being told to wear hardware they do not own on the one screen whose job is
+ // explaining their device. WHOOP does not report steps at all, and was told
+ // to wear an iPhone about it.
+ //
+ // Derived from the catalogue now — see src/lib/wearables/liveNotes.ts, which
+ // is where the reasoning and the test live.
+ const connectedMeta = connected.map((p) => p.meta);
  // Active where a device gives it, whole-day otherwise, and never one label on
  // the other's number.
  const energy: { kcal: number | null; kind: 'active' | 'total'; from: string } = (() => {
@@ -397,16 +410,16 @@ export default function Devices() {
    <Section>
     <SectionHead title="Live Today" note={`${connected.length} ${devicesWord}`} onPress={() => setDetail('source')} />
     <ListRow icon="heart" title="Average Heart Rate"
-     note={w.today.heartRateAvg == null ? 'Wear your Apple Watch' : `${num(w.today.heartRateAvg)} bpm across today's samples`}
+     note={w.today.heartRateAvg == null ? awaitingNote('heartRate', connectedMeta) : `${num(w.today.heartRateAvg)} bpm across today's samples`}
      onPress={() => setDetail('hr')} />
     <ListRow icon="trending" title="Steps"
-     note={w.today.steps == null ? 'Comes from your iPhone' : `${num(w.today.steps)} today`}
+     note={w.today.steps == null ? awaitingNote('steps', connectedMeta) : `${num(w.today.steps)} today`}
      onPress={() => setDetail('steps')} />
     <ListRow icon="clock" title="Connected Sources"
      note={connected.map((p) => p.meta.name).join(' · ')}
      onPress={() => setDetail('source')} />
     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-     Updates automatically. Steps come from your iPhone; heart rate &amp; calories need an Apple Watch (wear it).
+     {liveFootnote(connectedMeta)}
     </Text>
    </Section>
   </>) : null}
@@ -812,7 +825,7 @@ export default function Devices() {
        work. It now names only the two that do, and says what the other two
        need — which is the same thing their rows say, rather than the opposite. */}
    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-    Apple Health reads your paired Apple Watch through HealthKit. WHOOP and Oura connect through their own APIs — sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
+    Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs — sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
    </Text>
   </Section>
  </ScrollView>
@@ -828,7 +841,13 @@ export default function Devices() {
      </View>
      <Text style={{ ...value(34), color: t.ink, marginBottom: sp.md }}>{DETAILS[detail].value}</Text>
      <Text style={{ ...ty.body, color: t.ink2 }}>{DETAILS[detail].blurb}</Text>
-     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Manage what {BRAND.label} can read in Apple Health ▸ Sharing ▸ {BRAND.label}.</Text>
+     {/* Apple Health ▸ Sharing is the right answer on an iPhone and no answer
+         at all on Android, where the same setting is in Health Connect, or on
+         a WHOOP-only account, where nothing on the phone governs it. Null
+         when nothing is connected. */}
+     {permissionsNote(connectedMeta, BRAND.label) ? (
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{permissionsNote(connectedMeta, BRAND.label)}</Text>
+     ) : null}
     </>
    ) : null}
   </View>

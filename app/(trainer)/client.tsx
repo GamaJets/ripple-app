@@ -98,8 +98,8 @@ import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useAuthRevision } from '../../src/ui/authRevision';
 import { useAuth } from '../../src/ui/auth';
 import {
-  assessDrift, fetchClientActivity, DEFAULT_WINDOWS, DRIFT_LABEL,
-  type Drift,
+  assessDrift, readClientActivity, DEFAULT_WINDOWS, DRIFT_LABEL,
+  type ActivityEvent, type Drift,
 } from '../../src/lib/clientDrift';
 import { appLocale } from '../../src/lib/locale';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
@@ -144,6 +144,36 @@ import {
   canLogContact, channelOptions, contactGapLine, contactInsert, contactScope,
   contactScopeLine, draftBlocker, outcomeOptions,
 } from '../../src/lib/coachContacts';
+// ── the money on the client detail screen ─────────────────────────────────
+//
+// R1. Everything below is READ from the modules that already own it. Nothing
+// here computes a second lifetime value: `clientValue` is the one, it lives in
+// src/lib/clientValue.ts, and app/(trainer)/money.tsx renders the same figure
+// from the same function over the same three reads. Two places that both
+// "add up what somebody paid" is how a coach comes to be shown two answers to
+// the question they are about to end a relationship on.
+import {
+  clientValue, valueEmptyLine, valueSpanLine, valueStatus,
+  VALUE_IS_PAST, VALUE_MAY_DOUBLE_COUNT, VALUE_NEEDS_YOUR_RECORDS,
+  type ClientValue,
+} from '../../src/lib/clientValue';
+import { minorMoney } from '../../src/lib/coachMoney';
+import { fetchClientPurchases, type CoachPurchase } from '../../src/lib/connect';
+import { fetchMySubscribers, fetchMySubscriptionPayments, statusLabel, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
+import { fetchMyReceipts } from '../../src/ui/coachReceipts';
+import { type CoachReceipt } from '../../src/lib/coachReceipts';
+import { fetchMyInvoices } from '../../src/ui/coachInvoices';
+import { ageingBook, invoiceNumber, money as invoiceMoney, type CoachInvoice } from '../../src/lib/coachInvoice';
+// The reading half of the retention log. R2 — the writing half
+// (`CHANNELS`, `CONTACT_OUTCOMES`, `triedLine`) has been on this screen since
+// it was built; the analysis of the coach's own calls was reachable only from
+// a gym owner's laptop. `WHY_NO_RATE` travels with it and is printed: this is
+// a follow-up ledger, never a success rate.
+import {
+  assessAllFollowUps, summariseFollowUps, loopHeadline, FOLLOW_UP_LABEL, WHY_NO_RATE,
+  FOLLOW_UP_READ_DAYS, FOLLOW_UP_CONTACT_DAYS,
+  type FollowUpRead,
+} from '../../src/lib/interventions';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
@@ -282,25 +312,70 @@ export default function ClientScreen() {
 
   const [drift, setDrift] = useState<Drift | null>(null);
   const [driftFailed, setDriftFailed] = useState(false);
+  /**
+   * The same activity read, kept whole, for R2.
+   *
+   * The drift hero needs 56 days. Judging what FOLLOWED a phone call needs the
+   * client's settled pattern as it stood BEFORE that call, so a contact made
+   * ninety days ago needs ninety days plus the drift history behind it —
+   * `FOLLOW_UP_READ_DAYS`. The extra rows are read once, here, rather than by a
+   * second query over the same four tables.
+   *
+   * `assessDrift` is still handed exactly the 56 days it was handed before, by
+   * filtering — its `recordFrom` is the earlier of `since` and the first event
+   * it can see, so widening the read would quietly widen `observedDays` and
+   * move a client's band. The hero is not this item's to change.
+   *
+   * A truncated read is NOT passed to the follow-up assessment at all. Its far
+   * end is covered by `readFromMs`, but `readClientActivity` puts no ORDER on
+   * its four queries, so a truncated page is an ARBITRARY thousand rows rather
+   * than the newest thousand — and the missing ones are exactly those that
+   * would say somebody came back. Where that happens the drift hero is read
+   * again at its own narrower window rather than computed off the wide one, so
+   * this item cannot degrade a verdict that was working.
+   */
+  const [activity, setActivity] = useState<{ events: ActivityEvent[]; readFromMs: number; truncated: boolean } | null>(null);
   const joinedAt = client?.joinedAt ?? null;
   useEffect(() => {
     if (!canRead || !id) return;
     let live = true;
-    setDrift(null); setDriftFailed(false);
+    setDrift(null); setDriftFailed(false); setActivity(null);
     (async () => {
       try {
-        const events = await fetchClientActivity(supabase, [id], {
-          days: DEFAULT_WINDOWS.historyDays,
+        const readFromMs = Date.now() - FOLLOW_UP_READ_DAYS * 86_400_000;
+        const read = await readClientActivity(supabase, [id], {
+          days: FOLLOW_UP_READ_DAYS,
           tenantId: tenant?.id ?? null,
         });
+        if (!live) return;
+        const unusable = read.truncated || read.notAsked.length > 0;
+        // The wide read came back at a row ceiling, so the DRIFT hero is read
+        // again at its own window rather than computed off it. `readClientActivity`
+        // puts no ORDER on its four queries — a truncated page is an arbitrary
+        // thousand rows, not the newest thousand — so a client who logs enough
+        // to overflow six months would otherwise have their last-seen verdict
+        // drawn from whichever rows the server happened to return. That is a
+        // regression this item must not introduce into a figure that was
+        // working, and it costs one extra query only for the clients it
+        // actually happens to.
+        const driftEvents = unusable
+          ? (await readClientActivity(supabase, [id], {
+              days: DEFAULT_WINDOWS.historyDays,
+              tenantId: tenant?.id ?? null,
+            })).byClient[id] ?? []
+          : (read.byClient[id] ?? []).filter((e) => {
+              const at = Date.parse(e.at);
+              return Number.isFinite(at) && at >= Date.now() - DEFAULT_WINDOWS.historyDays * 86_400_000;
+            });
         if (!live) return;
         // `since` is when they joined the book. Without it a client added
         // yesterday and a client silent for eight weeks are the same shape of
         // nothing — see the note in clientDrift.ts.
-        setDrift(assessDrift({ clientId: id, events: events[id] ?? [], since: joinedAt }));
+        setDrift(assessDrift({ clientId: id, events: driftEvents, since: joinedAt }));
+        setActivity({ events: read.byClient[id] ?? [], readFromMs, truncated: unusable });
       } catch (e) {
         reportError('client.drift', e);
-        if (live) { setDrift(null); setDriftFailed(true); }
+        if (live) { setDrift(null); setDriftFailed(true); setActivity(null); }
       }
     })();
     return () => { live = false; };
@@ -621,6 +696,85 @@ export default function ClientScreen() {
   const creditShortfall = useMemo(() => shortfallLine(creditLedger), [creditLedger]);
   const creditsLoading = packRows === undefined || passRows === undefined || creditRows === undefined;
   const creditsUnread = !creditsLoading && (packRows === null || passRows === null || creditRows === null);
+
+  /* ── what they have paid, what they are on, and what they owe ──────────
+   *
+   * R1. Until this existed the client detail screen — the screen a coach ends
+   * a relationship from, offers a discount from, and decides whether to chase
+   * from — carried no money at all. A £2,400 client and a £120 client went
+   * through the same two-tap dialog and looked identical on the way in.
+   *
+   * FOUR reads, and they fail independently, which is the whole reason
+   * `clientValue` takes the three statuses as a SET rather than composing them
+   * here: a figure that looks trustworthy while the CASH half is unread is
+   * wrong for most coaches and wrong in the direction that makes them
+   * undervalue the person in front of them. See src/lib/clientValue.ts.
+   *
+   * Nothing here adds anything up. `clientValue` owns the total,
+   * `ageingBook` owns what is outstanding, `statusLabel` owns the subscription
+   * word — each of them already rendered somewhere else in this app, and a
+   * second implementation on this screen is a second answer to the question a
+   * coach is about to act on.
+   */
+  const [sales, setSales] = useState<{ rows: CoachPurchase[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  const [renewals, setRenewals] = useState<{ rows: SubscriptionPayment[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  const [receipts, setReceipts] = useState<{ rows: CoachReceipt[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  const [subs, setSubs] = useState<{ rows: Subscriber[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  const [invoices, setInvoices] = useState<{ rows: CoachInvoice[]; status: LoadStatus }>({ rows: [], status: 'loading' });
+  useEffect(() => {
+    if (!canRead || !id) return;
+    let live = true;
+    setSales({ rows: [], status: 'loading' });
+    setRenewals({ rows: [], status: 'loading' });
+    setReceipts({ rows: [], status: 'loading' });
+    setSubs({ rows: [], status: 'loading' });
+    setInvoices({ rows: [], status: 'loading' });
+    (async () => {
+      const [p, r, rec, sb, inv] = await Promise.all([
+        fetchClientPurchases(),
+        fetchMySubscriptionPayments(),
+        fetchMyReceipts(),
+        fetchMySubscribers(),
+        fetchMyInvoices(),
+      ]);
+      if (!live) return;
+      setSales(p); setRenewals(r); setReceipts(rec); setSubs(sb); setInvoices(inv);
+    })();
+    return () => { live = false; };
+  }, [canRead, id]);
+
+  /** The three statuses as one set, passed whole to `clientValue`. Never
+   *  composed here — the set IS the argument, and a caller that took two of
+   *  the three is the failure clientValue.ts was written about. */
+  const valueReads = useMemo(
+    () => ({ purchases: sales.status, renewals: renewals.status, receipts: receipts.status }),
+    [sales.status, renewals.status, receipts.status],
+  );
+  const value: ClientValue | null = useMemo(
+    () => (id ? clientValue(id, sales.rows, renewals.rows, receipts.rows, valueReads) : null),
+    [id, sales.rows, renewals.rows, receipts.rows, valueReads],
+  );
+  const valueRead = useMemo(() => valueStatus(valueReads), [valueReads]);
+
+  /** This client's subscription to this coach, where there is one. Null under a
+   *  read that did not land, which is not the same as a client who is not
+   *  subscribed — the section says which. */
+  const sub = useMemo(
+    () => (subs.status === 'ready' && id ? (subs.rows.find((r) => r.client_id === id) ?? null) : null),
+    [subs.status, subs.rows, id],
+  );
+
+  /** What this client owes, aged, over the coach's own invoice book. Filtered
+   *  to them BEFORE `ageingBook` so the outstanding figure is theirs and not
+   *  the coach's whole ledger. */
+  const owed = useMemo(
+    () => ageingBook(
+      id ? invoices.rows.filter((iv) => iv.clientId === id) : [],
+      id ? invoices.status : 'error',
+      todayISO,
+    ),
+    [invoices.rows, invoices.status, id, todayISO],
+  );
 
   /**
    * Days the client ticked ANYTHING, out of the window.
@@ -953,6 +1107,56 @@ export default function ClientScreen() {
   const cScopeLine = contactScopeLine(cScope, who);
   /** Why there is nothing in it, or null when there is. */
   const cGapLine = contactGapLine(contactStatus, contacts ? contacts.length : 0, who);
+
+  /* ── and whether any of it landed ──────────────────────────────────────
+   *
+   * R2. The writing half of src/lib/interventions.ts has been on this screen
+   * since it was built. The reading half — `assessAllFollowUps`,
+   * `summariseFollowUps`, `loopHeadline` — was imported by exactly one file in
+   * the repository, a gym owner's page in studio-web. So the coach's phone was
+   * a write-only retention log: the person who made the calls, and the only
+   * person who will change their behaviour because of what followed them, was
+   * the one who could not see it.
+   *
+   * Null in, null out, at every gate. A tally over a contact list that did not
+   * come back whole, or over an activity read that was truncated, is a claim
+   * about calls or days that were never in it.
+   */
+  const followUps = useMemo<FollowUpRead[] | null>(() => {
+    if (contactStatus !== 'ready' || !contacts || !id) return null;
+    if (!activity || activity.truncated) return null;
+    const from = nowMs - FOLLOW_UP_CONTACT_DAYS * 86_400_000;
+    const recent = contacts.filter((c) => {
+      const at = Date.parse(c.at);
+      // An unreadable date is KEPT. `assessAllFollowUps` reports it as its own
+      // refusal, and dropping it here would quietly under-count what the gym
+      // actually did.
+      return !Number.isFinite(at) || at >= from;
+    });
+    if (recent.length === 0) return null;
+    return assessAllFollowUps(recent, () => activity.events, {
+      now: nowMs,
+      readFromMs: activity.readFromMs,
+    });
+  }, [contactStatus, contacts, id, activity, nowMs]);
+  const loopTally = useMemo(() => summariseFollowUps(followUps), [followUps]);
+  const loopLine = useMemo(() => loopHeadline(loopTally), [loopTally]);
+  /** Why the loop cannot be shown at all, or null when it can. Each of these is
+   *  a different fact and none of them is "nothing followed your calls". */
+  const loopBlocked = useMemo<string | null>(() => {
+    if (contactStatus === 'loading') return null;
+    if (contactStatus !== 'ready' || !contacts) return null;   // cGapLine already says it
+    if (contacts.length === 0) return null;                    // cGapLine already says it
+    if (!activity) {
+      return driftFailed
+        ? `Their training record could not be read, so what followed your contacts with ${who} is unknown rather than nothing.`
+        : 'Reading what followed your contacts…';
+    }
+    if (activity.truncated) {
+      return `${who} has more training on record than one request returns, so nothing is said about what followed your contacts. The rows that were cut off are exactly the ones that would show somebody coming back.`;
+    }
+    return null;
+  }, [contactStatus, contacts, activity, driftFailed, who]);
 
   /** The most recent one. Null under 'error' by construction, because
    *  `checkIns` is null there rather than empty. */
@@ -1433,6 +1637,127 @@ export default function ClientScreen() {
 
         <Rule />
 
+        {/* ── what they have paid you ──────────────────────────────────────
+            R1. The number the decision on this screen turns on, and it was on
+            no coach-side screen about a named person: sales lived on Payments,
+            renewals on Payments, cash on Receipts, and no per-person total
+            anywhere. A coach ends a £2,400 relationship and a £120 one through
+            the same two-tap dialog.
+
+            It is a SUM OF ROWS THAT ALREADY EXIST — money already charged or
+            already handed over — and `VALUE_IS_PAST` says so on the screen,
+            because a coach who reads it as a forecast will act on it as one.
+
+            The cash half is not optional. A receipts read that did not come
+            back whole withholds the TOTAL exactly as a failed sales read does,
+            and for most self-employed coaches cash is the bigger half. The
+            arithmetic is `clientValue`'s and this screen does not repeat it. */}
+        <Section>
+          <SectionHead title="What They Have Paid You" note="All time" />
+          {unasked ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{unasked}</Text>
+          ) : !value || valueRead === 'loading' ? (
+            // `valueStatus` and not a status composed here. It is exported for
+            // exactly this: a caller that took two of the three reads would
+            // produce a status saying the figure is trustworthy while the cash
+            // half is still in flight.
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading what they have paid you…</Text>
+          ) : (<>
+            <KpiRow items={[
+              {
+                label: 'Worth',
+                // Two currencies are two amounts of money and are never added.
+                // A client who paid in AED and once in GBP has two pots and
+                // there is no single figure for them.
+                value: value.ledger.total && value.ledger.total.pots.length
+                  ? value.ledger.total.pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
+                  : '—',
+              },
+              { label: 'Payments', value: fig(value.payments) },
+              {
+                label: 'Owed Now',
+                value: owed.outstanding && owed.outstanding.pots.length
+                  ? owed.outstanding.pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
+                  : '—',
+              },
+            ]} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {value.ledger.total ? (valueSpanLine(value, new Date(nowMs)) ?? '') : valueEmptyLine(value)}
+            </Text>
+            {/* An amount with no currency on it is a hole in the figure, and
+                the size of the hole is what is worth reporting. It is never
+                summed into a unit nobody stated. */}
+            {value.ledger.total && (value.ledger.total.unlabelled > 0 || value.ledger.total.unpriced > 0) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                {value.ledger.total.unlabelled > 0
+                  ? `${value.ledger.total.unlabelled} of their payments carry an amount with no currency on it and are in no figure above. `
+                  : ''}
+                {value.ledger.total.unpriced > 0
+                  ? `${value.ledger.total.unpriced} of their payments have no amount recorded at all.`
+                  : ''}
+              </Flag>
+            ) : null}
+            {/* Their subscription, in Stripe's own state and this app's word
+                for it. `statusLabel` is the same function Payments renders, so
+                a coach cannot read "past due" on one screen and "active" here
+                about one subscription. */}
+            <View style={{ marginTop: sp.md }}>
+              {subs.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Reading whether they are on a subscription…</Text>
+              ) : subs.status === 'ready' ? (
+                <Text style={{ ...ty.label, color: t.ink2 }}>
+                  {sub
+                    ? `On a subscription to you — ${statusLabel(sub.status)}.`
+                    : `${who} is not on a subscription to you. What they have paid is one-off sales, cash, or both.`}
+                </Text>
+              ) : (
+                <Flag tone={t.warn}>
+                  Whether {who} is on a subscription could not be read. That is our end and not a statement
+                  that they are on none, so do not cancel or re-sell anything against it.
+                </Flag>
+              )}
+            </View>
+            {/* What they owe, aged, from the coach's own invoice book. Nothing
+                here is inferred from a payment processor, because nothing about
+                a payment processor reaches that table. */}
+            <View style={{ marginTop: sp.md }}>
+              {owed.withheld ? (
+                <Flag tone={t.warn}>{owed.withheld}</Flag>
+              ) : owed.overdue.length === 0 && owed.upcoming.length === 0 && owed.undated.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  You have raised no invoice to {who} that is still open.
+                </Text>
+              ) : (<>
+                {[...owed.overdue, ...owed.upcoming, ...owed.undated].slice(0, 5).map((a) => (
+                  <View key={a.invoice.id} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }} numberOfLines={2}>
+                      {invoiceNumber(a.invoice.seq)} — {a.age.line}
+                    </Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{invoiceMoney(a.invoice) ?? '—'}</Text>
+                  </View>
+                ))}
+                {owed.undatedNote ? <Flag style={{ marginTop: sp.sm }}>{owed.undatedNote}</Flag> : null}
+              </>)}
+            </View>
+            {/* Where a coach goes to change any of it. Deep links only — this
+                screen reads money and writes none of it. */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+              <Ghost label="Payments" onPress={() => router.push('/(trainer)/payments')} />
+              <Ghost label="Invoices" onPress={() => router.push('/(trainer)/invoices')} />
+              <Ghost label="Record a Payment" onPress={() => router.push('/(trainer)/receipts')} />
+            </View>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{VALUE_IS_PAST}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_NEEDS_YOUR_RECORDS}</Text>
+            {/* One wording of this warning in the app. `VALUE_MAY_DOUBLE_COUNT`
+                is clientValue.ts's, written for this figure; it points at
+                `RECEIPT_MAY_DOUBLE_COUNT` rather than restating it, and a
+                second phrasing here would be the copy that drifts. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_MAY_DOUBLE_COUNT}</Text>
+          </>)}
+        </Section>
+
+        <Rule />
+
         {/* ── what pays for their sessions ─────────────────────────────────
             The number a coach plans a renewal conversation around, and the one
             line they have to act on. Both come from src/lib/sessionCredits.ts,
@@ -1532,6 +1857,41 @@ export default function ClientScreen() {
                 </View>
               ))
             )}
+            {/* ── and what followed ────────────────────────────────────
+                R2. Counts of what FOLLOWED each contact, with the word
+                "followed" kept in front of them and the refusals kept visible
+                beside them. There is no percentage here and there is not one
+                to show: everybody contacted was contacted because they were
+                drifting, so there is no comparable group who were left alone.
+                `WHY_NO_RATE` is printed rather than paraphrased. */}
+            {loopBlocked ? (
+              <View style={{ marginTop: sp.md }}>
+                <Flag tone={t.warn}>{loopBlocked}</Flag>
+              </View>
+            ) : loopLine && loopTally ? (
+              <View style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                <Text style={{ ...ty.body, color: t.ink }}>{loopLine}</Text>
+                {loopTally.judged > 0 ? (
+                  <View style={{ marginTop: sp.md }}>
+                    {([
+                      ['recovered', loopTally.recovered],
+                      ['held', loopTally.held],
+                      ['kept-falling', loopTally.keptFalling],
+                    ] as const).map(([k, n]) => (
+                      <View key={k} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+                        <Text style={{ ...ty.label, color: t.ink2 }}>{FOLLOW_UP_LABEL[k]}</Text>
+                        <Text style={{ ...ty.label, ...numeric, color: t.ink2 }}>{fig(n)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{WHY_NO_RATE}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  Over your contacts with {who} in the last {FOLLOW_UP_CONTACT_DAYS} days, judged against
+                  the {FOLLOW_UP_READ_DAYS} days of their training this screen read.
+                </Text>
+              </View>
+            ) : null}
             {canLogContact(cScope) ? (
               <View style={{ flexDirection: 'row', marginTop: sp.md }}>
                 <Ghost label="Log a Contact" onPress={() => { setLogErr(null); setLogging({ channel: null, outcome: null, note: '' }); }} />

@@ -56,10 +56,57 @@ export const COUNTRIES: Country[] = [
   { iso: 'OM', name: 'Oman',                 dial: '968', len: [8, 8] },
 ];
 
+/**
+ * What `toE164` and friends assume when a CALLER states no country.
+ *
+ * A last resort inside this file, not a default for the SCREEN. It is 'AE'
+ * because the list above leads with the Gulf and the first entry has to be
+ * something; it is never a claim about the person holding the phone.
+ *
+ * `app/phone-signin.tsx` used to seed its picker with this, which turned a
+ * fallback into an answer: a UK member typed their number the way they always
+ * write it, got `+9717700900123`, no text arrived, and nothing on screen
+ * explained why — a guess dressed up as a choice, one country over. That screen
+ * now asks the handset. See `initialCountry` below and src/lib/locale.ts on why
+ * this product has no region to assume.
+ */
 export const DEFAULT_COUNTRY = 'AE';
 
 export function countryFor(iso: string): Country {
   return COUNTRIES.find((c) => c.iso === iso) ?? COUNTRIES[0];
+}
+
+/**
+ * The country to open the picker on, given what the handset says its region is.
+ *
+ * Pure, and takes the region rather than reading it, so the rule can be argued
+ * with in a test instead of inferred from whichever machine the test runs on.
+ * `deviceRegion()` in src/lib/unitPreference.ts is the impure half and is
+ * already written and already guarded.
+ *
+ * A region this list does not carry falls back rather than inventing an entry:
+ * the picker is searchable and a full +international number can always be
+ * typed, so being on the wrong row is recoverable in a way that a dial code
+ * this file has never verified is not.
+ */
+export function initialCountry(region: string | null | undefined): string {
+  const iso = String(region || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(iso)) return DEFAULT_COUNTRY;
+  return COUNTRIES.some((c) => c.iso === iso) ? iso : DEFAULT_COUNTRY;
+}
+
+/**
+ * What to show in the empty number field.
+ *
+ * The screen printed the literal "50 767 1842" — a UAE mobile — whatever
+ * country was selected, so a member in London was shown an example that is not
+ * a number in their country and does not have the right number of digits. This
+ * says the one thing that is true of every country on the list and is checked
+ * by `isPlausiblePhone`: how many digits go after the dial code.
+ */
+export function nationalPlaceholder(c: Country): string {
+  const [lo, hi] = c.len;
+  return lo === hi ? `${lo} digits` : `${lo}–${hi} digits`;
 }
 
 /** The flag emoji for an ISO code, derived rather than stored. */

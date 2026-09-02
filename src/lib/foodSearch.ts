@@ -61,7 +61,12 @@ export type FoodSource = 'common' | 'restaurant' | 'branded';
  */
 export interface BrandedItem {
   name: string;
-  kcal: number; protein: number; carbs: number; fat: number;
+  kcal: number;
+  /** Null where the source recorded nothing for it. Open Food Facts often has
+   *  a product's energy and none of its macros, and a zero standing in for
+   *  "not told" is the one thing src/lib/foodPortion.ts exists to refuse — see
+   *  `OffProduct` in src/lib/openfoodfacts.ts. */
+  protein: number | null; carbs: number | null; fat: number | null;
   /** The basis the macros are for — "100 g", "1 serving", "330 ml". */
   serving: string;
 }
@@ -74,7 +79,11 @@ export interface FoodResult {
   source: FoodSource;
   /** Short Title Case badge: "Common", "Restaurant · Italian", "Branded". */
   label: string;
-  kcal: number; protein: number; carbs: number; fat: number;
+  kcal: number;
+  /** Null where the source did not give it. A common food or a restaurant dish
+   *  always has all three; a branded row often does not, and `missingMacros`
+   *  is what turns that into a box the member fills in rather than a zero. */
+  protein: number | null; carbs: number | null; fat: number | null;
   /** What the figures are FOR — '100 g', '1 serving' — where the source says.
    *  Null for a common food, whose name already carries its portion.
    *

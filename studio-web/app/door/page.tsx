@@ -14,10 +14,12 @@ import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchVisits, checkIn, checkOut, summariseVisits, dwellMinutes,
-  sweepStaleVisits, wasSwept, currentlyInside,
+  sweepStaleVisits, isAccountedFor, currentlyInside, duplicateOpenVisits,
   busiestSlots, visitsByHour, visitsByWeekday, averageDwellMinutes,
+  admissionCheck, wasOverridden,
+  readPending, addPending, dropPending, partitionPending, pendingNote, pendingKey,
   WEEKDAYS,
-  type Visit,
+  type Visit, type Admission, type PendingCheckIn,
 } from '@lib/gymVisits';
 import { searchRows } from '@lib/consoleSearch';
 import {
@@ -30,6 +32,16 @@ import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
 
 const DAY = 86400000;
+
+/**
+ * How often the door log is re-read while somebody is looking at it.
+ *
+ * Thirty seconds. Short enough that two desks agree about who is in the
+ * building before either of them has finished serving the next person, long
+ * enough that a tablet propped by the door is not one query per second for
+ * twelve hours.
+ */
+const REFRESH_MS = 30_000;
 
 /**
  * How far either side of now a class is offered as the reason for a visit.
@@ -57,6 +69,35 @@ type Unread = 'loading' | 'failed' | null;
 
 /** The calendar day a visit belongs to, in the gym's own timezone. */
 const dayOf = (iso: string) => isoDate(new Date(iso));
+
+/** An id for a queued arrival. `crypto.randomUUID` where the browser has it,
+ *  and something unique enough where it does not — this only has to tell one
+ *  desk's own held rows apart. */
+function newId(): string {
+  try {
+    const c = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  } catch { /* falls through */ }
+  return `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Whether this failure was the network rather than the gym.
+ *
+ * The distinction decides whether an arrival is HELD or reported, and getting
+ * it wrong in either direction is bad: a refused write held forever retries an
+ * answer that will not change, and a dropped connection reported as a refusal
+ * loses the person who walked in. supabase-js surfaces a fetch failure as a
+ * TypeError with no status, so the test is "the browser says it is offline, or
+ * the failure carries no answer from the server at all".
+ */
+function isOffline(e: any): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  if (e?.status != null || e?.code != null) return false;
+  const m = String(e?.message ?? '').toLowerCase();
+  return m.includes('failed to fetch') || m.includes('networkerror')
+    || m.includes('network request failed') || m.includes('load failed');
+}
 
 /** One settled read, as a line for the banner. Null when it came back fine. */
 function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
@@ -134,6 +175,60 @@ export default function Door() {
     return () => { live = false; };
   }, [load]);
 
+  /**
+   * Re-read the door log on a timer, when the tab comes back, and when the
+   * gym's own day rolls over.
+   *
+   * ── Why a screen that never refreshed was wrong on both tablets ─────────
+   *
+   * Everything below was computed from a snapshot taken when the page loaded.
+   * With two people working the desk, each tablet saw only its own check-ins,
+   * so "Inside now" was wrong on both — and the one figure on this screen
+   * somebody would read out during an evacuation is that one. Neither desk had
+   * any way to know it was looking at a stale number, because a stale number
+   * looks exactly like a current one.
+   *
+   * ── And the tablet nobody turns off ────────────────────────────────────
+   *
+   * `today` is computed once per render pass, so a tablet left on overnight
+   * kept yesterday's date and showed yesterday's arrivals as this morning's:
+   * a desk opening up at 6am read a busy screen and a full "Inside now" for a
+   * building that was empty. `dayTick` below moves with the gym's own local
+   * midnight rather than UTC's, so the rollover happens when the gym's day
+   * does — the same date this screen already compares every visit against.
+   *
+   * A poll rather than a realtime channel: nothing else in this console
+   * subscribes, the door log is small, and a thirty-second read that always
+   * arrives is worth more at a front desk than a socket that silently drops.
+   */
+  const [dayTick, setDayTick] = useState(() => isoDate(new Date()));
+  useEffect(() => {
+    if (!me?.tenantId) return;
+    if (me.role !== 'owner' && me.role !== 'trainer') return;
+    const tenantId = me.tenantId;
+    let stopped = false;
+
+    const tick = () => {
+      // The day first, so a rollover repaints even if the read is in flight.
+      const d = isoDate(new Date());
+      setDayTick((prev) => (prev === d ? prev : d));
+      if (document.visibilityState === 'hidden') return;
+      if (stopped) return;
+      void load(tenantId);
+    };
+
+    const every = window.setInterval(tick, REFRESH_MS);
+    // A tablet that was asleep for an hour is the worst case, not the best:
+    // coming back to the tab is exactly when the snapshot is furthest out.
+    const onShow = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => {
+      stopped = true;
+      window.clearInterval(every);
+      document.removeEventListener('visibilitychange', onShow);
+    };
+  }, [me, load]);
+
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
 
@@ -169,7 +264,10 @@ export default function Door() {
   // morning already short. The same date decides a pass expiry, so a pass good
   // "to the 3rd" was refused at the desk for the four hours either side of
   // local midnight. One date, and every "today" below is compared against it.
-  const today = isoDate(new Date());
+  // `dayTick` rather than a bare `new Date()`: the value is identical, and
+  // holding it in state is what makes the rollover happen on a screen nobody
+  // has touched since yesterday.
+  const today = dayTick;
   const todays = (visits ?? []).filter((v) => dayOf(v.enteredAt) === today);
 
   // "Inside now" means today, the same thing the Overview tile means by "In the
@@ -184,11 +282,15 @@ export default function Door() {
   // anywhere in the repository until now — the definition existed, was tested,
   // and every screen re-implemented it.
   const inside = currentlyInside(todays);
+  // The second and third open rows for somebody who is already in the list
+  // above. `currentlyInside` folds them so the headcount is people rather than
+  // scans; they are counted here so a desk that is double-scanning finds out.
+  const dupes = duplicateOpenVisits(todays);
   const openBefore = (visits ?? []).filter((v) => !v.exitedAt && dayOf(v.enteredAt) !== today);
   // Of those, the ones a sweep has already accounted for. Two different things
   // for the desk: "nobody has looked at these" and "these are known to be
   // people who left without scanning out".
-  const sweptBefore = openBefore.filter(wasSwept);
+  const sweptBefore = openBefore.filter(isAccountedFor);
 
   const sum = visits ? summariseVisits(todays) : null;
   const pSum = passes ? summarisePasses(passes, today) : null;
@@ -239,12 +341,13 @@ export default function Door() {
       </div>
 
       <CheckInBar
-        members={members} passes={passes} classes={classes} tenantId={tenantId}
+        members={members} passes={passes} classes={classes} visits={visits} tenantId={tenantId}
         membersUnread={unread(members)} classesUnread={unread(classes)}
         today={today} onChange={refresh}
       />
       <Inside
         inside={inside} openBefore={openBefore.length} swept={sweptBefore.length}
+        duplicates={dupes.length}
         unread={unread(visits)} tenantId={tenantId} isOwner={me.role === 'owner'}
         onChange={refresh}
       />
@@ -264,8 +367,9 @@ export default function Door() {
 
 /* ── check-in ──────────────────────────────────────────────────────────────── */
 
-function CheckInBar({ members, passes, classes, tenantId, membersUnread, classesUnread, today, onChange }: {
+function CheckInBar({ members, passes, classes, visits, tenantId, membersUnread, classesUnread, today, onChange }: {
   members: Membership[] | null; passes: GymPass[] | null; classes: GymClass[] | null;
+  visits: Visit[] | null;
   tenantId: string;
   membersUnread: Unread; classesUnread: Unread; today: string; onChange: () => void;
 }) {
@@ -290,6 +394,64 @@ function CheckInBar({ members, passes, classes, tenantId, membersUnread, classes
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  /**
+   * The refusal the desk is looking at, and the sentence that would let this
+   * person in anyway.
+   *
+   * A refusal with no way through is not a safer door, it is a desk that stops
+   * using the console: the member renewing at the counter, the member whose
+   * payment cleared this morning and the member the owner has waved through are
+   * all real, and every visit that goes unrecorded takes attendance, fill rate
+   * and the retention reading down with it. So the override is one line of
+   * typing, and what is typed is written onto the visit — the row itself then
+   * carries why it exists, which is the only thing that makes it auditable
+   * afterwards.
+   */
+  const [refused, setRefused] = useState<Admission | null>(null);
+  const [why, setWhy] = useState('');
+
+  /**
+   * Arrivals this machine is holding because the network would not take them.
+   *
+   * The entire failure path here used to be one line of message text: nothing
+   * written down, nothing retried, and the next arrival cleared it. Every
+   * person who came in during a two-minute wifi drop was permanently absent
+   * from the record, and the only trace was a toast the receptionist had
+   * already dismissed. The rules — what may be held, for how long, and what
+   * happens to one the gym's own record refuses — are in src/lib/gymVisits.ts;
+   * this is the part that keeps them on the machine and sends them.
+   */
+  const [pending, setPending] = useState<PendingCheckIn[]>([]);
+  const [queueRead, setQueueRead] = useState(true);
+  const [lapsed, setLapsed] = useState<PendingCheckIn[]>([]);
+  const [flushing, setFlushing] = useState(false);
+
+  const store = useCallback((list: PendingCheckIn[]) => {
+    setPending(list);
+    try { window.localStorage.setItem(pendingKey(tenantId), JSON.stringify(list)); }
+    // A browser that refuses to store — private mode, a full quota — must not
+    // take the check-in down with it. The row is still being sent; what is lost
+    // is the retry, and the sentence below says so.
+    catch { setQueueRead(false); }
+  }, [tenantId]);
+
+  useEffect(() => {
+    let raw: string | null = null;
+    try { raw = window.localStorage.getItem(pendingKey(tenantId)); } catch { setQueueRead(false); return; }
+    const { items, read } = readPending(raw);
+    setQueueRead(read);
+    // Split on the way in rather than on the way out: an arrival from last
+    // night written into this morning's log would put a stranger in "Inside
+    // now" and a phantom into the busiest hour. What lapsed is handed to the
+    // screen rather than binned, because a queue that loses things quietly is
+    // the thing this whole section exists to replace.
+    const { live, lapsed: gone } = partitionPending(items);
+    setPending(live);
+    setLapsed(gone);
+    if (gone.length) {
+      try { window.localStorage.setItem(pendingKey(tenantId), JSON.stringify(live)); } catch { /* said below */ }
+    }
+  }, [tenantId]);
 
   /* The live passes held by the person selected. Keyed on `holderId`, which is
    * the whole reason A1 had to be fixed first: a pass issued with only a
@@ -301,19 +463,57 @@ function CheckInBar({ members, passes, classes, tenantId, membersUnread, classes
   // rather than the one that finished an hour ago.
   const nearby = [...(classes ?? [])].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
+  /**
+   * What the gym's own record says about the person at the desk, worked out
+   * before anybody presses anything.
+   *
+   * The authoritative check is inside `checkIn`, which reads the database at
+   * the moment of the write — this cannot be the gate, because it is computed
+   * from a snapshot and from a member list that may have been refused. It is
+   * here so the answer arrives while the member is being selected rather than
+   * after a button press: a receptionist who is told "cancelled" before they
+   * click has a conversation, and one who is told afterwards has an argument.
+   */
+  const preview = useMemo<Admission | null>(() => {
+    if (!memberId) return null;
+    return admissionCheck({
+      memberId,
+      passId: reason.startsWith('pass:') ? reason.slice(5) : null,
+      // Null when the read was refused, never []. `admissionCheck` says
+      // "unknown" for the first and "no membership at all" for the second, and
+      // telling a paying member the gym has no record of them because a query
+      // failed is the worse of the two by a distance.
+      memberships: members === null
+        ? null
+        : members.filter((m) => m.memberId === memberId).map((m) => ({ status: m.status, endsOn: m.endsOn })),
+      recent: (visits ?? [])
+        .filter((v) => v.memberId === memberId)
+        .map((v) => ({ enteredAt: v.enteredAt, exitedAt: v.exitedAt })),
+      today,
+    });
+  }, [memberId, reason, members, visits, today]);
+
   // A pass belongs to its holder, so changing who is at the desk must not leave
   // somebody else's pass selected. Silently keeping it would take a visit off
   // the wrong person's pass — a real entitlement, spent on somebody else.
   const pickMember = (id: string) => {
     setMemberId(id);
     if (reason.startsWith('pass:')) setReason('');
+    // A refusal belongs to the person it was about. Leaving it on screen while
+    // the next member is selected would offer an override against somebody
+    // else's record.
+    setRefused(null); setWhy('');
   };
 
-  const go = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const record = async (overrideReason: string | null) => {
     setBusy(true); setMsg(null);
     const passId = reason.startsWith('pass:') ? reason.slice(5) : null;
     const classId = reason.startsWith('class:') ? reason.slice(6) : null;
+    // Stamped here, once, and carried through both the write and the queue. A
+    // queued arrival that took its time from the flush would land a 06:02 entry
+    // in the log at 06:47, and the busiest hour, the average stay and the class
+    // it reconciles against would all be wrong with nothing to show for it.
+    const at = new Date().toISOString();
     try {
       // An empty selection is a deliberate anonymous head-count, not an error.
       await checkIn(supabase, tenantId, {
@@ -321,13 +521,113 @@ function CheckInBar({ members, passes, classes, tenantId, membersUnread, classes
         passId,
         classId,
         source: 'desk',
+        enteredAtIso: at,
+        overrideReason,
       });
-      setMemberId(''); setReason('');
-      setMsg(memberId ? 'Checked in.' : 'Anonymous visit recorded.');
+      setMemberId(''); setReason(''); setRefused(null); setWhy('');
+      setMsg(
+        !memberId ? 'Anonymous visit recorded.'
+          : overrideReason ? 'Recorded, with your reason on the visit.'
+          : 'Checked in.',
+      );
       onChange();
+      // A desk that has just written a row is a desk that can reach the server,
+      // which is the cheapest signal there is that the queue is worth trying.
+      if (pending.length) void flush();
     } catch (e: any) {
-      setMsg(e?.message ?? 'Could not record that check-in.');
+      // A refusal is not an error message. It is the gym's own record saying
+      // no, and it comes with the one control that gets past it — so it is held
+      // in its own state and rendered as a decision rather than joining the
+      // stream of things that went wrong.
+      if (e?.name === 'AdmissionRefused' && e.admission) {
+        setRefused(e.admission as Admission);
+        setMsg(null);
+      } else if (isOffline(e)) {
+        // The network, not the gym. The arrival is kept with the minute the
+        // person actually walked in on it, so replaying it later writes exactly
+        // the same fact rather than a made-up one.
+        store(addPending(pending, {
+          id: newId(),
+          tenantId,
+          memberId: memberId || null,
+          memberName: memberId
+            ? (members ?? []).find((m) => m.memberId === memberId)?.memberName ?? null
+            : null,
+          passId, classId,
+          enteredAtIso: at,
+          queuedAt: Date.now(),
+          tries: 1,
+          refusedWhy: null,
+        }));
+        setMemberId(''); setReason(''); setRefused(null); setWhy('');
+        setMsg('The gym could not be reached, so that arrival is held on this machine and goes up on its own when the connection is back. It keeps the minute they came in.');
+      } else {
+        setRefused(null);
+        setMsg(e?.message ?? 'Could not record that check-in.');
+      }
     } finally { setBusy(false); }
+  };
+
+  /**
+   * Send what is waiting.
+   *
+   * Run when the browser says the connection is back and after every successful
+   * check-in, because a desk that has just written a row is a desk that can
+   * reach the server. One at a time and in arrival order, so the log reads the
+   * way the morning happened.
+   *
+   * An item the gym's own record REFUSES is not retried into oblivion: the
+   * answer will not change, so the reason is stored on it and the desk is asked
+   * (below). An item the network refuses is left exactly as it is.
+   */
+  const flush = useCallback(async () => {
+    if (flushing) return;
+    const { live, lapsed: gone } = partitionPending(pending);
+    if (gone.length) setLapsed((l) => [...l, ...gone]);
+    if (!live.length) { if (gone.length) store(live); return; }
+    setFlushing(true);
+    let list = live;
+    for (const item of live) {
+      if (item.refusedWhy) continue;
+      try {
+        await checkIn(supabase, item.tenantId, {
+          memberId: item.memberId,
+          passId: item.passId,
+          classId: item.classId,
+          enteredAtIso: item.enteredAtIso,
+          source: 'desk',
+        });
+        list = dropPending(list, item.id);
+      } catch (e: any) {
+        if (e?.name === 'AdmissionRefused') {
+          list = list.map((i) => i.id === item.id
+            ? { ...i, tries: i.tries + 1, refusedWhy: e.message ?? 'The gym’s record refused it.' }
+            : i);
+        } else if (isOffline(e)) {
+          // Still down. Stop rather than hammer, and keep the rest in order.
+          list = list.map((i) => i.id === item.id ? { ...i, tries: i.tries + 1 } : i);
+          break;
+        } else {
+          list = list.map((i) => i.id === item.id
+            ? { ...i, tries: i.tries + 1, refusedWhy: e?.message ?? 'That arrival was refused.' }
+            : i);
+        }
+      }
+    }
+    store(list);
+    setFlushing(false);
+    onChange();
+  }, [flushing, pending, store, onChange]);
+
+  useEffect(() => {
+    const go = () => { void flush(); };
+    window.addEventListener('online', go);
+    return () => window.removeEventListener('online', go);
+  }, [flush]);
+
+  const go = (e: React.FormEvent) => {
+    e.preventDefault();
+    void record(null);
   };
 
   return (
@@ -355,6 +655,121 @@ function CheckInBar({ members, passes, classes, tenantId, membersUnread, classes
           {busy ? 'Recording…' : 'Check in'}
         </button>
       </form>
+      {/* What the record says, before anybody presses anything. `ok` is silent:
+          a green line against every member who may come in is a line the desk
+          stops reading, and then the one that matters is invisible too. */}
+      {preview && preview.verdict !== 'ok' && !refused ? (
+        <p style={{
+          margin: '0 14px 14px', fontSize: 12.5, maxWidth: '78ch',
+          color: preview.verdict === 'refuse' ? 'var(--crit)' : '#f0c04e',
+        }}>
+          {preview.reason}
+        </p>
+      ) : null}
+
+      {/* What is being held on this machine. */}
+      {pendingNote(pending) ? (
+        <div style={{
+          margin: '0 14px 14px', padding: '11px 13px', background: 'var(--surface2)',
+          border: '1px solid var(--ring)', borderLeft: '3px solid #f0c04e',
+        }}>
+          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)', maxWidth: '80ch' }}>
+            {pendingNote(pending)}
+          </p>
+          <div style={{ marginTop: 8, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
+            <button type="button" style={linkBtn} disabled={flushing} onClick={() => void flush()}>
+              {flushing ? 'Sending…' : 'Try them now'}
+            </button>
+          </div>
+          {pending.filter((p) => p.refusedWhy).map((p) => (
+            <p key={p.id} style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--ink2)', maxWidth: '80ch' }}>
+              <span className="mono" style={{ color: 'var(--ink)' }}>
+                {new Date(p.enteredAtIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+              {' '}{p.memberName ?? 'somebody not identified'} — {p.refusedWhy}{' '}
+              <button
+                type="button" style={linkBtn}
+                onClick={() => {
+                  // Recorded against the gym's own answer, with the fact that
+                  // it was held on the desk as the reason — which is the true
+                  // one and the one an audit needs.
+                  void checkIn(supabase, p.tenantId, {
+                    memberId: p.memberId, passId: p.passId, classId: p.classId,
+                    enteredAtIso: p.enteredAtIso, source: 'desk',
+                    overrideReason: `recorded at the desk while offline at ${new Date(p.enteredAtIso).toLocaleTimeString()}`,
+                  })
+                    .then(() => { store(dropPending(pending, p.id)); onChange(); })
+                    .catch((e: any) => setMsg(e?.message ?? 'That arrival was still not recorded.'));
+                }}
+              >
+                Record it anyway
+              </button>
+              {' · '}
+              <button type="button" style={{ ...linkBtn, color: 'var(--ink3)' }}
+                      onClick={() => store(dropPending(pending, p.id))}>
+                Discard it
+              </button>
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {/* What was held too long to be today's arrival. Said, never binned in
+          silence: the gym has lost a row and is entitled to know which. */}
+      {lapsed.length > 0 ? (
+        <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--crit)', maxWidth: '80ch' }}>
+          {lapsed.length === 1 ? 'One arrival was' : `${lapsed.length} arrivals were`} held on this
+          machine for more than half a day and {lapsed.length === 1 ? 'has' : 'have'} not been
+          recorded:{' '}
+          {lapsed.map((p) => `${p.memberName ?? 'not identified'} at ${new Date(p.enteredAtIso).toLocaleString()}`).join(', ')}.
+          They are not written now because a visit from yesterday put into today&rsquo;s log is a
+          stranger in Inside now. Add them by hand if they matter.{' '}
+          <button type="button" style={linkBtn} onClick={() => setLapsed([])}>Dismiss</button>
+        </p>
+      ) : null}
+
+      {!queueRead ? (
+        <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--crit)', maxWidth: '80ch' }}>
+          This browser will not let the desk hold anything, so a check-in that fails is lost rather
+          than retried. Private browsing and a full storage quota both do this.
+        </p>
+      ) : null}
+
+      {/* The refusal itself, and the only way past it. */}
+      {refused ? (
+        <div style={{
+          margin: '0 14px 14px', padding: '11px 13px', background: 'var(--surface2)',
+          border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
+        }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--ink2)', maxWidth: '78ch' }}>
+            <strong style={{ color: 'var(--ink)' }}>Not recorded.</strong> {refused.reason}
+          </p>
+          <p style={{ margin: '8px 0 9px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '78ch' }}>
+            Let them in anyway if you can see the record is behind — a renewal taken at the counter,
+            a payment that cleared this morning, a decision the owner has already made. What you type
+            is written onto the visit, so the row says why it exists.
+          </p>
+          <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+            <input
+              value={why} onChange={(e) => setWhy(e.target.value)}
+              placeholder="Why they are being let in"
+              aria-label="Why this person is being admitted anyway"
+              style={{ ...field, flex: 2, minWidth: 220 }}
+            />
+            <button
+              type="button" disabled={busy || !why.trim()}
+              onClick={() => void record(why.trim())}
+              style={{ ...btn, flex: 'none', opacity: why.trim() ? 1 : 0.5 }}
+            >
+              {busy ? 'Recording…' : 'Record it anyway'}
+            </button>
+            <button type="button" style={linkBtn} onClick={() => { setRefused(null); setWhy(''); }}>
+              Leave it
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Same distinction as the member list beside it. An unread timetable
           offers no classes, and a desk reading that as "no class is on" files
           a room full of people under gym floor for the rest of the morning. */}
@@ -538,8 +953,8 @@ function MemberPicker({ members, value, onPick, unread }: {
 
 /* ── who is inside ─────────────────────────────────────────────────────────── */
 
-function Inside({ inside, openBefore, swept, unread, tenantId, isOwner, onChange }: {
-  inside: Visit[]; openBefore: number; swept: number; unread: Unread;
+function Inside({ inside, openBefore, swept, duplicates, unread, tenantId, isOwner, onChange }: {
+  inside: Visit[]; openBefore: number; swept: number; duplicates: number; unread: Unread;
   tenantId: string; isOwner: boolean; onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
@@ -608,13 +1023,21 @@ function Inside({ inside, openBefore, swept, unread, tenantId, isOwner, onChange
   return (
     <Section title="Inside now" sub="Anyone who came in today and has not been checked out. A visit left open overnight is marked with a note and never a guessed exit time — an invented exit would put a twenty-hour stay into the average.">
       {msg ? <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {duplicates > 0 ? (
+        <p style={{ margin: '14px', fontSize: 12.5, color: '#f0c04e', maxWidth: '80ch' }}>
+          {duplicates === 1 ? 'One member has' : `${duplicates} members have`} more than one check-in
+          open from today. They are counted once here — a headcount is people, not scans — but a
+          desk producing these is scanning the same card twice, and this is the figure somebody
+          would read out in an evacuation.
+        </p>
+      ) : null}
       {openBefore > 0 ? (
         <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>
           {openBefore === 1 ? '1 visit is' : `${openBefore} visits are`} still open from an earlier
           day — check-ins nobody closed, not people standing in the gym, so they are said here and
           counted nowhere. There is no Check out on them on purpose: closing one now would stamp
           this minute as the exit and put a twenty-hour stay into the average.
-          {swept > 0 ? ` ${swept} of them ${swept === 1 ? 'has' : 'have'} already been marked.` : ''}
+          {swept > 0 ? ` ${swept} of them ${swept === 1 ? 'has' : 'have'} already been accounted for — marked by a sweep, or carrying the reason somebody was let in.` : ''}
           {isOwner && openBefore > swept ? (
             <>
               {' '}
@@ -650,7 +1073,13 @@ function Today({ visits, unread }: { visits: Visit[]; unread: Unread }) {
         // A dash, not a zero: an open visit has no measured length.
         return d == null ? <span className="dash">—</span> : `${d} min`;
       } },
-    { key: 'via', header: 'Via', value: (v) => v.source },
+    { key: 'via', header: 'Via', value: (v) => v.source,
+      // An overridden visit is the gym letting somebody in against its own
+      // record, and it is the row an audit comes looking for. Marked here
+      // rather than buried in a note nobody opens.
+      render: (v) => wasOverridden(v)
+        ? <span title={v.note ?? undefined} style={{ color: '#f0c04e' }}>{v.source} · let in</span>
+        : v.source },
   ];
   return (
     <Section title="Today" sub="Every arrival logged since local midnight — the gym's midnight, not UTC's.">

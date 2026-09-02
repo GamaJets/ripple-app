@@ -25,6 +25,7 @@ import { Icon } from '../../src/ui/Icon';
 import { sp, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
+import { FloorQueueSync } from '../../src/ui/floorQueue';
 
 export default function TrainerLayout() {
   // This build is one of three separate apps. If the trainer portal is not
@@ -95,6 +96,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="documents" options={{ href: null, title: 'Documents' }} />
       <Tabs.Screen name="invoices" options={{ href: null, title: 'Invoices' }} />
       <Tabs.Screen name="receipts" options={{ href: null, title: 'Cash and Transfers' }} />
+      <Tabs.Screen name="costs" options={{ href: null, title: 'What It Costs You' }} />
       <Tabs.Screen name="nudges" options={{ href: null, title: 'Nudges' }} />
       <Tabs.Screen name="client-report" options={{ href: null, title: 'Their Record' }} />
       <Tabs.Screen name="credentials" options={{ href: null, title: 'Credentials' }} />
@@ -108,6 +110,11 @@ export default function TrainerLayout() {
       <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="me" size={23} color={color} /> }} />
     </Tabs>
     <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
+    {/* Renders nothing. Reads this coach's unsent floor queue — attendance
+        ticks, session outcomes, logged sessions — off the device once, so the
+        app's reconnect and foreground triggers can empty it without the coach
+        having to reopen one of the three screens that own it. */}
+    <FloorQueueSync uid={user?.id ?? null} />
     </>
   );
 }

@@ -77,12 +77,13 @@ import { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Flag } from '../../src/ui/kit';
+import { Rule, Flag, Ghost } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModules';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
+import { fmtRelativeDay } from '../../src/lib/format';
 import { attachmentNoun, unsentNote } from '../../src/lib/messageAttachments';
 import {
   blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
@@ -176,7 +177,7 @@ export default function Messages() {
   const router = useRouter();
   const peer = useThreadPeerName('client', null);
   const head = peerHeading(peer, 'coach');
-  const { messages: msgs, send, status, unsent, cachedNote } = useThread(null, 'client');
+  const { messages: msgs, send, status, unsent, cachedNote, hasOlder, loadingOlder, olderError, loadOlder } = useThread(null, 'client');
   // The block and the report. Its state is deliberately allowed to be stale or
   // unread: the database refuses a blocked write regardless, so being wrong
   // here costs a sentence rather than the protection. See src/lib/threadSafety.
@@ -192,6 +193,11 @@ export default function Messages() {
   const [reportNote, setReportNote] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
   const scRef = useRef<ScrollView>(null);
+  // Set for exactly one content-size change: the one caused by a page of older
+  // messages arriving. Without it the `scrollToEnd` below fires on the growth
+  // and throws the reader back to the bottom of the thread they just stepped
+  // out of — the newest messages, which is the half they were not reading.
+  const heldPosition = useRef(false);
   // "your coach" rather than their name, and everywhere on this surface. A name
   // that could not be read renders as a dash, and a dash as the subject of
   // "— will not be able to send you messages" reads as the screen having broken
@@ -274,7 +280,11 @@ export default function Messages() {
     // sent" would tell somebody to type it again.
     if (!res.ok && res.reason) Alert.alert(res.queued ? 'Waiting to send' : 'Not sent', res.reason);
   };
-  const fmt = (iso: string) => { const d = new Date(iso); const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
+  // The stamp under every bubble. It was a hardcoded English weekday array
+  // glued to `${d.getDate()}/${d.getMonth() + 1}` — day-before-month, which a
+  // reader in the United States reads the other way round. Both are the
+  // reader's own now. See `fmtRelativeDay` in src/lib/format.ts.
+  const fmt = (iso: string) => fmtRelativeDay(iso);
   const G = layout.gutter;
   const { ref: barRef, lift } = useKeyboardLift();
   return (
@@ -324,7 +334,39 @@ export default function Messages() {
             a live one believes they have heard everything — and the message
             that is missing is the one that arrived after the signal went. */}
         {cachedNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingTop: sp.sm }}>{cachedNote}</Flag> : null}
-        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }}
+          onContentSizeChange={() => {
+            if (heldPosition.current) { heldPosition.current = false; return; }
+            scRef.current?.scrollToEnd({ animated: true });
+          }}
+          keyboardShouldPersistTaps="handled">
+          {/* ── the beginning of the conversation, when it is not on screen ──
+              `useThread` reads newest-first at the row cap, so a long coaching
+              relationship arrives with its own start missing. That was reported
+              as `status: 'partial'` and said nowhere: the word did not appear on
+              this screen, and there was no way back to the messages above the
+              cut. A member could not read the beginning of their own
+              conversation and nothing admitted it.
+
+              Said ABOVE the oldest bubble, which is where the missing part
+              actually is, and with the control beside the sentence rather than
+              a sentence on its own. */}
+          {hasOlder || status === 'partial' ? (
+            <View style={{ marginBottom: sp.lg, gap: sp.sm }}>
+              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
+                {hasOlder
+                  ? 'This is not the whole conversation. Earlier messages are on the server and not on this screen.'
+                  : 'That is the whole conversation.'}
+              </Text>
+              {hasOlder ? (
+                <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
+                  <Ghost label={loadingOlder ? 'Loading…' : 'Load Earlier Messages'}
+                    onPress={() => { if (loadingOlder) return; heldPosition.current = true; void loadOlder(); }} />
+                </View>
+              ) : null}
+              {olderError ? <Flag tone={t.warn}>{olderError}</Flag> : null}
+            </View>
+          ) : null}
           {msgs.map((m) => {
             const mine = m.sender === 'client';
             // A bubble the server refused is on this phone and nowhere else.

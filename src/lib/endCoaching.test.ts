@@ -16,7 +16,10 @@
 // that nothing is watching this file.
 import {
   coachLabel, leaveCoachPrompt, leaveOutcome, endCoachingErrorMessage,
-  type EndCoachingResult,
+  departureTally, departureLine, END_REASON_LABEL,
+  END_REASONS, CLIENT_END_REASONS, CLIENT_END_REASON_LABEL, CLIENT_END_REASON_NOTE,
+  CLIENT_END_EXPLAINER, clientEndConfirmBody, clientEndOutcomeLine,
+  type EndCoachingResult, type EndedRelationship,
 } from './endCoaching';
 
 const errors: string[] = [];
@@ -125,6 +128,106 @@ ok(!/\.\.$/.test(odd), 'no message ends in a double full stop');
 // Nothing, at all, from an empty raise.
 ok(endCoachingErrorMessage(null) === 'The change could not be saved.', 'a null reason still produces a sentence');
 ok(endCoachingErrorMessage('   ') === 'The change could not be saved.', 'a whitespace reason still produces a sentence');
+
+/* ── R3: the answers, counted ──────────────────────────────────────────────
+ *
+ * Every departure reason was collected and none was ever counted. The negative
+ * assertions matter most here too: a tally that printed "0 people have left
+ * you" over a refused read would be a compliment manufactured out of a broken
+ * query, and a percentage over a book of five would move twenty points because
+ * one person moved house.
+ */
+
+const dep = (reason: unknown): EndedRelationship => ({ reason, endedAt: '2026-08-01T00:00:00Z' });
+
+ok(departureTally(null) === null, 'an unread list of endings produces no tally at all');
+ok(departureLine(null, 90) === null, 'and no sentence over it');
+ok(departureLine(departureTally([]), 90) === null,
+  'nor does an empty book: "0 people have left you" reads as a compliment on a book nobody has been on');
+
+const tally = departureTally([
+  dep('cost'), dep('cost'), dep('schedule'), dep('unsaid'), dep(null), dep('a-reason-a-later-build-invented'),
+])!;
+ok(tally.total === 6, 'every ending in the window is counted, whether or not anybody said why');
+ok(tally.counts.length === 3, 'only the reasons with something against them are listed');
+ok(tally.counts[0].reason === 'cost' && tally.counts[0].n === 2, 'commonest first');
+ok(tally.unrecorded === 2,
+  'a null and a reason this build does not know both land in unrecorded, rather than being dropped or guessed at');
+ok(!tally.counts.some((c) => (c.reason as string) === 'a-reason-a-later-build-invented'),
+  'and an unrecognised reason never becomes a row nothing can label');
+
+// The one collapse this must never make. "They were asked and did not want to
+// say" and "nobody asked" are opposite facts about the coach's own
+// record-keeping, and only one of them is something they can still fix.
+const unsaidOnly = departureTally([dep('unsaid'), dep(null)])!;
+ok(unsaidOnly.counts.length === 1 && unsaidOnly.counts[0].n === 1 && unsaidOnly.unrecorded === 1,
+  'an unrecorded ending is never folded in with They Did Not Say');
+
+const line = departureLine(tally, 90)!;
+ok(!/%/.test(line), 'there is no percentage in the line: a share over a small book is noise reading as a trend');
+ok(line.includes(END_REASON_LABEL.cost.toLowerCase()), 'the commonest reason is named in the coach\u2019s own vocabulary');
+ok(/90 days/.test(line), 'and the window is stated, because the whole figure is about a period');
+ok(/not the same as/.test(line), 'the unrecorded ones are told apart from the ones somebody declined to explain');
+
+const allBlank = departureLine(departureTally([dep(null), dep(null)]), 90)!;
+ok(/nothing is recorded about why/.test(allBlank),
+  'a book where nobody has been asked says so, rather than showing an empty list under a heading');
+
+
+/* ── the member's own account of why they left ──────────────────────────────
+ *
+ * The only `endCoaching` call in the client app was on the Find a Trainer
+ * DIRECTORY, and it was the one-argument form. So a member who wanted out had
+ * to open a marketplace to find the exit, and the only churn reason ever
+ * recorded was the coach's belief about somebody who was never asked.
+ */
+
+// The ids must be the SAME ids. A churn list that cannot hold a client's own
+// answer beside a coach's guess is two lists, and the whole of
+// `reasonAttribution` depends on them being one question asked of two people.
+for (const r of CLIENT_END_REASONS) {
+  ok(END_REASONS.includes(r), `every reason a client can pick is a reason the coach's list knows — ${r}`);
+  ok(!!CLIENT_END_REASON_LABEL[r], `and carries a label — ${r}`);
+  ok(!!CLIENT_END_REASON_NOTE[r], `and a line under it — ${r}`);
+}
+
+// The two a client cannot honestly answer.
+ok(!CLIENT_END_REASONS.includes('coach-ended'),
+  '"My Decision" is a coach speaking about themselves and is not offered to a client');
+ok(!CLIENT_END_REASONS.includes('unsaid'),
+  '"They Did Not Say" is a fact about the coach\'s asking — a client who will not say has the Skip button');
+
+// First person, and not the coach's wording carried over.
+for (const r of CLIENT_END_REASONS) {
+  ok(!/\bthey\b/i.test(CLIENT_END_REASON_NOTE[r]),
+    `the member reads about themselves, not about a third party — ${r}: ${CLIENT_END_REASON_NOTE[r]}`);
+}
+
+ok(/coach sees this/i.test(CLIENT_END_EXPLAINER), 'the member is told who reads it before they write it');
+ok(/your own words/i.test(CLIENT_END_EXPLAINER), 'and that it is filed as theirs rather than as a guess');
+ok(/skip/i.test(CLIENT_END_EXPLAINER), 'and that they can leave without answering');
+
+const body = clientEndConfirmBody('Sam');
+ok(/Sam/.test(body), 'the confirmation names the coach');
+ok(/no longer see your training/i.test(body), 'and says what the coach loses access to');
+ok(/nothing you have logged is deleted/i.test(body), 'and that the member loses no record of their own');
+ok(/not refunded here/i.test(body) || /settled with them directly/i.test(body),
+  'and that money is not settled by this button');
+ok(/this coach/.test(clientEndConfirmBody(null)), 'an unnamed coach still gets a grammatical sentence');
+ok(/this coach/.test(clientEndConfirmBody('   ')), 'and so does a blank name');
+
+// The three outcomes, kept apart. `reasonStored` false with `ended` true is a
+// real answer from endCoachingWithReason, not a failure.
+ok(/nothing was changed/i.test(clientEndOutcomeLine(false, true, false)),
+  'a server that found no relationship says so rather than claiming an ending');
+ok(/Nothing was recorded about why/i.test(clientEndOutcomeLine(true, false, false)),
+  'skipping is reported as having recorded nothing');
+ok(/passed on to them/i.test(clientEndOutcomeLine(true, true, true)),
+  'a stored reason says it reached the coach');
+const lost = clientEndOutcomeLine(true, true, false);
+ok(/could not be recorded/i.test(lost), 'a reason that did not save says so');
+ok(/ending itself did happen/i.test(lost), 'and does not leave the member wondering whether they left');
+ok(!/passed on to them/i.test(lost), 'and never claims the coach was told');
 
 if (errors.length) {
   console.error(`endCoaching: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);

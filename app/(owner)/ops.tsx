@@ -63,6 +63,7 @@ import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings';
 import { fetchGymMerchant, merchantState, startGymOnboarding, type GymMerchant } from '../../src/lib/gymMerchant';
+import { Fetched } from '../../src/ui/fetched';
 import { WEB_ORIGIN } from '../../src/lib/deepLink';
 
 /**
@@ -185,19 +186,26 @@ export default function OwnerOps() {
   const [merchantStatus, setMerchantStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [merchantBusy, setMerchantBusy] = useState(false);
   const [merchantMsg, setMerchantMsg] = useState<string | null>(null);
+  /** Bumped by the Refresh control. */
+  const [merchantTick, setMerchantTick] = useState(0);
+  /** When the merchant read LANDED. `r.ok` only — a refusal leaves the stamp
+   *  on the answer currently on screen, which is what "payouts are on" was
+   *  read off. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
   useEffect(() => {
     let live = true;
     (async () => {
       if (!USE_SUPABASE) { setMerchantStatus('ready'); return; }
       if (!tenant?.id) { if (tenantStatus !== 'loading') setMerchantStatus(tenantStatus === 'error' ? 'error' : 'ready'); return; }
+      setMerchantStatus('loading');
       const r = await fetchGymMerchant(supabase as any, tenant.id);
       if (!live) return;
-      if (r.ok) { setMerchant(r.value); setMerchantStatus('ready'); }
+      if (r.ok) { setMerchant(r.value); setMerchantStatus('ready'); setFetchedAt(Date.now()); }
       else { reportError('ops.gymMerchant', new Error(r.reason)); setMerchantStatus('error'); }
     })();
     return () => { live = false; };
-  }, [tenant?.id, tenantStatus]);
+  }, [tenant?.id, tenantStatus, merchantTick]);
 
   /**
    * Start or resume the gym's Stripe onboarding.
@@ -379,6 +387,12 @@ export default function OwnerOps() {
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Operations</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your session fee · notices to members · support · gym activity</Text>
+          {/* Whether card payments are switched on is read off one query. An
+              owner in a plant room with no signal reading "payouts enabled"
+              from a read half an hour old is being told something about their
+              money that may no longer be true. */}
+          <Fetched at={fetchedAt} busy={merchantStatus === 'loading'}
+            onRefresh={() => setMerchantTick((n) => n + 1)} />
         </View>
 
         {/* ── the three jobs this screen does ────────────────────────────── */}

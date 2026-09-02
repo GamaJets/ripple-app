@@ -511,6 +511,13 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     if ('exercise' in next) patch.exercise = next.exercise;
     if ('t' in next) patch.performed_at = next.t;
     if ('sets' in next) patch.sets = next.sets ?? null;
+    // `bw` and `timed` are aligned to `sets` and had no key here at all, so an
+    // edit that changed the sets left the flags on the server describing the
+    // OLD ones — and an edit sheet that could not write them could not offer
+    // them either. Both columns exist (supabase/parts/162 and 204); undefined
+    // is sent as null so clearing the last bodyweight set really clears it.
+    if ('bw' in next) patch.bw = next.bw ?? null;
+    if ('timed' in next) patch.timed = next.timed ?? null;
     if ('feel' in next) patch.feel = next.feel ?? null;
     if ('cardio' in next) patch.cardio = next.cardio ?? null;
     if ('kcal' in next) patch.kcal = next.kcal ?? null;

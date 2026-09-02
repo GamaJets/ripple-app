@@ -20,7 +20,14 @@
 // Compile with tsc then run with node, like gymClassFill.test.ts.
 import { normalise, terms, matches, searchRows, searchNote } from './consoleSearch';
 import { weeklyOccurrences, isCancelled, classesThatRan, placesLeft, splitRoster, type GymClass, type NewClass, type RosterEntry } from './gymSchedule';
-import { busiestSlots, visitsByWeekday, wasSwept, SWEEP_NOTE, type Visit } from './gymVisits';
+import {
+  busiestSlots, visitsByWeekday, wasSwept, SWEEP_NOTE,
+  admissionCheck, currentlyInside, duplicateOpenVisits, wasOverridden,
+  OVERRIDE_PREFIX, RESCAN_MINUTES, OPEN_VISIT_HOURS,
+  readPending, addPending, dropPending, partitionPending, pendingNote, pendingKey,
+  PENDING_CAP, PENDING_HOURS,
+  type Visit, type AdmissionMembership, type PendingCheckIn,
+} from './gymVisits';
 import { rotaCost, shiftBlocker, type Shift } from './gymRota';
 import { buildSegments, reachBlocker, willTruncateInbox, deliveryNote, segmentCsv, LAPSING_DAYS, UNSEEN_DAYS, type SegmentMember } from './gymReach';
 import { parseTags, tagsText, isReachable, contactLine, isEmptyPatch, type GymMemberRecord } from './gymMembers';
@@ -381,6 +388,184 @@ const mem = (id: string, status: string, lastSeenDays: number | null): SegmentMe
   ok(bulk.includes('jane%40example.com') && bulk.includes('sam%40example.com'), 'and carries both');
   ok(!bulk.includes('Hi%20Jane'), 'with no name, because one message is read by everybody in the batch');
   eq(bulkInviteMailto([], {}), null, 'an empty batch has no link rather than an empty one');
+}
+
+/* ── the door asks about the person ───────────────────────────────────────── */
+//
+// `checkIn` was a bare insert: no membership read, no duplicate guard, no
+// anti-passback. A membership cancelled in March admitted its holder with one
+// click in June, and one card could badge in an unlimited queue behind it.
+// These are the rules with the database taken out, which is the only reason
+// they can be asserted at all.
+{
+  const TODAY = '2026-06-15';
+  const NOW = Date.parse('2026-06-15T09:00:00Z');
+  const live: AdmissionMembership[] = [{ status: 'active', endsOn: null }];
+  const ask = (over: Partial<Parameters<typeof admissionCheck>[0]> = {}) =>
+    admissionCheck({ memberId: 'm1', memberships: live, today: TODAY, now: NOW, ...over });
+
+  eq(ask().verdict, 'ok', 'a live membership walks in');
+  eq(ask().code, 'active', 'and says which rule let them');
+
+  eq(ask({ memberId: null }).verdict, 'ok', 'an anonymous head-count asks about nobody');
+  eq(ask({ memberId: null }).code, 'anonymous', 'and is not pretending to be a membership check');
+
+  // The one the roadmap led with.
+  eq(ask({ memberships: [{ status: 'cancelled', endsOn: null }] }).verdict, 'refuse',
+    'a cancelled membership is refused at the door — the gym cancelled it in March and June must mean it');
+  eq(ask({ memberships: [{ status: 'cancelled', endsOn: null }] }).code, 'cancelled',
+    'and the desk is told which decision it is looking at');
+  eq(ask({ memberships: [{ status: 'frozen', endsOn: null }] }).code, 'frozen',
+    'a freeze is a freeze, not a cancellation — the desk can unfreeze one of them');
+  eq(ask({ memberships: [] }).code, 'no-membership',
+    'no membership at all is its own answer: there is nothing to unfreeze or reopen');
+
+  eq(ask({ memberships: [{ status: 'active', endsOn: '2026-06-14' }] }).code, 'expired',
+    'an active membership whose end date has passed has ended, whatever the status column says');
+  eq(ask({ memberships: [{ status: 'active', endsOn: '2026-06-15' }] }).verdict, 'ok',
+    'and the last day of a membership is a day it still works — a member paid to the 15th trains on the 15th');
+
+  ok((ask({ memberships: [{ status: 'active', endsOn: '2026-06-01' }] }).reason ?? '').includes('2026-06-01'),
+    'the refusal names the date, because "your membership has expired" starts an argument the date ends');
+
+  // UNKNOWN is not "has not paid". This is the LoadStatus rule at the door.
+  eq(ask({ memberships: null }).code, 'unknown',
+    'a membership read that failed is unknown, never a member with no membership');
+  ok((ask({ memberships: null }).reason ?? '').includes('failed query'),
+    'and says so, so nobody tells a paying member the gym has no record of them');
+
+  // The kindest true statement wins.
+  eq(ask({ memberships: [{ status: 'cancelled', endsOn: null }, { status: 'frozen', endsOn: null }] }).code,
+    'frozen', 'holding a frozen membership and an old cancelled one, the desk is told the one it can act on');
+  eq(ask({ memberships: [{ status: 'cancelled', endsOn: null }, { status: 'active', endsOn: null }] }).verdict,
+    'ok', 'and one live membership is enough, whatever else is in their history');
+
+  // A pass is the entitlement. Refusing it would refuse the gym's own cash.
+  eq(ask({ memberships: [], passId: 'p1' }).verdict, 'ok',
+    'somebody redeeming a pass needs no membership — that is what the pass is');
+  eq(ask({ memberships: [], passId: 'p1' }).code, 'on-a-pass', 'and it is recorded as the reason they were let in');
+
+  // Anti-passback. The card handed back down the queue.
+  const openNow = [{ enteredAt: '2026-06-15T08:40:00Z', exitedAt: null }];
+  eq(ask({ recent: openNow }).verdict, 'refuse',
+    'a member who is already inside cannot be checked in again — that is the same body twice in the evacuation headcount');
+  eq(ask({ recent: openNow }).code, 'already-inside', 'named as the duplicate it is');
+  ok((ask({ recent: openNow }).reason ?? '').includes('20'),
+    'and says how long ago, so the desk can tell a queue from a genuine second visit');
+
+  // …but the duplicate guard is checked BEFORE the membership, deliberately.
+  eq(ask({ recent: openNow, memberships: [{ status: 'cancelled', endsOn: null }] }).code, 'already-inside',
+    'told "cancelled" on a second scan, the desk fixes the wrong problem');
+
+  // An open visit older than the sweep horizon is paperwork, not a person.
+  const stale = [{ enteredAt: '2026-06-10T08:00:00Z', exitedAt: null }];
+  eq(ask({ recent: stale }).verdict, 'warn',
+    `an open visit older than ${OPEN_VISIT_HOURS} hours must not lock a paying member out over last week's paperwork`);
+  eq(ask({ recent: stale }).code, 'stale-open', 'it is said out loud rather than silently ignored');
+
+  // The double press.
+  const justOut = [{ enteredAt: '2026-06-15T08:59:00Z', exitedAt: '2026-06-15T08:59:30Z' }];
+  eq(ask({ recent: justOut }).code, 'just-scanned',
+    `two scans inside ${RESCAN_MINUTES} minutes are one arrival typed twice`);
+  const earlier = [{ enteredAt: '2026-06-15T07:00:00Z', exitedAt: '2026-06-15T08:00:00Z' }];
+  eq(ask({ recent: earlier }).verdict, 'ok',
+    'a member who trained this morning and came back after lunch is a second visit, not a double scan');
+}
+
+/* ── a headcount is people, not scans ─────────────────────────────────────── */
+{
+  const v = (over: Partial<Visit>): Visit => ({
+    id: 'v', memberId: null, memberName: null, passId: null, classId: null,
+    enteredAt: '2026-06-15T08:00:00Z', exitedAt: null, source: 'desk', note: null, ...over,
+  });
+
+  const twice = [
+    v({ id: 'a', memberId: 'm1', enteredAt: '2026-06-15T08:00:00Z' }),
+    v({ id: 'b', memberId: 'm1', enteredAt: '2026-06-15T08:02:00Z' }),
+    v({ id: 'c', memberId: 'm2' }),
+  ];
+  eq(currentlyInside(twice).length, 2,
+    'one member scanned twice is one person in the building — this figure is read out in an evacuation');
+  eq(currentlyInside(twice).map((x) => x.id).sort().join(','), 'b,c',
+    'and it is the most recent scan that is kept, because that is when they are believed to have arrived');
+  eq(duplicateOpenVisits(twice).map((x) => x.id).join(','), 'a',
+    'the folded row is reported rather than dropped — a desk producing these is double-scanning');
+
+  const anon = [v({ id: 'x' }), v({ id: 'y' })];
+  eq(currentlyInside(anon).length, 2,
+    'two anonymous visits are two different people; folding them would under-count the evacuation list instead');
+
+  const gone = [v({ id: 'z', memberId: 'm3', exitedAt: '2026-06-15T09:00:00Z' })];
+  eq(currentlyInside(gone).length, 0, 'somebody who checked out is not inside');
+
+  ok(wasOverridden(v({ note: `${OVERRIDE_PREFIX}renewed at the counter` })),
+    'a visit recorded against the gym’s own answer is marked as one');
+  ok(!wasOverridden(v({ note: 'left their bag' })), 'and an ordinary desk note is not');
+  ok(!wasOverridden(v({ note: null })), 'nor is no note at all');
+}
+
+/* ── the arrival that happened while the wifi was down ────────────────────── */
+//
+// The Door screen's entire failure path was one line of message text: nothing
+// written locally, nothing retried, and the next arrival cleared it. Every
+// person who came in during a two-minute drop was permanently absent from the
+// record the gym's attendance, fill rate and retention are all built on.
+{
+  const NOW = Date.parse('2026-06-15T09:00:00Z');
+  const q = (over: Partial<PendingCheckIn>): PendingCheckIn => ({
+    id: 'q1', tenantId: 't1', memberId: 'm1', memberName: 'Sara', passId: null, classId: null,
+    enteredAtIso: '2026-06-15T08:55:00Z', queuedAt: NOW, tries: 1, refusedWhy: null, ...over,
+  });
+
+  ok(pendingKey('t1') !== pendingKey('t2'),
+    'two gyms on one machine do not share a queue — one gym’s arrivals must never flush into another’s log');
+
+  // Reading it back.
+  eq(readPending(null).items.length, 0, 'nothing stored is an empty queue');
+  ok(readPending(null).read, 'and that is a read that worked, not one that failed');
+  ok(!readPending('{oh dear').read,
+    'a store that will not parse is UNREAD — a desk told the queue is empty stops looking');
+  eq(readPending('{oh dear').items.length, 0, 'and hands back nothing rather than guessing');
+  eq(readPending(JSON.stringify([{ id: 'x', tenantId: 't1', enteredAtIso: 'not a date' }])).items.length, 0,
+    'an item with no usable arrival time is dropped: the time is the whole reason a replay is honest');
+
+  const round = readPending(JSON.stringify([q({})]));
+  eq(round.items[0].enteredAtIso, '2026-06-15T08:55:00Z', 'the minute they walked in survives the round trip');
+
+  // Order and the cap.
+  const two = addPending(addPending([], q({ id: 'b', enteredAtIso: '2026-06-15T08:50:00Z' })),
+                         q({ id: 'a', enteredAtIso: '2026-06-15T08:40:00Z' }));
+  eq(two.map((i) => i.id).join(','), 'a,b', 'the queue is in arrival order, so the log reads the way the morning happened');
+  eq(addPending([q({ id: 'a' })], q({ id: 'a', memberName: 'Sara O' }))[0].memberName, 'Sara O',
+    'the same id replaces rather than duplicating');
+
+  let many: PendingCheckIn[] = [];
+  for (let i = 0; i < PENDING_CAP + 5; i++) {
+    many = addPending(many, q({ id: `i${String(i).padStart(3, '0')}`, enteredAtIso: new Date(NOW - (PENDING_CAP + 5 - i) * 60_000).toISOString() }));
+  }
+  eq(many.length, PENDING_CAP, 'the queue is a front desk during an outage, not a data store');
+  eq(many[many.length - 1].id, `i${String(PENDING_CAP + 4).padStart(3, '0')}`,
+    'and at the cap it is the OLDEST that goes — dropping the newest would lose the person standing at the desk');
+
+  eq(dropPending([q({ id: 'a' }), q({ id: 'b' })], 'a').map((i) => i.id).join(','), 'b',
+    'a flush drops exactly what it wrote');
+
+  // Age. A visit from yesterday written into today's log is a stranger in
+  // "Inside now".
+  const old = q({ id: 'old', enteredAtIso: new Date(NOW - (PENDING_HOURS + 1) * 3600_000).toISOString() });
+  const split = partitionPending([q({ id: 'new' }), old], NOW);
+  eq(split.live.map((i) => i.id).join(','), 'new', `an arrival older than ${PENDING_HOURS} hours is not today’s`);
+  eq(split.lapsed.map((i) => i.id).join(','), 'old',
+    'and it is handed back rather than binned — a queue that loses things quietly is what this replaces');
+
+  // What the desk reads.
+  eq(pendingNote([]), null, 'nothing waiting says nothing');
+  ok((pendingNote([q({})]) ?? '').includes('1 arrival is'), 'one waiting is counted as one');
+  ok((pendingNote([q({})]) ?? '').includes('minute the person actually came in'),
+    'and the note says the arrival time is preserved, because that is what makes the replay honest');
+  const stuck = pendingNote([q({ id: 'a' }), q({ id: 'b', refusedWhy: 'Their membership was cancelled.' })]) ?? '';
+  ok(stuck.includes('1 arrival is') && stuck.includes('refused by the gym'),
+    'one waiting on the network and one refused by the record are two different sentences, because they need two different actions');
 }
 
 if (errors.length) {

@@ -26,6 +26,7 @@ import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+import { Fetched } from '../../src/ui/fetched';
 import { pct } from '../../src/lib/gymSchedule';
 import { fetchGymTrainers, type GymTrainer } from '../../src/lib/gymTrainers';
 import {
@@ -112,6 +113,9 @@ export default function OwnerRota() {
   /** Same distinction for the roster the Add-a-Shift sheet picks from. */
   const [trainersFailed, setTrainersFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** When the week's shifts and demand last landed. Not moved by a failed
+   *  retry — what is on screen is still the earlier read's. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [who, setWho] = useState<string | null>(null);
@@ -139,6 +143,7 @@ export default function OwnerRota() {
       setShifts(s);
       setDemand(d);
       setFailed(false);
+      setFetchedAt(Date.now());
     } catch (e) {
       reportError('rota.fetch', e);
       // Null, and `failed` says which of the two nulls this is. See the note on
@@ -251,6 +256,12 @@ export default function OwnerRota() {
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Rota</Text>
         </View>
+
+        {/* Who is on the floor this week, and when that was last asked. A rota
+            read in a basement an hour ago and still on screen is exactly the
+            figure somebody staffs a shift against. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={!loaded && !failed}
+          style={{ marginTop: 0, marginBottom: sp.md }} />
 
         {/* ── the week being read ────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>

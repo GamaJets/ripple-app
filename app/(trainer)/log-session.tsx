@@ -32,7 +32,7 @@ import { useAuth } from '../../src/ui/auth';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { logForClient } from '../../src/lib/coachLog';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, keptOfflineLine } from '../../src/lib/floorQueue';
+import { floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/lib/floorQueue';
 import { notifySuccess } from '../../src/ui/haptics';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 
@@ -64,6 +64,20 @@ export default function LogSession() {
   // mount, so a session typed in a basement yesterday goes up as soon as this
   // screen is opened anywhere with signal.
   const queue = useFloorQueue(auth.user?.id ?? null);
+  // Send what this phone is still carrying, now. The queue is emptied on the
+  // app's own reconnect and foreground triggers too, through the registry in
+  // src/lib/offlineQueue.ts; this is the button beside the banner that used to
+  // say something was waiting and offer nothing to do about it. Every arm of
+  // the result is reported: a refused write has been dropped rather than kept.
+  const [sending, setSending] = useState(false);
+  const sendWaiting = async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      const line = flushResultLine(await queue.flush());
+      if (line) Alert.alert('Sending finished', line);
+    } finally { setSending(false); }
+  };
   const { clientId, name } = useLocalSearchParams<{ clientId?: string; name?: string }>();
   const coachEx = useCoachExercises();
 
@@ -253,6 +267,10 @@ export default function LogSession() {
           ) : floorPendingNote(queue.unsent) ? (
             <View style={{ marginBottom: sp.lg }}>
               <Flag tone={t.warn}>{floorPendingNote(queue.unsent)}</Flag>
+              <View style={{ alignItems: 'flex-start', paddingTop: sp.sm }}>
+                <Ghost label="Send Now" a11yLabel="Send what is waiting on this phone"
+                  onPress={() => { void sendWaiting(); }} />
+              </View>
             </View>
           ) : null}
 

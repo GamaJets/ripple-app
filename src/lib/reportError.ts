@@ -12,6 +12,7 @@
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
+import { queueCrash } from '../ui/crashQueue';
 
 let APP_VERSION = 'unknown';
 try { APP_VERSION = require('expo-constants').default?.expoConfig?.version ?? 'unknown'; } catch { /* not available */ }
@@ -61,20 +62,30 @@ export function reportError(context: string, err: unknown, extra?: Record<string
     const message = ('[' + context + '] ' + detail + suffix).slice(0, 500);
     const stack = err instanceof Error ? String(err.stack || '').slice(0, 4000) : null;
 
-    supabase.auth.getUser().then(({ data }) => {
+    // ── and if it does not land, keep it ──────────────────────────────────
+    //
+    // This used to be `.then(() => {}, () => {})` and nothing else, so a report
+    // made on a dead network was dropped where it stood. The reports worth most
+    // are the ones from a basement gym or a tube platform, which meant
+    // `app_errors` under-reported exactly the conditions the app is used in.
+    // src/lib/crashQueue.ts is the queue; it goes up on the next reconnect with
+    // everything else, carrying the moment it actually happened.
+    //
+    // `at` is minted here rather than inside the queue, so a report that waits
+    // three days still says when it was made.
+    const at = new Date().toISOString();
+    const send = (uid: string | null) => {
       supabase.from('app_errors').insert({
-        user_id: data?.user?.id ?? null,
-        message,
-        stack,
-        platform: Platform.OS,
-        app_version: APP_VERSION,
-      }).then(() => {}, () => {});
-    }, () => {
+        user_id: uid, message, stack, platform: Platform.OS, app_version: APP_VERSION,
+      }).then(
+        ({ error }: { error: unknown }) => { if (error) void queueCrash({ message, stack, userId: uid, at }); },
+        () => { void queueCrash({ message, stack, userId: uid, at }); },
+      );
+    };
+    supabase.auth.getUser().then(({ data }) => send(data?.user?.id ?? null), () => {
       // Not signed in (or auth unavailable) — the insert policy allows a null
       // user_id, so the report is still worth sending.
-      supabase.from('app_errors').insert({
-        user_id: null, message, stack, platform: Platform.OS, app_version: APP_VERSION,
-      }).then(() => {}, () => {});
+      send(null);
     });
   } catch { /* reporting must never break the caller */ }
 }

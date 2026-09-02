@@ -22,7 +22,7 @@ import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
 import {
   fetchClasses, createClass, createSeries, deleteClass,
   cancelClass, restoreClass, cancelSeriesFrom, updateClass, updateSeriesFrom,
-  fetchRoster, setAttendance, promoteFromWaitlist, returnToWaitlist,
+  fetchRoster, setAttendance, promoteFromWaitlist, returnToWaitlist, bookOnto,
   summariseAttendance, pct, isCancelled, classesThatRan, splitRoster, placesLeft,
   type GymClass, type RosterEntry, type ClassPatch,
 } from '@lib/gymSchedule';
@@ -65,12 +65,37 @@ export default function Timetable() {
   const [members, setMembers] = useState<Membership[] | null>(null);
   const [membersErr, setMembersErr] = useState<string | null>(null);
 
+  /**
+   * The week this board is showing, in the gym's own calendar.
+   *
+   * ── Why the end is not `monday + 7 days` ────────────────────────────────
+   *
+   * It was `new Date(monday.getTime() + 7 * DAY - 1)`, and that adds a fixed
+   * 604,799,999 milliseconds to a moment built from LOCAL calendar parts. Six
+   * days in seven that is the same thing as the following Monday's midnight.
+   * On a clocks-change weekend it is not:
+   *
+   *   · spring forward, and the week closes at Sunday 22:59:59 local. A Sunday
+   *     23:00 class is outside the `.lte('starts_at', to)` bound, so it
+   *     disappears from the timetable, from the double-booking check and from
+   *     floor cover — on a week where an hour of the rota has already moved;
+   *   · autumn back, and the following Monday's midnight hour leaks in and is
+   *     counted as this week's, in the fill rate and in the class pay.
+   *
+   * So the end is the next Monday's midnight, built the same way the start is —
+   * `setDate(+7)` then `setHours(0,0,0,0)`, which is arithmetic on the calendar
+   * rather than on the clock — minus a millisecond. Both bounds are then the
+   * gym's own midnights whatever its offset did that weekend.
+   */
   const range = useCallback(() => {
     const now = new Date();
     const monday = new Date(now);
     monday.setDate(now.getDate() - ((now.getDay() + 6) % 7) + weekOffset * 7);
     monday.setHours(0, 0, 0, 0);
-    const sunday = new Date(monday.getTime() + 7 * DAY - 1);
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
+    nextMonday.setHours(0, 0, 0, 0);
+    const sunday = new Date(nextMonday.getTime() - 1);
     return { from: monday.toISOString(), to: sunday.toISOString(), monday };
   }, [weekOffset]);
 
@@ -201,7 +226,13 @@ export default function Timetable() {
   const tenantId = me.tenantId!;
   const refresh = () => load(tenantId);
   const { monday } = range();
-  const weekLabel = `${monday.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${new Date(monday.getTime() + 6 * DAY).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
+  // The same calendar arithmetic as `range` above, for the same reason: on a
+  // clocks-change week `monday + 6 * DAY` lands at 23:00 on Saturday or 01:00
+  // on Sunday, and the label would name the wrong last day of the week it is
+  // showing.
+  const sundayLabel = new Date(monday);
+  sundayLabel.setDate(monday.getDate() + 6);
+  const weekLabel = `${monday.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${sundayLabel.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
 
   const classFor = (id: string) => raw?.classes.find((x) => x.id === id) ?? null;
 
@@ -222,7 +253,12 @@ export default function Timetable() {
    */
   const callOff = (c: GymClass) => {
     const why = prompt(
-      `Why is "${c.title}" not running?\n\nThe class, its ${c.booked} booking${c.booked === 1 ? '' : 's'} and its register are all kept — this records that it did not happen.`,
+      `Why is "${c.title}" not running?\n\n`
+      + `The class, its ${c.booked} booking${c.booked === 1 ? '' : 's'} and its register are all kept — this records that it did not happen.\n\n`
+      // Said here because it is the difference between a cancellation and a
+      // room full of people arriving at a locked door, and because what is
+      // typed below is what they read.
+      + `Everybody booked or waiting is sent this, with your reason in it. Putting the class back on later sends nothing, so tell them yourself if you do.`,
       '',
     );
     // Cancel on the prompt is null and must do nothing. An empty string is
@@ -398,7 +434,16 @@ export default function Timetable() {
         <Kpi label="Class show rate" text={classSum ? pct(classSum.showRate) : null}
              note={classSum?.showRate == null ? 'nothing booked yet' : undefined} />
         <Kpi label="Double-booked" text={sum ? String(sum.clashes) : null}
-             note={sum && sum.clashes === 0 ? 'no room or trainer clashes' : 'needs a look'} />
+             note={
+               sum == null ? undefined
+                 : sum.sharedRooms > 0
+                   // Said in the note rather than added to the figure. The board
+                   // can see two one-to-ones in one room and cannot know whether
+                   // that room holds two, so it reports the fact instead of
+                   // asserting a limit nothing in the data records.
+                   ? `plus ${sum.sharedRooms} ${sum.sharedRooms === 1 ? 'room' : 'rooms'} shared by two one-to-ones`
+                   : sum.clashes === 0 ? 'no room or trainer clashes' : 'needs a look'
+             } />
       </div>
 
       {conflicts.length ? <Clashes rows={conflicts} /> : null}
@@ -446,7 +491,10 @@ export default function Timetable() {
       {owner ? <CalledOff classes={calledOff} onPutBack={putBack} /> : null}
 
       {openClass ? (
-        <Roster gymClass={openClass} canEdit={staff} onClose={() => { setOpenClass(null); refresh(); }} />
+        <Roster
+          gymClass={openClass} canEdit={staff} members={members} membersErr={membersErr}
+          onClose={() => { setOpenClass(null); refresh(); }}
+        />
       ) : null}
       {editing ? (
         <EditClass
@@ -694,9 +742,14 @@ function FloorCover({ board, monday }: { board: TimetableEntry[] | null; monday:
   // Default to today when the shown week contains it, so the first thing an
   // owner sees is the day they are standing in.
   const todayIdx = useMemo(() => {
-    const start = monday.getTime();
-    const now = Date.now();
-    const i = Math.floor((now - start) / DAY);
+    // Counted in calendar days rather than by dividing a millisecond gap by
+    // 86,400,000: on a clocks-change week one of those days is 23 or 25 hours
+    // long, and the division lands on the day before or after the one the owner
+    // is standing in.
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfWeek = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate()).getTime();
+    const i = Math.round((midnight - startOfWeek) / DAY);
     return i >= 0 && i < 7 ? i : 0;
   }, [monday]);
   const [dayIdx, setDayIdx] = useState(todayIdx);
@@ -837,10 +890,12 @@ function Clashes({ rows }: { rows: ReturnType<typeof clashes> }) {
     <section style={{ border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>Double-booked</h2>
-        <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-          Only visible now that both calendars are on one board. A room clash is
-          counted when a class is one of the two — several one-to-ones sharing the
-          main floor is normal, and nothing here records how many a room holds.
+        <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '84ch' }}>
+          Only visible now that both calendars are on one board. A class taking a room, or one
+          trainer in two places, is counted as a double-booking. Two one-to-ones in the same room
+          are listed as <em>shared</em> and counted separately: several of them on the main floor is
+          ordinary, two of them in Studio 2 is two clients in a doorway, and nothing in the record
+          says how many a room holds — so the board says what it can see rather than guessing.
         </p>
       </div>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -848,8 +903,11 @@ function Clashes({ rows }: { rows: ReturnType<typeof clashes> }) {
           <li key={`${c.reason}:${c.a.key}:${c.b.key}:${i}`} style={{
             padding: '10px 14px', borderTop: i ? '1px solid var(--ring)' : 'none', fontSize: 13,
           }}>
-            <span style={{ color: 'var(--crit)', fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              {c.reason === 'room' ? 'Room' : 'Trainer'}
+            <span style={{
+              color: c.reason === 'room-shared' ? '#f0c04e' : 'var(--crit)',
+              fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase',
+            }}>
+              {c.reason === 'room' ? 'Room' : c.reason === 'trainer' ? 'Trainer' : 'Shared'}
             </span>
             <span style={{ color: 'var(--ink)', marginLeft: 8 }}>{c.what}</span>
             <span style={{ color: 'var(--ink3)', marginLeft: 8 }}>
@@ -1307,8 +1365,10 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
  * desk handles — the member who rings up, the no-show at 06:05 whose bike is
  * free, the coach who says one more can squeeze in — had no path at all.
  */
-function Roster({ gymClass, canEdit, onClose }: {
-  gymClass: GymClass; canEdit: boolean; onClose: () => void;
+function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
+  gymClass: GymClass; canEdit: boolean;
+  members: Membership[] | null; membersErr: string | null;
+  onClose: () => void;
 }) {
   const [rows, setRows] = useState<RosterEntry[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -1357,6 +1417,34 @@ function Roster({ gymClass, canEdit, onClose }: {
     } catch (e: any) {
       setErr(e?.message ?? 'That booking was not moved back.');
     }
+  };
+
+  /**
+   * Put somebody on this class from the desk — the walk-in and the phone
+   * booking, neither of which could reach a register before.
+   *
+   * `bookOnto` returns which of the two things happened, and it is said rather
+   * than assumed: telling somebody they have a place on a class that was
+   * already full is worse than not booking them, because they turn up.
+   */
+  const [adding, setAdding] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+  const [addMsg, setAddMsg] = useState<string | null>(null);
+
+  const add = async () => {
+    if (!adding) return;
+    setAddBusy(true); setAddMsg(null); setErr(null);
+    try {
+      const got = await bookOnto(supabase, gymClass.id, adding);
+      const who = (members ?? []).find((m) => m.memberId === adding)?.memberName ?? 'They';
+      setAdding('');
+      setAddMsg(got === 'booked'
+        ? `${who} has a place on this class.`
+        : `${who} is on the WAITING LIST — this class is full, so that is not a place. Tell them before they travel.`);
+      await load();
+    } catch (e: any) {
+      setAddMsg(e?.message ?? 'Nobody was put on this class.');
+    } finally { setAddBusy(false); }
   };
 
   const split = rows ? splitRoster(rows) : null;
@@ -1445,6 +1533,50 @@ function Roster({ gymClass, canEdit, onClose }: {
         </div>
 
         {err ? <Banner tone="crit">{err}</Banner> : null}
+
+        {/* Booking at the desk. Not offered on a class that was called off:
+            putting somebody on a class that is not running is not a booking,
+            it is a person turning up to a locked room. */}
+        {canEdit && !isCancelled(gymClass) ? (
+          <div style={{
+            display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap',
+            padding: '11px 16px', borderBottom: '1px solid var(--ring)', background: 'var(--surface2)',
+          }}>
+            <label style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Add somebody at the desk</label>
+            <select value={adding} onChange={(e) => { setAdding(e.target.value); setAddMsg(null); }}
+                    style={{ ...field, flex: 2, minWidth: 200 }} aria-label="Who to put on this class">
+              <option value="">
+                {members === null
+                  ? (membersErr ? 'The member list could not be read' : 'Reading the member list…')
+                  : 'Who is it for?'}
+              </option>
+              {/* One entry per person, not per membership row: somebody who
+                  froze one and opened another is one human being, and two
+                  identical names in a picker is how the wrong one is chosen.
+                  Anybody already on the register is left out — they have a
+                  place, and offering to give them a second one is a click that
+                  can only confuse the desk. */}
+              {[...new Map((members ?? [])
+                .filter((m) => !(rows ?? []).some((r) => r.userId === m.memberId))
+                .map((m) => [m.memberId, m]))
+                .values()]
+                .sort((a, b) => (a.memberName ?? '').localeCompare(b.memberName ?? ''))
+                .map((m) => (
+                  <option key={m.memberId} value={m.memberId}>
+                    {m.memberName ?? m.memberId}{m.status === 'active' ? '' : ` — ${m.status}`}
+                  </option>
+                ))}
+            </select>
+            <button onClick={add} disabled={addBusy || !adding} style={primaryBtn}>
+              {addBusy ? 'Adding…' : left != null && left <= 0 ? 'Put on the waiting list' : 'Book them on'}
+            </button>
+          </div>
+        ) : null}
+        {addMsg ? (
+          <p style={{ margin: 0, padding: '9px 16px', borderBottom: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink2)' }}>
+            {addMsg}
+          </p>
+        ) : null}
         {isCancelled(gymClass) ? (
           <p style={{ margin: 0, padding: '11px 16px', borderBottom: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink2)' }}>
             This class was called off{gymClass.cancelReason ? `: ${gymClass.cancelReason}` : ''}. Its
@@ -1461,8 +1593,8 @@ function Roster({ gymClass, canEdit, onClose }: {
           </div>
         ) : rows === null || split === null ? <Loading /> : rows.length === 0 ? (
           <div style={{ padding: '26px 18px', color: 'var(--ink3)', fontSize: 13.5 }}>
-            Nobody has booked this class. Members book from the Repple app; a walk-in can be added
-            once member sign-up is wired to the desk.
+            Nobody has booked this class yet. Members book from the Repple app, and anybody who
+            phoned or walked in goes on below.
           </div>
         ) : (
           <>

@@ -89,7 +89,18 @@ export interface InjuryCandidate {
  * fine and there is no injury in it". A screen that renders both as an empty
  * list tells a client with a torn ACL that their report says nothing.
  */
-export type ExtractOutcome = 'unreadable' | 'nothing-recognised' | 'candidates';
+export type ExtractOutcome =
+  /** Nothing legible came back. NOT the document saying nothing. */
+  | 'unreadable'
+  /** Legible, and in a script this file's vocabulary cannot be applied to at
+   *  all. See `looksNonLatin` — a Greek, Cyrillic, Hebrew or CJK report that
+   *  OCR read perfectly used to land on 'unreadable' and be reported as a
+   *  photograph we could not make out, sending the member to re-photograph a
+   *  page that was read fine. */
+  | 'unsupported-script'
+  /** Read, and no body area with a problem described against it was found. */
+  | 'nothing-recognised'
+  | 'candidates';
 
 export interface Extraction {
   outcome: ExtractOutcome;
@@ -196,15 +207,76 @@ export function segments(text: string): string[] {
     .filter(Boolean);
 }
 
-/** Letters, not characters. A page of OCR noise is mostly punctuation, and
- *  `text.length` counts that as having read something. */
+/**
+ * Letters, not characters. A page of OCR noise is mostly punctuation, and
+ * `text.length` counts that as having read something.
+ *
+ * This was `/[a-z]/gi`, which is not "letters" — it is the letters of one
+ * alphabet. A Greek, Cyrillic, Hebrew, Arabic or CJK report that OCR read
+ * perfectly scored ZERO and was reported to the member as a photograph we could
+ * not read, on the one screen in this app that touches a medical document. They
+ * were told to take a straighter, brighter photo of a page that had been read
+ * fine.
+ *
+ * `\p{L}` with the `u` flag is the Unicode letter property: it counts a letter
+ * in any script, and it counts a Han ideograph and a Hangul syllable as one
+ * each. That last part is why `MIN_READABLE_TOKENS` is not simply 24 — see
+ * below.
+ */
 export function readableLetters(text: string): number {
-  return (String(text ?? '').match(/[a-z]/gi) || []).length;
+  return (String(text ?? '').match(/\p{L}/gu) || []).length;
+}
+
+/**
+ * Characters that carry a whole word or syllable rather than a sound.
+ *
+ * CJK Unified Ideographs, Hiragana, Katakana and Hangul syllables. A Japanese
+ * or Chinese clinic letter says in eight characters what an English one takes
+ * forty to say, so a floor of 24 written for an alphabet rejects a page that is
+ * unambiguously a document.
+ *
+ * Written as code-point ranges rather than `\p{Script=Han}`: a script property
+ * escape is a newer regex feature than the letter property, and a regex that
+ * fails at PARSE time takes down the screen rather than one match — the same
+ * reasoning the sentence splitter above gives for avoiding lookbehind.
+ */
+export function ideographCount(text: string): number {
+  return (String(text ?? '').match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/g) || []).length;
 }
 
 /** Below this, we say we could not read the document rather than that the
  *  document holds nothing. Those are different sentences to a client. */
 export const MIN_READABLE_LETTERS = 24;
+
+/** The same floor for a script where one character is a word. */
+export const MIN_READABLE_IDEOGRAPHS = 8;
+
+/** Whether enough legible text came back to talk about the document at all. */
+export function documentWasRead(text: string): boolean {
+  return readableLetters(text) >= MIN_READABLE_LETTERS
+    || ideographCount(text) >= MIN_READABLE_IDEOGRAPHS;
+}
+
+/**
+ * Whether this text is mostly outside the Latin alphabet.
+ *
+ * Every vocabulary in this file — SYNONYMS, COMPLAINT, NEGATION, SEVERITY_CUES
+ * — is English, so a document in another script is one this file provably
+ * cannot read a word of. That is a different fact from "we read it and found no
+ * injury", and it deserves a different sentence: one says the photo was bad,
+ * one says the report describes nothing, and neither is true of a Greek
+ * physiotherapy report that scanned perfectly.
+ *
+ * Two thirds rather than a bare majority, so a Greek report with an English
+ * letterhead, or a Cyrillic one quoting an English drug name, still counts as
+ * Greek or Cyrillic.
+ */
+export function looksNonLatin(text: string): boolean {
+  const letters = readableLetters(text);
+  if (letters === 0) return false;
+  const latin = (String(text ?? '').match(/[A-Za-z\u00c0-\u024f]/g) || []).length;
+  return latin / letters < 0.34;
+}
 
 /** The exercise-name keywords for this area that the segment also mentions.
  *  Context attached to a candidate; never a reason one exists. */
@@ -285,7 +357,11 @@ export function extractInjuryCandidates(text: string): InjuryCandidate[] {
 export function extractFromDocument(text: string): Extraction {
   const candidates = extractInjuryCandidates(text);
   if (candidates.length) return { outcome: 'candidates', candidates };
-  if (readableLetters(text) < MIN_READABLE_LETTERS) return { outcome: 'unreadable', candidates: [] };
+  if (!documentWasRead(text)) return { outcome: 'unreadable', candidates: [] };
+  // Read, and in a script none of this file's English vocabulary can touch.
+  // Reporting that as "we found no injury in it" is a claim about a document we
+  // did not read a word of.
+  if (looksNonLatin(text)) return { outcome: 'unsupported-script', candidates: [] };
   return { outcome: 'nothing-recognised', candidates: [] };
 }
 
@@ -304,10 +380,15 @@ export function outcomeMessage(outcome: ExtractOutcome): { title: string; note: 
         title: 'We could not read that',
         note: 'No text came back from that image, so this is not the document saying nothing — it is us failing to read it. Try a straighter, brighter photo, or add the injury yourself.',
       };
+    case 'unsupported-script':
+      return {
+        title: 'We can only read English documents',
+        note: 'The text came back clearly, and it is not in an alphabet this app can read. Nothing is wrong with your photo or with your document. Type the injury in yourself and it will be treated exactly the same as one we had read.',
+      };
     case 'nothing-recognised':
       return {
         title: 'Nothing we could turn into an injury',
-        note: 'We read the document but found no body area with a problem described against it. That does not mean it says nothing — it means we could not tell. Add what it says yourself.',
+        note: 'We read the document but found no body area with a problem described against it. This app only understands English clinical wording, so a report in another language will land here even when it describes an injury plainly. That does not mean it says nothing — it means we could not tell. Add what it says yourself.',
       };
     default:
       return {

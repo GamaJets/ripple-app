@@ -7,7 +7,7 @@
 // store a plausible number against the wrong label, permanently, and the screen
 // it came from would still look right.
 import {
-  snapshotOf, closeBlocker, reopenBlocker, driftSince, liveCloseFor,
+  snapshotOf, closeBlocker, reopenBlocker, driftSince, liveCloseFor, closedMonthBlocker,
   type MonthCloseRow, type CloseSnapshot,
 } from './gymClose';
 import type { MonthClose } from './monthEnd';
@@ -28,7 +28,7 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
   ended: true,
   income: {
     takenCents: 420000, count: 14, byMethod: [], currencies: ['GBP'],
-    unattributed: 1, unattributedCents: 2500,
+    unattributed: 1, unattributedCents: 2500, unattributedCurrency: 'GBP',
   },
   purpose: [],
   owed: {
@@ -178,6 +178,38 @@ eq(reopenBlocker('Late cash from the 31st'), null, 'a reason is a reason');
 
   const unmarkedNow: CloseSnapshot = { ...same, unmarkedSessions: 3 };
   eq(driftSince(stored, unmarkedNow, fmt).length, 1, 'the unmarked count is watched too');
+}
+
+/* ── a closed month refuses money dated into it ───────────────────────────
+ *
+ * Part 182 locked payments and invoices and nothing else, and /payroll never
+ * read this table at all — so a settlement could land in a month that had been
+ * signed off, and /accounting's "Money out" for a filed month moved underneath
+ * the accountant. Part 481 makes the database refuse it; this is the rule that
+ * refuses it with the run still on screen.
+ */
+{
+  const closed = (monthKey: string, reopenedAt: string | null = null): MonthCloseRow => ({
+    id: 'c-' + monthKey, monthKey, closedAt: '2026-09-02T09:00:00.000Z',
+    closedBy: null, closedByName: null, note: null,
+    takenCents: null, invoicedCents: null, outstandingCents: null, payrollCents: null,
+    currency: null, unmarkedSessions: null, blockersAtClose: null,
+    reopenedAt, reopenedBy: null, reopenedByName: null,
+    reopenReason: reopenedAt ? 'a late payment' : null,
+  });
+
+  ok(closedMonthBlocker('2026-08-01', [closed('2026-08')]) != null,
+    'a payroll run dated into a closed August is refused');
+  ok((closedMonthBlocker('2026-08-01', [closed('2026-08')]) ?? '').includes('2026-08'),
+    'and the refusal names the month, because the way out is reopening that one');
+  eq(closedMonthBlocker('2026-09-01', [closed('2026-08')]), null,
+    'a run for an open month is not refused by a neighbouring close');
+  eq(closedMonthBlocker('2026-08-01', [closed('2026-08', '2026-09-03T10:00:00.000Z')]), null,
+    'a month that was reopened is open again — the row stays as history, not as a lock');
+  eq(closedMonthBlocker('2026-08-01', []), null, 'a gym that has closed nothing blocks nothing');
+  eq(closedMonthBlocker('2026-08-01', null), null,
+    'and a close record that could not be READ does not block: part 481 makes the database the backstop');
+  eq(closedMonthBlocker('', [closed('2026-08')]), null, 'a date nobody stated cannot be placed in a month');
 }
 
 if (errors.length) {

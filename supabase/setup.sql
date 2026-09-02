@@ -38588,3 +38588,1801 @@ end $$;
 -- these two lines are additive and neither widens anything else.
 grant select (delivery_mode) on public.trainers to authenticated;
 grant update (delivery_mode) on public.trainers to authenticated;
+
+-- ▶ the-largest-line-in-a-coachs-year.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Rent, insurance, the accountant, and everything else a coach pays for.
+--
+-- ── What was missing ─────────────────────────────────────────────────────
+--
+-- The outgoing half of the Money screen had exactly two sources: the coach's
+-- own Repple plan, and the ad spend they typed against a join code. Its empty
+-- state said so in as many words — "Your Repple plan and any ad spend you
+-- record show up here" — and that was the whole of it.
+--
+-- For a self-employed coach the largest single line of the year is usually the
+-- gym rent or the chair fee, and it was nowhere. Nor was insurance, nor
+-- professional indemnity, nor CPD, nor equipment, nor kit, nor travel between
+-- clients, nor the accountant who prepares the return this app's own statement
+-- is meant to be handed to. So the statement was one-sided by construction:
+-- every penny in, no penny out, given to somebody whose job is to work out the
+-- difference.
+--
+-- ── THE LINE THIS TABLE MUST NOT CROSS ───────────────────────────────────
+--
+-- Nothing subtracts this from anything.
+--
+-- `NO_NET_NOTE` in src/lib/coachLedger.ts is a standing rule of this product
+-- and this table is the single biggest temptation to break it: the moment
+-- money in and money out are both in the database, somebody computes a profit
+-- and puts it in a hero. That figure would be wrong for four independent
+-- reasons — the takings are gross of Stripe's fee and the platform's, the cash
+-- half of the income depends on what the coach happened to write down, the
+-- costs half depends on the same, and the two sides can be in different
+-- currencies that this app has no rate to convert between. A net figure over
+-- those is not a smaller truth, it is a number about nothing, and it would be
+-- read as what the coach earned.
+--
+-- So `coachLedger.ts` keeps two ledgers with no arithmetic between them,
+-- `coachCosts.ts` produces a `Taken` for the outgoing side exactly as
+-- `coachReceipts.ts` does for the incoming one, and neither this table nor
+-- anything reading it produces a profit, a margin or a balance.
+--
+-- ── What a row claims ────────────────────────────────────────────────────
+--
+-- One thing: that this coach says they paid this amount, in this currency, for
+-- this, on this day. It is the coach's own word — nothing here has been checked
+-- against a bank, a card, a receipt or an invoice, and no supplier is named as
+-- having been paid. It is a bookkeeping note, and it is visible to nobody but
+-- the coach who wrote it.
+--
+-- Deliberately NOT a claim about tax. There is no deductibility flag, no VAT
+-- column and no category that implies either, for the same reason part 138
+-- refuses a tax line on an invoice: what is allowable turns on the coach's
+-- country, their trade and their accountant's judgement, and a "deductible"
+-- tick in this app would be tax advice printed under somebody's name. The
+-- categories below are the words a person uses to sort their own spending, and
+-- nothing reads them as anything else.
+--
+-- ── Modelled on part 190 throughout ──────────────────────────────────────
+--
+-- Same shape, same rules, same reasoning: minor units and a required currency,
+-- a DATE rather than an instant, INSERT and DELETE for the owner and no UPDATE,
+-- and no read policy for anybody else. Where the two differ it is stated below.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.coach_costs (
+  id          uuid        primary key default gen_random_uuid(),
+  coach_id    uuid        not null references public.trainers(id) on delete cascade,
+  -- What it was for, in the coach's own words. Required: an amount with no
+  -- description is a line nobody can reconcile against anything later, and the
+  -- one reader of this table is a person trying to remember what they spent
+  -- money on eleven months ago.
+  description text        not null check (btrim(description) <> '' and length(description) <= 200),
+  -- A closed set, for the reason `coach_receipts.method` is one: the category
+  -- is the field a coach might later total or filter by, and forty spellings of
+  -- "insurance" is a column nobody can group. 'other' is the escape hatch and
+  -- the description carries the detail.
+  --
+  -- NO 'advertising' and no 'platform'. Ad spend is already recorded against a
+  -- join code (part 98) and the coach's own Repple plan is already read from
+  -- their billing, so both are on the Going Out side already — a second row for
+  -- either would count the same money twice, exactly as a `coach_receipts` row
+  -- for a Stripe sale would on the way in.
+  category    text        not null check (category in (
+                            'rent', 'insurance', 'education', 'equipment',
+                            'kit', 'travel', 'professional', 'other')),
+  -- Minor units, matching coach_receipts, client_purchases, coach_invoices and
+  -- trainer_packages, so nothing between this table and the rest of the app's
+  -- money ever has to be converted. bigint for the same reason they are.
+  amount_cents bigint     not null check (amount_cents > 0 and amount_cents < 100000000000),
+  -- NOT NULL and no default, exactly as in part 190. tenants.currency is
+  -- nullable on purpose (part 99) and null there means "this gym has not told
+  -- us", so a cost simply cannot be recorded until somebody states a currency.
+  -- A figure with the wrong three letters on it is a different amount of money.
+  --
+  -- This side can legitimately differ from the income side: a coach who is paid
+  -- in dirhams may pay a UK insurer in sterling. Nothing anywhere adds the two,
+  -- and `sumTaken` keeps every currency in its own pot.
+  currency    text        not null check (currency = upper(btrim(currency)) and length(currency) between 3 and 4),
+  -- A DATE, not a timestamp, for the reason part 190 gives: rent was paid on a
+  -- day, and storing an instant puts a Monday payment on Sunday for every coach
+  -- west of Greenwich.
+  paid_on     date        not null,
+  note        text        check (note is null or length(note) <= 500),
+  created_at  timestamptz not null default now()
+);
+
+comment on table public.coach_costs is
+  'What a coach says their own business cost them — rent or a chair fee, insurance, CPD, equipment, kit, travel, an accountant. The coach''s own record, readable by nobody else, never reconciled against a bank. NOT a tax record: there is no deductibility flag and no tax column, because what is allowable is the coach''s accountant''s judgement and not this app''s. Nothing anywhere subtracts this from what the coach was paid.';
+comment on column public.coach_costs.category is
+  'rent | insurance | education | equipment | kit | travel | professional | other. Deliberately no ''advertising'' and no ''platform'': ad spend is already recorded against a join code and the Repple plan is already read from billing, so a row here for either would count the same money twice.';
+comment on column public.coach_costs.paid_on is
+  'The day the coach says the money went out, not the day the row was written. A quarter of receipts written up in one evening must not all land in that evening''s month.';
+comment on column public.coach_costs.currency is
+  'ISO 4217, uppercase, required. There is no default and no fallback — see tenants.currency in part 99. It may differ from the currency the coach is PAID in, and the two are never added.';
+
+-- The read is always "mine, newest first", and the statement reads a date range
+-- of it. `id` is in the index because every paged read in this app orders on a
+-- total order — two costs recorded on the same day would otherwise tie and a
+-- page boundary could drop or repeat one.
+create index if not exists coach_costs_coach_idx
+  on public.coach_costs (coach_id, paid_on desc, id desc);
+
+-- ── Row-level security ───────────────────────────────────────────────────
+
+alter table public.coach_costs enable row level security;
+
+drop policy if exists coach_costs_owner_read on public.coach_costs;
+create policy coach_costs_owner_read on public.coach_costs
+  for select
+  to authenticated
+  using (coach_id = (select auth.uid()));
+
+drop policy if exists coach_costs_owner_insert on public.coach_costs;
+create policy coach_costs_owner_insert on public.coach_costs
+  for insert
+  to authenticated
+  with check (coach_id = (select auth.uid()));
+
+drop policy if exists coach_costs_owner_delete on public.coach_costs;
+create policy coach_costs_owner_delete on public.coach_costs
+  for delete
+  to authenticated
+  using (coach_id = (select auth.uid()));
+
+-- Named and dropped rather than merely never written, so a policy added by
+-- somebody who wanted an "edit" button cannot survive a rebuild of this file.
+-- Correcting a cost is deleting the wrong line and writing the right one; an
+-- UPDATE would leave a row whose amount and whose date came from two different
+-- intentions, and nothing on it would say so.
+--
+-- And no gym-owner read. A self-employed coach's own outgoings are not their
+-- gym's business, and a table an owner could read would make one — the same
+-- reasoning part 190 gives for refusing a client read of `coach_receipts`.
+drop policy if exists coach_costs_owner_update on public.coach_costs;
+drop policy if exists coach_costs_owner_of_gym_read on public.coach_costs;
+drop policy if exists coach_costs_client_read on public.coach_costs;
+
+-- RLS narrows a GRANT; it does not create one.
+grant select, insert, delete on public.coach_costs to authenticated;
+revoke update on public.coach_costs from authenticated;
+revoke all on public.coach_costs from anon;
+
+-- ▶ a-registered-coach-can-use-their-own-invoice.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A VAT-registered coach could not use Repple's invoice.
+--
+-- ── What part 138 refused, and what it over-refused ──────────────────────
+--
+-- Part 138 built a numbered document a coach can hand over, and put one
+-- sentence on every copy of it: no tax has been calculated, added or withheld,
+-- there is no tax registration number on it, and it is not a tax invoice. The
+-- concepts were ABSENT rather than zeroed, on purpose. That refusal was right
+-- and it stays right: this app does not know the coach's country, their
+-- registration status, where their client is, or what the thing sold attracts,
+-- so any tax figure it produced would be invented under somebody's name on a
+-- document they hand to a customer.
+--
+-- But it refused one thing too many. A rate and a registration number that the
+-- COACH TYPES are not calculations. They are stated facts about the issuer,
+-- exactly as `bill_to` is a stated fact about the recipient and `description`
+-- is a stated fact about what was sold — every one of them typed by the same
+-- person, printed verbatim, and never checked by this app against anything.
+-- Refusing to print them meant a registered coach had to keep a second
+-- invoicing system, which made the whole money side of Repple a duplicate of
+-- their real books.
+--
+-- ── WHAT THIS PART DOES NOT ADD ──────────────────────────────────────────
+--
+-- No tax AMOUNT. No net figure. No gross/net split. No "subtotal". Not as
+-- columns, not as defaults, not as zeros — the concepts stay absent, and the
+-- document still says in words that Repple has calculated nothing. The only
+-- money column on an invoice is still `amount_cents`, and it is still the flat
+-- amount charged.
+--
+-- The line is exactly where `INVOICE_TAX` in src/lib/coachInvoice.ts has always
+-- drawn it: this app may print what a person stated and may not work anything
+-- out from it. A coach who states "20%" beside "GBP 480.00" has said two true
+-- things; an app that prints "VAT: GBP 80.00" underneath has made a claim about
+-- their tax affairs, and it would be wrong for a coach on a margin scheme, a
+-- flat-rate scheme, a reverse charge, or a mixed-rate invoice.
+--
+-- ── Snapshotted, like everything else on the document ────────────────────
+--
+-- Both columns live on the INVOICE, not on the trainer. Part 138's argument
+-- about `bill_to` applies unchanged: a coach who deregisters next year has not
+-- changed what a document they issued this year said, and a joined column would
+-- silently rewrite every invoice they had already handed out. The screen offers
+-- the values from their last invoice that carried them, so nobody types a
+-- registration number twice, and what is STORED is what was on the page.
+--
+-- ── The guard is replaced, not extended ──────────────────────────────────
+--
+-- Part 188 lists every immutable column by name and raises if any of them
+-- moves. Two new document-bearing columns that were not on that list would be
+-- editable after issue — a tax rate that can change under somebody who has
+-- already read the document is the worst version of this, because it is the
+-- field a tax authority would look at. `create or replace` on the same
+-- signature, so the trigger created in part 138 keeps pointing at it.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- The rate the coach typed, as a percentage. NUMERIC and not an integer: a 12.5
+-- per cent rate is real, and rounding somebody's stated rate to a whole number
+-- would print a figure they did not type. NULL means they stated nothing, which
+-- is the ordinary case and is a different document — see `INVOICE_TAX` against
+-- `INVOICE_TAX_STATED` in src/lib/coachInvoice.ts.
+--
+-- Zero is ALLOWED and is not the same as null. A zero-rated supply is a real
+-- thing that a registered business states on purpose, and collapsing it into
+-- "nothing stated" would take a deliberate statement off the document.
+alter table public.coach_invoices add column if not exists tax_rate_pct numeric(6,3);
+alter table public.coach_invoices add column if not exists tax_registration text;
+
+alter table public.coach_invoices drop constraint if exists coach_invoices_tax_rate_range;
+alter table public.coach_invoices add constraint coach_invoices_tax_rate_range
+  check (tax_rate_pct is null or (tax_rate_pct >= 0 and tax_rate_pct <= 100));
+
+alter table public.coach_invoices drop constraint if exists coach_invoices_tax_reg_len;
+alter table public.coach_invoices add constraint coach_invoices_tax_reg_len
+  check (tax_registration is null or (btrim(tax_registration) <> '' and length(tax_registration) <= 60));
+
+comment on column public.coach_invoices.tax_rate_pct is
+  'A tax rate the COACH typed, as a percentage, printed verbatim. Repple calculates nothing from it: there is no tax amount column and no net/gross split anywhere on an invoice. NULL means the coach stated no rate; 0 means they stated a zero rate, and the two are different documents.';
+comment on column public.coach_invoices.tax_registration is
+  'A tax registration number the COACH typed, printed verbatim. Never checked against any register, and never inferred from a country or a currency.';
+
+-- ── The guard, widened by exactly two columns ─────────────────────────────
+--
+-- Verbatim from part 188 plus the two new lines. Replaced rather than extended
+-- in place because it lists every immutable column by name and there is no
+-- other way to add one.
+create or replace function public.coach_invoices_immutable_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.id is distinct from old.id
+     or new.coach_id is distinct from old.coach_id
+     or new.seq is distinct from old.seq
+     or new.client_id is distinct from old.client_id
+     or new.bill_to is distinct from old.bill_to
+     or new.description is distinct from old.description
+     or new.amount_cents is distinct from old.amount_cents
+     or new.currency is distinct from old.currency
+     or new.kind is distinct from old.kind
+     or new.issued_on is distinct from old.issued_on
+     -- On the list because it is on the DOCUMENT. A due date that could move
+     -- after issue is a term changed under somebody who has already read it.
+     or new.due_on is distinct from old.due_on
+     -- On the list for the same reason and more sharply. A tax rate or a
+     -- registration number that could move after issue is the field a tax
+     -- authority reads, changed under a document somebody is already holding.
+     or new.tax_rate_pct is distinct from old.tax_rate_pct
+     or new.tax_registration is distinct from old.tax_registration
+     or new.note is distinct from old.note
+     or new.created_at is distinct from old.created_at then
+    raise exception 'an issued invoice cannot be edited — void it and issue another';
+  end if;
+
+  -- The chase columns are the only two an update may move, and they may only
+  -- move forward. `+ 1` rather than `>=` so nothing can jump the count to a
+  -- number no sequence of taps produced, and nothing can reset it to zero.
+  if new.reminder_count is distinct from old.reminder_count
+     and new.reminder_count is distinct from old.reminder_count + 1 then
+    raise exception 'a reminder count moves up by one at a time';
+  end if;
+  if new.reminder_count = old.reminder_count
+     and new.reminded_at is distinct from old.reminded_at then
+    raise exception 'the last-chased time only changes when a chase is recorded';
+  end if;
+
+  -- One way only. Un-voiding would put a number back into circulation that the
+  -- coach has already told somebody was cancelled.
+  if old.voided_at is not null then
+    raise exception 'that invoice is already voided';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.coach_invoices_immutable_guard() from public, anon, authenticated;
+
+-- ── Issuing, now with what the coach stated about tax ─────────────────────
+--
+-- The old nine-argument signature is DROPPED rather than left beside the new
+-- one, for the reason part 188 gives: `create or replace` with a different
+-- argument list creates an OVERLOAD, and PostgREST resolving
+-- `issue_coach_invoice` against two candidates with compatible defaults is an
+-- ambiguity that surfaces as a 300 at the moment a coach taps Issue.
+drop function if exists public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text, date);
+
+create or replace function public.issue_coach_invoice(
+  p_bill_to          text,
+  p_description      text,
+  p_amount_cents     bigint,
+  p_issued_on        date,
+  p_kind             text,
+  p_client_id        uuid default null,
+  p_currency         text default null,
+  p_note             text default null,
+  p_due_on           date default null,
+  p_tax_rate_pct     numeric default null,
+  p_tax_registration text default null
+)
+returns public.coach_invoices
+language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  ccy text;
+  n   integer;
+  reg text;
+  out_row public.coach_invoices;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  if not exists (select 1 from public.trainers t where t.id = uid) then
+    raise exception 'no trainer profile for this account';
+  end if;
+
+  if p_bill_to is null or btrim(p_bill_to) = '' then
+    raise exception 'an invoice has to say who it is for';
+  end if;
+  if p_description is null or btrim(p_description) = '' then
+    raise exception 'an invoice has to say what it is for';
+  end if;
+  if p_amount_cents is null or p_amount_cents <= 0 then
+    raise exception 'an invoice for nothing is not an invoice';
+  end if;
+  if p_amount_cents >= 100000000000 then
+    raise exception 'that amount is too large';
+  end if;
+  if p_kind is null or p_kind not in ('received', 'requested') then
+    raise exception 'say whether this records money received or money requested';
+  end if;
+  if p_issued_on is null then
+    raise exception 'an invoice has to carry the date it was issued';
+  end if;
+  if p_issued_on > current_date + 1 then
+    raise exception 'an invoice cannot be dated in the future';
+  end if;
+
+  -- Refused, not corrected. A document that says it fell due before it was
+  -- written is not one anybody can act on, and silently swapping the two dates
+  -- would print terms the coach did not type. There is deliberately no upper
+  -- bound: a coach settling annually with a corporate client is ordinary.
+  if p_due_on is not null and p_due_on < p_issued_on then
+    raise exception 'an invoice cannot fall due before it is issued';
+  end if;
+
+  -- Refused rather than clamped, for the reason every money refusal in this
+  -- product is refused rather than corrected: clamping 120 to 100 prints a rate
+  -- the coach did not type onto a document about their tax affairs.
+  if p_tax_rate_pct is not null and (p_tax_rate_pct < 0 or p_tax_rate_pct > 100) then
+    raise exception 'a tax rate is a percentage between 0 and 100';
+  end if;
+  reg := nullif(btrim(coalesce(p_tax_registration, '')), '');
+  if reg is not null and length(reg) > 60 then
+    raise exception 'that tax registration number is longer than any this can print';
+  end if;
+
+  if p_client_id is not null and not exists (
+    select 1 from public.clients c where c.id = p_client_id and c.trainer_id = uid
+  ) then
+    raise exception 'that client is not one of yours';
+  end if;
+
+  ccy := nullif(btrim(upper(coalesce(p_currency, ''))), '');
+  if ccy is null then
+    select case when count(distinct upper(k.currency)) = 1 then max(upper(k.currency)) end
+      into ccy
+    from public.trainer_packages k
+    where k.trainer_id = uid and k.currency is not null and btrim(k.currency) <> '';
+  end if;
+  if ccy is null then
+    select upper(btrim(t.currency)) into ccy
+    from public.trainers tr
+    join public.tenants t on t.id = tr.tenant_id
+    where tr.id = uid and t.currency is not null and btrim(t.currency) <> '';
+  end if;
+  if ccy is null then
+    raise exception 'no currency has been set, so there is nothing to price this in';
+  end if;
+  if ccy !~ '^[A-Z]{3,4}$' then
+    raise exception 'currency must be a three-letter code';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 138));
+
+  select coalesce(max(i.seq), 0) + 1 into n
+  from public.coach_invoices i
+  where i.coach_id = uid;
+
+  insert into public.coach_invoices
+    (coach_id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, note,
+     tax_rate_pct, tax_registration)
+  values
+    (uid, n, p_client_id, btrim(p_bill_to), btrim(p_description), p_amount_cents, ccy, p_kind,
+     p_issued_on, p_due_on, nullif(btrim(coalesce(p_note, '')), ''),
+     p_tax_rate_pct, reg)
+  returning * into out_row;
+
+  return out_row;
+end $$;
+
+revoke all on function public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text, date, numeric, text) from public, anon;
+grant execute on function public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text, date, numeric, text) to authenticated;
+
+-- ▶ the-register-a-covering-coach-cannot-take.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The register a covering coach cannot take, and the show rate over 100%.
+--
+-- Two functions from part 25, both about `class_bookings.attended_at`, both
+-- still counting or guarding the way they did before the rest of the product
+-- moved. Part 165 already made the argument for the first of them and changed
+-- the TABLE policies; the RPC the phone actually calls never got the change.
+--
+-- ── 1 · `set_class_attendance` still says 'not your class' ─────────────────
+--
+-- The guard is `gc.trainer_id = auth.uid()`. Part 165 widened
+-- `class_bookings_staff_r` / `_staff_u` to the gym's staff and set out why in
+-- full; the two reasons that matter here are quoted rather than paraphrased,
+-- because they are the whole justification for this file:
+--
+--   "Classes are covered — illness, holiday, a swap arranged in the group chat
+--    — and the person standing in the room is the person who knows who turned
+--    up. A register only the named coach can take is a register that does not
+--    get taken on precisely the days it is hardest to reconstruct afterwards."
+--
+--   "Every class already on the board has `trainer_id` NULL. studio-web's Add
+--    a class wrote free-text `instructor` and never the id, so a
+--    trainer_id-scoped policy would match no existing class for anybody."
+--
+-- The consequence on the phone is not an empty screen, it is a refusal: the
+-- RPC RAISES, `setAttendance` and the floor queue both read that as the server
+-- declining, and app/(trainer)/class-checkin.tsx takes the `refused` branch —
+-- which correctly does NOT move the row and correctly does not queue it,
+-- because the same bytes would be refused every time. So on every covered
+-- class, and on every class the console created, the coach taps a member and
+-- is told it did not save. The register goes unrecorded and per-attendee pay
+-- with it.
+--
+-- The new guard is the same line part 165 drew, stated the same way: the
+-- class's own tenant, and a staff role in it. The class's named trainer is
+-- kept as its own arm rather than folded in, because an INDEPENDENT coach —
+-- no gym, `my_tenant()` null — runs classes too, and a purely tenant-scoped
+-- guard would lock them out of their own register. Both arms, and a class
+-- whose `tenant_id` is null is reachable only by its named trainer. Unscoped
+-- fails closed.
+--
+-- ── 2 · `class_attendance_summary` counts a waitlister as a show ───────────
+--
+-- `booked` filters `cb.status = 'booked'`. `attended` does not filter at all:
+-- it is `count(cb.attended_at)` over every booking row on the class, waitlist
+-- included. The register lists waitlisters and every row is tappable — by
+-- design, because a place comes free at the door and the coach ticks the
+-- person in front of them — so this is the ordinary case and not an edge one.
+--
+-- Two people off the waitlist on a class of 12 with 12 booked and 10 present
+-- gives attended 12 over booked 12: a show rate of 100% on a class two of the
+-- people who paid for it did not attend. Push it further and the rate goes
+-- over 100%, which is not a rate at all. `summariseClassRows` sums both
+-- columns across a month and divides once, so one class does this to the
+-- month's figure.
+--
+-- `attended` is therefore narrowed to booked rows, which is what its own
+-- comment in src/lib/classRates.ts has always claimed it was: "Of those
+-- booked, how many were marked present."
+--
+-- The people who came off the waitlist are COUNTED, not discarded. They really
+-- trained, the gym really has to pay for them, and dropping them would fix a
+-- rate by losing a fact. `waitlist_attended` is a new column, which is exactly
+-- what `GymClass.waitlistAttended` in src/lib/gymSchedule.ts already holds for
+-- the console's own read of the same table, and for the reason stated there:
+-- "a number that can exceed its own denominator is not a rate".
+--
+-- The return type changes, so the function is dropped and recreated. Every
+-- existing caller reads columns by name and is unaffected by a new one on the
+-- end; `attended` keeps its name and gets the meaning it was documented with.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1 · anyone standing in the room may take the register ───────────────────
+create or replace function public.set_class_attendance(p_class uuid, p_user uuid, p_present boolean)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+begin
+  -- Two arms, deliberately. The first is the gym's staff, matching
+  -- class_bookings_staff_u from part 165 line for line so the phone and the
+  -- console cannot disagree about who may take a register. The second is the
+  -- class's own trainer, kept because an independent coach has no tenant and
+  -- would otherwise be locked out of their own class by a tenant-scoped guard.
+  if not exists (
+    select 1 from gym_classes gc
+    where gc.id = p_class
+      and ( ( gc.tenant_id is not null
+              and gc.tenant_id = my_tenant()
+              and my_role() in ('trainer', 'owner') )
+            or gc.trainer_id = auth.uid() )
+  ) then
+    -- The message is what the phone shows the coach, so it says which of the
+    -- two things is wrong rather than repeating a possessive that is no longer
+    -- the test. `refusedLine` in src/lib/floorQueue.ts puts it beside "was not
+    -- saved and is not waiting to send".
+    raise exception 'this class is not yours to register';
+  end if;
+  update class_bookings
+     set attended_at = case when p_present then now() else null end
+   where class_id = p_class and user_id = p_user;
+end; $function$;
+
+grant execute on function public.set_class_attendance(uuid, uuid, boolean) to authenticated;
+
+-- ── 2 · a show rate that cannot exceed its own denominator ──────────────────
+drop function if exists public.class_attendance_summary(timestamptz, timestamptz);
+
+create function public.class_attendance_summary(p_from timestamptz, p_to timestamptz)
+returns table(class_id uuid, title text, kind text, branch text, trainer_id uuid,
+              trainer_name text, starts_at timestamptz,
+              capacity integer, booked integer, attended integer,
+              waitlist_attended integer)
+language sql
+security definer
+set search_path to 'public'
+as $function$
+  select gc.id, gc.title, gc.kind, gc.branch, gc.trainer_id,
+         coalesce(tp.full_name, 'Trainer') as trainer_name, gc.starts_at,
+         coalesce(gc.capacity, 0)::int as capacity,
+         count(cb.id) filter (where cb.status = 'booked')::int as booked,
+         -- Of THOSE BOOKED, how many were marked present. The filter is the
+         -- whole fix: without it a waitlister ticked in at the door counted
+         -- against a denominator they were never in.
+         count(cb.attended_at) filter (where cb.status = 'booked')::int as attended,
+         -- And the people who came off the waitlist and trained. Counted apart
+         -- rather than dropped: they are real attendance the gym pays for, and
+         -- they belong nowhere near the numerator of a show rate.
+         count(cb.attended_at) filter (where cb.status <> 'booked')::int as waitlist_attended
+  from gym_classes gc
+  left join class_bookings cb on cb.class_id = gc.id
+  left join profiles tp on tp.id = gc.trainer_id
+  where gc.starts_at >= p_from and gc.starts_at < p_to
+    and ( gc.trainer_id = auth.uid()
+          -- the caller must own THIS class's gym, not merely be an owner
+          or is_owner_of(gc.tenant_id) )
+  group by gc.id, tp.full_name
+  order by gc.starts_at desc;
+$function$;
+
+grant execute on function public.class_attendance_summary(timestamptz, timestamptz) to authenticated;
+
+-- ▶ a-coach-can-move-a-session-instead-of-cancelling-it.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- A coach can move a booked session. Until now they could only cancel it.
+--
+-- Part 243 gave the MEMBER an atomic reschedule and stated the argument in
+-- full: "Not cancel-then-book. Those are two acts with a gap in the middle."
+-- `reschedule_my_session` scopes on `s.client_id = auth.uid()`, so a coach
+-- calling it is refused as `not_yours` — and the coach's calendar never called
+-- it. Their only route is `releaseSession`, then `promote_from_waitlist`, then
+-- a "Session cancelled" push, then booking the client back in by hand.
+--
+-- What that does to a coach moving Ana from 7am to 8am:
+--
+--   · Ana's 7am is freed and handed to whoever was first on its waitlist,
+--     inside the transaction that frees it. Correct behaviour for a
+--     cancellation; catastrophic for a move, because Ana has not been put
+--     anywhere yet.
+--   · Ana is sent a cancellation. She has not cancelled and is not cancelled.
+--   · The 8am may be taken in the gap by anybody, including the person who
+--     just took the 7am.
+--   · The pack credit markers on the booking are cleared by
+--     `sessions_release_clears_draw` (part 370) — rightly, because a released
+--     slot must never read as paid — and re-booking Ana draws a SECOND credit
+--     for one hour of training.
+--
+-- Moving a session is the single most common thing that happens to a diary.
+--
+-- ── This is part 243's function with three deliberate differences ─────────
+--
+-- 1 · WHO. Both rows are scoped by `trainer_id = auth.uid()` rather than by
+--     `client_id`, and the moved booking keeps ITS OWN client. A coach moves
+--     their client's hour; they do not take it.
+--
+-- 2 · NO NOTICE GATE, AND STILL NO CHARGE. Part 243 refuses a member's move
+--     inside the coach's notice window, because moving freely inside it would
+--     be the button that makes late cancellation cost nothing. Neither half of
+--     that argument applies here. The notice period is the COACH's own rule and
+--     exists to protect the coach; there is nobody to charge for a coach's
+--     change of plan, and a coach who cannot move a session two hours out will
+--     cancel it instead — which is strictly worse for the client, for the
+--     record, and for the credit attached to it. Nothing is written to
+--     `charges` on any path through this function.
+--
+-- 3 · THE CLIENT IS TOLD BY THE APP, NOT BY THIS. The id of the client whose
+--     session moved comes back in the report so the caller can push to exactly
+--     that person, and to nobody else. A move nobody is told about is a
+--     no-show the client is blamed for.
+--
+-- Everything else is part 243's, deliberately unchanged and for its own stated
+-- reasons: the lock order, the free-then-book order inside a subtransaction so
+-- an exclusion violation rolls the whole move back, the five credit markers
+-- travelling in the SAME statement that gives the slot its occupant (which is
+-- what tells `sessions_release_clears_draw` this is a carry rather than a
+-- release), the gym-pass redemption following by id, and the freed slot going
+-- to the head of its waitlist inside this same transaction so it is never
+-- observable as bookable while somebody is waiting for it.
+--
+-- NO CREDIT IS DRAWN and none returned. The credit follows the member: they
+-- paid for one session, they are having one session, and it is the same one at
+-- a different hour.
+-- ═════════════════════════════════════════════════════════════════════════
+
+create or replace function public.reschedule_client_session(p_from uuid, p_to uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid      uuid := auth.uid();
+  v_from     record;
+  v_to       record;
+  v_promoted uuid;
+  v_waiting  int := 0;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  if p_from = p_to then
+    return jsonb_build_object('moved', false, 'reason', 'same_slot');
+  end if;
+
+  -- Both rows locked, in a fixed order by id, so two coaches moving into each
+  -- other's slots at the same moment cannot deadlock. Part 243's, kept exactly.
+  perform 1 from sessions s
+   where s.id in (p_from, p_to)
+   order by s.id
+     for update;
+
+  -- The booking being moved, plus the five markers that have to travel with it.
+  -- Read under the lock above, because the update that frees p_from clears them.
+  select s.id, s.trainer_id, s.client_id, s.starts_at, s.duration_min,
+         s.pack_drawn_at, s.pack_drawn_purchase_id, s.pack_drawn_kind,
+         s.pack_drawn_pass_id, s.booking_drew_credit_at
+    into v_from
+    from sessions s
+   where s.id = p_from and s.trainer_id = v_uid and s.status = 'booked'
+     and s.client_id is not null;
+  if not found then
+    -- Not this coach's, not booked, or nobody in it. A refusal and not a fault:
+    -- the screen may have been open for an hour and the session may already
+    -- have been cancelled from the client's phone.
+    return jsonb_build_object('moved', false, 'reason', 'not_yours');
+  end if;
+
+  -- A session that has already begun is not something to move. It is either
+  -- delivered or it is not, and both of those are outcomes rather than times.
+  if v_from.starts_at <= now() then
+    return jsonb_build_object('moved', false, 'reason', 'already_started');
+  end if;
+
+  -- The destination: this coach's own open hour. Scoped by trainer_id here as
+  -- well, so a coach cannot move their client into a colleague's diary — that
+  -- is not a move, it is a different booking with a different relationship
+  -- behind it.
+  select s.id, s.trainer_id, s.starts_at, s.duration_min
+    into v_to
+    from sessions s
+   where s.id = p_to and s.trainer_id = v_uid and s.status = 'available';
+  if not found then
+    return jsonb_build_object('moved', false, 'reason', 'taken');
+  end if;
+
+  if v_to.starts_at <= now() then
+    return jsonb_build_object('moved', false, 'reason', 'already_started');
+  end if;
+
+  -- Free first, then book. If booking the new slot violates the no-double-
+  -- booking exclusion constraint the whole subtransaction rolls back and the
+  -- client still has the hour they started with.
+  begin
+    update sessions
+       set client_id = null, status = 'available', released = true
+     where id = p_from;
+
+    -- The markers travel, in the SAME statement that gives the slot its new
+    -- occupant. `sessions_release_clears_draw` (part 370) reads that as a carry
+    -- rather than a release, which is what stops a moved session drawing a
+    -- second credit for one hour of training.
+    update sessions
+       set client_id = v_from.client_id, status = 'booked', released = false,
+           pack_drawn_at = v_from.pack_drawn_at,
+           pack_drawn_purchase_id = v_from.pack_drawn_purchase_id,
+           pack_drawn_kind = v_from.pack_drawn_kind,
+           pack_drawn_pass_id = v_from.pack_drawn_pass_id,
+           booking_drew_credit_at = v_from.booking_drew_credit_at
+     where id = p_to;
+
+    update gym_pass_redemptions set session_id = p_to where session_id = p_from;
+  exception when exclusion_violation then
+    -- The client already has something with this coach across the new hour.
+    return jsonb_build_object('moved', false, 'reason', 'clash');
+  end;
+
+  -- The hour the client gave up is genuinely free, so it goes to whoever is
+  -- first in line for it, in this same transaction. Unlike the cancel-then-book
+  -- route this replaces, the client being moved is already in their new slot
+  -- before anybody else is offered the old one.
+  v_promoted := public._promote_session_waitlist(p_from);
+  select count(*) into v_waiting from session_waitlist where session_id = p_from;
+
+  return jsonb_build_object(
+    'moved', true,
+    'reason', null,
+    -- So the app can tell exactly one person, and only about their own hour.
+    'client', v_from.client_id,
+    'from_at', v_from.starts_at,
+    'to_at', v_to.starts_at,
+    -- Stated rather than implied. Nothing on this path writes to `charges` and
+    -- nothing draws or returns a credit, and a caller that had to infer that
+    -- from silence would be one edit away from telling somebody otherwise.
+    'charged', false,
+    'credit_drawn', false,
+    'promoted', v_promoted,
+    'waiting', v_waiting);
+end;
+$fn$;
+
+revoke all on function public.reschedule_client_session(uuid, uuid) from public, anon;
+grant execute on function public.reschedule_client_session(uuid, uuid) to authenticated;
+
+comment on function public.reschedule_client_session(uuid, uuid) is
+  'A coach moves one of their booked sessions into another of their own open slots, atomically. Never charges, never draws or returns a credit, and carries the pack markers so the move does not read as a second booking. The freed hour goes to the head of its waitlist in the same transaction. Part 243 is the member-side counterpart and holds the shared argument.';
+
+-- ▶ an-enquiry-that-tells-the-coach-it-arrived.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- An enquiry that tells the coach it arrived.
+--
+-- ── What was silent, and how that was established ────────────────────────
+--
+-- Part 157 built the whole enquiry path: a public form, one narrow SECURITY
+-- DEFINER writer `anon` may call, a `coach_leads` row with the join code that
+-- brought the person in, and `app/(trainer)/leads.tsx` to work through them.
+-- Part 211 extended it. Neither part carries a trigger and neither calls
+-- `notify_users` — grep both files for either word and there is nothing.
+--
+-- So a `coach_leads` row is written by an UNAUTHENTICATED form and then sits
+-- there until the coach happens to open the Leads screen. Nothing on the phone
+-- knows it exists. `leads.tsx:19-25` already prints `FOLLOW_UP_IS_MANUAL` on
+-- the screen, which is honest about the absent email channel; what it cannot
+-- say is that the app is not even telling the coach there is something to
+-- follow up.
+--
+-- An enquiry is a person who raised their hand, and at that moment they are
+-- also enquiring with three other coaches. This is the one row in this table
+-- whose value decays in hours.
+--
+-- ── Why a trigger, and not a push from the writer ────────────────────────
+--
+-- The writer is `record_coach_lead()` — SECURITY DEFINER, called by `anon` from
+-- a marketing page. Two reasons the notification does not go in there.
+--
+-- The choke point argument parts 158 and 163 both make: a trigger on the table
+-- cannot be forgotten by the next writer, and part 211 already added a second
+-- path into this table once.
+--
+-- And the authorisation one, which is specific to this row. `notify_users()`
+-- (part 122) authorises the RECIPIENT against the CALLER's identity, and the
+-- caller here is `anon` — no `auth.uid()`, no relationship to the coach, no
+-- basis on which that function would write anything. So this inserts into
+-- `notifications` directly, exactly as part 146 does and for the same stated
+-- reason: the recipient is established by the ROW rather than by the caller,
+-- and `coach_leads.trainer_id` is a `not null references trainers(id)`, which
+-- is itself `references profiles(id)`. The recipient is a real profile by
+-- construction, which is the foreign key `notifications.user_id` needs.
+--
+-- ── The guards, each of which is a way this could refuse an enquiry ──────
+--
+-- This fires inside the transaction of a stranger submitting a form. An
+-- exception here rolls back the INSERT, and the person who raised their hand is
+-- told the form failed and does not fill it in twice.
+--
+--   `coach_leads.trainer_id`  NOT NULL, on delete cascade — it cannot be null
+--                             and it cannot point at a missing trainer, so the
+--                             recipient is safe by the schema rather than by a
+--                             check here. Guarded anyway, because a check that
+--                             costs one comparison is cheaper than an enquiry
+--                             lost to a schema change nobody re-read this file
+--                             after.
+--   `coach_leads.name`        NOT NULL and length-constrained (part 157), but
+--                             it is a string a STRANGER typed. Trimmed, and a
+--                             blank one falls back to "Somebody" rather than
+--                             rendering a sentence that starts with a space.
+--
+-- Deliberately NOT wrapped in `exception when others then null`, on part 158's
+-- argument: that swallows a real defect silently and for ever, and the
+-- reasoning above is the stronger guarantee.
+--
+-- ── What this must not say ───────────────────────────────────────────────
+--
+-- NOT THE CONTACT DETAILS, and not the message. `coach_leads.contact` is
+-- whatever a stranger typed into a public form and `note` is free text from the
+-- same place. A push notification is rendered on a lock screen, so putting
+-- either in the body would show an unread phone number, or an unvetted
+-- sentence, to whoever is standing next to the coach. The coach can read both
+-- the moment they open the screen, which is one tap away and is where the
+-- policy that entitles them to it is enforced.
+--
+-- The NAME is in the body, and it is the one field that has to be: "an enquiry
+-- came in" is not a thing a coach can prioritise between, and the name is what
+-- makes the notification worth opening rather than dismissing. It is also the
+-- field that person typed in order to be called by it.
+--
+-- NOT THE JOIN CODE either. `via_code` is how the coach measures a channel and
+-- it belongs on the screen that can match it against their own codes; in a
+-- notification it is a string of letters that means nothing at arm's length.
+--
+-- ── And why nobody else is told ──────────────────────────────────────────
+--
+-- Part 160's test: the recipient must be able to act AND have no other way to
+-- learn. The gym's owner fails the first half — an enquiry to a self-employed
+-- coach through that coach's own join code is not the gym's to answer, and
+-- `coach_leads` has no tenant column to address one by. The enquirer fails
+-- both: they have no account, which is the whole premise of the table.
+--
+-- Idempotent; safe to re-run.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create or replace function public.coach_lead_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_who  text;
+  v_body text;
+begin
+  -- Schema-guaranteed today. Checked anyway: the cost is one comparison and the
+  -- failure it prevents is a stranger being told their enquiry did not send.
+  if new.trainer_id is null then
+    return new;
+  end if;
+
+  -- A stranger's typing. Trimmed, and a blank falls back rather than producing
+  -- a sentence with a hole at the front of it.
+  v_who := nullif(btrim(coalesce(new.name, '')), '');
+
+  v_body := coalesce(v_who, 'Somebody')
+    || ' has enquired about training with you. They left their details on your enquiry form and have not been'
+    || ' replied to. Open Leads to see what they asked for and how to reach them.';
+
+  insert into public.notifications (user_id, title, body, icon, route)
+  values (new.trainer_id, 'A new enquiry', left(v_body, 500), 'people', '/(trainer)/leads');
+
+  return new;
+end;
+$function$;
+
+comment on function public.coach_lead_notify() is
+  'Tells the COACH the moment an enquiry lands on coach_leads. Carries the enquirer''s name and nothing else — not their contact details, not their message, not the join code — because a push is rendered on a lock screen. See part 470.';
+
+drop trigger if exists coach_leads_notify on public.coach_leads;
+create trigger coach_leads_notify
+  after insert on public.coach_leads
+  for each row execute function public.coach_lead_notify();
+
+-- Revoked from public, anon AND authenticated. Postgres checks EXECUTE when a
+-- trigger is CREATED and not when it fires, so a trigger function needs no
+-- grant to anybody (parts 51, 141, 158, 163). Postgres grants EXECUTE to PUBLIC
+-- on every new function and `anon` resolves through that grant, so both are
+-- named — and `anon` is the role that actually reaches this table, which makes
+-- the revoke here load-bearing rather than ceremonial.
+revoke all on function public.coach_lead_notify() from public;
+revoke all on function public.coach_lead_notify() from anon;
+revoke all on function public.coach_lead_notify() from authenticated;
+
+-- ▶ the-block-that-ran-out-and-told-nobody.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The block that ran out and told nobody.
+--
+-- ── What was silent, and how that was established ────────────────────────
+--
+-- `src/lib/programStart.ts` defines the `'after'` phase and its own comment
+-- says what it is for: "the block's last week has passed. Not an error and not
+-- 'finished' … It is a prompt to write the next block."
+--
+-- It is computed ON DEMAND, when a screen asks. Nothing computes it when
+-- nobody is looking. Grep `SERVER_WRITTEN` in src/lib/notifyInbox.ts and there
+-- is no row for it; grep `assigned_programs` in supabase/parts and there is no
+-- trigger on the table and no scheduled pass over it.
+--
+-- And nothing breaks visibly on either side. `src/lib/clientBlock.ts` keeps a
+-- client on the block's LAST week rather than emptying their Train tab — which
+-- is the right call, because an empty Train tab is a worse failure than a
+-- repeated week — so the client goes on repeating week eight indefinitely and
+-- the coach finds out when the client mentions it.
+--
+-- The block end date is not an inference. It is a column the coach typed
+-- (`assigned_programs.starts_on`, part 205) plus the number of weeks they
+-- wrote. Both are certain, which makes this the cheapest true notification in
+-- the product.
+--
+-- ── Why a scheduled pass and not a trigger ───────────────────────────────
+--
+-- Nothing writes a row when a block ends. That is the whole shape of it: the
+-- event is the ABSENCE of a write, the same reason part 202 made its overdue
+-- and credential passes scheduled rather than triggered. There is no INSERT or
+-- UPDATE to hang a trigger on — the last thing that happened to the row was the
+-- coach assigning it, eight weeks ago.
+--
+-- ── Why no bookkeeping table, unlike part 202's overdue pass ─────────────
+--
+-- Because the condition is true on exactly ONE day.
+--
+-- `blockPosition` calls it 'after' when `floor(offset / 7) + 1 > weeks`, which
+-- is `offset >= weeks * 7`. So the FIRST day of 'after' is
+-- `starts_on + weeks * 7`, and this pass tests `current_date` for equality with
+-- that day rather than for being past it. A daily run therefore sends exactly
+-- one message per block, and `coach_overdue_notices`'s whole reason for
+-- existing — a condition that stays true for weeks — does not arise.
+--
+-- The cost of that choice, stated rather than hidden: a day the cron does not
+-- run is a block nobody is told about. That is the right trade against a second
+-- state table, and it is the same trade part 202's credential pass makes on the
+-- day of expiry. The coach's own screens still say 'after' the moment they
+-- look, because `blockPosition` computes it and always did.
+--
+-- ── The week count, and the one place it could drift ────────────────────
+--
+-- `weekCount()` in src/lib/programBlock.ts is `programWeeks(p).length`, and
+-- `programWeeks` is: no `weeks` array, or an empty one, means ONE week — the
+-- week that `days` describes. Otherwise it is `weeks.length`.
+--
+-- Written out in SQL below as exactly that, and named here so the two can be
+-- read against each other. This is a copy of a rule that lives in TypeScript
+-- and copies drift, which is why it is the smallest possible one: a single
+-- CASE over `jsonb_array_length`, with no notion of what a week contains. The
+-- alternative — a `weeks` column on the table — would be a second opinion about
+-- a programme that the builder would have to remember to keep in step, which is
+-- worse.
+--
+-- ── The guards ───────────────────────────────────────────────────────────
+--
+-- This runs as a scheduled job and not inside anybody's transaction, so a
+-- failure here costs the message and nothing else. The recipient is still
+-- guarded, because `notifications.user_id` is `not null references
+-- profiles(id)`:
+--
+--   `assigned_programs.coach_id`  NULLABLE (on delete set null) — GUARDED. A
+--                                 programme whose coach deleted their account
+--                                 has nobody to tell.
+--   `assigned_programs.client_id`  the primary key, `not null`. Used only as a
+--                                 NAME, and a missing profile falls back to
+--                                 "A client" rather than to an empty string.
+--   `starts_on`                    NULL on every assignment made before part
+--                                 205 and on every one where the coach did not
+--                                 choose a date. Those are `'no-date'`, not
+--                                 `'after'`, and the WHERE clause excludes them
+--                                 — a block with no start date has no end date
+--                                 and this pass must not invent one.
+--
+-- ── What this must not say ───────────────────────────────────────────────
+--
+-- NOT "they finished it" and NOT "they completed the block". Nothing in this
+-- database knows whether the client did any of it — that is what
+-- `src/lib/planVsActual.ts` is for, and it refuses to say a session was
+-- completed even with the log in front of it. The message states the fact that
+-- is certain: the last week of the block they were given has passed, and they
+-- are still being shown it.
+--
+-- NOT a week number for the week they are on now. `clientWeek` holds them on
+-- the last week, so "they are on week 9 of 8" is a sentence the app should
+-- never produce.
+--
+-- ── And why the client is not told ──────────────────────────────────────
+--
+-- Part 160's test: the recipient must be able to act AND have no other way to
+-- learn. A client fails the first half completely — they cannot write
+-- themselves a block, and a notification saying "your programme ran out" with
+-- nothing they can do about it is an anxious message about somebody else's
+-- work. When the coach writes the next block the client's Train tab changes,
+-- which is the notification that means something.
+--
+-- Idempotent; safe to re-run.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create or replace function public.run_block_ended_notices()
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_sent integer := 0;
+  r      record;
+begin
+  for r in
+    select
+      a.client_id,
+      a.coach_id,
+      a.starts_on,
+      -- `weekCount` in src/lib/programBlock.ts, written out. No `weeks` array,
+      -- or an empty one, is ONE week: the week that `days` describes.
+      case
+        when jsonb_typeof(a.program -> 'weeks') = 'array'
+         and jsonb_array_length(a.program -> 'weeks') > 0
+        then jsonb_array_length(a.program -> 'weeks')
+        else 1
+      end as weeks
+      from public.assigned_programs a
+     where a.coach_id is not null
+       and a.starts_on is not null
+  loop
+    -- The first day of `'after'`. `blockPosition` says 'after' when
+    -- `floor(offset / 7) + 1 > weeks`, which is `offset >= weeks * 7`, so the
+    -- boundary day is exactly this one. Equality and not `<=`: the condition
+    -- being true for one day is what makes a bookkeeping table unnecessary.
+    if current_date <> (r.starts_on + (r.weeks * 7)) then
+      continue;
+    end if;
+
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      'A block has run out',
+      -- The name is theirs to give: the coach can already read it through
+      -- `profiles_trainer_r_clients`, so this states nothing the recipient
+      -- could not already see. A blank or missing name falls back to
+      -- "A client", never to an empty string that would render a sentence
+      -- starting with a space.
+      left(
+        coalesce(
+          (select nullif(btrim(coalesce(p.full_name, '')), '') from public.profiles p where p.id = r.client_id),
+          'A client'
+        )
+        || ' has reached the end of the ' || r.weeks || '-week block you gave them, which started on '
+        || to_char(r.starts_on, 'DD Mon YYYY') || '.'
+        || ' Nothing here says whether they did it — their Train tab is simply still showing them the last week,'
+        || ' and it will go on showing it until you write the next one.',
+        500),
+      'dumbbell',
+      '/(trainer)/builder'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+revoke all on function public.run_block_ended_notices() from public, anon, authenticated;
+
+comment on function public.run_block_ended_notices() is
+  'Nightly. Tells a COACH on the day a client''s assigned block reaches the end of its last week — starts_on plus weeks*7, the same boundary blockPosition() in src/lib/programStart.ts calls the first day of the ''after'' phase. Says nothing about whether the client did any of it. One message per block, because the condition is true on exactly one day.';
+
+-- ── The schedule ─────────────────────────────────────────────────────────
+create extension if not exists pg_cron;
+
+-- Unschedule first so re-running this file does not accumulate duplicate jobs
+-- each firing the same pass, exactly as parts 48, 135 and 202 do.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'block-ended-notices') then
+    perform cron.unschedule('block-ended-notices');
+  end if;
+end $$;
+
+-- 07:26 UTC, seven minutes after part 202's second pass and on the same morning
+-- reasoning: this wakes a phone, and a coach whose notification arrives at
+-- 03:17 is a coach who turns notifications off. Off the top of the hour, and
+-- clear of the two passes already scheduled, so none of the three contend.
+select cron.schedule(
+  'block-ended-notices',
+  '26 7 * * *',
+  $cron$ select public.run_block_ended_notices(); $cron$
+);
+
+-- ▶ an-online-sale-that-reaches-the-ledger.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A member paid the gym by card online and no row appeared in `gym_payments`.
+--
+-- `supabase/functions/stripe-webhook` fulfils a paid `gym_orders` row by
+-- writing the ENTITLEMENT — a `memberships` term or a `gym_passes` row — and
+-- then closing the order. It never wrote the MONEY. Every writer of
+-- `gym_payments` in the product was a hand entry at the desk
+-- (`src/lib/gymRecord.ts`) or a spreadsheet import (`src/lib/gymImports.ts`),
+-- and `grep "from('gym_payments')" supabase/functions/` returned nothing at all.
+--
+-- `/money`, `/revenue`, `/accounting` and `/close` all count `gym_payments` and
+-- nothing else. So a gym selling memberships online had the money in its Stripe
+-- balance, the member had their membership, and the screen /accounting tells the
+-- accountant to reconcile against the bank was short by every online sale ever
+-- made. Not an exception an owner can explain away: a discrepancy equal to all
+-- online takings, every month, growing.
+--
+-- The webhook now writes the payment. This part is the column that makes that
+-- write SAFE TO RETRY, which for a payment matters more than making it at all.
+--
+-- ── Why a column and not the amount ────────────────────────────────────────
+--
+-- A Stripe webhook is retried, and it is retried precisely when the handler
+-- failed part way through. "Have I already recorded this?" cannot be answered
+-- by looking for a payment of the same amount on the same day: two members on
+-- the same plan pay the same money in the same minute, and a ledger that
+-- deduplicates on the amount would silently drop the second one. It has to be
+-- answered by IDENTITY, and the identity of an online sale is the order.
+--
+-- This is the same shape part 281 gave `memberships.gym_order_id` and
+-- `gym_passes.gym_order_id`, for the same reason and deliberately not a new
+-- idea: one order produces at most one entitlement and at most one payment, the
+-- unique index says so, and a webhook that is delivered twice finds the row the
+-- first delivery wrote instead of writing a second.
+--
+-- PARTIAL, because every payment taken at the desk and every imported row has
+-- NULL here and NULLs do not collide. The index only ever constrains rows the
+-- webhook wrote.
+--
+-- ── The link is worth having on its own ────────────────────────────────────
+--
+-- `gym_payments.membership_id` is written too, so an online membership sale
+-- arrives already attributed and /accounting's 45-day amount-and-member guess
+-- is not asked about it. And `gym_order_id` makes the reverse question
+-- answerable for the first time: an order marked `paid` with no payment row
+-- pointing at it is money Stripe took that this ledger does not have, which is
+-- exactly the exception the reconciliation screen should be raising rather than
+-- the one nobody could see.
+--
+-- ── What this does NOT change ──────────────────────────────────────────────
+--
+-- `gym_orders` is read by the member's own purchase history and by nothing that
+-- adds money up, so nothing is double counted by this row existing. The pass
+-- figure on /close comes from `gym_passes.paid_cents` and is reported beside
+-- the takings rather than inside them, exactly as a desk-sold pass already was.
+--
+-- The closed-month trigger from part 182 still applies to this table and is
+-- deliberately not exempted: a webhook is not a reason to write into a month an
+-- owner has signed off. What changes is that the refusal is now VISIBLE — the
+-- order stands as paid with no payment beside it, which the reconciliation
+-- screen lists.
+--
+-- Additive and idempotent. Nothing here alters an existing row.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.gym_payments
+  add column if not exists gym_order_id uuid references public.gym_orders(id) on delete set null;
+
+-- `on delete set null` and not restrict: an order is the record of a Stripe
+-- charge and outlives nothing, but if one were ever removed the MONEY still
+-- arrived and the ledger row has to survive it. Compare `reverses_payment_id`
+-- in part 180, which is `restrict` because a correction without its original is
+-- not a fact at all.
+
+create unique index if not exists uq_gym_payments_gym_order
+  on public.gym_payments (gym_order_id)
+  where gym_order_id is not null;
+
+comment on column public.gym_payments.gym_order_id is
+  'The gym_orders row whose Stripe payment this is, or NULL for money taken at the desk or imported from a spreadsheet. Unique: it is what stops a retried webhook recording one payment twice. Written only by supabase/functions/stripe-webhook.';
+
+-- The reconciliation question this column exists to make askable: which paid
+-- orders have no money against them. Small and partial, because the answer is
+-- read per gym and per month from the order side.
+create index if not exists idx_gym_payments_order_lookup
+  on public.gym_payments (tenant_id, gym_order_id)
+  where gym_order_id is not null;
+
+-- ▶ payroll-cannot-land-in-a-closed-month.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A month was signed off, and then a payroll run landed in it.
+--
+-- Part 182 gave this database a lock: `gym_refuse_write_into_closed_month`,
+-- attached to `gym_payments` on `taken_at` and to `gym_invoices` on
+-- `issued_on`. Its argument is that a stored close which any later write can
+-- invalidate is a note rather than a close.
+--
+-- `payroll_settlements` was left out, and it is the one place money LEAVES the
+-- building. /accounting's "Money out" for a filed month is read straight off
+-- this table, so a run settled into August after August was closed changes the
+-- figure an accountant has already been handed — silently, and in the one
+-- direction that reduces the net cash a filed month reported.
+--
+-- /payroll made that easy rather than hard: the period picker offered six
+-- months and never read `gym_month_closes` at all, so a closed month looked
+-- exactly like an open one and the run wrote `period_from` straight through.
+--
+-- ── Why `period_from` and not `settled_at` ─────────────────────────────────
+--
+-- `settled_at` is when somebody pressed the button and is always now. Locking
+-- on it would refuse nothing, because the current month is the one month nobody
+-- has closed. `period_from` is what the run CLAIMS to be paying for, it is the
+-- column /accounting buckets by, and it is the one that decides which month's
+-- costs move. A run recorded on 2 September for August is August's cost, which
+-- is exactly the case this refuses once August is closed.
+--
+-- The way out is the way out for a payment: reopen the month on /close, with a
+-- reason, and settle again. The refusal names the month and says so.
+--
+-- ── What is still deliberately NOT locked ──────────────────────────────────
+--
+-- Sessions. Part 182 argues it and nothing here changes: a coach marking an
+-- outcome late is fixing the record rather than moving money, and a lock there
+-- would leave a session permanently unmarkable and therefore unpayable. It is
+-- the SETTLEMENT that is money, and the settlement is what is guarded.
+--
+-- Also not `payroll_settlements.reversed_at`. Taking a run back is a correction
+-- somebody is making deliberately, with the run in front of them, and part 182
+-- makes the same exemption for the import undo. The trigger only fires on the
+-- columns named below, so a reversal that touches neither is unaffected.
+--
+-- Additive and idempotent. The function itself is part 182's, unchanged.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+drop trigger if exists trg_payroll_settlements_closed_month on public.payroll_settlements;
+create trigger trg_payroll_settlements_closed_month
+  before insert or update of period_from, amount_cents on public.payroll_settlements
+  for each row execute function public.gym_refuse_write_into_closed_month('period_from');
+
+-- ▶ pay-and-a-reimbursement-are-not-the-same-money.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A payroll run recorded one figure, and it was two different kinds of money.
+--
+-- `payroll_adjustments` has had four kinds since part 183 — bonus, deduction,
+-- reimbursement, advance — and `ADJUSTMENT_LABEL` in src/lib/gymPay.ts says
+-- plainly why they are four words and not two signs:
+--
+--     A reimbursement is the gym paying back money the coach spent; a bonus is
+--     pay. Both add, and a payslip that called one the other would be wrong in
+--     a way that matters to whoever files it — one is taxable and one is not.
+--
+-- The run then settled all of it as a single `amount_cents`, so the distinction
+-- the schema went to the trouble of recording was thrown away at exactly the
+-- moment it mattered. Whoever files the payroll has one number and no way to
+-- get back to the two, because the adjustments are stamped with the settlement
+-- and the settlement says nothing about them.
+--
+-- ── Why a column here rather than a join back ──────────────────────────────
+--
+-- The adjustments are still there and still stamped, so in principle the split
+-- is recomputable. In principle is not good enough for a payment record: this
+-- table exists at all because part 36 chose to SNAPSHOT what was handed over
+-- rather than recompute it from today's rates, and the same argument applies
+-- unchanged. A rate, a kind or an amount edited afterwards must not silently
+-- restate what somebody was paid last March.
+--
+-- ── NULL is not zero, and the difference is the whole column ───────────────
+--
+-- NULL means the run did not say — which is every settlement recorded before
+-- this part, and there is no way to find out now. 0 means the run DID say, and
+-- none of it was a reimbursement. A screen that read NULL as 0 would report
+-- every historical run as wholly taxable pay, which is a claim about somebody's
+-- tax that nothing in this database supports.
+--
+-- Not constrained against `amount_cents`. A run whose deductions exceed its
+-- session pay can leave the reimbursement larger than the total, and refusing
+-- that would refuse a real run. `amount_cents >= 0` already stops the case that
+-- actually matters, which is a settlement recorded as a negative payment.
+--
+-- Additive and idempotent.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.payroll_settlements
+  add column if not exists reimbursement_cents integer;
+
+alter table public.payroll_settlements drop constraint if exists payroll_settlements_reimbursement_positive;
+alter table public.payroll_settlements add constraint payroll_settlements_reimbursement_positive
+  check (reimbursement_cents is null or reimbursement_cents >= 0);
+
+comment on column public.payroll_settlements.reimbursement_cents is
+  'How much of amount_cents was money the coach spent and got back, rather than pay. NULL means the run did not say, which is every settlement recorded before this column existed; 0 means it said, and none of it was. The rest of amount_cents is taxable pay. Snapshotted for the same reason amount_cents is: an adjustment edited later must not restate what somebody was paid.';
+
+-- ▶ the-door-asked-nothing-about-the-person.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The door asked nothing about the person.
+--
+-- `checkIn` in src/lib/gymVisits.ts was a bare insert. It read nothing, so a
+-- membership cancelled in March admitted its holder with one click in June, and
+-- one card could badge in an unlimited queue behind it. That check now happens
+-- in the library — `admissionCheck`, with a staff override that has to say why
+-- — and this part is the half of it the database has to hold.
+--
+-- ── Why the database needs a share of it at all ──────────────────────────
+--
+-- Because the console is not the only writer and never will be. `gym_visits`
+-- takes `source in ('desk','qr','door','app','manual')`: a turnstile, a QR
+-- reader and the member's own phone are all in the table's own vocabulary, and
+-- none of them will call a TypeScript function. A rule that lives only in the
+-- console is a rule the first terminal integration walks straight through.
+--
+-- ── What is guarded, and what deliberately is not ────────────────────────
+--
+-- The DUPLICATE, not the membership. A second open visit for a member who
+-- already has one is wrong under every business model a gym could have: it puts
+-- the same person into the fire-evacuation headcount twice, which is the one
+-- number on the Door screen somebody could be hurt by. Whether a lapsed member
+-- may train is a decision the gym makes, it changes, and the console states it
+-- with a reason the desk can read — that belongs in the library, not in a
+-- constraint that would refuse the owner's own decision at 6am with a Postgres
+-- error code.
+--
+-- ── Why a trigger and not a unique index ─────────────────────────────────
+--
+-- A partial unique index on (tenant_id, member_id) where exited_at is null is
+-- the stronger guard and cannot be created: gyms already carry open duplicates,
+-- and the only ways to clear them are to delete a visit — destroying the record
+-- of an arrival — or to stamp an exit time nobody observed. This codebase
+-- refuses to invent an exit (see `sweepStaleVisits`, which writes a note and
+-- leaves `exited_at` null precisely so a twenty-hour stay never enters the dwell
+-- average), so the guard has to be one that can be added to a table with
+-- history in it. The trigger reads committed rows, so two desks scanning the
+-- same member in the same instant can still both get through; seconds apart —
+-- the queue, the double press, the tablet retrying — is what actually happens
+-- and is what this stops.
+--
+-- ── The stale-visit escape ───────────────────────────────────────────────
+--
+-- Only an open visit from the last twelve hours blocks. The same twelve hours
+-- `sweepStaleVisits` uses: nobody trains for twelve hours, and a 6am regular is
+-- not back until 6am tomorrow. Past that an open visit is a row nobody closed,
+-- and refusing today's arrival over last Tuesday's paperwork would lock a
+-- paying member out of the building.
+--
+-- ── The override ─────────────────────────────────────────────────────────
+--
+-- A note beginning `admitted anyway: ` is a member of staff who has been shown
+-- the refusal and typed a reason. It passes. That is not a hole in the guard,
+-- it is the guard's purpose: the alternative to an auditable override is a desk
+-- that stops recording visits, and the door log is what attendance, fill rate
+-- and every retention figure in the product are built on.
+--
+-- The prefix must stay byte-identical to OVERRIDE_PREFIX in
+-- src/lib/gymVisits.ts. Two spellings and the console would believe it had
+-- recorded a visit the database refused.
+--
+-- Additive only. Nothing here alters an existing table or policy, and nothing
+-- here widens who can read or write anything.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create or replace function gym_visits_no_double_entry() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  open_at timestamptz;
+begin
+  -- An anonymous head-count is not a duplicate of anything. Two turnstile
+  -- counts with no member id are two different people, and collapsing them
+  -- would under-count the evacuation list instead — the same fault pointing
+  -- the other way.
+  if new.member_id is null then
+    return new;
+  end if;
+
+  -- Staff have been shown the refusal and said why. Let it through, with their
+  -- sentence on the row.
+  if new.note is not null and new.note like 'admitted anyway: %' then
+    return new;
+  end if;
+
+  -- A row being inserted with an exit already on it is a correction or an
+  -- import, not somebody walking in. It cannot be a second body in the room.
+  if new.exited_at is not null then
+    return new;
+  end if;
+
+  select v.entered_at into open_at
+    from gym_visits v
+   where v.tenant_id = new.tenant_id
+     and v.member_id = new.member_id
+     and v.exited_at is null
+     and v.entered_at > coalesce(new.entered_at, now()) - interval '12 hours'
+     and v.id is distinct from new.id
+   order by v.entered_at desc
+   limit 1;
+
+  if open_at is not null then
+    -- The message reaches a receptionist with somebody standing in front of
+    -- them, so it says what happened and what to do about it rather than
+    -- naming a constraint.
+    raise exception
+      'That member is already checked in (at %) and has not been checked out. Check them out first, or record the visit with a reason.',
+      to_char(open_at, 'HH24:MI')
+      using errcode = 'unique_violation';
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists trg_gym_visits_no_double_entry on gym_visits;
+create trigger trg_gym_visits_no_double_entry
+  before insert on gym_visits
+  for each row execute function gym_visits_no_double_entry();
+
+-- The lookup the trigger does on every arrival. Partial, because the only rows
+-- it ever reads are the open ones, and on a busy gym those are a handful out of
+-- years of log.
+create index if not exists idx_gym_visits_open_member
+  on gym_visits(tenant_id, member_id, entered_at desc)
+  where exited_at is null and member_id is not null;
+
+-- ▶ the-sweep-that-only-ran-when-somebody-pressed-a-button.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The sweep that only ran when somebody pressed a button.
+--
+-- `supabase/functions/sweep-stale-visits` is written, commented and deployed
+-- nowhere. The only thing in this repository that closes the loop is the
+-- owner-only button on the Door screen, and the comment beside that button says
+-- so in as many words: the scheduled half is "written and NOT deployed".
+--
+-- So the sweep runs when a human happens to open /door and press it. A gym that
+-- closes for a week comes back to a week of visits still open, an "Inside now"
+-- count that includes them, and an average-stay figure the screen has to keep
+-- withholding because nothing has accounted for the rows.
+--
+-- ── Why this is SQL rather than a deploy ─────────────────────────────────
+--
+-- The edge function exists because the sweep needs to run across every tenant,
+-- which no signed-in owner's session can do. That is a real requirement and the
+-- service role is a real answer to it — but it is a heavier answer than the work
+-- deserves. The sweep is ONE UPDATE of ONE column. It takes no input, reads
+-- nothing back and returns a count. Sending that through an HTTP endpoint,
+-- a shared secret, a scheduler that has to hold the secret, and a deploy step
+-- somebody has to remember, is four things that can be wrong about a statement
+-- that fits on a line.
+--
+-- Doing it in the database also removes the failure this part exists to fix: a
+-- pg_cron job is applied with the rest of the schema by the person who applies
+-- the schema, so it cannot be the half that gets forgotten. The edge function is
+-- left in place — it is reachable, it is authenticated, and a gym that wants an
+-- external scheduler can still use it. Both write exactly the same note, so
+-- neither can undo the other and running both is harmless: the second one finds
+-- nothing left to mark.
+--
+-- ── What a sweep writes, and what it refuses to write ────────────────────
+--
+-- A NOTE. Never `exited_at`. Stamping a plausible exit would quietly corrupt
+-- every dwell figure computed afterwards, and a twenty-hour stay in the average
+-- is not a rounding error — it is the reason the average exists. What the sweep
+-- records is that somebody has accounted for the row: it is not a person
+-- standing in the building.
+--
+-- ── Twelve hours, and hourly ────────────────────────────────────────────
+--
+-- Twelve is the same cutoff `sweepStaleVisits` and the edge function use, and it
+-- must stay the same in all three: it is longer than the longest honest visit
+-- and shorter than the gap between two visits by the same member, so a 6am
+-- regular is never swept on the way to being back at 6am tomorrow.
+--
+-- Hourly rather than nightly because "nightly" is a time of day, and this
+-- platform is white-label and multi-timezone: 3am in one gym is the middle of a
+-- Saturday session in another. An hourly job has no opinion about whose night
+-- it is. It is also cheap — after the first run of the hour there is nothing
+-- left to match, which is what the note-as-guard below is for.
+--
+-- ── The note is also the guard ──────────────────────────────────────────
+--
+-- `note is distinct from` rather than `<>`. A plain `<>` is NULL for a row whose
+-- note is null, the row is not matched, and null is the majority case and
+-- exactly the set that most needs sweeping. Without the guard every run
+-- re-marks every stale row the platform has ever accumulated and reports the
+-- same growing number for ever.
+--
+-- Rows carrying a desk note are still swept and theirs is overwritten. That is
+-- a real cost and the smaller one: a desk note on a visit nobody closed is worth
+-- less than an accurate count of what is still open.
+--
+-- With ONE exception, in the where clause below: a note beginning
+-- `admitted anyway: ` records that the gym let somebody in against its own
+-- record, and why. That is the row an audit comes looking for, and it is worth
+-- more than the count.
+--
+-- ── Scope ────────────────────────────────────────────────────────────────
+--
+-- SECURITY DEFINER with no parameters, and no parameters is the point. A
+-- definer-shaped function that accepts a tenant id from its caller is the exact
+-- bug 35-class-capacity-and-scope.sql was written to fix, and the safest version
+-- of that argument is not to have the argument. Execute is revoked from every
+-- signed-in role: nothing but the scheduler calls this, and an owner who wants
+-- to sweep their own gym already has the Door button, which runs under their own
+-- session and their own policies.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create extension if not exists pg_cron;
+
+-- Must stay byte-identical to SWEEP_NOTE in src/lib/gymVisits.ts and to the
+-- constant in supabase/functions/sweep-stale-visits. The console reads it back
+-- to tell a visit nobody closed from one that has been accounted for, and two
+-- spellings would make the same row look swept to one surface and unswept to
+-- the other.
+create or replace function sweep_stale_visits() returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  marked integer;
+begin
+  update gym_visits
+     set note = 'auto-closed: no exit recorded'
+   where exited_at is null
+     and entered_at < now() - interval '12 hours'
+     and note is distinct from 'auto-closed: no exit recorded'
+     -- The one desk note a sweep may not overwrite. A note beginning
+     -- `admitted anyway: ` is the gym recording that it let somebody in
+     -- against its own record, with the member of staff's reason on it (see
+     -- part 490), and it is the row an audit comes looking for. Every other
+     -- desk note is worth less than an accurate count of what is still open;
+     -- this one is not. `isAccountedFor` in src/lib/gymVisits.ts is the console
+     -- side of the same rule, so neither surface keeps offering to sweep a row
+     -- the other will never take.
+     and note not like 'admitted anyway: %';
+  get diagnostics marked = row_count;
+  return marked;
+end $$;
+
+revoke all on function sweep_stale_visits() from public;
+revoke all on function sweep_stale_visits() from anon, authenticated;
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'sweep-stale-visits') then
+    perform cron.unschedule('sweep-stale-visits');
+  end if;
+end $$;
+
+select cron.schedule(
+  'sweep-stale-visits',
+  '7 * * * *',
+  $cron$ select public.sweep_stale_visits(); $cron$
+);
+
+-- ▶ a-walk-in-could-not-be-put-on-a-class.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- A member who phones up or walks in could not be put on a class register.
+--
+-- `bookOnto` has been in src/lib/gymSchedule.ts since the class screens were
+-- built and has never had a caller. supabase/parts/136 says why, in its own
+-- closing note: `class_bookings_owner_w` is UPDATE only, there is no INSERT
+-- policy for staff, and `bookOnto` inserts directly — "so it is refused today
+-- and was refused before this part … Left alone rather than fixed blind: an
+-- INSERT policy written without that screen in front of it is a guess."
+--
+-- The screen is now in front of it. This is the answer, and it is deliberately
+-- not the INSERT policy that note contemplated.
+--
+-- ── Why a function and not a policy ─────────────────────────────────────
+--
+-- Because capacity lives inside `book_class` and nowhere else. There is no
+-- constraint, no trigger and no index that stops a class of twelve taking a
+-- thirteenth booking as `booked` — `book_class` counts under a row lock and
+-- writes 'waitlist' when the class is full, and it is the ONLY thing that does.
+-- An INSERT policy would let the front desk write `status: 'booked'` straight
+-- past that, so the first walk-in booked at the desk would over-sell a full
+-- class silently, and the waiting list the member app maintains would be
+-- bypassed by the very screen that promotes people off it.
+--
+-- So this is `book_class` with one difference: it books the person the DESK
+-- names rather than `auth.uid()`. Everything else — the row lock, the count,
+-- the choice between booked and waitlist — is the same logic for the same
+-- reason.
+--
+-- ── What makes a SECURITY DEFINER function safe here ────────────────────
+--
+-- The tenant is DERIVED, never accepted. It is read off the class, and the
+-- caller is then checked against it: `my_tenant()` must match and `my_role()`
+-- must be trainer or owner. A definer function that takes a tenant id from its
+-- caller is the exact bug 35-class-capacity-and-scope.sql was written to fix.
+--
+-- The member is checked too, and this is the part that would be easy to leave
+-- out. Without it a member of staff could book ANY uuid onto their class —
+-- another gym's member, or a person who has no relationship with this business
+-- at all — and that row would then appear on that person's own attendance
+-- screen. So p_user must hold a membership in the same tenant. The console's
+-- picker is fed from exactly that table, so nothing legitimate is refused.
+--
+-- ── A member already on the class ───────────────────────────────────────
+--
+-- Returns their CURRENT status and changes nothing. `book_class` uses
+-- `on conflict … do update set status = excluded.status`, which is right for a
+-- member re-booking themselves and wrong here: a desk clicking twice on a class
+-- that filled up in between would demote somebody who already holds a
+-- confirmed place to the waiting list. A place already given is not taken back
+-- by a second click.
+--
+-- Additive only. It adds one function; it changes no table, no policy and no
+-- existing function, and it widens nobody's read of anything.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create or replace function public.book_class_for(p_class uuid, p_user uuid)
+returns text language plpgsql security definer set search_path = public as $$
+declare
+  v_tenant uuid;
+  v_cap int;
+  v_count int;
+  v_status text;
+  v_existing text;
+begin
+  -- The lock comes first, exactly as it does in `book_class`: the count below
+  -- is only capacity-safe if nothing else can book between reading it and
+  -- writing.
+  perform 1 from gym_classes where id = p_class for update;
+
+  select gc.tenant_id, gc.capacity into v_tenant, v_cap
+    from gym_classes gc where gc.id = p_class;
+  if v_tenant is null then
+    -- A class with no tenant is unscoped, and unscoped fails closed — the same
+    -- position part 165 took on the staff read policy.
+    return 'notfound';
+  end if;
+
+  if not (v_tenant = my_tenant() and my_role() in ('trainer', 'owner')) then
+    raise exception 'Only this gym''s staff can book somebody onto its classes.'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  if not exists (
+    select 1 from memberships m
+     where m.tenant_id = v_tenant and m.member_id = p_user
+  ) then
+    raise exception 'That person is not on this gym''s roster, so they cannot be put on its register.'
+      using errcode = 'foreign_key_violation';
+  end if;
+
+  select cb.status into v_existing
+    from class_bookings cb
+   where cb.class_id = p_class and cb.user_id = p_user;
+  if v_existing is not null then
+    -- Already on it. Their place is not re-decided by a second click.
+    return v_existing;
+  end if;
+
+  select count(*) into v_count
+    from class_bookings where class_id = p_class and status = 'booked';
+  v_status := case when v_count < coalesce(v_cap, 0) then 'booked' else 'waitlist' end;
+
+  insert into class_bookings (class_id, user_id, status)
+  values (p_class, p_user, v_status);
+
+  return v_status;
+end $$;
+
+revoke all on function public.book_class_for(uuid, uuid) from public;
+revoke all on function public.book_class_for(uuid, uuid) from anon;
+grant execute on function public.book_class_for(uuid, uuid) to authenticated;
+
+comment on function public.book_class_for(uuid, uuid) is
+  'Puts a named member on a class from the front desk — the walk-in and the phone booking. Capacity-safe under a row lock, exactly like book_class, and returns ''booked'', ''waitlist'' or ''notfound''. The tenant is derived from the class and never accepted from the caller; the caller must be trainer or owner of it, and the member must hold a membership in it. See part 492.';
+
+-- ▶ calling-off-a-class-told-nobody.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Calling off a class told the twelve people who booked it nothing at all.
+--
+-- `cancelClass` in src/lib/gymSchedule.ts is a plain status update, and there is
+-- no trigger on `gym_classes` that writes `notifications` — the only
+-- class-related notify trigger in this schema is
+-- `class_bookings_notify_promoted` (part 159), which fires on a waitlist
+-- promotion. So an owner cancels the 6am on a Sunday night, the confirm prompt
+-- tells them the bookings are kept, and every one of those twelve people
+-- arrives at a locked room on Monday. The gym finds out from the reviews.
+--
+-- ── Why the trigger, and not the console ─────────────────────────────────
+--
+-- Because the console is not the only thing that cancels a class. `cancelClass`
+-- and `cancelSeriesFrom` both write the status, the trainer's own app has its
+-- own path to it, and anything added later will too. A notification written by
+-- the screen is one every future caller has to remember; a notification written
+-- by the data cannot be missed by a screen that forgot.
+--
+-- It is also the pattern this schema already settled on. `gym_events` is
+-- trigger-written and the compliance screen says why that is what makes it
+-- worth reading: the log cannot drift from the data, because it IS the data.
+--
+-- ── Who is told ──────────────────────────────────────────────────────────
+--
+-- Everybody attached to the class, booked AND waitlisted. A waitlister has
+-- arranged their morning around the chance of a place and is exactly as
+-- entitled to know the class is off; and part 195's whole point is that the
+-- bookings are KEPT when a class is called off, so the rows to notify are still
+-- there when this fires.
+--
+-- The person who pressed the button is not told. They are watching it happen —
+-- the same exclusion `class_promotion_notify` makes for a member who promoted
+-- themselves.
+--
+-- ── Once, on the transition ─────────────────────────────────────────────
+--
+-- `when (old.status is distinct from new.status)` on the trigger, and the body
+-- refuses anything that is not scheduled → cancelled. Re-saving a cancelled
+-- class must not send a second round of messages about the same cancellation,
+-- and `restoreClass` putting it back on must not send one at all.
+--
+-- Putting a class BACK is deliberately silent. Twelve people told a class is
+-- off, then told it is on again, then off — that is a gym that looks like it
+-- does not know what it is doing, and the honest fix is that an owner who puts
+-- a class back tells the members themselves. A notification saying "actually it
+-- is on" cannot be trusted to arrive before somebody has already made other
+-- plans.
+--
+-- ── The reason is passed on, when there is one ───────────────────────────
+--
+-- `cancel_reason` is what the owner typed, and it goes in the message: "the
+-- coach is ill" and "the room flooded" are different conversations for the
+-- member, and a cancellation with no reason reads as one the gym could not be
+-- bothered to explain. It is truncated with the rest of the body at 500, the
+-- same ceiling part 159 uses.
+--
+-- Additive only. One function, one trigger, no table and no policy changed.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create or replace function public.class_cancelled_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_when text;
+  v_why  text;
+begin
+  -- Only the transition ONTO cancelled. Not a re-save, and not a restore.
+  if not (coalesce(old.status, 'scheduled') <> 'cancelled'
+          and new.status = 'cancelled') then
+    return new;
+  end if;
+
+  -- The member's own clock is the client screen's job; what a notification can
+  -- honestly say is which class, on which day, in the gym's own words.
+  v_when := to_char(new.starts_at, 'FMDay FMDD FMMon at HH24:MI');
+  v_why := nullif(btrim(coalesce(new.cancel_reason, '')), '');
+
+  insert into public.notifications (user_id, title, body, icon, route)
+  select
+    cb.user_id,
+    'A class you booked is not running',
+    left(
+      '“' || coalesce(nullif(btrim(new.title), ''), 'A class') || '” on ' || v_when
+      || ' has been called off'
+      || coalesce(': ' || v_why, '')
+      || '. '
+      || case when cb.status = 'waitlist'
+              then 'You were on the waiting list for it, so there is nothing to cancel.'
+              else 'Your booking is kept on the record and there is nothing for you to do.'
+         end
+      || ' Your Classes screen has the rest of the timetable.',
+      500)
+    ,
+    'calendar',
+    '/(client)/classes'
+  from public.class_bookings cb
+  where cb.class_id = new.id
+    -- The person who called it off is watching it happen.
+    and cb.user_id is distinct from auth.uid();
+
+  return new;
+end;
+$function$;
+
+comment on function public.class_cancelled_notify() is
+  'Writes one inbox row to every member booked or waitlisted on a class at the moment it is called off, excluding whoever called it off. Fires only on the transition onto cancelled, so a re-save sends nothing and a restore sends nothing. See part 493.';
+
+drop trigger if exists gym_classes_notify_cancelled on public.gym_classes;
+create trigger gym_classes_notify_cancelled
+  after update of status on public.gym_classes
+  for each row
+  when (old.status is distinct from new.status)
+  execute function public.class_cancelled_notify();
+
+revoke all on function public.class_cancelled_notify() from public;
+revoke all on function public.class_cancelled_notify() from anon;
+revoke all on function public.class_cancelled_notify() from authenticated;

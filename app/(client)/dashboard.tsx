@@ -7,6 +7,11 @@
 // of four competing 20px numbers, hairline-separated sections instead of eleven
 // stacked bordered cards, and a card spent only on the thing you can act on.
 import { useState, useEffect, useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useReachability } from '../../src/ui/reachability';
+import { offlineBanner } from '../../src/lib/reachability';
+import { useOutbox } from '../../src/ui/outbox';
+import { OUTBOX_KINDS, lapsedNote, outboxNote } from '../../src/lib/outbox';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,7 +20,8 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, ListRow, Cta, Ghost, QuickRow, Meter, Spark, WeekDots, Notice, Card, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
-import { num } from '../../src/lib/format';
+import { num, fmtTime } from '../../src/lib/format';
+import { appLocale } from '../../src/lib/locale';
 import { macrosFor, applyCoachAdjust, caloriesLeft, caloriesNote, dayBurn } from '../../src/lib/nutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { useClientData } from '../../src/ui/clientData';
@@ -52,8 +58,12 @@ import {
   checklist, checklistDone, checklistLeft, nextTodo, showChecklist,
 } from '../../src/lib/firstRun';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// The month and weekday names used to be two hardcoded English arrays here,
+// rendered as `{DAYS[d.getDay()]} {d.getDate()} {MONTHS[d.getMonth()]}` on the
+// first line of the first screen every member sees every day — in a language
+// and an order the reader may not use. Repple is white-label: a gym in Dubai,
+// one in London and one in Tokyo run the same binary, so there is no house
+// locale to fall back to (src/lib/locale.ts). The date is the handset's now.
 
 
 export default function Home() {
@@ -63,7 +73,7 @@ export default function Home() {
   const wu = useSettings().weightUnit;
   const router = useRouter();
   const c = useClientData();
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   const { getProgram, status: programStatus } = useAssignedPrograms();
   const coachProgram = getProgram(c.id);
   // Under 'error' an empty log means the history could not be read, not that
@@ -117,7 +127,7 @@ export default function Home() {
   // log, the programs, the invites and readiness are all status-gated a few
   // lines from here. "No Sessions Booked" said to somebody expected in the room
   // on Thursday is the sentence this app pays most dearly for.
-  const { sessions, status: sessionStatus } = useSessions();
+  const { sessions, status: sessionStatus, refresh: refreshSessions } = useSessions();
   const sessionsKnown = sessionStatus === 'ready' || sessionStatus === 'partial';
   // `status` is read, not discarded. useInvites documents that under 'error' an
   // empty `received` means the check did not happen — not that nobody invited
@@ -126,9 +136,39 @@ export default function Home() {
   // no reason for its absence, and both sides concluded the other had failed.
   // Reported four separate times from two apps.
   const {
-    received: myInvites, status: invitesStatus,
+    received: myInvites, status: invitesStatus, reload: reloadInvites,
     acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite,
   } = useInvites();
+  // The home screen tells a member whose invitation check failed to "pull down
+  // to try again", and until now the ScrollView had no RefreshControl at all —
+  // so the gesture did nothing, and the only remedy that worked was killing the
+  // app. The three server reads this screen renders and reports on are the
+  // three it asks for again.
+  const pull = usePullToRefresh(useCallback(() => {
+    reloadInvites(); reloadLog(); void refreshSessions();
+  }, [reloadInvites, reloadLog, refreshSessions]));
+
+  // ── the three sentences about being offline that nothing rendered ───────
+  //
+  // `offlineBanner` and `lapsedNote` were both written, both tested and both
+  // read by nothing. This is the home screen, so this is where the standing one
+  // belongs: offline, every figure below is what this phone last had, and until
+  // now nothing anywhere said so. `offlineBanner` returns null on 'online' AND
+  // on 'unknown', so a launch that has not made a request yet draws nothing.
+  const reach = useReachability();
+  const offline = offlineBanner(reach);
+  // An intent that sat past the moment it was about is taken out of the queue
+  // without being sent, and the member's model is that it happened. This is the
+  // one case the outbox header calls out as having to be TOLD, and it was being
+  // discarded in silence. One line per kind, not per item: three lapsed
+  // measurements are one thing to say.
+  const outbox = useOutbox();
+  const lapsedKinds = [...new Set((outbox?.lapsed ?? []).map((i) => i.kind))];
+  // And what is still waiting. `outboxNote` returns null at zero, so a kind
+  // with nothing pending contributes no line rather than an empty one.
+  const waiting = OUTBOX_KINDS
+    .map((k) => outboxNote(outbox?.countOf(k) ?? 0, k))
+    .filter((line): line is string => line !== null);
   const foodLog = useFoodLog();
   const foodToday = foodLog.consumed;
   const wearables = useWearables();
@@ -328,12 +368,12 @@ export default function Home() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{DAYS[d.getDay()]} {d.getDate()} {MONTHS[d.getMonth()]}</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>{d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}</Text>
             {/* A client who has not finished onboarding has no name yet — don't
                 render "Good morning," with a dangling comma and nothing after it. */}
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={1}>
@@ -362,6 +402,28 @@ export default function Home() {
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
+          {/* First, because it changes how everything under it should be read.
+              It deliberately promises nothing about anything being sent later:
+              whether a particular write is queued is a fact about that write,
+              and src/lib/outbox.ts owns saying so. */}
+          {offline ? (
+            <Notice tone={t.warn} kicker="Offline" title="Showing what this phone already had" note={offline} />
+          ) : null}
+
+          {waiting.length > 0 ? (
+            <Notice tone={t.warn} kicker="Waiting to send"
+              title={waiting.length === 1 ? 'One thing is still on this phone' : 'Some things are still on this phone'}
+              note={waiting.join(' ')} />
+          ) : null}
+
+          {lapsedKinds.map((k) => (
+            <Notice key={`lapsed-${k}`} tone={t.warn} kicker="Not sent"
+              title="Something waited too long to send" note={lapsedNote(k)}>
+              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+                <View style={{ flex: 1 }}><Ghost label="Got It" onPress={() => outbox?.clearLapsed()} /></View>
+              </View>
+            </Notice>
+          ))}
           {needsOnboard ? (
             <Card onPress={() => router.push('/(client)/onboarding')} tone={t.brand} style={{ marginBottom: sp.md }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
@@ -683,7 +745,12 @@ export default function Home() {
               // capping, so a truncated page holds the future and drops the
               // ancient history.
               title={nextSession
-                ? `Next session · ${new Date(nextSession.startsAt).toLocaleDateString(undefined, { weekday: 'short' })} ${(() => { let h = new Date(nextSession.startsAt).getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${ap}`; })()}`
+                // `undefined` as a locale is the reader's device and `appLocale()`
+                // is the same handset asked through one place, so these two agreed
+                // by luck. The CLOCK did not: it was a 12-hour am/pm formatter
+                // hand-built in English, and most of the world reads 24 — see
+                // `fmtClock` in src/lib/format.ts.
+                ? `Next session · ${new Date(nextSession.startsAt).toLocaleDateString(appLocale(), { weekday: 'short' })} ${fmtTime(nextSession.startsAt)}`
                 : sessionsKnown ? 'No Sessions Booked'
                 : sessionStatus === 'loading' ? 'Checking Your Sessions'
                 : 'Your Sessions Could Not Be Read'}

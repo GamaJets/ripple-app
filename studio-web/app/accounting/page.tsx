@@ -38,7 +38,8 @@ import {
 } from '@lib/monthEnd';
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit } from '@lib/rowCap';
-import { fetchMemberships, matchPayment, type Membership } from '@lib/gymRecord';
+import { fetchMemberships, matchPayment, fetchOnlineOrders, type Membership, type OnlineOrder } from '@lib/gymRecord';
+import { onlineOrderProblem } from '@lib/gymOrderPayment';
 import {
   createInvoice, setInvoiceStatus, settleInvoice, invoiceBlocker, parseAmount,
   dueAfter, isoDay, SETTABLE_INVOICE_STATUSES, INVOICE_STATUS_LABEL,
@@ -132,6 +133,11 @@ interface Settled {
   sessionsCount: number | null;
   method: string | null;
   settledAt: string;
+  /** How much of `amountCents` was money the coach spent and got back rather
+   *  than pay (supabase/parts/482). NULL means the run did not say, which is
+   *  every settlement recorded before that column existed — and is deliberately
+   *  not read as zero, because zero is the claim that none of it was. */
+  reimbursementCents: number | null;
 }
 
 /** One read, with the three states kept apart. */
@@ -156,6 +162,9 @@ interface Books {
    *  month: an exception raised in June is still an exception in September, and
    *  an answer keyed to a month would have to be given again each time. */
   marks: MarkIndex;
+  /** Paid and failed online orders in the month. A read of its own because it
+   *  answers a question no other read on this page can: what Stripe took. */
+  online: Read<OnlineOrder>;
   /** Whether the marks read succeeded. A failed one shows every exception as
    *  unanswered, which re-asks questions somebody has already answered — bad,
    *  but not as bad as hiding a real one, so the page says so and carries on. */
@@ -164,7 +173,7 @@ interface Books {
 
 const EMPTY: Books = {
   invoices: reading(), payments: reading(), settled: reading(),
-  marks: new Map(), marksErr: null,
+  marks: new Map(), marksErr: null, online: reading(),
 };
 
 /* ── totals that refuse ────────────────────────────────────────────────────── */
@@ -273,11 +282,16 @@ export default function Accounting() {
     // empties the payments — and this screen would then report a month in which
     // the gym both billed nothing and took nothing, two wrong facts that agree
     // with each other and so look like a quiet month rather than a broken read.
-    const [iRes, pRes, sRes, mRes] = await Promise.allSettled([
+    const [iRes, pRes, sRes, mRes, oRes] = await Promise.allSettled([
       fetchInvoices(tenantId, mw.lastDay),
       fetchPayments(supabase, tenantId, since, until),
       fetchSettled(tenantId, mw.fromIso, mw.toIso),
       fetchMarks(supabase, tenantId),
+      // What the gym sold online in the month, and whether each sale reached
+      // the ledger. `gym_orders` was read by one file in the whole product —
+      // the member's own purchase history — so a sale that took the money and
+      // failed to grant anything existed in a server log and on no screen.
+      fetchOnlineOrders(supabase, tenantId, mw.fromIso, mw.toIso),
     ]);
 
     setLoaded({
@@ -292,6 +306,7 @@ export default function Accounting() {
         // a real exception off an accountant's page because a lookup 500'd.
         marks: mRes.status === 'fulfilled' ? mRes.value : new Map(),
         marksErr: mRes.status === 'fulfilled' ? null : failure(mRes, 'the answers already given on this reconciliation'),
+        online: landed(oRes, 'the online sales'),
       },
     });
   }, []);
@@ -311,6 +326,7 @@ export default function Accounting() {
             settled: { rows: [], state: null, why: null },
             marks: new Map(),
             marksErr: null,
+            online: { rows: [], state: null, why: null },
           },
         });
         return;
@@ -506,6 +522,7 @@ function Month({ w, books, gymName, ccy, members, tenantId, me, onChange }: {
       />
       <Invoiced read={books.invoices} raised={raised} w={w} />
       <Ageing read={books.invoices} rows={outstanding} asAt={asAt} total={owedSum} />
+      <OnlineSales read={books.online} w={w} />
       <Reconcile
         books={books} w={w} inMonthPayments={inMonthPayments}
         tenantId={tenantId} me={me} onChange={onChange}
@@ -615,6 +632,64 @@ function MoneyIn({ read, rows, w, total }: {
   );
 }
 
+/* ── what was sold online ──────────────────────────────────────────────────── */
+
+/**
+ * Online sales that need a person, and only those.
+ *
+ * Two states reach this table and both used to be invisible.
+ *
+ *   · An order the webhook marked FAILED. The card was charged and the
+ *     entitlement could not be written. `supabase/functions/stripe-webhook`
+ *     records the reason on the row and then writes a `console.error`, and
+ *     `gym_orders` was read by exactly one file in the product: the member's
+ *     own purchase history. So the only person who could see it was whoever
+ *     tails the edge-function logs, and the gym learned about it when the
+ *     member turned up and was refused at the door.
+ *
+ *   · An order marked PAID with no `gym_payments` row against it. Before part
+ *     480 that was EVERY online sale, and it is the reason this page's
+ *     reconciliation against the bank was short by all of them. It is now
+ *     narrow — the closed-month lock refusing the write is the ordinary cause —
+ *     and it is listed rather than left silent, because the alternative is a
+ *     figure on this page that is quietly wrong by whatever it comes to.
+ *
+ * A paid order that reached the ledger is not listed at all. It is an ordinary
+ * payment and appears in Money in like any other.
+ */
+function OnlineSales({ read, w }: { read: Read<OnlineOrder>; w: MonthWindow }) {
+  const problems = (read.rows ?? [])
+    .map((o) => ({ o, problem: onlineOrderProblem(o) }))
+    .filter((x): x is { o: OnlineOrder; problem: string } => x.problem !== null);
+
+  const cols: Column<{ o: OnlineOrder; problem: string }>[] = [
+    { key: 'when', header: 'Paid', value: (r) => r.o.paidAt ?? '',
+      render: (r) => (r.o.paidAt ? new Date(r.o.paidAt).toLocaleDateString() : <span className="dash">not stated</span>) },
+    { key: 'member', header: 'Member', value: (r) => r.o.memberName,
+      render: (r) => r.o.memberName ?? <span className="dash">nobody named</span> },
+    { key: 'what', header: 'Bought', value: (r) => r.o.kind },
+    { key: 'amount', header: 'Amount', value: (r) => r.o.amountCents, numeric: true,
+      render: (r) => money(r.o.amountCents, r.o.currency) ?? <span className="dash">not stated</span> },
+    { key: 'problem', header: 'What is wrong', value: (r) => r.problem,
+      render: (r) => <span style={{ color: 'var(--crit)', whiteSpace: 'normal' }}>{r.problem}</span> },
+  ];
+
+  return (
+    <Section
+      title="Online sales that need a person"
+      sub={`Card purchases in ${w.label} where Stripe took the money and something did not follow. A sale that granted what it should and reached the payment record is not here — it is an ordinary payment, in Money in.`}
+    >
+      <Part read={read} what="the online sales"
+            cost="whether anybody paid online and got nothing is unknown for this month">
+        <DataTable
+          rows={problems} columns={cols} rowKey={(r) => r.o.id}
+          empty={`Every online sale in ${w.label} granted what it should and is in the payment record.`}
+        />
+      </Part>
+    </Section>
+  );
+}
+
 /* ── money out ─────────────────────────────────────────────────────────────── */
 
 function MoneyOut({ read, rows, total }: { read: Read<Settled>; rows: Settled[]; total: Sum }) {
@@ -649,6 +724,14 @@ function MoneyOut({ read, rows, total }: { read: Read<Settled>; rows: Settled[];
         }
         return <>{money(c, s.currency)}</>;
       } },
+    // Pay and a reimbursement are not the same money, and whoever files the
+    // payroll needs them apart. The run recorded one figure until
+    // supabase/parts/482; a settlement from before that says so rather than
+    // being reported as wholly pay.
+    { key: 'reimbursed', header: 'Of which reimbursed', value: (s) => s.reimbursementCents, numeric: true,
+      render: (s) => (s.reimbursementCents == null
+        ? <span className="dash">the run did not say</span>
+        : <>{money(s.reimbursementCents, s.currency)}</>) },
     { key: 'method', header: 'Method', value: (s) => s.method },
   ];
 
@@ -1420,6 +1503,69 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
     return <button className="no-print" style={linkBtn} onClick={() => setAnswering(k)}>{label}</button>;
   };
 
+  /* ── recording a match, which nothing could do ────────────────────────────
+   *
+   * `matchPayment` and `settleInvoice` were both imported by this file and
+   * called by nothing anywhere in the repository. So `gym_payments.invoice_id`
+   * — the column supabase/parts/180 added precisely to be the hard link — was
+   * never written by any code path, the `p.invoiceId === inv.id` test in
+   * `reconcile` above never fired, and every invoice fell through to the
+   * 45-day exact-amount guess. The copy under this section told the accountant
+   * the column is "written when somebody records the payment against a
+   * membership or matches it here", and there was no here.
+   *
+   * A part payment, a lump cash banking, or two members paying the same amount
+   * therefore reappeared as an exception every month for ever, and the only
+   * action available was "explain or flag" — which records a note and leaves
+   * the ledger unlinked.
+   *
+   * Which of the two writes is used follows from the invoice's status, and the
+   * distinction is not cosmetic:
+   *
+   *   · An invoice already marked PAID needs the link alone. `matchPayment`.
+   *   · An invoice still OPEN is being settled by this payment, so it needs the
+   *     link and the status, in that order. `settleInvoice` does both and its
+   *     own doc comment explains why the order is not free.
+   *
+   * Nothing here infers a match. The rule stays as the way the screen GROUPS
+   * unmatched rows; this is a person recording that they looked and it is
+   * right, which is the difference the note on `matchPayment` insists on.
+   */
+  const [matching, setMatching] = useState<string | null>(null);
+
+  const recordMatch = async (invoice: Invoice, paymentId: string) => {
+    setMarkErr(null);
+    try {
+      if ((invoice.status ?? '') === 'paid') await matchPayment(supabase, paymentId, invoice.id);
+      else await settleInvoice(supabase, invoice.id, paymentId);
+      setMatching(null);
+      onChange();
+    } catch (e: any) {
+      setMarkErr(`That match was NOT recorded: ${e?.message ?? 'the write was refused'}. The payment and the invoice are still unlinked.`);
+    }
+  };
+
+  /** The payments that could settle this invoice: same member, not already
+   *  linked to something else. Deliberately NOT filtered by amount or by date —
+   *  a part payment and a lump banking are the two cases the heuristic cannot
+   *  see, and they are the reason this control exists. */
+  const candidatePayments = (inv: Invoice): GymPayment[] =>
+    (books.payments.rows ?? []).filter((p) =>
+      p.invoiceId == null && p.kind === 'payment' && p.memberId != null && p.memberId === inv.memberId);
+
+  /** The invoices this payment could settle: same member, not already settled by
+   *  another payment. An invoice in any status is offered — an open one is
+   *  settled by the match, a paid one is merely linked. */
+  const candidateInvoices = (p: GymPayment): Invoice[] => {
+    const taken = new Set((books.payments.rows ?? [])
+      .filter((x) => x.invoiceId != null && x.id !== p.id)
+      .map((x) => x.invoiceId as string));
+    return (books.invoices.rows ?? []).filter((i) =>
+      i.memberId != null && i.memberId === p.memberId
+      && !taken.has(i.id)
+      && i.status !== 'void' && i.status !== 'draft');
+  };
+
   const invCols: Column<Invoice>[] = [
     { key: 'member', header: 'Member', value: (i) => i.memberName },
     { key: 'issued', header: 'Issued', value: (i) => i.issuedOn },
@@ -1438,6 +1584,21 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
         </span>
       ) },
     { key: 'note', header: 'Note', value: (i) => i.note },
+    { key: 'match', header: 'The payment', value: () => '', align: 'right',
+      render: (i) => (
+        <MatchPicker
+          open={matching === `invoice:${i.id}`}
+          onOpen={() => { setMarkErr(null); setMatching(`invoice:${i.id}`); }}
+          onCancel={() => setMatching(null)}
+          label="Match a payment"
+          empty="No unmatched payment from this member is in the window. Reach further back on Money, or explain the row."
+          options={candidatePayments(i).map((p) => ({
+            id: p.id,
+            label: `${new Date(p.takenAt).toLocaleDateString()} — ${money(p.amountCents, p.currency) ?? 'no amount'}${p.note ? ` (${p.note})` : ''}`,
+          }))}
+          onPick={(paymentId) => recordMatch(i, paymentId)}
+        />
+      ) },
     { key: 'answer', header: 'Answer', value: (i) => marks.get(markKey('invoice', i.id))?.state ?? '', align: 'right',
       render: (i) => answerCell('invoice', i.id, 'Explain or flag') },
   ];
@@ -1450,6 +1611,24 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
       render: (p) => money(p.amountCents, p.currency) },
     { key: 'method', header: 'Method', value: (p) => (p.method ?? '').replace('_', ' ') },
     { key: 'note', header: 'Note', value: (p) => p.note },
+    { key: 'match', header: 'The invoice', value: () => '', align: 'right',
+      render: (p) => (
+        <MatchPicker
+          open={matching === `payment:${p.id}`}
+          onOpen={() => { setMarkErr(null); setMatching(`payment:${p.id}`); }}
+          onCancel={() => setMatching(null)}
+          label="Match an invoice"
+          empty="This member has no invoice left for this to settle. That is what the row is saying, and explaining it is the honest answer."
+          options={candidateInvoices(p).map((i) => ({
+            id: i.id,
+            label: `${i.number != null ? `#${i.number} ` : ''}${i.issuedOn} — ${money(i.amountCents, i.currency) ?? 'no amount'} (${i.status ?? 'no status'})`,
+          }))}
+          onPick={(invoiceId) => {
+            const inv = (books.invoices.rows ?? []).find((x) => x.id === invoiceId);
+            if (inv) void recordMatch(inv, p.id);
+          }}
+        />
+      ) },
     { key: 'answer', header: 'Answer', value: (p) => marks.get(markKey('payment', p.id))?.state ?? '', align: 'right',
       render: (p) => answerCell('payment', p.id, 'Explain or flag') },
   ];
@@ -1670,7 +1849,7 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice
 async function fetchSettled(tenantId: string, fromIso: string, toIso: string): Promise<Settled[]> {
   const { data, error } = await supabase
     .from('payroll_settlements')
-    .select('id, trainer_id, period_from, period_to, amount_cents, currency, sessions_count, method, settled_at')
+    .select('id, trainer_id, period_from, period_to, amount_cents, reimbursement_cents, currency, sessions_count, method, settled_at')
     .eq('tenant_id', tenantId)
     .gte('settled_at', fromIso)
     .lt('settled_at', toIso)
@@ -1695,6 +1874,7 @@ async function fetchSettled(tenantId: string, fromIso: string, toIso: string): P
     sessionsCount: r.sessions_count ?? null,
     method: r.method ?? null,
     settledAt: r.settled_at,
+    reimbursementCents: Number.isFinite(r.reimbursement_cents) ? r.reimbursement_cents : null,
   }));
 }
 
@@ -1743,6 +1923,51 @@ async function namesFor(ids: Array<string | null | undefined>): Promise<Map<stri
  * one action with different implications about whether anybody actually looked,
  * and a month later nothing on screen could tell them apart.
  */
+/**
+ * Pick the other half of a match, and record it.
+ *
+ * Closed by default and one at a time, for the same reason `Answer` is: a
+ * dropdown on every row of a two-hundred-row exception list is two hundred
+ * chances to link the wrong pair, and this write is the one that tells the
+ * reconciliation an answer is a FACT rather than a guess.
+ *
+ * The empty case is a sentence rather than an empty select. "There is nothing
+ * to match this to" is itself the answer to the exception, and an owner staring
+ * at a control with no options in it would read it as broken.
+ */
+function MatchPicker({ open, onOpen, onCancel, onPick, options, label, empty }: {
+  open: boolean;
+  onOpen: () => void;
+  onCancel: () => void;
+  onPick: (id: string) => void;
+  options: Array<{ id: string; label: string }>;
+  label: string;
+  empty: string;
+}) {
+  const [chosen, setChosen] = useState('');
+  if (!open) {
+    return <button className="no-print" style={linkBtn} onClick={onOpen}>{label}</button>;
+  }
+  if (!options.length) {
+    return (
+      <span style={{ fontSize: 12, color: 'var(--ink3)' }}>
+        {empty}{' '}
+        <button className="no-print" style={{ ...linkBtn, marginLeft: 6 }} onClick={onCancel}>close</button>
+      </span>
+    );
+  }
+  return (
+    <span className="no-print" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+      <select value={chosen} onChange={(e) => setChosen(e.target.value)} style={{ ...field, maxWidth: 320 }}>
+        <option value="">Choose one…</option>
+        {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+      <button style={linkBtn} disabled={!chosen} onClick={() => chosen && onPick(chosen)}>Record it</button>
+      <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={onCancel}>cancel</button>
+    </span>
+  );
+}
+
 function Answer({ kind, subjectId, tenantId, me, existing, onDone, onCancel, onErr }: {
   kind: 'invoice' | 'payment'; subjectId: string; tenantId: string; me: Me;
   existing: ReconcileMark | null;
