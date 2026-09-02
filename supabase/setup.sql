@@ -41205,12 +41205,21 @@ alter table public.client_disputes enable row level security;
 -- a merchant-side case file with a reason code and an evidence deadline on it
 -- is a different act entirely, and it is not one this app has been asked to do.
 drop policy if exists client_disputes_read on public.client_disputes;
+-- The coach and nobody else, which is what every neighbouring table already
+-- says: coach_payouts, coach_invoices and coach_receipts are all
+-- `coach_id = auth.uid()` with no second arm.
+--
+-- An earlier draft of this part also admitted the owner of the coach's gym.
+-- Under direct charges the disputed money is the COACH's, taken on the coach's
+-- own Stripe account, and the row names the client who disputed as well. So
+-- that arm would have told a gym owner which of a coach's clients had gone to
+-- their bank, about a payment that never touched the gym — and it would have
+-- been the only coach-money table in the schema to do it.
+--
+-- If a gym ever needs this it is a deliberate widening with an argument
+-- attached, not a default nobody chose.
 create policy client_disputes_read on public.client_disputes for select using (
-  trainer_id = (select auth.uid())
-  or exists (
-    select 1 from public.trainers tr
-     where tr.id = client_disputes.trainer_id
-       and public.is_owner_of(tr.tenant_id)));
+  trainer_id = (select auth.uid()));
 
 -- No insert, update or delete policy, on purpose. RLS denies what no policy
 -- permits, so this table is read-only to every signed-in user and writable only
@@ -41813,7 +41822,7 @@ begin
      where
        -- Only what the coach is ASKING for. A 'received' invoice is their own
        -- statement that the money came in, and `invoiceAge()` calls it settled.
-       and i.kind = 'requested'
+       i.kind = 'requested'
        -- A voided invoice is on no list at all: the coach has already told
        -- somebody that number was cancelled.
        and i.voided_at is null

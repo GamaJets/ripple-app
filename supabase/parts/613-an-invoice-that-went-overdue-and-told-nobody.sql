@@ -124,7 +124,7 @@ begin
      where
        -- Only what the coach is ASKING for. A 'received' invoice is their own
        -- statement that the money came in, and `invoiceAge()` calls it settled.
-       and i.kind = 'requested'
+       i.kind = 'requested'
        -- A voided invoice is on no list at all: the coach has already told
        -- somebody that number was cancelled.
        and i.voided_at is null
