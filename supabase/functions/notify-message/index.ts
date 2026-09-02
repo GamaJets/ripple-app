@@ -98,6 +98,34 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     if (!prefErr && off) return json({ ok: true, muted: true });
   } catch { /* a preference we cannot read is not a mute — fall through and send */ }
+
+  // ── Quiet hours (part 530) ──────────────────────────────────────────────
+  //
+  // Chat does not go through send-push, and chat at eleven at night is the
+  // notification the whole complaint was about — so the same check is made
+  // here, in the same single-recipient shape as the channel filter above and
+  // under the same three rules.
+  //
+  // The hour arithmetic belongs to `notify_quiet_now`, not to this function.
+  // `new Date().getHours()` here is the hour in whatever zone the edge runtime
+  // is in, which is the one hour certain to be wrong for the person receiving
+  // it; the view resolves the window in the recipient's OWN stored zone.
+  //
+  // As above: the notifications ROW is already written by this point and is
+  // written either way. Quiet hours stop the banner, never the record — a
+  // coach who was quiet still finds the message in their list and in the
+  // thread, which is what makes suppressing it safe to offer at all.
+  //
+  // A failed read SENDS, per part 251. A database fault must not be able to
+  // swallow somebody's message with nothing anywhere to find it out from.
+  try {
+    const { data: quiet, error: quietErr } = await admin
+      .from('notify_quiet_now')
+      .select('user_id')
+      .eq('user_id', recipient)
+      .maybeSingle();
+    if (!quietErr && quiet) return json({ ok: true, muted: true });
+  } catch { /* an hour we cannot read is not a quiet hour — fall through and send */ }
   try {
     const { data: toks } = await admin.from('push_tokens').select('token').eq('user_id', recipient);
     const tokens: string[] = (toks ?? []).map((r: any) => r.token).filter(Boolean);

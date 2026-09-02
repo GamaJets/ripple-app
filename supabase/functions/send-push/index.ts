@@ -92,6 +92,39 @@ Deno.serve(async (req: Request) => {
         }
       }
     }
+
+    // ── Quiet hours (part 530) ────────────────────────────────────────────
+    //
+    // Composed AFTER the channel filter and against `recipients`, not
+    // `user_ids`, so the two compose rather than the second undoing the first.
+    //
+    // The hour arithmetic is the view's, not this function's, and deliberately:
+    // `new Date().getHours()` here is the hour in whatever zone the edge
+    // runtime happens to be in, which is the one hour certain to be wrong for
+    // every recipient. `notify_quiet_now` resolves each person's window in
+    // their OWN stored zone, so a coach in Dubai and a coach in Los Angeles are
+    // both quiet at eleven at night rather than both quiet at eleven UTC.
+    //
+    // Unlike the channel filter this needs no `channel` guard: quiet hours are
+    // a statement about the hour, not about the kind of message.
+    //
+    // `!quietErr` is part 251's rule and it is not an oversight: a failed read
+    // of this table SENDS. A database fault must not be able to swallow the
+    // notification that somebody's payment failed, because there would be
+    // nothing anywhere to discover that from afterwards.
+    if (recipients.length) {
+      const { data: quiet, error: quietErr } = await supa
+        .from('notify_quiet_now').select('user_id').in('user_id', recipients);
+      if (!quietErr && quiet) {
+        const asleep = new Set((quiet as { user_id: string }[]).map((r) => r.user_id));
+        if (asleep.size) {
+          const before = recipients.length;
+          recipients = recipients.filter((id) => !asleep.has(id));
+          muted += before - recipients.length;
+        }
+      }
+    }
+
     if (!recipients.length) return json({ sent: 0, muted });
 
     const { data: rows } = await supa.from('push_tokens').select('token').in('user_id', recipients);
