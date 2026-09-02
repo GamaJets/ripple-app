@@ -133,15 +133,18 @@
 //     returns nothing. It exists because a client who asks to be cancelled
 //     today and is billed again in three weeks writes the review that costs the
 //     coach the next five clients.
-//   · Refund — NOW HERE, for a one-off sale, in whole. What made it safe rather
-//     than half-working is in supabase/functions/connect-refund: the refund is
-//     made in the SALE'S OWN Stripe account (read off the row, never from the
-//     coach's current charge model), Stripe is called first and the row is
-//     written only from its answer, and Repple's share comes back in
-//     proportion. What is NOT here is a partial amount — the edge function
-//     accepts one, and a typed field that could credit somebody's card by a
-//     figure they did not choose is worth building properly rather than
-//     quickly.
+//   · Refund — NOW HERE, for a one-off sale, in whole OR IN PART. What made it
+//     safe rather than half-working is in supabase/functions/connect-refund:
+//     the refund is made in the SALE'S OWN Stripe account (read off the row,
+//     never from the coach's current charge model), Stripe is called first and
+//     the row is written only from its answer, and Repple's share comes back in
+//     proportion. The partial amount was the deliberate limit this shipped
+//     with, because a typed field can credit somebody's card by a figure they
+//     did not choose. It is built now: the box is shaped by the SALE's currency
+//     (a yen has no minor unit and a dinar has three places), the reader
+//     converts digits rather than multiplying a float, nothing is rounded and
+//     nothing is clamped, the ceiling is what is LEFT rather than the price,
+//     and the confirm states the exact amount with its currency on it.
 //   · Open the client's billing portal — still not here, and never will be.
 //     That is their saved card, their billing address and every receipt they
 //     have been sent. It stays theirs; a coach calling it is refused with a 403
@@ -199,14 +202,16 @@ import {
 } from '../../src/lib/packagePromo';
 import { isoToday } from '../../src/lib/dayPlan';
 import {
-  refundBlocker, refundableCents, isPartlyRefunded, isFullyRefunded,
-  REFUND_DOES_NOT, REFUND_FEES_NOTE, REFUND_IS_FINAL, END_NOW_TAKES_THE_REST, END_AT_PERIOD_IS_KINDER,
+  refundBlocker, refundableCents, refundAmountBlocker, refundBalanceNote, refundConfirmLine,
+  isPartlyRefunded, isFullyRefunded,
+  REFUND_DOES_NOT, REFUND_FEES_NOTE, REFUND_IS_FINAL, REFUND_PART_IS_EXACT,
+  END_NOW_TAKES_THE_REST, END_AT_PERIOD_IS_KINDER,
   type Refundable,
 } from '../../src/lib/refunds';
 import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
-import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, type Pot, type TakenRow } from '../../src/lib/coachMoney';
+import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, currencyDecimals, readMinorAmount, type Pot, type TakenRow } from '../../src/lib/coachMoney';
 import { readNumber } from '../../src/lib/units';
-import { accountTypeOf } from '../../src/lib/directCharges';
+import { accountTypeOf, accountForObject } from '../../src/lib/directCharges';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
   { key: null, label: 'One-off' },
@@ -258,6 +263,16 @@ export default function TrainerPayments() {
    *  without disabling every other row's — a coach refunding two people in a
    *  row should not be locked out of the second by the first. */
   const [refundBusy, setRefundBusy] = useState<string | null>(null);
+  /** The sale whose refund sheet is open, and what has been typed into it.
+   *  A sheet rather than an Alert because a partial refund needs a box, the
+   *  currency beside the box, and the exact figure that will leave shown back
+   *  before anything is tapped — none of which fits in an alert, and shipping
+   *  the alert without them is what kept this whole-only. */
+  const [refunding, setRefunding] = useState<CoachPurchase | null>(null);
+  /** True for the whole of what is left, false for a typed amount. Defaults to
+   *  the whole: it is the commoner act and the one with nothing to get wrong. */
+  const [refundWhole, setRefundWhole] = useState(true);
+  const [refundAmt, setRefundAmt] = useState('');
   // The coach's discount codes, read LIVE from their own Stripe account — there
   // is no local table and no cache, because Stripe holds the redemption count
   // and a second copy of it would be a second copy that can disagree. Its own
@@ -435,12 +450,31 @@ export default function TrainerPayments() {
    *     because a coach who reads "fully refunded" and expects to be square
    *     finds a shortfall later with nothing to attribute it to.
    *
-   * Whole only, for now, and that is a deliberate limit rather than an
-   * oversight. The edge function accepts a partial amount and refuses anything
-   * above what is left; what is missing here is a typed-amount field with a
-   * decimal pad and the currency beside it, and shipping the button without it
-   * is better than shipping a field that could credit somebody's card by a
-   * figure they did not choose.
+   * ── The partial amount, which was the deliberate limit until now ───────
+   *
+   * This said "whole only, for now", and the reason it gave was right: a typed
+   * amount can credit somebody's card by a figure they did not choose. The
+   * field it asked for is below, and these are the four things that make it
+   * safe rather than merely present.
+   *
+   *   · THE BOX IS SHAPED BY THE CURRENCY. `currencyDecimals` in coachMoney.ts
+   *     answers how many decimal places this money has, and there is no default
+   *     — a "12.50" box in front of a yen sale is the wrong box, and a dinar
+   *     has three places rather than two. The keyboard follows it, so a
+   *     zero-decimal currency raises a pad with no point on it at all.
+   *   · NOTHING IS ROUNDED AND NOTHING IS CLAMPED. `readMinorAmount` converts
+   *     the DIGITS rather than multiplying a float, and `refundAmountBlocker`
+   *     refuses an amount over the ceiling instead of quietly refunding the
+   *     ceiling — a coach who types 500 on a 480 sale has made a mistake, and
+   *     silently giving back 480 hands them a figure to reconcile that was
+   *     never theirs.
+   *   · THE CEILING IS WHAT IS LEFT, NOT THE PRICE. `refundableCents` takes off
+   *     what has already gone, so a second partial refund is bounded by the
+   *     remainder. That remainder is the running total the SERVER wrote from
+   *     Stripe's own answer, never a figure this screen predicted.
+   *   · THE CONFIRM STATES THE EXACT AMOUNT AND ITS CURRENCY, through
+   *     `minorMoney`, which is the one formatter in this codebase and the only
+   *     thing that knows how many places to print.
    */
   /* ── discount codes ──────────────────────────────────────────────────────
      Held at Stripe, on the coach's own connected account, and nowhere else —
@@ -450,7 +484,14 @@ export default function TrainerPayments() {
      and the one restriction worth knowing about: a code can only be attached to
      a SUBSCRIPTION package, because Repple's cut there is a percentage and
      comes down with the price, while on a one-off it is an absolute figure
-     worked out before anybody types a code. */
+     Stripe wants in the same call in which it works the discount out — so it
+     can only ever be computed from the list price or from a total this app
+     guessed at, and both of those underpay the coach.
+     The client now types the code in the app rather than on Stripe's own
+     payment page, which is what makes the restriction to ONE package
+     enforceable at all: Stripe holds that restriction as metadata it does not
+     act on. `PROMO_IS_TYPED_AT_CHECKOUT` is the sentence the coach is given to
+     pass on. */
 
   /** The packages a code may be attached to, in the shape the rule reads. Only
    *  the recurring ones are offered, and `promoBlocker` refuses a one-off by
@@ -529,10 +570,11 @@ export default function TrainerPayments() {
     return back && left ? `${back} refunded, ${left} of it still stands` : 'Partly refunded';
   };
 
-  const doRefund = (b: CoachPurchase) => {
-    const money = minorMoney(b.amount_cents, b.currency);
+  /** One sale, in the shape the rule reads. Built in one place so the row's
+   *  button, the sheet and the confirm cannot disagree about what is left. */
+  const refundableOf = (b: CoachPurchase): Refundable => {
     const already = Number(b.refunded_cents ?? 0);
-    const refundable: Refundable = {
+    return {
       kind: 'purchase',
       amountCents: b.amount_cents,
       currency: b.currency,
@@ -540,38 +582,75 @@ export default function TrainerPayments() {
       stripeRef: b.stripe_session_id ?? null,
       paid: b.status === 'paid',
     };
+  };
+
+  const openRefund = (b: CoachPurchase) => {
     // The reason, never a dead control. The screen's copy of the rule is a
     // convenience; connect-refund runs the same one from the same module, so
     // the two cannot say different things.
-    const blocked = refundBlocker(refundable);
+    const blocked = refundBlocker(refundableOf(b));
     if (blocked) { Alert.alert('Nothing to refund', blocked); return; }
-    const left = refundableCents(refundable);
-    const leftMoney = minorMoney(left, b.currency);
+    setRefunding(b);
+    setRefundWhole(true);
+    setRefundAmt('');
+  };
+
+  /**
+   * Send it. `cents` is undefined for the whole of what is LEFT — which the
+   * edge function resolves from the row itself rather than from anything this
+   * screen believes, so a stale figure here cannot become a refund.
+   */
+  const sendRefund = async (b: CoachPurchase, cents?: number) => {
     const who = b.client_name || 'this client';
-    const go = async () => {
-      setRefundBusy(b.id);
-      const r = await refundPurchase(b.id);
-      setRefundBusy(null);
-      if (!r.ok) {
-        Alert.alert('No refund was made', (r.error || 'Nothing has been given back.') + '\n\nThey have not been refunded and nothing on your side has changed.');
-        load();
-        return;
-      }
-      // The narrow, loud middle state: the money went back and this app could
-      // not write it down. Saying "it failed" would be false and the coach's
-      // next act would be to refund it a second time.
-      if (r.mirrored === false) {
-        Alert.alert('Refunded, and not recorded here',
-          'The money has gone back to them. This app could not write the refund onto the sale, so the figures on this screen are still showing the full amount. Do NOT refund it again — check your Stripe dashboard, which is the record of what actually moved.');
-      } else {
-        Alert.alert('Refunded', `${minorMoney(r.refundedCents ?? 0, r.currency ?? b.currency) ?? 'The amount'} has gone back to ${who}. Stripe emails them a receipt for it; anything else you want to say is yours to say.`);
-      }
+    setRefundBusy(b.id);
+    const r = await refundPurchase(b.id, cents);
+    setRefundBusy(null);
+    if (!r.ok) {
+      Alert.alert('No refund was made', (r.error || 'Nothing has been given back.') + '\n\nThey have not been refunded and nothing on your side has changed.');
       load();
-    };
+      return;
+    }
+    // The narrow, loud middle state: the money went back and this app could
+    // not write it down. Saying "it failed" would be false and the coach's
+    // next act would be to refund it a second time.
+    if (r.mirrored === false) {
+      Alert.alert('Refunded, and not recorded here',
+        'The money has gone back to them. This app could not write the refund onto the sale, so the figures on this screen are still showing the full amount. Do NOT refund it again — check your Stripe dashboard, which is the record of what actually moved.');
+    } else {
+      // Stripe's own figure, not the one asked for. They are the same today,
+      // and a screen that echoed the request back would be reporting an
+      // intention as a fact about somebody's card.
+      Alert.alert('Refunded', `${minorMoney(r.refundedCents ?? 0, r.currency ?? b.currency) ?? 'The amount'} has gone back to ${who}. Stripe emails them a receipt for it; anything else you want to say is yours to say.`);
+    }
+    load();
+  };
+
+  /**
+   * The last thing between a typed figure and somebody's card.
+   *
+   * `amountLabel` is the exact amount, formatted with its currency by
+   * `minorMoney` — never the raw string the coach typed, because the point of
+   * showing it back is that they read the figure this app has actually
+   * understood.
+   */
+  const confirmRefund = (b: CoachPurchase, cents: number | undefined, amountLabel: string | null, part: boolean) => {
+    const who = b.client_name || 'this client';
+    const money = minorMoney(b.amount_cents, b.currency);
+    const line = amountLabel
+      ? refundConfirmLine(amountLabel, who, part)
+      : 'What is left on this sale would go back to the card they paid with.';
+    // Whose balance it leaves, read off THIS SALE rather than off the coach's
+    // current setting: a coach who has moved to direct charges still has older
+    // sales on the platform, and the two sentences are not interchangeable.
+    // Null when the row does not say, and nothing is said in that case.
+    const balance = refundBalanceNote(accountForObject(b) ? 'direct' : 'destination');
     Alert.alert(
       'Give this money back?',
-      `${who}${money ? ` — ${money}` : ''}\n\n${leftMoney ? `${leftMoney} would go back to the card they paid with.` : 'What is left on this sale would go back to the card they paid with.'}\n\n${REFUND_DOES_NOT}\n\n${REFUND_FEES_NOTE}\n\n${REFUND_IS_FINAL}`,
-      [{ text: 'Leave It', style: 'cancel' }, { text: 'Refund It', style: 'destructive', onPress: go }],
+      `${who}${money ? ` — ${money} was charged` : ''}\n\n${line}\n\n${REFUND_DOES_NOT}\n\n${REFUND_FEES_NOTE}${balance ? `\n\n${balance}` : ''}\n\n${REFUND_IS_FINAL}`,
+      [
+        { text: 'Leave It', style: 'cancel' },
+        { text: 'Refund It', style: 'destructive', onPress: () => { setRefunding(null); void sendRefund(b, cents); } },
+      ],
     );
   };
 
@@ -806,6 +885,31 @@ export default function TrainerPayments() {
   const typed = readNumber(price) ?? 0;
   const priceEcho = currency && typed > 0 ? pkgMoney(Math.round(typed * 100), currency) : null;
 
+  // ── the refund sheet's own arithmetic ──────────────────────────────────────
+  //
+  // The ceiling is what is LEFT on the sale, never the price it was sold at.
+  // `refunded_cents` on the row is the running total the edge function wrote
+  // from Stripe's own answers, so a second partial refund is bounded by what
+  // actually remains rather than by the original charge.
+  const refundLeft = refunding ? refundableCents(refundableOf(refunding)) : 0;
+  const refundLeftMoney = refunding ? minorMoney(refundLeft, refunding.currency) : null;
+  // How many decimal places this money has. Null is impossible in the sheet —
+  // `refundBlocker` refuses a sale with no currency before it can open — and is
+  // handled rather than asserted, because a currency is not a thing to assume.
+  const refundDp = refunding ? currencyDecimals(refunding.currency) : null;
+  const refundTyped = refundAmt.trim();
+  const refundRead = refunding && !refundWhole && refundTyped ? readMinorAmount(refundTyped, refunding.currency) : null;
+  const refundCents = refundRead && refundRead.ok ? refundRead.minorUnits : null;
+  // Two refusals in order: what was typed is not an amount, then the amount is
+  // more than is left. Never a clamp — see refundAmountBlocker.
+  const refundProblem = refundRead && !refundRead.ok
+    ? refundRead.reason
+    : refundCents == null ? null : refundAmountBlocker(refundCents, refundLeft);
+  // The figure that would actually leave, read back in its own currency. This
+  // is what the confirm states, so what the coach checks is what is sent.
+  const refundMoney = refunding && refundCents != null && !refundProblem ? minorMoney(refundCents, refunding.currency) : null;
+  const refundReady = !!refunding && (refundWhole || (refundCents != null && !refundProblem));
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
@@ -1027,15 +1131,8 @@ export default function TrainerPayments() {
                     {refundedLine(b) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refundedLine(b)}</Text>
                     ) : null}
-                    {refundBlocker({
-                      kind: 'purchase',
-                      amountCents: b.amount_cents,
-                      currency: b.currency,
-                      refundedCents: Number(b.refunded_cents ?? 0) || 0,
-                      stripeRef: b.stripe_session_id ?? null,
-                      paid: b.status === 'paid',
-                    }) === null ? (
-                      <Pressable onPress={() => doRefund(b)} hitSlop={8} accessibilityRole="button"
+                    {refundBlocker(refundableOf(b)) === null ? (
+                      <Pressable onPress={() => openRefund(b)} hitSlop={8} accessibilityRole="button"
                         disabled={refundBusy === b.id}
                         accessibilityLabel={`Refund the sale to ${b.client_name || 'this client'}`}
                         style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
@@ -1423,6 +1520,97 @@ export default function TrainerPayments() {
         )}
 
       </ScrollView>
+
+      {/* ── give a client their money back ──────────────────────────────────
+          Whole or part. The part was the deliberate limit this screen shipped
+          with, and the four things that make a typed amount safe rather than
+          merely present are written above `refundableOf`.
+
+          A sheet rather than an alert because an alert cannot hold a box, the
+          currency beside the box, and the exact figure read back — and without
+          those three a typed amount is a figure nobody checked. */}
+      <Modal visible={!!refunding} animationType="slide" transparent onRequestClose={() => setRefunding(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRefunding(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Refund This Sale</Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {/* What was charged and what is still standing. Both, because the
+                second is the number the amount below is judged against and a
+                coach looking at a partly refunded sale would otherwise work
+                from the first. */}
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+              {refunding?.client_name || 'This client'}
+              {refunding && minorMoney(refunding.amount_cents, refunding.currency) ? ` — ${minorMoney(refunding.amount_cents, refunding.currency)} was charged` : ''}
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+              {refundLeftMoney ? `${refundLeftMoney} of it can still be given back.` : 'What is left on this sale can be given back.'}
+            </Text>
+
+            <View style={{ marginTop: sp.lg }}>
+              <Pick label="How much"
+                options={[{ key: 'whole', label: 'All Of It' }, { key: 'part', label: 'Part Of It' }]}
+                chosen={refundWhole ? 'whole' : 'part'}
+                onPick={(k: string) => { setRefundWhole(k === 'whole'); setRefundAmt(''); }} />
+            </View>
+
+            {!refundWhole ? (
+              <>
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Amount</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  {/* The SALE's own currency, shown and not editable. A refund
+                      is made in the money the charge was made in and in no
+                      other, and there is no currency this box could offer that
+                      would not be a different amount of money. */}
+                  <Text style={{ ...ty.label, color: t.ink3 }}>{(refunding?.currency || '').toUpperCase()}</Text>
+                  {/* The keyboard follows the currency. A yen has no minor unit,
+                      so a decimal point on that pad is a key that can only
+                      produce a slip; everything else can carry a fraction and
+                      the pad has to have the point on it. */}
+                  <TextInput value={refundAmt} onChangeText={setRefundAmt}
+                    keyboardType={refundDp === 0 ? 'number-pad' : 'decimal-pad'}
+                    placeholder={refundDp === 0 ? '0' : '0.' + '0'.repeat(refundDp ?? 2)} placeholderTextColor={t.ink3}
+                    accessibilityLabel={`Amount to refund, in ${(refunding?.currency || '').toUpperCase()}`}
+                    style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+                </View>
+                {/* Read back before it is sent. The coach checks the figure this
+                    app understood, not the characters they typed. */}
+                {refundMoney ? (
+                  <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{refundMoney} would go back.</Text>
+                ) : null}
+                {refundProblem ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{refundProblem}</Flag> : null}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{REFUND_PART_IS_EXACT}</Text>
+              </>
+            ) : null}
+
+            {/* Everything a refund does not do, said before the tap rather than
+                discovered afterwards. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{REFUND_DOES_NOT}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFUND_FEES_NOTE}</Text>
+            {/* Whose balance it leaves, read off THIS SALE. A coach who has
+                since moved to direct charges still has older sales on the
+                platform, and the two sentences say opposite things. */}
+            {refunding ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {refundBalanceNote(accountForObject(refunding) ? 'direct' : 'destination')}
+              </Text>
+            ) : null}
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{REFUND_IS_FINAL}</Flag>
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          <Cta wide
+            disabled={!refundReady || refundBusy === refunding?.id}
+            label={refundBusy === refunding?.id ? 'Refunding…' : refundWhole ? 'Refund What Is Left' : 'Refund This Amount'}
+            onPress={() => {
+              if (!refunding || !refundReady) return;
+              // Whole sends NO amount at all, so the server resolves it from the
+              // row rather than from anything this screen believes about it.
+              if (refundWhole) confirmRefund(refunding, undefined, refundLeftMoney, false);
+              else if (refundCents != null) confirmRefund(refunding, refundCents, refundMoney, refundCents < refundLeft);
+            }} />
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Cancel" onPress={() => setRefunding(null)} />
+        </View>
+      </Modal>
 
       {/* ── change a package's name or price ────────────────────────────────
           The one thing a coach could not do without withdrawing the package

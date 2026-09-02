@@ -47,6 +47,53 @@ const walk = (d) => readdirSync(d).flatMap((n) => {
 const files = walk(DIR);
 const problems = [];
 
+// ── Deno resolves a specifier LITERALLY ────────────────────────────────────
+//
+// `from './coachMoney'` is a file called `coachMoney`, with no extension, which
+// does not exist. The module throws when it is first evaluated — not at deploy,
+// not at call, but on the first request, as a 500 nobody sees until a purchase
+// fails.
+//
+// The app cannot write `./coachMoney.ts` instead: `moduleResolution` is
+// `bundler` and TypeScript refuses an import path ending in `.ts`. So a module
+// an edge function imports has to be a LEAF with no relative imports at all —
+// which is why `directCharges.ts` and `refunds.ts` have none.
+//
+// This walks OUT of the functions into src/lib and fails on the first
+// extensionless value import it can reach, because checking only the function's
+// own line misses it by one hop. That is exactly how `gym-checkout` shipped
+// importing `memberBuy.ts`, whose six extensionless imports the Supabase CLI
+// reported as `failed to read file` warnings that scroll past.
+//
+// `import type` is not flagged: it is erased before Deno ever resolves it.
+const VALUE_IMPORT = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)([\s\S]{0,400}?)\s*from\s+['"](\.[^'"]+)['"]/g;
+
+function reachableFrom(entry) {
+  const seen = new Set();
+  const bad = [];
+  const queue = [entry];
+  while (queue.length) {
+    const file = queue.shift();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    let src;
+    try { src = readFileSync(file, 'utf8'); } catch { continue; }
+    for (const m of src.matchAll(VALUE_IMPORT)) {
+      const spec = m[2];
+      const target = resolve(dirname(file), spec);
+      if (/\.[a-zA-Z]+$/.test(spec)) {
+        if (existsSync(target)) queue.push(target);
+        continue;
+      }
+      // No extension. Deno cannot resolve it.
+      bad.push({ file, spec, via: file === entry ? null : entry });
+      // Follow it anyway so one miss does not hide the rest.
+      for (const ext of ['.ts', '.tsx']) if (existsSync(target + ext)) queue.push(target + ext);
+    }
+  }
+  return bad;
+}
+
 for (const file of files) {
   const src = readFileSync(file, 'utf8');
   const rel = relative(ROOT, file);
@@ -72,6 +119,16 @@ for (const file of files) {
     if (!existsSync(target)) {
       problems.push(`  ${rel}  imports '${spec}', which does not exist`);
     }
+  }
+}
+
+for (const entry of files) {
+  for (const b of reachableFrom(entry)) {
+    const where = relative(ROOT, b.file);
+    problems.push(
+      `  ${where}  imports '${b.spec}' with no file extension`
+      + (b.via ? `, and is reached from ${relative(ROOT, b.via)}` : '')
+      + ` — Deno cannot resolve that, so the function throws on its first request`);
   }
 }
 

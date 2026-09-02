@@ -53,6 +53,44 @@ import { appLocale } from './locale';
 export const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf']);
 
 /**
+ * The other end of the same mistake: currencies whose minor unit is a
+ * THOUSANDTH, not a hundredth.
+ *
+ * A Kuwaiti dinar has 1000 fils in it, and Stripe stores the amount in fils.
+ * Divided by a hundred, a KWD 12.340 sale printed as "KWD 1,234.00" — a figure
+ * a hundred times too big, on a coach's own takings screen. It went the other
+ * way too, and worse: a refund box that reads "12.340" as 1234 minor units
+ * gives back a hundredth of what the coach typed, and the screen then agrees
+ * with itself about it.
+ *
+ * Five currencies, and Stripe's own list. It sits beside ZERO_DECIMAL because
+ * the two are one question — how many decimal places does this money have —
+ * and a codebase that answers it in one place cannot answer it two ways.
+ *
+ * Stripe additionally requires an amount in one of these to be a whole multiple
+ * of ten minor units; `readMinorAmount` refuses one that is not, rather than
+ * rounding a figure a person typed.
+ */
+export const THREE_DECIMAL = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
+
+/**
+ * How many decimal places this money has, or null when nobody said which money
+ * it is.
+ *
+ * Null rather than 2. There is no default currency in this product and there is
+ * therefore no default number of decimal places either — a "£12.50" box in
+ * front of a yen sale is the same class of error as a dollar sign in front of a
+ * dirham figure, and both read as considered.
+ */
+export function currencyDecimals(currency: string | null | undefined): number | null {
+  const cur = (currency || '').trim().toLowerCase();
+  if (!cur) return null;
+  if (ZERO_DECIMAL.has(cur)) return 0;
+  if (THREE_DECIMAL.has(cur)) return 3;
+  return 2;
+}
+
+/**
  * An amount in the currency it is actually charged in — "AED 600.00", never
  * "$600".
  *
@@ -69,9 +107,11 @@ export function moneyIn(amount: number | null | undefined, currency: string | nu
   if (amount == null || !Number.isFinite(amount)) return null;
   const cur = (currency || '').trim().toLowerCase();
   if (!cur) return null;
-  const zero = ZERO_DECIMAL.has(cur);
-  const whole = minor && !zero ? amount / 100 : amount;
-  const dp = zero ? 0 : 2;
+  // How many decimal places this money has — asked, never assumed. Two is the
+  // answer for most of the world and it is the answer for none of Japan, Korea,
+  // Vietnam or Kuwait.
+  const dp = currencyDecimals(cur) ?? 2;
+  const whole = minor ? amount / Math.pow(10, dp) : amount;
   return `${cur.toUpperCase()} ${whole.toLocaleString(appLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
 }
 
@@ -80,6 +120,91 @@ export const minorMoney = (amount: number | null | undefined, currency: string |
 
 /** A whole-unit amount somebody typed — a session rate, a revenue target. */
 export const wholeMoney = (amount: number | null | undefined, currency: string | null | undefined): string | null => moneyIn(amount, currency, false);
+
+/* ── an amount a person typed, going the other way ────────────────────────── */
+
+/** Either the exact minor-unit figure, or the reason what was typed is not one.
+ *  Never a best guess: the caller of this is about to credit somebody's card. */
+export type TypedAmount = { ok: true; minorUnits: number } | { ok: false; reason: string };
+
+/**
+ * What a coach typed in a money box, in minor units — or why it is not money.
+ *
+ * ── Why `readNumber` is not this function ─────────────────────────────────
+ *
+ * `readNumber` in src/lib/units.ts is the house reader for a typed figure and
+ * it is right for what it does: it takes the decimal COMMA a German or French
+ * phone puts on the decimal pad, and it is deliberately lenient about a
+ * half-typed field so a controlled input does not drop the point as it is
+ * typed. Both of those are wrong here. It replaces the first comma with a point
+ * and parses, so "1,234.50" becomes 1.234; and leniency on a field whose value
+ * is the amount that leaves somebody's balance is how a card gets credited by a
+ * figure nobody chose. This one refuses instead, and refuses ambiguity rather
+ * than resolving it — "1,234" is not read as either 1234 or 1.234.
+ *
+ * ── Nothing here rounds ───────────────────────────────────────────────────
+ *
+ * The conversion is done on the DIGITS, not by multiplying a float: "12.50" in
+ * a two-place currency becomes the integer 1250 by padding the fraction, never
+ * by `12.5 * 100`, which is a floating-point multiplication whose result has to
+ * be rounded back. A refund is the amount the coach typed or it is refused.
+ *
+ * ── The currency decides the shape of the box ─────────────────────────────
+ *
+ * There is no default currency, so there is no default here either: with no
+ * currency this refuses outright. A yen has no minor unit, so "500.50" is not
+ * a smaller amount of yen, it is a slip — and a dinar has three places, where
+ * Stripe also requires the last one to be a nought.
+ */
+export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined): TypedAmount {
+  const cur = (currency || '').trim().toUpperCase();
+  const dp = currencyDecimals(currency);
+  if (!cur || dp == null) {
+    return { ok: false, reason: 'No currency is recorded here, so an amount typed in would not be an amount of any money. Nothing can be worked out from it.' };
+  }
+  const raw = String(typed ?? '').trim().replace(/\s/g, '');
+  if (!raw) return { ok: false, reason: 'Type an amount.' };
+  // Digits and at most one separator. A minus sign, a currency symbol and a
+  // stray letter are all refused by the same rule, and none of them is quietly
+  // stripped: a box that silently drops characters is a box that accepts a
+  // different number from the one on the screen.
+  if (!/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
+    const shape = dp === 0 ? '500' : '12.' + '5'.padEnd(dp, '0');
+    return { ok: false, reason: `That is not an amount. Type the figure in digits — ${shape}, for instance — with no symbol and no spaces.` };
+  }
+  const sep = raw.search(/[.,]/);
+  const intPart = sep === -1 ? raw : raw.slice(0, sep);
+  const fracPart = sep === -1 ? '' : raw.slice(sep + 1);
+  if (!intPart && !fracPart) return { ok: false, reason: 'Type an amount.' };
+  if (dp === 0 && sep !== -1) {
+    return { ok: false, reason: `${cur} has no smaller unit, so there is nothing after the point. Type a whole number.` };
+  }
+  if (fracPart.length > dp) {
+    // Where the ambiguity is refused rather than guessed. In a two-place
+    // currency "1,234" is either one thousand two hundred and thirty-four or
+    // one and a bit, depending on which side of the Channel the person typing
+    // it grew up on, and neither reading may be chosen on their behalf.
+    return {
+      ok: false,
+      reason: `${cur} has ${dp} decimal place${dp === 1 ? '' : 's'}, and that has ${fracPart.length}. Type the amount without a thousands separator — 1234.50 rather than 1,234.50.`,
+    };
+  }
+  const digits = (intPart || '0') + fracPart.padEnd(dp, '0');
+  if (digits.length > 15) {
+    return { ok: false, reason: 'That is larger than any amount this can work with.' };
+  }
+  const minorUnits = Number(digits);
+  if (!Number.isSafeInteger(minorUnits)) {
+    return { ok: false, reason: 'That is larger than any amount this can work with.' };
+  }
+  // Stripe's own rule for the thousandth-unit currencies: the amount is charged
+  // in minor units and the last of the three must be a nought. Refused rather
+  // than rounded, because rounding it is choosing an amount the coach did not.
+  if (dp === 3 && minorUnits % 10 !== 0) {
+    return { ok: false, reason: `${cur} is charged in thousandths and the last place must be a nought. 12.340 is an amount; 12.345 is not one that can be charged.` };
+  }
+  return { ok: true, minorUnits };
+}
 
 /** One payment — a one-off sale or a renewal — reduced to the three things a
  *  total depends on. */

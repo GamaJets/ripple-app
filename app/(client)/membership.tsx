@@ -178,6 +178,12 @@ export default function Membership() {
     { label: 'Classes', note: 'Book a group class at your branch', icon: 'calendar', route: '/(client)/classes' },
     { label: 'Personal Training', note: 'Approve sessions your trainer delivered', icon: 'people', route: '/(client)/pt-sessions' },
     { label: 'My Bookings', note: 'Everything you have booked', icon: 'check', route: '/(client)/bookings' },
+    // The screen this one could not reach for as long as it existed. Every
+    // figure above is read-only: a member could see the plan they were on and
+    // its price and could not buy it, renew it or move off it, and the gym's
+    // own price book has been readable since part 29 with nothing to do about
+    // it. src/lib/memberBuy.ts is the rules; that screen is the act.
+    { label: 'Plans & Passes', note: 'Buy, renew or change what you are on', icon: 'target', route: '/(client)/gym-plans' },
     { label: 'Memberships & Packs', note: 'What you have bought and what is left', icon: 'trophy', route: '/(client)/packages' },
     // Pointed at Explore — "what else the app can do" — which is not an offer.
     // There is a real offers screen now, where a gym code is redeemed.
@@ -284,6 +290,19 @@ export default function Membership() {
                 <Flag tone={t.crit} style={{ marginTop: sp.md }}>
                   Your gym still has this marked active, but the end date has passed. Check at reception before you travel in for a session.
                 </Flag>
+              ) : null}
+
+              {/* The one act this screen was missing. Offered where it is
+                  useful rather than on every state: a membership with months
+                  left does not need a renew button under it, and one that has
+                  run out or is about to needs it more than it needs another
+                  read-only line. What buying would actually DO is decided on
+                  the other screen by `offerFor`, against the same standing this
+                  one is printing, so the two cannot disagree. */}
+              {standing.kind === 'expiring' || standing.kind === 'expired' ? (
+                <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                  <Ghost label="Renew or Change Plan" onPress={() => router.push('/(client)/gym-plans')} />
+                </View>
               ) : null}
             </>
           )}

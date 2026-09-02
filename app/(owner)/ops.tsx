@@ -49,7 +49,7 @@
 // from a missing writer. Nothing holds insert rights on it, so it cannot be
 // forged either.
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -62,6 +62,8 @@ import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings';
+import { fetchGymMerchant, merchantState, startGymOnboarding, type GymMerchant } from '../../src/lib/gymMerchant';
+import { WEB_ORIGIN } from '../../src/lib/deepLink';
 
 /**
  * The currencies a gym can be priced in.
@@ -171,6 +173,52 @@ export default function OwnerOps() {
   const feeField = feeDraft ?? sessionFeeFieldValue(tenant?.sessionFee ?? null);
   const [feeBusy, setFeeBusy] = useState(false);
   const [feeMsg, setFeeMsg] = useState<{ bad: boolean; text: string } | null>(null);
+
+  /* ── whether the gym can take a card at all ──────────────────────────────
+     null is "no account row", which is every gym today and a real, sayable
+     state. It is NOT the same as a read that failed, and `merchantStatus`
+     carries that difference: an owner told they have not set this up when the
+     read simply did not land would set it up a second time, and a gym with two
+     connected accounts has its takings split across two ledgers that cannot be
+     merged. */
+  const [merchant, setMerchant] = useState<GymMerchant | null>(null);
+  const [merchantStatus, setMerchantStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [merchantBusy, setMerchantBusy] = useState(false);
+  const [merchantMsg, setMerchantMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      if (!USE_SUPABASE) { setMerchantStatus('ready'); return; }
+      if (!tenant?.id) { if (tenantStatus !== 'loading') setMerchantStatus(tenantStatus === 'error' ? 'error' : 'ready'); return; }
+      const r = await fetchGymMerchant(supabase as any, tenant.id);
+      if (!live) return;
+      if (r.ok) { setMerchant(r.value); setMerchantStatus('ready'); }
+      else { reportError('ops.gymMerchant', new Error(r.reason)); setMerchantStatus('error'); }
+    })();
+    return () => { live = false; };
+  }, [tenant?.id, tenantStatus]);
+
+  /**
+   * Start or resume the gym's Stripe onboarding.
+   *
+   * The return pages are the same two the coach flow uses and neither
+   * congratulates anybody: reaching `return_url` means the owner LEFT Stripe's
+   * hosted flow, not that it succeeded, and the honest source of truth is what
+   * `account.updated` writes back onto the row. So the account is re-read when
+   * they come back to this screen rather than assumed to be live.
+   */
+  const openStripeSetup = async () => {
+    setMerchantBusy(true);
+    setMerchantMsg(null);
+    const r = await startGymOnboarding(supabase as any, {
+      refreshUrl: `${WEB_ORIGIN}/connect-refresh`,
+      returnUrl: `${WEB_ORIGIN}/connect-return`,
+    });
+    setMerchantBusy(false);
+    if (!r.ok) { setMerchantMsg(r.error || 'Stripe setup could not be opened. Nothing has changed.'); return; }
+    try { await Linking.openURL(r.url); } catch { setMerchantMsg('Stripe setup could not be opened in a browser. Nothing has changed.'); }
+  };
   // Under 'error' the fee we hold is not the gym's answer, so the field must not
   // be offered as one: saving over it would write a value read off a failed
   // read. 'partial' cannot happen here — it is a single row — but worstStatus
@@ -437,6 +485,50 @@ export default function OwnerOps() {
                   <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
                     onPress={() => { void saveFee(); }} />
                 </View>
+              </>)}
+            </Section>
+
+            <Rule />
+
+            {/* ── the gym's own Stripe account ─────────────────────────────
+                Until this exists, a member can read the price of the plan they
+                are on and cannot buy it, renew it or move off it, and the gym's
+                price book is a document rather than a shop. `gym_connect_
+                accounts` (part 280) is one row per GYM and it is deliberately
+                NOT the owner's own coach row in `connect_accounts`: a
+                membership sold on a coach's account makes a different legal
+                entity the merchant of record for it, and nothing in the app
+                would look wrong about that until a chargeback arrived.
+
+                Four states and three of them need different words. "Never
+                started" is one tap from starting; "Stripe is still verifying"
+                is waiting on nobody here; and an account of the wrong KIND can
+                never take payments, because Stripe fixes an account's type at
+                creation and will not change it. A read that FAILED is the
+                fourth and says nothing about the gym at all. */}
+            <Section>
+              <SectionHead title="Card Payments"
+                note={merchantStatus === 'ready' ? (merchant && merchantState(merchant).kind === 'live' ? 'On' : 'Off') : undefined} />
+              {merchantStatus === 'loading' ? (
+                <Empty tone={t.ink3}>Reading your gym’s payment account…</Empty>
+              ) : merchantStatus === 'error' ? (
+                <Empty tone={t.warn}>
+                  Your gym’s payment account could not be read, so whether it takes cards is not known. This is
+                  not a statement that it does not.
+                </Empty>
+              ) : !tenant ? (
+                <Empty tone={t.ink3}>This account is not attached to a gym, so there is nothing to set up.</Empty>
+              ) : (<>
+                <Text style={{ ...ty.label, color: t.ink3 }}>{merchantState(merchant).note}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  The account is your gym’s own, in your gym’s name. Stripe holds your gym responsible for
+                  refunds and disputes on it, and the money never passes through a coach’s account.
+                </Text>
+                <View style={{ marginTop: sp.lg }}>
+                  <Cta wide label={merchantBusy ? 'Opening…' : merchantState(merchant).cta} disabled={merchantBusy}
+                    onPress={() => { void openStripeSetup(); }} />
+                </View>
+                {merchantMsg ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{merchantMsg}</Flag> : null}
               </>)}
             </Section>
 

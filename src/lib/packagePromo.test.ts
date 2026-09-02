@@ -32,6 +32,10 @@ import {
   PROMO_IS_TYPED_AT_CHECKOUT,
   PROMO_LIVES_AT_STRIPE,
   PROMO_WITHDRAW_IS_FORWARD_ONLY,
+  checkoutCodeBlocker,
+  codeAppliesTo,
+  CODE_IS_NOT_FOR_A_ONE_OFF,
+  CODE_IS_FOR_ANOTHER_PACKAGE,
   type PromoCode,
   type PromoTarget,
 } from './packagePromo';
@@ -147,6 +151,39 @@ ok(/of 10/.test(promoUseLine(promo({ timesRedeemed: 4, maxRedemptions: 10 }))), 
 ok(/stops working after 2026-12-31/.test(promoUseLine(promo({ expiresOn: '2026-12-31' }))), 'and an end date is named');
 ok(!/of /.test(promoUseLine(promo({ timesRedeemed: 4 })).replace('Used 4 times', '')), 'and no limit is implied where there is none');
 
+/* ── 5b. the client's end of the same code ──────────────────────────────── */
+
+// The field on the client's checkout, and the rule the server re-runs. Its
+// whole reason for existing is that a code typed on Stripe's own page is one
+// nothing in this repo can see — so neither of the two rules below could be
+// enforced at all until it existed.
+eq(checkoutCodeBlocker('NEWYEAR25', monthly), null, 'a real code on a monthly package goes through');
+eq(checkoutCodeBlocker('newyear25', yearly), null, 'a yearly package takes one too, and the case does not matter');
+eq(checkoutCodeBlocker('  new year 25 ', monthly), null, 'and it is normalised the same way the coach saw it');
+
+// THE refusal, and the reason it survives this feature rather than being
+// dropped by it. On a one-off Repple's cut is an absolute amount that must be
+// sent in the same call that creates the session, and Stripe computes the
+// discounted total inside that call — so there is no ordering in which the fee
+// is derived from what Stripe actually charged.
+eq(checkoutCodeBlocker('NEWYEAR25', oneOff), CODE_IS_NOT_FOR_A_ONE_OFF, 'a one-off refuses a code, by the same rule as the coach screen');
+ok(/every month or year/i.test(CODE_IS_NOT_FOR_A_ONE_OFF), 'and the client is told what codes DO work on');
+ok(!/fee|application|Repple’s cut/i.test(CODE_IS_NOT_FOR_A_ONE_OFF), 'without being handed the platform’s own arithmetic');
+
+ok(!!checkoutCodeBlocker('', monthly), 'an empty box is not a code');
+ok(!!checkoutCodeBlocker('!!!', monthly), 'and nor is punctuation, which normalises to nothing');
+ok(!!checkoutCodeBlocker('AB', monthly), 'two characters is shorter than Stripe will take');
+ok(!!checkoutCodeBlocker('NEWYEAR25', null), 'a package that could not be read cannot have a code checked against it');
+
+// The restriction Stripe does not enforce. connect-promo records the package in
+// METADATA, because this app's packages are inline prices with no Product for
+// Stripe's `applies_to` to point at — so this is the only place it can hold.
+ok(codeAppliesTo('pk_sub', 'pk_sub'), 'a code used on the package it was made for applies');
+ok(!codeAppliesTo('pk_sub', 'pk_other'), 'and one used on another package does not');
+ok(codeAppliesTo(null, 'pk_sub'), 'a code with no package recorded is not restricted by this app');
+ok(codeAppliesTo('   ', 'pk_sub'), 'and a blank restriction is no restriction, not a refusal of everything');
+ok(!/pk_/.test(CODE_IS_FOR_ANOTHER_PACKAGE), 'the refusal names no ids at a client');
+
 /* ── 6. the four things the screen has to keep saying ───────────────────── */
 
 // An amount off would need a CURRENCY, and Repple is white-labelled: a "£20
@@ -154,7 +191,8 @@ ok(!/of /.test(promoUseLine(promo({ timesRedeemed: 4 })).replace('Used 4 times',
 ok(/never a fixed amount/i.test(PROMO_IS_A_PERCENTAGE), 'the screen says why it is a percentage');
 ok(/white-labelled/i.test(PROMO_IS_A_PERCENTAGE), 'and names the reason');
 
-ok(/on the payment page/i.test(PROMO_IS_TYPED_AT_CHECKOUT), 'the coach is told where their client types it');
+ok(/in the app/i.test(PROMO_IS_TYPED_AT_CHECKOUT), 'the coach is told where their client types it');
+ok(/Have A Code/.test(PROMO_IS_TYPED_AT_CHECKOUT), 'and the words on the control they have to look for');
 ok(/one copy of it and Stripe keeps it/i.test(PROMO_LIVES_AT_STRIPE), 'and that there is one copy of the count');
 
 // The thing a coach would otherwise assume, and be wrong about a year later.

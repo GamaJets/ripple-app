@@ -28,6 +28,8 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/ownedSites.ts",
+    "src/lib/ownedSites.test.ts",
     "src/lib/bulkEnd.test.ts",
     "src/lib/analyticsExport.test.ts",
     "src/lib/coachNotify.test.ts",
@@ -143,6 +145,7 @@
     "src/lib/packDraw.test.ts",
     "src/lib/notifyInbox.test.ts",
     "src/lib/memberRecord.test.ts",
+    "src/lib/memberBuy.test.ts",
     "src/lib/accountSecurity.test.ts",
     "src/lib/messageAttachments.test.ts",
     "src/lib/booking.test.ts",

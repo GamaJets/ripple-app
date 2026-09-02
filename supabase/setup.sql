@@ -34234,3 +34234,709 @@ comment on column public.platform_admins.note is
   'Why this person is on the list, for whoever reads this table in two years. Not an audit trail.';
 comment on function public.is_platform_admin() is
   'True when the caller is on the platform_admins allowlist. SECURITY DEFINER with a pinned search_path, like is_owner_of, so the billing policies do not depend on the caller being able to read platform_admins through RLS.';
+
+-- ▶ a-gym-that-can-take-a-payment.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A gym that can take a payment.
+--
+-- ── What was missing, stated plainly ──────────────────────────────────────
+--
+-- `connect_accounts` (part 21) is keyed `trainer_id uuid primary key references
+-- profiles(id)`. It is a COACH's payout account and nothing else. There has
+-- never been a row anywhere in this schema representing the GYM's own Stripe
+-- account, which is why the only purchasable thing in the client app is a
+-- coach's own package: a membership, a drop-in and a class pack are all sold by
+-- the gym, and the gym had no ledger to sell them on.
+--
+-- Putting the gym's sales on a coach's account is not a shortcut, it is a
+-- different company taking the money. `src/lib/directCharges.ts` is written
+-- around the rule that the account a sale lands on is a property OF THE SALE
+-- and is read from the object's own column; the same rule applied to the
+-- merchant means a gym membership must land on the gym's account, on purpose,
+-- recorded at the moment it happens. So the gym gets its own row.
+--
+-- ── One arrangement, and no `charge_model` column ─────────────────────────
+--
+-- `connect_accounts` carries `charge_model` because it has to: every coach
+-- onboarded before part 161 is on an Express account taking DESTINATION
+-- charges, Stripe fixes an account's type at creation and will not change it,
+-- and those coaches must keep selling exactly as they do. That is a legacy this
+-- table does not have. There is no gym selling anything today — there is no
+-- table for one to sell from — so every row here will be created after the
+-- decision in part 161 was already made.
+--
+-- Stripe's account-type table gives Standard accounts "Direct only" for
+-- supported charge types and puts fraud and dispute liability on the connected
+-- account for direct charges. That is the arrangement the owner chose. So a gym
+-- sells on a STANDARD account taking DIRECT charges, or it does not sell, and a
+-- column offering a second answer would be a switch with one safe setting and
+-- one that quietly leaves Repple carrying a gym's chargebacks.
+--
+-- The gate is therefore `canTakeDirectCharges` in src/lib/directCharges.ts,
+-- unchanged and shared: an account id, `account_type = 'standard'`, card
+-- payments not explicitly inactive, and `charges_enabled`. Its four columns are
+-- the four this table records, deliberately spelled the same way so the same
+-- function reads both tables.
+--
+-- ── What a member is allowed to know about it ─────────────────────────────
+--
+-- A member must be told "this gym cannot take payments yet" as a first-class
+-- state — a screen that renders a Buy button over an account that cannot charge
+-- sends somebody to a Stripe page that refuses them. But a member has no
+-- business reading the gym's Stripe account id, its payout state or who Stripe
+-- holds for its losses.
+--
+-- RLS is row-level, not column-level, so a SELECT policy scoped to
+-- `tenant_id = my_tenant()` would hand a member the whole row. Instead there is
+-- a SECURITY DEFINER function returning exactly the four facts the gate needs,
+-- with the account id reduced to "there is one". `conn_read` on
+-- `connect_accounts` keeps the coach table owner-and-trainer only for the same
+-- reason; this is that rule for the gym.
+--
+-- Idempotent. Additive only — nothing here alters an existing table.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists gym_connect_accounts (
+  tenant_id uuid primary key references tenants(id) on delete cascade,
+  -- Stripe's `acct_...`. Null means onboarding has been started and Stripe has
+  -- not yet given us one, or nobody has started it. Either way the gym cannot
+  -- sell, and `canTakeDirectCharges` refuses on exactly that.
+  stripe_account_id text unique,
+  -- Stripe's own aggregate answer to "can this account take a card". Written by
+  -- the `account.updated` webhook, the same way the coach table's is.
+  charges_enabled boolean not null default false,
+  details_submitted boolean not null default false,
+  -- Stripe's `Account.type`. NOT backfilled and NOT defaulted, for the reason
+  -- part 161 gives at length: null means "nobody has asked Stripe what this
+  -- account is", which is a different fact from "Stripe told us Express", and
+  -- only one of the two is safe to create a direct charge on. Null is refused.
+  account_type text,
+  -- The `card_payments` capability. Stripe requires it ACTIVE for direct
+  -- charges; an account halfway through onboarding has it merely REQUESTED.
+  -- Null means not recorded yet and falls back to `charges_enabled`; a value
+  -- that is present and not 'active' is a refusal.
+  card_payments_status text,
+  transfers_status text,
+  payouts_enabled boolean,
+  -- `controller.losses.payments` as Stripe reports it: who carries an
+  -- unrecoverable negative balance. Recorded because it cannot be worked out
+  -- later from anything else, and because it is the answer to the question the
+  -- whole Standard-account decision exists for.
+  losses_owner text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table gym_connect_accounts drop constraint if exists gym_connect_accounts_account_type_ck;
+alter table gym_connect_accounts add constraint gym_connect_accounts_account_type_ck
+  check (account_type is null or account_type in ('standard', 'express', 'custom', 'none'));
+
+alter table gym_connect_accounts drop constraint if exists gym_connect_accounts_losses_owner_ck;
+alter table gym_connect_accounts add constraint gym_connect_accounts_losses_owner_ck
+  check (losses_owner is null or losses_owner in ('application', 'stripe'));
+
+-- The webhook resolves a connected-account event back to a gym through this.
+-- Under direct charges the account id is frequently the strongest identity left
+-- on an event, exactly as part 161 records for coaches.
+create index if not exists idx_gym_connect_accounts_stripe_id
+  on gym_connect_accounts (stripe_account_id) where stripe_account_id is not null;
+
+-- ── row-level security ──────────────────────────────────────────────────────
+alter table gym_connect_accounts enable row level security;
+
+-- The gym's own owner, and nobody else. Written by the edge functions through
+-- the service role, which RLS does not apply to.
+drop policy if exists gym_connect_owner on gym_connect_accounts;
+create policy gym_connect_owner on gym_connect_accounts
+  for all using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+-- ── what a member may ask ───────────────────────────────────────────────────
+--
+-- Four facts and no identifiers. `has_account` rather than the id itself,
+-- because the app's only question is whether there is one — src/lib/gymPay.ts
+-- turns these four into the same answer `canTakeDirectCharges` gives, and a
+-- test asserts the two agree on every shape.
+--
+-- ZERO ROWS is a real and common answer: this gym has never started onboarding.
+-- The app reads that as "cannot take payments yet" and says so, which is
+-- different again from a read that failed — and that difference is the point of
+-- returning rows rather than a bare boolean that would be false for both.
+--
+-- STABLE and SECURITY DEFINER, set search_path, in the shape 28 established.
+create or replace function public.my_gym_payment_readiness()
+returns table (
+  has_account boolean,
+  account_type text,
+  card_payments_status text,
+  charges_enabled boolean
+)
+language sql stable security definer set search_path to 'public', 'pg_temp'
+as $function$
+  select
+    (a.stripe_account_id is not null and btrim(a.stripe_account_id) <> ''),
+    a.account_type,
+    a.card_payments_status,
+    a.charges_enabled
+  from gym_connect_accounts a
+  where a.tenant_id = my_tenant()
+$function$;
+
+revoke all on function public.my_gym_payment_readiness() from public;
+grant execute on function public.my_gym_payment_readiness() to authenticated;
+
+comment on function public.my_gym_payment_readiness() is
+  'The four facts canTakeDirectCharges needs about the signed-in member''s gym, and nothing that identifies the account. Zero rows means the gym has no Stripe account at all.';
+
+-- ▶ a-member-can-buy-what-the-gym-sells.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A member can buy what the gym sells.
+--
+-- `membership_plans` (part 29) and `gym_pass_types` (part 31) have both been
+-- readable by members since the day they were written — `membership_plans_
+-- tenant_r` and `gym_pass_types_tenant_r` publish the price book to anyone in
+-- the tenant. What has never existed is any way to ACT on it. A member could
+-- read the price of the plan they are on and had no way to renew it, no way to
+-- move to a different one, and no way to buy a day pass or a class pack.
+--
+-- This is the record of one attempt to buy. Not the entitlement — a paid order
+-- CREATES a `memberships` row or a `gym_passes` row, and those tables stay the
+-- record of what somebody holds. This table is the record of the money and of
+-- which account it landed on.
+--
+-- ── Why the account id is NOT NULL here, and nullable on the coach tables ──
+--
+-- `client_purchases.stripe_account_id` and `client_subscriptions.stripe_account
+-- _id` are nullable and null MEANS THE PLATFORM, because every row written
+-- before part 161 was created on the platform under destination charges and the
+-- absence is the correct value for them.
+--
+-- No gym sale has ever happened. There is no history for a null to describe, and
+-- there is no destination-charge path for a gym (see part 280): a gym sells on
+-- its own Standard account under direct charges or it does not sell. So a gym
+-- order without an account id is not "a sale on the platform", it is a row
+-- nobody could later refund, because a refund on a direct charge must be issued
+-- in the connected account's context and there would be nothing here saying
+-- which one. NOT NULL, written at the moment the Checkout Session is created,
+-- from the account the session was actually created on — never re-derived later
+-- from the gym's current settings, which is the rule `accountForObject` exists
+-- to state.
+--
+-- ── The quote is stored, because the quote is what was agreed ─────────────
+--
+-- `amount_cents`, `currency`, `term_starts_on`, `term_ends_on` and `uses_total`
+-- are all written when the session is created, from the plan or pass type as it
+-- read THEN. A gym that reprices on Tuesday must not change what somebody was
+-- charged on Monday, and a member who was shown "runs to 31 October" must get a
+-- membership that runs to 31 October. Fulfilment copies these across rather
+-- than recomputing them.
+--
+-- `currency` is NOT NULL with NO DEFAULT, which is part 150's rule for filed
+-- money restated: an amount with no currency is not a record with a gap in it,
+-- it is a figure nobody can act on.
+--
+-- ── The order is written BEFORE Stripe is called ──────────────────────────
+--
+-- `stripe_session_id` is nullable for exactly one window: between the insert
+-- that records the intent and the update that records the session. The ordering
+-- is deliberate and it is the safe one — an order with no session is a row
+-- nobody was charged for and nothing ever fulfils, whereas a session with no
+-- order would be money taken against a purchase this database has no record of.
+-- If the Stripe call fails, a pending row with a null session id is left behind
+-- and is visible to the member as a purchase that never started.
+--
+-- Idempotent. Additive only.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists gym_orders (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  member_id uuid not null references profiles(id) on delete cascade,
+
+  -- What is being bought. A membership term, or a pass (a drop-in or a class
+  -- pack). Guest passes are not sold here — `gym_passes` needs a holder who is
+  -- not the buyer and there is no screen that collects one.
+  kind text not null check (kind in ('membership', 'pass')),
+
+  -- Why. 'new' is a first membership or one bought after a gap; 'renew' extends
+  -- the plan they are already on; 'upgrade' moves them to a different plan and
+  -- supersedes the one they hold. Always 'new' for a pass, which supersedes
+  -- nothing.
+  intent text not null default 'new' check (intent in ('new', 'renew', 'upgrade')),
+
+  -- Exactly one of these is set, and which one follows from `kind`. Both go
+  -- null rather than taking the order with them if the gym deletes what it
+  -- sold: the order is the record of money that moved, and it outlives the
+  -- price-book row it was made from.
+  plan_id uuid references membership_plans(id) on delete set null,
+  pass_type_id uuid references gym_pass_types(id) on delete set null,
+
+  -- The membership this renews or replaces. Null for 'new' and for every pass.
+  supersedes_membership_id uuid references memberships(id) on delete set null,
+
+  -- ── the quote ───────────────────────────────────────────────────────────
+  amount_cents integer not null check (amount_cents >= 0),
+  currency text not null,
+  -- Bare dates: a membership term is a run of calendar days in the member's own
+  -- life, not an instant. Null `term_ends_on` is open-ended, which is what a
+  -- plan with interval 'once' buys and is NOT the same as expired.
+  term_starts_on date,
+  term_ends_on date,
+  -- How many visits a pass order is worth, and when it stops being usable.
+  uses_total integer check (uses_total is null or uses_total >= 1),
+  expires_on date,
+
+  -- ── Stripe ──────────────────────────────────────────────────────────────
+  -- Which ledger the charge was created on. See the header: never null, never
+  -- re-derived.
+  stripe_account_id text not null,
+  stripe_session_id text unique,
+  stripe_payment_intent text,
+
+  -- 'pending'   the session was created and Stripe has not said anything yet.
+  -- 'paid'      checkout.session.completed arrived and the entitlement below
+  --             was written.
+  -- 'abandoned' the session expired without payment. Nobody was charged.
+  -- 'failed'    Stripe took the money and the entitlement could not be written.
+  --             A state that must exist so it can be found and fixed by hand,
+  --             rather than a paid member with nothing to show for it and
+  --             nothing anywhere recording that we know.
+  status text not null default 'pending'
+    check (status in ('pending', 'paid', 'abandoned', 'failed')),
+  -- What went wrong, for a 'failed' row. Never shown to the member as-is.
+  failure_note text,
+
+  -- ── what it produced ────────────────────────────────────────────────────
+  membership_id uuid references memberships(id) on delete set null,
+  pass_id uuid references gym_passes(id) on delete set null,
+
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+
+  -- A membership order names a plan and a pass order names a pass type. Not
+  -- enforced through the FKs, which cannot see each other, so it is spelled
+  -- out: an order that names neither is unfulfillable and an order that names
+  -- both is ambiguous about what somebody paid for.
+  constraint gym_orders_names_one_thing check (
+    (kind = 'membership' and plan_id is not null and pass_type_id is null)
+    or (kind = 'pass' and pass_type_id is not null and plan_id is null)
+  ),
+  -- Only a membership can supersede one.
+  constraint gym_orders_supersedes_is_membership check (
+    supersedes_membership_id is null or kind = 'membership'
+  ),
+  -- A term that ends before it starts is a quote nobody could honour.
+  constraint gym_orders_term_in_order check (
+    term_ends_on is null or term_starts_on is null or term_ends_on >= term_starts_on
+  )
+);
+
+create index if not exists idx_gym_orders_member on gym_orders (member_id, created_at desc);
+create index if not exists idx_gym_orders_tenant on gym_orders (tenant_id, created_at desc);
+-- The webhook finds an order by the session that paid for it.
+create index if not exists idx_gym_orders_session on gym_orders (stripe_session_id)
+  where stripe_session_id is not null;
+
+-- ── row-level security ──────────────────────────────────────────────────────
+alter table gym_orders enable row level security;
+
+-- The member reads their own, and nothing else. No INSERT and no UPDATE for
+-- anybody: every write here is made by the service role from
+-- supabase/functions/gym-checkout and supabase/functions/stripe-webhook. A
+-- client that could insert its own order row could grant itself a membership.
+drop policy if exists gym_orders_own_r on gym_orders;
+create policy gym_orders_own_r on gym_orders
+  for select using (member_id = (select auth.uid()));
+
+-- The gym's owner reads every order in their own gym. SELECT only, and
+-- deliberately not `for all` the way part 29's owner policies are: those tables
+-- record what the gym itself did at the desk, and an owner writing one is the
+-- gym recording its own act. An order is a record of a Stripe charge, and an
+-- owner writing one by hand would be a membership granted with no money behind
+-- it and nothing in Stripe to reconcile it against.
+drop policy if exists gym_orders_owner_r on gym_orders;
+create policy gym_orders_owner_r on gym_orders
+  for select using (is_owner_of(tenant_id));
+
+comment on table gym_orders is
+  'One attempt by a member to buy a membership term or a pass from their gym. The entitlement lives in memberships/gym_passes; this is the money and the Stripe account it landed on.';
+
+-- ── the idempotency key fulfilment needs ────────────────────────────────────
+--
+-- A Stripe webhook is retried, and it is retried precisely when the handler
+-- failed part way through. The dangerous window is between "the membership row
+-- was inserted" and "the order was marked paid": on the retry, an order that
+-- still reads 'pending' would be fulfilled a second time and the member would
+-- hold two memberships for one payment.
+--
+-- `gym_orders.membership_id` alone does not close it, because it is written in
+-- the same statement that closes the order. So the entitlement carries the
+-- order id too, with a UNIQUE index on it: fulfilment looks for a row already
+-- stamped with this order before it inserts one, and if two inserts ever race,
+-- the second fails loudly on the index instead of quietly doubling somebody's
+-- membership.
+--
+-- The two tables now reference each other. Both columns are nullable and both
+-- are `on delete set null`, so neither is a cycle anything has to break.
+alter table memberships add column if not exists gym_order_id uuid references gym_orders(id) on delete set null;
+create unique index if not exists uq_memberships_gym_order on memberships (gym_order_id) where gym_order_id is not null;
+
+alter table gym_passes add column if not exists gym_order_id uuid references gym_orders(id) on delete set null;
+create unique index if not exists uq_gym_passes_gym_order on gym_passes (gym_order_id) where gym_order_id is not null;
+
+comment on column memberships.gym_order_id is
+  'The gym_orders row that paid for this membership, or NULL for one the gym recorded at the desk. Unique: it is what stops a retried webhook fulfilling one payment twice.';
+comment on column gym_passes.gym_order_id is
+  'The gym_orders row that paid for this pass, or NULL for one sold at the desk. Unique, for the same reason.';
+
+-- ▶ a-pack-buyer-had-no-billing-account.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Somebody who only ever bought a session pack had no billing account at all.
+--
+-- app/(client)/packages.tsx renders the "Payment & Invoices" button INSIDE
+-- `liveSubs.map(...)`. That is not a layout accident, it is the only place the
+-- button could go: `openSubscriptionPortal` takes a subscription id, and
+-- connect-checkout's `portal` action reads `client_subscriptions.stripe_
+-- customer_id` to find the Stripe Customer whose portal to open. A client who
+-- has only ever bought one-off packs has no `client_subscriptions` row, so
+-- there was no id to pass and no customer to open — no invoice, no card
+-- management, and no route to ask for money back other than messaging their
+-- coach and hoping.
+--
+-- Moving the button out of the loop on its own would have produced a button
+-- that does nothing, which is worse than the absence. The missing thing is
+-- underneath: a one-off Checkout Session in `mode: 'payment'` creates no
+-- Customer and no Invoice unless it is asked to, so there was nothing for a
+-- portal to show even if we could have opened one.
+--
+-- ── The three halves of the fix ───────────────────────────────────────────
+--
+-- 1. connect-checkout's one-off branch now passes `customer_creation: 'always'`
+--    and `invoice_creation: { enabled: true }`, so Stripe makes a Customer and
+--    a real, downloadable Invoice for a pack the same way it already does for a
+--    subscription.
+-- 2. The webhook writes that customer id onto the purchase — this column.
+-- 3. connect-checkout gains a `purchase_portal` action that opens the billing
+--    portal for it, in the purchase's OWN account context (`stripe_account_id`,
+--    part 161), because a Customer belongs to one account and a `cus_...` from
+--    the platform is simply not found on a coach's connected account.
+--
+-- ── Nullable, not backfilled ──────────────────────────────────────────────
+--
+-- Null means no Customer was ever created for this sale, and that is true of
+-- every row written before this part: those sessions were created without
+-- `customer_creation`, so there is no Customer at Stripe to point at and none
+-- can be manufactured now. The screen reads a null as "there is no billing
+-- account for this one" and says so, rather than offering a button that opens
+-- an error. The same absence, said out loud, instead of an absence with no
+-- words for it.
+--
+-- Idempotent. Additive only.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table client_purchases add column if not exists stripe_customer_id text;
+
+comment on column client_purchases.stripe_customer_id is
+  'The Stripe Customer this one-off sale was charged to, on the account named by stripe_account_id. NULL on every sale made before the checkout asked Stripe to create one — there is no customer to open a billing portal for, and that is a sentence rather than a dead button.';
+
+-- The portal action looks a purchase up by id and then checks the caller is its
+-- buyer; the index that matters for that already exists (`client_purchases` is
+-- keyed on `id`). Nothing else is needed: no policy changes, because
+-- `purch_read` already lets the buyer read their own row, and every write to
+-- this column is made by the service role from the webhook.
+
+-- ▶ a-second-gym-is-a-second-tenant.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- One owner, one gym — the part of it that can be built without touching a
+-- policy that already works.
+--
+-- Today `is_owner_of(t)` is "this caller's profile says role = 'owner' and
+-- profiles.tenant_id = t", `my_tenant()` is one uuid, and every read in the
+-- product is scoped through one or the other. An operator with two sites
+-- therefore has two accounts, and each account sees exactly one site. That is
+-- inconvenient and it is also the single property this schema has spent parts
+-- 38, 39, 106 and 252 establishing: an owner sees one gym's data and no
+-- other's.
+--
+-- ── WHAT THIS PART REFUSES TO DO ────────────────────────────────────────
+--
+-- It does not touch `is_owner_of`, `my_tenant`, `my_role`, `tenant_of_user`
+-- or any existing policy. Not one.
+--
+-- The tempting change is four words long: make `is_owner_of` also consult a
+-- membership table. It is also the largest single widening anybody could make
+-- to this database. Counted in the generated bundle as this part was written,
+-- `is_owner_of` is named by 64 distinct policies across 56 TABLES — members,
+-- payments, invoices, payroll, paperwork, crash logs, coach rosters — and
+-- every one of them would silently start returning a second gym's rows the
+-- moment that function changed, with no line in any policy having been edited
+-- and nothing in `pg_policies` to show for it. The reviewer of that diff reads
+-- four words; the effect is fifty-six tables. The direction of travel in this schema is the opposite
+-- one — part 39 narrowed nine policies that asked "is this caller AN owner"
+-- instead of "the owner of THIS row", and part 106 narrowed a tenth — and a
+-- part that widens `is_owner_of` reverses all of it at once.
+--
+-- So the reader set is UNCHANGED by this file. An owner recorded below
+-- against a second gym gets, from this part, exactly one new thing: the fact
+-- that the second gym exists, and its name. No row of its data. The console
+-- is expected to SAY so rather than to pretend otherwise — see
+-- src/lib/ownedSites.ts, which words it.
+--
+-- What actually lets somebody read a second site is a separate decision with
+-- a human at a keyboard, and the two candidate designs are written down at the
+-- bottom of this file so that whoever makes it is not starting from scratch.
+--
+-- ── WHY AN EXPLICIT TABLE, AGAIN ────────────────────────────────────────
+--
+-- The same argument part 252 makes for `platform_admins`, and it applies here
+-- with more force rather than less: THE PLATFORM LETS PEOPLE SIGN UP AS AN
+-- OWNER. `profiles.role` is a value a stranger chooses about themselves, and
+-- `profiles.tenant_id` is written by the invite flow. Neither is a safe place
+-- to record "this person owns these gyms". A table with no INSERT policy for
+-- anybody cannot be reached by signing up: a row can only be written by the
+-- service role, which is to say by whoever owns the project.
+--
+-- It ships EMPTY. An empty table means every account resolves to exactly the
+-- one gym it resolves to today, so a single-site owner cannot tell this part
+-- was applied.
+--
+-- Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- ── 1 · the membership ──────────────────────────────────────────────────
+--
+-- "This person owns this gym." One row per pair. Not a column on `profiles`,
+-- which holds one tenant and is the spine several other things follow (part 37
+-- rewrites it when a member changes gyms), and not a column on `tenants`,
+-- which would make a gym hold one owner.
+create table if not exists public.owner_sites (
+  -- The account. `profiles` rather than `auth.users`, matching `platform_admins`
+  -- and the rest of this schema, so a deleted account takes its memberships
+  -- with it instead of leaving rows pointing at nobody.
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  -- The gym. A SITE IS A TENANT — that is the decision this whole part rests
+  -- on and it is argued in section 4 below.
+  tenant_id  uuid not null references public.tenants(id) on delete cascade,
+  -- Why this person is on this gym, in words, for whoever reads the table in
+  -- two years. Not an audit trail and not pretending to be one — same as the
+  -- `note` on `platform_admins`.
+  note       text,
+  added_at   timestamptz not null default now(),
+  primary key (user_id, tenant_id)
+);
+
+-- "Who owns this gym" is the other direction and the primary key cannot answer
+-- it. Small table, but it is the query a support person types.
+create index if not exists idx_owner_sites_tenant on public.owner_sites(tenant_id);
+
+alter table public.owner_sites enable row level security;
+
+-- ── the ONLY policy on this table ───────────────────────────────────────
+--
+-- A person may read their OWN memberships, and that is the whole of it. There
+-- is deliberately:
+--
+--   · no INSERT policy, so no authenticated account can add itself to a gym.
+--     This is the property that makes the table safe, and it is the same
+--     property `platform_admins` has and for the same reason;
+--   · no UPDATE and no DELETE policy, so nobody can quietly hand themselves a
+--     second site or remove somebody else from one;
+--   · no read of anybody ELSE's rows. "Which gyms does that person own" is not
+--     a question one owner needs answered from a browser.
+--
+-- The service role bypasses all of this, which is how a row gets in.
+drop policy if exists owner_sites_self on public.owner_sites;
+create policy owner_sites_self on public.owner_sites for select
+  using (user_id = auth.uid());
+
+-- ── 2 · what the console is allowed to know ─────────────────────────────
+--
+-- The console needs to answer two questions and no more than two: "might this
+-- account have more than one gym", and "what is the one I am showing called".
+--
+-- It cannot answer the second from `tenants` alone. `tenants_read` is
+-- `id = my_tenant()` (part 38), so an owner recorded against a second gym can
+-- read the membership row and gets a bare uuid — the name is behind a policy
+-- that is correctly scoped to one tenant.
+--
+-- The answer is NOT to add a policy to `tenants`. A new permissive policy
+-- there would hand the whole row over — brand, plan, session_fee, currency —
+-- for a question that needs a name. So this is a function returning exactly
+-- two fields, on the `my_tenant_brand()` precedent from part 101: jsonb rather
+-- than a row set, SECURITY DEFINER with a pinned search_path so it does not
+-- depend on the caller being able to read the tables it reads, and STABLE
+-- because the answer cannot change within a statement.
+--
+-- ── what is in the answer ──
+--
+--   id       the tenant
+--   name     `tenants.name`, or null if the gym never set one
+--   current  true for THE ONE THIS SESSION CAN ACTUALLY READ — the tenant
+--            `is_owner_of` says yes to, which is `profiles.tenant_id` when the
+--            profile's role is 'owner'. Exactly one entry can carry it, and on
+--            an account with no owner role none does.
+--
+-- `current` is the honest half of this whole part. Every other entry in the
+-- list is a gym this account is recorded against and can read NOTHING of, and
+-- the flag is what lets the console say that in words rather than render a
+-- picker whose second option silently shows an empty gym.
+--
+-- The profile's own tenant is included whether or not `owner_sites` holds a
+-- row for it, so a single-site owner with an empty table gets a one-element
+-- list — the same one gym the console already shows, and no picker.
+--
+-- A non-owner gets `[]` from the profile arm: the test here is `role = 'owner'
+-- and tenant_id is not null`, which is `is_owner_of` written out, and a
+-- trainer does not own the gym they work at.
+create or replace function public.my_sites()
+returns jsonb language sql stable security definer set search_path to 'public', 'pg_temp'
+as $function$
+  with mine as (
+    -- The gym this session is actually scoped to. `is_owner_of` spelled out
+    -- rather than called, because it takes the tenant as an argument and the
+    -- question here is which tenant that is.
+    -- `readable` rather than `current`: the jsonb KEY below is 'current',
+    -- which is what the console reads, but `current` is a keyword Postgres
+    -- reserves in enough contexts that using it as a column alias is a coin
+    -- flip nobody needs to take in a file that is pasted into a SQL editor.
+    select p.tenant_id as tenant_id, true as readable
+      from public.profiles p
+     where p.id = auth.uid() and p.role = 'owner' and p.tenant_id is not null
+    union
+    -- Every gym the service role has recorded this person against. No role
+    -- test: the row IS the record, written by somebody with a SQL console, and
+    -- it grants no data either way.
+    select os.tenant_id, false
+      from public.owner_sites os
+     where os.user_id = auth.uid()
+  ),
+  folded as (
+    -- A person whose profile tenant also has an `owner_sites` row appears
+    -- twice above; `bool_or` keeps the readable one rather than whichever the
+    -- union happened to emit.
+    select tenant_id, bool_or(readable) as readable
+      from mine group by tenant_id
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object('id', f.tenant_id, 'name', t.name, 'current', f.readable)
+      -- Readable first, then by name, then by id so the order is total and two
+      -- gyms with the same name cannot swap places between reads.
+      order by f.readable desc, lower(coalesce(t.name, '')), f.tenant_id
+    ),
+    '[]'::jsonb)
+    from folded f
+    left join public.tenants t on t.id = f.tenant_id;
+$function$;
+
+revoke all on function public.my_sites() from public, anon;
+grant  execute on function public.my_sites() to authenticated;
+
+-- ── 3 · what this part does NOT add ─────────────────────────────────────
+--
+-- No policy anywhere reads `owner_sites`, and nothing in this file mentions
+-- `is_owner_of`, `my_tenant`, `my_role` or `tenant_of_user`. That is checkable
+-- and it is meant to be checked: `grep -n owner_sites supabase/setup.sql`
+-- should show this file and nothing else.
+
+comment on table public.owner_sites is
+  'Which gyms a person owns, when that is more than the one on their profile. An explicit table and NOT a profiles column, because the platform lets people sign up as an owner — the same argument platform_admins is built on. It has no INSERT, UPDATE or DELETE policy for anybody: a row can only be written by the service role. It ships empty. GRANTING A ROW HERE GRANTS NO DATA: no policy in this schema reads this table, is_owner_of is unchanged, and an owner recorded against a second gym can read that gym''s name and nothing else. Widening that is a separate decision — see the part file.';
+comment on column public.owner_sites.tenant_id is
+  'The gym. A site is a tenant of its own; see the note on gym_classes.branch for why a branch column was not the answer.';
+comment on column public.owner_sites.note is
+  'Why this person owns this gym, for whoever reads this table in two years. Not an audit trail.';
+comment on function public.my_sites() is
+  'The gyms the caller is recorded as owning, as [{id, name, current}] — where `current` marks the ONE this session can actually read, the tenant is_owner_of() says yes to. Two fields per gym and no more: tenants_read is correctly scoped to one tenant, and the fix for a name behind it is a function that returns the name, not a policy that returns the row. Returns [] for a non-owner, and exactly one entry for an ordinary single-site owner.';
+
+-- ── 4 · A SITE IS A TENANT. A branch is not. ────────────────────────────
+--
+-- This is the load-bearing call and it is expensive to undo, so it is written
+-- down where somebody about to undo it will read it.
+--
+-- `gym_classes.branch` has existed since part 02 and looks like the beginning
+-- of a multi-site model. It is not, and it must not be made into one.
+--
+-- THE CASE FOR branch-as-a-column, honestly stated: one login, one set of
+-- membership plans, one price list, one roll-up for free, and an operator who
+-- thinks of two rooms in one town as one business gets what they expect.
+--
+-- WHY IT LOSES:
+--
+--   1. It is a column on ONE table. `gym_visits`, `memberships`,
+--      `gym_payments`, `gym_invoices`, `sessions`, `gym_equipment`, `gym_shifts`
+--      and `gym_month_closes` have no branch and never had. Making branch the site
+--      key means adding it to all of them AND adding `and branch = $1` to every
+--      read in `src/lib` and every screen in `studio-web`. Isolation would then
+--      live in roughly thirty screens' worth of remembering to filter, instead
+--      of in the database. The first read anybody forgets is a blended figure
+--      presented as one site's — which is the exact defect this work exists to
+--      prevent, arriving by the door we opened for it.
+--
+--   2. Tenant-scoped things are already site-scoped things. `tenants.currency`
+--      (part 150: there is no default currency), `session_fee`,
+--      `session_pay_policy`, the brand, the join code, the membership plan
+--      list, the gym invoice sequence and the month close are all per tenant —
+--      and every one of them is per SITE in a real two-site operator. Two sites
+--      in two countries do not share a currency; two sites anywhere do not
+--      share an invoice sequence or a month-end close. A branch column would
+--      have to grow a second copy of each of those settings, at which point a
+--      branch IS a tenant with a worse name.
+--
+--   3. RLS already isolates tenants and has been narrowed four times to do it
+--      properly. Site-as-tenant needs no new policy at all; the isolation is
+--      the isolation that already exists and is already tested.
+--
+--   4. The cost of site-as-tenant is the roll-up and the login, and the
+--      roll-up is a figure over two sites — which under this project's own
+--      rules has to be labelled as covering two sites whichever way the schema
+--      is drawn. So that cost is not avoided by the other design, only hidden.
+--
+-- WHAT `branch` IS, then: a free-text label for a place within one gym, the
+-- same kind of thing as `room`. app/(trainer)/classes.tsx offers it as free
+-- text with chips built from the gym's own past values, and app/(client)/
+-- classes.tsx filters the timetable by it. Both are correct uses. What is NOT
+-- correct is summing across it and calling the result the gym's: see
+-- `branchSpan` in src/lib/ownedSites.ts, which is the guard for that.
+comment on column public.gym_classes.branch is
+  'A free-text label for a place WITHIN one gym — the same kind of thing as `room`, and offered to the trainer as free text with chips built from the gym''s own past values. It is NOT the multi-site key and must not be made into one: a site is a tenant of its own. The argument is in supabase/parts/290; the short form is that branch exists on this table alone, while currency, session fee, pay policy, invoice numbering and the month close are all per tenant and all per site, so a branch that carried a site would need a second copy of each of them. A figure summed across two branch values is not one branch''s figure — src/lib/ownedSites.ts branchSpan() is the guard.';
+
+-- ── 5 · the decision this part deliberately leaves open ─────────────────
+--
+-- Letting one login READ two sites. Two designs, both of which someone has to
+-- choose between with the live database in front of them:
+--
+--   (A) TEACH THE POLICIES ABOUT MEMBERSHIP. Either widen `is_owner_of` or add
+--       a second owner-arm policy to every table. The first is the four-word
+--       change argued against at the top of this file. The second is honest —
+--       each widening is its own line in `pg_policies` — but it is sixty-odd
+--       new policies across fifty-six tables, each of which is a place to get
+--       it wrong once, and it permanently doubles the cost of every future
+--       table.
+--
+--   (B) SWITCH WHICH SITE THE SESSION IS IN. A SECURITY DEFINER function that
+--       checks `owner_sites` and then writes `profiles.tenant_id`. At any
+--       instant the caller is the owner of exactly one tenant and every policy
+--       stays exactly as narrow as it is today — the reader set at a point in
+--       time is unchanged, which is why this is the safer-looking of the two.
+--
+--       It is not free, and these are the parts that need a human:
+--
+--        · `profiles.tenant_id` is the spine. Part 37 rewrites it when a MEMBER
+--          moves gyms and part 39's `tenant_of_user` reads it. A switch is
+--          therefore indistinguishable, in the row, from a move.
+--        · `tenant_of_user` prefers `trainers.tenant_id` over the profile's. An
+--          owner who also coaches has both, and switching one leaves the two
+--          disagreeing — which decides who can read their coach roster.
+--        · It is global and it persists. The phone app, a second browser tab
+--          and any background job all move with it, and there is no session in
+--          this design to hold "which site am I looking at" instead.
+--        · Anything WRITTEN while switched belongs to the switched-to site.
+--          That is correct, and it means a mis-switch writes a payment into the
+--          wrong gym's books.
+--
+-- Neither is written here. What is written here is the record of who owns
+-- what, which both designs need and neither can be built without.

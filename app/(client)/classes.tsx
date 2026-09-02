@@ -155,8 +155,18 @@ export default function Classes() {
             until now only the gym could read it. Put here rather than only on a
             tab because a member wondering whether to book a class is the same
             member wondering how often they have actually been coming. */}
-        <View style={{ flexDirection: 'row', marginTop: sp.lg }}>
+        <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginTop: sp.lg }}>
           <Ghost label="My Attendance" onPress={() => router.push('/(client)/attendance')} />
+          {/* Money and seats, kept apart on purpose.
+              A place in a class is scarce and a payment is a second act that
+              can fail on its own, so nothing on this screen charges anybody:
+              booking stays the immediate, loud, money-free write it already is,
+              and what a member buys is a CREDIT — a drop-in or a class pack —
+              which the gym can issue any number of and which nobody else can
+              take while a card is being typed. The full argument is at the top
+              of src/lib/memberBuy.ts, and src/lib/outbox.ts refuses to queue a
+              booking for the same family of reasons. */}
+          <Ghost label="Buy a Pass" onPress={() => router.push('/(client)/gym-plans')} />
         </View>
 
         {branches.length > 1 ? (

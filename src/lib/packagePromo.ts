@@ -32,10 +32,13 @@
 //
 // This is the part worth reading before anybody widens it.
 //
-// A code is collected on STRIPE'S OWN hosted checkout page — `allow_promotion_
-// codes: true` — so the client types it there and no screen in this app needs a
-// field. Stripe then applies the discount to the total AFTER the session was
-// created.
+// A code is collected on the CLIENT'S OWN checkout screen — app/(client)/
+// packages.tsx — and travels with the request that creates the Checkout
+// Session. It used to be collected on Stripe's hosted page instead
+// (`allow_promotion_codes: true`), which was less to build and could enforce
+// neither of the two rules below, because a box on Stripe's page is a box no
+// code in this repo ever sees. `checkoutCodeBlocker` is the rule now, run by
+// that screen as a convenience and by connect-checkout as the rule.
 //
 // On a SUBSCRIPTION, Repple's cut is `application_fee_percent`: a percentage,
 // so it scales with the discount automatically. A 20% off code means the client
@@ -43,20 +46,42 @@
 // no arithmetic anywhere.
 //
 // On a ONE-OFF, Repple's cut is `application_fee_amount`: an absolute figure in
-// minor units, computed from the LIST price when the session is created,
-// because at that moment nothing knows a code will be typed. Stripe then
-// discounts the charge and does not touch the fee. So a coach running 30% off a
-// £100 pack would receive £70 from the client and still pay a fee calculated on
-// £100 — they would eat the whole discount AND a fee on money they never got,
-// and nothing on any screen would say so. At a large enough discount the fee
-// exceeds the charge and Stripe refuses the payment outright, which the client
-// meets as a checkout that will not complete.
+// minor units. Left as it was, it is computed from the LIST price, Stripe then
+// discounts the charge and does not touch the fee, and a coach running 30% off
+// a £100 pack receives £70 from the client and still pays a fee calculated on
+// £100 — eating the whole discount AND a fee on money they never got, with
+// nothing on any screen saying so. At a large enough discount the fee exceeds
+// the charge and Stripe refuses the payment outright, which the client meets as
+// a checkout that will not complete.
 //
-// Neither is acceptable, and the fix is not a cap on the percentage: it is for
-// the code to be supplied WHEN THE SESSION IS CREATED, so the fee can be
-// computed from the discounted total. That needs a field on the client's own
-// checkout flow, which is a screen this work does not own. Until it exists,
-// `promoBlocker` refuses a one-off package by name and says why.
+// ── AND WHY HAVING THE CODE EARLIER DOES NOT FIX THE ONE-OFF ──────────────
+//
+// This file used to say the fix was for the code to be supplied WHEN THE
+// SESSION IS CREATED, so the fee could be computed from the discounted total,
+// and that it only needed a field on the client's checkout flow. The field
+// exists now. It does not fix this, and the reason is an ORDERING that no field
+// can change.
+//
+// `application_fee_amount` is an input to `checkout.sessions.create`. What the
+// discount actually comes to is an OUTPUT of that same call — Stripe applies
+// the coupon and works out the total inside it. So the fee can never be derived
+// from what Stripe charged; it can only be derived from a discounted total this
+// app predicted, and Stripe's own percentage rounding is not this app's to
+// reproduce. A prediction one minor unit out is a coach underpaid on every sale
+// of that package, quietly, forever. Nothing that can be sent in that call is
+// the figure Stripe is about to compute in it.
+//
+// A second call is not an escape either: Stripe's Checkout owns the
+// PaymentIntent it creates and documents that changes made to it from outside
+// may be overwritten, so "create the session, read `amount_total`, then patch
+// the fee onto the PaymentIntent" is a fee that may or may not survive to the
+// charge — which is worse than a wrong one, because it is wrong intermittently.
+//
+// So the refusal stands, and it is now enforced at the CHECKOUT as well as at
+// the coach's screen: `promoBlocker` refuses a one-off package by name when a
+// coach tries to attach a code to it, and `checkoutCodeBlocker` refuses one
+// against a one-off sale when a client types it. Both are run by their screen
+// and again by their edge function.
 //
 // Pure, framework-free and asserted against under plain `node`.
 
@@ -142,6 +167,89 @@ export function promoBlocker(code: string, percentOff: number, target: PromoTarg
   return out;
 }
 
+/* ── the client's end of the same code ────────────────────────────────────── */
+
+/**
+ * Whether a code the CLIENT typed may be sent with this checkout, or the reason
+ * it may not — in the client's words rather than the coach's.
+ *
+ * ── Why there is a field at all now ───────────────────────────────────────
+ *
+ * There was not one. `allow_promotion_codes: true` put the box on STRIPE'S
+ * hosted page, which is genuinely less to build and has two costs that are only
+ * obvious once codes exist:
+ *
+ *   1. THE PACKAGE RESTRICTION WAS NOT ENFORCED ANYWHERE. A code is created for
+ *      one package and the restriction is recorded in Stripe METADATA, because
+ *      this app's packages are inline prices with no stored Product for
+ *      Stripe's own `applies_to` to point at — connect-promo says so in as many
+ *      words. Stripe therefore does not enforce it, and a box on Stripe's page
+ *      is a box nothing in this repo can see, so a code meant for one recurring
+ *      package worked on every other one the coach sells. Typed HERE, the
+ *      restriction can be checked before the session is created.
+ *   2. THE ONE-OFF REFUSAL WAS ONLY EVER A COACH-SIDE ONE. `promoBlocker` stops
+ *      a coach ATTACHING a code to a one-off package. Nothing stopped a code
+ *      created for a subscription being typed against a one-off sale, and the
+ *      only reason it did not happen is that the one-off branch never presented
+ *      a box. That is a property of a missing feature, not a rule.
+ *
+ * So the code is collected in the app and travels with the request. Both
+ * refusals above are then run in one place — this function — by the client's
+ * screen as a convenience and by supabase/functions/connect-checkout as the
+ * rule.
+ *
+ * ── And the one-off still refuses ─────────────────────────────────────────
+ *
+ * The header of this file has the long form. The short one: on a one-off,
+ * Repple's cut is an absolute `application_fee_amount` that has to be sent in
+ * the same call that creates the session, and Stripe computes the discounted
+ * total inside that call — so there is no ordering in which the fee is derived
+ * from what Stripe actually charged. A fee predicted from a discount this app
+ * calculated is not the same thing, and the difference is a coach underpaid or
+ * a payment Stripe refuses outright. The refusal stands and is now enforced at
+ * the checkout as well as at the coach's screen.
+ */
+export function checkoutCodeBlocker(typed: string, target: PromoTarget | null): string | null {
+  const c = normaliseCode(typed);
+  if (!c) return 'Type the code your coach gave you. Letters and numbers only.';
+  if (c.length < 3) return 'That code is too short. Check what your coach gave you.';
+  if (!target) return 'That package could not be read, so a code cannot be checked against it.';
+  if (!target.billingInterval) return CODE_IS_NOT_FOR_A_ONE_OFF;
+  return null;
+}
+
+/**
+ * What a client is told when they type a code against a one-off pack.
+ *
+ * Not the fee explanation. A client is not owed Repple's internal arithmetic
+ * and would not be helped by it; what they need is which of their coach's
+ * things a code works on, and the price they are actually being asked for.
+ */
+export const CODE_IS_NOT_FOR_A_ONE_OFF =
+  'Discount codes work on the memberships your coach charges for every month or year. This one is bought once, at the price shown.';
+
+/**
+ * Whether a code created for one package may be used on another.
+ *
+ * `codePackageId` is Stripe metadata written by connect-promo at creation.
+ * A code with none — one made in the coach's own Stripe dashboard rather than
+ * through this app — is not restricted by this app either, because there is
+ * nothing recorded to restrict it to and inventing one would refuse a code the
+ * coach deliberately made general.
+ */
+export function codeAppliesTo(codePackageId: string | null | undefined, packageId: string): boolean {
+  const restricted = String(codePackageId ?? '').trim();
+  if (!restricted) return true;
+  return restricted === String(packageId ?? '').trim();
+}
+
+/** Said when a real, live code is typed against the wrong package. Names
+ *  neither package: the client knows which one they are buying, and telling
+ *  them which OTHER thing their coach's offer is for is the coach's business
+ *  rather than this screen's. */
+export const CODE_IS_FOR_ANOTHER_PACKAGE =
+  'That code is for something else your coach sells, so it does not come off this one. Check with them which it is for.';
+
 /**
  * The ceiling on a discount, and it is about Stripe rather than about taste.
  *
@@ -216,9 +324,19 @@ export function promoUseLine(p: PromoCode): string {
 export const PROMO_IS_A_PERCENTAGE =
   'A code takes a percentage off, never a fixed amount. Repple is white-labelled, so a fixed amount would need a currency and would do nothing at all for a client paying in a different one — a percentage is the same offer whatever you charge in.';
 
-/** Where the client types it, so the coach knows what to tell them. */
+/**
+ * Where the client types it, so the coach knows what to tell them.
+ *
+ * This used to say the code was typed on the payment page itself, and that was
+ * true while `allow_promotion_codes` put the box there. It moved into the app,
+ * because a box on Stripe's page is one nothing in this repo can see and the
+ * restriction to a single package is recorded in Stripe metadata that Stripe
+ * does not enforce — see `checkoutCodeBlocker`. A coach telling their client
+ * the wrong place to type it is a coach fielding a message about a code that
+ * "does not work".
+ */
 export const PROMO_IS_TYPED_AT_CHECKOUT =
-  'Your client types the code on the payment page itself, so there is nothing for them to do in the app. Give them the code and it works at checkout.';
+  'Your client types the code in the app, on the package itself, before the payment page opens. Give them the code and tell them to tap Have A Code when they subscribe.';
 
 /**
  * That Stripe holds these and this app does not.

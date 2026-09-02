@@ -31,14 +31,15 @@
 //
 // ── SUBSCRIPTION PACKAGES ONLY ────────────────────────────────────────────
 //
-// Checked here as well as on the screen. `allow_promotion_codes` is set only on
-// the subscription branch of connect-checkout, because Repple's cut there is
+// Checked here as well as on the screen. connect-checkout applies a code only
+// on its subscription branch, because Repple's cut there is
 // `application_fee_percent` and scales with the discount — on a one-off it is
-// an absolute figure computed from the LIST price before anybody types
-// anything, so the coach would eat the whole discount AND pay a fee on money
-// they never received. A code created against a one-off package would appear to
-// work and would do nothing, which is the failure this refusal exists to
-// prevent.
+// an absolute figure that Stripe wants in the SAME call in which it works the
+// discount out, so it can only ever be computed from the list price or from a
+// total this app guessed at. The coach would eat the whole discount AND pay a
+// fee on money they never received. A code created against a one-off package
+// would appear to work and would be refused at checkout, which is the failure
+// this refusal exists to prevent.
 //
 // ── Who may call it ───────────────────────────────────────────────────────
 //
@@ -222,10 +223,14 @@ Deno.serve(async (req) => {
       // The package this is FOR, stamped where the list read can find it again.
       // Stripe's own `applies_to.products` is about Products, and this app's
       // packages are inline `price_data` with no stored Product to point at —
-      // so the restriction is recorded here and enforced by which package the
-      // coach hands the code out for, rather than by Stripe. Said plainly
-      // because it is a real limitation: a code created for one recurring
-      // package will also work on this coach's other recurring packages.
+      // so the restriction is recorded here and Stripe never acts on it.
+      // It used to be enforced by nothing at all beyond which package the coach
+      // handed the code out for, so a code made for one recurring package
+      // worked on every other one they sell. It is enforced now, at the point
+      // the client's code reaches connect-checkout, by `codeAppliesTo` in
+      // src/lib/packagePromo.ts — which only became possible once the code was
+      // typed in the app rather than on Stripe's own hosted page, where nothing
+      // in this repo could see it.
       metadata: { repple_package_id: packageId, repple_trainer_id: uid },
     }, acctOpts);
 

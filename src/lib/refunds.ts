@@ -153,6 +153,39 @@ export function refundAmountBlocker(minorUnits: number, max: number): string | n
 /* ── the sentences a refund screen has to carry ───────────────────────────── */
 
 /**
+ * The one line that states what is about to happen, in the confirm.
+ *
+ * `amount` arrives ALREADY FORMATTED, with its currency on it — from
+ * `minorMoney` in coachMoney.ts, which is where the number of decimal places a
+ * currency has is decided. It is passed in rather than formatted here because
+ * this module is imported by supabase/functions/connect-refund, which runs
+ * under Deno and must not pull in the app's locale handling; and because there
+ * is exactly one formatter for money in this codebase and it is not this file.
+ *
+ * `part` is whether this is less than the whole of what is left. The two
+ * sentences differ in the thing a coach most needs to know afterwards — whether
+ * anything is still standing on that sale — and a single sentence covering both
+ * would have to be vague about it.
+ */
+export function refundConfirmLine(amount: string, who: string, part: boolean): string {
+  return part
+    ? `${amount} goes back to ${who}, on the card they paid with. The rest of this sale still stands.`
+    : `${amount} goes back to ${who}, on the card they paid with. That is the whole of what is left on this sale.`;
+}
+
+/**
+ * That the figure typed is the figure that leaves, exactly.
+ *
+ * Said beside a partial amount and nowhere else. A coach typing a number into a
+ * box beside somebody's card is entitled to know that nothing rounds it, tops
+ * it up to a neat figure or adjusts it for a fee — because every one of those
+ * would be this app choosing an amount on their behalf, and the amount is the
+ * one thing here that is theirs to choose.
+ */
+export const REFUND_PART_IS_EXACT =
+  'The amount you type is the amount that goes back, exactly. Nothing is rounded, and nothing is added to it or taken off it.';
+
+/**
  * Whose balance the money comes out of, which is not the same for every coach.
  *
  * Under DIRECT charges the coach is the merchant of record and Stripe debits

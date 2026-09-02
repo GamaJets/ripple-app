@@ -64,6 +64,7 @@ import {
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { fetchTrainerOptions } from '@lib/gymPtSchedule';
 import { summariseClassRows, type ClassSummaryRow, type ClassRates } from '@lib/classRates';
+import { branchSpan, branchNote } from '@lib/ownedSites';
 
 const DAY = 86400000;
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -187,14 +188,21 @@ export default function Classes() {
   );
 
   // The shared row shape, so the shared rate maths can be used unchanged.
-  // `kind` and `branch` are left empty rather than invented: neither is read by
-  // this screen, and nothing below ever renders them.
+  //
+  // `kind` is left empty rather than invented: it is not read by this screen and
+  // nothing below renders it.
+  //
+  // `branch` is NOT. It was `''` here, and that emptied the one field that says
+  // whether these rows come from one place or several — so every figure on this
+  // screen was labelled as the gym's whether or not the classes behind it
+  // happened at two. `summariseClassRows` sums whatever it is handed and cannot
+  // know; `branchSpan` below is what asks.
   const rows: ClassSummaryRow[] = useMemo(
     () => (classes ?? []).map((c) => ({
       classId: c.id,
       title: c.title,
       kind: '',
-      branch: '',
+      branch: c.branch ?? '',
       trainerId: c.trainerId ?? '',
       trainerName: nameOf(c),
       startsAt: c.startsAt,
@@ -264,6 +272,22 @@ export default function Classes() {
   const waitingClasses = (classes ?? []).filter((c) => c.waitlisted > 0).length;
   const waitingAttended = (classes ?? []).reduce((a, c) => a + c.waitlistAttended, 0);
   const unmarked = (classes ?? []).filter((c) => c.booked > 0 && c.attended === 0);
+
+  /**
+   * How many places these figures cover.
+   *
+   * `gym_classes.branch` is a label for a place within one gym (see the column
+   * comment, and supabase/parts/290 for why it is not the multi-site key). A
+   * gym that uses it for two rooms in two streets gets ONE fill rate over both
+   * out of `summariseClassRows`, and every tile above prints it under one gym's
+   * name. The number is real; the label on it is not.
+   *
+   * 'unknown' while the read has not settled, so this cannot certify a window
+   * nobody has seen. Every gym in the live database is 'none' today — the
+   * console has always written `branch: ''` — so this renders nothing until a
+   * gym starts using the field the trainer app has always offered.
+   */
+  const places = branchSpan(rows, classes ? 'ready' : unread === 'failed' ? 'error' : 'loading');
 
   return (
     <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/classes">
@@ -347,6 +371,20 @@ export default function Classes() {
           }
         />
       </div>
+
+      {/* THE ONE BANNER ON THIS SCREEN THAT IS ABOUT THE LABEL RATHER THAN THE
+          NUMBER. Every tile above is a total over the window, and a total over
+          classes held at two places is not either place's — so if this gym uses
+          `branch`, the tiles say so out loud rather than being read as one
+          room's performance. Null for every gym today: nothing in this console
+          has ever written a branch. */}
+      {branchNote(places) ? (
+        <Banner>
+          {branchNote(places)} The per-class and per-coach tables below break the same window down;
+          neither of them splits it by place, because nothing in this console has ever offered a way
+          to set one.
+        </Banner>
+      ) : null}
 
       {rated && capacityless.length > 0 ? (
         <Banner>

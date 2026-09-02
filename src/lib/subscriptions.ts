@@ -266,13 +266,35 @@ export async function fetchMySubscriptionPayments(): Promise<{ rows: Subscriptio
   } catch (e) { reportError('subscriptions.fetchMySubscriptionPayments', e); return { rows: [], status: 'error' }; }
 }
 
-/** Client subscribes to a recurring package → Stripe Checkout in subscription
- *  mode. Same edge function as a one-off buy; the package's billing_interval is
- *  what decides which mode it opens, and the app is not trusted to say. */
-export async function subscribeToPackage(packageId: string): Promise<{ ok: boolean; error?: string }> {
+/**
+ * Client subscribes to a recurring package → Stripe Checkout in subscription
+ * mode. Same edge function as a one-off buy; the package's billing_interval is
+ * what decides which mode it opens, and the app is not trusted to say.
+ *
+ * `code` is the coach's own discount code, as the client typed it. Sent WITH
+ * the session request rather than collected on Stripe's hosted page, and the
+ * reason is in `checkoutCodeBlocker` in src/lib/packagePromo.ts: the
+ * restriction of a code to one package is recorded in Stripe metadata that
+ * Stripe does not enforce, so a box on Stripe's page is a box nothing in this
+ * repo can check. Omitted means no code, which is the ordinary case and takes
+ * the path it always did.
+ *
+ * There is deliberately no equivalent on `buyPackage`. A one-off refuses a
+ * code — Repple's cut there is an absolute fee that has to be sent in the same
+ * call that creates the session, so it cannot be derived from the discounted
+ * total Stripe computes inside that call — and connect-checkout refuses one on
+ * that branch whoever sends it.
+ */
+export async function subscribeToPackage(packageId: string, code?: string): Promise<{ ok: boolean; error?: string }> {
   try {
+    const promo = String(code ?? '').trim();
     const { data, error } = await supabase.functions.invoke('connect-checkout', {
-      body: { package_id: packageId, success_url: appLink('purchase/success'), cancel_url: appLink('purchase/cancel') },
+      body: {
+        package_id: packageId,
+        success_url: appLink('purchase/success'),
+        cancel_url: appLink('purchase/cancel'),
+        ...(promo ? { promo_code: promo } : {}),
+      },
     });
     if (error) return { ok: false, error: error.message };
     if (data?.url) { await openUrl(data.url); return { ok: true }; }

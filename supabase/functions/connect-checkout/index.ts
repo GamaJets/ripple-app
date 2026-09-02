@@ -1,7 +1,12 @@
 // connect-checkout — a client buys a trainer's package. Creates a Stripe Checkout
 // Session whose funds go to the trainer's connected account, with the platform
 // taking an application fee. Uses STRIPE_SECRET_KEY. PLATFORM_FEE_PCT (default 10)
-// is the platform's cut. Request: { package_id, success_url?, cancel_url? }
+// is the platform's cut.
+// Request: { package_id, success_url?, cancel_url?, promo_code? }
+//   `promo_code` is the coach's own discount code as the client typed it. It is
+//   accepted on a SUBSCRIPTION package and refused on a one-off, by name and
+//   with the reason — see `checkoutCodeBlocker` and the note in the
+//   subscription branch. Omitted is the ordinary case.
 //
 // ── Which account the charge is created ON, and why it moved ──────────────
 //
@@ -72,6 +77,10 @@ import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { refusalFor } from '../../../src/lib/subscriptionScope.ts';
 import {
+  normaliseCode, checkoutCodeBlocker, codeAppliesTo,
+  CODE_IS_NOT_FOR_A_ONE_OFF, CODE_IS_FOR_ANOTHER_PACKAGE, type PromoTarget,
+} from '../../../src/lib/packagePromo.ts';
+import {
   modelForAccount, optionsForObject, platformFeePct, applicationFeeCents, canTakeDirectCharges,
 } from '../../../src/lib/directCharges.ts';
 
@@ -134,6 +143,65 @@ Deno.serve(async (req) => {
   if (!uid) return json({ error: 'no user' }, 401);
 
   const action = String(body.action || 'checkout');
+
+  // ── the billing portal for a ONE-OFF sale ─────────────────────────────────
+  //
+  // Somebody who has only ever bought session packs had no route to an invoice,
+  // to their card, or to a refund. Not because the button was in the wrong
+  // place — app/(client)/packages.tsx renders it inside `liveSubs.map(...)`,
+  // which is the only place it COULD go, because the `portal` action below is
+  // keyed on a subscription and reads its `stripe_customer_id`. A pack buyer
+  // has no `client_subscriptions` row, so there was no id to pass.
+  //
+  // The missing thing was underneath: a Checkout Session in `mode: 'payment'`
+  // creates neither a Customer nor an Invoice unless it is asked to, so there
+  // was nothing for a portal to show even if one could have been opened. The
+  // one-off branch at the bottom of this file now asks for both, the webhook
+  // records the customer on `client_purchases` (part 282), and this action
+  // opens it.
+  //
+  // NULL customer is a SENTENCE, not an error to hide. Every sale made before
+  // that change has no Customer at Stripe and none can be manufactured now, so
+  // the screen is told so plainly rather than being handed a button that opens
+  // a failure.
+  if (action === 'purchase_portal') {
+    const purchaseId = String(body.purchase_id || '');
+    if (!purchaseId) return json({ error: 'missing purchase_id' }, 400);
+
+    const { data: row, error: readErr } = await service.from('client_purchases')
+      .select('id, client_id, stripe_customer_id, stripe_account_id').eq('id', purchaseId).maybeSingle();
+    if (readErr) return json({ error: 'could not read your purchase: ' + readErr.message }, 500);
+    if (!row) return json({ error: 'purchase not found' }, 404);
+
+    // The BUYER's alone, and not the coach's. The portal opens somebody's card,
+    // their invoices and their receipts, which is the same rule
+    // src/lib/subscriptionScope.ts states for the subscription portal: a coach
+    // may cancel a subscription they are paid through and may not look inside
+    // their client's wallet. A stranger gets the same 404 as an id that does
+    // not exist, so guessing reveals nothing about which ones are real.
+    if (String(row.client_id ?? '') !== uid) {
+      console.warn('connect-checkout: refused purchase_portal on ' + purchaseId + ' for ' + uid);
+      return json({ error: 'purchase not found' }, 404);
+    }
+    if (!row.stripe_customer_id) {
+      return json({ error: 'Stripe has no billing account for this purchase, so there is nothing to open. Your coach can send a receipt or arrange a refund.' }, 404);
+    }
+
+    // In the purchase's OWN account context. A Customer belongs to exactly one
+    // account: under destination charges the buyer is a customer of the
+    // PLATFORM, and under direct charges Checkout created them on the COACH's
+    // connected account. The two id spaces are unrelated and a `cus_...` from
+    // one is simply not found in the other — which is the whole reason
+    // `accountForObject` reads the object's own column rather than the coach's
+    // current setting.
+    try {
+      const portal = await stripe.billingPortal.sessions.create({
+        customer: row.stripe_customer_id,
+        return_url: String(body.return_url || 'repple://packages'),
+      }, optionsForObject(row));
+      return json({ url: portal.url });
+    } catch (e) { return stripeError('billing portal', e); }
+  }
 
   // ── managing a subscription already sold ──────────────────────────────────
   if (action === 'cancel' || action === 'resume' || action === 'portal' || action === 'end_now') {
@@ -400,6 +468,67 @@ Deno.serve(async (req) => {
   if (!currency) return json({ error: 'This package has no currency set, so it cannot be sold. The gym needs to set one.' }, 400);
   const interval = pkg.billing_interval ? String(pkg.billing_interval) : null;
 
+  // ── the coach's discount code, if the client typed one ────────────────────
+  //
+  // It arrives WITH this request now. It used to be collected on Stripe's own
+  // hosted page through `allow_promotion_codes`, which is less to build and
+  // could enforce neither of the two rules that matter:
+  //
+  //   · WHICH PACKAGE the code is for. connect-promo records that in Stripe
+  //     METADATA, because this app's packages are inline `price_data` with no
+  //     stored Product for Stripe's `applies_to` to point at — so Stripe does
+  //     not enforce it, and a box on Stripe's page is a box no code in this
+  //     repo ever sees. A code made for one recurring package therefore worked
+  //     on every other one the coach sells.
+  //   · THAT A ONE-OFF TAKES NO CODE. `promoBlocker` stops a coach ATTACHING a
+  //     code to a one-off package; nothing stopped a subscription's code being
+  //     typed against a one-off sale. The only reason that never happened is
+  //     that the one-off branch below never set the flag, which is a property
+  //     of a missing feature rather than a rule.
+  //
+  // Both are `checkoutCodeBlocker` in src/lib/packagePromo.ts, imported rather
+  // than written here so the client's screen and this cannot say different
+  // things.
+  const typedCode = normaliseCode(String(body.promo_code ?? ''));
+  let promotionCodeId: string | null = null;
+  if (typedCode) {
+    const promoTarget: PromoTarget = {
+      id: packageId,
+      name: String(pkg.name ?? ''),
+      billingInterval: interval,
+      active: !!pkg.active,
+    };
+    const refusal = checkoutCodeBlocker(typedCode, promoTarget);
+    if (refusal) return json({ error: refusal }, 400);
+
+    // A code lives on the COACH's connected account and is only ever consulted
+    // by a Checkout Session created there too. Under destination charges the
+    // session is created on the PLATFORM, where a connected account's promotion
+    // code simply does not exist — which is the same reason connect-promo
+    // refuses to create one for a coach on that model. Refused here rather than
+    // sent to Stripe to come back as "No such promotion code".
+    if (model !== 'direct') {
+      return json({ error: 'Your coach’s payment setup does not take discount codes. Nothing has been charged — buy it at the price shown, or ask them about the code.' }, 409);
+    }
+
+    let found: Stripe.PromotionCode | null = null;
+    try {
+      // Stripe's own list, on the coach's account, filtered by the string the
+      // client typed. There is no local table to consult: the code, the
+      // percentage, the expiry, the limit and the redemption count all live at
+      // Stripe and this app keeps no copy of any of them.
+      const list = await stripe.promotionCodes.list({ code: typedCode, active: true, limit: 1, expand: ['data.coupon'] }, acctOpts);
+      found = list.data[0] ?? null;
+    } catch (e) { return stripeError('checking that code', e); }
+    if (!found) {
+      return json({ error: 'That code is not one your coach is running, or it has stopped working. Nothing has been charged — check it with them.' }, 404);
+    }
+    if (!codeAppliesTo(found.metadata?.repple_package_id, packageId)) {
+      return json({ error: CODE_IS_FOR_ANOTHER_PACKAGE }, 400);
+    }
+    promotionCodeId = found.id;
+  }
+
   if (interval) {
     if (!INTERVALS.has(interval)) return json({ error: 'This package has a billing interval this app does not sell.' }, 400);
 
@@ -438,13 +567,18 @@ Deno.serve(async (req) => {
           ...(model === 'direct' ? {} : { transfer_data: { destination: acct.stripe_account_id } }),
           metadata: subMeta,
         },
-        // ── the coach's own discount codes ───────────────────────────────
+        // ── the coach's own discount code ────────────────────────────────
         //
-        // Collected on STRIPE'S hosted page, so no screen in this app needs a
-        // field for it and the client simply types the code where they type
-        // their card. The codes themselves live on the coach's connected
-        // account and are created by supabase/functions/connect-promo; this
-        // app stores none of them.
+        // Applied to the session by id, from the code the client typed in the
+        // app. `allow_promotion_codes: true` used to stand here instead, which
+        // put the box on Stripe's hosted page, and it is GONE rather than kept
+        // as a second route: the two rules set out where the code is resolved
+        // above can only be checked on a code that passes through this
+        // function, so leaving the box on Stripe's page would leave the
+        // package restriction optional — a client who skipped the field in the
+        // app would be back to a code that works on anything the coach sells.
+        // An enforcement with a way round it is not one. (Stripe rejects a
+        // session carrying both fields in any case.)
         //
         // ON THE SUBSCRIPTION BRANCH ONLY, and the reason is the platform fee.
         // Here Repple's cut is `application_fee_percent` — a percentage — so a
@@ -452,22 +586,20 @@ Deno.serve(async (req) => {
         // share of the smaller amount, correctly, with no arithmetic anywhere.
         //
         // On the one-off branch below the cut is `application_fee_amount`: an
-        // absolute figure computed from the LIST price at the moment the
-        // session is created, because nothing then knows a code will be typed.
-        // Stripe would discount the charge and leave the fee alone, so a coach
-        // running 30% off a £100 pack would receive £70 and still pay a fee
-        // worked out on £100 — eating the whole discount AND a fee on money
-        // they never got — and at a large enough discount the fee exceeds the
-        // charge and Stripe refuses the payment outright, which the client
-        // meets as a checkout that will not complete.
+        // absolute figure in minor units, and Stripe requires it in the SAME
+        // call that creates the session — the call in which Stripe itself works
+        // out what the discount comes to. There is therefore no ordering in
+        // which that fee is derived from what Stripe actually charged: it can
+        // only be derived from a discounted total this app predicted, and a
+        // predicted total that is one minor unit out is a coach underpaid on
+        // every sale of that package. Left as it was, the coach would be worse
+        // off still — a 30% off code on a £100 pack pays them £70 and charges a
+        // fee worked out on £100, and at a large enough discount the fee
+        // exceeds the charge and Stripe refuses the payment outright.
         //
-        // The fix for the one-off case is not a cap. It is for the code to be
-        // supplied WHEN THE SESSION IS CREATED, so the fee can be computed from
-        // the discounted total — which needs a field on the client's own
-        // checkout flow. Until that exists, `promoBlocker` in
-        // src/lib/packagePromo.ts refuses a one-off package by name and says
-        // why, and this flag stays off down there.
-        allow_promotion_codes: true,
+        // So the one-off refusal stands, and it is now enforced HERE as well as
+        // on the coach's screen. See `checkoutCodeBlocker`.
+        ...(promotionCodeId ? { discounts: [{ promotion_code: promotionCodeId }] } : {}),
         success_url: successUrl,
         cancel_url: cancelUrl,
         metadata: { repple_kind: 'connect_subscription', package_id: packageId, trainer_id: pkg.trainer_id, client_id: uid, repple_account: acctMeta },
@@ -490,6 +622,16 @@ Deno.serve(async (req) => {
   // So `fee: null` means OMIT the field, and that is a different thing from
   // zero. It is returned rather than thrown because a cheap package is not an
   // error — Repple simply takes nothing on it.
+
+  // No code reaches this branch. `checkoutCodeBlocker` above already refused
+  // one against a package with no billing interval, and this is the second
+  // copy of that refusal rather than a first: everything below computes an
+  // application fee from `pkg.price_cents`, the LIST price, and the moment a
+  // discount exists that figure is a fee on money the coach never received.
+  // If the two rules are ever allowed to disagree, the disagreement stops here
+  // rather than at somebody's charge.
+  if (typedCode) return json({ error: CODE_IS_NOT_FOR_A_ONE_OFF }, 400);
+
   const feeCalc = applicationFeeCents(pkg.price_cents, feePct);
   if (!feeCalc.ok) {
     console.error('connect-checkout: ' + feeCalc.reason);
@@ -509,6 +651,20 @@ Deno.serve(async (req) => {
         ...(fee === null ? {} : { application_fee_amount: fee }),
         ...(model === 'direct' ? {} : { transfer_data: { destination: acct.stripe_account_id } }),
       },
+      // A Customer and a real Invoice for a one-off sale.
+      //
+      // `mode: 'payment'` creates neither by default, and that absence was the
+      // whole of the defect above: a client who had only ever bought packs had
+      // nothing for a billing portal to open, so the button could only ever be
+      // drawn beside a subscription. `customer_creation: 'always'` gives the
+      // sale a Customer, `invoice_creation` gives it an invoice the buyer can
+      // download, and the webhook records the customer id on the purchase.
+      //
+      // On a DIRECT charge both are created on the coach's connected account,
+      // which is where the `purchase_portal` action above opens them — the same
+      // context the charge was made in, read off the purchase's own column.
+      customer_creation: 'always',
+      invoice_creation: { enabled: true },
       success_url: successUrl,
       cancel_url: cancelUrl,
       // `repple_account` is how the webhook learns which ledger to stamp on

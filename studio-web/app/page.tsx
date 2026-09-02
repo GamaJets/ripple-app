@@ -18,6 +18,8 @@ import { fetchMemberships, fetchPayments, fetchPlans, summarise, type Membership
 import { fetchClasses, summariseAttendance, pct } from '@lib/gymSchedule';
 import { fetchVisits, summariseVisits } from '@lib/gymVisits';
 import { fetchOwnerMetrics, type OwnerMetrics } from '@/lib/ownerMetrics';
+import { fetchOwnedSites } from '@/lib/sites';
+import { siteNotice, type SiteScope } from '@lib/ownedSites';
 
 interface Gym {
   id: string;
@@ -107,12 +109,32 @@ export default function Overview() {
   // saying which query broke leaves an owner unable to tell anyone what is down.
   const [hubErr, setHubErr] = useState<string | null>(null);
 
+  /**
+   * How many gyms this account owns, and which of them this page is showing.
+   *
+   * Starts as 'loading' and not as one gym: an owner recorded against two sites
+   * and an owner with one are indistinguishable until this read settles, and
+   * the difference is what every figure below means. `siteNotice` says nothing
+   * at all for the ordinary one-gym case, so this is invisible on every console
+   * on the platform until a row is written into `owner_sites` — see
+   * supabase/parts/290 and src/lib/ownedSites.ts.
+   */
+  const [sites, setSites] = useState<SiteScope>({ status: 'loading', sites: [] });
+
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
+
+      // Before the tenant guard, because it is the read that says whether the
+      // tenant below is the whole of this owner's business. It carries its own
+      // status, so a refusal arrives as UNKNOWN rather than as one gym.
+      const owned = await fetchOwnedSites();
+      if (!live) return;
+      setSites(owned);
+
       if (!who?.tenantId) { setTrainers([]); return; }
 
       // supabase-js RESOLVES with { data, error } rather than throwing, so
@@ -233,7 +255,7 @@ export default function Overview() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gym?.name ?? null} current="/">
+      <Shell me={me} gymName={gym?.name ?? null} sites={sites} current="/">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -315,6 +337,13 @@ export default function Overview() {
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         {gym?.name ? `${gym.name} · last 30 days` : 'Last 30 days'}
       </p>
+
+      {/* Which gym these figures are. Null — so nothing renders — for a settled
+          read of one gym, which is every account on the platform today. Not
+          null when the site read failed, because a two-site owner and a
+          one-site owner are indistinguishable then and the tiles below would
+          otherwise read as the whole business. */}
+      {siteNotice(sites) ? <Notice>{siteNotice(sites)}</Notice> : null}
 
       {!me.tenantId ? (
         <Notice>

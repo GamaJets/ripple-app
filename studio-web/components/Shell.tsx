@@ -17,6 +17,7 @@
 // than mixing "the gym" and "me" and leaving the reader to sort them out.
 import type { Me } from '@/lib/supabase';
 import { supabase } from '@/lib/supabase';
+import { siteRailLine, type SiteScope } from '@lib/ownedSites';
 
 export type NavContext = 'gym' | 'mine';
 
@@ -173,6 +174,7 @@ export function Shell({
   gymName,
   gymNameUnread,
   platformAdmin,
+  sites,
   current,
   children,
 }: {
@@ -202,6 +204,21 @@ export function Shell({
    * somebody can reach by typing the URL.
    */
   platformAdmin?: boolean;
+  /**
+   * The gyms this account owns, when the page has bothered to ask.
+   *
+   * Optional and defaulting to undefined, so every page that does not pass it
+   * gets the rail it has always had — and so does every page that DOES pass it,
+   * for the overwhelming majority of accounts: `siteRailLine` returns null for
+   * one gym, for no gyms, and for a read that did not settle. A line appears
+   * only for an account recorded against more than one gym, which is nobody
+   * until a row is written into `owner_sites` with the service role.
+   *
+   * It is a label, not a control. Part 290 changed no policy, so a second site
+   * is a name this console knows and a gym it cannot open; the rail says which
+   * one is being shown and the page says the rest.
+   */
+  sites?: SiteScope;
   current: string;
   children: React.ReactNode;
 }) {
@@ -217,6 +234,9 @@ export function Shell({
   // preference to drift out of step with the page being shown.
   const landing = (id: NavContext) => reachable.find((n) => n.context === id)?.href ?? '/';
   const who = me.fullName?.trim() || me.email || 'Signed in';
+  // Null unless this account owns more than one gym AND the read settled. See
+  // the note on the `sites` prop.
+  const railLine = sites ? siteRailLine(sites) : null;
 
   // Headings in the order their first member appears in NAV, so there is no
   // second list of group names to fall out of step with the nav itself.
@@ -268,6 +288,23 @@ export function Shell({
             </span>
           )}
         </div>
+
+        {/* Which of how many, and only when there is more than one. Null for a
+            single-site owner and null for a read that did not settle, so this
+            renders nothing at all for every account on the platform today —
+            the sentence about a FAILED site read belongs beside the figures it
+            qualifies, not in a label strip. */}
+        {railLine ? (
+          <div
+            className="mono"
+            style={{
+              padding: '0 12px', marginTop: -12, fontSize: 9, letterSpacing: '0.12em',
+              textTransform: 'uppercase', color: 'var(--ink3)',
+            }}
+          >
+            {railLine}
+          </div>
+        ) : null}
 
         {contexts.length > 1 && (
           <div style={{ margin: '0 12px', display: 'grid', gridTemplateColumns: `repeat(${contexts.length}, 1fr)`, border: '1px solid var(--ring)' }}>

@@ -21,7 +21,7 @@
 //                               a number with a dollar sign guessed onto it.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { BRAND } from '../../src/lib/brands';
-import { View, Text, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -29,8 +29,9 @@ import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Meter, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, type Purchase, type TrainerPackage } from '../../src/lib/connect';
+import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/theme/scale';
+import { normaliseCode, checkoutCodeBlocker, type PromoTarget } from '../../src/lib/packagePromo';
+import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, openPurchasePortal, portalPurchase, type Purchase, type TrainerPackage } from '../../src/lib/connect';
 import { packBalance, type PackPurchase } from '../../src/lib/packDraw';
 import { useAuth } from '../../src/ui/auth';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
@@ -64,6 +65,26 @@ export default function ClientPackages() {
    *  were. Non-null means what is drawn came off this phone. */
   const [cachedAt, setCachedAt] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /**
+   * The discount code, and which package's box is open.
+   *
+   * ── Why there is a box at all ─────────────────────────────────────────
+   *
+   * There was not one. The code was collected on Stripe's own hosted page
+   * (`allow_promotion_codes`), which is less to build and put the code
+   * somewhere nothing in this app could see — and the restriction of a code to
+   * ONE package is recorded in Stripe metadata that Stripe does not enforce, so
+   * a code meant for one membership worked on every other one the coach sold.
+   * Typed here, it travels with the request and can be checked before a session
+   * exists. src/lib/packagePromo.ts carries the argument.
+   *
+   * Behind a disclosure rather than on every row: most clients have no code,
+   * and an empty box under every price reads as a price that is negotiable.
+   * null is "no box open", which is not the same as an open box holding
+   * nothing.
+   */
+  const [codeFor, setCodeFor] = useState<string | null>(null);
+  const [code, setCode] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -180,11 +201,38 @@ export default function ClientPackages() {
   const buyable = (offers ?? []).filter((p) => !(p.billing_interval && subIds.has(p.id)));
   const G = layout.gutter;
 
+  /** The package, in the shape the code rule reads. */
+  const promoTargetOf = (p: TrainerPackage): PromoTarget =>
+    ({ id: p.id, name: p.name, billingInterval: p.billing_interval, active: p.active });
+
+  /**
+   * The code as it stands for one package, or the reason it cannot be sent.
+   *
+   * Null while the box is closed or empty — a client who has not typed anything
+   * has not made a mistake, and a refusal under an untouched box is a screen
+   * telling somebody off for nothing.
+   */
+  const codeProblem = (p: TrainerPackage): string | null =>
+    codeFor === p.id && code.trim() ? checkoutCodeBlocker(code, promoTargetOf(p)) : null;
+
   const start = async (p: TrainerPackage) => {
+    // The screen's copy of the rule, so a client is not sent to Stripe to be
+    // told no. connect-checkout runs the same one from the same module.
+    const problem = codeProblem(p);
+    if (problem) { Alert.alert('That code cannot be used here', problem); return; }
+    const typed = codeFor === p.id ? normaliseCode(code) : '';
     setBusy(p.id);
-    const r = p.billing_interval ? await subscribeToPackage(p.id) : await buyPackage(p.id);
+    // A code only ever goes with a subscription. A one-off refuses one —
+    // Repple's cut there is an absolute fee that Stripe wants in the same call
+    // that works the discount out — so `buyPackage` takes none and the server
+    // refuses one on that branch whoever sends it.
+    const r = p.billing_interval ? await subscribeToPackage(p.id, typed) : await buyPackage(p.id);
     setBusy(null);
-    if (!r.ok) Alert.alert('Could not start checkout', r.error || 'Try again in a moment.');
+    if (!r.ok) { Alert.alert('Could not start checkout', r.error || 'Try again in a moment.'); return; }
+    // Cleared only once the payment page has actually opened, so a client whose
+    // checkout was refused still has what they typed in front of them.
+    setCodeFor(null);
+    setCode('');
   };
 
   const stop = (s: ClientSubscription) => {
@@ -212,9 +260,28 @@ export default function ClientPackages() {
     load();
   };
 
-  const manage = async (s: ClientSubscription) => {
-    setBusy(s.id);
-    const r = await openSubscriptionPortal(s.stripe_subscription_id);
+  /**
+   * The one billing portal this client has, and what it is opened FROM.
+   *
+   * A subscription first, because that is the account Stripe keeps their card
+   * on when there is one. Otherwise the newest purchase Stripe created a
+   * Customer for — which is what gives a pack-only buyer a portal at all. Both
+   * are opened by the server in the object's OWN Stripe account context, so a
+   * coach on direct charges and one still on the platform both work.
+   *
+   * Null for both is a real state and it is not an error: every sale made
+   * before part 282 has no Customer to open. The render says so rather than
+   * drawing a button that produces a refusal.
+   */
+  const portalSub = liveSubs.find((s) => !!s.stripe_subscription_id) ?? null;
+  const portalBuy = portalSub ? null : portalPurchase(rows);
+
+  const openBilling = async () => {
+    setBusy('portal');
+    const r = portalSub
+      ? await openSubscriptionPortal(portalSub.stripe_subscription_id)
+      : portalBuy ? await openPurchasePortal(portalBuy.id)
+      : { ok: false as const, error: 'There is no billing account to open.' };
     setBusy(null);
     if (!r.ok) Alert.alert('Billing', r.error || 'Could not open billing in a browser.');
   };
@@ -311,10 +378,54 @@ export default function ClientPackages() {
                       : <Ghost label={busy === s.id ? 'Working…' : 'Cancel'}
                           a11yLabel={`Cancel your ${(s.package_id ? pkgNames.get(s.package_id) : null) || 'subscription'} at the end of the period`}
                           onPress={() => stop(s)} />}
-                    <Ghost label="Payment & Invoices" onPress={() => manage(s)} />
                   </View>
                 </View>
               ))}
+            </Section>
+
+            <Rule />
+
+            {/* ── your card, your invoices, your money back ────────────────
+                This button used to live INSIDE the loop above, and that was not
+                a layout accident: `openSubscriptionPortal` takes a subscription
+                id, so the only place it could be drawn was beside a
+                subscription. A client who had only ever bought session packs
+                therefore had no invoice, no card management and no route to a
+                refund at all, and nothing on the screen said so.
+
+                It is drawn once now, and what it opens depends on what the
+                client actually has. A subscription opens its own portal; with
+                no subscription, the newest PURCHASE Stripe made a Customer for
+                opens the same portal on the same account (part 282). Both open
+                the card, the invoices and the receipts.
+
+                The third state is the honest one and it is why this is not
+                simply a button moved: every sale made before Checkout was asked
+                to create a Customer has none, and there is nothing to open. A
+                dead button is worse than a sentence, so the sentence says what
+                is missing and who can act on it. */}
+            <Section>
+              <SectionHead title="Payment & Invoices" />
+              {subs === null ? (
+                <Flag tone={t.crit}>
+                  We couldn't read your subscriptions, so we can't tell you which billing account to open.
+                  This is our end, not a statement about what you are paying for.
+                </Flag>
+              ) : portalSub || portalBuy ? (
+                <>
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    Your card, your invoices and your receipts, on Stripe. Opens in your browser.
+                  </Text>
+                  <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                    <Ghost label={busy === 'portal' ? 'Opening…' : 'Open Billing'} onPress={openBilling} />
+                  </View>
+                </>
+              ) : (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Stripe has no billing account for anything you have bought here, so there is nothing to open.
+                  Your coach can send a receipt or arrange a refund, and anything you buy from now on will have one.
+                </Text>
+              )}
             </Section>
 
             <Rule />
@@ -431,8 +542,43 @@ export default function ClientPackages() {
                       ? `Charged every ${p.billing_interval === 'month' ? 'month' : 'year'} until you cancel. Cancel any time.`
                       : p.sessions ? `${p.sessions} sessions · paid once` : 'Paid once'}
                   </Text>
+                  {/* ── a discount code, on the things one works on ────────
+                      Only on a subscription. A code cannot be attached to a
+                      one-off package at all (src/lib/packagePromo.ts has the
+                      reason), so a box here would be a box that can only ever
+                      say no — and the client would read the refusal as their
+                      coach having given them a code that does not work.
+
+                      Behind a disclosure because most clients have none, and an
+                      empty code box under every price reads as a price that is
+                      negotiable. */}
+                  {p.billing_interval ? (
+                    codeFor === p.id ? (
+                      <View style={{ marginTop: sp.md }}>
+                        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Discount code</Text>
+                        {/* Normalised as it is typed, so what the client sees is
+                            what is actually sent — Stripe upper-cases these and
+                            drops everything that is not a letter or a digit, and
+                            a box that quietly disagreed with the code on the
+                            poster is a support message for the coach. */}
+                        <TextInput value={code} onChangeText={(v) => setCode(normaliseCode(v))}
+                          autoCapitalize="characters" autoCorrect={false}
+                          placeholder="The code your coach gave you" placeholderTextColor={t.ink3}
+                          accessibilityLabel="Discount code"
+                          style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+                        {codeProblem(p) ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{codeProblem(p)}</Flag> : null}
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                          The discount is applied on the payment page, and what you see there is what you pay.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
+                        <Ghost label="Have A Code" onPress={() => { setCodeFor(p.id); setCode(''); }} />
+                      </View>
+                    )
+                  ) : null}
                   <View style={{ marginTop: sp.md }}>
-                    <Cta label={busy === p.id ? 'Opening…' : p.billing_interval ? 'Subscribe' : 'Buy'} wide disabled={busy === p.id} onPress={() => start(p)} />
+                    <Cta label={busy === p.id ? 'Opening…' : p.billing_interval ? 'Subscribe' : 'Buy'} wide disabled={busy === p.id || !!codeProblem(p)} onPress={() => start(p)} />
                   </View>
                 </View>
               ))}

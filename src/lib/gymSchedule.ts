@@ -30,6 +30,23 @@ export interface GymClass {
   id: string;
   title: string;
   room: string | null;
+  /**
+   * The place within the gym this class happens at — `gym_classes.branch`.
+   *
+   * Free text a trainer types (app/(trainer)/classes.tsx offers chips built
+   * from the gym's own past values) and a client filters the timetable by. It
+   * is a LABEL FOR A PLACE WITHIN ONE GYM and is not the multi-site key; the
+   * argument for that is in supabase/parts/290, and the column carries a
+   * comment saying so.
+   *
+   * Read here because a rate summed across two of these is not either place's
+   * figure, and until this was selected no screen could tell. `branchSpan` in
+   * src/lib/ownedSites.ts is what asks the question; nothing else reads it.
+   *
+   * Optional on the type for the same reason the four fields below are: rows
+   * are built by hand in tests whose subject is rate arithmetic.
+   */
+  branch?: string | null;
   instructor: string | null;
   trainerId: string | null;
   startsAt: string;
@@ -210,7 +227,7 @@ export async function fetchClasses(
     (from, to) => {
       let q = sb
         .from('gym_classes')
-        .select('id, title, room, instructor, trainer_id, starts_at, duration_min, capacity, status, cancelled_at, cancel_reason, series_id')
+        .select('id, title, room, branch, instructor, trainer_id, starts_at, duration_min, capacity, status, cancelled_at, cancel_reason, series_id')
         .eq('tenant_id', tenantId)
         .gte('starts_at', fromISO)
         .lte('starts_at', toISO);
@@ -284,6 +301,7 @@ export async function fetchClasses(
     id: r.id,
     title: r.title,
     room: r.room ?? null,
+    branch: r.branch ?? null,
     instructor: r.instructor ?? null,
     trainerId: r.trainer_id ?? null,
     startsAt: r.starts_at,

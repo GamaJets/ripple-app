@@ -95,13 +95,12 @@ export function isRedeemable(
  * local time makes a pass issued late in the evening expire a day early for
  * anyone east of UTC.
  */
-export function expiryFor(issuedOn: string, validDays: number | null | undefined): string | null {
-  if (validDays == null) return null;
-  const d = new Date(`${issuedOn}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return null;
-  d.setUTCDate(d.getUTCDate() + validDays);
-  return d.toISOString().slice(0, 10);
-}
+// `expiryFor` lives in `./termDates`, a leaf module with no relative imports,
+// because `gym-checkout` imports it and Deno cannot resolve an extensionless
+// specifier — this file pulls in rowCap and wroteRows and so can never be
+// imported by an edge function. Re-exported so every caller here is unchanged.
+import { expiryFor } from './termDates';
+export { expiryFor };
 
 /**
  * What the gym actually took for these passes.

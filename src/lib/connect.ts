@@ -84,7 +84,22 @@ export interface Purchase { id: string; client_id: string | null; trainer_id: st
   /** The Checkout Session, which is what a refund is traced back to. Selected
    *  by the coach-side read so the screen can tell a sale that CAN be refunded
    *  from one recorded by other means. */
-  stripe_session_id?: string | null }
+  stripe_session_id?: string | null;
+  /** The Stripe Customer this sale was charged to, on the account named by
+   *  `stripe_account_id` (part 282). Null on every sale made before Checkout
+   *  was asked to create one, and null is a sentence rather than a dead button:
+   *  there is no Customer at Stripe to open a billing portal for and one cannot
+   *  be manufactured afterwards. `portalPurchase` is what picks a row that has
+   *  one. */
+  stripe_customer_id?: string | null;
+  /** The connected account this sale was charged ON, or null for the platform
+   *  (part 161). Written from the Checkout Session's metadata by the webhook,
+   *  and it is a fact about THIS SALE rather than about the coach's current
+   *  setting — a coach who has since moved to direct charges still has older
+   *  sales on the platform. connect-refund reads it to pick the Stripe context;
+   *  the screen reads it to say whose balance a refund is about to leave, which
+   *  is a different sentence on each model. */
+  stripe_account_id?: string | null }
 
 const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
 
@@ -380,6 +395,47 @@ export async function buyPackage(packageId: string): Promise<{ ok: boolean; erro
     if (data?.url) { await openUrl(data.url); return { ok: true }; }
     return { ok: false, error: data?.error || 'Could not start checkout.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
+}
+
+/**
+ * Open the Stripe billing portal for a ONE-OFF purchase.
+ *
+ * The twin of `openSubscriptionPortal` in src/lib/subscriptions.ts, for the
+ * client who never subscribed to anything. That function takes a subscription
+ * id and finds the Stripe Customer on the subscription row; a client who has
+ * only ever bought session packs has no such row, which is why
+ * app/(client)/packages.tsx could only draw the button inside its list of live
+ * subscriptions — and why somebody with three packs and no subscription had no
+ * invoice, no card management and no route to a refund at all.
+ *
+ * `client_purchases.stripe_customer_id` (part 282) is what this opens, and the
+ * server opens it in the purchase's OWN account context: a Customer belongs to
+ * one Stripe account, so a `cus_...` created on a coach's connected account is
+ * not found on the platform and the other way round.
+ *
+ * NULL customer is the expected answer for every sale made before that column
+ * existed, and the error says so in words. The caller must NOT render a button
+ * that produces it: `canOpenPurchasePortal` below is what a screen asks first.
+ */
+export async function openPurchasePortal(purchaseId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('connect-checkout', {
+      body: { action: 'purchase_portal', purchase_id: purchaseId, return_url: appLink('packages') },
+    });
+    if (error) return { ok: false, error: error.message };
+    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    return { ok: false, error: data?.error || 'Could not open billing.' };
+  } catch (e) { return { ok: false, error: (e as Error).message }; }
+}
+
+/** The purchase a billing portal can actually be opened for: the most recent
+ *  one Stripe made a Customer for. Null when there is none, which is a sentence
+ *  the screen prints rather than a button it draws. */
+export function portalPurchase(rows: Purchase[] | null | undefined): Purchase | null {
+  if (!rows || !rows.length) return null;
+  const withCustomer = rows.filter((r) => typeof r.stripe_customer_id === 'string' && r.stripe_customer_id.trim());
+  if (!withCustomer.length) return null;
+  return [...withCustomer].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
 }
 
 /**

@@ -54,6 +54,7 @@ import { fetchMemberships, type Membership } from '@lib/gymRecord';
 import { fetchVisits, type Visit } from '@lib/gymVisits';
 import { fetchClasses, pct, type GymClass } from '@lib/gymSchedule';
 import { summariseClassRows, type ClassRates, type ClassSummaryRow } from '@lib/classRates';
+import { branchSpan, branchNote } from '@lib/ownedSites';
 import { cohorts, type Cohort, type TrainerLike } from '@lib/ownerAnalytics';
 import {
   MIN_COHORT_FOR_RATE, COHORT_MATURITY_DAYS, rateOf, pointsPerMember, monthOfDate,
@@ -571,10 +572,14 @@ export default function Analytics() {
       .map((c) => ({
         classId: c.id,
         title: c.title,
-        // Neither is read by summariseClassRows and neither is rendered here.
-        // Left empty rather than invented.
+        // `kind` is not read by summariseClassRows and is not rendered here;
+        // left empty rather than invented.
+        //
+        // `branch` was empty too, and that is a different thing: it is the field
+        // that says whether these classes happened at one place or several, and
+        // emptying it made a two-place total indistinguishable from one gym's.
         kind: '',
-        branch: '',
+        branch: c.branch ?? '',
         trainerId: c.trainerId ?? '',
         trainerName: c.instructor ?? '',
         startsAt: c.startsAt,
@@ -587,13 +592,32 @@ export default function Analytics() {
 
   const uncapped = (classes.rows ?? []).filter((c) => !(c.capacity || 0)).length;
 
+  /** How many places the fill figure covers. See the same note on /classes:
+   *  `summariseClassRows` sums whatever it is handed, so a gym using `branch`
+   *  for two rooms in two streets gets one rate over both. Unknown until the
+   *  read settles, and 'none' for every gym in the live database today. */
+  const classPlaces = branchSpan(
+    classes.rows ?? [],
+    classes.rows ? 'ready' : classes.state === 'failed' ? 'error' : 'loading',
+  );
+
+  /** The clause that stops the fill tile being read as one room's rate.
+   *
+   *  Empty for every gym today, because nothing in this console has ever
+   *  written a branch. When a gym does use the field the tile says the figure
+   *  spans more than one place, rather than leaving the reader to assume it
+   *  does not — the full sentence, with the places named, is on /classes. */
+  const placesClause = branchNote(classPlaces)
+    ? `, and these classes ran at more than one place, so this covers all of them`
+    : '';
+
   const fillNote =
     classes.state === 'failed' ? 'the classes could not be read'
       : classes.state === 'loading' ? 'reading the timetable…'
         : (classes.rows?.length ?? 0) === 0 ? 'no class ran in the last 30 days'
           : !rated || rated.fill == null
             ? `none of the ${classes.rows?.length ?? 0} classes recorded a capacity`
-            : `${rated.booked} booked of ${rated.capacity} places${uncapped ? `, ${uncapped} class${uncapped === 1 ? '' : 'es'} left out for want of a capacity` : ''}`;
+            : `${rated.booked} booked of ${rated.capacity} places${uncapped ? `, ${uncapped} class${uncapped === 1 ? '' : 'es'} left out for want of a capacity` : ''}${placesClause}`;
 
   /* ── cohorts ───────────────────────────────────────────────────────────── */
 

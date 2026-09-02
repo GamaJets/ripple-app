@@ -75,6 +75,10 @@
 // nothing in here may ever write a column that implies otherwise.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// The two decisions gym fulfilment turns on, imported rather than restated so a
+// screen and its server cannot disagree about what a renewal or an upgrade does
+// to somebody's membership. Both are asserted in src/lib/memberBuy.test.ts.
+import { renewalIsContiguous, supersedeRow } from '../../../src/lib/termDates.ts';
 
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
 
@@ -251,6 +255,32 @@ Deno.serve(async (req) => {
   };
 
   /**
+   * One membership term, written from a paid gym order.
+   *
+   * Every value comes off the ORDER and none is recomputed here. The member was
+   * quoted a start and an end before their card was touched (see
+   * supabase/functions/gym-checkout), and a webhook that arrives a day late
+   * must not shorten what they bought.
+   *
+   * `gym_order_id` is stamped in the same insert, which is what makes a retry
+   * of this event find the row instead of writing a second one — the unique
+   * index in part 281 is the backstop if two ever race.
+   */
+  const insertMembership = async (order: any, orderId: string): Promise<{ id: string | null; error: string | null }> => {
+    const { data, error } = await service.from('memberships').insert({
+      tenant_id: order.tenant_id,
+      member_id: order.member_id,
+      plan_id: order.plan_id,
+      started_on: order.term_starts_on,
+      ends_on: order.term_ends_on,
+      status: 'active',
+      gym_order_id: orderId,
+    }).select('id').maybeSingle();
+    if (error) return { id: null, error: error.message };
+    return { id: data?.id ?? null, error: null };
+  };
+
+  /**
    * Mirror one Connect subscription. `at` is how current the object is — the
    * event's own timestamp for an event payload, now() for something just
    * re-read from Stripe.
@@ -391,6 +421,33 @@ Deno.serve(async (req) => {
         updated_at: new Date().toISOString(),
       }).eq('stripe_account_id', acct.id);
       if (error) return fail('connect_accounts', error.message);
+
+      // The same event, for a GYM's own account (part 280).
+      //
+      // Written as a second UPDATE rather than as a branch, because an account
+      // id belongs to exactly one of the two tables and neither read is
+      // expensive: `connect_accounts` is keyed on the coach and
+      // `gym_connect_accounts` on the tenant, and an id in one is in neither
+      // the other's index nor its rows. An UPDATE that matches nothing is not
+      // an error in PostgREST and costs one index probe.
+      //
+      // It matters as much here as it does for a coach and for the same reason:
+      // an owner finishes verification on Stripe's hosted flow and may never
+      // come back through the app, so this is the only thing that will ever
+      // tell us `card_payments` went active. `gym-checkout` refuses a charge
+      // while that capability is present and not active, so a gym whose status
+      // is never written stays unable to sell to anybody.
+      const { error: gymErr } = await service.from('gym_connect_accounts').update({
+        charges_enabled: !!acct.charges_enabled,
+        details_submitted: !!acct.details_submitted,
+        payouts_enabled: !!acct.payouts_enabled,
+        card_payments_status: acct.capabilities?.card_payments ?? null,
+        transfers_status: acct.capabilities?.transfers ?? null,
+        losses_owner: acct.controller?.losses?.payments ?? null,
+        account_type: acct.type ?? null,
+        updated_at: new Date().toISOString(),
+      }).eq('stripe_account_id', acct.id);
+      if (gymErr) return fail('gym_connect_accounts', gymErr.message);
     } else if (event.type === 'payout.paid' || event.type === 'payout.failed'
                || event.type === 'payout.updated' || event.type === 'payout.canceled') {
       // ── what actually landed in the coach's bank ─────────────────────────
@@ -451,6 +508,181 @@ Deno.serve(async (req) => {
       // A client bought a trainer's package (Connect checkout).
       const sess = event.data.object as Stripe.Checkout.Session;
       const meta = (sess.metadata || {}) as Record<string, string>;
+
+      // ── a member bought something from their GYM ─────────────────────────
+      //
+      // A third business arrives down this pipe. `repple_kind: 'gym_order'`
+      // tells it apart, the same way `connect_subscription` tells a client's
+      // coaching subscription from a coach's own Repple plan, and getting it
+      // wrong in the obvious direction would file a gym's membership income as
+      // a coach's package sale on a `trainer_id` nobody set.
+      //
+      // WHAT FULFILMENT MEANS HERE. `gym_orders` is the money; the ENTITLEMENT
+      // is a row in `memberships` or `gym_passes`, and it is written here
+      // because this is the only moment anything knows the money moved. Every
+      // date and every figure is copied off the ORDER rather than recomputed:
+      // the member was quoted a term before their card was touched, and a
+      // webhook that arrives a day late must not shorten it.
+      //
+      // IDEMPOTENCE, which a webhook needs and a payment needs more than most.
+      // Three guards, in order of how much they cost: the replay ledger above
+      // catches the ordinary duplicate delivery; an order already marked 'paid'
+      // is left alone; and the entitlement itself carries `gym_order_id` with a
+      // UNIQUE index (part 281), which is the one that covers the dangerous
+      // window — a retry after the membership was inserted and before the order
+      // was closed. Without the third, one payment buys two memberships.
+      if (meta.repple_kind === 'gym_order' && meta.order_id) {
+        const orderId = meta.order_id;
+        const nowIso = new Date().toISOString();
+        const { data: order, error: ordErr } = await service.from('gym_orders')
+          .select('id, tenant_id, member_id, kind, intent, status, amount_cents, currency, plan_id, pass_type_id, supersedes_membership_id, term_starts_on, term_ends_on, uses_total, expires_on, membership_id, pass_id')
+          .eq('id', orderId).maybeSingle();
+        if (ordErr) return fail('gym_orders lookup', ordErr.message);
+
+        if (!order) {
+          // Money has moved against an order this database has no record of.
+          // Retrying cannot conjure the row, so the event is accepted and the
+          // fact is logged as loudly as a log can be: the Stripe payment is the
+          // surviving record and somebody has to reconcile it by hand.
+          console.error('stripe-webhook: PAID gym order ' + orderId + ' has no row in gym_orders. Session ' + sess.id + ', account ' + (eventAccount ?? 'platform') + '. Nothing was fulfilled.');
+        } else if (order.status === 'paid') {
+          // Already done. Not an error and not worth a second write.
+        } else if (sess.payment_status !== 'paid' && sess.payment_status !== 'no_payment_required') {
+          // A completed session is not necessarily a paid one — a delayed
+          // payment method completes and settles later. Nothing is granted
+          // until it does, and the order stays pending rather than being
+          // closed against a payment that has not happened.
+          console.warn('stripe-webhook: gym order ' + orderId + ' completed with payment_status ' + String(sess.payment_status) + '; nothing granted yet.');
+        } else {
+          const pi = typeof sess.payment_intent === 'string' ? sess.payment_intent : (sess.payment_intent?.id ?? null);
+          let membershipId: string | null = order.membership_id ?? null;
+          let passId: string | null = order.pass_id ?? null;
+          let problem: string | null = null;
+
+          if (order.kind === 'membership') {
+            // Anything this order has already produced. The unique index makes
+            // this the authoritative answer rather than a guess.
+            const { data: already, error: alreadyErr } = await service.from('memberships')
+              .select('id').eq('gym_order_id', orderId).maybeSingle();
+            if (alreadyErr) return fail('memberships lookup', alreadyErr.message);
+
+            if (already?.id) {
+              membershipId = already.id;
+            } else if (order.intent === 'renew' && order.supersedes_membership_id) {
+              // Extend, or start again after a gap. `renewalIsContiguous` is
+              // the decision and it is not cosmetic: pushing `ends_on` out
+              // across a lapse would leave a membership row claiming somebody
+              // was a member through weeks they were not, and that row is what
+              // an attendance or billing dispute is settled against.
+              const { data: held, error: heldErr } = await service.from('memberships')
+                .select('id, member_id, plan_id, started_on, ends_on').eq('id', order.supersedes_membership_id).maybeSingle();
+              if (heldErr) return fail('memberships lookup', heldErr.message);
+              if (!held || String(held.member_id) !== String(order.member_id)) {
+                problem = 'The membership this renewal was for could not be found.';
+              } else if (renewalIsContiguous(held.ends_on ?? null, String(order.term_starts_on))) {
+                const { error: extErr, count } = await service.from('memberships').update({
+                  ends_on: order.term_ends_on,
+                  status: 'active',
+                  gym_order_id: orderId,
+                }, { count: 'exact' }).eq('id', held.id);
+                if (extErr) return fail('memberships', extErr.message);
+                // A write that matched no rows is not an error in PostgREST. It
+                // would mean the renewal was paid for and the membership never
+                // moved, which is exactly the state that must not be recorded
+                // as success.
+                if (count === 0) problem = 'The membership could not be extended.';
+                else membershipId = held.id;
+              } else {
+                const fresh = await insertMembership(order, orderId);
+                if (fresh.error) return fail('memberships', fresh.error);
+                membershipId = fresh.id;
+                if (!membershipId) problem = 'The new term could not be recorded.';
+              }
+            } else {
+              const fresh = await insertMembership(order, orderId);
+              if (fresh.error) return fail('memberships', fresh.error);
+              membershipId = fresh.id;
+              if (!membershipId) problem = 'The membership could not be recorded.';
+              // An upgrade closes the one it replaces. Written AFTER the new
+              // membership exists, so a failure here leaves somebody with two
+              // running memberships rather than none.
+              if (membershipId && order.intent === 'upgrade' && order.supersedes_membership_id) {
+                const { data: held, error: heldErr } = await service.from('memberships')
+                  .select('id, member_id, started_on').eq('id', order.supersedes_membership_id).maybeSingle();
+                if (heldErr) return fail('memberships lookup', heldErr.message);
+                if (held && String(held.member_id) === String(order.member_id)) {
+                  const close = supersedeRow({ startedOn: String(held.started_on) }, String(order.term_starts_on));
+                  if (close) {
+                    const { error: closeErr } = await service.from('memberships')
+                      .update({ status: close.status, ends_on: close.ends_on }).eq('id', held.id);
+                    // Logged, not fatal, and not `problem`: the member HAS the
+                    // plan they paid for. What is wrong is that the old one is
+                    // still open beside it, which is a tidy-up rather than a
+                    // reason to tell somebody their purchase failed.
+                    if (closeErr) console.error('stripe-webhook: gym order ' + orderId + ' upgraded but the old membership ' + held.id + ' was not closed:', closeErr.message);
+                  }
+                }
+              }
+            }
+          } else {
+            const { data: already, error: alreadyErr } = await service.from('gym_passes')
+              .select('id').eq('gym_order_id', orderId).maybeSingle();
+            if (alreadyErr) return fail('gym_passes lookup', alreadyErr.message);
+            if (already?.id) {
+              passId = already.id;
+            } else {
+              const { data: made, error: passErr } = await service.from('gym_passes').insert({
+                tenant_id: order.tenant_id,
+                pass_type_id: order.pass_type_id,
+                holder_id: order.member_id,
+                expires_on: order.expires_on,
+                uses_total: order.uses_total,
+                // What was ACTUALLY taken, from Stripe, in the unit Stripe
+                // charged in. `gym_passes.paid_cents` is null when nobody
+                // recorded a price, which is a different fact from free, and
+                // `passRevenueCents` counts those out of a total rather than as
+                // zero. Stripe stated both here, so both are recorded.
+                paid_cents: sess.amount_total ?? order.amount_cents,
+                currency: (sess.currency ?? order.currency ?? '').toUpperCase(),
+                gym_order_id: orderId,
+              }).select('id').maybeSingle();
+              if (passErr) return fail('gym_passes', passErr.message);
+              passId = made?.id ?? null;
+              if (!passId) problem = 'The pass could not be recorded.';
+            }
+          }
+
+          if (problem) {
+            // The money moved and the entitlement did not. Recorded as 'failed'
+            // with the reason, because a member who has paid and holds nothing
+            // must not be left looking at a screen that shows no membership and
+            // says nothing about why.
+            const { error: markErr } = await service.from('gym_orders').update({
+              status: 'failed',
+              failure_note: problem,
+              stripe_session_id: sess.id,
+              stripe_payment_intent: pi,
+              paid_at: eventAt,
+              updated_at: nowIso,
+            }).eq('id', orderId);
+            if (markErr) return fail('gym_orders', markErr.message);
+            console.error('stripe-webhook: gym order ' + orderId + ' was paid and could not be fulfilled: ' + problem);
+          } else {
+            const { error: doneErr } = await service.from('gym_orders').update({
+              status: 'paid',
+              membership_id: membershipId,
+              pass_id: passId,
+              stripe_session_id: sess.id,
+              stripe_payment_intent: pi,
+              paid_at: eventAt,
+              failure_note: null,
+              updated_at: nowIso,
+            }).eq('id', orderId);
+            if (doneErr) return fail('gym_orders', doneErr.message);
+          }
+        }
+      }
+
       // A subscription checkout also completes, with an amount_total that is
       // only the FIRST month. Recording it as a purchase would put a one-off
       // sale in the client's history for a thing that recurs, and — worse —
@@ -475,6 +707,12 @@ Deno.serve(async (req) => {
           // ordinary course — because a REFUND does, and a refund on a direct
           // charge has to be issued in the connected account's context.
           ...(accountForRow(meta) ? { stripe_account_id: accountForRow(meta) } : {}),
+          // The Stripe Customer this sale was charged to (part 282), so a
+          // client who has only ever bought one-off packs has a billing portal
+          // to reach. Null on every sale made before `customer_creation` was
+          // asked for, and null stays null: there is no Customer at Stripe to
+          // point at and one cannot be manufactured afterwards.
+          ...(typeof sess.customer === 'string' && sess.customer ? { stripe_customer_id: sess.customer } : {}),
           amount_cents: sess.amount_total,
           // The unit the amount beside it is in, from the SESSION — what Stripe
           // actually charged in, not what the package row says today.
@@ -677,6 +915,15 @@ Deno.serve(async (req) => {
 //     invoice.marked_uncollectible
 //     payout.paid
 //     payout.failed
+//
+// A GYM's own account (part 280) is a connected account like any other and its
+// events arrive on the same connected destination. Nothing extra has to be
+// subscribed to for gym sales — `checkout.session.completed` and
+// `account.updated` are already on the list above — but the consequence of the
+// destination being wrong is now wider than one coach: a member pays for a
+// membership, the gym is paid, and the app never grants it. `gym_orders` would
+// sit at 'pending' forever, which is at least a row somebody can find, and the
+// member would be told their purchase was never confirmed.
 //
 // The PLATFORM destination keeps the same subscription list it has today: the
 // owner's own billing still runs there, and coaches still on destination

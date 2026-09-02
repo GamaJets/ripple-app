@@ -39,7 +39,7 @@
 //    the counts of unlabelled and unpriced rows ADD rather than being taken
 //    from whichever side had more, and neither subtotal is modified — the
 //    screen renders both of them beside the total.
-import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, type TakenRow, type PackRow } from './coachMoney';
+import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, type TakenRow, type PackRow } from './coachMoney';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -65,6 +65,71 @@ eq(minorMoney(60000, '  '), null, 'a blank currency is no currency');
 eq(minorMoney(null, 'aed'), null, 'no amount is not zero');
 eq(minorMoney(0, 'aed'), 'AED 0.00', 'a real zero is a real zero and is still printed');
 eq(moneyIn(Number.NaN, 'aed', true), null, 'NaN is not a figure');
+
+/* ── how many decimal places this money has ───────────────────────────────── */
+
+eq(currencyDecimals('gbp'), 2, 'most of the world has two');
+eq(currencyDecimals('JPY'), 0, 'and a yen has none');
+eq(currencyDecimals('kwd'), 3, 'and a dinar has three — a thousand fils in it, not a hundred');
+eq(currencyDecimals(null), null, 'and a currency nobody stated has no answer at all, which is not two');
+eq(currencyDecimals('  '), null, 'a blank currency is no currency here either');
+
+// The figure a hundred times out. Stripe stores a KWD amount in fils, so 12340
+// of them is KWD 12.340 — printed at two places it read as KWD 123.40.
+eq(minorMoney(12340, 'kwd'), 'KWD 12.340', 'a three-decimal currency divides by a thousand');
+eq(minorMoney(12340, 'bhd'), 'BHD 12.340', 'and so does every other one of them');
+
+/* ── an amount a coach typed, in minor units ──────────────────────────────── */
+
+const typed = (s: string, cur: string | null) => {
+  const r = readMinorAmount(s, cur);
+  return r.ok ? r.minorUnits : null;
+};
+
+eq(typed('12.50', 'gbp'), 1250, 'a two-place amount becomes minor units exactly');
+eq(typed('12,50', 'gbp'), 1250, 'the decimal COMMA on a French or German keyboard is the same amount');
+eq(typed('12.5', 'gbp'), 1250, 'a short fraction is padded, not misread as five minor units');
+eq(typed('12', 'gbp'), 1200, 'and a whole figure is not twelve pence');
+eq(typed('0.01', 'gbp'), 1, 'the smallest real amount is readable');
+eq(typed('  12.50 ', 'gbp'), 1250, 'surrounding space is not part of the number');
+eq(typed('.5', 'gbp'), 50, 'a leading point is a fraction of one');
+
+// The multiplication that is never done. 12.35 * 100 is 1234.9999999999998 in
+// floating point, and a reader that rounds it back is a reader that can round
+// the wrong way on some other figure.
+eq(typed('12.35', 'gbp'), 1235, 'the conversion is done on the digits, so no float rounds it');
+eq(typed('1234567.89', 'gbp'), 123456789, 'and a large amount survives it too');
+
+// No default currency, here as everywhere else.
+ok(!readMinorAmount('12.50', null).ok, 'an amount with no currency is not an amount');
+ok(!readMinorAmount('12.50', '   ').ok, 'nor is one whose currency is blank');
+
+// A yen has no minor unit, so a "£12.50" box in front of one is the wrong box.
+eq(typed('500', 'jpy'), 500, 'a zero-decimal amount is itself, not a hundredth of itself');
+ok(!readMinorAmount('500.50', 'jpy').ok, 'and half a yen is a slip rather than an amount');
+ok(/no smaller unit/i.test((readMinorAmount('500.5', 'krw') as { reason: string }).reason),
+  'and the coach is told why rather than having it silently truncated');
+
+// Three places, and Stripe's own rule about the last of them.
+eq(typed('12.340', 'kwd'), 12340, 'a dinar amount is read in thousandths');
+eq(typed('12.34', 'kwd'), 12340, 'and a short fraction pads to the thousandth');
+ok(!readMinorAmount('12.345', 'kwd').ok, 'an amount Stripe cannot charge is refused rather than rounded');
+
+// Ambiguity is refused, never resolved. "1,234" is one thousand two hundred and
+// thirty-four to one reader and one and a bit to another, and neither reading
+// may be chosen on somebody's behalf when the answer credits a card.
+ok(!readMinorAmount('1,234', 'gbp').ok, 'a thousands separator is refused rather than guessed at');
+ok(!readMinorAmount('1,234.50', 'gbp').ok, 'and so is the fully grouped spelling');
+ok(/thousands separator/i.test((readMinorAmount('1,234', 'gbp') as { reason: string }).reason),
+  'and the refusal says what to type instead');
+
+ok(!readMinorAmount('', 'gbp').ok, 'an empty box is not an amount');
+ok(!readMinorAmount('   ', 'gbp').ok, 'nor is a box holding a space');
+ok(!readMinorAmount('-5', 'gbp').ok, 'a negative refund is not a refund');
+ok(!readMinorAmount('12.5.0', 'gbp').ok, 'two separators are not a number');
+ok(!readMinorAmount('£12.50', 'gbp').ok, 'a symbol is refused rather than stripped');
+ok(!readMinorAmount('12abc', 'gbp').ok, 'and so is trailing text — this is not a half-typed load');
+ok(!readMinorAmount('99999999999999999', 'gbp').ok, 'a figure past what integers hold is refused, not silently rounded');
 
 /* ── adding up a period ───────────────────────────────────────────────────── */
 
