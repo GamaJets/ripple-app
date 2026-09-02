@@ -40386,3 +40386,562 @@ create trigger gym_classes_notify_cancelled
 revoke all on function public.class_cancelled_notify() from public;
 revoke all on function public.class_cancelled_notify() from anon;
 revoke all on function public.class_cancelled_notify() from authenticated;
+
+-- ▶ a-signature-was-a-member-of-staff-typing-the-members-name.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Every signature this product holds is a member of staff typing the member's
+-- name into a box.
+--
+-- studio-web/app/compliance/page.tsx has one control that writes to
+-- `gym_agreement_signatures`, and it is a <select> of the roster beside a text
+-- input labelled "The name they signed with", filled in by whoever is at the
+-- desk. There is no member-side path anywhere in the repository: nothing the
+-- member opens, nothing the member taps, no row any member's own session has
+-- ever written. Part 185 built the table for both — `witnessed_by` is
+-- documented there as "NULL for a signature taken in the app by the member
+-- themselves" — and the app half was never dispatched.
+--
+-- So the document a gym would produce after an injury reads "Sara Ahmed signed
+-- our liability waiver on 4 March", and what actually happened is that a
+-- part-time receptionist typed those eleven characters. The row cannot say
+-- which, because nothing on it distinguishes the two.
+--
+-- ── Why this is a labelling defect and not a worthless record ─────────────
+--
+-- A signature taken at a desk is not nothing. A gym that sat somebody down with
+-- the waiver on a clipboard and keyed the result in has done most of what the
+-- law asks; what it has is a STAFF ATTESTATION that the member agreed, which is
+-- a real and ordinary business record. What it is not is the member's own act,
+-- and the two carry very different weight in front of anybody who asks.
+--
+-- The defect is that the schema cannot tell them apart, so the screen calls
+-- both "signed" and the gym believes it holds the stronger one. The fix is
+-- therefore two columns and a trigger, not a rewrite:
+--
+--   signed_by     the account whose session actually wrote the row. Set HERE,
+--                 from auth.uid(), never from anything a caller sends.
+--   attribution   'member' when those are the same person, 'staff' when they
+--                 are not, and 'unknown' for every row written before this
+--                 part existed.
+--
+-- ── Why 'unknown' exists, and why the backfill does not guess ─────────────
+--
+-- The tempting backfill is `attribution = 'staff'` for everything, on the
+-- reasoning that no member-side path existed so no member can have signed. That
+-- reasoning is about the APP, and the table is reachable by anything holding a
+-- session: part 185 has shipped `gym_agreement_sig_own_i` since the day it
+-- landed, so a member-attributed row is possible in principle and this part
+-- cannot tell whether one exists.
+--
+-- So the backfill claims only what the row already says. `witnessed_by` names a
+-- member of staff who took it, and only the console ever set it, so those rows
+-- are 'staff' on the evidence of their own contents. Everything else is
+-- 'unknown' — written before anybody was recording this, and this part will not
+-- invent an answer to make a screen tidier. `signed_by` stays NULL on every
+-- backfilled row for the same reason: nothing recorded it at the time.
+--
+-- Nothing is relabelled UPWARDS. No existing row becomes 'member'.
+--
+-- ── Why a trigger and not a column the client fills in ────────────────────
+--
+-- Because the whole point is that the client cannot be believed about this. An
+-- `attribution` the console sets is the same defect one level up: the desk
+-- would send 'member' and the row would say the member signed. The value is
+-- derived in the database from auth.uid(), which is the one fact a session
+-- cannot lie about, and the RLS policy below refuses the owner's insert
+-- outright when the member_id is their own — so staff cannot write a
+-- member-attributed signature by any route, trigger or no trigger.
+--
+-- ── Why version_signed is validated rather than trusted ───────────────────
+--
+-- It is denormalised on purpose (part 185: "a signature has to be legible from
+-- its own row") and it arrived from the caller unchecked, so a stale screen
+-- could pin a signature to a version number the agreement never had. Each
+-- version is its OWN agreement row, so the correct value is never in doubt —
+-- it is read off the agreement being signed and a mismatch is refused rather
+-- than silently corrected, because a mismatch means the screen was showing
+-- something that is no longer true and the person should be asked again.
+--
+-- Additive and idempotent.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. what the row now records about who wrote it ──────────────────────────
+
+alter table public.gym_agreement_signatures
+  add column if not exists signed_by uuid references public.profiles(id) on delete set null;
+
+-- Default 'unknown' rather than 'staff', so that a row arriving by any route the
+-- trigger below does not cover reads as unrecorded instead of as an assertion
+-- nobody made. The trigger overwrites it on every insert, so the default is
+-- never what a live row ends up holding — it is the safe answer if this part is
+-- ever half-applied.
+alter table public.gym_agreement_signatures
+  add column if not exists attribution text not null default 'unknown';
+
+comment on column public.gym_agreement_signatures.signed_by is
+  'The account whose session wrote this row, from auth.uid(). NULL on rows written before supabase/parts/520, where nothing recorded it.';
+
+comment on column public.gym_agreement_signatures.attribution is
+  'member = the member''s own authenticated session wrote this. staff = somebody at the desk recorded it on their behalf. unknown = written before this was recorded and no honest answer exists. It is derived in the database, never sent by a caller.';
+
+-- ── 2. the backfill, which claims only what the rows already say ────────────
+
+update public.gym_agreement_signatures
+   set attribution = 'staff'
+ where attribution = 'unknown'
+   and witnessed_by is not null;
+
+-- ── 3. what a row is allowed to say ─────────────────────────────────────────
+--
+-- 'member' is the claim with consequences, so it is the one the constraint is
+-- about: it may only stand where the member's own account wrote the row, and a
+-- signature the member gave themselves has no witness by definition — a
+-- witnessed_by beside 'member' would be a member of staff attesting to
+-- something they were not present for.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conname = 'gym_signature_attribution_is_earned'
+       and conrelid = 'public.gym_agreement_signatures'::regclass
+  ) then
+    alter table public.gym_agreement_signatures
+      add constraint gym_signature_attribution_is_earned check (
+        attribution in ('member', 'staff', 'unknown')
+        and (attribution <> 'member'
+             or (signed_by is not null and signed_by = member_id and witnessed_by is null))
+      );
+  end if;
+end $$;
+
+-- ── 4. who wrote it, decided by the database ────────────────────────────────
+
+/**
+ * Stamp the writer onto the row, and say plainly which of the two things it is.
+ *
+ * `signed_by` is assigned rather than validated: whatever a caller sends is
+ * discarded, because a column that can be sent is a column that can be forged
+ * and this one exists precisely to be unforgeable. auth.uid() is NULL for
+ * service_role, and a signature written by a back-end job is not somebody
+ * signing, so that case is refused rather than recorded as staff — there is no
+ * member of staff to name.
+ *
+ * `attribution` follows from it and is never taken from the caller either. The
+ * console does not send either column and does not need to know they exist.
+ */
+create or replace function public.gym_signature_attribution()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  actor uuid := auth.uid();
+  a record;
+begin
+  if actor is null then
+    raise exception
+      'A signature has to be written by somebody signed in: this row has no session behind it, so there is nobody it could be attributed to.'
+      using errcode = 'P0001';
+  end if;
+
+  select id, tenant_id, version into a
+    from public.gym_agreements
+   where id = new.agreement_id;
+  if a.id is null then
+    raise exception 'That agreement does not exist, so there is nothing this signature could be against.'
+      using errcode = 'P0001';
+  end if;
+  if a.tenant_id is distinct from new.tenant_id then
+    raise exception 'That agreement belongs to a different gym.' using errcode = 'P0001';
+  end if;
+
+  -- The version is not negotiable. Each version is its own agreement row, so
+  -- the right answer is on the row being signed; a caller disagreeing means the
+  -- screen was showing a version that has since been superseded, and the person
+  -- in front of it should be shown the current wording rather than have this
+  -- one quietly corrected underneath them.
+  if new.version_signed is distinct from a.version then
+    raise exception
+      'That signature is against version % and the agreement it names is version %. The wording on screen is out of date — reload it and ask again, because the version pinned to a signature is what makes it evidence of anything.',
+      new.version_signed, a.version
+      using errcode = 'P0001';
+  end if;
+
+  new.signed_by := actor;
+
+  if new.member_id is not null and new.member_id = actor then
+    if new.witnessed_by is not null then
+      raise exception
+        'This is the member signing for themselves, so there is no witness to name. A witness is who took the signature at the desk when somebody else did.'
+        using errcode = 'P0001';
+    end if;
+    new.attribution := 'member';
+  else
+    new.attribution := 'staff';
+    -- Somebody recorded this on another person's behalf, and the row has to
+    -- name them. The console already passes it; this is what makes it true of
+    -- every route, so that 'staff' always answers "which member of staff".
+    if new.witnessed_by is null then new.witnessed_by := actor; end if;
+  end if;
+
+  return new;
+end $$;
+
+revoke all on function public.gym_signature_attribution() from public, anon, authenticated;
+
+drop trigger if exists trg_gym_signature_attribution on public.gym_agreement_signatures;
+create trigger trg_gym_signature_attribution
+  before insert on public.gym_agreement_signatures
+  for each row execute function public.gym_signature_attribution();
+
+-- ── 5. and it stays what it was ─────────────────────────────────────────────
+
+/**
+ * Refuse to edit the evidence.
+ *
+ * Part 185 gave the owner `for all` on this table, which includes UPDATE — so
+ * every guarantee above could be undone one second later by setting attribution
+ * to 'member' on a row a receptionist typed. That is the exact failure this
+ * part exists to prevent, arriving through the back door.
+ *
+ * `note` is left writable: it is the owner's own annotation of the record and
+ * carries no claim about who signed. Everything that IS such a claim is frozen.
+ */
+create or replace function public.gym_signatures_freeze()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.attribution     is distinct from old.attribution
+  or new.signed_by       is distinct from old.signed_by
+  or new.member_id       is distinct from old.member_id
+  or new.agreement_id    is distinct from old.agreement_id
+  or new.signed_name     is distinct from old.signed_name
+  or new.signed_at       is distinct from old.signed_at
+  or new.version_signed  is distinct from old.version_signed
+  or new.witnessed_by    is distinct from old.witnessed_by
+  or new.guardian_name   is distinct from old.guardian_name
+  or new.guardian_relationship is distinct from old.guardian_relationship
+  then
+    raise exception
+      'A signature cannot be edited. It is the record of what one person agreed to at one moment, and a record that can be changed afterwards is not evidence of anything. Add a note, or take a new signature.'
+      using errcode = 'P0001';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.gym_signatures_freeze() from public, anon, authenticated;
+
+drop trigger if exists trg_gym_signatures_freeze on public.gym_agreement_signatures;
+create trigger trg_gym_signatures_freeze
+  before update on public.gym_agreement_signatures
+  for each row execute function public.gym_signatures_freeze();
+
+-- ── 6. access ───────────────────────────────────────────────────────────────
+--
+-- Part 185's `gym_agreement_sig_owner` was one `for all` policy, which let an
+-- owner insert a row naming themselves as the member — a member-attributed
+-- signature written by staff, which is the thing that must be impossible. It is
+-- split into four so the INSERT can be narrowed on its own, and the other three
+-- keep exactly the reach they had.
+--
+-- Policies for the same command are OR'd, so this can only be done by replacing
+-- the wide one. An owner who is also a member of their own gym still signs
+-- their own waiver — through the member policy below, from their own session,
+-- which is the whole distinction.
+drop policy if exists gym_agreement_sig_owner on public.gym_agreement_signatures;
+
+drop policy if exists gym_agreement_sig_owner_r on public.gym_agreement_signatures;
+create policy gym_agreement_sig_owner_r on public.gym_agreement_signatures
+  for select using (is_owner_of(tenant_id));
+
+drop policy if exists gym_agreement_sig_owner_i on public.gym_agreement_signatures;
+create policy gym_agreement_sig_owner_i on public.gym_agreement_signatures
+  for insert with check (
+    is_owner_of(tenant_id)
+    and member_id is distinct from (select auth.uid())
+  );
+
+drop policy if exists gym_agreement_sig_owner_u on public.gym_agreement_signatures;
+create policy gym_agreement_sig_owner_u on public.gym_agreement_signatures
+  for update using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+
+drop policy if exists gym_agreement_sig_owner_d on public.gym_agreement_signatures;
+create policy gym_agreement_sig_owner_d on public.gym_agreement_signatures
+  for delete using (is_owner_of(tenant_id));
+
+-- The member signs their own, and only what the gym is actually asking for now.
+--
+-- Part 185's version checked the agreement's tenant and stopped there, so a
+-- member could sign a RETIRED version — which produces a row that satisfies
+-- nothing on the compliance screen, since `outstandingFor` matches on the live
+-- one, and leaves somebody believing they have signed. `active` is the fix and
+-- it belongs here rather than in the app: the app is what would be out of date.
+drop policy if exists gym_agreement_sig_own_i on public.gym_agreement_signatures;
+create policy gym_agreement_sig_own_i on public.gym_agreement_signatures
+  for insert with check (
+    member_id = (select auth.uid())
+    and tenant_id = my_tenant()
+    and exists (select 1 from public.gym_agreements a
+                 where a.id = agreement_id
+                   and a.tenant_id = gym_agreement_signatures.tenant_id
+                   and a.active));
+
+comment on table public.gym_agreement_signatures is
+  'Evidence that one person agreed to one version of one document at one moment, and a column saying whether that person was the member or a member of staff recording it for them. Nothing cascades into this table and nothing about a row may be edited afterwards: it is precisely what a gym is required to be able to produce, and a record that can be changed later is not evidence of anything.';
+
+-- ▶ a-coach-can-say-not-at-eleven-at-night.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A coach could mute a whole channel and could not say "not at eleven at night".
+--
+-- ── What part 251 gave them, and what it left out ────────────────────────
+--
+-- Part 251 built `notify_channel_prefs`: five per-channel switches, applied
+-- server-side in supabase/functions/send-push and notify-message, so a coach
+-- who mutes chat still hears that a client's card was declined. That was the
+-- right fix for the right problem and it is unchanged here.
+--
+-- It has no time dimension at all. The complaint behind it — "this arrives at
+-- eleven at night" — is answered by muting client messages for ever, which is
+-- not what anybody wanted. A coach wants their clients to be able to message
+-- them; they want the phone to be quiet while they sleep. Those are the same
+-- notification at two different hours, and there was no way to say so.
+--
+-- ── WHY THIS COULD NOT BE A DEVICE SETTING, AND WHY THE ZONE IS HERE ─────
+--
+-- src/lib/notifyPrefs.ts already has `inQuietHours` and `whenToDeliver`, and
+-- both are explicitly limited to LOCAL notifications — the ones this app
+-- schedules on the member's own phone, where the phone knows the hour because
+-- it is the phone's own clock.
+--
+-- Every coach-directed notification is remote. All of them: some are sent by a
+-- client's handset, the rest by a trigger or an edge function. The gate has to
+-- be where the recipients are resolved, which is a server that has never been
+-- told what time it is where the coach is.
+--
+-- So the zone is carried. `tz` is an IANA name captured from the coach's own
+-- device and stored beside the window, and the hour arithmetic is done HERE,
+-- in Postgres, against Postgres's own timezone database. The edge functions do
+-- no date maths whatever — they read a view that already says who is asleep.
+-- That is deliberate: a JS `getHours()` in an edge function would be the hour
+-- in the function's region, which is the one hour that is certainly wrong for
+-- everybody, and a hand-rolled UTC offset would be right until the clocks go
+-- back and then silently wrong for half of Europe for a fortnight.
+--
+-- The alternative was to scope the feature to what works with no zone, and
+-- what works with no zone is nothing at all — there is no local half of a
+-- coach's notifications to gate. A switch that reads "quiet" while the phone
+-- buzzes is the defect src/lib/pushConsent.ts was written for, so it is either
+-- carried properly or not offered.
+--
+-- ── THE ROLLOUT FLAG, AND WHY A TABLE RATHER THAN A COMMENT ──────────────
+--
+-- The filter below is inert until supabase/functions/send-push and
+-- notify-message are redeployed to read it. Between this part being applied
+-- and that deploy happening, a settings screen offering a quiet-hours switch
+-- would be offering a control that does nothing — which is exactly the failure
+-- this file spends forty lines refusing to ship.
+--
+-- `notify_quiet_hours_rollout` is how the app finds out. It holds one row, it
+-- ships with `enforced = false`, and app/(trainer)/settings.tsx reads it: while
+-- it is false the screen does not draw a switch, it says quiet hours are not
+-- available on this server yet. Whoever deploys the two functions runs:
+--
+--     update public.notify_quiet_hours_rollout set enforced = true;
+--
+-- and every coach's screen gains the control on its next read. Flipping it
+-- before the deploy is the one way to make this feature lie, which is why the
+-- flag is a row somebody has to change on purpose rather than a constant in a
+-- bundle that ships with the client.
+--
+-- ── WHAT A QUIET HOUR DOES, AND WHAT IT MUST NOT DO ──────────────────────
+--
+-- It suppresses the PUSH and never the record, exactly as a muted channel
+-- does: `notify_users()` (part 122) has already written the `notifications` row
+-- before send-push is called, so a notification held at 11pm is in the coach's
+-- list and on the bell in the morning. Nothing is deferred and re-sent, and the
+-- screen says so — the member's local version SHIFTS a notification to the end
+-- of the window because it holds a scheduled trigger it can move, and a push
+-- that has already been handed to Expo is not a thing this system can hold.
+-- Promising a delayed delivery it cannot perform would be worse than the 11pm
+-- buzz.
+--
+-- A FAILED READ SENDS, for the same reason part 251 gives: a transient fault
+-- must not silently swallow the notification that a subscription payment
+-- failed. Erring towards the notification is the recoverable error.
+--
+-- Not coach-only by construction. `user_id` is any profile; a member's quiet
+-- hours are local and stay in notifyPrefs.ts today, and nothing about this
+-- shape would have to change if they ever moved.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.notify_quiet_hours (
+  user_id    uuid     primary key references public.profiles(id) on delete cascade,
+  -- 0–23, in the coach's own zone. INCLUSIVE: quiet begins at the top of this
+  -- hour.
+  from_hour  smallint not null check (from_hour between 0 and 23),
+  -- 0–23. EXCLUSIVE: quiet ends at the top of this hour, so 22 → 7 is silent
+  -- from 22:00 through 06:59. The same convention as NotifyPrefs in
+  -- src/lib/notifyPrefs.ts, stated in both places because a disagreement
+  -- between them would cost somebody an hour of sleep or an hour of silence.
+  to_hour    smallint not null check (to_hour between 0 and 23),
+  -- An IANA zone name — 'Europe/London', 'Asia/Dubai'. Validated by the trigger
+  -- below rather than by a CHECK, because knowing whether a string is a zone
+  -- means asking the catalogue and a CHECK may not.
+  --
+  -- Stored, not derived. There is no `trainers.timezone` and this deliberately
+  -- does not add one: a coach's quiet hours are a fact about where they SLEEP,
+  -- which is where their phone was when they set them, and a gym's address
+  -- would be the wrong answer for every coach who moved or who travels.
+  tz         text     not null check (btrim(tz) <> '' and length(tz) <= 64),
+  updated_at timestamptz not null default now(),
+  -- A zero-length window is refused rather than stored. `from = to` has no
+  -- meaning here: read as "all day" it silences everything with nothing on
+  -- screen saying why, and read as "no window" it is a row that does nothing
+  -- while the switch beside it says quiet hours are on. The way to have no
+  -- quiet hours is to have no row.
+  constraint notify_quiet_hours_nonzero check (from_hour <> to_hour)
+);
+
+comment on table public.notify_quiet_hours is
+  'When a person will not accept a push. The zone is stored WITH the window because the server resolving recipients has no other way to know what hour it is where they are. Applied through notify_quiet_now in supabase/functions/send-push and notify-message, where recipients are resolved — never at a call site. It suppresses the push and never the notifications row, and nothing is re-sent later.';
+comment on column public.notify_quiet_hours.tz is
+  'IANA zone name, captured from the coach''s device. Validated against pg_timezone_names on write, so notify_quiet_now can never raise on a bad value mid-query and take a whole send down with it.';
+comment on column public.notify_quiet_hours.to_hour is
+  'EXCLUSIVE. 22 to 7 is silent from 22:00 through 06:59 — the same convention NotifyPrefs uses for the member''s local version.';
+
+-- ── The zone is checked on the way in ────────────────────────────────────
+--
+-- A row holding 'Europe/Londn' would make `now() at time zone tz` raise, and it
+-- would raise inside the view — during a query the edge function runs over
+-- every recipient of a send. One coach's typo would then stop everybody else's
+-- notification. So it is refused at the write, where exactly one person is
+-- affected and they are looking at the screen.
+create or replace function public.notify_quiet_hours_check()
+returns trigger language plpgsql as $function$
+begin
+  if not exists (select 1 from pg_timezone_names where name = new.tz) then
+    raise exception 'not a timezone this server knows: %', new.tz
+      using hint = 'send an IANA zone name such as Europe/London';
+  end if;
+  new.updated_at := now();
+  -- Pinned on update for the reason part 251 gives: the WITH CHECK would refuse
+  -- a moved row, and refusing produces an error where pinning produces the
+  -- correct row.
+  if tg_op = 'UPDATE' then new.user_id := old.user_id; end if;
+  return new;
+end
+$function$;
+
+drop trigger if exists notify_quiet_hours_check on public.notify_quiet_hours;
+create trigger notify_quiet_hours_check
+  before insert or update on public.notify_quiet_hours
+  for each row execute function public.notify_quiet_hours_check();
+
+alter table public.notify_quiet_hours enable row level security;
+
+-- One policy, FOR ALL, and nobody else may read it — the same reasoning part
+-- 251 gives for notify_channel_prefs. When somebody sleeps is not a thing a gym
+-- owner, a client or another coach has any business looking up. The two edge
+-- functions run with the SERVICE ROLE and bypass this entirely, which is what
+-- lets the filter live there.
+drop policy if exists nqh_self on public.notify_quiet_hours;
+create policy nqh_self on public.notify_quiet_hours for all
+  to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+-- ── Who is asleep right now ──────────────────────────────────────────────
+--
+-- The whole point of this part. The edge functions read this and nothing else:
+-- one `select user_id from notify_quiet_now where user_id in (...)`, no date
+-- arithmetic in JavaScript, no offset table, no DST to get wrong.
+--
+-- The wrap is the ordinary case and is why this is a CASE rather than a
+-- BETWEEN: 22 → 7 means 22, 23, 0, 1 … 6. `from = to` cannot occur — the table
+-- refuses it — so there is no third branch to argue about.
+--
+-- security_invoker, so a coach reading this view reads it under their own
+-- policy and sees only themselves. Without it the view would run as its owner
+-- and hand any authenticated caller the sleeping habits of every coach on the
+-- platform, which is precisely what the single policy above exists to prevent.
+drop view if exists public.notify_quiet_now;
+create view public.notify_quiet_now
+  with (security_invoker = true) as
+select q.user_id
+  from public.notify_quiet_hours q
+ cross join lateral (
+   select extract(hour from (now() at time zone q.tz))::int as h
+ ) local_now
+ where case
+         when q.from_hour < q.to_hour
+           then local_now.h >= q.from_hour and local_now.h < q.to_hour
+         else local_now.h >= q.from_hour or local_now.h < q.to_hour
+       end;
+
+comment on view public.notify_quiet_now is
+  'The people whose quiet hours are running at this instant, in their own zone. Read by supabase/functions/send-push and notify-message alongside notify_channel_prefs; a user_id present here is not pushed to. security_invoker, so an ordinary caller sees only their own row.';
+
+-- ── Whether the server actually applies any of this ──────────────────────
+--
+-- See the header. This ships FALSE and the app draws no switch while it is
+-- false, because a quiet-hours setting the server cannot apply is worse than
+-- no quiet hours at all. It is flipped by whoever deploys the two edge
+-- functions, in the same sitting, by hand:
+--
+--     update public.notify_quiet_hours_rollout set enforced = true;
+create table if not exists public.notify_quiet_hours_rollout (
+  -- One row, enforced by the primary key and the CHECK together. A second row
+  -- would be a second answer, and the app would read whichever came back first.
+  only_row boolean primary key default true check (only_row),
+  enforced boolean not null default false,
+  note     text
+);
+
+insert into public.notify_quiet_hours_rollout (only_row, enforced, note)
+values (true, false, 'Flip to true only once supabase/functions/send-push and notify-message have been deployed reading notify_quiet_now. Until then the app draws no quiet-hours switch, because a switch that does nothing is worse than none.')
+on conflict (only_row) do nothing;
+
+alter table public.notify_quiet_hours_rollout enable row level security;
+
+-- Readable by anybody signed in, writable through the API by nobody. There is
+-- deliberately no insert, update or delete policy: this is a statement about
+-- the deployment and the only person who may make it is somebody with a SQL
+-- console, at the moment they deploy. A coach who could set it to true would be
+-- turning on a filter that is not running.
+drop policy if exists nqh_rollout_read on public.notify_quiet_hours_rollout;
+create policy nqh_rollout_read on public.notify_quiet_hours_rollout for select
+  to authenticated using (true);
+
+drop policy if exists nqh_rollout_write on public.notify_quiet_hours_rollout;
+
+comment on table public.notify_quiet_hours_rollout is
+  'Whether supabase/functions/send-push and notify-message have been deployed reading notify_quiet_now. The app draws no quiet-hours control while this is false. Set by hand at deploy time; there is no write policy, because the only honest author of this row is the person doing the deploy.';
+
+-- ── What the two edge functions have to do ───────────────────────────────
+--
+-- Neither is deployed by this part and neither can be — this is SQL. Written
+-- out so the change is unambiguous when somebody makes it.
+--
+-- supabase/functions/send-push, immediately after the notify_channel_prefs
+-- filter it already runs, and against `recipients` rather than `user_ids` so
+-- the two filters compose:
+--
+--     const { data: quiet, error: quietErr } = await supa
+--       .from('notify_quiet_now').select('user_id').in('user_id', recipients);
+--     if (!quietErr && quiet) {
+--       const asleep = new Set((quiet as { user_id: string }[]).map((r) => r.user_id));
+--       if (asleep.size) {
+--         const before = recipients.length;
+--         recipients = recipients.filter((id) => !asleep.has(id));
+--         muted += before - recipients.length;
+--       }
+--     }
+--
+-- supabase/functions/notify-message, the same three lines against whatever it
+-- calls its recipient list, because chat does not go through send-push and chat
+-- is the notification the whole complaint was about.
+--
+-- `!quietErr` is the rule from part 251 and it is not an oversight: a failed
+-- read of this table SENDS. A database fault must not be able to swallow the
+-- notification that somebody's payment failed, and there would be nothing
+-- anywhere to discover that from.

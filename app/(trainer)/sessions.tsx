@@ -30,7 +30,7 @@
 // work. See src/lib/trainerSessions.ts for why that is the right key rather
 // than a convenient one.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -53,17 +53,44 @@ import { useFloorQueue } from '../../src/ui/floorQueue';
 import { floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/lib/floorQueue';
 // The record, as opposed to the queue. See "What Already Happened" below.
 import {
-  pastSessions, pastVerdict, PAST_STATE_LABEL, PAST_STATE_NOTE, type PastState,
+  pastSessions, pastVerdict, PAST_STATES, PAST_STATE_LABEL, PAST_STATE_NOTE, type PastState,
 } from '../../src/lib/sessionHistory';
+import {
+  NO_FILTER, clientOptions, emptyFilterLine, filterActive, filterLine, filterSessions,
+  stateCounts, type SessionFilter,
+} from '../../src/lib/sessionFilter';
 import { appLocale } from '../../src/lib/locale';
 
-/** The four outcomes, in the order a person would consider them. */
-const OUTCOMES: { id: SessionOutcome; label: string; short: string; tone: (t: Theme) => string }[] = [
-  { id: 'completed',      label: 'Went Ahead',    short: 'Done',        tone: (t) => t.brand },
-  { id: 'no_show',        label: 'Did Not Turn Up', short: 'No show',   tone: (t) => t.crit },
-  { id: 'late_cancelled', label: 'Cancelled Late', short: 'Late cxl',   tone: (t) => t.s3 },
-  { id: 'cancelled',      label: 'Cancelled in Time', short: 'Cxl',     tone: (t) => t.ink3 },
+/**
+ * The four outcomes, in the order a person would consider them.
+ *
+ * `wholeDay` says whether an outcome may be applied to a whole day at once, and
+ * it is a NAMED PROPERTY because the whole-day row used to be
+ * `OUTCOMES.slice(0, 2)`.
+ *
+ * Two things were wrong with that. The small one: it offered two of the four,
+ * so a coach whose Tuesday was called off — the single most common reason a
+ * whole day needs clearing — had to tap every session individually, which is
+ * the tapping this control exists to remove, and payroll stays unanswerable
+ * until they finish. The large one: a slice is positional. The day somebody
+ * reorders this array to put the outcomes in a different order on screen, the
+ * whole-day row silently starts offering a different pair, with nothing
+ * anywhere saying it changed and no way to notice except by using it. A
+ * property moves with its row.
+ *
+ * All four qualify today. The field is not therefore redundant: it is the place
+ * a fifth outcome that must NOT be a whole-day action gets excluded by name.
+ */
+const OUTCOMES: { id: SessionOutcome; label: string; short: string; wholeDay: boolean; tone: (t: Theme) => string }[] = [
+  { id: 'completed',      label: 'Went Ahead',    short: 'Done',        wholeDay: true, tone: (t) => t.brand },
+  { id: 'no_show',        label: 'Did Not Turn Up', short: 'No show',   wholeDay: true, tone: (t) => t.crit },
+  { id: 'late_cancelled', label: 'Cancelled Late', short: 'Late cxl',   wholeDay: true, tone: (t) => t.s3 },
+  { id: 'cancelled',      label: 'Cancelled in Time', short: 'Cxl',     wholeDay: true, tone: (t) => t.ink3 },
 ];
+
+/** The subset offered on the whole-day row, by property rather than by
+ *  position. Computed once — it cannot change between renders. */
+const WHOLE_DAY_OUTCOMES = OUTCOMES.filter((o) => o.wholeDay);
 
 const when = (iso: string) => {
   const d = new Date(iso);
@@ -248,7 +275,30 @@ export default function TrainerSessions() {
 
   const loaded = queue !== null;
   const rows = queue ?? [];
-  const days = byDay(rows);
+
+  /* ── narrowing a quarter of sessions down to the one being looked for ────
+   *
+   * The filter is applied to what is DRAWN and to nothing else. Every figure on
+   * this screen — the Hero, the three KPIs, the size of the record — stays on
+   * the unfiltered lists, because they are facts about the coach's book and a
+   * coach who types three letters into a search box has not changed how many
+   * sessions are waiting on an outcome. A Hero that fell to 2 because a name
+   * was typed would be the same defect as an unread queue rendering as zero,
+   * arrived at from the other direction, and this screen is one a gym settles
+   * payroll against.
+   *
+   * `filterActive` and the sentences live in src/lib/sessionFilter.ts, which
+   * exists mainly to keep "you have none" and "none of these matches what you
+   * narrowed to" from ever being the same sentence.
+   */
+  const [filter, setFilter] = useState<SessionFilter>(NO_FILTER);
+  const narrowed = filterActive(filter);
+  const clearFilter = () => setFilter(NO_FILTER);
+  const shownRows = useMemo(() => filterSessions(rows, filter), [rows, filter]);
+  /** Unfiltered, for the KPI row: how many days of the coach's queue there are
+   *  is not a property of what they have typed into a box. */
+  const allDays = useMemo(() => byDay(rows), [rows]);
+  const days = useMemo(() => byDay(shownRows), [shownRows]);
 
   /* Everything in the window that has already finished, newest first —
    * delivered, not attended, cancelled either way, and the ones still waiting
@@ -257,7 +307,24 @@ export default function TrainerSessions() {
    * for why removing that evidence quietly improves every figure computed over
    * what is left. */
   const history = useMemo(() => pastSessions(all ?? []), [all]);
-  const historyDays = useMemo(() => byDay(history), [history]);
+  /* The state is `pastVerdict`'s and is passed in rather than re-derived, so
+   * the chip a coach filters by and the label printed on the row can never come
+   * from two different opinions about the same session. */
+  const stateOf = useCallback((row: PtSession): PastState => pastVerdict(row).state, []);
+  const shownHistory = useMemo(
+    () => filterSessions(history, filter, stateOf), [history, filter, stateOf]);
+  const historyDays = useMemo(() => byDay(shownHistory), [shownHistory]);
+  /** Who is in the window at all. Built from the record rather than from the
+   *  queue: the queue is the unmarked part of the same set, so a picker built
+   *  from it would lose every client whose sessions are all marked — which is
+   *  most of them, and exactly who somebody looking through the record wants. */
+  const who = useMemo(() => clientOptions(history), [history]);
+  const counts = useMemo(() => stateCounts(history, stateOf, PAST_STATES), [history, stateOf]);
+  /** The picked client's name, for the sentence. Null when the pick names
+   *  somebody no longer in the window — the chip goes with them, and a filter
+   *  matching nobody must still be explainable. */
+  const pickedName = useMemo(
+    () => who.find((c) => c.clientId === filter.clientId)?.name ?? null, [who, filter.clientId]);
   /** The instant the loaded window starts at — the edge of what this screen can
    *  answer for, named on screen rather than implied by a list that stops. */
   const windowFrom = useMemo(() => windowStart(loadedDays), [loadedDays]);
@@ -367,9 +434,17 @@ export default function TrainerSessions() {
   /** Mark a whole day the same way. Confirmed, because it is many writes. */
   const markDay = (day: { label: string; rows: PtSession[] }, outcome: SessionOutcome) => {
     const label = OUTCOMES.find((o) => o.id === outcome)?.label ?? outcome;
+    // The rows this acts on are the rows on screen, which under a filter is not
+    // the whole day. Said out loud rather than left for the coach to work out
+    // from a count: "mark the whole day" over a filtered day would otherwise
+    // leave sessions behind on a day the coach believes they have cleared, and
+    // an unmarked session is what holds a settlement up.
+    const narrowNote = narrowed
+      ? `\n\nYou have narrowed this list, so this is the ${day.rows.length} shown and not necessarily every unmarked session on that day. Clear the filters first if you meant all of them.`
+      : '';
     Alert.alert(
       `${label} — all ${day.rows.length}?`,
-      `Every unmarked session on ${day.label} will be recorded as "${label}". You can undo each one afterwards.`,
+      `Every unmarked session on ${day.label} that is shown below will be recorded as "${label}". You can undo each one afterwards.${narrowNote}`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Mark all', onPress: async () => { for (const s of day.rows) await mark(s, outcome); } },
@@ -410,8 +485,8 @@ export default function TrainerSessions() {
           <Section>
             <KpiRow items={[
               { label: 'Sessions', value: fig(rows.length) },
-              { label: 'Days', value: fig(days.length) },
-              { label: 'Oldest', value: days.length ? days[days.length - 1].day.slice(5) : '—' },
+              { label: 'Days', value: fig(allDays.length) },
+              { label: 'Oldest', value: allDays.length ? allDays[allDays.length - 1].day.slice(5) : '—' },
             ]} />
           </Section>
         ) : null}
@@ -443,6 +518,98 @@ export default function TrainerSessions() {
           </View>
         ) : null}
 
+        {/* ── narrowing what is drawn ──────────────────────────────────────
+            Ninety days of a full book is several hundred rows and the screen
+            had no way to reach into it: no client picker, no search, no filter
+            on what became of a session. A coach looking for one person's March
+            read everybody's March.
+
+            It narrows the two LISTS and no figure. The Hero above and the three
+            KPIs stay on the unfiltered queue, because "seven waiting on an
+            outcome" is a fact about the book and not about what somebody typed
+            into a box — and this is the screen a gym settles payroll from.
+
+            Drawn only once a read has come back and there is something to
+            narrow. Controls over an unread list would be four ways to produce
+            an empty screen that has nothing to do with the filters. */}
+        {all !== null && (history.length > 0 || rows.length > 0) ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Find" note={narrowed ? 'Filtered' : undefined} />
+
+              <TextInput
+                value={filter.text}
+                onChangeText={(v) => setFilter((f) => ({ ...f, text: v }))}
+                placeholder="Search a client's name"
+                placeholderTextColor={t.ink3}
+                accessibilityLabel="Search these sessions by client name"
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }}
+              />
+
+              {/* One chip per client in the window, with how many sessions are
+                  theirs — so a coach can see somebody has one before tapping
+                  into a list with one row in it. An id, not a name: two people
+                  called Sam are two people. */}
+              {who.length > 1 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.md }}>
+                  {who.map((c) => {
+                    const on = filter.clientId === c.clientId;
+                    return (
+                      <Pressable key={c.clientId} hitSlop={4}
+                        onPress={() => setFilter((f) => ({ ...f, clientId: on ? null : c.clientId }))}
+                        accessibilityRole="button" accessibilityState={{ selected: on }}
+                        accessibilityLabel={`${on ? 'Stop showing only' : 'Show only'} ${c.name}, ${c.count} ${c.count === 1 ? 'session' : 'sessions'}`}
+                        style={{ borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2, paddingHorizontal: sp.md, paddingVertical: 6 }}>
+                        <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink2 }}>{c.name} · {c.count}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              ) : null}
+
+              {/* Outcome, over the record only. Every row in the queue above is
+                  unmarked by construction, so a state filter there would be one
+                  useful position and four that empty the list. A count of zero
+                  is drawn rather than the chip being dropped: a coach who
+                  cannot see "cancelled late" has no way to learn that none of
+                  their sessions is. */}
+              {history.length > 0 ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: who.length > 1 ? 0 : sp.md }}>
+                  {PAST_STATES.map((st) => {
+                    const on = filter.state === st;
+                    return (
+                      <Pressable key={st} hitSlop={4}
+                        onPress={() => setFilter((f) => ({ ...f, state: on ? null : st }))}
+                        accessibilityRole="button" accessibilityState={{ selected: on }}
+                        accessibilityLabel={`${on ? 'Stop showing only sessions' : 'Show only sessions'} ${PAST_STATE_LABEL[st]}, ${counts[st]} of them`}
+                        style={{ borderWidth: hairline, borderColor: on ? t.brand : t.ring, borderRadius: radius.pill, backgroundColor: on ? t.brand : 'transparent', paddingHorizontal: sp.md, paddingVertical: 5 }}>
+                        <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink2 }}>
+                          {PAST_STATE_LABEL[st]} · {counts[st]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              {narrowed ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    {filterLine(shownRows.length + shownHistory.length, rows.length + history.length, filter, pickedName)}
+                  </Text>
+                  <View style={{ alignItems: 'flex-start', marginTop: sp.sm }}>
+                    <Ghost label="Show Everything" a11yLabel="Clear every filter" onPress={clearFilter} />
+                  </View>
+                </View>
+              ) : null}
+            </Section>
+          </>
+        ) : null}
+
         {failed ? (
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
             <Flag tone={t.crit}>Could not read your sessions</Flag>
@@ -466,6 +633,14 @@ export default function TrainerSessions() {
               Every session that has already happened has an outcome recorded{hasGym ? ', so nothing is holding payroll up.' : '.'}
             </Text>
           </View>
+        ) : shownRows.length === 0 ? (
+          /* NOT "all caught up". There are unmarked sessions and the coach
+             narrowed them off the screen themselves — a tick and "nothing is
+             holding payroll up" here would be a settlement cleared by a search
+             box. */
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+            {emptyFilterLine(rows.length, filter)}
+          </Text>
         ) : days.map((day, di) => (
           <View key={day.day}>
             <Section>
@@ -473,7 +648,7 @@ export default function TrainerSessions() {
 
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.md }}>
                 <Text style={{ ...ty.caption, color: t.ink3, alignSelf: 'center' }}>Whole day:</Text>
-                {OUTCOMES.slice(0, 2).map((o) => (
+                {WHOLE_DAY_OUTCOMES.map((o) => (
                   <Pressable key={o.id} onPress={() => markDay(day, o.id)} hitSlop={6}
                     accessibilityRole="button" accessibilityLabel={`Mark every session on ${day.label} as ${o.label}`}
                     style={{ borderWidth: hairline, borderColor: o.tone(t), borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
@@ -561,6 +736,13 @@ export default function TrainerSessions() {
               {history.length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   No sessions of yours have finished in this window. Read further back to see earlier ones.
+                </Text>
+              ) : shownHistory.length === 0 ? (
+                /* The window still holds sessions; the filter is what is hiding
+                   them. "Read further back" would send a coach to buy another
+                   read for rows that are already on this phone. */
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  {emptyFilterLine(history.length, filter)}
                 </Text>
               ) : historyDays.map((day, di) => (
                 <View key={day.day}>

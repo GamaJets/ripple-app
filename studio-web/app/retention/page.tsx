@@ -67,6 +67,7 @@ import { fetchVisits } from '@lib/gymVisits';
 import { fetchClasses } from '@lib/gymSchedule';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 import { fetchSessions } from '@lib/gymSessions';
 import { buildDossiers, sliceLoading, sliceReady, sliceFailed, type Slice, type MemberBooking } from '@lib/memberView';
 import { bandTitle, bandNote, DRIFT_LABEL, type ActivityEvent, type Drift } from '@lib/clientDrift';
@@ -422,11 +423,6 @@ async function slice<T>(run: () => Promise<T[]>): Promise<Slice<T>> {
   }
 }
 
-/** How many class ids go into one `.in(...)` filter. A gym with years of
- *  timetable has thousands, and one filter holding all of them is a URL long
- *  enough for the gateway to reject — which would read as "no bookings". */
-const ID_CHUNK = 150;
-
 /**
  * Class bookings for the gym's classes in the window, flattened per member.
  *
@@ -454,31 +450,29 @@ async function fetchBookings(tenantId: string, sinceIso: string): Promise<Member
   // truncated bookings read here is not a smaller figure: every member whose
   // rows fell off the end reports nothing booked and nothing attended, which is
   // the exact false statement the `.error` check above exists to prevent,
-  // arriving by another door. `readAll` finishes the read instead.
+  // arriving by another door. The `.in(...)` filter travels in the query
+  // string, so a thousand class ids is a forty-kilobyte URL the gateway
+  // rejects — a loud failure, but not one to discover in production.
   //
-  // The `.in(...)` filter travels in the query string, so a thousand class ids
-  // is a forty-kilobyte URL that the gateway rejects. That failure is loud, but
-  // it is not one to discover in production, so the ids go in chunks — the same
-  // 150 the export page uses.
-  const ids = [...byId.keys()];
-  const rows: any[] = [];
-  for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    const slice = ids.slice(i, i + ID_CHUNK);
-    const page = await readAll<any>(
-      (from, to) => supabase
-        .from('class_bookings')
-        .select('id, class_id, user_id, status, attended_at')
-        .in('class_id', slice)
-        // A total order. Postgres promises nothing about the order of rows
-        // that tie, and each page is a separate request — so paging over a
-        // non-unique order can drop rows, silently, which would put this read
-        // straight back where it started.
-        .order('id', { ascending: true })
-        .range(from, to),
-      'the class bookings in this window',
-    );
-    for (const r of page) rows.push(r);
-  }
+  // Both are `readByIds`' job now (src/lib/idLookup.ts). It was this loop,
+  // written out here and again on /retention, and the chunk size lived in two
+  // consts that had to agree; a third and fourth copy were about to be written
+  // for the name lookups on /accounting and /close, which needed the same
+  // treatment once their reads started paging.
+  const rows = await readByIds<any>(
+    byId.keys(),
+    (chunk, from, to) => supabase
+      .from('class_bookings')
+      .select('id, class_id, user_id, status, attended_at')
+      .in('class_id', chunk)
+      // A total order. Postgres promises nothing about the order of rows that
+      // tie, and each page is a separate request — so paging over a non-unique
+      // order can drop rows, silently, which would put this read straight back
+      // where it started.
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the class bookings in this window',
+  );
 
   return rows.map((r: any) => {
     const c = byId.get(r.class_id);

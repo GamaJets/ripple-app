@@ -37,7 +37,8 @@ import {
   type MonthWindow,
 } from '@lib/monthEnd';
 import { isoDate } from '@lib/format';
-import { assertWhole, capLimit } from '@lib/rowCap';
+import { assertWhole, capLimit, readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 import { fetchMemberships, matchPayment, fetchOnlineOrders, type Membership, type OnlineOrder } from '@lib/gymRecord';
 import { onlineOrderProblem } from '@lib/gymOrderPayment';
 import {
@@ -271,11 +272,12 @@ export default function Accounting() {
     const since = new Date(Date.parse(mw.fromIso) - MATCH_DAYS * DAY).toISOString();
     // And an UPPER bound, which this read did not have. It computed a start
     // date and no end, so opening a month from a year ago read every payment
-    // from that month up to TODAY — a set that grows without bound, that the
-    // month's own figures then filter back down, and that trips `assertWhole`
-    // on any gym busy enough to have crossed a thousand payments since. The
-    // shoulder is symmetrical for the same reason it exists on the near side:
-    // an invoice issued on the 30th is often paid on the 3rd.
+    // from that month up to TODAY — a set that grows without bound and that the
+    // month's own figures then filter back down. `fetchPayments` pages now, so
+    // that no longer takes the screen away; it would still drag a year of
+    // payments across the wire to reconcile one month. The shoulder is
+    // symmetrical for the same reason it exists on the near side: an invoice
+    // issued on the 30th is often paid on the 3rd.
     const until = new Date(Date.parse(mw.toIso) + MATCH_DAYS * DAY).toISOString();
 
     // allSettled, never all. Under a single catch a refused invoice query also
@@ -1784,27 +1786,38 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
  * `?? []`, and this page reports a gym that billed nothing, is owed nothing and
  * reconciles perfectly.
  *
- * Capped through src/lib/rowCap.ts, and it refuses rather than reporting a
- * prefix. PostgREST stops at 1000 rows and says nothing; a gym billing monthly
- * to two hundred members crosses that in five months, and the paragraph above
- * is the reason it cannot be allowed to happen quietly. The order is
- * `issued_on desc`, so the rows that would fall away are the OLDEST — which are
- * precisely the long-unpaid ones the ageing table exists to surface, and the
- * ones a reconciliation needs to match this month's payments against. A
- * truncated read would not merely make "owed" smaller: it would make the month
- * appear to reconcile, which is the sentence somebody files accounts on.
+ * PAGED through src/lib/rowCap.ts. PostgREST stops at 1000 rows and says
+ * nothing; a gym billing monthly to two hundred members crosses that in five
+ * months, and the order is `issued_on desc`, so the rows that fell away were
+ * the OLDEST — precisely the long-unpaid ones the ageing table exists to
+ * surface, and the ones a reconciliation needs to match this month's payments
+ * against. A truncated read would not merely make "owed" smaller: it would make
+ * the month appear to reconcile, which is the sentence somebody files accounts
+ * on.
+ *
+ * Refusing was the honest answer to that and not a durable one. The set only
+ * grows, so a gym that crossed the line stayed the wrong side of it and this
+ * screen was gone for good. `readAll` finishes the read instead; `PAGE_CEILING`
+ * still refuses past fifty thousand invoices, which is a statement about a read
+ * too large to total in a browser rather than a figure.
+ *
+ * `issued_on` is a DATE and a gym raising its book on the first of the month
+ * ties hundreds of rows on it, so `id` — the primary key — supplies the total
+ * order `readAll` requires. Paging a tied order loses and repeats rows without
+ * saying so, and here that is an invoice missing from a reconciliation.
  */
 async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice[]> {
-  const { data, error } = await supabase
-    .from('gym_invoices')
-    .select('id, number, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note, billed_name')
-    .eq('tenant_id', tenantId)
-    .lte('issued_on', upToDay)
-    .order('issued_on', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-
-  const rows = assertWhole(data, 'the invoices up to the end of this month');
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_invoices')
+      .select('id, number, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note, billed_name')
+      .eq('tenant_id', tenantId)
+      .lte('issued_on', upToDay)
+      .order('issued_on', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the invoices up to the end of this month',
+  );
   if (!rows.length) return [];
 
   const names = await namesFor(rows.map((r: any) => r.member_id));
@@ -1894,13 +1907,33 @@ async function fetchSettled(tenantId: string, fromIso: string, toIso: string): P
  * tenant_id)`, so an owner reading three ids gets back only the ones inside
  * their own gym. A missing name is a person this console may not name.
  */
+/**
+ * Names for the ids on a set of rows.
+ *
+ * CHUNKED through src/lib/idLookup.ts, which stopped being optional when the
+ * reads above it started paging. One `.in()` was safe only while those reads
+ * refused past a thousand rows and so carried at most a thousand distinct ids;
+ * finished, they can hand this five thousand, and a bare `.in()` would answer
+ * with the first thousand names and no complaint — leaving two thirds of a
+ * reconciliation unnamed, which reads as a gym that never recorded who it
+ * billed rather than as a broken lookup. That many uuids is also a query string
+ * no proxy will forward.
+ *
+ * Throwing rather than swallowing, as before: an unnamed invoice register on
+ * the screen somebody files accounts from is not a cosmetic problem.
+ */
 async function namesFor(ids: Array<string | null | undefined>): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  const { data, error } = await supabase
-    .from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  if (error) throw error;
-  return new Map(assertWhole(data, 'the names on those rows')
+  const rows = await readByIds<any>(
+    ids,
+    (chunk, from, to) => supabase
+      .from('profiles')
+      .select('id, full_name')
+      .in('id', chunk)
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the names on those rows',
+  );
+  return new Map(rows
     .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
     .filter(([, n]) => !!n));
 }

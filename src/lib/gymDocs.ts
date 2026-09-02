@@ -46,6 +46,7 @@
 
 import { assertWhole, capLimit, readAll } from './rowCap';
 import { writeFailure } from './wroteRows';
+import { attributionOf, type SignatureAttribution } from './gymSigning';
 
 type Queryable = { from: (table: string) => any; storage?: any };
 
@@ -106,6 +107,15 @@ export interface Signature {
   guardianName: string | null;
   guardianRelationship: string | null;
   note: string | null;
+  /**
+   * Whether the MEMBER gave this or a member of staff recorded it for them.
+   *
+   * Until supabase/parts/520 the row could not say, and every signature this
+   * product held was the second thing while every screen called it the first.
+   * See src/lib/gymSigning.ts — the value is derived in the database from
+   * auth.uid() and is not something any caller can set.
+   */
+  attribution: SignatureAttribution;
 }
 
 /** Why an agreement cannot be published, or null when it can. */
@@ -182,7 +192,7 @@ export async function fetchSignatures(sb: Queryable, tenantId: string): Promise<
   const rows = await readAll<any>(
     (from, to) => sb
       .from('gym_agreement_signatures')
-      .select('id, agreement_id, member_id, signed_name, signed_at, version_signed, guardian_name, guardian_relationship, note')
+      .select('id, agreement_id, member_id, signed_name, signed_at, version_signed, guardian_name, guardian_relationship, note, attribution')
       .eq('tenant_id', tenantId)
       .order('signed_at', { ascending: false })
       .order('id', { ascending: false })
@@ -206,6 +216,7 @@ export async function fetchSignatures(sb: Queryable, tenantId: string): Promise<
     guardianName: r.guardian_name ?? null,
     guardianRelationship: r.guardian_relationship ?? null,
     note: r.note ?? null,
+    attribution: attributionOf(r.attribution),
   }));
 }
 
@@ -243,8 +254,17 @@ export async function publishAgreement(
  * Record that somebody signed, at the desk.
  *
  * The name is what they wrote, kept independently of `profiles.full_name`,
- * because the name on a waiver IS the waiver. `witnessedBy` is who took it —
- * null when a member signed in the app themselves.
+ * because the name on a waiver IS the waiver.
+ *
+ * What this produces is a STAFF-ATTRIBUTED row and it cannot produce any other
+ * kind: supabase/parts/520 stamps `attribution` from auth.uid(), and the caller
+ * here is by definition not the member. `witnessedBy` is who took it, and the
+ * database fills it in from the session when a caller leaves it null, so 'staff'
+ * always answers "which member of staff".
+ *
+ * The member signing for themselves is `signAsMember` in src/lib/gymSigning.ts,
+ * from the member's own session. There is no argument to this function that
+ * would make it write one.
  */
 export async function recordSignature(
   sb: Queryable,

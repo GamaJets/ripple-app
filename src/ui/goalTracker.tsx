@@ -15,6 +15,27 @@
 // Goals live in `goal_targets` now (supabase/parts/59). The arithmetic is in
 // src/lib/goalTargets.ts, which is pure and tested; this file is the store.
 //
+// ── A goal set with no signal used to be a goal that never existed ────────
+//
+// Every write below returned false on a throw and the screen said "your goal
+// could not be saved just now, so it isn't stored". True, and the end of it:
+// the words were gone, and a member who set a target in a basement gym set
+// nothing. `src/lib/outbox.ts` had a durable queue for a message, a measurement
+// and a session approval and its own closing rule admits this one — a goal is a
+// write about the member's own record that says the same thing whenever it
+// lands, nobody else can take it, and it carries no file. So a goal that cannot
+// be sent is now kept, counted on the home screen, and sent on the reconnect.
+//
+// The row shown while it waits carries the OUTBOX's id, not a server key. That
+// is the rule src/ui/outbox.tsx states for a queued message and it matters the
+// same way here: the queued intent and the row on the goals screen are one
+// goal, and giving them two identities is how the member ends up looking at it
+// twice. `isPending` is what everything destructive checks — see `removeGoal`.
+//
+// This provider is also where the three record handlers are registered, and
+// src/ui/recordOutbox.ts explains why they are together and where they would
+// rather live.
+//
 // ── The device key is a migration, not a fallback ──────────────────────────
 //
 // Clients who set a target before this shipped have it on their phone and
@@ -26,10 +47,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { classifyWrite } from '../lib/offlineQueue';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
-import { sortGoals, type GoalTarget, type MeasuredKind } from '../lib/goalTargets';
+import { sortGoals, type GoalKind, type GoalTarget, type MeasuredKind } from '../lib/goalTargets';
+import { isPending } from '../lib/wellnessSync';
+import { useOutbox } from './outbox';
+import { useRecordOutboxHandlers } from './recordOutbox';
 
 const LEGACY_KEY = 'repple.goalTarget';
 const MIGRATED_KEY = 'repple.goalTarget.migrated';
@@ -40,10 +65,22 @@ interface GoalValue {
    *  the client has none. The screen must not offer to set a first goal to
    *  somebody who already has three. */
   status: LoadStatus;
-  /** One target per measured metric, so this replaces any existing goal of the
-   *  same kind. Resolves true only once the row is on the server. */
+  /**
+   * One target per measured metric, so this replaces any existing goal of the
+   * same kind.
+   *
+   * True once the row is on the server OR once the write has been kept on this
+   * phone to be sent later — and the goal appears on the list either way, so the
+   * two are the same answer to the screen: the member set a goal and it was not
+   * lost. What tells them apart is the home screen's "waiting to send" line and
+   * `isPending` on the row's id, which is what the destructive calls below check.
+   *
+   * False is what it has always been: nothing was written and nothing was kept.
+   */
   setMeasuredGoal: (kind: MeasuredKind, value: number, targetDateISO: string | null) => Promise<boolean>;
   addCustomGoal: (title: string, targetDateISO: string | null) => Promise<boolean>;
+  /** Refuses a goal that has not reached the server yet — see the note on the
+   *  implementation. */
   removeGoal: (id: string) => Promise<boolean>;
   setAchieved: (id: string, achieved: boolean) => Promise<boolean>;
 }
@@ -72,6 +109,24 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
   const [goals, setGoals] = useState<GoalTarget[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
+  const outbox = useOutbox();
+  // Bumped when a queued goal finally lands, so the optimistic row keyed on the
+  // outbox's id is replaced by the server's own. Without it the member would go
+  // on looking at a goal that says the right thing under an id nothing can act
+  // on until the next launch.
+  const [rev, setRev] = useState(0);
+  // The three record handlers live here. See src/ui/recordOutbox.ts for why they
+  // are registered together and why this provider is the mount.
+  useRecordOutboxHandlers({
+    onGoalSettled: (id) => {
+      // The waiting row has stopped being the truth — it either reached the
+      // server or was declined by it. Off the list either way, and then a
+      // re-read, which is what puts the server's own row (and its own id) in
+      // front of the member.
+      setGoals((p) => p.filter((g) => g.id !== id));
+      setRev((n) => n + 1);
+    },
+  });
 
   // Returns null for a read that failed and `truncated` for one that came back
   // at its ceiling. Two different answers, because the screen owes the client a
@@ -119,11 +174,15 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
       if (mine == null) { setStatus('error'); return; }
       const after = await migrateLegacyTarget(who, mine.goals);
       if (cancelled) return;
-      setGoals(after);
+      // Anything still on this phone is kept in front of the server's answer.
+      // A re-read that dropped it would take a goal off the member's list while
+      // the outbox is still holding it, and the home screen would go on counting
+      // a goal the goals screen says they never set.
+      setGoals((p) => sortGoals([...after, ...p.filter((g) => isPending(g.id))]));
       setStatus(mine.truncated ? 'partial' : 'ready');
     })();
     return () => { cancelled = true; };
-  }, [authRev, load]);
+  }, [authRev, load, rev]);
 
   // Move a pre-server target weight up, once. Deliberately conservative: if the
   // server already holds a weight goal it wins, because it is the one the coach
@@ -155,48 +214,119 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Keep this goal on the phone and show it while it waits.
+   *
+   * The row is keyed on the OUTBOX's id so the waiting intent and the row on the
+   * goals screen are one goal rather than two — the rule src/ui/outbox.tsx
+   * states for a queued message, for the same reason. `isPending` is how
+   * everything downstream can tell it apart from a row the server has.
+   *
+   * False when nothing was kept: no outbox above this provider, a phone already
+   * holding as much as it will hold, or a device outbox that could not be read.
+   * The caller's screen then says what it has always said, which is true.
+   */
+  const queueGoal = async (
+    kind: GoalKind, value: number | null, title: string | null, date: string | null,
+  ): Promise<boolean> => {
+    if (!outbox) return false;
+    const { result, id } = await outbox.enqueue('goal', { kind, value, title, targetDate: date });
+    if (result !== 'queued' || !id) return false;
+    setGoals((p) => sortGoals([
+      // One target per measured metric — the rule the partial index enforces —
+      // so a second offline mark of the same kind replaces the first rather
+      // than showing the member two answers for one decision. Any SERVER row of
+      // that kind goes off the list too: the queued intent will replace it when
+      // it lands, and until then the old number is not what they just set. The
+      // re-read on `onGoalSettled` is what puts the truth back either way.
+      ...p.filter((g) => kind === 'custom' || g.kind !== kind),
+      {
+        id,
+        kind,
+        targetValue: kind === 'custom' ? null : value,
+        title: kind === 'custom' ? title : null,
+        targetDateISO: date,
+        achievedAtISO: null,
+        createdAtISO: new Date().toISOString(),
+      },
+    ]));
+    return true;
+  };
+
   const setMeasuredGoal = async (kind: MeasuredKind, value: number, targetDateISO: string | null): Promise<boolean> => {
+    // No backend, or nobody signed in. There is no outbox to key by either, so
+    // this is the same refusal it has always been rather than a queue.
     if (!USE_SUPABASE || !uid) return false;
     const date = targetDateISO ? targetDateISO.slice(0, 10) : null;
     // Replace rather than upsert. The uniqueness of a measured goal is enforced
     // by a PARTIAL index (kind <> 'custom'), which PostgREST cannot name in an
     // on_conflict, so the existing row is found here and updated by id.
     const existing = goals.find((g) => g.kind === kind);
+    // A goal that is still waiting to send cannot be updated by id, because the
+    // id is this device's and no server has ever seen it. Changing your mind
+    // twice offline queues the second intent and drops the first row.
+    if (existing && isPending(existing.id)) return queueGoal(kind, value, null, date);
     try {
       if (existing) {
         const { data, error } = await supabase.from('goal_targets')
           .update({ target_value: value, target_date: date, achieved_at: null, updated_at: new Date().toISOString() })
           .eq('id', existing.id)
           .select('id, kind, target_value, title, target_date, achieved_at, created_at').single();
-        if (error || !data) { reportError('goalTracker.update', error); return false; }
-        setGoals((p) => sortGoals(p.map((g) => (g.id === existing.id ? rowToGoal(data as unknown as Row) : g))));
-        return true;
+        // Three answers, not two. 'refused' is the server having read the row
+        // and declined it — RLS, a CHECK, a row that is not there — and offering
+        // the same bytes again gets the same answer, so it is NOT queued. Only
+        // 'unsent', where nobody answered at all, is worth keeping.
+        const out = classifyWrite(error as any, data ? 1 : 0);
+        if (out === 'stored' && data) {
+          setGoals((p) => sortGoals(p.map((g) => (g.id === existing.id ? rowToGoal(data as unknown as Row) : g))));
+          return true;
+        }
+        reportError('goalTracker.update', error);
+        return out === 'refused' ? false : queueGoal(kind, value, null, date);
       }
       const { data, error } = await supabase.from('goal_targets')
         .insert({ client_id: uid, kind, target_value: value, target_date: date })
         .select('id, kind, target_value, title, target_date, achieved_at, created_at').single();
-      if (error || !data) { reportError('goalTracker.insert', error); return false; }
-      setGoals((p) => sortGoals([...p, rowToGoal(data as unknown as Row)]));
-      return true;
-    } catch (e) { reportError('goalTracker.setMeasuredGoal', e); return false; }
+      const out = classifyWrite(error as any, data ? 1 : 0);
+      if (out === 'stored' && data) {
+        setGoals((p) => sortGoals([...p, rowToGoal(data as unknown as Row)]));
+        return true;
+      }
+      reportError('goalTracker.insert', error);
+      return out === 'refused' ? false : queueGoal(kind, value, null, date);
+    } catch (e) {
+      // A throw is a request that never completed — the offline case, and the
+      // one this queue exists for.
+      reportError('goalTracker.setMeasuredGoal', e);
+      return queueGoal(kind, value, null, date);
+    }
   };
 
   const addCustomGoal = async (title: string, targetDateISO: string | null): Promise<boolean> => {
     if (!USE_SUPABASE || !uid) return false;
     const t = title.trim();
     if (!t) return false;
+    const date = targetDateISO ? targetDateISO.slice(0, 10) : null;
     try {
       const { data, error } = await supabase.from('goal_targets')
-        .insert({ client_id: uid, kind: 'custom', title: t, target_date: targetDateISO ? targetDateISO.slice(0, 10) : null })
+        .insert({ client_id: uid, kind: 'custom', title: t, target_date: date })
         .select('id, kind, target_value, title, target_date, achieved_at, created_at').single();
-      if (error || !data) { reportError('goalTracker.addCustom', error); return false; }
-      setGoals((p) => sortGoals([...p, rowToGoal(data as unknown as Row)]));
-      return true;
-    } catch (e) { reportError('goalTracker.addCustom', e); return false; }
+      const out = classifyWrite(error as any, data ? 1 : 0);
+      if (out === 'stored' && data) {
+        setGoals((p) => sortGoals([...p, rowToGoal(data as unknown as Row)]));
+        return true;
+      }
+      reportError('goalTracker.addCustom', error);
+      return out === 'refused' ? false : queueGoal('custom', null, t, date);
+    } catch (e) { reportError('goalTracker.addCustom', e); return queueGoal('custom', null, t, date); }
   };
 
   const removeGoal = async (id: string): Promise<boolean> => {
     if (!USE_SUPABASE) return false;
+    // A goal the server has never seen. There is nothing to delete and the id
+    // would 400, so this is honestly false and the screen says the goal is still
+    // there — which it is, on this phone, waiting to go up.
+    if (isPending(id)) return false;
     try {
       // Counting the rows: a delete that matched nothing is not an error in
       // PostgREST, so without this a goal RLS refused to delete would vanish
@@ -210,6 +340,8 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
 
   const setAchieved = async (id: string, achieved: boolean): Promise<boolean> => {
     if (!USE_SUPABASE) return false;
+    // Same as `removeGoal`: an id this device made names no row anywhere.
+    if (isPending(id)) return false;
     const at = achieved ? new Date().toISOString() : null;
     try {
       const { data, error } = await supabase.from('goal_targets')

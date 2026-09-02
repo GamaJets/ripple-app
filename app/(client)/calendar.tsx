@@ -101,6 +101,9 @@ import {
   type PlannedDay, type PlannedDayType,
 } from '../../src/lib/dayPlan';
 import { fetchPlannedDays, savePlannedDay, clearPlannedDay, PLAN_NOTE_MAX } from '../../src/lib/plannedDays';
+import { keptOnPhoneNote, planExpiry } from '../../src/lib/recordQueue';
+import { useOutbox } from '../../src/ui/outbox';
+import { useToast } from '../../src/ui/toast';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import type { IconName } from '../../src/ui/Icon';
 // `refundSession` and `reofferSlot` moved with the cancellation into
@@ -295,6 +298,10 @@ export default function Calendar() {
   // empty `plans` under 'error' means the read failed, and offering "nothing
   // planned yet — tap a day to plan one" to somebody who has planned their
   // whole month is the same lie as "0 sessions left" to a client holding ten.
+  // The device's queue and the quiet channel, for the day-plan write below.
+  // Both are null-safe outside their providers by design.
+  const outbox = useOutbox();
+  const { say } = useToast();
   const [plans, setPlans] = useState<PlannedDay[]>([]);
   const [planStatus, setPlanStatus] = useState<LoadStatus>('loading');
   const [planReload, setPlanReload] = useState(0);
@@ -481,6 +488,27 @@ export default function Calendar() {
     setPlanFor(dateISO);
   }
 
+  /**
+   * Keep a day-plan intent on the phone, and say so.
+   *
+   * The expiry is the whole reason this one is not a plain queue entry.
+   * `canPlan` refuses to mark a date that has gone — "marking last Tuesday as a
+   * rest day is not a plan, it is a claim about what happened" — so an intent
+   * that surfaces after its own day would be that claim arriving through the
+   * back door. `planExpiry` sets the boundary at the end of the day itself, and
+   * `partitionLapsed` takes it out rather than sending it; the home screen then
+   * says a planned day was not sent, which is the one outcome the member cannot
+   * see for themselves.
+   *
+   * Returns whether anything was kept, so the caller can tell the member the
+   * truth rather than either of the two convenient lies.
+   */
+  async function queuePlan(day: string, intent: Record<string, unknown>): Promise<boolean> {
+    if (!outbox) return false;
+    const { result } = await outbox.enqueue('day-plan', intent, { expiresAt: planExpiry(day) });
+    return result === 'queued';
+  }
+
   async function savePlan() {
     const day = planFor; if (!day) return;
     setPlanBusy(true);
@@ -489,8 +517,20 @@ export default function Calendar() {
     setPlanBusy(false);
     // A save that never landed used to be the easiest failure in this app to
     // ship: nothing on screen afterwards hints at it, and the client comes back
-    // next week to a calendar that has forgotten the plan they made.
+    // next week to a calendar that has forgotten the plan they made. It is now
+    // kept on the phone instead — a plan is a statement about the member's own
+    // record, nobody else can take the day, and it says the same thing whenever
+    // it lands, which is exactly what src/lib/outbox.ts admits.
     if (!r.ok) {
+      if (await queuePlan(day, { dateISO: day, type: planType, note })) {
+        // Shown on the calendar while it waits. The mark is the member's
+        // intention and the intention is real; what has not happened is the
+        // send, and the home screen is where that is counted.
+        setPlans((prev) => [...prev.filter((p) => p.dateISO !== day), { dateISO: day, type: planType, note }]);
+        setPlanFor(null);
+        say(keptOnPhoneNote('planned day'));
+        return;
+      }
       Alert.alert('Not saved', `We couldn’t save this day${r.error ? ` (${r.error})` : ''}. Your calendar is unchanged — try again in a moment.`);
       return;
     }
@@ -506,6 +546,16 @@ export default function Calendar() {
     const r = await clearPlannedDay(day);
     setPlanBusy(false);
     if (!r.ok) {
+      // Queued as the same kind rather than a second one: marking a day and
+      // changing your mind about it are one thing to the member and one row to
+      // the server, and two kinds would draw two lines on the home screen for
+      // one decision.
+      if (await queuePlan(day, { dateISO: day, remove: true })) {
+        setPlans((prev) => prev.filter((p) => p.dateISO !== day));
+        setPlanFor(null);
+        say(keptOnPhoneNote('change to this day'));
+        return;
+      }
       Alert.alert('Not removed', `We couldn’t remove this day${r.error ? ` (${r.error})` : ''}. It is still on your calendar.`);
       return;
     }

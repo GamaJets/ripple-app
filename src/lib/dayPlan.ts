@@ -147,6 +147,13 @@ export function compareIsoDays(a: string, b: string): number | null {
  * about what happened, and this table is not the place a claim about the past
  * gets to live — the workout log is. Days already gone still show what was
  * planned for them; they just cannot be given a plan retrospectively.
+ *
+ * The offline queue answers to this rule rather than working around it. A mark
+ * made with no signal is kept (`'day-plan'` in src/lib/outbox.ts) and carries an
+ * expiry of the day it is about, so an intent that surfaces on Wednesday for
+ * Tuesday is taken OUT and said out loud instead of being written — because a
+ * queue that replayed it would be this function's refusal arriving through the
+ * back door. See `planExpiry` in src/lib/recordQueue.ts.
  */
 export function canPlan(dateISO: string, todayISO: string): boolean {
   const c = compareIsoDays(dateISO, todayISO);

@@ -42,6 +42,26 @@
 // same `st.notifPush` / `st.setPushEnabled` pair app/(client)/settings.tsx
 // drives, with the same four outcomes spoken aloud.
 //
+// ── And a whole channel muted is not "not at eleven at night" ──────────────
+//
+// The five switches have no time dimension, and the complaint they came from
+// was an hour rather than a category: a coach who mutes client messages to stop
+// the 11pm ping has stopped their clients being able to reach them at all.
+//
+// Quiet hours for a coach cannot work the way the member's do. Every
+// coach-directed notification is remote, so there is no scheduled trigger on
+// this phone to move and nothing here knows what hour it is where the server
+// is deciding. The window and an IANA zone are therefore stored server-side
+// (supabase/parts/530) and the hour arithmetic happens in Postgres.
+//
+// Which leaves one honest problem, and this screen is where it is answered:
+// none of that does anything until the two edge functions are redeployed to
+// read it, and a switch the server does not apply is worse than no switch —
+// the coach stops expecting the ping, gets it anyway, and stops trusting this
+// page. So the control is drawn only when the server SAYS it applies quiet
+// hours, and says which of the three states it is in otherwise. See
+// `quietAvailability` in src/lib/quietHours.ts.
+//
 // The important half is where the gate lives, and it is worth restating because
 // it is the reason a second implementation would have been wrong: the switch
 // does not filter sends. It takes this handset's row OUT of `push_tokens`. The
@@ -78,6 +98,12 @@ import {
   CHANNEL_UNKNOWN_LABEL, CHANNEL_MASTER_NOTE, CHANNEL_STILL_RECORDED,
   CHANNEL_QUIET_COST, CHANNEL_ACCOUNT_WIDE,
 } from '../../src/lib/coachNotify';
+import { useQuietHours, saveQuietHours } from '../../src/ui/quietHours';
+import {
+  SUGGESTED_QUIET, deviceZone, hourLabel, windowLabel, quietAvailability,
+  zoneMovedNote, QUIET_HELD_NOT_DELAYED, QUIET_ZONE_NOTE, QUIET_ORDER_NOTE,
+  type QuietHours,
+} from '../../src/lib/quietHours';
 
 /** A label and its value. `value` is already a string — see `fig`. */
 function Line({ t, label, value, first }: { t: Theme; label: string; value: string; first?: boolean }) {
@@ -186,6 +212,69 @@ export default function TrainerSettings() {
     // row, which is the same discipline `loadPending` above keeps.
     await channels.reload();
   };
+  /* ── the hours, as opposed to the categories ──────────────────────────
+   *
+   * Held apart from the five switches above on purpose. Those say WHAT a coach
+   * hears about; this says WHEN, and it is the answer to the complaint the five
+   * were a partial fix for.
+   *
+   * Nothing here is drawn unless the server says it applies quiet hours.
+   * `enforced` is a row part 530 ships FALSE and somebody flips by hand at the
+   * moment they deploy the two edge functions — so between the SQL landing and
+   * the deploy, this section is a sentence rather than a switch. Unread is its
+   * own third state and reads differently again: "could not find out" is not
+   * "your server does not do this".
+   */
+  const quiet = useQuietHours();
+  const avail = quietAvailability(quiet.status === 'ready' ? quiet.enforced : null);
+  const zone = deviceZone();
+  const [quietBusy, setQuietBusy] = useState(false);
+  /** The stored window, bound once so every hour on screen comes from the same
+   *  one the guard tested. */
+  const quietWindow = quiet.quiet;
+
+  /** Save a window, or clear it, and say what the server actually took. Never
+   *  patched locally: what the switch shows next comes from the row, which is
+   *  the discipline every other control on this screen keeps. */
+  const putQuiet = async (next: QuietHours | null) => {
+    if (quietBusy) return;
+    setQuietBusy(true);
+    try {
+      const ok = await saveQuietHours(next);
+      if (!ok) {
+        Alert.alert('Not Saved',
+          'The server did not take that, so your quiet hours are exactly as they were. Try again once you have signal.');
+        return;
+      }
+      await quiet.reload();
+    } finally { setQuietBusy(false); }
+  };
+
+  const turnQuietOn = () => {
+    // No zone, no window. Storing UTC on a coach's behalf would put a London
+    // coach's 10pm at 11pm for half the year and a Los Angeles coach's in the
+    // afternoon — a silence at the wrong hours is harder to diagnose than none.
+    if (!zone) {
+      Alert.alert('Cannot set quiet hours on this phone',
+        "This phone did not report which timezone it is in, and quiet hours are applied by a server that has no other way to know. Without it the hours would be applied in the wrong ones, so nothing has been set.");
+      return;
+    }
+    void putQuiet({ ...SUGGESTED_QUIET, tz: zone });
+  };
+
+  /** Move one end of the window. The other end and the zone are carried
+   *  through unchanged — re-reading the device zone here would silently move a
+   *  coach's window to wherever they are standing when they nudge an hour. */
+  const moveQuiet = (which: 'fromHour' | 'toHour', by: 1 | -1) => {
+    if (!quiet.quiet) return;
+    const next = { ...quiet.quiet, [which]: (quiet.quiet[which] + by + 24) % 24 };
+    // A zero-length window is refused by the database and would mean nothing
+    // here either. Skipped over rather than rejected: the coach is holding a
+    // stepper and an error dialog on the tenth tap is not an answer.
+    if (next.fromHour === next.toHour) next[which] = (next[which] + by + 24) % 24;
+    void putQuiet(next);
+  };
+
   // The same sentence the client's settings screen shows: what a change to
   // this actually converts, so nobody expects it to rewrite stored history.
   const weightNote = convertedNote(st.weightUnit);
@@ -400,7 +489,13 @@ export default function TrainerSettings() {
     if (exporting) return;
     setExporting(true);
     try {
-      const res = await exportMyDataDetailed();
+      // `coach: true` is what puts the coach's OWN business in the file. Without
+      // it this screen handed a coach the member export — profiles, workouts,
+      // food logs, scans, bookings, what they had PAID — and not one row of
+      // what they charge, what they invoiced, what reached their bank or what
+      // it cost them. See COACH_TABLES in src/lib/gdpr.ts, which also explains
+      // why those tables are filtered by hand instead of left to RLS.
+      const res = await exportMyDataDetailed({ coach: true });
       const json = res.json;
       await shareTextFile(json, 'repple-coach-my-data.json', 'application/json', 'Export my data');
       if (!res.complete) {
@@ -581,6 +676,81 @@ export default function TrainerSettings() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_ACCOUNT_WIDE}</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_MASTER_NOTE}</Text>
           </View>
+
+          {/* ── the hours ──────────────────────────────────────────────────
+              The five switches above answer "what am I told about" and the
+              complaint they came from was "at eleven at night". This is the
+              other half.
+
+              It is drawn only when the server says it applies it. Between part
+              530 landing and supabase/functions/send-push and notify-message
+              being redeployed to read it, a switch here would be a coach
+              turning quiet hours on and being buzzed at 11pm anyway — after
+              which they will not trust the switches above either. Three states,
+              three sentences: available, not yet, and could-not-find-out. */}
+          <View style={{ marginTop: sp.xl }}>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>When you will not be buzzed</Text>
+
+            {quiet.status === 'loading' ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Reading your quiet hours…</Text>
+            ) : !avail.available ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{avail.note}</Text>
+            ) : (<>
+              <SwitchRow t={t} first
+                label="Quiet Hours"
+                note={quiet.quiet
+                  ? `Your phone stays quiet from ${windowLabel(quiet.quiet)}`
+                  : 'Hold pushes overnight, or over whatever hours you choose'}
+                on={!!quiet.quiet}
+                onPress={() => { if (quiet.quiet) void putQuiet(null); else turnQuietOn(); }} />
+
+              {/* Bound once. `quiet.quiet` is a property on a hook's return
+                  value and TypeScript cannot narrow it across the callbacks
+                  below — and neither can a reader, which is the better reason:
+                  every hour drawn here has to come from the same window the
+                  guard above tested. */}
+              {quietWindow ? (<>
+                {/* Two steppers rather than a picker: this is a whole hour on
+                    either end and there are only ever two numbers to move. The
+                    labels say the hour rather than the digit, because "22" and
+                    "10pm" are the same fact and only one of them is what a
+                    coach thinks in. */}
+                <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.lg }}>
+                  {([['fromHour', 'From'], ['toHour', 'Until']] as const).map(([key, label]) => (
+                    <View key={key} style={{ flex: 1 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{label}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 4 }}>
+                        <Pressable onPress={() => moveQuiet(key, -1)} disabled={quietBusy} hitSlop={8}
+                          accessibilityRole="button" accessibilityLabel={`An hour earlier, ${label.toLowerCase()}`}
+                          style={{ paddingHorizontal: sp.md, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: t.surface2, opacity: quietBusy ? 0.5 : 1 }}>
+                          <Text style={{ ...ty.label, color: t.ink2 }}>−</Text>
+                        </Pressable>
+                        <Text style={{ ...ty.body, color: t.ink, minWidth: 68, textAlign: 'center' }}>
+                          {hourLabel(quietWindow[key])}
+                        </Text>
+                        <Pressable onPress={() => moveQuiet(key, 1)} disabled={quietBusy} hitSlop={8}
+                          accessibilityRole="button" accessibilityLabel={`An hour later, ${label.toLowerCase()}`}
+                          style={{ paddingHorizontal: sp.md, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: t.surface2, opacity: quietBusy ? 0.5 : 1 }}>
+                          <Text style={{ ...ty.label, color: t.ink2 }}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                {/* Said where it is true and nowhere else: a coach who set
+                    these in London and is now in Dubai is silent from 2am
+                    local, and nothing else on this screen would explain it. */}
+                {zoneMovedNote(quietWindow.tz, zone) ? (
+                  <Flag tone={t.warn} style={{ marginTop: sp.md }}>{zoneMovedNote(quietWindow.tz, zone)}</Flag>
+                ) : null}
+
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{QUIET_HELD_NOT_DELAYED}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{QUIET_ZONE_NOTE}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{QUIET_ORDER_NOTE}</Text>
+              </>) : null}
+            </>)}
+          </View>
         </Section>
 
         <Rule />
@@ -723,7 +893,7 @@ export default function TrainerSettings() {
         <Section>
           <SectionHead title="Your Data" />
           <ListRow icon="share" title={exporting ? 'Preparing Export…' : 'Export My Data'}
-            note="Everything Repple stores about you, as a JSON file you can keep"
+            note="Your account and your coaching business — your price list, invoices, receipts, payouts, costs and enquiries — as a JSON file you can keep"
             onPress={exportData} />
           {pending?.requestedAt ? (
             <ListRow icon="back" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}

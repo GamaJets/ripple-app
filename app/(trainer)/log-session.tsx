@@ -18,6 +18,31 @@
 //   · invent a calorie figure. Strength work records reps and weight, not
 //     energy, and the client's own screens render an absent burn as a dash.
 //     Guessing here would put a fabricated number into somebody else's history.
+//
+// ── Who it is for, and why that is a picker rather than a param ────────────
+//
+// This screen used to read `clientId` off the route and nothing else. Opened
+// any other way it rendered "Client" as its title, took a whole hour of
+// somebody's training, and said "This screen was opened without a client, so
+// there is nobody to log against" WHEN THE COACH PRESSED SAVE — the worst
+// possible moment, because the sets are typed by then and nothing on the screen
+// keeps them. src/lib/features.ts left it out of the coach's directory for
+// exactly that reason: a search result that leads to lost work is worse than no
+// search result. So it has a picker, and it is listed.
+//
+// The picker is seeded from the param when there is one, so the way in from the
+// client's own screen is unchanged — the coach lands with the person already
+// chosen and never sees a list. And the CTA is HELD until somebody is chosen,
+// with the reason under it, rather than accepting an hour of typing against
+// nobody: the check that used to happen at save now happens before the first
+// set is entered.
+//
+// The roster it offers is only ever the roster that LOADED. Under a read that
+// failed the list is unknown, not empty, and this screen says which — a coach
+// standing on a gym floor being shown "you have no clients" would put the phone
+// away. A client seeded from the param stays selectable through all of that,
+// because that id came from the person's own screen and does not depend on this
+// screen's read of anything.
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,6 +54,9 @@ import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
+import { useRoster } from '../../src/ui/roster';
+import { searchRoster, rosterSearchLine } from '../../src/lib/rosterSearch';
+import { hitSlopFor } from '../../src/lib/a11y';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { logForClient } from '../../src/lib/coachLog';
 import { useFloorQueue } from '../../src/ui/floorQueue';
@@ -47,6 +75,15 @@ const LIB = [
   { name: 'Pull-up', group: 'Back' }, { name: 'Barbell Row', group: 'Back' },
   { name: 'Lat Pulldown', group: 'Back' }, { name: 'Plank', group: 'Core' },
 ];
+
+/** How many names the picker draws before somebody has typed.
+ *
+ *  A coach with eighty clients gets eighty pills between the title and the
+ *  first exercise, and scrolls past their whole book to reach the thing they
+ *  came here to do. Twelve is a screenful; the line under them says how many
+ *  there are and that typing finds the rest, so the short list is never
+ *  mistaken for the whole one. */
+const PICKER_SHOWN = 12;
 
 interface Row { key: string; name: string; sets: { reps: string; kg: string }[] }
 
@@ -80,6 +117,13 @@ export default function LogSession() {
   };
   const { clientId, name } = useLocalSearchParams<{ clientId?: string; name?: string }>();
   const coachEx = useCoachExercises();
+  const r = useRoster();
+
+  // Seeded from the route, so the way in from a client's own screen is exactly
+  // what it was: their name in the title and nothing to choose. `null` is the
+  // state this screen could not previously get out of.
+  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  const [clientQ, setClientQ] = useState('');
 
   const [rows, setRows] = useState<Row[]>([]);
   const [picker, setPicker] = useState(false);
@@ -87,7 +131,37 @@ export default function LogSession() {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
-  const first = (name || 'your client').split(' ')[0];
+  const pickedRow = r.roster.find((c) => c.id === picked) ?? null;
+  // The roster's name where the roster has one, and the param's where it does
+  // not — which is every case where the read failed or the client was added by
+  // hand on another device. Never the param's name for a DIFFERENT id: a coach
+  // who arrived on Sarah's screen and then picked Priya must not read Sarah's
+  // name over Priya's sets.
+  const pickedName = pickedRow?.name ?? (picked && picked === clientId ? (name || null) : null);
+  const first = (pickedName || 'your client').split(' ')[0];
+
+  /* ── the picker ────────────────────────────────────────────────────────────
+   *
+   * One field over the coach's own book, shared with the roster search on the
+   * Clients screen (src/lib/rosterSearch.ts) so typing three letters means the
+   * same thing in both places.
+   *
+   * `shownClients` is what is drawn. The person already chosen is always in it,
+   * whatever has been typed and whatever the read cut off — a selected chip
+   * that scrolls out of existence is a screen that cannot tell the coach who
+   * they are about to write to. */
+  const matches = searchRoster(r.roster, clientQ);
+  const capped = !clientQ.trim() && matches.length > PICKER_SHOWN;
+  const shownClients = (() => {
+    const base = capped ? matches.slice(0, PICKER_SHOWN) : matches;
+    if (pickedRow && !base.some((c) => c.id === pickedRow.id)) return [pickedRow, ...base];
+    return base;
+  })();
+  /** What the search searched. Only a whole read may say a name is not on the
+   *  book — see src/lib/rosterSearch.ts. */
+  const clientQLine = rosterSearchLine({
+    status: r.status, query: clientQ, matched: matches.length, searched: r.roster.length,
+  });
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const sheet = { backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 };
   const G = layout.gutter;
@@ -152,7 +226,12 @@ export default function LogSession() {
   // figure silently zeroed is the failure above; refusing the save is the
   // only honest alternative, because this is a write to a client's record
   // with no undo and no notification to them.
-  const ready = entriesToWrite().length > 0 && loadProblem() == null;
+  //
+  // And withheld while nobody is chosen, which is the change this screen was
+  // listed for. The check existed — at save, after the hour was typed. Held
+  // here it costs a coach one tap at the top of the screen instead of the whole
+  // session.
+  const ready = picked != null && entriesToWrite().length > 0 && loadProblem() == null;
 
   const save = async () => {
     const entries = entriesToWrite();
@@ -160,8 +239,11 @@ export default function LogSession() {
       Alert.alert('Nothing to log', 'Add at least one set with a rep count.');
       return;
     }
-    if (!clientId) {
-      setFailure('This screen was opened without a client, so there is nobody to log against.');
+    if (!picked) {
+      // Reachable only if the button is pressed while nothing is chosen, which
+      // `ready` already prevents. Kept as the second half of the belt: this is
+      // a write into somebody's history and there is no undo on the other side.
+      setFailure('Nobody is chosen yet, so there is nobody to log this against. Pick a client at the top of this screen.');
       return;
     }
     const coachId = auth.user?.id;
@@ -177,7 +259,7 @@ export default function LogSession() {
     }
     setBusy(true);
     setFailure(null);
-    const res = await logForClient(clientId, coachId, entries);
+    const res = await logForClient(picked, coachId, entries);
     if (res.ok) {
       setBusy(false);
       notifySuccess();
@@ -209,7 +291,7 @@ export default function LogSession() {
     // classifies and keeps it. It is never reported as saved — see rule 1 in
     // src/lib/floorQueue.ts.
     const out = await queue.attempt({
-      kind: 'session-log', clientId, clientName: name || null, entries,
+      kind: 'session-log', clientId: picked, clientName: pickedName, entries,
     });
     setBusy(false);
     if (out === 'stored') {
@@ -238,11 +320,16 @@ export default function LogSession() {
             </Pressable>
             <View>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Log a session</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{name || 'Client'}</Text>
+              {/* The person's name once there is one, and an honest heading
+                  before that. It used to read "Client" over a screen that had
+                  nobody and could not be given anybody. */}
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{pickedName || 'Log a Session'}</Text>
             </View>
           </View>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-            Goes into {first}&rsquo;s own record, marked as logged by you.
+            {picked
+              ? `Goes into ${first}’s own record, marked as logged by you.`
+              : 'Pick who this was with, then add what they did. It goes into their own record, marked as logged by you.'}
           </Text>
 
           <Rule />
@@ -273,6 +360,91 @@ export default function LogSession() {
               </View>
             </View>
           ) : null}
+
+          {/* ── who this was with ──────────────────────────────────────────
+              First on the screen, because it is the first thing the coach has
+              to be right about and the one thing that used to be unanswerable
+              here. Under a failed read the chips are not the book — that is
+              said rather than left to be inferred from an empty row of pills. */}
+          <Section>
+            <SectionHead title="Client" note={picked ? undefined : 'Pick one'} />
+
+            {r.status === 'error' ? (
+              <View style={{ marginBottom: sp.md }}>
+                <Flag tone={t.warn}>
+                  Your clients could not be read, so this is not an empty book — nobody is listed
+                  because the list did not come back. {picked
+                    ? 'The person you came here for is still selected and can still be logged against.'
+                    : 'Open this from a client’s own screen, or try again once you are connected.'}
+                </Flag>
+              </View>
+            ) : null}
+
+            {/* The field is offered whenever there is anything to search. It is
+                the same matcher the Clients screen uses, so three letters mean
+                the same thing in both places. */}
+            {r.roster.length > 0 ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginBottom: sp.md }}>
+                <Icon name="search" size={16} color={t.ink3} />
+                <TextInput value={clientQ} onChangeText={setClientQ}
+                  placeholder="Find a client by name" placeholderTextColor={t.ink3}
+                  autoCapitalize="none" autoCorrect={false} accessibilityLabel="Find a client by name"
+                  style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+                {clientQ ? (
+                  <Pressable onPress={() => setClientQ('')} hitSlop={hitSlopFor(24)}
+                    accessibilityRole="button" accessibilityLabel="Clear the client search">
+                    <Text style={{ ...ty.head, color: t.ink3 }}>&times;</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+
+            {r.roster.length === 0 && r.status !== 'error' ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                {r.status === 'loading'
+                  ? 'Reading your clients…'
+                  : 'Nobody is on your book yet. Add or invite a client from the Clients screen and they can be logged against here.'}
+              </Text>
+            ) : (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                {shownClients.map((c) => {
+                  const on = picked === c.id;
+                  return (
+                    <Pressable key={c.id} onPress={() => setPicked(on ? null : c.id)}
+                      accessibilityRole="button" accessibilityState={{ selected: on }}
+                      accessibilityLabel={on ? `${c.name}, chosen` : `Log this session against ${c.name}`}
+                      hitSlop={{ top: hitSlopFor(34), bottom: hitSlopFor(34), left: 0, right: 0 }}
+                      style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                      <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Two different things the coach is owed, and neither may be
+                skipped. `clientQLine` is what the search searched — and the only
+                sentence allowed to say a name is not on the book, and only under
+                a whole read. The second says the pills are a screenful of a
+                longer list, so a short row is never read as a short book. */}
+            {clientQLine ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{clientQLine}</Text>
+            ) : capped ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {`Showing ${shownClients.length} of your ${r.roster.length} clients — type a name to find the rest.`}
+              </Text>
+            ) : null}
+
+            {/* A client seeded from a route the roster does not confirm. Said
+                out loud rather than left as a name in the title: under a whole
+                read they are not on this coach's book, and `logForClient` will
+                refuse the write for exactly that reason. */}
+            {picked && !pickedRow && r.status === 'ready' ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
+                {pickedName || 'This client'} is not on your roster, so a session logged against them will be refused. Pick somebody from your book instead.
+              </Text>
+            ) : null}
+          </Section>
 
           <Section>
             <SectionHead title="Exercises" note={rows.length ? `${rows.length}` : undefined} />
@@ -342,7 +514,13 @@ export default function LogSession() {
               <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: sp.sm }}>
                 {loadProblem() ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} /> : null}
                 <Text style={{ ...ty.caption, color: loadProblem() ? t.ink2 : t.ink3, textAlign: 'center' }}>
-                  {loadProblem() ?? 'Add at least one set with a rep count.'}
+                  {/* The client comes first of the three, because it is the one
+                      that used to be reported at save — and a coach told to add
+                      a set, who adds one and is then told about the client, has
+                      been sent looking twice. */}
+                  {!picked
+                    ? 'Pick who this session was with, at the top of this screen.'
+                    : loadProblem() ?? 'Add at least one set with a rep count.'}
                 </Text>
               </View>
             ) : null}

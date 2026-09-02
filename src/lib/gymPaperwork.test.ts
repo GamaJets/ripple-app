@@ -55,7 +55,7 @@ eq(nextVersion([agree()], 'terms'), 1, 'a different kind numbers from 1 of its o
 const sig = (agreementId: string, memberId: string, version = 1): Signature => ({
   id: `s-${agreementId}-${memberId}`, agreementId, memberId, memberName: null,
   signedName: 'Sara Ahmed', signedAt: '2026-02-01T10:00:00Z', versionSigned: version,
-  guardianName: null, guardianRelationship: null, note: null,
+  guardianName: null, guardianRelationship: null, note: null, attribution: 'staff',
 });
 
 {

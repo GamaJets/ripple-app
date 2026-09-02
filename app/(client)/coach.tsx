@@ -5,6 +5,21 @@
 // (`src/theme/scale`). No hero and no cards — a chat screen's content is the
 // conversation, so the bubbles carry the ink and the chrome recedes to a
 // hairline. Every provider, conditional and route is unchanged.
+//
+// ── The conversation is kept now, and it is kept HERE ─────────────────────
+//
+// It used to live in one `useState` and nothing else: no table, no key, no
+// provider. Tapping Back threw away everything the member had asked and
+// everything they had been told, so an answer about training around a knee had
+// to be asked for again at the rack.
+//
+// It is now in AsyncStorage under this account, through `useCoachChat` —
+// on the phone rather than in the database, and src/lib/coachChat.ts holds
+// the argument for that in full. The short of it: the replies here are written
+// from this member's body, sleep, readiness and injuries and come back in the
+// second person, so the thread is a second copy of exactly what
+// src/lib/coachShare.ts gates — and `WHERE_IT_GOES`, which is on this screen
+// above the two buttons, ends "and it is not sent to your gym."
 import { useState, useRef, useEffect } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { num } from '../../src/lib/format';
@@ -27,6 +42,8 @@ import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { buildProgram } from '../../src/lib/programs';
 import { askCoachForMember, coachAvailable, type ChatMsg } from '../../src/lib/coach';
 import { useCoachShare } from '../../src/ui/coachShare';
+import { useCoachChat } from '../../src/ui/coachChat';
+import { THREAD_KEPT_NOTE, WITHDRAWN_THREAD_NOTE } from '../../src/lib/coachChat';
 import {
   ALWAYS_SENT, SENT_WITH_PERMISSION, NEVER_SENT, WHERE_IT_GOES,
   CONSENT_TITLE, CONSENT_BODY, WITHHELD_NOTE, NOT_MEDICAL_ADVICE,
@@ -175,9 +192,6 @@ export default function Coach() {
   // route — and it is the one the member themselves just chose, so it would
   // read as the app having ignored them.
   const knowsAll = logWhole && foodWhole && isWhole(cd.status);
-  const [msgs, setMsgs] = useState<ChatMsg[]>([
-    { role: 'assistant', content: `Hi ${cd.name.split(' ')[0]} I'm your ${BRAND.label} coach. ${knowsAll ? 'I know your plan, targets, and latest numbers' : 'I have your plan and whatever of your numbers loaded'} — ask me anything about training or nutrition.` },
-  ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const scroller = useRef<ScrollView>(null);
@@ -193,28 +207,43 @@ export default function Coach() {
   // disclosure somebody can only read once is a disclosure they cannot check.
   const [showsDetail, setShowsDetail] = useState(false);
 
-  // The greeting is derived rather than frozen at mount, because at mount the
-  // consent is still 'unknown' — the AsyncStorage read has not landed. It is
-  // written back into the opening message only while the conversation IS the
-  // opening message, so nothing a member has already read changes under them
-  // and no reply is ever rewritten.
+  // The conversation, kept between visits. src/lib/coachChat.ts is the whole
+  // argument for it living on this phone rather than in `coach_chats`: the
+  // replies are written from this member's body, sleep and injuries and come
+  // back in the second person, so a stored thread is a second copy of exactly
+  // the material `src/lib/coachShare.ts` gates — and the sentence they consented
+  // against ends "it is not sent to your gym."
+  //
+  // `ready` is the same gate everything else on this screen answers to. Nothing
+  // is read while the consent is 'unknown', because restoring a health thread
+  // during the window where nobody has read the answer is restoring it before
+  // being allowed to.
+  const thread = useCoachChat('client', { ready: answered, health: consent === 'yes' });
+  const msgs = thread.msgs;
+
+  // The greeting is derived rather than stored, and it is no longer a message.
+  // It was the first element of `msgs` and had to be rewritten in place once the
+  // consent read landed; now it is a line this phone draws above the
+  // conversation, which is what it always was. Two things follow, both wanted:
+  // it cannot be trimmed away by the thread cap, and it is not posted to the
+  // model as "the replies so far" — it is our own copy, not a reply.
   const greeting = `Hi ${cd.name.split(' ')[0]} I'm your ${BRAND.label} coach. ${
     consent === 'no'
       ? 'I have your plan and your targets, and not your body, sleep or injuries, because you asked me not to'
       : knowsAll ? 'I know your plan, targets, and latest numbers'
         : 'I have your plan and whatever of your numbers loaded'
   } — ask me anything about training or nutrition.`;
-  useEffect(() => {
-    setMsgs((m) => (m.length === 1 && m[0].role === 'assistant' ? [{ role: 'assistant', content: greeting }] : m));
-  }, [greeting]);
 
   const params = useLocalSearchParams<{ ask?: string }>();
   const seeded = useRef(false);
   const send = async (text: string) => {
     const q = text.trim();
-    if (!q || busy || !answered) return;
+    // `thread.status` joins the guard: a question typed before the stored
+    // conversation has come back would be answered against an empty history and
+    // then have the restored one land underneath it.
+    if (!q || busy || !answered || thread.status === 'loading') return;
     const history: ChatMsg[] = [...msgs, { role: 'user', content: q }];
-    setMsgs(history); setInput(''); setBusy(true);
+    thread.set(history); setInput(''); setBusy(true);
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 50);
     const res = await askCoachForMember(
       history.filter((m) => m.role === 'user' || m.role === 'assistant'),
@@ -231,7 +260,10 @@ export default function Coach() {
         : res.reason === 'unavailable'
           ? "The AI coach turns on once your team deploys the coach-chat function and enables AI features. Until then, here's a tip: hit your protein target first — it protects muscle and keeps you full."
           : 'I hit a snag reaching the coach service — try again in a moment.';
-    setMsgs((m) => [...m, { role: 'assistant', content: said }]);
+    // `history` and not the current state: the only writer of this thread is
+    // this function, and reading it back through a setter would race the
+    // AsyncStorage write that `set` starts.
+    thread.set([...history, { role: 'assistant', content: said }]);
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 50);
   };
 
@@ -241,12 +273,16 @@ export default function Coach() {
     // said whether their injuries may be sent is the exact thing the gate
     // exists to prevent — and it would have fired on mount, before the screen
     // had even drawn the question.
-    if (!seeded.current && params.ask === 'injury' && answered) {
+    //
+    // It waits for the stored thread too, for the same reason `send` does: a
+    // question fired against an empty history and then buried under a restored
+    // conversation is a question that appears to have been answered twice.
+    if (!seeded.current && params.ask === 'injury' && answered && thread.status !== 'loading') {
       seeded.current = true;
       send('I have an injury logged that limits some exercises. Build me a safe workout plan for today that trains around it, and tell me what to avoid.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.ask, answered]);
+  }, [params.ask, answered, thread.status]);
 
   const G = layout.gutter;
   const { ref: barRef, lift } = useKeyboardLift();
@@ -350,6 +386,40 @@ export default function Coach() {
             </View>
           ) : null}
 
+          {/* The greeting, drawn rather than stored — see where it is built.
+              It is shown as soon as the question has an answer, because it is
+              about the consent and the reads and knows nothing about the
+              conversation underneath it. */}
+          {answered ? (
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-start', marginBottom: sp.md }}>
+              <View style={{ maxWidth: '82%', backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.md, paddingVertical: sp.sm + 2 }}>
+                <Text style={{ ...ty.body, color: t.ink }}>{greeting}</Text>
+              </View>
+            </View>
+          ) : null}
+
+          {/* The stored conversation is still being read. Said rather than
+              drawn as an empty thread: an empty thread under a row of opening
+              suggestions is this screen claiming the member has never asked it
+              anything, which is the fabricated-empty-answer bug in the one
+              place where the member can see it is wrong. */}
+          {answered && thread.status === 'loading' ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
+              <ActivityIndicator color={t.brand} size="small" />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Fetching your last conversation from this phone…</Text>
+            </View>
+          ) : null}
+
+          {answered && thread.status === 'partial' ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+              An earlier conversation is saved on this phone and could not be read this time. It has been left alone rather than written over, so anything you ask now is not being kept — try again after the next restart.
+            </Flag>
+          ) : null}
+
+          {answered && thread.withdrawn ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{WITHDRAWN_THREAD_NOTE}</Flag>
+          ) : null}
+
           {answered ? msgs.map((m, i) => (
             <View key={i} style={{ flexDirection: 'row', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: sp.md }}>
               <View style={{ maxWidth: '82%', backgroundColor: m.role === 'user' ? t.brand : t.surface2, borderRadius: radius.md, paddingHorizontal: sp.md, paddingVertical: sp.sm + 2 }}>
@@ -363,7 +433,11 @@ export default function Coach() {
               <Text style={{ ...ty.caption, color: t.ink3 }}>Coach is thinking…</Text>
             </View>
           ) : null}
-          {answered && msgs.length <= 1 ? (
+          {/* Offered only when there is genuinely nothing to carry on from, and
+              only once the phone has been read: a restored conversation with
+              "What should I eat post-workout?" underneath it is the screen
+              having forgotten the thread it is displaying. */}
+          {answered && thread.status !== 'loading' && msgs.length === 0 ? (
             <View style={{ marginTop: sp.md, gap: sp.sm }}>
               {SUGGESTIONS.map((s) => (
                 <Pressable key={s} onPress={() => send(s)} accessibilityRole="button" accessibilityLabel={s}
@@ -386,10 +460,27 @@ export default function Coach() {
                   ? 'Your coach can use your body, sleep and injuries. Your name and the words of any injury note never leave your phone.'
                   : 'Your coach is working without your body, sleep or injuries. Your name never leaves your phone either.'}
               </Text>
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
+              {/* Where the conversation itself is, said on the screen that
+                  keeps it. A member cannot decide to clear a record they have
+                  not been told exists, and this one is health information they
+                  typed — see the header of src/lib/coachChat.ts. It answers
+                  to whether it is ACTUALLY being kept: nobody signed in, or a
+                  stored thread we could not read, and nothing is. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {thread.kept
+                  ? THREAD_KEPT_NOTE
+                  : 'This conversation is not being kept — it goes when you leave the screen, and it is not stored on our servers either.'}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Ghost label={showsDetail ? 'Hide the Detail' : 'What Gets Sent'} onPress={() => setShowsDetail((v) => !v)} />
                 <Ghost label={consent === 'yes' ? 'Turn It Off' : 'Turn It On'}
                   onPress={() => answer(consent === 'yes' ? 'no' : 'yes')} />
+                {/* Straight through, with no modal. It is the member's own
+                    conversation on the member's own phone, it is one tap to
+                    start another, and a question in a box is what this app
+                    reserves for a thing that cannot be undone by doing it
+                    again — see src/ui/toast.tsx. */}
+                {msgs.length ? <Ghost label="Clear This Chat" onPress={() => thread.clear()} /> : null}
               </View>
               {showsDetail ? (
                 <View style={{ marginTop: sp.sm }}>

@@ -39,6 +39,20 @@
 // their display name or their account being erased — and the version they
 // signed is denormalised onto the row, because a signature has to be legible
 // from itself.
+//
+// ── And the thing it wrote that was not true ──────────────────────────────
+//
+// The form below is a <select> of the roster beside a text box, filled in by
+// whoever is at the desk. There was no member-side path anywhere in the
+// product, so EVERY signature this gym held was a member of staff typing the
+// member's name, and this screen called all of them "Signed by".
+//
+// That is a labelling defect rather than a worthless record — a signature taken
+// at a desk is a staff attestation, which is an ordinary and useful business
+// record — so the fix is to stop the record claiming to be the other thing.
+// supabase/parts/520 derives `attribution` in the database from auth.uid(), the
+// "Given by the member" column and the How These Were Given panel show the
+// split, and the member's own path is app/(client)/agreements.tsx.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
@@ -53,6 +67,10 @@ import {
   AGREEMENT_KINDS, AGREEMENT_LABEL, AGREEMENT_NOTE, DOCUMENT_KINDS, DOCUMENT_LABEL,
   type Agreement, type AgreementKind, type Signature, type GymDocument, type DocumentKind,
 } from '@lib/gymDocs';
+import {
+  tallyAttribution, ATTRIBUTION_LABEL, ATTRIBUTION_NOTE,
+  type AttributionTally,
+} from '@lib/gymSigning';
 import { capLimit, readAll } from '@lib/rowCap';
 import { isoDate } from '@lib/format';
 
@@ -427,7 +445,18 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
     } finally { setBusy(false); }
   };
 
-  const signedFor = (a: Agreement) => (signatures.rows ?? []).filter((s) => s.agreementId === a.id).length;
+  const signaturesFor = (a: Agreement) => (signatures.rows ?? []).filter((s) => s.agreementId === a.id);
+  const signedFor = (a: Agreement) => signaturesFor(a).length;
+  /**
+   * How many of this version's signatures the MEMBER actually gave.
+   *
+   * Split out rather than folded into the count beside it, because until
+   * supabase/parts/520 every signature this product held was a member of staff
+   * typing the member's name and every screen — this one included — called all
+   * of them "signed by". One number could not say which, so it said the
+   * flattering thing by default.
+   */
+  const byMemberFor = (a: Agreement) => signaturesFor(a).filter((s) => s.attribution === 'member').length;
 
   const cols: Column<Agreement>[] = [
     { key: 'kind', header: 'What it is', value: (a) => AGREEMENT_LABEL[a.kind] ?? a.kind },
@@ -437,12 +466,23 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
       render: (a) => a.required
         ? <span style={{ color: 'var(--ink2)' }}>to join</span>
         : <span style={{ color: 'var(--ink3)' }}>optional</span> },
-    { key: 'signed', header: 'Signed by', value: (a) => (signatures.rows ? signedFor(a) : null), numeric: true,
+    { key: 'signed', header: 'Signatures held', value: (a) => (signatures.rows ? signedFor(a) : null), numeric: true,
       render: (a) => signatures.rows
         ? String(signedFor(a))
         : <span className="dash">not read</span> },
+    { key: 'own', header: 'Given by the member', value: (a) => (signatures.rows ? byMemberFor(a) : null), numeric: true,
+      render: (a) => {
+        if (!signatures.rows) return <span className="dash">not read</span>;
+        const own = byMemberFor(a);
+        const all = signedFor(a);
+        return (
+          <span style={{ color: own === all ? 'var(--ink2)' : 'var(--ink3)' }}>
+            {own}{all ? ` of ${all}` : ''}
+          </span>
+        );
+      } },
     { key: 'act', header: '', value: () => 0, align: 'right',
-      render: (a) => <button style={linkBtn} onClick={() => { setErr(null); setSigning(a); }}>Record a signature</button> },
+      render: (a) => <button style={linkBtn} onClick={() => { setErr(null); setSigning(a); }}>Record one at the desk</button> },
   ];
 
   return (
@@ -517,8 +557,66 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
         </div>
       ) : null}
 
+      <HowGiven read={signatures} />
       <Outstanding rows={outstanding} live={live.length} />
     </Section>
+  );
+}
+
+/**
+ * Who actually gave the signatures this gym holds.
+ *
+ * The panel this screen most needed and did not have. Every other figure here
+ * answers "has this been signed"; this one answers "by whom", and until
+ * supabase/parts/520 the second question had no answer at all — a signature was
+ * a member of staff typing the member's name into the box below, in every case,
+ * and the record could not say so.
+ *
+ * Counts and not a percentage. "84% member-signed" invites an owner to read the
+ * remainder as rounding, and the remainder is precisely the part of the filing
+ * cabinet that would not survive being asked about.
+ */
+function HowGiven({ read }: { read: Read<Signature> }) {
+  const tally: AttributionTally | null = read.rows ? tallyAttribution(read.rows) : null;
+  const kinds = ['member', 'staff', 'unknown'] as const;
+  return (
+    <div style={{ borderTop: '1px solid var(--ring)' }}>
+      <div style={{ padding: '11px 14px' }}>
+        <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>How these were given</h3>
+        <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12, maxWidth: '78ch' }}>
+          A signature the member gave from their own account and a signature somebody at the desk
+          entered for them are both real records, and they are not the same record. This console used
+          to write only the second kind and call it the first.
+        </p>
+      </div>
+      {tally === null ? (
+        <div style={{ padding: '0 14px 14px', color: 'var(--ink2)', fontSize: 13, maxWidth: '78ch' }}>
+          {read.state === 'loading'
+            ? 'Reading.'
+            : 'The signatures could not be read, so this says nothing about how any of them were given. It is not a statement that the gym holds none.'}
+        </div>
+      ) : tally.total === 0 ? (
+        <div style={{ padding: '0 14px 14px', color: 'var(--ink3)', fontSize: 13 }}>
+          This gym holds no signatures at all.
+        </div>
+      ) : (
+        <ul style={{ margin: 0, padding: '0 14px 14px', listStyle: 'none' }}>
+          {kinds.map((k) => (
+            <li key={k} style={{ marginTop: 8, maxWidth: '80ch' }}>
+              <span style={{
+                fontSize: 13,
+                color: k === 'member' ? 'var(--ink)' : k === 'unknown' ? 'var(--ink3)' : 'var(--ink2)',
+              }}>
+                <strong style={{ fontWeight: 600 }}>{tally[k]}</strong> &mdash; {ATTRIBUTION_LABEL[k]}
+              </span>
+              <div style={{ fontSize: 12, color: 'var(--ink3)', lineHeight: 1.55, marginTop: 2 }}>
+                {ATTRIBUTION_NOTE[k]}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -591,7 +689,14 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
       onErr(null);
       onDone();
     } catch (e: any) {
-      onErr(`That signature was NOT recorded: ${e?.message ?? 'the write was refused'}. Nothing is on file and this person has still signed nothing.`);
+      // Two refusals from supabase/parts/520 arrive here and neither is a
+      // fault: recording a signature for YOURSELF is refused because that would
+      // be staff writing a member-attributed row, and a version mismatch means
+      // this console is holding wording the gym has since replaced.
+      const why = memberId === me.id
+        ? 'You cannot record your own signature from the desk — that would file a staff entry as though you had signed it yourself. Sign it in the app, from your own account.'
+        : `That signature was NOT recorded: ${e?.message ?? 'the write was refused'}. Nothing is on file and this person has still signed nothing.`;
+      onErr(why);
     } finally { setBusy(false); }
   };
 
@@ -602,10 +707,19 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
     }}>
       <div className="micro">{AGREEMENT_LABEL[agreement.kind]} v{agreement.version} — {agreement.title}</div>
       <p style={{ margin: '7px 0 10px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '76ch' }}>
-        Recorded as a simple electronic signature: the name they typed, the moment, and the version
-        they were shown. That is what eIDAS Article 25 and the UK Electronic Communications Act make
-        admissible &mdash; a drawn squiggle on a phone is not more binding and is considerably more
-        storage. The name is kept apart from their account name on purpose: the name on a waiver
+        This records that <em>you</em> took their signature, not that they gave it. The row is
+        attributed to staff by the database from your session, and it says so on the row and in the
+        column above &mdash; there is no argument to this form that would make it say otherwise, and
+        that is deliberate: what a gym had here before was a member of staff typing a member&rsquo;s
+        name into a box, filed as though the member had signed.
+      </p>
+      <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '76ch' }}>
+        It is still a proper record &mdash; a staff attestation that this person agreed, taken at the
+        desk, which is what a gym with a clipboard has always had. The stronger one is the member
+        agreeing in the app from their own account, which they can now do without anybody at
+        reception, and which is what the &ldquo;Given by the member&rdquo; column counts. Use this
+        when the member is standing in front of you and the app is not.
+        The name is kept apart from their account name on purpose: the name on a waiver
         <em> is</em> the waiver, and it must survive them renaming themselves or being erased.
       </p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -617,8 +731,8 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
           ))}
         </select>
         <input value={signedName} onChange={(e) => setSignedName(e.target.value)}
-               placeholder="The name they signed with"
-               style={{ ...field, flex: 2, minWidth: 200 }} aria-label="The name they signed with" />
+               placeholder="The name they gave"
+               style={{ ...field, flex: 2, minWidth: 200 }} aria-label="The name they gave" />
         {agreement.kind === 'guardian_consent' ? (
           <>
             <input value={guardianName} onChange={(e) => setGuardianName(e.target.value)}
@@ -630,7 +744,7 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
           </>
         ) : null}
         <button onClick={go} disabled={busy || !!blocker} style={primaryBtn}>
-          {busy ? 'Recording…' : 'Record it'}
+          {busy ? 'Recording…' : 'Record it as taken by me'}
         </button>
         <button onClick={onCancel} style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
       </div>

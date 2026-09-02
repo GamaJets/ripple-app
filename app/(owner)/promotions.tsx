@@ -7,6 +7,22 @@
 // count became the screen's one hero figure, the two bordered boxes became
 // hairline-separated sections, and the Georgia serif header is gone.
 //
+// ── "Live" meant "exists" ─────────────────────────────────────────────────
+//
+// The hero read "Live Codes" over `promos.length`, and the list below it was
+// headed "Active Promotions" with the same figure. `promos.length` is every
+// code this gym has ever made. `p.active` — the column the Growth screen's
+// toggle writes, and the one `redeem_promo` checks — was not read on this
+// screen at all. So a code the owner had deliberately switched off was counted
+// as live, listed under Active, and could still be pushed to every member from
+// the button beside it; the only way to stop that was to DELETE the code, which
+// also destroys the record of a promotion the gym ran.
+//
+// Both figures now count `p.active`, the list says which each row is and can
+// switch it, and Push is not offered on a code nobody could redeem. The
+// switched-off codes are still listed — a promotion that ended is a thing that
+// happened, and hiding it is how an owner recreates it by accident.
+//
 // The redemption count is real again, and the history is worth keeping. Each
 // row once printed "· {p.redeemed} redeemed" against a `promos.redeemed`
 // column nothing incremented — a permanent zero presented as a tracked metric —
@@ -31,7 +47,7 @@ import { sendPushChecked } from '../../src/ui/pushNotifications';
 export default function Promotions() {
   const t = useTheme();
   const router = useRouter();
-  const { promos, status, addPromo, removePromo } = usePromos();
+  const { promos, status, addPromo, toggleActive, removePromo } = usePromos();
   const [title, setTitle] = useState('');
   const [code, setCode] = useState('');
   const [disc, setDisc] = useState(20);
@@ -86,6 +102,16 @@ export default function Promotions() {
     } finally { setBusy(false); }
   };
 
+  // Whether the list on screen is what the server holds. Under 'error' it is
+  // an empty array that means UNKNOWN, and a hero reading "0 codes" would tell
+  // an owner with six that they have none — so the figure is withheld instead.
+  // 'partial' is the list plus a caveat: it arrives when the read was truncated
+  // OR when only the redemption counts failed, and this screen cannot tell
+  // those apart, so it says the count may be short rather than guessing.
+  const countable = status !== 'loading' && status !== 'error';
+  const live = countable ? promos.filter((p) => p.active).length : null;
+  const off = countable ? promos.length - live! : 0;
+
   const G = layout.gutter;
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 } as const;
 
@@ -102,13 +128,19 @@ export default function Promotions() {
         </View>
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
+        {/* `promos.length` was every code the gym had ever made, under the word
+            "Live". This counts the ones a member could actually redeem. */}
         <Hero
           label="Live Codes"
-          figure={fig(promos.length)}
-          unit={promos.length === 1 ? 'code' : 'codes'}
-          note={promos.length
-            ? 'Push any code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.'
-            : 'Create an offer and push it straight to your members.'}
+          figure={fig(live)}
+          unit={live === 1 ? 'code' : 'codes'}
+          note={status === 'loading' ? 'Reading your codes…'
+            : status === 'error' ? 'Your codes could not be read — this is not a gym with none.'
+            : live === 0
+              ? off > 0
+                ? `Nothing is redeemable right now. ${off} code${off === 1 ? ' is' : 's are'} switched off below — switch one back on, or create a new offer.`
+                : 'Create an offer and push it straight to your members.'
+              : `${off > 0 ? `${off} more switched off. ` : ''}Push a live code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.${status === 'partial' ? ' Some of your codes could not be read, so this may be short.' : ''}`}
         />
 
         <Rule />
@@ -134,8 +166,9 @@ export default function Promotions() {
           <View style={{ height: sp.sm }} />
           <TextInput value={msg} onChangeText={setMsg} placeholder="Push message (optional)" placeholderTextColor={t.ink3} style={inp} />
           <View style={{ height: sp.lg }} />
-          {/* `disabled={busy}` on the old buttons, preserved: the kit's Cta/Ghost
-              take no disabled prop, so the pair is gated as a group. */}
+          {/* `disabled={busy}` on the old buttons, preserved: `Ghost` takes no
+              disabled prop, so the pair is gated as a group rather than one of
+              them being live while the other is not. */}
           <View pointerEvents={busy ? 'none' : 'auto'} style={{ opacity: busy ? 0.6 : 1 }}>
             <Cta label={busy ? 'Working…' : 'Create & push to members'} wide onPress={() => create(true)} />
             <View style={{ height: sp.sm }} />
@@ -147,7 +180,11 @@ export default function Promotions() {
 
         {/* ── active promotions ──────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Active Promotions" note={promos.length ? String(promos.length) : undefined} />
+          {/* "Active Promotions" over a count of every code ever made. The
+              switched-off ones belong in this list — a promotion the gym ran
+              and ended is a thing that happened — but the heading may not call
+              them active, and each row says which it is. */}
+          <SectionHead title="Your Codes" note={countable && promos.length ? `${live} live of ${promos.length}` : undefined} />
           {status === 'error' ? (
             // An empty list under 'error' is unknown, not "no promotions" —
             // and offering to create the first code to somebody who may
@@ -157,7 +194,7 @@ export default function Promotions() {
             </Text>
           ) : promos.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {status === 'loading' ? 'Loading.' : 'No promotions yet. Create a code above and it appears here, ready to push to every member.'}
+              {status === 'loading' ? 'Loading.' : 'No promotions yet. Create a code above and it appears here, live and ready to push to every member.'}
             </Text>
           ) : promos.map((p, i) => (
             <View key={p.id} style={{
@@ -165,19 +202,41 @@ export default function Promotions() {
               borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink, letterSpacing: 1 }}>{p.code}</Text>
+                <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: p.active ? t.ink : t.ink3, letterSpacing: 1 }}>{p.code}</Text>
                 {/* The count is rows in promo_redemptions, not a stored
                     counter — so a 0 here means nobody has used it, and -1
                     means the count itself could not be read, which renders as
                     a dash rather than as nobody. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                   {p.discountPct}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
+                  {p.active ? '' : ' · switched off, nobody can redeem it'}
                 </Text>
               </View>
-              <Ghost label="Push" onPress={() => { const body = `${p.discountPct}% off with code ${p.code}`; pushToMembers(body).then((r) => Alert.alert(r.ok ? 'Queued' : 'Not sent', r.ok ? `Queued to ${r.queued} member${r.queued === 1 ? '' : 's'}.` : (r.error || 'The push did not go out.'))); }} />
+              {/* The switch this screen did not have. Without it the only way to
+                  stop a code was the × beside it, which deletes the promotion
+                  and the evidence that the gym ever ran it. Awaited and checked:
+                  `toggleActive` counts the rows it changed, so a refused update
+                  says so rather than flipping the dot on a screen the server
+                  never agreed with. */}
+              <Pressable
+                onPress={async () => { if (!await toggleActive(p.id)) Alert.alert('Not changed', `“${p.code}” could not be switched ${p.active ? 'off' : 'on'}, so it is still ${p.active ? 'live' : 'off'}.`); }}
+                accessibilityRole="button"
+                accessibilityLabel={`${p.code} is ${p.active ? 'live' : 'off'} — switch it ${p.active ? 'off' : 'on'}`}
+                hitSlop={6}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 6 }}>
+                <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: p.active ? t.brand : t.ink3 }} />
+                <Text style={{ ...ty.caption, color: t.ink2 }}>{p.active ? 'Live' : 'Off'}</Text>
+              </Pressable>
+              {/* Push is offered on a code a member could actually redeem, and
+                  on no other. Pushing a switched-off code sends every member to
+                  an offer `redeem_promo` will refuse, which is worse than not
+                  telling them about it. */}
+              {p.active ? (
+                <Ghost label="Push" onPress={() => { const body = `${p.discountPct}% off with code ${p.code}`; pushToMembers(body).then((r) => Alert.alert(r.ok ? 'Queued' : 'Not sent', r.ok ? `Queued to ${r.queued} member${r.queued === 1 ? '' : 's'}.` : (r.error || 'The push did not go out.'))); }} />
+              ) : null}
               {/* The boolean was discarded here too: a code the server refused
                   to delete vanished from the list and stayed redeemable. */}
-              <Pressable onPress={async () => { if (!await removePromo(p.id)) Alert.alert('Not deleted', `“${p.code}” could not be deleted, so it is still live and can still be redeemed.`); }} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Remove ' + p.code}>
+              <Pressable onPress={async () => { if (!await removePromo(p.id)) Alert.alert('Not deleted', `“${p.code}” could not be deleted, so it is still there and, if it is live, can still be redeemed.`); }} hitSlop={6} accessibilityRole="button" accessibilityLabel={'Remove ' + p.code}>
                 <Icon name="minus" size={16} color={t.ink3} />
               </Pressable>
             </View>

@@ -10,7 +10,8 @@
 // spreadsheet and a dispute in a gym.
 
 import { minorMoney } from './coachMoney';
-import { assertWhole, capLimit } from './rowCap';
+import { assertWhole, capLimit, readAll } from './rowCap';
+import { readByIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
@@ -161,18 +162,50 @@ export async function setPlanActive(sb: Queryable, planId: string, active: boole
 
 /* ── memberships ───────────────────────────────────────────────────────────── */
 
+/**
+ * Every membership in the gym's history, not just the live ones.
+ *
+ * ── Why this pages rather than refuses ────────────────────────────────────
+ *
+ * It used to be `capLimit()` plus `assertWhole`, on the reasoning that a gym a
+ * few years old crosses a thousand rows without being large and a truncated set
+ * silently drops the oldest — exactly the set a revenue trend reads. The
+ * diagnosis was right and the remedy was half of one: the read stopped lying
+ * and started refusing instead, and it refuses for FIFTEEN callers, which is
+ * every membership-bearing screen in the console and three in the phone app.
+ * /close, /accounting, /retention, /members, /passes, /revenue, /export and the
+ * roster picker on the invoice form all go dark together on the same day, and
+ * they stay dark, because nothing a gym can do makes its own history shorter.
+ *
+ * Windowing it instead is not available. There is no honest window: a
+ * membership that started four years ago and is still live is the row a tenure
+ * figure is made of, and a rolling window would drop it and report a founding
+ * member as a new one.
+ *
+ * So the read is finished. This is the shape `readAll` exists for in the one
+ * respect that matters — the screens genuinely need all of it — and
+ * src/lib/gymPasses.ts already reads a tenant's whole pass book the same way.
+ * What replaces the thousand-row cliff is `PAGE_CEILING`: past fifty thousand
+ * memberships this still refuses, out loud, with a sentence naming the set.
+ * That is a different claim from the old one. It says "this is too large to
+ * total in a browser", not "this gym has 1000 memberships".
+ *
+ * `readAll` needs a TOTAL order — one that cannot tie — because every page is a
+ * separate HTTP request. `started_on` is a DATE, so a gym that signed up
+ * thirty people on the first of the month has thirty rows Postgres may return
+ * in any order; `id` is the primary key and breaks it.
+ */
 export async function fetchMemberships(sb: Queryable, tenantId: string): Promise<Membership[]> {
-  const { data, error } = await sb
-    .from('memberships')
-    .select('id, member_id, member_label, plan_id, started_on, ends_on, status')
-    .eq('tenant_id', tenantId)
-    .order('started_on', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  // Every membership in the gym's history, not just the live ones — a gym a few
-  // years old crosses a thousand rows without being large, and a truncated set
-  // silently drops the oldest, which is exactly the set a revenue trend reads.
-  const rows = assertWhole(data, "this gym's memberships");
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('memberships')
+      .select('id, member_id, member_label, plan_id, started_on, ends_on, status')
+      .eq('tenant_id', tenantId)
+      .order('started_on', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    "this gym's memberships",
+  );
   if (!rows.length) return [];
 
   const [names, planNames] = await Promise.all([
@@ -292,31 +325,58 @@ export async function setMembershipPlan(
 
 /* ── payments ──────────────────────────────────────────────────────────────── */
 
+/**
+ * What the gym was actually paid, over the window the caller asked for.
+ *
+ * Payments are the number an owner reconciles against a bank statement, so a
+ * truncated read here does not make the figure smaller — it makes it wrong.
+ * That was the case for `assertWhole` and it still holds; what has changed is
+ * that refusing is no longer the only alternative to lying.
+ *
+ * ── Why this pages ────────────────────────────────────────────────────────
+ *
+ * Two of the callers are unbounded by design and cannot be windowed. /members
+ * shows what each person has paid over their whole time at the gym, and
+ * /export hands over the ledger; a rolling window on either would quietly
+ * report a four-year member's lifetime total as one year of it, which is the
+ * exact failure the cap exists to stop, arriving through the front door. Under
+ * `assertWhole` both screens simply stopped working at a thousand payments —
+ * roughly two hundred members billed monthly, five months in.
+ *
+ * So the read is finished a page at a time, with `PAGE_CEILING` as the backstop
+ * the row cap used to be. Past fifty thousand payments in one window it still
+ * refuses, and the refusal names the set: that is a claim about the size of the
+ * read, not a claim about the gym's takings.
+ *
+ * `taken_at` alone is not a total order — two payments taken in the same
+ * millisecond are two rows Postgres may hand back in either order — so `id`
+ * breaks the tie. Every page is a separate request, and a tied order across
+ * pages drops and repeats rows without saying so.
+ */
 export async function fetchPayments(
   sb: Queryable, tenantId: string, sinceISO?: string, untilISO?: string,
 ): Promise<GymPayment[]> {
-  let q = sb
-    .from('gym_payments')
-    .select('id, member_id, membership_id, amount_cents, currency, method, taken_at, note, kind, reverses_payment_id, invoice_id, payer_name')
-    .eq('tenant_id', tenantId)
-    .order('taken_at', { ascending: false });
-  if (sinceISO) q = q.gte('taken_at', sinceISO);
-  // An UPPER bound as well as a lower one, and it is not optional politeness.
-  // /accounting and /close both computed a start date and no end date, so
-  // opening a month from a year ago read every payment from that month up to
-  // today — a set that grows without bound, that the month's figures then have
-  // to filter back down, and that trips `assertWhole` on any gym busy enough to
-  // have crossed a thousand payments since. The read is now exactly the window
-  // the caller asked for.
-  if (untilISO) q = q.lt('taken_at', untilISO);
-  q = q.limit(capLimit());
-  const { data, error } = await q;
-  if (error) throw error;
-  // Payments are what the gym was paid. A truncated read here does not make the
-  // figure smaller, it makes it wrong, and it is the number an owner reconciles
-  // against a bank statement.
-  assertWhole(data, 'this gym\u2019s payments');
-  const rows = data ?? [];
+  const rows = await readAll<any>(
+    (from, to) => {
+      let q = sb
+        .from('gym_payments')
+        .select('id, member_id, membership_id, amount_cents, currency, method, taken_at, note, kind, reverses_payment_id, invoice_id, payer_name')
+        .eq('tenant_id', tenantId)
+        .order('taken_at', { ascending: false })
+        .order('id', { ascending: false });
+      if (sinceISO) q = q.gte('taken_at', sinceISO);
+      // An UPPER bound as well as a lower one, and it is not optional
+      // politeness. /accounting and /close both computed a start date and no
+      // end date, so opening a month from a year ago read every payment from
+      // that month up to today — a set that grows without bound and that the
+      // month's own figures then have to filter back down. Paging removes the
+      // cliff that read used to fall off; it does not make reading a year of
+      // payments to total one month of them a sensible thing to do.
+      if (untilISO) q = q.lt('taken_at', untilISO);
+      return q.range(from, to);
+    },
+    'this gym\u2019s payments',
+  );
   if (!rows.length) return [];
 
   const names = await namesFor(sb, rows.map((r: any) => r.member_id).filter(Boolean));
@@ -384,31 +444,54 @@ export interface OnlineOrder {
  * exchange for nothing. A failure there is not swallowed — a screen that showed
  * "not in the ledger" because a lookup failed would raise an exception against
  * every online sale the gym made.
+ *
+ * Both halves are paged. The month window bounds the orders read but does not
+ * cap it — a gym running a January sale can take a thousand online orders in a
+ * month without being unusual, and /accounting sums this array and lists every
+ * order that never reached the ledger. Under the old cap the oldest of those
+ * fell off the end and the reconciliation reported the month as clean.
+ *
+ * The ledger check is chunked through src/lib/idLookup.ts rather than sent as
+ * one `.in()`, because it inherits its size from the read above: with the
+ * orders read paging, that list is no longer bounded by a thousand, and
+ * `gym_order_id` is a foreign key rather than a unique one, so a chunk can
+ * legitimately answer with more rows than it had ids.
  */
 export async function fetchOnlineOrders(
   sb: Queryable, tenantId: string, sinceISO: string, untilISO: string,
 ): Promise<OnlineOrder[]> {
-  const { data, error } = await sb
-    .from('gym_orders')
-    .select('id, member_id, kind, status, amount_cents, currency, failure_note, paid_at')
-    .eq('tenant_id', tenantId)
-    .in('status', ['paid', 'failed'])
-    .gte('paid_at', sinceISO)
-    .lt('paid_at', untilISO)
-    .order('paid_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  const rows = assertWhole(data, 'this gym\u2019s online orders');
+  // `paid_at` is nullable on `gym_orders` and ties freely on a busy morning, so
+  // `id` — the primary key — carries the total order `readAll` requires.
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_orders')
+      .select('id, member_id, kind, status, amount_cents, currency, failure_note, paid_at')
+      .eq('tenant_id', tenantId)
+      .in('status', ['paid', 'failed'])
+      .gte('paid_at', sinceISO)
+      .lt('paid_at', untilISO)
+      .order('paid_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'this gym\u2019s online orders',
+  );
   if (!rows.length) return [];
 
-  const ids = rows.map((r: any) => r.id);
-  const { data: paid, error: paidErr } = await sb
-    .from('gym_payments')
-    .select('gym_order_id')
-    .eq('tenant_id', tenantId)
-    .in('gym_order_id', ids);
-  if (paidErr) throw paidErr;
-  const inLedger = new Set((paid ?? []).map((p: any) => p.gym_order_id));
+  const paid = await readByIds<any>(
+    rows.map((r: any) => r.id),
+    (chunk, from, to) => sb
+      .from('gym_payments')
+      .select('id, gym_order_id')
+      .eq('tenant_id', tenantId)
+      .in('gym_order_id', chunk)
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the ledger entries for those online sales',
+  );
+  // Not swallowed: `readByIds` throws a failed lookup rather than returning a
+  // short list, and a short list here is the failure this whole comment block
+  // is about — every order it could not confirm would be drawn as an exception.
+  const inLedger = new Set(paid.map((p: any) => p.gym_order_id));
 
   const names = await namesFor(sb, rows.map((r: any) => r.member_id).filter(Boolean));
   return rows.map((r: any) => ({
@@ -778,19 +861,56 @@ export function money(cents: number | null | undefined, currency: string | null 
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */
 
+/**
+ * Names for the ids on a set of rows.
+ *
+ * Chunked through src/lib/idLookup.ts rather than sent as one `.in()`, and that
+ * became load-bearing the moment the reads above started paging. A single
+ * `.in()` was safe only while `assertWhole` kept those reads under a thousand
+ * rows and so under a thousand distinct ids; with ten thousand payments in
+ * hand it would have come back with the first thousand names and no complaint,
+ * and every member past that would have rendered as a dash on a screen whose
+ * whole job is naming people.
+ *
+ * Still no-error-ok, and still for the stated reason: an unreadable name
+ * becomes null and renders as a dash, while the row it labels is real and stays
+ * on screen. What the chunking buys is that "no name" now means the lookup was
+ * refused, rather than meaning the list of ids was too long to ask about.
+ */
 async function namesFor(sb: Queryable, ids: string[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter(Boolean))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name becomes null and renders as a dash; the row it labels is still real
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique);
-  return new Map((data ?? []).map((p: any) => [p.id, (p.full_name || '').trim()]));
+  try {
+    const rows = await readByIds<any>(
+      ids,
+      (chunk, from, to) => sb.from('profiles')
+        .select('id, full_name')
+        .in('id', chunk)
+        .order('id', { ascending: true })
+        .range(from, to),
+      'the names on those rows',
+    );
+    return new Map(rows.map((p: any) => [p.id, (p.full_name || '').trim()]));
+  } catch {
+    return new Map();
+  }
 }
 
+/** Plan names, chunked for the same reason and swallowing a failure for the
+ *  same one: an unreadable plan name becomes null and renders as a dash, and
+ *  the membership row it belongs to is still real. */
 async function planNamesFor(sb: Queryable, ids: string[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter(Boolean))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable plan name becomes null and renders as a dash; the membership row is still real
-  const { data } = await sb.from('membership_plans').select('id, name').in('id', unique);
-  return new Map((data ?? []).map((p: any) => [p.id, p.name]));
+  try {
+    const rows = await readByIds<any>(
+      ids,
+      (chunk, from, to) => sb.from('membership_plans')
+        .select('id, name')
+        .in('id', chunk)
+        .order('id', { ascending: true })
+        .range(from, to),
+      'the names of those plans',
+    );
+    return new Map(rows.map((p: any) => [p.id, p.name]));
+  } catch {
+    return new Map();
+  }
 }
 

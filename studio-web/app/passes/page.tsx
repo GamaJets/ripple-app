@@ -33,7 +33,7 @@ import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships, fetchPlans, money } from '@lib/gymRecord';
-import { fetchVisits } from '@lib/gymVisits';
+import { fetchPassVisits } from '@lib/passVisits';
 import { fetchPasses } from '@lib/gymPasses';
 import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
@@ -88,13 +88,21 @@ export default function Passes() {
     // price book that 500s must not take the pass counts down with it — the
     // page may be partial, but only if it says which part and what that costs.
     //
-    // No `sinceIso` on the visits: a pass issued eighteen months ago and
-    // redeemed the week after is exactly the case this page exists to find, and
-    // a rolling window would silently drop it and report the pass as unused.
+    // No window on the visits: a pass issued eighteen months ago and redeemed
+    // the week after is exactly the case this page exists to find, and a
+    // rolling window would silently drop it and report the pass as unused.
+    //
+    // This asked `fetchVisits` for the gym's WHOLE door log to get that, which
+    // is the one shape src/lib/gymVisits.ts refuses outright — so the screen
+    // threw for every gym past a thousand scans, which at a busy front desk is
+    // about a month, and pass income and the call list went with it.
+    // `fetchPassVisits` reads the same set the page actually uses — the visits
+    // a pass paid for — bounded by that filter rather than by a date, and
+    // paged, so the eighteen-month-old redemption is still found.
     const [passes, memberships, visits, plans] = await Promise.all([
       slice(() => fetchPasses(supabase, tenantId)),
       slice(() => fetchMemberships(supabase, tenantId)),
-      slice(() => fetchVisits(supabase, tenantId)),
+      slice(() => fetchPassVisits(supabase, tenantId)),
       slice(() => fetchPlans(supabase, tenantId)),
     ]);
     setRec({ passes, memberships, visits, plans });

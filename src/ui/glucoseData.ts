@@ -13,6 +13,17 @@
 // answer, and a screen that renders those the same way tells somebody wearing a
 // CGM that their sensor recorded nothing — which is the one thing they would
 // actually act on.
+//
+// ── A reading typed with no signal used to be a reading that never happened ─
+//
+// `addManual` caught the failure, returned false, and app/(client)/glucose.tsx
+// said "that reading could not be saved". True, and the end of it: the number
+// was gone, and a monitor reading is a thing somebody has exactly once. A typed
+// reading passes `src/lib/outbox.ts`'s own admission rule — it is a write about
+// the member's own record, nobody else can take it, it costs nothing and it
+// carries no file — so it is now kept and sent on the reconnect, as 'glucose'.
+// See src/lib/recordQueue.ts for why the health-store IMPORT is deliberately
+// not queued alongside it.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BRAND } from '../lib/brands';
 import { supabase } from '../lib/supabase';
@@ -23,6 +34,10 @@ import {
   type GlucoseReadStatus, type GlucoseReading, type GlucoseSummary, type MealGlucose, type MealRef,
 } from '../lib/glucose';
 import { glucoseSource } from '../lib/wearables/glucoseSource';
+import { classifyWrite, type WriteOutcome } from '../lib/offlineQueue';
+import { keptOnPhoneNote, notKeptNote } from '../lib/recordQueue';
+import { useOutbox } from './outbox';
+import { useToast } from './toast';
 
 /** How far back the screens look, and how far back the import reads. */
 export const WINDOW_DAYS = 14;
@@ -60,7 +75,14 @@ export interface GlucoseData {
    * like the fourth.
    */
   importFromHealth: () => Promise<{ added: number; status: GlucoseReadStatus; reason?: string }>;
-  /** Store one reading somebody typed. mmol/L. */
+  /**
+   * Store one reading somebody typed. mmol/L.
+   *
+   * True once the row is on the server, and also true once it has been kept on
+   * this phone to be sent later — both mean the reading was not lost, which is
+   * what the screen's alert is about. A queued reading is SAID through the toast
+   * rather than drawn on the chart: see the implementation.
+   */
   addManual: (mmol: number, at?: string) => Promise<boolean>;
   /** Remove one. Only the owner can, and the database agrees. */
   remove: (id: string) => Promise<boolean>;
@@ -109,6 +131,16 @@ export function useGlucose(personId?: string): GlucoseData {
   const [mealsStatus, setMealsStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
   const readOnly = !!personId;
+  // The device's queue, for the one write here that is allowed to wait. Null
+  // when there is no provider above the screen, which is a real state and not an
+  // error — see `useOutbox`.
+  const outbox = useOutbox();
+  // The quiet channel. A queued reading has to be SAID, because it is the one
+  // outcome the screen cannot show: the chart is the evidence and the reading is
+  // not on the server yet, so without a line the member is left looking at a
+  // table that has not changed. `useToast` returns a working no-op outside a
+  // provider, so this is safe on every screen that calls this hook.
+  const { say } = useToast();
 
   // Who "their own readings" means, settled before any read is attempted.
   //
@@ -277,15 +309,46 @@ export function useGlucose(personId?: string): GlucoseData {
     return { added: count, status: 'ready' };
   }, [readOnly, target, rows, refresh]);
 
+  /**
+   * One reading somebody typed.
+   *
+   * True once the row is on the server OR once the write has been kept on this
+   * phone to be sent later. The two are one answer to the screen — the reading
+   * was not lost — and `say` is what tells them apart, because a queued reading
+   * deliberately does NOT appear on the chart yet: the chart is the evidence,
+   * and a reading drawn on it before the server has it is the app showing
+   * somebody a record that does not exist.
+   *
+   * `taken_at` is carried, so a reading typed in a basement and sent an hour
+   * later sits against the meal it actually followed rather than the one it was
+   * sent after.
+   */
   const addManual = useCallback(async (mmol: number, at?: string): Promise<boolean> => {
     if (readOnly || !target) return false;
-    const { error } = await supabase.from('glucose_readings').insert({
-      client_id: target, taken_at: at ?? new Date().toISOString(), mmol_l: mmol, external_id: null, source: 'manual',
-    });
-    if (error) return false;
-    await refresh();
+    const taken = at ?? new Date().toISOString();
+    let out: WriteOutcome;
+    try {
+      // `.select('id')` and a counted outcome. An insert PostgREST narrows to
+      // zero rows under RLS does not fail — it succeeds having done nothing —
+      // and this was the one write in this file still reading only `error`,
+      // which is the bug `remove` and `setSharedFlag` were already written
+      // against.
+      const { data, error } = await supabase.from('glucose_readings').insert({
+        client_id: target, taken_at: taken, mmol_l: mmol, external_id: null, source: 'manual',
+      }).select('id');
+      out = classifyWrite(error as any, data ? data.length : 0);
+    } catch { out = 'unsent'; }
+    if (out === 'stored') { await refresh(); return true; }
+    // 'refused' is the server having read the row and declined it. Offering the
+    // same bytes again gets the same answer, so it is not queued and the screen
+    // says it was not saved.
+    if (out === 'refused') return false;
+    if (!outbox) return false;
+    const { result } = await outbox.enqueue('glucose', { mmol, at: taken });
+    if (result !== 'queued') { say(notKeptNote('reading', result === 'full' ? 'full' : 'unavailable')); return false; }
+    say(keptOnPhoneNote('reading'));
     return true;
-  }, [readOnly, target, refresh]);
+  }, [readOnly, target, refresh, outbox, say]);
 
   const remove = useCallback(async (id: string): Promise<boolean> => {
     if (readOnly || !target) return false;

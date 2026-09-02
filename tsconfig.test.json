@@ -28,6 +28,14 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/sessionFilter.ts",
+    "src/lib/sessionFilter.test.ts",
+    "src/lib/checklistCopy.ts",
+    "src/lib/checklistCopy.test.ts",
+    "src/lib/segments.ts",
+    "src/lib/segments.test.ts",
+    "src/lib/quietHours.ts",
+    "src/lib/quietHours.test.ts",
     "src/lib/coachDelivery.ts",
     "src/lib/coachDelivery.test.ts",
     "src/lib/coachRevenue.ts",
@@ -206,6 +214,7 @@
     "src/lib/coachThreads.test.ts",
     "src/lib/deltaLabel.test.ts",
     "src/lib/readAll.test.ts",
+    "src/lib/idLookup.test.ts",
     "src/lib/finReview.test.ts",
     "src/lib/clientRecord.test.ts",
     "src/lib/coachLedger.test.ts",
@@ -258,6 +267,7 @@
     "src/lib/gymClose.test.ts",
     "src/lib/gymPay.test.ts",
     "src/lib/gymPaperwork.test.ts",
+    "src/lib/gymSigning.test.ts",
     "src/lib/gymDocAccess.test.ts",
     "src/lib/reachability.test.ts",
     "src/lib/outbox.test.ts",
@@ -276,6 +286,11 @@
     "src/lib/streaks.test.ts",
     "src/lib/wearables/liveNotes.test.ts",
     "src/lib/crashQueue.test.ts",
-    "src/lib/intakeDraft.test.ts"
+    "src/lib/intakeDraft.test.ts",
+    "src/lib/rosterSearch.ts",
+    "src/lib/rosterSearch.test.ts",
+    "src/lib/inviteDelivery.test.ts",
+    "src/lib/coachChat.test.ts",
+    "src/lib/recordQueue.test.ts"
   ]
 }

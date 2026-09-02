@@ -11,7 +11,7 @@
 // systematically under-reports the conditions the app is actually used in, and
 // the table looks healthiest precisely where the app is worst.
 //
-// ── Why this is not a fifth `OutboxKind` ───────────────────────────────────
+// ── Why this is not another `OutboxKind` ───────────────────────────────────
 //
 // `src/lib/outbox.ts` is the obvious home and it is the wrong one, for reasons
 // that file states itself. Its closing rule is:

@@ -144,6 +144,7 @@ const UID = '11111111-1111-1111-1111-111111111111';
   ok(!/sent to your coach|delivered|read/i.test(one), 'and never implies anybody has seen it');
   ok(one.includes('this phone'), 'while making clear the work is not lost');
   eq(kindNoun('pt-approval').many, 'session approvals', 'every kind has a noun, so no sentence can be assembled without one');
+  eq(kindNoun('day-plan').one, 'planned day', 'and the noun is the member’s word for the thing, not the table’s');
 }
 
 // ── 6. A KIND WITH NO SENTENCE ───────────────────────────────────────────
@@ -154,7 +155,7 @@ const UID = '11111111-1111-1111-1111-111111111111';
 // about it — which is the whole failure these sentences were written for, so it
 // is asserted rather than trusted.
 {
-  eq(OUTBOX_KINDS.length, 3, 'the list has one entry per kind in the union');
+  eq(OUTBOX_KINDS.length, 6, 'the list has one entry per kind in the union');
   for (const k of OUTBOX_KINDS) {
     ok(isOutboxKind(k), `${k} is recognised coming back off the disk`);
     const n = kindNoun(k);

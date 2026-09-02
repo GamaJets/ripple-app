@@ -270,9 +270,18 @@ export interface WriteOutcome {
   why: string | null;
 }
 
-/** What a bulk action was doing, which is the only thing the report's wording
- *  needs to differ on. */
-export type BulkKind = 'assign' | 'unassign' | 'message' | 'end';
+/**
+ * What a bulk action was doing, which is the only thing the report's wording
+ * needs to differ on.
+ *
+ * 'checklist' is copying a coach's daily lines onto other clients' lists —
+ * src/lib/checklistCopy.ts does the planning and the guard, this file reports
+ * the fan-out. It is here rather than as its own reporter because the three
+ * failure modes in this file's header are identical for it: N writes, refused
+ * one at a time for ordinary reasons, and a coach who is told "8 of 12" and
+ * nothing else has to work out which four by opening twelve clients.
+ */
+export type BulkKind = 'assign' | 'unassign' | 'message' | 'end' | 'checklist';
 
 export interface BulkReport {
   title: string;
@@ -330,6 +339,11 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
     // account is intact and that the client has been told.
     : kind === 'end'
     ? (c: number) => `${c === 1 ? 'They are' : `All ${num(c)} are`} off your roster, and anyone with an account has been told the coaching ended. They keep everything they logged; anyone you had added by hand is deleted along with the name and goal you typed.`
+    // Says WHEN, because nothing is sent and nobody is told: a coach who
+    // expects a notification to have gone out will follow up on a conversation
+    // that never happened. The lines simply appear on the list tomorrow.
+    : kind === 'checklist'
+    ? (c: number) => `The lines are on ${c === 1 ? 'their' : `${num(c)} clients’`} daily list from tomorrow morning, marked as set by you. Nobody was notified, and only you can take them off again.`
     : (c: number) => `Your message is in ${c === 1 ? 'their thread' : `${num(c)} threads`} now.`;
 
   if (n === 0) {
@@ -338,8 +352,8 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
     return { title: 'Nobody Selected', body: 'Nothing was written, because nobody was ticked.', retry: [] };
   }
 
-  const verbTitle = kind === 'assign' ? 'Assigned' : kind === 'unassign' ? 'Taken Off' : kind === 'end' ? 'Removed' : 'Sent';
-  const verbBody = kind === 'assign' ? 'Assigned to' : kind === 'unassign' ? 'Took the programme off' : kind === 'end' ? 'Removed' : 'Sent to';
+  const verbTitle = kind === 'assign' ? 'Assigned' : kind === 'unassign' ? 'Taken Off' : kind === 'end' ? 'Removed' : kind === 'checklist' ? 'Copied' : 'Sent';
+  const verbBody = kind === 'assign' ? 'Assigned to' : kind === 'unassign' ? 'Took the programme off' : kind === 'end' ? 'Removed' : kind === 'checklist' ? 'Copied to' : 'Sent to';
 
   if (!bad.length) {
     return {
@@ -355,7 +369,7 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
 
   if (!ok.length) {
     return {
-      title: kind === 'assign' ? 'Not Assigned' : kind === 'unassign' ? 'Not Taken Off' : kind === 'end' ? 'Nobody Was Removed' : 'Not Sent',
+      title: kind === 'assign' ? 'Not Assigned' : kind === 'unassign' ? 'Not Taken Off' : kind === 'end' ? 'Nobody Was Removed' : kind === 'checklist' ? 'Nothing Was Copied' : 'Not Sent',
       body:
         `${n === 1 ? 'The write' : `None of the ${num(n)} writes`} landed, so nothing has changed for ${n === 1 ? 'them' : 'any of them'}. `
         + `${n === 1 ? 'They are' : 'They are all'} still selected, so you can try again without finding ${n === 1 ? 'them' : 'them all'} again.\n\n`
@@ -365,7 +379,7 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
   }
 
   return {
-    title: kind === 'assign' ? 'Partly Assigned' : kind === 'unassign' ? 'Partly Taken Off' : kind === 'end' ? 'Partly Removed' : 'Partly Sent',
+    title: kind === 'assign' ? 'Partly Assigned' : kind === 'unassign' ? 'Partly Taken Off' : kind === 'end' ? 'Partly Removed' : kind === 'checklist' ? 'Partly Copied' : 'Partly Sent',
     body:
       `${num(ok.length)} of ${num(n)} landed — ${namesWithRest(ok.map((r) => r.name))}. ${landed(ok.length)}\n\n`
       + `${num(bad.length)} did not, and ${bad.length === 1 ? 'is' : 'are'} still selected so you can try again:\n\n`

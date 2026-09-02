@@ -31,7 +31,7 @@
 // the Staff screen's question, and a second copy of it under a different
 // heading is how two screens end up disagreeing about the same coach.
 //
-// ── Three things this page refuses to do ───────────────────────────────────
+// ── Four things this page refuses to do ────────────────────────────────────
 //
 //   · call a partial month a low-churn month. August is not finished; the
 //     leavers it has not had yet have not happened. A rate over a running month
@@ -45,7 +45,25 @@
 //     through the door, every member has zero visits and every cohort retains
 //     nobody — a chart of the gym's hardware, drawn as though it were a chart
 //     of the gym. The log is probed separately for its last entry, and when it
-//     has none the visit figures are unknown rather than zero.
+//     has none the visit figures are unknown rather than zero;
+//   · add two currencies together. A gym that changed its money has both in its
+//     ledger and dirhams plus pounds is not a bigger number about the same
+//     thing. That refusal is absolute and there is no total anywhere in the
+//     money section — but it used to mean the gym lost the revenue trend, ARPU
+//     and the year-on-year comparison outright and forever, which is a
+//     different and much larger refusal than the one the rule asks for. Each
+//     currency now gets its own thirteen months and nothing crosses between
+//     them.
+//
+// ── And one rate that was not a rate ───────────────────────────────────────
+//
+// The churn denominator can only count somebody it has a join date for —
+// "on the books before the 1st" is a question about a date — while the numerator
+// counted every departure. So a member whose start was never recorded was
+// counted LEAVING and never counted PRESENT, which inflates churn, and inflates
+// it most at the gyms with the messiest records. Both halves are now drawn from
+// the same population, and a month that lost somebody undated withholds the
+// rate rather than quietly printing the smaller one. See `monthRows`.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
@@ -66,7 +84,12 @@ import {
 } from '@lib/gymRetention';
 import { monthWindow, recentMonths, monthEnded, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
 import { readAll } from '@lib/rowCap';
-import { money, sharedCurrency } from '@lib/gymRecord';
+// `sharedCurrency` is gone from this file. It answers "are these all one
+// money", and the only thing this page did with a No was withhold the entire
+// revenue section — see the Money component. `normaliseCurrency` is the same
+// rule one level down ('gbp', ' GBP ' and 'GBP' are one currency, '' and null
+// are one silence) and is what the payments are grouped by instead.
+import { money, normaliseCurrency } from '@lib/gymRecord';
 
 const DAY = 86400000;
 
@@ -189,6 +212,14 @@ interface MonthRow {
   left: number;
   /** On the books on the first day of the month — the churn denominator. */
   opening: number;
+  /**
+   * Departures this month by members with NO usable join date.
+   *
+   * They are inside `left` — a person who leaves has left, whatever the record
+   * says about their arrival — and they are the reason this month can have no
+   * churn rate. See the ladder below.
+   */
+  undatedLeavers: number;
   /** joined − left, or null when the leavers are known to be incomplete. */
   net: number | null;
   churn: number | null;
@@ -208,6 +239,34 @@ function monthRows(spans: Span[], undatedExits: number, now: number): MonthRow[]
     const joined = spans.filter((s) => monthOfDate(s.joinedOn) === key).length;
     const left = spans.filter((s) => monthOfDate(s.leftOn) === key).length;
 
+    /**
+     * ── The two populations, which used to be different ────────────────────
+     *
+     * `left` above counts everybody who left this month. `opening` below counts
+     * everybody on the books when it began — and it can only count somebody it
+     * has a join date for, because "joined before the 1st" is a question about
+     * a date. So a member whose start was never recorded was counted LEAVING
+     * and never counted PRESENT: in the numerator, absent from the denominator,
+     * having arrived in no month at all.
+     *
+     * That is not a rate. It is one population over another, it errs upward in
+     * both directions at once, and it errs most at the gyms with the messiest
+     * records — the ones whose churn figure is least likely to be checked
+     * against anything.
+     *
+     * Both halves are fixed here. The numerator is restricted to the same
+     * population as the denominator, so `churnable / opening` is a rate over
+     * one set of people; and where that restriction actually dropped somebody,
+     * the month withholds the rate rather than printing the smaller number,
+     * because those departures happened and a figure that quietly leaves them
+     * out understates churn exactly where the record is worst. The count is
+     * carried out to the table so the owner is told which months, and how many.
+     */
+    const undatedLeavers = spans.filter(
+      (s) => !isDay(s.joinedOn) && monthOfDate(s.leftOn) === key,
+    ).length;
+    const churnable = left - undatedLeavers;
+
     // On the books at the START of the month: joined before it began, and had
     // not left before it began. Somebody who joined and left inside the same
     // month is in neither the denominator nor the opening roster, which is the
@@ -223,12 +282,17 @@ function monthRows(spans: Span[], undatedExits: number, now: number): MonthRow[]
       churnNote = 'still running — a partial month is not a low churn month';
     } else if (undatedExits > 0) {
       churnNote = `${undatedExits} ended membership${undatedExits === 1 ? ' has' : 's have'} no end date, so the leavers are incomplete`;
+    } else if (undatedLeavers > 0) {
+      // Above the size floor deliberately. This is not "too few to say"; it is
+      // "the two halves are drawn from different people", and no denominator is
+      // large enough to make that a rate.
+      churnNote = `${undatedLeavers} left this month with no start date recorded, so they are in no opening roster to be a share of`;
     } else if (opening === 0) {
       churnNote = 'nobody was on the books when the month began';
     } else {
       // rateOf withholds anything under the shared floor, so this screen and
       // the Retention screen cannot disagree about "too small to say".
-      churn = rateOf(left, opening);
+      churn = rateOf(churnable, opening);
       if (churn == null) {
         const p = pointsPerMember(opening);
         churnNote = `${opening} on the books — one leaver would move it ${p == null ? '—' : p.toFixed(1)} points`;
@@ -236,10 +300,15 @@ function monthRows(spans: Span[], undatedExits: number, now: number): MonthRow[]
     }
 
     out.push({
-      key, label: w.label, w, running, joined, left, opening,
+      key, label: w.label, w, running, joined, left, opening, undatedLeavers,
       // A net over an incomplete leaver count is a claim about the direction of
       // the roster made from half the evidence, and it always errs upward.
-      net: undatedExits > 0 ? null : joined - left,
+      //
+      // `undatedLeavers` withholds it for the mirror-image reason, downward: a
+      // member with no start date was in no month's joiner count and is in this
+      // month's leaver count, so the net subtracts an arrival it never added.
+      // The roster reads as shrinking by somebody who, on this page, never came.
+      net: undatedExits > 0 || undatedLeavers > 0 ? null : joined - left,
       churn, churnNote,
     });
   }
@@ -397,6 +466,14 @@ export default function Analytics() {
     [spans, undatedExits, now],
   );
 
+  /** Departures inside the thirteen months on screen made by members with no
+   *  recorded start date — the ones that used to sit in a churn numerator over
+   *  a denominator they were not in. */
+  const undatedLeavers = useMemo(
+    () => (months ?? []).reduce((n, m) => n + m.undatedLeavers, 0),
+    [months],
+  );
+
   /**
    * Whether the door log can be read as evidence at all.
    *
@@ -452,71 +529,57 @@ export default function Analytics() {
   /* ── the money, which this page had none of ────────────────────────────── */
 
   /**
-   * The currency the whole trend is in, or null when the rows disagree.
+   * The money, split by the currency it was actually taken in.
    *
-   * Same rule as every other total in this product: a gym that changed its
-   * currency has two in its ledger, adding them is not a sum, and a row stating
-   * none does not agree with one that does. Null withholds the entire money
-   * section rather than drawing a trend line through two moneys.
+   * ── What this used to do, and why it was not enough ─────────────────────
+   *
+   * `sharedCurrency` over every payment, and `null` — meaning the rows do not
+   * agree — withheld the revenue trend, ARPU and the year-on-year comparison
+   * outright. The refusal to ADD two currencies is right and has not moved:
+   * dirhams plus pounds is not a bigger number about the same thing, and no
+   * amount of wanting a chart makes it one.
+   *
+   * But "these cannot be added" and "these cannot be shown" are different
+   * claims, and only the first one is true. A gym that changed its currency in
+   * March has a perfectly readable pound trend up to March and a perfectly
+   * readable dirham trend after it; what it does not have is a single line
+   * through both. So the payments are GROUPED by currency and each group gets
+   * its own thirteen months. Nothing is summed across a group boundary, nothing
+   * is converted — there is no rate in this product and a rate invented here
+   * would be a made-up number on a page about money — and the year-on-year
+   * column inside a group compares two months of the same currency, which is
+   * the only comparison it was ever allowed to make.
+   *
+   * The group whose currency is NULL is not a currency. `tenants.currency` is
+   * nullable on purpose and a payment can carry nothing; two such rows are not
+   * known to be in the same money as each other, so that group shows its
+   * counts, renders its amounts as dashes exactly as `money()` requires, and
+   * carries no year-on-year figure at all.
    */
-  const moneyCurrency = useMemo(
-    () => (payments.rows && payments.rows.length ? sharedCurrency(payments.rows) : null),
-    [payments.rows],
-  );
-  const moneyMixed = !!(payments.rows && payments.rows.length && moneyCurrency == null);
-
-  /**
-   * Thirteen months of takings, ARPU and the same month last year.
-   *
-   * ARPU's denominator is members who PAID in the month, not the roster: a
-   * revenue-per-member figure over everybody on the books answers a different
-   * question — how much of the roster is paying — and the two move in opposite
-   * directions when a gym signs a lot of people who then do not pay.
-   *
-   * The RUNNING month is marked and never compared. A part-month always looks
-   * like a collapse, and a year-on-year delta against one is the single most
-   * alarming wrong number this page could produce.
-   */
-  const moneyMonths = useMemo<MoneyMonth[] | null>(() => {
-    if (!payments.rows || moneyCurrency == null) return null;
-    const keys = recentMonths(MONTHS_SHOWN, now);
-    const by = new Map<string, { cents: number; payers: Set<string>; count: number }>();
+  const moneySeries = useMemo<MoneySeries[] | null>(() => {
+    if (!payments.rows) return null;
+    const groups = new Map<string | null, MoneyRow[]>();
     for (const p of payments.rows) {
-      const k = monthKeyOf(Date.parse(p.takenAt));
-      const cur = by.get(k) ?? { cents: 0, payers: new Set<string>(), count: 0 };
-      cur.cents += p.amountCents;
-      cur.count += 1;
-      // A payment with nobody's name on it is real money and not a payer we can
-      // count, so it contributes to the total and not to the denominator.
-      if (p.memberId) cur.payers.add(p.memberId);
-      by.set(k, cur);
+      const c = normaliseCurrency(p.currency);
+      const held = groups.get(c);
+      if (held) held.push(p); else groups.set(c, [p]);
     }
-    const thisMonth = monthKeyOf(now);
-    return keys.map((k) => {
-      const v = by.get(k) ?? { cents: 0, payers: new Set<string>(), count: 0 };
-      const w = monthWindow(k);
-      const running = k === thisMonth || (w != null && !monthEnded(w, now));
-      const yearAgoKey = `${Number(k.slice(0, 4)) - 1}-${k.slice(5, 7)}`;
-      const yearAgo = by.get(yearAgoKey);
-      return {
-        key: k,
-        label: w ? w.label : k,
-        running,
-        cents: v.cents,
-        payments: v.count,
-        payers: v.payers.size,
-        // Null rather than zero: nobody paid means there is no average to take,
-        // and 0.00 per member reads as a gym whose members pay nothing.
-        arpuCents: v.payers.size ? Math.round(v.cents / v.payers.size) : null,
-        // Withheld on a running month and where there is no matching month in
-        // the read at all — a gym eleven months old has no last January, and
-        // "−100%" would be the answer to a question nobody asked.
-        yoyPct: running || !yearAgo || yearAgo.cents === 0
-          ? null
-          : Math.round(((v.cents - yearAgo.cents) / yearAgo.cents) * 100),
-      };
-    });
-  }, [payments.rows, moneyCurrency, now]);
+    return [...groups.entries()]
+      .map(([currency, rows]) => ({
+        currency,
+        payments: rows.length,
+        months: moneyMonthsOf(rows, now, currency != null),
+      }))
+      // Largest first, and the currency-less group last however big it is: it
+      // is the one with no figures in it, and leading with a table of dashes
+      // buries the money the gym can actually read.
+      .sort((a, b) => (a.currency == null ? 1 : b.currency == null ? -1 : b.payments - a.payments));
+  }, [payments.rows, now]);
+
+  /** Whether this gym's ledger holds more than one money. Not an error — it is
+   *  what a gym that changed currency looks like — and the only thing it
+   *  changes is that nothing may be added across the tables. */
+  const moneyMixed = !!(moneySeries && moneySeries.length > 1);
 
   /**
    * When the gym is actually busy, by hour of the day.
@@ -778,6 +841,24 @@ export default function Analytics() {
           withheld rather than reported high and low respectively.
         </Banner>
       ) : null}
+      {/* The mirror image, and the one that used to pass silently. An undated
+          EXIT is visibly missing — nothing credits it to a month. An undated
+          JOIN was worse: the member's departure WAS credited to a month, so the
+          gym was charged for losing somebody it had never been credited with
+          having, and the churn rate carried that on top of a denominator they
+          were absent from. */}
+      {undatedLeavers > 0 ? (
+        <Banner tone="crit">
+          {undatedLeavers} member{undatedLeavers === 1 ? '' : 's'} left in the last{' '}
+          {MONTHS_SHOWN} months with no start date on record.{' '}
+          {undatedLeavers === 1 ? 'That departure is' : 'Those departures are'} real and{' '}
+          {undatedLeavers === 1 ? 'is' : 'are'} counted under Left — but somebody whose join
+          date is missing cannot be counted onto the roster the month opened with, so the
+          months that lost {undatedLeavers === 1 ? 'them' : 'them'} show no churn rate at all.
+          A rate whose leavers and whose roster are different sets of people is not a rate,
+          and it reads high.
+        </Banner>
+      ) : null}
 
       <div
         style={{
@@ -802,7 +883,10 @@ export default function Analytics() {
           note={
             !months ? (memberships.state === 'failed' ? 'the memberships could not be read' : 'reading the memberships…')
               : !lastFull ? 'no month has finished yet'
-                : lastFull.net == null ? 'leavers incomplete — see above'
+                : lastFull.net == null
+                  ? lastFull.undatedLeavers > 0
+                    ? `${lastFull.undatedLeavers} left with no start date — see below`
+                    : 'leavers incomplete — see above'
                   : `${lastFull.joined} joined, ${lastFull.left} left`
           }
         />
@@ -842,7 +926,7 @@ export default function Analytics() {
         visitsCounted={visitsCounted}
       />
 
-      <Money rows={moneyMonths} state={payments.state} currency={moneyCurrency} mixed={moneyMixed} />
+      <Money series={moneySeries} state={payments.state} mixed={moneyMixed} />
 
       <ByHour rows={hours} state={visits.state} doorState={doorState} doorNote={doorNote} />
     </Shell>
@@ -861,14 +945,91 @@ interface MoneyMonth {
   /** Null when nobody paid — there is no average of nothing, and 0.00 per
    *  member reads as a gym whose members pay nothing. */
   arpuCents: number | null;
-  /** Null on a running month and where there is no matching month a year back. */
+  /** Null on a running month, where there is no matching month a year back,
+   *  and in the group whose currency nobody stated — two rows carrying no
+   *  currency are not known to be in the same money, so the ratio between two
+   *  of their months is a ratio of nothing in particular. */
   yoyPct: number | null;
+}
+
+/**
+ * One currency's thirteen months.
+ *
+ * A gym has one of these unless it has changed currency, in which case it has
+ * one per money in its ledger and NOTHING crosses between them. The type is the
+ * enforcement: there is no field here for a total, because there is no total.
+ */
+interface MoneySeries {
+  /** Null is the group of payments that state no currency at all. Not a
+   *  currency, and never presented as one. */
+  currency: string | null;
+  /** Rows in the group — how much of the ledger this table is. */
+  payments: number;
+  months: MoneyMonth[];
+}
+
+/**
+ * Thirteen months of takings, ARPU and the same month last year, over the rows
+ * of ONE currency.
+ *
+ * ARPU's denominator is members who PAID in the month, not the roster: a
+ * revenue-per-member figure over everybody on the books answers a different
+ * question — how much of the roster is paying — and the two move in opposite
+ * directions when a gym signs a lot of people who then do not pay.
+ *
+ * The RUNNING month is marked and never compared. A part-month always looks
+ * like a collapse, and a year-on-year delta against one is the single most
+ * alarming wrong number this page could produce.
+ *
+ * `comparable` is false for the group with no stated currency: the amounts are
+ * still counted, because the payments are real, but no percentage is taken
+ * between two months of money nobody has named.
+ */
+function moneyMonthsOf(rows: MoneyRow[], now: number, comparable: boolean): MoneyMonth[] {
+  const keys = recentMonths(MONTHS_SHOWN, now);
+  const by = new Map<string, { cents: number; payers: Set<string>; count: number }>();
+  for (const p of rows) {
+    const k = monthKeyOf(Date.parse(p.takenAt));
+    const cur = by.get(k) ?? { cents: 0, payers: new Set<string>(), count: 0 };
+    cur.cents += p.amountCents;
+    cur.count += 1;
+    // A payment with nobody's name on it is real money and not a payer we can
+    // count, so it contributes to the total and not to the denominator.
+    if (p.memberId) cur.payers.add(p.memberId);
+    by.set(k, cur);
+  }
+  const thisMonth = monthKeyOf(now);
+  return keys.map((k) => {
+    const v = by.get(k) ?? { cents: 0, payers: new Set<string>(), count: 0 };
+    const w = monthWindow(k);
+    const running = k === thisMonth || (w != null && !monthEnded(w, now));
+    const yearAgoKey = `${Number(k.slice(0, 4)) - 1}-${k.slice(5, 7)}`;
+    const yearAgo = by.get(yearAgoKey);
+    return {
+      key: k,
+      label: w ? w.label : k,
+      running,
+      cents: v.cents,
+      payments: v.count,
+      payers: v.payers.size,
+      // Null rather than zero: nobody paid means there is no average to take,
+      // and 0.00 per member reads as a gym whose members pay nothing.
+      arpuCents: v.payers.size ? Math.round(v.cents / v.payers.size) : null,
+      // Withheld on a running month and where there is no matching month in
+      // the read at all — a gym eleven months old has no last January, and
+      // "−100%" would be the answer to a question nobody asked.
+      yoyPct: !comparable || running || !yearAgo || yearAgo.cents === 0
+        ? null
+        : Math.round(((v.cents - yearAgo.cents) / yearAgo.cents) * 100),
+    };
+  });
 }
 
 interface HourRow { hour: number; visits: number; share: number }
 
 /**
- * Revenue by month, per paying member, and against the same month last year.
+ * Revenue by month, per paying member, and against the same month last year —
+ * one table per currency the gym has actually taken money in.
  *
  * This page never imported `fetchPayments`. So a screen whose entire subject is
  * "which way is the gym moving" could show joiners, leavers, cohorts and visit
@@ -880,14 +1041,76 @@ interface HourRow { hour: number; visits: number; share: number }
  * stating: a part-month is always down, always looks like a collapse, and a
  * year-on-year delta against one is the most alarming wrong number this page
  * could print. Its row carries the word "running" instead of a percentage.
+ *
+ * ── One table per currency, and no total ────────────────────────────────────
+ *
+ * A gym that has ever changed its currency used to lose this whole section —
+ * trend, ARPU and year-on-year, permanently, with no way back, because
+ * `sharedCurrency` said the rows disagreed and the section refused to draw. The
+ * refusal to ADD two currencies is correct and is still absolute: nothing here
+ * sums across a table, nothing converts, and there is no grand total anywhere,
+ * because a conversion rate this product does not hold would have to be
+ * invented to produce one.
+ *
+ * What has changed is that "cannot be added" no longer means "cannot be seen".
+ * Each currency's own thirteen months answer the question the owner came with —
+ * is this moving up or down — inside a money where the arithmetic is real.
  */
-function Money({ rows, state, currency, mixed }: {
-  rows: MoneyMonth[] | null; state: Unread; currency: string | null; mixed: boolean;
+function Money({ series, state, mixed }: {
+  series: MoneySeries[] | null; state: Unread; mixed: boolean;
 }) {
+  return (
+    <Section
+      title="Money, by month"
+      sub="What was recorded as received, whatever it was for. Not what was billed and not what is owed — those are on Accounting, and this is the one that moved."
+    >
+      {state === 'loading' ? <Loading /> : null}
+      {state === 'failed' ? (
+        <Unreadable what="the payments" cost="the revenue trend is unknown, not flat" />
+      ) : null}
+      {state === null && mixed ? (
+        <div style={{ padding: '16px 14px 0', color: 'var(--ink2)', fontSize: 13, maxWidth: '76ch' }}>
+          The payments in this window are in more than one currency, which is what a gym that
+          changed its currency looks like — the older rows keep the one they were written in,
+          because a payment is a historical fact. Each is counted on its own below.{' '}
+          <strong style={{ color: 'var(--ink)' }}>Nothing is added across them</strong>: adding
+          dirhams to pounds is not a bigger number about the same thing, and there is no
+          conversion rate in this product that could honestly make one.
+        </div>
+      ) : null}
+      {state === null && series && series.length === 0 ? (
+        <div style={{ padding: '16px 14px', color: 'var(--ink2)', fontSize: 13, maxWidth: '76ch' }}>
+          No payment has been recorded in thirteen months. That is not the same as no income —
+          it is the same as nobody having entered one.
+        </div>
+      ) : null}
+      {state === null && series ? series.map((s) => (
+        <MoneyTable key={s.currency ?? '(none)'} series={s} named={mixed} />
+      )) : null}
+      {state === null && series && series.length ? (
+        <p style={{ margin: 0, padding: '11px 14px', borderTop: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '80ch' }}>
+          &ldquo;Per paying member&rdquo; divides by the members who actually paid in that month,
+          not by the roster. A figure over everybody on the books answers a different question —
+          how much of the roster is paying — and the two move in opposite directions at a gym that
+          signs a lot of people who then do not. A payment with nobody&rsquo;s name on it is in the
+          total and not in the denominator.
+        </p>
+      ) : null}
+    </Section>
+  );
+}
+
+/** One currency's thirteen months. `named` puts the currency in a heading over
+ *  the table, which is only worth doing when there is more than one to tell
+ *  apart — a gym with a single currency already has it beside every figure. */
+function MoneyTable({ series, named }: { series: MoneySeries; named: boolean }) {
+  const currency = series.currency;
   const cols: Column<MoneyMonth>[] = [
     { key: 'month', header: 'Month', value: (m) => m.key,
       render: (m) => <span>{m.label}{m.running ? <span style={{ color: 'var(--ink3)' }}> · running</span> : null}</span> },
     { key: 'taken', header: 'Taken', value: (m) => m.cents, numeric: true,
+      // `money` returns null for a missing currency and that is the whole rule:
+      // a bare "6,300.00" is read in whatever money the reader is thinking in.
       render: (m) => money(m.cents, currency) ?? <span className="dash">—</span> },
     { key: 'payments', header: 'Payments', value: (m) => m.payments, numeric: true },
     { key: 'payers', header: 'Paying members', value: (m) => m.payers, numeric: true },
@@ -897,6 +1120,7 @@ function Money({ rows, state, currency, mixed }: {
         : money(m.arpuCents, currency) ?? <span className="dash">—</span> },
     { key: 'yoy', header: 'vs same month last year', value: (m) => m.yoyPct, numeric: true,
       render: (m) => {
+        if (currency == null) return <span className="dash">no currency stated</span>;
         if (m.running) return <span className="dash">the month has not finished</span>;
         if (m.yoyPct == null) return <span className="dash">no month to compare</span>;
         return (
@@ -908,38 +1132,26 @@ function Money({ rows, state, currency, mixed }: {
   ];
 
   return (
-    <Section
-      title="Money, by month"
-      sub="What was recorded as received, whatever it was for. Not what was billed and not what is owed — those are on Accounting, and this is the one that moved."
-    >
-      {state === 'loading' ? <Loading /> : null}
-      {state === 'failed' ? (
-        <Unreadable what="the payments" cost="the revenue trend is unknown, not flat" />
-      ) : null}
-      {state === null && mixed ? (
-        <div style={{ padding: '16px 14px', color: 'var(--ink2)', fontSize: 13, maxWidth: '76ch' }}>
-          The payments in this window are in more than one currency, so there is no trend to draw:
-          adding dirhams to pounds is not a bigger number about the same thing. This happens to a gym
-          that changed its currency — the older rows keep the one they were written in, because a
-          payment is a historical fact.
+    <>
+      {named ? (
+        <div style={{ padding: '14px 14px 8px' }}>
+          <div className="micro">
+            {currency ?? 'No currency recorded'} · {series.payments} payment{series.payments === 1 ? '' : 's'}
+          </div>
+          {currency == null ? (
+            <p style={{ margin: '5px 0 0', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '76ch' }}>
+              These rows name no currency, so they are not known to be in the same money as each
+              other. The counts are real; the amounts are withheld rather than printed bare, and
+              there is no comparison between their months.
+            </p>
+          ) : null}
         </div>
       ) : null}
-      {state === null && !mixed && rows ? (
-        <>
-          <DataTable
-            rows={rows} columns={cols} rowKey={(m) => m.key}
-            empty="No payment has been recorded in thirteen months. That is not the same as no income — it is the same as nobody having entered one."
-          />
-          <p style={{ margin: 0, padding: '11px 14px', borderTop: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '80ch' }}>
-            &ldquo;Per paying member&rdquo; divides by the members who actually paid in that month,
-            not by the roster. A figure over everybody on the books answers a different question —
-            how much of the roster is paying — and the two move in opposite directions at a gym that
-            signs a lot of people who then do not. A payment with nobody&rsquo;s name on it is in the
-            total and not in the denominator.
-          </p>
-        </>
-      ) : null}
-    </Section>
+      <DataTable
+        rows={series.months} columns={cols} rowKey={(m) => m.key}
+        empty="No payment has been recorded in thirteen months. That is not the same as no income — it is the same as nobody having entered one."
+      />
+    </>
   );
 }
 
@@ -1020,8 +1232,15 @@ function Joiners({ months, state, undatedJoins }: {
     { key: 'joined', header: 'Joined', value: (m) => m.joined, numeric: true },
     { key: 'left', header: 'Left', value: (m) => m.left, numeric: true },
     { key: 'net', header: 'Net', value: (m) => m.net, numeric: true,
+      // Two different reasons, and they point opposite ways: an undated EXIT
+      // means the leavers are short and the net reads too high, an undated JOIN
+      // that left this month means the net subtracts an arrival it never added
+      // and reads too low. Saying which is the difference between a dash the
+      // owner can act on and a dash they learn to ignore.
       render: (m) => m.net == null
-        ? <span className="dash" title="leavers incomplete">— leavers incomplete</span>
+        ? m.undatedLeavers > 0
+          ? <span className="dash" title="a leaver who joined on no recorded date">— {m.undatedLeavers} left with no start date</span>
+          : <span className="dash" title="leavers incomplete">— leavers incomplete</span>
         : <span style={{ color: m.net > 0 ? 'var(--good)' : m.net < 0 ? 'var(--crit)' : 'var(--ink2)' }}>
             {m.net > 0 ? `+${m.net}` : m.net}
           </span> },
@@ -1059,7 +1278,12 @@ function Joiners({ months, state, undatedJoins }: {
             happened, and a fraction of a month always reads as a good one.
             {undatedJoins > 0 ? (
               <> {undatedJoins} member{undatedJoins === 1 ? ' has' : 's have'} no usable
-                start date and appear in no month here.</>
+                start date and appear in no month&rsquo;s joiners here. The Left column still
+                counts {undatedJoins === 1 ? 'them' : 'them'} in the month they went — a
+                departure happened whatever the record says about the arrival — but the
+                opening roster cannot hold somebody whose join date is missing, so any month
+                that lost one has no churn rate rather than a rate whose top and bottom
+                halves are about different people.</>
             ) : null}
           </p>
         </>

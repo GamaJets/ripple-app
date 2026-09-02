@@ -1,7 +1,15 @@
 // GDPR — data access (export) + right-to-erasure (deletion request). The export
-// pulls the signed-in user's own rows (RLS scopes each table to them) into a JSON
-// bundle. Deletion flags the profile; an operator/edge-function purges the auth
-// user. Both are best-effort and OTA-safe.
+// pulls the signed-in user's own rows into a JSON bundle. Deletion flags the
+// profile; an operator/edge-function purges the auth user. Both are best-effort
+// and OTA-safe.
+//
+// The member half of that read leans on RLS: every policy behind `TABLES`
+// narrows to `= auth.uid()`, so a bare select returns the person's own rows and
+// nothing else. The COACH half cannot — `trainers` is readable for the whole
+// public directory and `trainer_packages` for whatever anybody bought — so
+// `COACH_TABLES` names the column that means "mine" and this file applies it.
+// A coach's export is opted into by the caller (`{ coach: true }`), which is
+// app/(trainer)/settings.tsx alone.
 //
 // The flag is also readable and reversible: web/delete-account.html promises a
 // request can be withdrawn until it is actioned, so this file exposes the read
@@ -42,7 +50,10 @@ import { BRAND } from './brands';
 export const MY_DATA_FILENAME = `${BRAND.id}-my-data.json`;
 
 /**
- * Every table the signed-in person can read their own rows out of.
+ * Every table the signed-in person can read their own rows out of AS A MEMBER.
+ *
+ * The coach's half of the account is `COACH_TABLES` below and is asked for
+ * separately, for a reason that is about RLS rather than about tidiness.
  *
  * ── What was missing, and why it mattered ────────────────────────────────
  *
@@ -99,6 +110,80 @@ const TABLES = [
   'liability_waivers',                       // part 84  · liability_waivers_own_r
   'coach_document_acceptances',              // part 135 · coach_doc_accept_own_r
 ];
+
+/**
+ * The other half of a coach's account: their own coaching business.
+ *
+ * ── What the export contained, and whose it was ──────────────────────────
+ *
+ * `TABLES` above is the MEMBER's record — what they logged, what they booked,
+ * what they paid. app/(trainer)/settings.tsx offers "Export My Data" on the
+ * same function, so a coach who asked for their data got somebody else's shape
+ * entirely: no `trainers` row, none of their price list, not one invoice they
+ * issued, no receipt they wrote up, no payout that reached their bank, no cost
+ * they recorded and no enquiry that came in through their code. Their books
+ * are the part of this app that is legally theirs and commercially theirs, and
+ * it was the part the export had none of.
+ *
+ * ── WHY THIS IS A SECOND LIST AND NOT MORE ENTRIES IN THE FIRST ──────────
+ *
+ * Every table above is read with a bare `select('*')` and that is safe there
+ * because a member's policies all narrow to `= auth.uid()`: RLS is the filter,
+ * and it is the whole filter.
+ *
+ * The coach-side tables do not behave that way and two of them are outright
+ * dangerous read that way. `trainers_public_directory_r` (part 23) grants
+ * SELECT on every LISTED coach on the platform, `trainers_peer_r` grants it on
+ * everyone in the same gym, and `pkg_read` (part 147) grants a coach the price
+ * list of the coach who trains THEM plus every package anybody ever bought
+ * from anyone. A bare `select('*')` on those two would write several hundred
+ * other people's rows into a file called "my data" and hand it to somebody as
+ * their own record — the mirror image of the empty-array bug below, and the
+ * worse half of it, because this one leaves the building.
+ *
+ * So every row here names the column that means "mine" and is filtered on it
+ * by this file. RLS still refuses anything it should; the filter is what makes
+ * the ANSWER the coach's own rather than everything they are allowed to see.
+ *
+ * A table goes in on the same rule as above — only if the signed-in coach can
+ * read their own rows out of it — and each is named beside the part that
+ * grants it.
+ *
+ * Two things it deliberately does not carry. `coach_lead_notes` (part 157) is
+ * keyed on the lead rather than on the coach, so it has no column that means
+ * "mine" and would need a join this file does not do; the enquiries themselves
+ * are here and the notes are named in the file's own warning as the one thing
+ * left out. And no client's record is here under any name: a coach's export is
+ * their business, and their clients' training belongs to their clients.
+ */
+const COACH_TABLES: { table: string; column: string; what: string }[] = [
+  // Who they are as a coach, as opposed to who they are as a person —
+  // `profiles` is already in TABLES above.        (part 23 · trainers_self_rw)
+  { table: 'trainers',              column: 'id',         what: 'your coach profile' },
+  { table: 'coach_prefs',           column: 'user_id',    what: 'your coaching preferences' },      // part 129 · coach_prefs_self
+  { table: 'notify_channel_prefs',  column: 'user_id',    what: 'which notifications you muted' },  // part 251 · ncp_self
+  // What they sell, and who they sold it to.
+  { table: 'trainer_packages',      column: 'trainer_id', what: 'your price list' },                // part 147 · pkg_read / pkg_write
+  { table: 'coach_join_codes',      column: 'trainer_id', what: 'your join codes' },                // part 81  · coach_join_codes_owner_read
+  { table: 'coach_leads',           column: 'trainer_id', what: 'enquiries that came through your codes' }, // part 157 · coach_leads_owner_read
+  // The books. The half of the export a coach would come here for.
+  { table: 'coach_invoices',        column: 'coach_id',   what: 'invoices you issued' },            // part 138 · coach_invoices_owner_read (tax columns: part 451)
+  { table: 'coach_receipts',        column: 'coach_id',   what: 'money you recorded taking' },      // part 190 · coach_receipts_owner_read
+  { table: 'coach_payouts',         column: 'coach_id',   what: 'payouts that reached your bank' }, // part 194 · coach_payouts_owner_read
+  { table: 'coach_costs',           column: 'coach_id',   what: 'costs you recorded' },             // part 450 · coach_costs_owner_read
+  // The work itself.
+  { table: 'coach_clients',         column: 'trainer_id', what: 'clients you added by hand' },      // part 23  · coach_clients_trainer_rw
+  { table: 'coach_checklist_items', column: 'coach_id',   what: 'checklist lines you set' },        // part 58  · coach_checklist_coach_write
+  { table: 'coach_documents',       column: 'coach_id',   what: 'documents you published' },        // part 135 · coach_documents_coach_r
+];
+
+/** What the file says about the one coach-side table that could not be given a
+ *  column meaning "mine". Said in the bundle rather than left as a silent
+ *  omission, because "everything held about you" is what an export claims. */
+const COACH_OMISSION_NOTE =
+  'Notes you wrote against an enquiry (coach_lead_notes) are not in this file. They are stored against the '
+  + 'enquiry rather than against you, so there is no field on them that says they are yours to pull out on '
+  + 'their own. The enquiries themselves are above. Ask support if you need the notes as well.';
 
 /**
  * Everything this account holds, as JSON — and an honest statement of whether
@@ -291,7 +376,22 @@ export async function readMyFile(bucket: string, path: string): Promise<string |
   }
 }
 
-export async function exportMyDataDetailed(): Promise<ExportResult> {
+export interface ExportOptions {
+  /**
+   * Also export the coach's own business — `COACH_TABLES`.
+   *
+   * Off by default, and it is a caller's decision rather than something this
+   * file sniffs out of the profile role. A member who is not a coach has no
+   * rows in any of those tables, so asking would return thirteen empty arrays
+   * and thirteen chances for a refusal to be reported as a part of their
+   * record that could not be read — which is the sentence that tells somebody
+   * their export is short. app/(trainer)/settings.tsx passes true; the client
+   * and owner screens do not, and their file is byte-identical to before.
+   */
+  coach?: boolean;
+}
+
+export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<ExportResult> {
   const out: Record<string, unknown> = { app: BRAND.label, exportedAt: new Date().toISOString() };
   if (!USE_SUPABASE) {
     out.note = `Not connected to ${BRAND.label} — nothing of yours is stored on a server to export.`;
@@ -303,7 +403,8 @@ export async function exportMyDataDetailed(): Promise<ExportResult> {
 
   const { data: auth, error: authErr } = await supabase.auth.getUser();
   if (authErr) failed.push({ table: 'account', reason: authErr.message });
-  out.userId = auth?.user?.id ?? null;
+  const myId = auth?.user?.id ?? null;
+  out.userId = myId;
   out.email = auth?.user?.email ?? null;
 
   for (const tbl of TABLES) {
@@ -320,6 +421,32 @@ export async function exportMyDataDetailed(): Promise<ExportResult> {
       out[tbl] = { error: 'NOT EXPORTED — this table could not be read', reason };
     }
   }
+
+  // ── the coach's own business ─────────────────────────────────────────
+  //
+  // Filtered by this file rather than left to RLS. See COACH_TABLES for why
+  // the two halves of this function read so differently: a bare select on
+  // `trainers` returns the public directory and every peer in the gym, and a
+  // bare select on `trainer_packages` returns whatever the coach's own coach
+  // sells — several hundred other people's rows, in a file called "my data".
+  const coachTables = opts.coach ? COACH_TABLES : [];
+  for (const c of coachTables) {
+    try {
+      // Not "unfiltered because RLS will narrow it". Without an id there is no
+      // filter to apply, and a read that cannot be scoped to this coach must
+      // not go out at all — an unscoped one would succeed and return other
+      // people's rows.
+      if (!myId) throw new Error('nobody is signed in, so this could not be narrowed to your own rows');
+      const { data, error } = await supabase.from(c.table).select('*').eq(c.column, myId);
+      if (error) throw error;
+      out[c.table] = data ?? [];
+    } catch (e: any) {
+      const reason = e?.message ? String(e.message) : 'could not be read';
+      failed.push({ table: c.table, reason });
+      out[c.table] = { error: `NOT EXPORTED — ${c.what} could not be read`, reason };
+    }
+  }
+  if (opts.coach) out.coachingNote = COACH_OMISSION_NOTE;
 
   // ── the files ────────────────────────────────────────────────────────
   //
@@ -346,7 +473,7 @@ export async function exportMyDataDetailed(): Promise<ExportResult> {
   out.complete = complete;
   if (!complete) {
     out.warning =
-      'THIS EXPORT IS INCOMPLETE. ' + failed.length + ' of ' + (TABLES.length + FILE_STORES.length) +
+      'THIS EXPORT IS INCOMPLETE. ' + failed.length + ' of ' + (TABLES.length + coachTables.length + FILE_STORES.length) +
       ' parts of your record could not be read. Tables are marked with an "error" object rather than data; ' +
       'a file store that could not be listed means the list of your files above is short and you cannot ' +
       'tell by how much. ' +

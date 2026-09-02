@@ -39,6 +39,21 @@
 // null is a confident sentence about a business that does not exist, and the
 // coach has nothing to doubt about it. So the composer is withheld — not
 // warned about — until the roster and the sessions have both come back whole.
+//
+// ── The conversation is kept now, and on the same terms as the member's ───
+//
+// This screen held its thread in one `useState` and nothing else, exactly as
+// app/(client)/coach.tsx did, so a coach who asked what to fix this week could
+// not reread the answer on Friday. Both halves are fixed together and by the
+// same store (`useCoachChat`), because "does this product keep an answer" is
+// not a question the two sides of it are allowed to answer differently.
+//
+// The side is part of the key, and that is not tidiness: a trainer trains, and
+// this app deliberately has them self-track on the client screens rather than
+// being promoted out of them, so one uid can legitimately hold a client-side
+// thread about their own sleep and a coach-side thread about their own revenue.
+// Keying on the account alone would let one screen restore the other's
+// conversation. See src/lib/coachChat.ts.
 import { useState, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -55,6 +70,8 @@ import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
 import { myTenantCurrency } from '../../src/lib/subscriptions';
 import { askAboutMyBusiness, coachAvailable, type ChatMsg } from '../../src/lib/coach';
+import { useCoachChat } from '../../src/ui/coachChat';
+import { COACH_THREAD_KEPT_NOTE } from '../../src/lib/coachChat';
 import {
   COACH_ASK_WHAT_GOES, COACH_ASK_WHAT_NEVER_GOES, COACH_ASK_NOT_ADVICE,
 } from '../../src/lib/coachShare';
@@ -107,16 +124,25 @@ export default function TrainerAssistant() {
     ? Math.round(adhKnown.reduce((a, x) => a + x, 0) / adhKnown.length) : null;
   const revenue = sessionFee == null || sessionsMo == null ? null : sessionsMo * sessionFee;
 
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  // Kept between visits, on this phone, under this account and under this side
+  // of the app. `ready` is unconditionally true and `health` unconditionally
+  // false: there is no consent question in front of this screen because there is
+  // no health tier in what it sends — every field `askAboutMyBusiness` admits is
+  // a count, a rate or an amount, and no client is named.
+  const thread = useCoachChat('coach', { ready: true, health: false });
+  const msgs = thread.msgs;
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [showsDetail, setShowsDetail] = useState(false);
 
   const send = async (text: string) => {
     const body = text.trim();
-    if (!body || busy || !figuresWhole) return;
+    // `thread.status` joins the gate: a question asked before the stored
+    // conversation has come back would be answered against an empty history and
+    // then have the restored one land underneath it.
+    if (!body || busy || !figuresWhole || thread.status === 'loading') return;
     const next: ChatMsg[] = [...msgs, { role: 'user', content: body }];
-    setMsgs(next); setInput(''); setBusy(true);
+    thread.set(next); setInput(''); setBusy(true);
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 40);
     // Composed here and filtered in `askAboutMyBusiness`. Every value is
     // already null-or-real: a null reaches the model as an absent field and the
@@ -136,7 +162,10 @@ export default function TrainerAssistant() {
     };
     const answer = await askAboutMyBusiness([{ role: 'user', content: SYSTEM }, ...next], ctx);
     setBusy(false);
-    setMsgs((p) => [...p, {
+    // `next` and not the current state: this function is the only writer of the
+    // thread, and reading it back through a setter would race the write that
+    // `set` has already started.
+    thread.set([...next, {
       role: 'assistant',
       content: answer.ok ? answer.reply
         : answer.reason === 'unavailable'
@@ -204,7 +233,24 @@ export default function TrainerAssistant() {
             </View>
           ) : null}
 
-          {figuresWhole && msgs.length === 0 ? (
+          {/* The stored conversation is still being read. Said rather than
+              drawn as an empty thread under a row of opening suggestions,
+              which would be this screen claiming the coach has never asked it
+              anything. */}
+          {thread.status === 'loading' ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
+              <ActivityIndicator color={t.brand} size="small" />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Fetching your last conversation from this phone…</Text>
+            </View>
+          ) : null}
+
+          {thread.status === 'partial' ? (
+            <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+              An earlier conversation is saved on this phone and could not be read this time. It has been left alone rather than written over, so anything you ask now is not being kept — try again after the next restart.
+            </Flag>
+          ) : null}
+
+          {figuresWhole && thread.status !== 'loading' && msgs.length === 0 ? (
             <View style={{ marginTop: sp.md, gap: sp.sm }}>
               {SUGGESTIONS.map((s) => (
                 <Pressable key={s} onPress={() => { void send(s); }} accessibilityRole="button" accessibilityLabel={s}
@@ -223,8 +269,17 @@ export default function TrainerAssistant() {
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               No client is named to the assistant, so it cannot tell you who to message — it can tell you how many and what to do, and the names are on your own roster.
             </Text>
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
+            {/* Where the conversation itself is. Said here for the same
+                reason the member's screen says it: a record nobody has been
+                told about is a record nobody can decide to clear. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {thread.kept
+                ? COACH_THREAD_KEPT_NOTE
+                : 'This conversation is not being kept — it goes when you leave the screen, and it is not stored on our servers either.'}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center', flexWrap: 'wrap' }}>
               <Ghost label={showsDetail ? 'Hide the Detail' : 'What Gets Sent'} onPress={() => setShowsDetail((v) => !v)} />
+              {msgs.length ? <Ghost label="Clear This Chat" onPress={() => thread.clear()} /> : null}
             </View>
             {showsDetail ? (
               <View style={{ marginTop: sp.sm, gap: sp.sm }}>

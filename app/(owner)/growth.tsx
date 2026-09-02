@@ -1,4 +1,36 @@
-// Owner · Growth. Acquisition/retention snapshot + an interactive promo-code
+// Owner · Growth. Trainer acquisition/retention + an interactive promo-code
+//
+// ── Growth of WHAT ────────────────────────────────────────────────────────
+//
+// Every figure on this screen counts TRAINERS. The hero is trainers who joined
+// this month, the retention row is trainers carrying nobody, the cohorts are
+// trainers grouped by the month they signed up, and the funnel starts at a
+// trainer signup. Under a tab called Growth, beside a strapline that read
+// "Acquisition & retention", an owner reads all of that as their gym's member
+// growth — and the comment on `idle` below actually said so out loud: idle
+// trainers were "the gym's equivalent of churn".
+//
+// They are not. A coach carrying no clients is a coach with a gap in their
+// diary; a member who left is somebody who stopped paying. Calling the first
+// one churn puts a number in front of an owner that answers a question they did
+// not ask, under a word that means the one they did.
+//
+// ── Why the real figure is not here instead ───────────────────────────────
+//
+// Because the record cannot produce it. `app/(owner)/financials.tsx` sets the
+// constraint out at length and it is worth restating rather than re-deriving:
+// nothing in `memberships` records WHEN a membership was cancelled. `status`
+// moves to 'cancelled' in place, and `ends_on` is only set on a fixed term, so
+// a member who left in March and one who left last week are the same row today.
+// Any monthly churn figure built on this handset would be a guess dressed as a
+// measurement, and this screen has no business being the place that invents it.
+//
+// So the labels changed and no number did. Every heading says trainers, and the
+// note under the hero says plainly that member churn is not on this screen and
+// what would have to be recorded for it to be. The console's /analytics screen
+// derives it from `ends_on` where every ended membership carries one, and
+// withholds it where they do not — which is the same answer arrived at with
+// more of the record to hand, not a different one.
 //
 // Promo rows carry a real redemption count. They once appended "· N redeemed"
 // over `promos.redeemed`, a column whose only write was the literal `0` at
@@ -63,8 +95,12 @@ export default function OwnerGrowth() {
     const d = new Date(ts);
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   }).length;
-  // Idle = carrying no clients and delivering nothing. That is the gym's
-  // equivalent of churn; a subscription "suspended" flag never existed here.
+  // Idle = a trainer carrying no clients and delivering nothing. This once
+  // called itself "the gym's equivalent of churn", which is the confusion the
+  // header is about: it is a gap in a coach's diary, not a member who left. The
+  // figure is worth having and the word was not — a subscription "suspended"
+  // flag never existed here either, so idle is what the roster can actually
+  // show.
   const idle = trainers.filter((x) => (x.clients || 0) === 0 && (x.sessions30 || 0) === 0).length;
   // Null, not 0, over a roster we do not have: "0% idle" is the best possible
   // reading of a retention figure and was what a refused read produced.
@@ -113,7 +149,7 @@ export default function OwnerGrowth() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Acquisition &amp; retention</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Trainer acquisition &amp; retention</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Growth</Text>
           <Fetched at={fetchedAt} onRefresh={refresh} busy={loading} />
         </View>
@@ -134,11 +170,25 @@ export default function OwnerGrowth() {
             : 'No trainers yet — this fills in as they join your gym.'}
         />
 
+        {/* Under the hero, not buried at the bottom: this is the sentence that
+            stops every trainer figure below being read as a member figure.
+            No number is offered in its place — see the header for why the
+            record cannot produce one. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+          Everything below counts trainers. Member churn is not on this screen and is not
+          derived anywhere on this handset: nothing in the membership record says WHEN a
+          membership was cancelled, so a monthly rate built from it would be a guess. The
+          console&rsquo;s Analytics page works it out from end dates where every ended
+          membership carries one, and withholds it where they do not.
+        </Text>
+
         <Rule />
 
         {/* ── retention ──────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Retention" />
+          {/* Headed "Retention" over three trainer figures, one tap from a tab
+              called Growth. Named. */}
+          <SectionHead title="Trainer Retention" note="Not member churn" />
           <KpiRow items={[
             // "0 of 0" under a dash is a fraction of nobody. `idlePct` is
             // already null with an empty roster, so the caption says the same
@@ -168,7 +218,12 @@ export default function OwnerGrowth() {
               it names somebody else's product: these are the members of THEIR
               gym, counted through the coaches who carry them. Overview settled
               this when it stopped saying "Repple HQ · Platform". */}
-          <SectionHead title="Your Members" note="Across every trainer" />
+          {/* The one section on this screen that does count members — as a
+              headcount today, through the coaches who carry them. It is not a
+              growth figure and nothing here subtracts anybody: a member who
+              left simply stops being counted, on a date the record does not
+              hold. */}
+          <SectionHead title="Your Members" note="Counted today, across every trainer" />
           <KpiRow items={[
             { label: 'Active Clients', value: trainersUnknown ? '—' : fig(num(ca.total)) },
             { label: 'Engaged', value: trainersUnknown ? '—' : fig(ca.engagementPct), unit: trainersUnknown || ca.engagementPct == null ? undefined : '%' },
@@ -209,10 +264,13 @@ export default function OwnerGrowth() {
 
         {/* ── cohort retention ───────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Cohort Retention" note="By signup month" />
+          {/* "Cohort Retention · By signup month" reads as member cohorts and
+              is `cohorts(trainers)` — trainers, grouped by the month THEY
+              joined. */}
+          <SectionHead title="Trainer Cohorts" note="Trainers, by signup month" />
           {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
             : trainersUnread ? <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so there was nothing to group into cohorts.</Text>
-            : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No signups to group yet.</Text> : null}
+            : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No trainer signups to group yet.</Text> : null}
           {coh.map((c) => (
             <Bar key={c.label} label={c.label} right={`${c.pct}% · ${num(c.active)}/${num(c.total)}`} pct={c.pct} dim={c.pct < 60} />
           ))}

@@ -22,6 +22,25 @@
 // come back at the next launch. That is the single most-reported shape of bug
 // in this product and it is not repeated here.
 //
+// ── One client at a time was the whole product ─────────────────────────────
+//
+// This screen set a client's lines and had no other path: a chip picker, an add
+// box, and nothing that reached a second person. `BulkKind` in
+// src/lib/bulkActions.ts had four members and checklists were not one of them.
+// But the five habits a coach gives one client are usually the five they give
+// everybody, and typing them out again for the twelfth person is how a coach
+// stops setting them at all.
+//
+// So the list on screen can be copied onto other clients, and the interesting
+// part is what the copy refuses to do. Adding a line somebody already has gives
+// them that line TWICE, every morning, for ever — the client cannot remove a
+// coach-set line and the coach cannot see the duplicate without selecting that
+// client, and deleting it takes their ticks for it with it. Knowing what each
+// target already has is therefore load-bearing, an empty list of it under a
+// failed read is indistinguishable from a client who has none, and
+// `guardChecklistCopy` refuses the whole action rather than writing over the
+// difference. src/lib/checklistCopy.ts carries the argument.
+//
 // ── What this screen deliberately cannot do ────────────────────────────────
 //
 // Tick anything. There is no `done` column on the table and there must not be
@@ -65,6 +84,11 @@ import {
   recentWindow, summariseAdherence, setItemLine, dayLabel,
   type DayWindow, type TickRow, type AdherenceSummary,
 } from '../../src/lib/adherence';
+import {
+  planChecklistCopy, guardChecklistCopy, copyBrief, copyPreview,
+  type CopyTarget, type CopyLine,
+} from '../../src/lib/checklistCopy';
+import { bulkReport, selectAllOffer, type WriteOutcome } from '../../src/lib/bulkActions';
 
 interface Item {
   id: string; label: string; icon: string; active: boolean; sort: number;
@@ -318,6 +342,139 @@ export default function CoachChecklists() {
       x.id === it.id ? { ...x, sort: other.sort } : x.id === other.id ? { ...x, sort: it.sort } : x));
   };
 
+  /* ── copying this list onto other clients ────────────────────────────────
+   *
+   * One read, not one per tick. `existing` holds every line this coach has set
+   * for anybody on their book, read once when the panel opens, so ticking a
+   * twelfth name costs nothing and the duplicate check is over the same set for
+   * everybody. It is capped and the truncation is carried, because a page of a
+   * coach's lines is not their lines and the one that did not come back is
+   * exactly the one about to be added a second time.
+   *
+   * Null under 'loading' and 'error' for the usual reason: an empty map would
+   * say every client has nothing, which is the sentence that produces the
+   * duplicates.
+   */
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [existing, setExisting] = useState<Map<string, { labels: string[]; maxSort: number }> | null>(null);
+  const [existingStatus, setExistingStatus] = useState<LoadStatus>('loading');
+  const [ticked, setTicked] = useState<string[]>([]);
+  const [copying, setCopying] = useState(false);
+
+  const loadExisting = useCallback(async (coachId: string) => {
+    setExistingStatus('loading');
+    const { data, error } = await supabase
+      .from('coach_checklist_items')
+      .select('client_id, label, sort')
+      .eq('coach_id', coachId)
+      .limit(capLimit());
+    if (error) {
+      reportError('coachChecklists.existing', error);
+      setExisting(null); setExistingStatus('error'); return;
+    }
+    const page = capped(data);
+    const map = new Map<string, { labels: string[]; maxSort: number }>();
+    for (const row of page.rows as unknown as { client_id: string; label: string; sort: number }[]) {
+      const cur = map.get(row.client_id) ?? { labels: [], maxSort: 0 };
+      cur.labels.push(row.label);
+      if (Number.isFinite(row.sort)) cur.maxSort = Math.max(cur.maxSort, row.sort);
+      map.set(row.client_id, cur);
+    }
+    setExisting(map);
+    // Truncated is 'partial' and 'partial' refuses. Not a warning: the rows the
+    // cap cut off are lines somebody already has, and they are the ones that
+    // would be written a second time.
+    setExistingStatus(page.truncated ? 'partial' : 'ready');
+  }, []);
+
+  const openCopy = () => {
+    setCopyOpen(true);
+    setTicked([]);
+    if (uid) void loadExisting(uid);
+  };
+
+  /** The lines that would travel. Active ones only — a line the coach has
+   *  turned off is not on this client's list, and copying it would put
+   *  something on eleven other people that is on nobody's list today. */
+  const sourceLines: CopyLine[] = useMemo(
+    () => (shown ?? []).filter((i) => i.active).map((i) => ({ label: i.label, icon: i.icon || '' })),
+    [shown],
+  );
+
+  /** Everybody except the person whose list this is. Copying somebody's list
+   *  onto themselves is the one gesture here with no meaning at all. */
+  const copyCandidates = useMemo(
+    () => r.roster.filter((c) => c.id !== picked), [r.roster, picked]);
+
+  const copyTargets: CopyTarget[] = useMemo(() => ticked.map((id) => {
+    const found = existing?.get(id);
+    return {
+      clientId: id,
+      name: copyCandidates.find((c) => c.id === id)?.name ?? 'Client',
+      existing: found?.labels ?? [],
+      maxSort: found?.maxSort ?? 0,
+    };
+  }), [ticked, existing, copyCandidates]);
+
+  const plan = useMemo(
+    () => planChecklistCopy(sourceLines, copyTargets), [sourceLines, copyTargets]);
+  const copyGuard = guardChecklistCopy(r.status, existingStatus);
+  const selectAll = selectAllOffer(r.status, copyCandidates.length);
+
+  const runCopy = async () => {
+    if (!uid || copying) return;
+    if (!copyGuard.allowed) {
+      Alert.alert(copyGuard.label ?? 'Not copied', copyGuard.reason ?? 'Nothing was copied.');
+      return;
+    }
+    const brief = copyBrief(plan, client?.name ?? 'this client');
+    if (!brief.actionable) { Alert.alert(brief.title, brief.body); return; }
+    Alert.alert(brief.title, brief.body, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: brief.confirmLabel, onPress: async () => {
+        setCopying(true);
+        const outcomes: WriteOutcome[] = [];
+        try {
+          for (const tp of plan.changed) {
+            const rows = tp.add.map((l) => ({
+              coach_id: uid, client_id: tp.clientId, label: l.label, icon: l.icon, sort: l.sort,
+            }));
+            const { data, error } = await supabase
+              .from('coach_checklist_items').insert(rows).select('id');
+            // Counted, not merely un-errored. An insert RLS refuses comes back
+            // without an error on some paths and with no rows on all of them,
+            // and "copied" over nothing written is the failure this whole
+            // screen is careful about one client at a time.
+            const wrote = data?.length ?? 0;
+            if (error || wrote === 0) {
+              reportError('coachChecklists.copy', error);
+              outcomes.push({ clientId: tp.clientId, name: tp.name, ok: false,
+                why: error?.message
+                  ? String(error.message)
+                  : 'the server took the request and wrote nothing — they may no longer be your client.' });
+            } else if (wrote < rows.length) {
+              outcomes.push({ clientId: tp.clientId, name: tp.name, ok: false,
+                why: `only ${wrote} of ${rows.length} lines were written, so their list is part of what you sent.` });
+            } else {
+              outcomes.push({ clientId: tp.clientId, name: tp.name, ok: true, why: null });
+            }
+          }
+          const report = bulkReport('checklist', outcomes);
+          // Left ticked, so trying again is the same gesture over the set that
+          // still needs it — and re-read, so a retry plans against what is now
+          // on their lists rather than against what was there before the half
+          // that landed.
+          setTicked(report.retry);
+          await loadExisting(uid);
+          Alert.alert(report.title, report.body);
+        } catch (e) {
+          reportError('coachChecklists.copy', e);
+          Alert.alert('Not copied', 'Nothing was written to anybody\u2019s list. Check your connection and try again.');
+        } finally { setCopying(false); }
+      } },
+    ]);
+  };
+
   const chip = (on: boolean) => ({
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
     backgroundColor: on ? t.brand : t.surface2,
@@ -515,6 +672,103 @@ export default function CoachChecklists() {
                 <Cta label={busy ? 'Saving…' : 'Add to Their List'} wide disabled={busy} onPress={add} />
               </View>
             </Section>
+
+            {/* ── the same five lines, for everybody else ──────────────────
+                The gap this closes is not a missing button, it is that there
+                was no path off this client at all: no bulk, no template, no
+                copy-to, and `BulkKind` had no member for checklists.
+
+                Offered only over a list that came back WHOLE. Under 'partial'
+                or 'error' the lines on screen are some of this client's lines,
+                and copying "their list" would copy the part that loaded onto
+                eleven other people — who would then have a list nobody chose.
+                The panel does not appear rather than appearing disabled: there
+                is nothing here for a coach to act on until the read lands. */}
+            {status === 'ready' && sourceLines.length > 0 ? (
+              <View>
+                <Rule />
+                <Section>
+                  <SectionHead title="Give These To Somebody Else"
+                    note={sourceLines.length === 1 ? '1 line' : `${sourceLines.length} lines`} />
+
+                  {!copyOpen ? (<>
+                    <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                      Put the {sourceLines.length === 1 ? 'line' : `${sourceLines.length} lines`} showing on
+                      {' '}{client?.name ?? 'this client'}&rsquo;s list onto other clients as well. Lines you have
+                      turned off do not travel, and anything somebody already has is left alone rather than added twice.
+                    </Text>
+                    <View style={{ alignItems: 'flex-start' }}>
+                      <Ghost label="Choose Who" a11yLabel="Choose which clients get these lines" onPress={openCopy} />
+                    </View>
+                  </>) : (<>
+                    {/* Who can be ticked, and whether ticking them all is a
+                        true gesture. `selectAllOffer` renames itself under a
+                        truncated roster rather than claiming "All" over people
+                        this screen has never seen. */}
+                    {copyCandidates.length === 0 ? (
+                      <Text style={{ ...ty.body, color: t.ink3 }}>
+                        {r.status === 'error'
+                          ? 'Your client list could not be read, so there is nobody here to choose. That is a read that failed, not an empty book.'
+                          : 'There is nobody else on your book to give these to.'}
+                      </Text>
+                    ) : (<>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
+                        {copyCandidates.map((c) => {
+                          const on = ticked.includes(c.id);
+                          return (
+                            <Pressable key={c.id} onPress={() => setTicked((p) => (on ? p.filter((x) => x !== c.id) : [...p, c.id]))}
+                              accessibilityRole="checkbox" accessibilityState={{ checked: on }}
+                              accessibilityLabel={c.name} style={chip(on)}>
+                              <Text style={{ ...ty.micro, color: on ? t.brandInk : t.ink2 }}>{c.name}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+
+                      <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center', marginBottom: sp.md }}>
+                        <Ghost label={selectAll.label}
+                          a11yLabel={selectAll.allowed ? selectAll.label : `${selectAll.label} — not available`}
+                          onPress={() => { if (selectAll.allowed) setTicked(copyCandidates.map((c) => c.id)); }} />
+                        {ticked.length ? (
+                          <Ghost label="Untick All" onPress={() => setTicked([])} />
+                        ) : null}
+                      </View>
+                      {selectAll.note ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{selectAll.note}</Text>
+                      ) : null}
+
+                      {/* What would actually be written, before it is. Both
+                          numbers, because a coach who ticks twelve and reads
+                          "12" cannot tell whether it counts people or lines —
+                          and the people who get nothing are the half they most
+                          need told about. */}
+                      {copyPreview(plan) ? (
+                        <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.md }}>{copyPreview(plan)}</Text>
+                      ) : null}
+
+                      {/* Withheld and said, not warned about and allowed. The
+                          duplicate this stops has no undo the client can reach
+                          and no undo the coach can reach without deleting the
+                          line, which deletes their ticks for it. */}
+                      {!copyGuard.allowed ? (
+                        <Notice tone={t.warn} kicker="Held" title={copyGuard.label ?? 'Not copied'}
+                          note={copyGuard.reason ?? ''} />
+                      ) : null}
+
+                      <View style={{ opacity: copyGuard.allowed ? 1 : 0.4 }} pointerEvents={copyGuard.allowed ? 'auto' : 'none'}>
+                        <Cta wide
+                          label={copying ? 'Copying…' : copyGuard.allowed ? `Copy to ${plan.changed.length}` : (copyGuard.label ?? 'Held')}
+                          disabled={copying || !copyGuard.allowed || plan.writes === 0}
+                          onPress={() => { void runCopy(); }} />
+                      </View>
+                      <View style={{ alignItems: 'flex-start', marginTop: sp.md }}>
+                        <Ghost label="Done" a11yLabel="Close the copy panel" onPress={() => setCopyOpen(false)} />
+                      </View>
+                    </>)}
+                  </>)}
+                </Section>
+              </View>
+            ) : null}
           </View>
         ) : null}
       </ScrollView>

@@ -50,6 +50,26 @@
 // Everything left is a write about the member's own record that says the same
 // thing whenever it lands. Those are the ones in here.
 //
+// ── The three that were left out of "everything left" ─────────────────────
+//
+// That closing rule was written with three kinds behind it and it admitted
+// three more, which had no queue for no reason anybody had decided on: the goal
+// a member sets (src/ui/goalTracker.tsx), the day they mark on the calendar
+// (app/(client)/calendar.tsx) and a blood sugar reading they type
+// (src/ui/glucoseData.ts). Every one is a statement about the member's own
+// record, none is scarce, none costs money and none carries a file, and all
+// three said "it isn't stored" and dropped what was typed. They are 'goal',
+// 'day-plan' and 'glucose' below, and src/lib/recordQueue.ts holds their
+// payloads.
+//
+// One of them needed the expiry this file already had and nothing used: a
+// planned day is a plan, and `canPlan` refuses to mark a date that has gone.
+// An intent to mark next Tuesday that surfaces on Wednesday is not a late plan,
+// it is a claim about the past, and this table is explicitly not where a claim
+// about the past gets to live. So a day-plan intent expires with its own day —
+// see `planExpiry` — and comes back through `partitionLapsed` to be said out
+// loud rather than written.
+//
 // ── The one that is handled somewhere else, deliberately ──────────────────
 //
 // An injury disclosure is not a kind here, and that is not an omission. It is
@@ -71,18 +91,22 @@ import { LOCAL_PREFIX } from './wellnessSync';
  * it: a kind with no handler is an item that sits on the phone forever being
  * counted as "waiting to send" by a screen and picked up by nothing.
  */
-export type OutboxKind = 'message' | 'measurement' | 'pt-approval';
+export type OutboxKind =
+  | 'message' | 'measurement' | 'pt-approval'
+  | 'goal' | 'day-plan' | 'glucose';
 
 /**
- * The same three kinds as a list, for a caller that has to walk them.
+ * The same kinds as a list, for a caller that has to walk them.
  *
  * The union is the authority and this is derived from it by hand, which is the
  * one thing worth watching: `src/lib/outbox.test.ts` asserts every member of
- * the union has an entry here, so a fourth kind added to the type without being
- * added to this list fails the suite rather than going quietly unrendered — the
- * exact failure mode of the sentences this list exists to draw.
+ * the union has an entry here, so a kind added to the type without being added
+ * to this list fails the suite rather than going quietly unrendered — the exact
+ * failure mode of the sentences this list exists to draw.
  */
-export const OUTBOX_KINDS: readonly OutboxKind[] = ['message', 'measurement', 'pt-approval'];
+export const OUTBOX_KINDS: readonly OutboxKind[] = [
+  'message', 'measurement', 'pt-approval', 'goal', 'day-plan', 'glucose',
+];
 
 export interface OutboxItem {
   /** Device-local and unique. Prefixed like every other unsent id in this app
@@ -190,7 +214,7 @@ export function readOutbox(raw: string | null | undefined): { items: OutboxItem[
 }
 
 // The same list as `OUTBOX_KINDS`, deliberately, rather than a second one: a
-// private copy here was how a fourth kind could become readable from storage
+// private copy here was how a new kind could become readable from storage
 // without ever being drawn on a screen.
 export const isOutboxKind = (s: string): s is OutboxKind => (OUTBOX_KINDS as readonly string[]).includes(s);
 
@@ -254,6 +278,12 @@ export function kindNoun(kind: OutboxKind): { one: string; many: string } {
     case 'message': return { one: 'message', many: 'messages' };
     case 'measurement': return { one: 'measurement', many: 'measurements' };
     case 'pt-approval': return { one: 'session approval', many: 'session approvals' };
+    // Named the way the member would name them, not the way the table does.
+    // "A planned day was waiting to send for too long" is a sentence somebody
+    // can act on; "a planned_days row" is not.
+    case 'goal': return { one: 'goal', many: 'goals' };
+    case 'day-plan': return { one: 'planned day', many: 'planned days' };
+    case 'glucose': return { one: 'blood sugar reading', many: 'blood sugar readings' };
   }
 }
 

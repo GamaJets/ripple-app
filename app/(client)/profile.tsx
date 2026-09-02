@@ -167,6 +167,7 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/social': 'share', '/(client)/devices': 'clock', '/(client)/music': 'play',
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
   '/(client)/coach-documents': 'pencil', '/(client)/notifications': 'bell',
+  '/(client)/agreements': 'pencil',
 };
 const HUB_GROUPS: { title: string; items: { label: string; note: string; route: string }[] }[] = [
   // First, deliberately. Pairing a watch is not an occasional settings errand —
@@ -215,6 +216,14 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     // by a different party, and coach-documents.tsx says so on its face — a
     // member who cannot tell the two apart takes a dispute to the wrong people.
     { label: "Your Coach's Documents", note: 'Waivers and forms your coach asks you to read', route: '/(client)/coach-documents' },
+    // Directly beneath the coach's, because they are the two sets of paperwork
+    // a member cannot otherwise tell apart, and this one is the gym's. Until it
+    // existed a member had no way to sign a gym waiver at all: every signature
+    // the product held was a member of staff typing the member's name at the
+    // desk. Both screens name their owner on their face for the same reason —
+    // somebody who cannot tell whose document it is takes a dispute to the
+    // wrong party.
+    { label: "Your Gym's Paperwork", note: 'Waivers and consents your gym asks you to sign', route: '/(client)/agreements' },
     { label: 'Find a Trainer', note: 'Have a code from your coach? Enter it here', route: '/(client)/trainers' },
     { label: 'Memberships & Packs', note: 'Your session packs & payments', route: '/(client)/packages' },
     { label: 'AI Coach', note: 'Chat with your AI coach', route: '/(client)/coach' },

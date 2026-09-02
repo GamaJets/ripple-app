@@ -34,8 +34,25 @@
 // `CATEGORIES` below records which is which, so the screen cannot offer a
 // switch for something this build cannot honour.
 //
+// ── The coach's quiet hours are a different mechanism ──────────────────────
+//
+// `inQuietHours` and `whenToDeliver` below are for LOCAL notifications and only
+// for them, and that limit is the reason they cannot be reused for a coach:
+// every coach-directed notification is remote, so there is no scheduled trigger
+// on this phone to move and no local clock at the point the decision is made.
+// The coach's version therefore lives on the server, carries an IANA zone with
+// it, and SUPPRESSES rather than shifts — src/lib/quietHours.ts and
+// supabase/parts/530 carry that argument in full.
+//
+// The one thing the two share is the wrap: 22 → 7 means 22, 23, 0 … 6, with the
+// end exclusive. That arithmetic is `hourInWindow` in quietHours.ts and is
+// called from here rather than written twice, because two copies of it are two
+// chances to disagree about an hour — and a disagreement costs somebody either
+// an hour of sleep or an hour of silence, depending which way it falls.
+//
 // Pure — no react, no storage, no notifications module — so the rules are
 // assertable without a phone.
+import { hourInWindow } from './quietHours';
 
 export type NotifyCategory =
   | 'sessions'      // "Session in 1 hour" for a booked PT slot
@@ -182,11 +199,11 @@ export function allows(category: NotifyCategory, prefs: NotifyPrefs): boolean {
  */
 export function inQuietHours(hour: number, prefs: NotifyPrefs): boolean {
   if (!prefs.quiet) return false;
-  const h = Math.floor(hour);
-  if (!Number.isFinite(h) || h < 0 || h > 23) return false;
-  const from = prefs.quietFromHour, to = prefs.quietToHour;
-  if (from === to) return false;
-  return from < to ? (h >= from && h < to) : (h >= from || h < to);
+  // The wrap, the range check and the zero-length rule are all `hourInWindow`.
+  // Behaviour here is unchanged to the character; what has changed is that the
+  // coach's server-side window (src/lib/quietHours.ts) computes membership from
+  // the same three lines rather than from a second copy of them.
+  return hourInWindow(hour, prefs.quietFromHour, prefs.quietToHour);
 }
 
 /**

@@ -64,6 +64,8 @@ import { supabase } from '../../src/lib/supabase';
 import { askAboutClient } from '../../src/lib/coach';
 import { sharedAreas, fillName } from '../../src/lib/coachShare';
 import { useRoster } from '../../src/ui/roster';
+import { searchRoster, rosterSearchLine } from '../../src/lib/rosterSearch';
+import { hitSlopFor } from '../../src/lib/a11y';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useCoachFeedback } from '../../src/ui/feedback';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
@@ -509,6 +511,18 @@ export default function TrainerClients() {
   const [msgFailed, setMsgFailed] = useState<string[]>([]);
   const [exportBusy, setExportBusy] = useState(false);
   const [seg, setSeg] = useState<string>('all');
+  // ── finding one person ──────────────────────────────────────────────────
+  //
+  // The only thing on this screen shaped like search was the magnifying glass
+  // in the header, and it pushes Explore — which searches TRAINER_NAV, the list
+  // of SCREENS. A coach with eighty clients tapped it, typed a name, and was
+  // told nothing matches about somebody sitting on their own roster. The chips
+  // below filter by delivery, drift and tag; none of them is "the woman I am
+  // training in ten minutes".
+  //
+  // It narrows what the segment already selected, so what the bulk controls act
+  // on stays exactly what is listed under them — see `shownRoster`.
+  const [rosterQ, setRosterQ] = useState('');
   const [tagDraft, setTagDraft] = useState('');
   const acceptJoin = async (id: string, ownerName: string | null) => {
     await acceptTrainerInvite(id);
@@ -1008,7 +1022,20 @@ export default function TrainerClients() {
   // A drift segment cannot be honoured once the read is gone; fall back to the
   // whole book rather than showing an empty list that reads as "none of these".
   const segLive = !(!bands && (seg === 'drifting' || seg === 'nodata'));
-  const shownRoster = segLive ? roster.filter(matchSeg) : roster;
+  const segRoster = segLive ? roster.filter(matchSeg) : roster;
+  // What is on screen, and therefore what every control under the list acts on.
+  //
+  // The search narrows the segment rather than sitting beside it. The
+  // alternative — filtering only the rows and leaving the bulk buttons on the
+  // segment — puts "Remove 12 From Your Roster" under three visible names,
+  // which is the worst version of a control this file already takes care to
+  // print a count on. One list, one count, one set of recipients.
+  const shownRoster = searchRoster(segRoster, rosterQ);
+  /** The sentence a search over an incomplete read owes the coach, or null.
+   *  Only a whole read may say a person is not on the book. */
+  const rosterQLine = rosterSearchLine({
+    status: rosterStatus, query: rosterQ, matched: shownRoster.length, searched: segRoster.length,
+  });
   // The book, in drift order once it can be. Until then it keeps the order it
   // came in — with a line above it saying that is what this is.
   const driftRows: { c: RosterClient; d: Drift | null }[] = (() => {
@@ -1146,9 +1173,15 @@ export default function TrainerClients() {
   // Reads as the object of a sentence, because it is one: the guard writes
   // "Only part of … came back", and "all of your clients" turns that into
   // "part of all of your clients".
-  const segLabel = seg === 'all'
+  //
+  // The search is part of that object when there is one. "Only part of your
+  // client list came back" is a different claim from "only part of your client
+  // list, narrowed to the names matching “sar”, came back", and the second is
+  // what the coach is looking at.
+  const segLabel = (seg === 'all'
     ? 'your client list'
-    : `the “${AUTO_SEGS.find((x) => x.key === seg)?.label ?? seg}” segment`;
+    : `the “${AUTO_SEGS.find((x) => x.key === seg)?.label ?? seg}” segment`)
+    + (rosterQ.trim() ? `, narrowed to the names matching “${rosterQ.trim()}”` : '');
   /** Whether "everybody in this segment" is a thing this screen may act on.
    *  Refuses rather than warns, for the reason guardOverwrite does: a banner
    *  does not stop a thumb, and neither a message nor an assign can be undone. */
@@ -1407,7 +1440,13 @@ export default function TrainerClients() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5, textTransform: 'capitalize' }} numberOfLines={1}>{studio}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
-            <Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} />
+            {/* Every SCREEN in the coach app, and it is the only way into
+                Explore that does not disappear once Getting Started is done —
+                so it stays pointed there. It reads as "search" to a screen
+                reader and read as "search" to a coach looking for a person,
+                which is what the field over the roster is now for; the spoken
+                label says which of the two this is. */}
+            <Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />
             {/* A client booking a slot and a client cancelling one are the two
                 events that change what a coach's day looks like, and until the
                 inbox shipped they existed only as a push — on a build that
@@ -1792,10 +1831,44 @@ export default function TrainerClients() {
             ))}
           </ScrollView>
 
+          {/* ── find one person ──────────────────────────────────────────────
+              The chips above answer "which kind of client"; this answers "which
+              client", which is the question a coach with eighty of them actually
+              has. It was answerable nowhere on this screen: the magnifying glass
+              in the header opens Explore, and Explore searches the list of
+              SCREENS.
+
+              It narrows the segment rather than replacing it, and everything
+              below — the bulk controls, their counts, the drift order — is built
+              from the result, so what the buttons act on is what is listed. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginBottom: sp.md }}>
+            <Icon name="search" size={16} color={t.ink3} />
+            <TextInput value={rosterQ} onChangeText={setRosterQ}
+              placeholder="Find a client by name" placeholderTextColor={t.ink3}
+              autoCapitalize="none" autoCorrect={false} accessibilityLabel="Find a client by name"
+              style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
+            {rosterQ ? (
+              <Pressable onPress={() => setRosterQ('')} hitSlop={hitSlopFor(24)}
+                accessibilityRole="button" accessibilityLabel="Clear the client search">
+                <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          {/* What the search actually searched. Under anything but a whole read
+              that is not the roster, and "nobody matches" said over a read that
+              failed tells a coach somebody is not on their book — see
+              src/lib/rosterSearch.ts. This line is the only thing on the screen
+              that may state an absence, and only under 'ready'. */}
+          {rosterQLine ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{rosterQLine}</Text>
+          ) : null}
+
           {/* Out of the app, and only ever the whole book. `exportRoster`
               refuses on a read that failed and marks the file INCOMPLETE on one
               that was truncated — see src/lib/rosterExport.ts. Offered whatever
-              the segment is, because a coach exporting their clients means all
+              the segment or the search is, and it exports `roster` rather than
+              what is listed, because a coach exporting their clients means all
               of them. */}
           {roster.length > 0 || rosterStatus !== 'ready' ? (
             <View style={{ marginBottom: sp.md }}>
@@ -1852,7 +1925,13 @@ export default function TrainerClients() {
             </View>
           ) : null}
 
-          {shownRoster.length === 0 ? (
+          {/* An empty list has four causes and they are not interchangeable.
+              A search that matched nobody is already spoken for by the line
+              under the field — which is the one that knows whether the roster
+              was read at all — so this does not say "no clients in this
+              segment" over a filtered list and send a coach to check a segment
+              that has people in it. */}
+          {shownRoster.length === 0 && !rosterQLine ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {rosterUnread && roster.length === 0
                 ? 'Your roster could not be read, so this is not "no clients" — pull down to try again.'
