@@ -200,6 +200,27 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
     purchases: sliceReady([
       { id: 'cp1', trainerId: 't1', trainerName: 'Ana', clientId: 'm1', amountCents: 60000, currency: 'gbp', sessionsTotal: 10, sessionsUsed: 3, status: 'paid', createdAt: '2026-04-01T00:00:00Z' },
     ]),
+    // The gym's own file on each member, and the paperwork. Sara has a record,
+    // a waiver she signed and a contract on file; Bo has the same three, so
+    // every one of them is a scoping assertion rather than a fixture that
+    // would pass with the filter deleted.
+    memberRecords: sliceReady([
+      { memberId: 'm1', memberName: 'Sara', phone: '+971500000001', email: 'sara@example.com', emergencyName: 'Nadia', emergencyPhone: '+971500000009', medicalNote: 'asthma inhaler in her bag', note: 'prefers mornings', tags: ['founder'], updatedAt: '2026-02-01T00:00:00Z' },
+      { memberId: 'm2', memberName: 'Bo', phone: null, email: null, emergencyName: null, emergencyPhone: null, medicalNote: null, note: null, tags: [], updatedAt: null },
+    ]),
+    agreements: sliceReady([
+      { id: 'w1', kind: 'waiver', title: 'Liability waiver', body: LONG, version: 1, active: true, required: true, createdAt: '2025-01-01T00:00:00Z' },
+      { id: 't1a', kind: 'terms', title: 'Membership terms', body: LONG, version: 1, active: true, required: true, createdAt: '2025-01-01T00:00:00Z' },
+    ]),
+    signatures: sliceReady([
+      { id: 'g1', agreementId: 'w1', agreementKind: 'waiver', agreementTitle: 'Liability waiver', memberId: 'm1', memberName: 'Sara', signedName: 'Sara Ahmed', signedAt: '2025-01-02T00:00:00Z', versionSigned: 1, attribution: 'staff', signedById: null, signedByName: null, witnessedById: 'o1', witnessedByName: 'Ana', guardianName: null, guardianRelationship: null, note: null },
+      { id: 'g2', agreementId: 'w1', agreementKind: 'waiver', agreementTitle: 'Liability waiver', memberId: 'm2', memberName: 'Bo', signedName: 'Bo Tan', signedAt: '2025-06-02T00:00:00Z', versionSigned: 1, attribution: 'member', signedById: 'm2', signedByName: 'Bo', witnessedById: null, witnessedByName: null, guardianName: null, guardianRelationship: null, note: null },
+    ]),
+    documents: sliceReady([
+      { id: 'd1', memberId: 'm1', memberAttached: true, equipmentId: null, kind: 'contract', title: 'Signed membership agreement', storagePath: 'T1/2025-01-02-abc-sara.pdf', mime: 'application/pdf', sizeBytes: 91234, expiresOn: null, note: null, uploadedById: 'o1', uploadedByName: 'Ana', uploadedAt: '2025-01-02T00:00:00Z' },
+      { id: 'd2', memberId: 'm2', memberAttached: true, equipmentId: null, kind: 'contract', title: 'Signed membership agreement', storagePath: 'T1/2025-06-02-def-bo.pdf', mime: 'application/pdf', sizeBytes: 88112, expiresOn: null, note: null, uploadedById: 'o1', uploadedByName: 'Ana', uploadedAt: '2025-06-02T00:00:00Z' },
+      { id: 'd3', memberId: null, memberAttached: false, equipmentId: 'e1', kind: 'insurance', title: 'Public liability schedule', storagePath: 'T1/2026-01-01-ghi-insurance.pdf', mime: 'application/pdf', sizeBytes: 4001, expiresOn: '2027-01-01', note: null, uploadedById: 'o1', uploadedByName: 'Ana', uploadedAt: '2026-01-01T00:00:00Z' },
+    ]),
   };
 
   const mine = memberSlices(base, 'm1');
@@ -228,9 +249,23 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
   eq(rows('promos'), 0, 'and the promo codes');
   eq(rows('settlements'), 0, 'and what the gym paid its staff');
 
-  // 1 membership + 1 payment + 1 invoice + 1 booking + 1 session + 2 passes
-  // + 1 visit + 1 invite + 1 contact + 1 pack + 1 event.
-  eq(memberRowCount(base, 'm1'), 12, 'twelve rows across the record');
+  // The three F3 was about. A subject-access bundle that omitted the member's
+  // own file — contact, next of kin, medical note, desk note — and every waiver
+  // they signed was missing the two things the request is usually FOR.
+  eq(rows('memberRecords'), 1, 'their own file: contact, next of kin, the medical note and the desk note');
+  eq(rows('signatures'), 1, 'the waivers they signed, and not the other member’s');
+  eq(rows('documents'), 1, 'the documents about them');
+  eq(rows('agreements'), 1,
+    'the wording they signed travels with the signature — a row naming version 1 of the waiver is a citation to a document, and the document has to be enclosed');
+  ok((mine.agreements as any).rows[0].id === 'w1',
+    'and only that one: the membership terms they never signed are not their record');
+  ok(!(mine.documents as any).rows.some((d: any) => d.id === 'd3'),
+    'the gym’s insurance schedule is the building’s paperwork, not this member’s');
+
+  // 1 own file + 1 membership + 1 payment + 1 invoice + 1 booking + 1 session
+  // + 2 passes + 1 visit + 1 invite + 1 contact + 1 pack + 1 event
+  // + 1 agreement + 1 signature + 1 document.
+  eq(memberRowCount(base, 'm1'), 16, 'sixteen rows across the record');
   eq(memberRowCount(base, 'm9'), 0, 'a person this gym holds nothing about is a real zero, and the screen says so');
 
   // One unreadable part makes the COUNT unknown rather than smaller. A smaller
@@ -248,6 +283,18 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
 
   ok(MEMBER_PARTS.every((p) => p !== 'plans' && p !== 'equipment' && p !== 'shifts' && p !== 'promos'),
     'the member parts list and the scoping agree about what belongs to a person');
+  ok(MEMBER_PARTS.includes('memberRecords') && MEMBER_PARTS.includes('signatures'),
+    'and a subject-access bundle carries the member’s own file and their signatures');
+
+  // With the signatures read refused there is no way to know WHICH versions
+  // they signed, so the wording travels whole rather than narrowed by a guess.
+  const noSigs: GymExportInput = { ...base, signatures: sliceFailed('permission denied') };
+  const blind = memberSlices(noSigs, 'm1');
+  eq((blind.agreements as any).state, 'ready', 'the agreements still read');
+  eq((blind.agreements as any).rows.length, 2,
+    'and go out whole when nothing can say which of them this member signed — over-inclusive beats a guess about what somebody agreed to');
+  eq((blind.signatures as any).state, 'failed',
+    'while the signatures stay failed: a refused read does not become an empty waiver file');
 }
 
 if (errors.length) {

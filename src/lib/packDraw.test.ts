@@ -206,5 +206,60 @@ for (const o of ['exhausted', 'nothing_to_return', 'unknown'] as const) {
   ok(s[0] === s[0].toLowerCase(), `the ${o} clause starts lower-case — it is a parenthetical, not a sentence`);
 }
 
+/* ── a pack that ran out of TIME, which is not a pack somebody used up ───── */
+
+// Part 612's nightly pass reduces `sessions_total` to `sessions_used` so that
+// every draw site in the database stops at an expired pack. That means an
+// expired pack and a fully used one arrive here as the same two numbers, and
+// they are opposite sentences about somebody's money.
+const CLOSED = {
+  expires_on: '2026-08-31',
+  expired_at: '2026-09-01T07:33:00.000Z',
+  sessions_expired: 6,
+};
+
+const timedOut = packBalance([P({ id: 'x', sessions_total: 4, sessions_used: 4, ...CLOSED })]);
+eq(timedOut.left, 0, 'nothing can be booked against a pack whose window has closed');
+eq(timedOut.exhausted, 0, 'and it is NOT counted as used up — they did not use it, it ran out');
+eq(timedOut.expired, 1, 'it is counted as expired, which is its own state');
+eq(timedOut.stranded, 6, 'and the sessions they paid for and did not take are stated rather than dropped');
+eq(timedOut.live, 0, 'an expired pack is not live, whatever is left on it');
+ok(timedOut.lines[0].expired === true, 'the line says so, so a screen cannot render the wrong sentence by omission');
+
+// The pack keeps its own name. `sessions_total` has already had the stranded
+// credits taken off it, so printing it raw would relabel a ten-pack as a
+// four-pack on the screen of the person who bought a ten.
+eq(timedOut.lines[0].sessions_total, 10, 'a pack is described by what was SOLD, not by what survived the window');
+eq(packBalance([P({ id: 'x', package_id: null, sessions_total: 4, sessions_used: 4, ...CLOSED })]).lines[0].label,
+  '10-session pack', 'and an unnamed one is described by that number too');
+
+// A pack that ran out having been fully used lost nobody anything.
+const cleanlyOut = packBalance([P({
+  id: 'y', sessions_total: 10, sessions_used: 10,
+  expires_on: '2026-08-31', expired_at: '2026-09-01T07:33:00.000Z', sessions_expired: 0,
+})]);
+eq(cleanlyOut.stranded, 0, 'a window closing on a fully used pack strands nothing');
+eq(cleanlyOut.expired, 1, 'though it is still an expired pack rather than an exhausted one');
+
+// THE distinction the app must not get ahead of. Between the last day passing
+// and the nightly pass running, the credits are genuinely still spendable —
+// every draw site in the database will take one — so a pack is expired here
+// only once `expired_at` says the pass has closed it.
+const stillLive = packBalance([P({ id: 'z', sessions_total: 10, sessions_used: 4, expires_on: '2020-01-01' })]);
+eq(stillLive.left, 6, 'a lapsed window that has not been closed still holds its credits');
+eq(stillLive.expired, 0, 'and the pack is not reported as expired before anything expired it');
+eq(stillLive.stranded, 0, 'and nothing is reported as stranded');
+
+// Every pack sold before part 612 carries none of these columns at all.
+const noWindow = packBalance([P({ id: 'old', sessions_total: 10, sessions_used: 3 })]);
+eq(noWindow.expired, 0, 'a pack with no window never expires');
+eq(noWindow.stranded, 0, 'and strands nothing');
+eq(noWindow.lines[0].expiresOn, null, 'and reports no date, rather than one this code chose');
+
+// An unread history strands an UNKNOWN number, not nought — the same rule
+// `left` follows, for the same reason.
+eq(packBalance(null).stranded, null, 'an unread history is not a history with nothing stranded in it');
+eq(packBalance([]).stranded, 0, 'and an empty one genuinely strands nothing');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('packDraw: ok (unread balance is null, zero rows is not a redemption, oldest pack spends first)');
+console.log('packDraw: ok (unread balance is null, zero rows is not a redemption, oldest pack spends first, a window closing is not a pack used up)');

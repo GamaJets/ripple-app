@@ -102,6 +102,37 @@ function inkFor(hex: string): string {
   return L > 0.179 ? '#101010' : '#ffffff';
 }
 
+/**
+ * Paint the console in a gym's colour, or take the paint off.
+ *
+ * Exported because the colour is now SETTABLE from this console — /settings
+ * writes `tenants.brand_color` through `saveGymProfile` — and this component
+ * reads it once, on mount, and never again. Without a way in, an owner would
+ * save a colour, be told it saved, and go on looking at the old one until they
+ * reloaded; the console would be the one surface that disagreed with the value
+ * it had just written. That is the same "saved somewhere and nowhere" failure
+ * `updateTenant` was fixed for on the phone, arriving as a stale paint instead
+ * of a stale row.
+ *
+ * A null or malformed value REMOVES the override rather than substituting
+ * anything, so `globals.css`'s own `--brand` comes back. That is the honest
+ * rendering of a gym that has not chosen a colour — part 118 dropped the teal
+ * default precisely so "has not chosen" could be a state — and it is what makes
+ * clearing the field on /settings visible immediately rather than on the next
+ * load.
+ */
+export function applyBrandColour(raw: string | null | undefined): void {
+  const root = document.documentElement;
+  const hex = safeHex(raw);
+  if (hex) {
+    root.style.setProperty('--brand', hex);
+    root.style.setProperty('--brand-ink', inkFor(hex));
+  } else {
+    root.style.removeProperty('--brand');
+    root.style.removeProperty('--brand-ink');
+  }
+}
+
 export function Console() {
   const [theme, setTheme] = useState<Theme | null>(null);
 
@@ -128,11 +159,19 @@ export function Console() {
    *
    * ── What was hardcoded ───────────────────────────────────────────────────
    *
-   * `tenants.brand_color` and `tenants.logo` have existed since part 01 and are
-   * read by nothing in this console; `globals.css` fixes `--brand` to Studio
-   * amber; the browser tab says "Repple Studio" whoever is signed in. The phone
-   * app already themes from the tenant. A chain buying Repple gets its own app
+   * `tenants.brand_color` and `tenants.logo` had existed since part 01 and were
+   * read by nothing in this console; `globals.css` fixed `--brand` to Studio
+   * amber; the browser tab said "Repple Studio" whoever was signed in. The phone
+   * app already themed from the tenant. A chain buying Repple got its own app
    * and a console with its supplier's name on it.
+   *
+   * ── And it can now be changed from here ─────────────────────────────────
+   *
+   * Reading it was only half of it. The colour was settable from the owner's
+   * phone and from nowhere else, so this console themed itself from a column it
+   * offered no way to touch — a white-label product whose branding needed the
+   * app installed. /settings writes it now, and `applyBrandColour` above is what
+   * lets a save land on the screen the owner is looking at.
    *
    * ── Why the tab title is set here and not in `metadata` ─────────────────
    *
@@ -154,11 +193,7 @@ export function Console() {
         .from('tenants').select('name, brand_color').eq('id', who.tenantId).single();
       if (!live || !data) return;
 
-      const hex = safeHex((data as any).brand_color);
-      if (hex) {
-        document.documentElement.style.setProperty('--brand', hex);
-        document.documentElement.style.setProperty('--brand-ink', inkFor(hex));
-      }
+      applyBrandColour((data as any).brand_color);
       const name = String((data as any).name ?? '').trim();
       // The gym first, the product second — the tab is read by somebody with
       // eleven tabs open, and the half they need is which gym.

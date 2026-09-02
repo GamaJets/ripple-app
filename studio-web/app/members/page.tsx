@@ -1146,7 +1146,31 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
     } finally { setBusy(false); }
   };
 
-  const download = () => {
+  /**
+   * The list, and the row that records it leaving.
+   *
+   * ── Why this writes to gym_export_runs ────────────────────────────────
+   *
+   * This button writes every selected member's name, membership, email and
+   * phone number to disk in one click, and it used to write nothing anywhere
+   * else. `/export` — the slow, deliberate, owner-only path — logs every bundle
+   * it produces, so the product's answer to "has anybody taken the members off
+   * this platform" was drawn entirely from the route nobody uses in a hurry.
+   * The unaudited path was the fast one, which is the wrong way round: the
+   * question a data-protection officer asks is not which screen it came from.
+   *
+   * So the same table, the same shape, and the same ORDER. The row is written
+   * AFTER the file exists, never before — a log entry for a download that never
+   * happened is a false statement about personal data having left the platform,
+   * and it is exactly the kind a regulator reads as evidence.
+   *
+   * `scope` is 'gym' and not 'member' even when the group holds one person. A
+   * member-scoped row means "this person's own record was produced", which is
+   * usually a subject-access response with a deadline attached; a contact list
+   * that happens to be one row long is not that, and logging it as one would
+   * put a request in the register that nobody ever made.
+   */
+  const download = async () => {
     if (!seg) return;
     const csv = segmentCsv(seg, (id) => {
       const r = gymRecs?.get(id) ?? null;
@@ -1158,6 +1182,7 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
     a.download = `${seg.id}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+    await logRosterExport(me, tenantId, seg);
   };
 
   if (!segments) return null;
@@ -1242,7 +1267,10 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
               <p style={{ margin: 0, fontSize: 12, color: 'var(--ink3)' }}>
                 Export hands the list — with whatever phone number and address the gym has recorded
                 — to the mailing tool you already use. There is no email sender in this product, and
-                no unsubscribe register, so nothing here pretends to run a campaign.
+                no unsubscribe register, so nothing here pretends to run a campaign. Taking it is
+                recorded, with who took it, when, and how many people were on it: the same record
+                the full export writes, because a route out of the console is a route out of the
+                console whichever screen it is on.
               </p>
               {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)' }}>{msg}</p> : null}
             </>
@@ -1251,6 +1279,33 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
       )}
     </Section>
   );
+}
+
+/**
+ * Record that a list of members left the platform.
+ *
+ * The sibling of `logExport` in studio-web/app/export/page.tsx, and swallowed
+ * for the same reason it is: the file is already in the owner's hands by the
+ * time this runs, so reporting a logging failure as an export failure would be
+ * false, and refusing the download over a logging table would be a worse
+ * product for a worse reason. A gap in the log is visible as a gap.
+ *
+ * The note names what was actually in the file. `parts: ['members']` alone
+ * would say a roster left and could not say it carried phone numbers, which is
+ * the half of the answer that matters to whoever reads this row later.
+ */
+async function logRosterExport(me: Me, tenantId: string, seg: Segment): Promise<void> {
+  if (!tenantId) return;
+  // eslint-disable-next-line -- no-error-ok: the CSV is already on the owner's disk; a logging failure must not be reported as an export failure, and a refusal here would be a console that cannot answer its own segments
+  await supabase.from('gym_export_runs').insert({
+    tenant_id: tenantId,
+    scope: 'gym',
+    member_id: null,
+    parts: ['members'],
+    rows_exported: seg.members.length,
+    taken_by: me.id,
+    note: `Roster CSV from /members — the “${seg.label}” group (${seg.members.length} member(s)), with name, membership, days since last visit, email and phone.`,
+  });
 }
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {

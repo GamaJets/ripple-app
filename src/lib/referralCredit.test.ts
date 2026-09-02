@@ -18,6 +18,8 @@
 import {
   CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, rewardNote, friendLine, joinedLabel,
   shapeReferrals, summaryLine, type RawReferral, type ReferralRow,
+  COACH_REWARD_NOTE, COACH_REFERRAL_PRIVACY_NOTE, shapeCoachReferrers,
+  referrerLine, coachSummaryLine, type RawCoachReferrer,
 } from './referralCredit';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -152,6 +154,65 @@ ok(!/free session|% off|voucher|points|credit balance/i.test(REWARD_NOTE),
 ok(/first name/i.test(REFERRAL_PRIVACY_NOTE), 'the privacy note says a first name is what is shown');
 ok(/never shown anything about your training/i.test(REFERRAL_PRIVACY_NOTE),
   'and that the exposure does not run the other way');
+
+/* ── THE COACH'S SIDE ─────────────────────────────────────────────────────── */
+//
+// Same two bugs, aimed at a different reader, plus a third that only exists
+// here: a coach shown a value would offer it to somebody. The rows below are
+// the shape coach_referrals() returns (supabase/parts/630) — an id, a first
+// name, and two counts, and no detail whatsoever about the people referred.
+
+const rawCoach: RawCoachReferrer[] = [
+  { referrer_id: 'c1', referrer_name: 'Priya', joined: 4, converted: 1 },
+  { referrer_id: 'c2', referrer_name: 'Tom', joined: 2, converted: 2 },
+  { referrer_id: 'c3', referrer_name: '   ', joined: 1, converted: 0 },
+];
+const coachRows = shapeCoachReferrers(rawCoach);
+eq(coachRows.length, 3, 'every client who brought somebody in is listed');
+eq(coachRows[0].id, 'c1', 'ordered by how many they brought in');
+eq(coachRows[2].name, 'A client', 'a blank name is described rather than left empty under a row');
+
+eq(shapeCoachReferrers([{ referrer_id: '', referrer_name: 'X', joined: 3, converted: 0 }]).length, 0,
+  'a row naming nobody is dropped — a coach cannot thank an id-less row');
+eq(shapeCoachReferrers([{ referrer_id: 'c9', referrer_name: 'X', joined: null, converted: null }]).length, 0,
+  'and a count that is not a count is dropped rather than becoming a zero');
+eq(shapeCoachReferrers([{ referrer_id: 'c9', referrer_name: 'X', joined: 2, converted: 5 }])[0].converted, 2,
+  'converted can never exceed joined — "3 of 2 started training" ends the reader’s trust in both');
+eq(shapeCoachReferrers(null).length, 0, 'a read that returned nothing shapes to nothing, not to a throw');
+
+const priya = referrerLine(coachRows[0]);
+ok(priya.includes('4 people joined') && priya.includes('1 has started training'),
+  `both counts are on the line, always — got ${priya}`);
+ok(referrerLine(coachRows[2]).includes('none training yet'),
+  'and a client whose people have not started is said plainly, not left blank');
+ok(!/£|\$|€|worth|credit|owed/i.test(priya), 'no line about a person carries money');
+
+// The first bug: a failed read becoming a statement about the world. A coach
+// told nobody is referring stops asking, and asking is free.
+for (const s of ['loading', 'error', 'partial'] as LoadStatus[]) {
+  const line = coachSummaryLine(s, null);
+  ok(!/\d/.test(line), `${s} states no figure — got ${line}`);
+  ok(!/^None|nobody/i.test(line), `${s} never says nobody has referred anybody — got ${line}`);
+}
+ok(coachSummaryLine('ready', null).includes('couldn’t'),
+  'a null under ready is still a failure to check, not an answer of none');
+ok(coachSummaryLine('ready', []).startsWith('None of your clients'),
+  'and only a real, whole, empty read may say none');
+
+const summary = coachSummaryLine('ready', coachRows);
+ok(summary.includes('7 people') && summary.includes('3 of whom'),
+  `the two totals are stated together — got ${summary}`);
+ok(!/£|\$|€|revenue|worth|value/i.test(summary), 'and the summary is a headcount, never a takings figure');
+
+// The third bug, which is the reason this screen was specified as counts only.
+ok(/no discount/i.test(COACH_REWARD_NOTE) && /no free session/i.test(COACH_REWARD_NOTE),
+  'the coach note names the rewards it is NOT offering rather than leaving them to be assumed');
+ok(!/[£$€]|\d/.test(COACH_REWARD_NOTE),
+  'and carries no amount and no currency — there is no figure it could honestly hold');
+ok(/yours to decide/i.test(COACH_REWARD_NOTE), 'and hands the decision back to the coach');
+ok(/never been told/i.test(COACH_REWARD_NOTE), 'saying outright that the app does not know the amount');
+ok(/not shown who those people are/i.test(COACH_REFERRAL_PRIVACY_NOTE),
+  'the privacy note says the referred people are not named to the coach');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`referralCredit: ok (${shaped.length} rows shaped, ${shaped.filter((r) => r.converted).length} converted)`);

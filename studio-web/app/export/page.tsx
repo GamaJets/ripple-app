@@ -44,26 +44,43 @@ import { fetchVisits } from '@lib/gymVisits';
 import { fetchInvites } from '@lib/memberInvites';
 import { readAll } from '@lib/rowCap';
 import { sliceLoading, sliceReady, sliceFailed } from '@lib/memberView';
+import { fetchMemberRecords } from '@lib/gymMembers';
+import { attributionOf } from '@lib/gymSigning';
+import {
+  windowFromDays, windowBlocker, describeWindow, isBounded, presetDays,
+  PRESET_IDS, PRESET_LABEL, type PresetId, type ExportWindow,
+} from '@lib/exportWindow';
 import {
   buildGymExport, exportBlocker, partSlice,
-  EXPORT_PARTS, EXPORT_LABEL, EXPORT_COST,
+  EXPORT_PARTS, EXPORT_LABEL, EXPORT_COST, EXPORT_DATE_FIELD, EXPORT_UNBOUNDED_WHY,
   type ExportPart, type ExportFile, type GymExportInput,
   type Slice, type MemberBooking, type GymClass,
-  memberSlices, memberRowCount, MEMBER_PARTS,
+  memberSlices, memberRowCount, MEMBER_PARTS, windowSlices,
   type ExportInvoice, type ExportSettlement, type ExportEquipment, type ExportShift,
   type ExportIntervention, type ExportPromo, type ExportEvent, type ExportPurchase,
+  type ExportMemberRecord, type ExportAgreement, type ExportSignature, type ExportDocument,
 } from '@lib/gymExport';
 
 /**
- * The bounds the time-ranged reads are made over.
+ * The bounds the two time-ranged READS are made over. Not the export's period.
  *
- * An export is the whole record, so these are deliberately wide rather than the
- * 30- or 90-day windows the other screens use. They are still stated in the
- * manifest, because a bundle that implies it covers all of time without saying
- * where it actually looked is making a promise it cannot check.
+ * `fetchClasses` and `fetchSessions` take a range because every other screen
+ * that calls them wants one; this screen wants all of it, so these are
+ * deliberately wide. They used to be the export's own bounds as well, and that
+ * was the defect: two constants with no control beside them meant the only
+ * request the console could answer was "everything", while every request an
+ * accountant or an auditor actually makes is for a period.
+ *
+ * The PERIOD is now `window` below, it is applied to the rows by
+ * `buildGymExport`, and it is deliberately not applied here. Reading the whole
+ * record once and narrowing it means changing the dates does not re-run
+ * nineteen queries, and — the reason that matters — it means the window cannot
+ * turn a read that would have failed into a read that quietly succeeds over a
+ * smaller set. What was readable is the same question whatever period is asked
+ * for, and the screen answers it once.
  */
-const FROM = '1970-01-01T00:00:00.000Z';
-const TO = '2100-01-01T00:00:00.000Z';
+const READ_FROM = '1970-01-01T00:00:00.000Z';
+const READ_TO = '2100-01-01T00:00:00.000Z';
 
 /** How many class ids go into one `.in(...)` filter. A gym with years of
  *  timetable has thousands, and one filter holding all of them is a URL long
@@ -91,6 +108,10 @@ const PENDING: Reads = {
   promos: sliceLoading(),
   events: sliceLoading(),
   purchases: sliceLoading(),
+  memberRecords: sliceLoading(),
+  agreements: sliceLoading(),
+  signatures: sliceLoading(),
+  documents: sliceLoading(),
 };
 
 const EMPTY: Reads = {
@@ -112,6 +133,10 @@ const EMPTY: Reads = {
   promos: sliceReady([]),
   events: sliceReady([]),
   purchases: sliceReady([]),
+  memberRecords: sliceReady([]),
+  agreements: sliceReady([]),
+  signatures: sliceReady([]),
+  documents: sliceReady([]),
 };
 
 export default function ExportPage() {
@@ -119,6 +144,11 @@ export default function ExportPage() {
   const [gymName, setGymName] = useState<string | null>(null);
   const [reads, setReads] = useState<Reads>(PENDING);
   const [readAt, setReadAt] = useState<string | null>(null);
+  // The two days somebody typed, held as typed. Blank on both sides is the
+  // whole record, which is the default and is a different request from a very
+  // wide period rather than a special case of one.
+  const [fromDay, setFromDay] = useState('');
+  const [toDay, setToDay] = useState('');
 
   const load = useCallback(async (tenantId: string) => {
     setReads(PENDING);
@@ -132,7 +162,7 @@ export default function ExportPage() {
     const timetable = async (): Promise<[Slice<GymClass>, Slice<MemberBooking>]> => {
       let classes: GymClass[];
       try {
-        classes = await fetchClasses(supabase, tenantId, FROM, TO);
+        classes = await fetchClasses(supabase, tenantId, READ_FROM, READ_TO);
       } catch (e) {
         const why = reason(e);
         return [
@@ -151,12 +181,13 @@ export default function ExportPage() {
       plans, memberships, payments, [classes, attendance],
       sessions, passTypes, passes, visits, invites,
       invoices, settlements, equipment, shifts, interventions, promos, events, purchases,
+      memberRecords, agreements, signatures, documents,
     ] = await Promise.all([
       slice(() => fetchPlans(supabase, tenantId)),
       slice(() => fetchMemberships(supabase, tenantId)),
       slice(() => fetchPayments(supabase, tenantId)),
       timetable(),
-      slice(() => fetchSessions(supabase, tenantId, FROM, TO)),
+      slice(() => fetchSessions(supabase, tenantId, READ_FROM, READ_TO)),
       slice(() => fetchPassTypes(supabase, tenantId)),
       slice(() => fetchPasses(supabase, tenantId)),
       slice(() => fetchVisits(supabase, tenantId)),
@@ -173,11 +204,21 @@ export default function ExportPage() {
       slice(() => readPromos(tenantId)),
       slice(() => readEvents(tenantId)),
       slice(() => readPurchases(tenantId)),
+      // The paperwork, and the member's own file. Same discipline: four reads
+      // with four sets of three states, because an empty signatures.csv beside
+      // a refused query would tell a gym facing a claim that nobody ever signed
+      // anything — which is the single most expensive false statement this
+      // bundle is capable of making.
+      slice(() => readMemberRecords(tenantId)),
+      slice(() => readAgreements(tenantId)),
+      slice(() => readSignatures(tenantId)),
+      slice(() => readDocuments(tenantId)),
     ]);
 
     setReads({
       plans, memberships, payments, classes, attendance, sessions, passTypes, passes, visits, invites,
       invoices, settlements, equipment, shifts, interventions, promos, events, purchases,
+      memberRecords, agreements, signatures, documents,
     });
     setReadAt(new Date().toISOString());
   }, []);
@@ -199,18 +240,28 @@ export default function ExportPage() {
     return () => { live = false; };
   }, [load]);
 
+  const periodError = windowBlocker(fromDay, toDay);
+  // A period that will not parse produces NO window rather than half of one. An
+  // export bounded by whichever of the two dates happened to be typeable is the
+  // failure this whole screen is about: it would be a slice, and it would name
+  // bounds nobody asked for.
+  const window: ExportWindow = useMemo(
+    () => (periodError ? { from: null, to: null } : windowFromDays(fromDay, toDay)),
+    [periodError, fromDay, toDay],
+  );
+
   const input: GymExportInput | null = useMemo(() => (
     me?.tenantId || me
       ? {
           gymName,
           tenantId: me?.tenantId ?? null,
           generatedAt: readAt ?? new Date(0).toISOString(),
-          from: FROM,
-          to: TO,
+          from: window.from,
+          to: window.to,
           ...reads,
         }
       : null
-  ), [me, gymName, readAt, reads]);
+  ), [me, gymName, readAt, reads, window]);
 
   const blocker = input ? exportBlocker(input) : 'Loading.';
   // Built even while blocked, so the screen can show what the bundle WOULD
@@ -251,12 +302,15 @@ export default function ExportPage() {
       <h1>Export</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13, maxWidth: 640 }}>
         The whole operating record as CSV in one zip, in the shapes another
-        system can read: the price book, members, memberships, payments, invoices,
-        the timetable, class attendance, one-to-ones, passes, the door log, invites,
-        payroll settlements, the equipment register, the rota, member contact, promo
-        codes, the activity log and PT packs. It is the gym’s record, and leaving with
-        it has to be possible. One member’s own file can be taken from the bottom of
-        this page.
+        system can read: the price book, members and the gym’s own file on each of
+        them, memberships, payments, invoices, the timetable, class attendance,
+        one-to-ones, passes, the door log, invites, payroll settlements, the
+        equipment register, the rota, member contact, promo codes, the activity log,
+        PT packs, and the paperwork — every version of what people are asked to sign,
+        every signature with who actually gave it, and the index of the filing
+        cabinet. It is the gym’s record, and leaving with it has to be possible.
+        A period can be set below; one member’s own file can be taken from the
+        bottom of this page.
       </p>
 
       {bundle && !bundle.complete ? (
@@ -265,7 +319,9 @@ export default function ExportPage() {
         </Banner>
       ) : null}
 
-      {bundle?.caveats.map((c) => <Banner key={c}>{c}</Banner>)}
+      {bundle?.caveats.map((c) => (
+        <Banner key={c} tone={c.startsWith('This is a SLICE') ? 'crit' : undefined}>{c}</Banner>
+      ))}
 
       {/*
         * The sentence, and what stands behind it.
@@ -287,7 +343,9 @@ export default function ExportPage() {
         */}
       {bundle?.complete ? (
         <Banner>
-          Every part of the record was read, and read whole. This bundle is complete as of{' '}
+          {bundle.manifest.wholeRecord
+            ? 'Every part of the record was read, and read whole. This bundle is complete as of '
+            : 'Every part was read, and read whole — within the period below. Complete here means nothing was lost to a failed read; it does not mean this is the whole record. Taken as of '}
           <span className="mono">{bundle.manifest.exportedAt}</span>. No read here can come back
           short without saying so — each one either fails rather than return a partial set, or
           pages until it has all of it, so a part that could not be read in full is listed as
@@ -295,11 +353,117 @@ export default function ExportPage() {
         </Banner>
       ) : null}
 
-      <Parts input={input} />
+      <Period
+        fromDay={fromDay} toDay={toDay}
+        setFromDay={setFromDay} setToDay={setToDay}
+        error={periodError} window={window}
+      />
+      <Parts input={input} window={window} />
       <Files bundle={bundle} blocker={blocker} me={me} />
       <MemberRecord input={input} blocker={blocker} readAt={readAt} me={me} />
       <Notes />
     </Shell>
+  );
+}
+
+/* ── the period ────────────────────────────────────────────────────────────── */
+
+/**
+ * The dates, and what setting them costs.
+ *
+ * ── Why the consequence is on the screen and not only in the file ─────────
+ *
+ * Because the person who sets a period and the person who reads the bundle are
+ * usually the same person three weeks apart. Left to the README alone, the
+ * owner types two dates, downloads what looks like nineteen files of gym
+ * record, and emails it to an accountant with a covering note saying "here is
+ * everything". The sentence that stops that has to be in front of them at the
+ * moment they choose, so this section says out loud which files a period
+ * narrows and which it leaves whole — the same two lists the README prints, in
+ * the same words, because the two disagreeing is its own defect.
+ *
+ * Blank is the default and blank means everything. There is no "all time"
+ * preset doing the same job differently: two spellings of the same request is
+ * how a screen ends up with a state nobody tested.
+ */
+function Period({ fromDay, toDay, setFromDay, setToDay, error, window }: {
+  fromDay: string; toDay: string;
+  setFromDay: (v: string) => void; setToDay: (v: string) => void;
+  error: string | null; window: ExportWindow;
+}) {
+  const bounded = isBounded(window);
+  const narrowed = EXPORT_PARTS.filter((p) => EXPORT_DATE_FIELD[p]);
+  const whole = EXPORT_PARTS.filter((p) => !EXPORT_DATE_FIELD[p]);
+
+  const preset = (id: PresetId) => {
+    const d = presetDays(id, new Date().toISOString());
+    setFromDay(d.from);
+    setToDay(d.to);
+  };
+
+  return (
+    <Section
+      title="The period"
+      sub="Leave both blank for the whole record. Every request an accountant or an auditor makes is for a period, and a bundle that covers one has to say so — in its filename, in the manifest and at the top of the README."
+    >
+      <div style={formRow}>
+        <label style={{ fontSize: 12.5, color: 'var(--ink2)' }}>
+          From{' '}
+          <input type="date" value={fromDay} onChange={(e) => setFromDay(e.target.value)}
+                 style={field} aria-label="The first day the export covers" />
+        </label>
+        <label style={{ fontSize: 12.5, color: 'var(--ink2)' }}>
+          To{' '}
+          <input type="date" value={toDay} onChange={(e) => setToDay(e.target.value)}
+                 style={field} aria-label="The last day the export covers, included" />
+        </label>
+        {PRESET_IDS.map((id) => (
+          <button key={id} onClick={() => preset(id)} style={linkBtn}>{PRESET_LABEL[id]}</button>
+        ))}
+      </div>
+
+      <div style={{ padding: '12px 14px', fontSize: 12.5, lineHeight: 1.65 }}>
+        {error ? (
+          <p style={{ margin: 0, color: 'var(--crit)' }}>
+            {error} Until that is fixed the export covers the whole record — it is not
+            half-bounded by whichever date was readable.
+          </p>
+        ) : (
+          <p style={{ margin: 0, color: bounded ? '#f0c04e' : 'var(--ink3)' }}>
+            {bounded
+              ? <>This export will cover <strong>{describeWindow(window)}</strong>. That is a SLICE of the
+                  record, not the record — the dates go in every filename and the README opens with
+                  them, because a bundle that looks whole and is a quarter is the failure this is
+                  guarding against.</>
+              : <>No period set, so this is the whole record: <strong>{describeWindow(window)}</strong>.</>}
+          </p>
+        )}
+
+        {bounded && !error ? (
+          <div style={{ marginTop: 10, color: 'var(--ink3)' }}>
+            <p style={{ margin: '0 0 4px' }}>
+              <strong style={{ color: 'var(--ink2)' }}>Narrowed by the period</strong> — only rows
+              dated inside it: {narrowed.map((p) => `${EXPORT_LABEL[p]} (${EXPORT_DATE_FIELD[p]})`).join(', ')}.
+            </p>
+            <p style={{ margin: '0 0 4px' }}>
+              <strong style={{ color: 'var(--ink2)' }}>Not narrowed</strong>, whatever period you
+              ask for: {whole.map((p) => EXPORT_LABEL[p]).join(', ')}.
+            </p>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              {/* The two that would be WRONG if they were bounded, said rather
+                  than listed. A reader guesses "not narrowed" means "we did not
+                  get round to it", and for these two it means the opposite. */}
+              <li>{EXPORT_UNBOUNDED_WHY.memberships}</li>
+              <li>{EXPORT_UNBOUNDED_WHY.agreements}</li>
+            </ul>
+            <p style={{ margin: '8px 0 0' }}>
+              So do not add a figure from a narrowed file to one from a whole file and call the
+              answer a figure for the period.
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </Section>
   );
 }
 
@@ -312,11 +476,20 @@ interface PartRow {
   state: 'loading' | 'ready' | 'failed';
   rows: number | null;
   reason: string | null;
+  /** The column the period narrowed this part by, or null when it left it
+   *  whole. Null on an unbounded export too — nothing was narrowed. */
+  by: string | null;
 }
 
-function Parts({ input }: { input: GymExportInput | null }) {
+function Parts({ input, window }: { input: GymExportInput | null; window: ExportWindow }) {
+  const bounded = isBounded(window);
+  // Counted over the WINDOWED rows, because this table sits above a download
+  // button and the number beside a part has to be the number of rows that
+  // download contains. Showing the unnarrowed count here would put "payments:
+  // 4,102" on screen over a file holding 312.
+  const scoped = input ? windowSlices(input, window) : null;
   const rows: PartRow[] = EXPORT_PARTS.map((part) => {
-    const s = input ? partSlice(input, part) : ({ state: 'loading' } as const);
+    const s = scoped ? partSlice(scoped, part) : ({ state: 'loading' } as const);
     return {
       part,
       label: EXPORT_LABEL[part],
@@ -324,6 +497,7 @@ function Parts({ input }: { input: GymExportInput | null }) {
       state: s.state,
       rows: s.state === 'ready' ? (s.rows as unknown[]).length : null,
       reason: s.state === 'failed' ? s.reason : null,
+      by: bounded ? EXPORT_DATE_FIELD[part] : null,
     };
   });
 
@@ -353,15 +527,30 @@ function Parts({ input }: { input: GymExportInput | null }) {
           : r.state === 'loading'
             ? <span style={{ color: 'var(--ink3)' }}>Not read yet.</span>
             : r.rows === 0
-              ? <span style={{ color: 'var(--ink3)' }}>Read, and there is nothing recorded.</span>
+              // Under a period, an empty file has a THIRD reading nobody would
+              // guess: read fine, and nothing inside your dates. Saying "there
+              // is nothing recorded" over that would be false about the gym.
+              ? <span style={{ color: 'var(--ink3)' }}>
+                  {bounded && r.by
+                    ? 'Read, and nothing dated inside the period.'
+                    : 'Read, and there is nothing recorded.'}
+                </span>
               : <span style={{ color: 'var(--ink3)' }}>{capitalise(r.cost)}.</span>,
     },
+    ...(bounded ? [{
+      key: 'period', header: 'Period', value: (r: PartRow) => r.by ?? '',
+      render: (r: PartRow) => (r.by
+        ? <span style={{ color: 'var(--ink3)', fontSize: 12.5 }}>narrowed by <span className="mono">{r.by}</span></span>
+        : <span style={{ color: '#f0c04e', fontSize: 12.5 }}>whole — not narrowed</span>),
+    } as Column<PartRow>] : []),
   ];
 
   return (
     <Section
       title="What is in the record"
-      sub="Each part is read on its own. A read that fails is reported here and named in the bundle — it never becomes an empty file."
+      sub={bounded
+        ? 'Counted over the period set above. Each part is read on its own; a read that fails is reported here and named in the bundle, and never becomes an empty file.'
+        : 'Each part is read on its own. A read that fails is reported here and named in the bundle — it never becomes an empty file.'}
     >
       <DataTable rows={rows} columns={cols} rowKey={(r) => r.part} empty="Nothing to export." />
     </Section>
@@ -405,7 +594,12 @@ function Files({ bundle, blocker, me }: {
       // download that failed to build is a false statement about data having
       // left the platform, and it is the kind of false statement a data
       // protection officer reads as evidence.
-      await logExport(me, 'gym', null, bundle.files.reduce((a, f) => a + (f.rows ?? 0), 0), bundle.manifest.parts.map((p) => p.part).filter((p): p is ExportPart => !!p));
+      await logExport(
+        me, 'gym', null,
+        bundle.files.reduce((a, f) => a + (f.rows ?? 0), 0),
+        bundle.manifest.parts.map((p) => p.part).filter((p): p is ExportPart => !!p),
+        { from: bundle.manifest.window.from, to: bundle.manifest.window.to },
+      );
     } catch (e) {
       // Said out loud rather than swallowed: a button that appears to do
       // nothing reads as "the export is empty". The per-file buttons below
@@ -502,6 +696,19 @@ function Notes() {
           <strong>Invite tokens are not exported.</strong> They are working join links, and a record should not carry
           live credentials into somebody’s Downloads folder.
         </li>
+        <li>
+          <strong>A signature says who gave it.</strong> Every row in <span className="mono">signatures.csv</span> carries an
+          attribution column and a sentence saying what it means. Only <em>member</em> is the member’s own act;
+          <em> staff</em> is somebody at the desk recording that they agreed, and <em>unknown</em> is a row written before
+          this product recorded which. Do not quote a row without that column — it is the difference between a
+          signature and a note about one.
+        </li>
+        <li>
+          <strong>The filing cabinet leaves as an index, not as files.</strong>{' '}
+          <span className="mono">documents.csv</span> says what each document is, what it is about and where it is
+          stored. A CSV cannot carry a 25 MB scan, so the scans themselves are still in the bucket — the file says
+          so rather than letting a full-looking column read as “we have the contracts”.
+        </li>
       </ul>
     </Section>
   );
@@ -594,7 +801,8 @@ function MemberRecord({ input, blocker, readAt, me }: {
       });
       const blob = await zip(bundle.files.map((f) => ({ name: f.name, text: f.text })));
       save(blob, `${bundle.prefix}.zip`);
-      await logExport(me, 'member', memberId, rows, MEMBER_PARTS);
+      await logExport(me, 'member', memberId, rows, MEMBER_PARTS,
+        { from: bundle.manifest.window.from, to: bundle.manifest.window.to });
     } catch (e) {
       setErr(reason(e));
     } finally { setBusy(false); }
@@ -603,7 +811,7 @@ function MemberRecord({ input, blocker, readAt, me }: {
   return (
     <Section
       title="One member’s record"
-      sub="What this gym holds about one person — memberships, payments, invoices, bookings, one-to-ones, passes, door entries, contact and the activity log. Not the price book, the timetable or the rota: those are the gym’s and belong to nobody."
+      sub="What this gym holds about one person — their own file (contact, next of kin, the medical note and the desk’s note), memberships, payments, invoices, bookings, one-to-ones, passes, door entries, contact, the activity log, every waiver and consent they signed and the wording they signed it against. Not the price book, the timetable or the rota: those are the gym’s and belong to nobody."
     >
       <div style={{ display: 'flex', gap: 8, padding: '12px 14px', flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={memberId} onChange={(e) => { setMemberId(e.target.value); setErr(null); }}
@@ -665,7 +873,7 @@ function MemberRecord({ input, blocker, readAt, me }: {
  */
 async function logExport(
   me: Me, scope: 'gym' | 'member', memberId: string | null,
-  rows: number | null, parts: ExportPart[],
+  rows: number | null, parts: ExportPart[], window: ExportWindow,
 ): Promise<void> {
   if (!me.tenantId) return;
   // eslint-disable-next-line -- no-error-ok: the file is already in the owner's hands; a logging failure must not be reported as an export failure
@@ -676,6 +884,11 @@ async function logExport(
     parts,
     rows_exported: rows,
     taken_by: me.id,
+    // The period, in the log. Without it the row says a number of rows left the
+    // platform and cannot say what they were a number OF, so two exports of the
+    // same gym a month apart are indistinguishable in the one record that is
+    // supposed to answer what was taken.
+    note: `Covers ${describeWindow(window)}.`,
   });
 }
 
@@ -889,6 +1102,175 @@ async function readPurchases(tenantId: string): Promise<ExportPurchase[]> {
     status: r.status ?? null,
     createdAt: r.created_at ?? null,
   }));
+}
+
+/* ── the paperwork, and the member's own file ──────────────────────────────── */
+
+/**
+ * The gym's own file on each member.
+ *
+ * `fetchMemberRecords` in src/lib/gymMembers.ts, unchanged and unwrapped: it
+ * already throws on an error and already refuses a truncated read, which is the
+ * whole contract this screen needs. Reusing it rather than writing a nineteenth
+ * hand-rolled read is also the point — this is the SAME query /members runs, so
+ * the export cannot show a member a record that differs from the one the
+ * console shows about them.
+ *
+ * The name comes from the roster rather than from the row, because
+ * `gym_member_records` holds no name: it is keyed by member and joined to a
+ * person by id everywhere else too.
+ */
+async function readMemberRecords(tenantId: string): Promise<ExportMemberRecord[]> {
+  const rows = await fetchMemberRecords(supabase, tenantId);
+  if (!rows.length) return [];
+  const names = await namesFor(rows.map((r) => r.memberId));
+  return rows.map((r) => ({
+    memberId: r.memberId,
+    memberName: names.get(r.memberId) ?? null,
+    phone: r.phone, email: r.email,
+    emergencyName: r.emergencyName, emergencyPhone: r.emergencyPhone,
+    medicalNote: r.medicalNote, note: r.note,
+    tags: r.tags, updatedAt: r.updatedAt,
+  }));
+}
+
+/** Every version of everything this gym asks anybody to agree to, retired ones
+ *  included — a retired version is what its signatures still point at. */
+async function readAgreements(tenantId: string): Promise<ExportAgreement[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_agreements')
+      .select('id, kind, title, body, version, active, required, created_at')
+      .eq('tenant_id', tenantId)
+      .order('kind', { ascending: true })
+      .order('version', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "the documents this gym asks people to sign",
+  );
+  return rows.map((r) => ({
+    id: r.id, kind: r.kind, title: r.title, body: r.body,
+    version: Number.isFinite(r.version) ? Number(r.version) : null,
+    active: typeof r.active === 'boolean' ? r.active : null,
+    required: typeof r.required === 'boolean' ? r.required : null,
+    createdAt: r.created_at ?? null,
+  }));
+}
+
+/**
+ * Every signature, with the column that says who actually gave it.
+ *
+ * `attribution` and `signed_by` are selected explicitly and `attributionOf`
+ * narrows the value, so a database on which supabase/parts/520 has not been
+ * applied — where the column comes back missing — produces 'unknown' rather
+ * than throwing or defaulting to 'staff'. That is the honest degradation: an
+ * unreadable answer to "who signed this" is exactly what 'unknown' means.
+ *
+ * Read straight here rather than through `fetchSignatures` in src/lib/gymDocs.ts
+ * for the reason the eight above are: that read does not select `signed_by` or
+ * `witnessed_by`, and the export wants the whole row. It is the same table with
+ * the same tenant filter, ordered for paging the same way.
+ */
+async function readSignatures(tenantId: string): Promise<ExportSignature[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_agreement_signatures')
+      .select('id, agreement_id, member_id, signed_name, signed_at, version_signed, attribution, signed_by, witnessed_by, guardian_name, guardian_relationship, note')
+      .eq('tenant_id', tenantId)
+      .order('signed_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the signatures this gym holds',
+  );
+  if (!rows.length) return [];
+  const names = await namesFor(rows.flatMap((r) => [r.member_id, r.signed_by, r.witnessed_by]));
+  const docs = await agreementsFor(rows.map((r) => r.agreement_id));
+  return rows.map((r) => {
+    const a = docs.get(r.agreement_id);
+    return {
+      id: r.id,
+      agreementId: r.agreement_id,
+      agreementKind: a?.kind ?? null,
+      agreementTitle: a?.title ?? null,
+      memberId: r.member_id ?? null,
+      // The live name where the account still exists, then the name they SIGNED
+      // with. The second is the one that matters: a signature is what the person
+      // wrote at the time, and it outlives them renaming or being erased.
+      memberName: (r.member_id ? names.get(r.member_id) : undefined) ?? r.signed_name ?? null,
+      signedName: r.signed_name,
+      signedAt: r.signed_at,
+      versionSigned: Number.isFinite(r.version_signed) ? Number(r.version_signed) : null,
+      attribution: attributionOf(r.attribution),
+      signedById: r.signed_by ?? null,
+      signedByName: r.signed_by ? names.get(r.signed_by) ?? null : null,
+      witnessedById: r.witnessed_by ?? null,
+      witnessedByName: r.witnessed_by ? names.get(r.witnessed_by) ?? null : null,
+      guardianName: r.guardian_name ?? null,
+      guardianRelationship: r.guardian_relationship ?? null,
+      note: r.note ?? null,
+    };
+  });
+}
+
+/** The index of the filing cabinet. The FILES do not travel — see the note on
+ *  `documentsTable` in src/lib/gymExport.ts. */
+async function readDocuments(tenantId: string): Promise<ExportDocument[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_documents')
+      .select('id, member_id, member_attached, equipment_id, kind, title, storage_path, mime, size_bytes, expires_on, note, uploaded_by, uploaded_at')
+      .eq('tenant_id', tenantId)
+      .order('uploaded_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "the documents this gym holds",
+  );
+  if (!rows.length) return [];
+  const names = await namesFor(rows.map((r) => r.uploaded_by));
+  return rows.map((r) => ({
+    id: r.id,
+    memberId: r.member_id ?? null,
+    // The column where there is one, and `member_id` where there is not, which
+    // is what a database from before supabase/parts/390 would say. Never
+    // `?? false`: a missing column must not read as "this is nobody's
+    // paperwork" in the file a gym produces when asked whose it is.
+    memberAttached: typeof r.member_attached === 'boolean' ? r.member_attached : r.member_id != null,
+    equipmentId: r.equipment_id ?? null,
+    kind: r.kind, title: r.title,
+    storagePath: r.storage_path,
+    mime: r.mime ?? null,
+    sizeBytes: Number.isFinite(r.size_bytes) ? r.size_bytes : null,
+    expiresOn: r.expires_on ?? null,
+    note: r.note ?? null,
+    uploadedById: r.uploaded_by ?? null,
+    uploadedByName: r.uploaded_by ? names.get(r.uploaded_by) ?? null : null,
+    uploadedAt: r.uploaded_at,
+  }));
+}
+
+/**
+ * Kind and title for a set of agreement ids.
+ *
+ * Deliberately not throwing, for the same reason as `namesFor` below: these two
+ * columns LABEL a signature whose id, name, date and attribution are all read
+ * from the row itself, and refusing to export the signatures because their
+ * titles would not load withholds the evidence to protect the caption. Every
+ * row carries `agreement_id` regardless, and agreements.csv is in the bundle.
+ */
+async function agreementsFor(
+  ids: Array<string | null | undefined>,
+): Promise<Map<string, { kind: string | null; title: string | null }>> {
+  const unique = [...new Set(ids.filter((x): x is string => !!x))];
+  const out = new Map<string, { kind: string | null; title: string | null }>();
+  for (let i = 0; i < unique.length; i += ID_CHUNK) {
+    // eslint-disable-next-line -- no-error-ok: a missing title renders as a blank beside the agreement_id that is always written, and agreements.csv carries the wording either way
+    const { data } = await supabase
+      .from('gym_agreements').select('id, kind, title').in('id', unique.slice(i, i + ID_CHUNK));
+    for (const a of (data ?? []) as any[]) {
+      out.set(a.id, { kind: a.kind ?? null, title: a.title ?? null });
+    }
+  }
+  return out;
 }
 
 /**

@@ -1,5 +1,6 @@
-// Tests for the two settings a gym has to state about itself, and for the
-// answer neither of them is allowed to give.
+// Tests for the settings a gym has to state about itself, for the answer none
+// of them is allowed to give, and for the boundary that decides which columns a
+// browser form can reach at all.
 //
 // ── What went wrong ────────────────────────────────────────────────────────
 //
@@ -18,7 +19,7 @@
 //
 // Compile with tsc then run with node, like wroteRows.test.ts.
 import {
-  payPolicyOf, payPolicyCode, parseTenantCurrency,
+  payPolicyOf, payPolicyCode, parseTenantCurrency, parseBrandColor, saveGymProfile,
   PAY_POLICY_CODES, PAY_POLICY_LABEL,
 } from './gymPolicy';
 import { PAY_DELIVERED_ONLY, isPayable, type PayPolicy } from './gymSessions';
@@ -136,10 +137,106 @@ for (const bad of ['£', '$', 'GB', 'GBPP', 'pounds', 'G8P', 'gb p', '123']) {
     `"${bad}" is refused with a reason that says what a currency code is`);
 }
 
-if (errors.length) {
-  console.error(`gymPolicy.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);
-  for (const e of errors.slice(0, 20)) console.error('  · ' + e);
-  if (errors.length > 20) console.error(`  … and ${errors.length - 20} more`);
-  process.exit(1);
+/* ── the brand colour ─────────────────────────────────────────────────────── */
+//
+// The colour has no CHECK constraint behind it — verified against the live
+// database and recorded on `isBrandColor` in gymSettings.ts — so unlike the
+// currency there is no second line of defence. Whatever this function lets
+// through is what a theme parses, and a theme that cannot parse it does not
+// fail: it draws unreadable labels on every button in the product.
+
+eq(parseBrandColor('').kind, 'clear',
+  'an emptied field CLEARS the colour — part 118 dropped the default so "this gym has not chosen one" could be stored');
+eq(parseBrandColor('   ').kind, 'clear', 'and whitespace is empty');
+eq(parseBrandColor(null).kind, 'clear', 'and so is nothing at all');
+
+{
+  const r = parseBrandColor('#1E88E5');
+  eq(r.kind, 'color', 'a six-digit hex is a colour');
+  eq(r.kind === 'color' ? r.color : null, '#1e88e5',
+    'and it is stored lower-cased — nothing normalises this column on the way in, so one spelling has to be decided here');
 }
-console.log('gymPolicy.test.ts — ok');
+{
+  const r = parseBrandColor('  #1b5  ');
+  eq(r.kind === 'color' ? r.color : null, '#1b5',
+    'the three-digit form survives; it is one of the two shapes both themes parse');
+}
+
+for (const bad of ['1e88e5', '#1e88e', '#1e88e5ff', 'rebeccapurple', 'rgb(1,2,3)', '#', '#gggggg']) {
+  const r = parseBrandColor(bad);
+  eq(r.kind, 'bad', `"${bad}" is refused HERE — there is no constraint to refuse it later, and a theme fed it produces invisible buttons rather than an error`);
+  ok(r.kind === 'bad' && /hex/i.test(r.reason), `"${bad}" is refused with a reason that says what a brand colour is`);
+}
+
+// #RRGGBBAA is refused rather than truncated, and that is worth its own line:
+// silently dropping the alpha would store a colour the owner did not pick and
+// would look like it had worked.
+eq(parseBrandColor('#1e88e580').kind, 'bad',
+  'eight digits are refused, not truncated to six — a colour nobody chose is the thing this whole module exists to prevent');
+
+/* ── what the patch may write, and what it may not ────────────────────────── */
+//
+// `tenants` is granted at TABLE level to `authenticated` with no per-column
+// ACLs (part 101 §4), so RLS cannot say which columns an update touches. The
+// mapping inside `saveGymProfile` IS the boundary between a column and a
+// browser form, which makes it worth asserting rather than reading.
+
+/** A Queryable that records the row a write would have sent. */
+function capture() {
+  const sent: Record<string, unknown>[] = [];
+  const sb = {
+    from: (table: string) => ({
+      update: (row: Record<string, unknown>) => {
+        sent.push({ table, ...row });
+        // A write that matched one row, so `assertWrote` is satisfied and the
+        // assertions below are about the ROW rather than about the count.
+        return { eq: () => Promise.resolve({ error: null, count: 1 }) };
+      },
+    }),
+  };
+  return { sent, sb };
+}
+
+async function main(): Promise<void> {
+  {
+    const { sent, sb } = capture();
+    await saveGymProfile(sb, 'gym', { brandColor: '#1e88e5' });
+    eq(sent.length, 1, 'a brand colour is a write');
+    eq(sent[0].brand_color, '#1e88e5',
+      'and it lands in brand_color — the column this console themes itself from and could not previously change');
+    eq('name' in sent[0], false, 'a field the patch did not mention is not sent, so a save cannot blank what it was not asked about');
+  }
+  {
+    const { sent, sb } = capture();
+    await saveGymProfile(sb, 'gym', { brandColor: null });
+    eq(sent[0].brand_color, null,
+      'null is a deliberate CLEAR, not an absent field — a gym that has un-chosen a colour goes back to each surface drawing its own');
+  }
+  {
+    const { sent, sb } = capture();
+    await saveGymProfile(sb, 'gym', { name: 'Iron Works' });
+    eq('brand_color' in sent[0], false,
+      'and saving the name leaves the colour alone — every field is independently optional or a settings screen becomes a way to erase four things at once');
+  }
+  {
+    // The widening is OPT-IN, at the mapping. `brand` is refused by a trigger
+    // (part 101 §4) and `plan` is what the gym is billed on; neither is in
+    // `GymProfilePatch`, and this asserts that being absent from the TYPE is
+    // also being absent from the write — a caller reaching past the type with a
+    // cast still cannot reach the column.
+    const { sent, sb } = capture();
+    await saveGymProfile(sb, 'gym', { brand: 'someone_else', plan: 'studio', logo: 'x' } as never);
+    eq(sent.length, 0,
+      'a patch of nothing this module maps sends nothing at all — an unknown key is ignored, never relayed to the row');
+  }
+
+  if (errors.length) {
+    console.error(`gymPolicy.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);
+    for (const e of errors.slice(0, 20)) console.error('  · ' + e);
+    if (errors.length > 20) console.error(`  … and ${errors.length - 20} more`);
+    process.exit(1);
+  }
+  console.log('gymPolicy.test.ts — ok');
+}
+
+main().catch((e) => { console.error('gymPolicy.test.ts — threw:', e); process.exit(1); });

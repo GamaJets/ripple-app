@@ -36,6 +36,10 @@
     "src/lib/segments.test.ts",
     "src/lib/quietHours.ts",
     "src/lib/quietHours.test.ts",
+    "src/lib/packExpiry.ts",
+    "src/lib/packExpiry.test.ts",
+    "src/lib/disputes.ts",
+    "src/lib/disputes.test.ts",
     "src/lib/coachDelivery.ts",
     "src/lib/coachDelivery.test.ts",
     "src/lib/coachRevenue.ts",
@@ -254,6 +258,7 @@
     "src/lib/gymImports.test.ts",
     "src/lib/blockRange.test.ts",
     "src/lib/classRegister.test.ts",
+    "src/lib/coachRegister.test.ts",
     "src/lib/deviceBusy.test.ts",
     "src/lib/calendarSync.test.ts",
     "src/lib/groupVersions.test.ts",
@@ -291,6 +296,8 @@
     "src/lib/rosterSearch.test.ts",
     "src/lib/inviteDelivery.test.ts",
     "src/lib/coachChat.test.ts",
-    "src/lib/recordQueue.test.ts"
+    "src/lib/recordQueue.test.ts",
+    "src/lib/exportWindow.ts",
+    "src/lib/exportWindow.test.ts"
   ]
 }

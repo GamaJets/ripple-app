@@ -574,9 +574,23 @@ for (const n of [0, 1, 4, 999, 1204, 99999]) {
   // it at the moment it is too late to have said anything, which is where
   // `packRunOut()` already was: computed, correct, and rendered only on a
   // screen nobody opens weekly.
-  const packRows = SERVER_WRITTEN.filter((x) => /session pack/.test(x.title));
+  const packRows = SERVER_WRITTEN.filter((x) => x.where.includes('pack_balance_notify'));
   eq(packRows.length, 2, 'a pack running out is told twice: nearly, and then actually');
   eq(new Set(packRows.map((x) => x.title)).size, 2, 'with two different headings');
+
+  // And a pack running out of TIME is a THIRD row, from a different writer.
+  // The filter above is keyed on part 163's function rather than on the words
+  // "session pack" for exactly this reason: part 612's expiry pass is about a
+  // pack somebody did NOT use, which is the opposite fact, and folding it in
+  // with the two above would let a future edit delete one of the pair and still
+  // count three.
+  const expiryRows = SERVER_WRITTEN.filter((x) => x.where.includes('run_pack_expiry'));
+  eq(expiryRows.length, 1, 'a pack running out of time is told once, on the day the window closes');
+  for (const r of [...packRows, ...expiryRows]) {
+    eq(r.to, 'trainer', `“${r.title}” is the coach's to act on`);
+  }
+  ok(!expiryRows.some((x) => packRows.some((p) => p.title === x.title)),
+    'and it does not borrow either of the used-up headings — "used up" and "ran out of time" are opposite facts about somebody paying');
   for (const p of packRows) {
     eq(p.to, 'trainer', `“${p.title}” goes to the coach — the client just booked the session that spent it`);
     eq(p.route, '/(trainer)/payments', `“${p.title}” opens the screen that knows how to price a pack`);

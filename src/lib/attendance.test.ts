@@ -20,7 +20,7 @@
 // with the same helper the code uses.
 import {
   localDay, daysBetween, addDays, weekStart, classOutcome, dwellMinutes,
-  mergeAttendance, attendedDays, rhythm,
+  mergeAttendance, attendedDays, rhythm, staffScopeNote, STAFF_RECORD_NOTE,
   type ClassDetail, type MyBooking, type MyVisit,
 } from './attendance';
 
@@ -274,6 +274,31 @@ const ordered = mergeAttendance(
 );
 eqJson(ordered.events.map((e) => e.key), ['visit:v5', 'class:c1', 'visit:v6'],
   'newest first, whichever table the row came from');
+
+/* ── SCOPE: an empty coach-side read is not an empty client ───────────────── */
+//
+// `class_bookings_staff_r` and `gym_visits_staff_rw` are tenant-scoped, so an
+// independent coach matches neither and is handed zero rows with error null.
+// The screen above this cannot tell that apart from a client who has never been
+// recorded, so it is told, and these are the three answers it can be told.
+
+eq(staffScopeNote(true), null,
+  'a coach with a gym may state an empty record as an empty record');
+
+const noGym = staffScopeNote(false);
+ok(noGym != null, 'a coach with no gym is never allowed to state an empty record');
+ok(!/\d/.test(noGym as string),
+  'and the sentence for it carries no figure — there is no figure to carry');
+ok((noGym as string).includes('no record'),
+  'it names the read as the thing that is missing, not the client');
+
+const unknownGym = staffScopeNote(null);
+ok(unknownGym != null, 'and neither may a coach whose own gym could not be read');
+ok(unknownGym !== noGym,
+  '"we could not find out" and "you have no gym" are different facts and read differently');
+
+ok(!/never|did not|has not/i.test(STAFF_RECORD_NOTE),
+  'the standing note about one gym’s record says what it covers, never what the client did not do');
 
 if (errors.length) {
   console.error(`attendance.test.ts — ${errors.length} failure(s):`);

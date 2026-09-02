@@ -53,7 +53,17 @@ export interface ConnectStatus { stripe_account_id: string | null; charges_enabl
  * without an explicit currency, so the default is never the value that lands.
  * See `pkgMoney` in src/lib/subscriptions.ts and tenants.currency in part 99.
  */
-export interface TrainerPackage { id: string; trainer_id: string; name: string; price_cents: number; currency: string; sessions: number | null; billing_interval: string | null; active: boolean }
+export interface TrainerPackage { id: string; trainer_id: string; name: string; price_cents: number; currency: string; sessions: number | null; billing_interval: string | null; active: boolean;
+  /** How many days the buyer has to use a session pack, from the day they buy
+   *  it (part 612). Null means it does not expire, which is every package sold
+   *  before that part and every one whose coach chose not to state a window —
+   *  there is no default here and there must never be one, because a default
+   *  would put a deadline on every pack every coach on this platform already
+   *  sells. Read ONCE, at checkout, and copied on to
+   *  `client_purchases.expires_on`; changing it never reaches a pack somebody
+   *  has already bought. `readValidityDays` in src/lib/packExpiry.ts is what
+   *  reads it out of the coach's own typing. */
+  validity_days?: number | null }
 /** A completed one-off sale. `client_id` was missing from this type for as long
  *  as every function reading the table filtered on it — the client-side reads
  *  never needed to look at a column they were already scoped by. The coach-side
@@ -93,6 +103,29 @@ export interface Purchase { id: string; client_id: string | null; trainer_id: st
    *  be manufactured afterwards. `portalPurchase` is what picks a row that has
    *  one. */
   stripe_customer_id?: string | null;
+  /** The last day the credits on this pack can be used, stamped at checkout
+   *  from the package's `validity_days` as it stood THAT DAY (part 612). Null
+   *  means no window, which is every pack sold before that part. Never
+   *  recomputed: a window read off `trainer_packages` at render time would let a
+   *  coach void every credit their existing clients hold by editing a package.
+   *  See src/lib/packExpiry.ts. */
+  expires_on?: string | null;
+  /** When `run_pack_expiry()` closed the window on this pack, or null because
+   *  it has not been closed. Until it is written the credits are genuinely
+   *  still spendable, which is why the app reads this column rather than
+   *  comparing `expires_on` to the clock itself. */
+  expired_at?: string | null;
+  /** Credits the window closed on unspent. Zero means none were lost, never
+   *  unknown. `sessions_total` has already had them taken off it, so this is
+   *  the only place the size of what somebody paid for and did not take
+   *  survives — and stating it is the whole difference between an expiry and a
+   *  silent zero. */
+  sessions_expired?: number | null;
+  /** The Stripe PaymentIntent this sale was charged on (part 610), which is
+   *  what `charge.refunded` and `charge.dispute.*` carry. Null on every sale
+   *  made before that part; the webhook walks back through
+   *  `checkout.sessions.list` for those. */
+  stripe_payment_intent?: string | null;
   /** Stripe's `amount_total` minus the total connect-checkout PREDICTED when it
    *  worked this sale's platform fee out (part 311). NULL on every sale where
    *  nothing was predicted — which is every sale with no discount code on it,
@@ -181,7 +214,7 @@ export async function fetchMyPackages(): Promise<TrainerPackage[] | null> {
  * which is a large enough difference that it is never inferred from anything,
  * only ever passed in explicitly.
  */
-export async function createPackage(p: { name: string; price_cents: number; sessions: number | null; currency: string; billing_interval?: 'month' | 'year' | null }): Promise<{ ok: boolean; error?: string }> {
+export async function createPackage(p: { name: string; price_cents: number; sessions: number | null; currency: string; billing_interval?: 'month' | 'year' | null; validity_days?: number | null }): Promise<{ ok: boolean; error?: string }> {
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return { ok: false, error: 'Not signed in.' };
@@ -197,7 +230,21 @@ export async function createPackage(p: { name: string; price_cents: number; sess
     // turns a constraint violation into a sentence. A recurring pack would
     // charge again every month for credits that are granted once.
     if (interval && p.sessions != null) return { ok: false, error: 'A recurring package cannot also be a session pack — sessions are granted once and nothing renews them.' };
-    const { error } = await supabase.from('trainer_packages').insert({ trainer_id: uid, name: p.name, price_cents: p.price_cents, sessions: p.sessions, billing_interval: interval, currency, active: true });
+    // How long the buyer has to use the sessions, or null for a pack that does
+    // not expire — which is every package this app has ever sold, and stays the
+    // answer for anybody who leaves the field empty. No fallback and no
+    // default, for the reason there is none on `currency` two lines up: thirty
+    // days and ninety days are conventions in somebody's trade in somebody's
+    // country, and a literal here would silently put a deadline on every pack
+    // every coach on this platform sells. See src/lib/packExpiry.ts.
+    const validity = p.validity_days ?? null;
+    // Part 612 refuses this combination in the database; refusing it here turns
+    // a constraint violation into a sentence. A membership has no credits to run
+    // out of — it is stopped by cancelling it, and a validity on one would be a
+    // second, silent way for it to end.
+    if (validity != null && p.sessions == null) return { ok: false, error: 'Only a session pack can run out of time. A membership is stopped by cancelling it, not by a date.' };
+    if (validity != null && (!Number.isInteger(validity) || validity <= 0)) return { ok: false, error: 'A validity has to be a whole number of days, or nothing at all for a pack that does not expire.' };
+    const { error } = await supabase.from('trainer_packages').insert({ trainer_id: uid, name: p.name, price_cents: p.price_cents, sessions: p.sessions, billing_interval: interval, currency, validity_days: validity, active: true });
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -549,7 +596,14 @@ export async function sessionPacks(trainerId?: string): Promise<PackBalance | nu
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return null;
-    let q = supabase.from('client_purchases').select('id, package_id, sessions_total, sessions_used, status, created_at').eq('client_id', uid).eq('status', 'paid').not('sessions_total', 'is', null).limit(capLimit());
+    // The three expiry columns come back with the balance, because a pack that
+    // ran out of time and a pack that was used up are the same two numbers by
+    // the time part 612's pass has run — `sessions_total` is reduced to
+    // `sessions_used` so that every draw site in the database stops at it — and
+    // they are opposite sentences to say to somebody about their own money.
+    // Without `expired_at` and `sessions_expired` here, six sessions somebody
+    // paid for and did not take disappear off their screen with nothing said.
+    let q = supabase.from('client_purchases').select('id, package_id, sessions_total, sessions_used, status, created_at, expires_on, expired_at, sessions_expired').eq('client_id', uid).eq('status', 'paid').not('sessions_total', 'is', null).limit(capLimit());
     if (trainerId) q = q.eq('trainer_id', trainerId);
     const { data, error } = await q;
     if (error) { reportError('connect.sessionsRemaining', error); return null; }
@@ -657,6 +711,82 @@ export async function fetchClientPurchases(): Promise<{ rows: CoachPurchase[]; s
     }));
     return { rows, status: page.truncated ? 'partial' : 'ready' };
   } catch (e) { reportError('connect.fetchClientPurchases', e); return { rows: [], status: 'error' }; }
+}
+
+/**
+ * A chargeback as the coach's screen holds it (supabase/parts/611).
+ *
+ * Everything except the id and the status is nullable, and every one of those
+ * nulls is a real state rather than a gap to be filled in. `evidence_due_by` is
+ * the one that matters: Stripe states none on an inquiry and none on a case it
+ * has already decided, and a screen that printed today's date or a dash into
+ * that space would either send a coach running at nothing or make the row look
+ * incomplete. `deadlineLine` in src/lib/disputes.ts is the sentence for it.
+ */
+export interface CoachDispute {
+  id: string;
+  stripe_dispute_id: string;
+  stripe_charge_id: string | null;
+  amount_cents: number | null;
+  currency: string | null;
+  reason: string | null;
+  status: string;
+  evidence_due_by: string | null;
+  opened_at: string | null;
+  closed_at: string | null;
+  client_id: string | null;
+  purchase_id: string | null;
+  renewal_id: string | null;
+  /** null when the name could not be read, and null on the many disputes that
+   *  carry no client at all — a chargeback can arrive against a payment this
+   *  app never recorded, and that is the case with the least other warning. */
+  client_name: string | null;
+}
+
+/**
+ * Chargebacks on the signed-in coach's charges, soonest deadline first.
+ *
+ * ── Why the status matters more here than anywhere else on this screen ────
+ *
+ * Every other read on the Payments screen answers "how much". This one answers
+ * "is there something with a deadline on it", and an empty list under 'error'
+ * is an all-clear made out of our own failure — on the one question in this app
+ * where being wrongly reassured costs the whole amount. `client_disputes` is
+ * read-only to every signed-in user (no insert, update or delete policy at all)
+ * and written only by the stripe-webhook, so a row here is Stripe's statement
+ * and not anybody's claim.
+ *
+ * Ordered by `evidence_due_by` ascending, which is the order a person acts in.
+ * Nulls last: a case with no stated deadline is either an inquiry or already
+ * decided, and neither is the thing to do first.
+ */
+export async function fetchMyDisputes(): Promise<{ rows: CoachDispute[]; status: LoadStatus }> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { data, error } = await supabase.from('client_disputes')
+      .select('id, stripe_dispute_id, stripe_charge_id, amount_cents, currency, reason, status, evidence_due_by, opened_at, closed_at, client_id, purchase_id, renewal_id')
+      .eq('trainer_id', uid)
+      .order('evidence_due_by', { ascending: true, nullsFirst: false })
+      .limit(capLimit());
+    if (error) { reportError('connect.fetchMyDisputes', error); return { rows: [], status: 'error' }; }
+    const page = capped((data as Omit<CoachDispute, 'client_name'>[]) ?? []);
+
+    const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
+    const names = new Map<string, string>();
+    if (clientIds.length) {
+      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
+      // no-error-ok: a name we cannot read stays null and renders as a dash; the dispute it labels is still live and still has a deadline on it
+      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
+      (profs ?? []).forEach((pr: any) => { if (pr?.id) names.set(pr.id, (pr.full_name || '').trim()); });
+    }
+
+    const rows: CoachDispute[] = page.rows.map((r) => ({
+      ...r,
+      client_name: (r.client_id && names.get(r.client_id)) || null,
+    }));
+    return { rows, status: page.truncated ? 'partial' : 'ready' };
+  } catch (e) { reportError('connect.fetchMyDisputes', e); return { rows: [], status: 'error' }; }
 }
 
 /**

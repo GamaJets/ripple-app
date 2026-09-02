@@ -243,6 +243,21 @@ export default function Leaderboard() {
           Use the Broadcast button on Clients to celebrate the top of the board.
         </Text>
 
+        {/* The board orders on what a client SAID about one day. What the gym
+            RECORDED about them turning up is a different record, kept honestly
+            in src/lib/attendance.ts, and a coach reading a low rating is one tap
+            from the question of whether the person has actually stopped coming.
+            Deliberately a link and not a column on the row: an unticked register
+            is not an absence, so there is no attendance figure that could be
+            ranked beside these without inventing one. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+          A rating is what somebody said about a day. Whether they have actually been in is a
+          separate record, and it does not belong in this order.
+        </Text>
+        <View style={{ marginTop: sp.md }}>
+          <Ghost label="Their Attendance" onPress={() => router.push('/(trainer)/client-attendance')} />
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );

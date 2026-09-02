@@ -158,7 +158,17 @@ export const canJoin = (c: ChallengeRow, now: number = Date.now()): boolean =>
  * `myScore` is allowed to be null and survives, because "we could not compute
  * your score" is a thing the screen can say and a zero is not.
  */
-export function shapeChallenges(rows: RawChallenge[] | null | undefined): ChallengeRow[] {
+export function shapeChallenges(
+  rows: RawChallenge[] | null | undefined,
+  // Injectable so the ORDER can be asserted against a fixed instant. It read
+  // `Date.now()` internally, which made the sort untestable except by building
+  // a fixture relative to the real clock — and a fixture relative to the real
+  // clock is a test with a date in it. This one had one: challenges.test.ts
+  // pinned NOW to 31 Aug and gave a challenge two days to run, so the suite
+  // went red of its own accord on 2 Sep at noon, halting every suite after it.
+  // Nobody broke it. Time did. Same fault as `YEARS = 2019..2026`.
+  now: number = Date.now(),
+): ChallengeRow[] {
   const out: ChallengeRow[] = [];
   for (const r of rows || []) {
     const id = (r?.id || '').trim();
@@ -196,7 +206,6 @@ export function shapeChallenges(rows: RawChallenge[] | null | undefined): Challe
   // are kept on screen for a month (the server drops them after that) because
   // "did I hit it?" is asked after the thing ends, not during.
   const order: Record<Phase, number> = { open: 0, upcoming: 1, finished: 2 };
-  const now = Date.now();
   return out.sort((a, b) => {
     const pa = order[challengePhase(a, now)];
     const pb = order[challengePhase(b, now)];

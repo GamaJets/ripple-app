@@ -66,6 +66,22 @@
 //                                   invoice.payment_succeeded. One row per invoice.
 //   invoices                        the PLATFORM's, and nothing to do with a coach.
 //
+// And two writes that take money AWAY, added because under direct charges both
+// of them happen somewhere this app was never looking:
+//
+//   refunded_cents                  from `charge.refunded`. A coach on a
+//                                   standard account has a full Stripe
+//                                   dashboard with a working Refund button, and
+//                                   until this branch existed a refund made
+//                                   there reached nothing here — the sale went
+//                                   on showing the money as taken, forever.
+//   client_disputes                 from `charge.dispute.*`. The screen tells a
+//                                   coach a chargeback is theirs to answer
+//                                   while giving them no way to know one
+//                                   exists, and the evidence deadline is a
+//                                   fixed date that passes whether or not
+//                                   anybody was told. See part 611.
+//
 // Everything else here is a status. `client_subscriptions.amount_cents` in
 // particular is a PRICE — what the subscription is set to charge — and summing
 // it over a period would be inventing renewals that may never have been paid.
@@ -83,6 +99,14 @@ import { renewalIsContiguous, supersedeRow } from '../../../src/lib/termDates.ts
 // answer with. Also a leaf, for the same reason. Asserted in
 // src/lib/gymOrderPayment.test.ts.
 import { gymOrderPaymentRow, isClosedMonthRefusal } from '../../../src/lib/gymOrderPayment.ts';
+// The day a session pack's validity window closes, worked out by the same
+// arithmetic the app reads it back with. A leaf, for the same reason. Asserted
+// in src/lib/packExpiry.test.ts.
+import { expiresOn } from '../../../src/lib/packExpiry.ts';
+// What a chargeback is, as a row and as a decision. Shared with
+// app/(trainer)/payments.tsx so the screen and the server cannot disagree about
+// which cases are live. Also a leaf. Asserted in src/lib/disputes.test.ts.
+import { disputeRow, type StripeDisputeLike } from '../../../src/lib/disputes.ts';
 
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
 
@@ -256,6 +280,98 @@ Deno.serve(async (req) => {
     if (eventAccount) return eventAccount;
     const stamped = (meta?.repple_account || '').trim();
     return stamped || null;
+  };
+
+  /**
+   * The Stripe options that put a call in the right account's context.
+   *
+   * `undefined` for the platform. Written once because every lookup a
+   * `charge.*` event needs is about an object on whichever account the event
+   * arrived from, and a Stripe call made on the platform about a connected
+   * account's Checkout Session answers "No such session" — which becomes a 500
+   * and a retry loop on an event that will never succeed.
+   */
+  const acctOpts = eventAccount ? { stripeAccount: eventAccount } : undefined;
+
+  /** Which of the two money tables a charge belongs to, and the row in it. */
+  type SaleRef = {
+    table: 'client_purchases' | 'client_subscription_payments';
+    id: string;
+    trainerId: string | null;
+    clientId: string | null;
+  };
+
+  /**
+   * The sale a Stripe charge paid for, or null when this database has no record
+   * of one.
+   *
+   * ── Why null is a real answer and not a failure ─────────────────────────
+   *
+   * A client can charge back a payment whose `checkout.session.completed` was
+   * never delivered — which is exactly the hole the header of this file spends
+   * four paragraphs on. A dispute against a payment nothing here recorded is
+   * still a dispute and still has a deadline on it, so the callers below write
+   * what they have rather than dropping the event.
+   *
+   * ── The three ways back, in the order they are cheap ────────────────────
+   *
+   *   1. THE INVOICE. `charge.invoice` on a subscription charge is the
+   *      `stripe_invoice_id` that part 132 made `not null unique` on the
+   *      renewal ledger. One indexed read, no Stripe call.
+   *   2. THE PAYMENT INTENT, on `client_purchases.stripe_payment_intent`.
+   *      Stamped at checkout since part 610.
+   *   3. THE PAYMENT INTENT, through Stripe. Every sale made BEFORE part 610
+   *      has no intent recorded and never will — the column can only be filled
+   *      at the moment of checkout and those moments are gone — so the session
+   *      is asked for. This is the slow path and it is the one that keeps the
+   *      feature true for the whole back catalogue.
+   *
+   * A DATABASE read that fails is returned as `dbError` rather than as "not
+   * found", and the callers answer Stripe with a 500 for it. The two are
+   * completely different: one is a sale this app never had, the other is a sale
+   * it could not look at this second, and treating the second as the first
+   * would silently skip mirroring a refund that has already happened.
+   */
+  const saleForCharge = async (
+    invoiceId: string | null,
+    paymentIntent: string | null,
+  ): Promise<{ sale: SaleRef | null; dbError: string | null }> => {
+    if (invoiceId) {
+      const { data, error } = await service.from('client_subscription_payments')
+        .select('id, trainer_id, client_id').eq('stripe_invoice_id', invoiceId).maybeSingle();
+      if (error) return { sale: null, dbError: error.message };
+      if (data?.id) {
+        return { sale: { table: 'client_subscription_payments', id: data.id, trainerId: data.trainer_id ?? null, clientId: data.client_id ?? null }, dbError: null };
+      }
+    }
+    if (!paymentIntent) return { sale: null, dbError: null };
+
+    const { data: byPi, error: piErr } = await service.from('client_purchases')
+      .select('id, trainer_id, client_id').eq('stripe_payment_intent', paymentIntent).maybeSingle();
+    if (piErr) return { sale: null, dbError: piErr.message };
+    if (byPi?.id) {
+      return { sale: { table: 'client_purchases', id: byPi.id, trainerId: byPi.trainer_id ?? null, clientId: byPi.client_id ?? null }, dbError: null };
+    }
+
+    // The back catalogue. Thrown rather than returned by the Stripe client, so
+    // it is caught here: a listing that fails is "we could not find it", not a
+    // reason to answer Stripe with a 500 on an event about money that has
+    // already moved.
+    let sessionIds: string[] = [];
+    try {
+      const list = await stripe.checkout.sessions.list({ payment_intent: paymentIntent, limit: 5 }, acctOpts);
+      sessionIds = (list.data ?? []).map((x) => x.id).filter(Boolean);
+    } catch (e) {
+      console.warn('stripe-webhook: could not list sessions for ' + paymentIntent + ':', (e as Error).message);
+    }
+    if (!sessionIds.length) return { sale: null, dbError: null };
+
+    const { data: bySess, error: sessErr } = await service.from('client_purchases')
+      .select('id, trainer_id, client_id').in('stripe_session_id', sessionIds).limit(1);
+    if (sessErr) return { sale: null, dbError: sessErr.message };
+    const row = (bySess ?? [])[0];
+    if (!row?.id) return { sale: null, dbError: null };
+    return { sale: { table: 'client_purchases', id: row.id, trainerId: row.trainer_id ?? null, clientId: row.client_id ?? null }, dbError: null };
   };
 
   /**
@@ -793,6 +909,41 @@ Deno.serve(async (req) => {
         // mentioned by Stripe exactly once.
         const trainerId = meta.trainer_id || (await trainerOfAccount(eventAccount)) || null;
 
+        // The PaymentIntent this sale was charged on. It is what `charge.*`
+        // events carry and what `client_purchases.stripe_payment_intent` (part
+        // 610) is for: without it, a refund or a dispute arriving months later
+        // can only find this sale by asking Stripe to list every Checkout
+        // Session against the intent, which is a round trip on the hot path of
+        // a money event and fails outright for a session Stripe has aged out.
+        const pi = typeof sess.payment_intent === 'string'
+          ? sess.payment_intent
+          : (sess.payment_intent?.id ?? null);
+
+        // ── how long the credits last ────────────────────────────────────
+        //
+        // Read from the package NOW and written on to the sale, because the
+        // window belongs to the sale and not to the package (part 612). A pack
+        // is the only thing that can carry one — `validity_days` on a
+        // membership is refused by a check constraint — so this asks only when
+        // the checkout granted sessions.
+        //
+        // A read that fails leaves the pack with no window. That is the right
+        // direction for the one error available here: a pack that should have
+        // expired and does not is a conversation, and a pack that expires
+        // because a lookup failed is somebody's paid-for sessions taken away by
+        // a network blip. Logged rather than swallowed, because it means a
+        // coach's stated validity silently did not apply to that sale.
+        let packExpiresOn: string | null = null;
+        if (!isNaN(sessions as number) && sessions != null) {
+          const { data: pkg, error: pkgErr } = await service.from('trainer_packages')
+            .select('validity_days').eq('id', meta.package_id).maybeSingle();
+          if (pkgErr) {
+            console.error('stripe-webhook: could not read validity_days for package ' + meta.package_id + ', so session ' + sess.id + ' was recorded with no expiry:', pkgErr.message);
+          } else {
+            packExpiresOn = expiresOn(eventAt, pkg?.validity_days ?? null);
+          }
+        }
+
         // ── the prediction, checked ──────────────────────────────────────
         //
         // A discount code on a one-off is the one place this app computes a
@@ -860,7 +1011,22 @@ Deno.serve(async (req) => {
           // counts those out of the total and says how many are missing, which
           // is the honest handling of a hole rather than a reason to fill it in.
           currency: sess.currency ?? null,
+          // The PaymentIntent, so a refund or a dispute arriving later can find
+          // this sale without asking Stripe to list sessions (part 610). It is
+          // the object those events carry; the Checkout Session is not.
+          ...(pi ? { stripe_payment_intent: pi } : {}),
           sessions_total: isNaN(sessions as number) ? null : sessions,
+          // The day the credits on this pack stop being usable, or null for a
+          // pack that does not expire — which is every pack whose coach set no
+          // validity, and every pack sold before part 612.
+          //
+          // Computed ONCE, here, and never again. That is the whole safety
+          // property of the feature: if a screen recomputed it from
+          // `trainer_packages.validity_days` at render time, a coach adding a
+          // ninety-day window to a package they had been selling for two years
+          // would void every unspent credit every one of those clients was
+          // holding, at the instant they pressed Save. See src/lib/packExpiry.ts.
+          ...(packExpiresOn ? { expires_on: packExpiresOn } : {}),
           status: 'paid',
           // NULL when nothing was predicted, 0 when the prediction was right,
           // and the signed difference otherwise. See part 311 — the three are
@@ -868,6 +1034,140 @@ Deno.serve(async (req) => {
           fee_variance_cents: variance,
         }, { onConflict: 'stripe_session_id' });
         if (error) return fail('client_purchases', error.message);
+      }
+    } else if (event.type === 'charge.refunded') {
+      // ── MONEY GOING BACK, FROM WHEREVER IT WAS SENT BACK ────────────────
+      //
+      // supabase/functions/connect-refund makes a refund and mirrors it itself.
+      // This branch is for every OTHER way one happens, and under direct
+      // charges that is the ordinary way: the coach is the merchant of record,
+      // their Stripe dashboard is the full one, and the Refund button in it
+      // works with no involvement from this app at all. Before this, a refund
+      // made there reached nothing here — the sale went on showing the money as
+      // taken, the coach's takings figure overstated them permanently, and the
+      // client showed as having paid for a pack they had been given the money
+      // back for.
+      //
+      // `amount_refunded` is Stripe's RUNNING TOTAL across every refund on the
+      // charge, which is exactly what part 192's column holds — so this is a
+      // plain assignment and never an addition. That also makes it idempotent
+      // and makes it correct in the one case connect-refund's arithmetic is
+      // not: two refunds racing, where each side adds its own amount to a total
+      // it read a moment earlier.
+      const charge = event.data.object as Stripe.Charge;
+      const refunded = typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0;
+      const chargePi = typeof charge.payment_intent === 'string' ? charge.payment_intent : (charge.payment_intent?.id ?? null);
+      const chargeInv = typeof charge.invoice === 'string' ? charge.invoice : (charge.invoice?.id ?? null);
+
+      if (refunded > 0) {
+        const { sale, dbError } = await saleForCharge(chargeInv, chargePi);
+        if (dbError) return fail('refund lookup', dbError);
+        if (!sale) {
+          // Money has gone back on a charge this database has no sale for.
+          // Retrying cannot conjure the row, so the event is accepted and the
+          // fact is logged as loudly as a log can be — Stripe is the surviving
+          // record and somebody has to reconcile it by hand.
+          console.error('stripe-webhook: REFUND WITH NO SALE TO MIRROR IT ON. Charge ' + charge.id + ', intent ' + (chargePi ?? 'none') + ', invoice ' + (chargeInv ?? 'none') + ', account ' + (eventAccount ?? 'platform') + '. The coach\'s takings figure still counts this money.');
+        } else {
+          const { error: refErr } = await service.from(sale.table).update({
+            refunded_cents: refunded,
+            // Stripe's own instant for the event, not now(): a delivery retried
+            // three days late must not move a refund into a different month.
+            refunded_at: eventAt,
+          }).eq('id', sale.id);
+          // 23514 is the CHECK in part 192 — `refunded_cents <= amount_cents`.
+          // It should be unreachable, because Stripe refuses to refund more than
+          // was charged; if it fires, this app's `amount_cents` disagrees with
+          // the charge, and answering with a 500 would put Stripe into a retry
+          // loop on an event that is refused identically every time. Logged and
+          // accepted instead, which leaves the sale visibly wrong rather than
+          // invisibly retried.
+          if (refErr && String(refErr.code ?? '') === '23514') {
+            console.error('stripe-webhook: refund of ' + refunded + ' on ' + sale.table + ' ' + sale.id + ' was refused by the amount check — this app has a smaller amount recorded than Stripe refunded. Charge ' + charge.id + '. Reconcile by hand.');
+          } else if (refErr) {
+            return fail(sale.table + ' refund', refErr.message);
+          }
+        }
+      }
+    } else if (event.type.startsWith('charge.dispute.')) {
+      // ── A CHARGEBACK, WHICH HAS A DEADLINE ON IT ────────────────────────
+      //
+      // app/(trainer)/payments.tsx tells a coach on a standard account that a
+      // dispute is theirs to answer, and until this branch existed that was the
+      // whole of what this app did about one: it told them the job was theirs
+      // while giving them no way to know a case existed. The money is taken
+      // back the moment a dispute opens, Stripe stops accepting evidence on a
+      // fixed date, and an empty response loses by default.
+      //
+      // See src/lib/disputes.ts for the shape and supabase/parts/611 for the
+      // table and the notification. The row is built by `disputeRow` rather
+      // than assembled here so the screen and the server cannot disagree about
+      // which cases are live.
+      const d = event.data.object as Stripe.Dispute;
+      const dPi = typeof d.payment_intent === 'string' ? d.payment_intent : (d.payment_intent?.id ?? null);
+      const dCharge = typeof d.charge === 'string' ? d.charge : (d.charge?.id ?? null);
+
+      // Who this is about. The sale carries the coach and the client; a dispute
+      // against a payment this app never recorded falls back to the account,
+      // which under direct charges resolves to the coach who owns it. Both can
+      // come back null, and the row is written anyway — a chargeback nobody can
+      // be told about is still one somebody has to find.
+      const { sale, dbError } = await saleForCharge(null, dPi);
+      if (dbError) return fail('dispute lookup', dbError);
+      const disputeTrainer = sale?.trainerId ?? (await trainerOfAccount(eventAccount)) ?? null;
+
+      const mirror = disputeRow(
+        {
+          id: d.id,
+          charge: dCharge,
+          paymentIntent: dPi,
+          amount: typeof d.amount === 'number' ? d.amount : null,
+          currency: d.currency ?? null,
+          reason: d.reason ?? null,
+          status: d.status ?? null,
+          evidenceDueBy: d.evidence_details?.due_by ?? null,
+          created: d.created ?? null,
+        } as StripeDisputeLike,
+        {
+          trainerId: disputeTrainer,
+          clientId: sale?.clientId ?? null,
+          purchaseId: sale?.table === 'client_purchases' ? sale.id : null,
+          renewalId: sale?.table === 'client_subscription_payments' ? sale.id : null,
+          stripeAccountId: eventAccount,
+        },
+        eventAt,
+      );
+
+      if (!mirror) {
+        // The only way here is an event with no dispute id, which Stripe does
+        // not send. Accepted rather than retried, and logged so that a Stripe
+        // API change producing it is visible rather than silent.
+        console.error('stripe-webhook: a ' + event.type + ' arrived with no dispute id. Nothing was recorded.');
+      } else {
+        // Insert-if-absent then guarded update, the same shape `writeConnectSub`
+        // uses and for the same reason: webhooks are not ordered, and an
+        // `updated` from 10:00:00 delivered after the `closed` from 10:00:01
+        // would reopen a case the coach has already been told the result of —
+        // and they would go and prepare evidence for it.
+        //
+        // The split also drives the notification. Part 611's triggers fire on
+        // the INSERT and on the update that first sets `closed_at`, so the coach
+        // is told once when a case opens and once when it is decided, and never
+        // for the status changes in between.
+        const { error: insErr } = await service.from('client_disputes')
+          .upsert(mirror, { onConflict: 'stripe_dispute_id', ignoreDuplicates: true });
+        if (insErr) return fail('client_disputes', insErr.message);
+
+        // Two plain filters rather than one `.or(...)`: an ISO timestamp inside
+        // PostgREST's or() grammar is a value full of the punctuation that
+        // grammar parses on, and a filter that silently fails to apply here is a
+        // filter that lets a stale event overwrite a live case.
+        const { error: updErr } = await service.from('client_disputes').update(mirror)
+          .eq('stripe_dispute_id', mirror.stripe_dispute_id).lte('stripe_event_at', eventAt);
+        if (updErr) return fail('client_disputes', updErr.message);
+        const { error: nullErr } = await service.from('client_disputes').update(mirror)
+          .eq('stripe_dispute_id', mirror.stripe_dispute_id).is('stripe_event_at', null);
+        if (nullErr) return fail('client_disputes', nullErr.message);
       }
     } else if (event.type.startsWith('invoice.')) {
       const inv = event.data.object as Stripe.Invoice;
@@ -1065,6 +1365,24 @@ Deno.serve(async (req) => {
 //     invoice.marked_uncollectible
 //     payout.paid
 //     payout.failed
+//     charge.refunded
+//     charge.dispute.created
+//     charge.dispute.updated
+//     charge.dispute.closed
+//
+// The last four are new and the last three are the ones with a clock on them.
+// `charge.refunded` is how a refund the coach made in their own dashboard
+// reaches this app at all — under direct charges that is the ordinary way to
+// make one, and without the subscription the sale goes on showing the money as
+// taken forever. The three `charge.dispute.*` events are how a coach learns a
+// chargeback exists: Stripe stops accepting evidence on a fixed date, an empty
+// response loses by default, and the date passes whether or not anybody was
+// told. A destination not subscribed to those is a coach losing disputes they
+// never heard about.
+//
+// All four also belong on the PLATFORM destination, because destination-charge
+// coaches — every account onboarded before part 161 — still produce their
+// refunds and their disputes there.
 //
 // A GYM's own account (part 280) is a connected account like any other and its
 // events arrive on the same connected destination. Nothing extra has to be

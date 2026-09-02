@@ -203,6 +203,25 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // the trophy is literally what happened, and the bell means "we do not know
   // what this is".
   ['/(trainer)/client-goals', 'trophy'],
+  // ── and the screen part 613 sends a coach to ─────────────────────────────
+  //
+  // Invoices is 'grid' in TRAINER_NAV (src/lib/features.ts), which is the same
+  // shape this list already gives Payments & Packages — and that is right
+  // rather than a collision: both notifications are about money owed, and a
+  // coach who has learned that shape from the nav should not have to read the
+  // row to know what kind of thing it is.
+  ['/(trainer)/invoices', 'grid'],
+  // ── and the screen part 614 sends a coach to ─────────────────────────────
+  //
+  // Progress Photos is 'camera' on the client's own page (app/(trainer)/client.tsx)
+  // and `InboxIcon` has no 'camera' — it is a deliberately short list, and
+  // widening it for one row would put a shape in coach inboxes that appears
+  // nowhere else. 'heart' is the shape this table already gives the one other
+  // screen that is about a member's body ('/(client)/injuries'), and it appears
+  // nowhere in a COACH's inbox otherwise, so it cannot be confused with
+  // anything. The bell would say "we have no idea what this is" over a
+  // notification about the most exposed thing a client does in this product.
+  ['/(trainer)/client-photos', 'heart'],
 ];
 
 const startsWithAny = (route: string, prefixes: readonly string[]): boolean =>
@@ -604,6 +623,74 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
     // than about a client, and the only one whose consequence is outside the
     // app: lapsed public liability means somebody is working uninsured.
     to: 'trainer', title: 'Your insurance runs out soon', route: '/(trainer)/credentials', icon: 'trophy',
+  },
+  // ── the chargeback and its deadline (part 611) ─────────────────────────
+  //
+  // The only row in this table with a DEADLINE in it, and the reason the date
+  // is in the title rather than in the body: Stripe stops accepting evidence on
+  // a fixed day, an empty response loses by default, and the title is the line
+  // that renders on a lock screen. app/(trainer)/payments.tsx has told coaches
+  // for months that a dispute is theirs to answer while giving them no way to
+  // know one existed.
+  //
+  // No amount and no currency, which is part 163's rule: `minorMoney` in
+  // src/lib/coachMoney.ts is the one money formatter in this codebase and it is
+  // not reachable from plpgsql. No client name either — `client_id` is
+  // frequently null on a dispute, because a chargeback can arrive against a
+  // payment this app never recorded.
+  {
+    where: 'supabase/parts/611 · client_dispute_notify',
+    when: 'a chargeback opens on one of the coach’s charges — charge.dispute.created',
+    to: 'trainer', title: 'A chargeback — evidence due by 14 Sep 2026', route: '/(trainer)/payments', icon: 'grid',
+  },
+  {
+    where: 'supabase/parts/611 · client_dispute_notify',
+    when: 'the bank decides it — the update that first sets closed_at',
+    to: 'trainer', title: 'A chargeback was decided in your favour', route: '/(trainer)/payments', icon: 'grid',
+  },
+  // ── the pack that ran out of time (part 612) ───────────────────────
+  //
+  // The counterpart of part 163's two rows, which are about a pack being USED
+  // up. This one is about a pack running out of TIME with sessions still on it
+  // — somebody paid for six they did not take — and it is sent only when
+  // credits were actually lost. A window closing on an empty pack is not news:
+  // part 163 already said so on the day the last session went.
+  {
+    where: 'supabase/parts/612 · run_pack_expiry',
+    when: 'a session pack’s validity window closes with sessions still on it',
+    to: 'trainer', title: 'A session pack has run out of time', route: '/(trainer)/payments', icon: 'grid',
+  },
+  // ── the invoice that aged (part 613) ───────────────────────────
+  //
+  // Part 188 collected the due date and built the chase, and every bit of it
+  // ran only when somebody opened the Invoices screen — which a self-employed
+  // coach does at the end of a quarter, not on the day something falls due. One
+  // message per invoice per band of `ageBucket()`, so four in the life of an
+  // invoice rather than one a night.
+  {
+    where: 'supabase/parts/613 · run_invoice_ageing_notices',
+    when: 'a requested invoice crosses into a new ageing band — 1-7, 8-30, 31-60, 61+',
+    to: 'trainer', title: 'An invoice has gone past its date', route: '/(trainer)/invoices', icon: 'grid',
+  },
+  // ── the photo a client sent (part 614) ─────────────────────────
+  //
+  // There is no cross-client read of shared photos at either layer, by design
+  // (part 47), so a coach could only discover one by opening a named client and
+  // looking. The route therefore CARRIES the client id, as the chat thread and
+  // the intake do: without it this opens a picker instead of the person it is
+  // about.
+  //
+  // The body is the narrowest in this table and deliberately so. A push renders
+  // on a LOCK SCREEN, read by whoever is standing near the coach's phone, and
+  // this is the most exposed thing a client does in the product. No image, no
+  // thumbnail, no storage path, no photo id, no date the photo was taken, no
+  // count, and nothing about the body — part 45 closed coach access to progress
+  // photos for a reason that applies to a lock screen most of all.
+  {
+    where: 'supabase/parts/614 · progress_photo_share_notify',
+    when: 'a client shares a progress photo with their coach — an insert on progress_photo_shares',
+    to: 'trainer', title: 'A client has sent you a progress photo',
+    route: '/(trainer)/client-photos?clientId=00000000-0000-0000-0000-000000000000', icon: 'heart',
   },
 ];
 

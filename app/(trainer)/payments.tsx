@@ -108,6 +108,38 @@
 // charged NEXT if nobody cancels — a forward-looking figure, which is why it is
 // not added to a backward-looking one.
 //
+// ── A chargeback, which this screen used to mention and never show ────────
+//
+// The Payouts note below says, out loud, that on a standard account "a dispute
+// is theirs to answer". That was true and it was the whole of what this app did
+// about one: it told a coach the job was theirs while giving them no way to
+// know a case existed. There was no `charge.dispute.*` handler in the webhook
+// and no table for it to write to.
+//
+// Every other figure on this screen answers "how much". A chargeback answers
+// "is there something with a deadline", and it is different in kind: Stripe
+// takes the money back the moment a dispute opens, stops accepting evidence on
+// a fixed day, and decides on whatever arrived — where nothing is the commonest
+// submission and loses by default. So the Chargebacks section sits ABOVE the
+// packs and the packages, the DATE is the first line of every row, and a read
+// that failed says so rather than showing an empty list. src/lib/disputes.ts
+// holds the rules and supabase/parts/611 the table.
+//
+// ── A pack that runs out of time ──────────────────────────────────────────
+//
+// Packages can now carry a validity (part 612) and it is offered on a session
+// pack alone — a membership has no credits to run out of. The one thing about
+// it a coach has to understand is on the form beside the field: a window
+// applies to packs bought FROM NOW ON, because it is stamped on the sale at
+// checkout and never recomputed. Anything else would mean a coach adding
+// ninety days to a package they have sold for two years voided every unspent
+// credit their existing clients hold, at the instant they pressed Save.
+//
+// And a pack that ran out of time with sessions on it is listed as exactly
+// that, with the number, beside the packs that were genuinely used up. Those
+// two are the same two numbers by the time the nightly pass has been over them
+// and they are opposite sentences about somebody's money.
+//
 // ── Stopping a subscription, which a coach can now actually do ────────────
 //
 // This screen used to say, out loud, that stopping a subscription was the
@@ -205,7 +237,21 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
-import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, fetchMyPromoCodes, createPromoCode, archivePromoCode, type ConnectStatus, type TrainerPackage, type CoachPurchase } from '../../src/lib/connect';
+import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
+// A chargeback is the one thing on this screen with a clock on it. See
+// src/lib/disputes.ts: the deadline is the content, a missing deadline is its
+// own sentence, and none of it is a judgement about whether to fight the case.
+import {
+  deadlineLine, disputeTone, disputeStatusLabel, disputeReasonLabel, isClosed, needsResponse,
+  DISPUTE_MONEY_IS_ALREADY_GONE, EVIDENCE_GOES_TO_STRIPE, WHAT_EVIDENCE_LOOKS_LIKE,
+} from '../../src/lib/disputes';
+// How long a pack is good for, and what to say on the day it is not. The rule
+// that matters is that a window belongs to the SALE — see the header of
+// src/lib/packExpiry.ts and supabase/parts/612.
+import {
+  readValidityDays, validityLine, expiryLine, strandedNote, expiryDayLabel, packWindow,
+  VALIDITY_NOT_RETROACTIVE, NO_VALIDITY_IS_FOREVER, EXPIRY_IS_NOT_A_REFUND,
+} from '../../src/lib/packExpiry';
 import { packageEditBlocker, isReprice, repriceNote } from '../../src/lib/packageEdit';
 import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, endSubscriptionNow, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import {
@@ -344,6 +390,10 @@ export default function TrainerPayments() {
   const [price, setPrice] = useState('');
   const [sessions, setSessions] = useState('');
   const [interval, setInterval] = useState<BillingInterval | null>(null);
+  // How long a pack is good for, as the coach typed it. Empty is not zero and
+  // not a default — it is a pack that does not expire, which is what every pack
+  // in this database does today.
+  const [validity, setValidity] = useState('');
   // The gym's own currency, and no fallback. Repple is white-labelled: null
   // here means the gym has not set one, and a price is not offered until it
   // has — a package priced in a currency nobody chose is a wrong number in
@@ -403,16 +453,24 @@ export default function TrainerPayments() {
   // with nothing on screen to say it was short.
   const [pays, setPays] = useState<SubscriptionPayment[]>([]);
   const [paysStatus, setPaysStatus] = useState<LoadStatus>('loading');
+  // Chargebacks. Carried with its own status for the same reason as the two
+  // above, and it matters more here than anywhere else on the screen: an empty
+  // list under 'error' would be an all-clear made out of our own failure, on
+  // the one question in this app where being wrongly reassured costs the whole
+  // amount and a fixed deadline goes past while nobody is told.
+  const [disputes, setDisputes] = useState<CoachDispute[]>([]);
+  const [disputesStatus, setDisputesStatus] = useState<LoadStatus>('loading');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [c, p, s, cur, b, r, pr] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), myTenantCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes()]);
+    const [c, p, s, cur, b, r, pr, dp] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), myTenantCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes(), fetchMyDisputes()]);
     setConn(c); setPkgs(p); setPkgErr(p === null);
     setSubs(s.rows); setSubsStatus(s.status);
     setCurrency(cur.currency); setCurrencyErr(cur.error);
     setBuys(b.rows); setBuysStatus(b.status);
     setPays(r.rows); setPaysStatus(r.status);
     setPromos(pr);
+    setDisputes(dp.rows); setDisputesStatus(dp.status);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -464,13 +522,19 @@ export default function TrainerPayments() {
     // it back in the currency it will actually be charged in. A subscription
     // priced by accident in the wrong currency is not one wrong sale, it is a
     // wrong sale every month to everybody who ever buys it.
+    // How long the credits last. Refused rather than coerced: an empty box is a
+    // pack that does not expire, and anything else has to be a whole number of
+    // days the coach actually meant. `readValidityDays` is the one place that
+    // reading happens, and it is asserted in src/lib/packExpiry.test.ts.
+    const typedValidity = readValidityDays(interval || !(sess && sess > 0) ? '' : validity);
+    if (!typedValidity.ok) { Alert.alert('How long is it good for?', typedValidity.reason); return; }
     const confirmLine = `${pkgPriceLine(cents, currency, interval) ?? fig(null)} — ${nm}`;
     const go = async () => {
       setBusy(true);
-      const r = await createPackage({ name: nm, price_cents: cents, sessions: sess && sess > 0 ? sess : null, currency, billing_interval: interval });
+      const r = await createPackage({ name: nm, price_cents: cents, sessions: sess && sess > 0 ? sess : null, currency, billing_interval: interval, validity_days: typedValidity.days });
       setBusy(false);
       if (!r.ok) { Alert.alert('Could not save', r.error || 'Try again.'); return; }
-      setName(''); setPrice(''); setSessions(''); setInterval(null); load();
+      setName(''); setPrice(''); setSessions(''); setInterval(null); setValidity(''); load();
     };
     if (!interval) { go(); return; }
     Alert.alert('Charge this every ' + (interval === 'month' ? 'month' : 'year') + '?',
@@ -983,7 +1047,27 @@ export default function TrainerPayments() {
   // The packs a coach has to know about: sold, and how much of each is left.
   // Listable under 'partial' (the rows are real); not countable.
   const packs = buys.filter((b) => b.sessions_total != null);
-  const runOut = packs.filter(packRunOut);
+  // Used up and RAN OUT OF TIME are the same two numbers by the time part 612's
+  // nightly pass has been over a pack — it reduces `sessions_total` to
+  // `sessions_used` so that every draw site in the database stops at it — and
+  // they are opposite sentences about somebody's money. `expired_at` is what
+  // tells them apart, and it is the fact rather than a date comparison run
+  // here: until that pass has written it the credits are genuinely spendable.
+  // Fixed for the render. Every expiry sentence below is about a day rather
+  // than an instant, and a bound recomputed per row would let two lines on the
+  // same screen disagree about what today is across a midnight.
+  const todayKey = isoToday(new Date());
+  // Cases that are still open, which is what the count beside the heading is
+  // about. A closed one stays in the list — a coach looking for the money that
+  // went missing last month has to be able to find it — but it is not a thing
+  // to do, and counting it as one would put a permanent number on a heading
+  // nobody can clear.
+  const liveDisputes = disputes.filter((d) => !isClosed(d.status, d.closed_at));
+  const expiredPacks = packs.filter((b) => !!b.expired_at);
+  // Sessions somebody paid for and can no longer book. Not a total to be netted
+  // off anything — it is a list of conversations.
+  const stranded = expiredPacks.reduce((a, b) => a + Math.max(0, Number(b.sessions_expired ?? 0)), 0);
+  const runOut = packs.filter((b) => !b.expired_at && packRunOut(b));
   // Used-up packs first. They are the only rows on this screen a coach has to
   // DO something about — the next session that client books is not covered by
   // anything they have paid for — and a coach with thirty packs sold was being
@@ -1241,6 +1325,85 @@ export default function TrainerPayments() {
 
             <Rule />
 
+            {/* ── chargebacks, and the date on each one ───────────────────
+                Placed HERE, above the packs and the packages, because it is
+                the only thing on this screen with a clock on it. Everything
+                below answers "how much"; this answers "is there something with
+                a deadline", and a case a coach scrolls past is a case decided
+                without them.
+
+                The screen has told coaches on a standard account for months
+                that a dispute is theirs to answer. Until part 611 it gave them
+                no way to know one existed. */}
+            <Section>
+              <SectionHead title="Chargebacks" note={disputesStatus === 'ready' && liveDisputes.length ? String(liveDisputes.length) : undefined} />
+              {disputesStatus === 'error' ? (
+                // Never an empty list under 'error'. This is the one read on
+                // the screen where being wrongly reassured costs the whole
+                // amount plus a fee, and the deadline goes past regardless.
+                <Flag tone={t.crit}>
+                  We could not read whether you have any chargebacks, so this is not a statement
+                  that you have none. Your Stripe dashboard is the record — check it if a payment
+                  has gone missing.
+                </Flag>
+              ) : disputesStatus === 'partial' ? (
+                <PartialRead what="chargebacks" shown={disputes.length} onPress={load} />
+              ) : disputes.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  No chargebacks. If a client ever disputes a payment with their bank, it appears
+                  here with the date Stripe stops accepting evidence.
+                </Text>
+              ) : null}
+
+              {(disputesStatus === 'error' ? [] : disputes).map((d, i) => {
+                const over = isClosed(d.status, d.closed_at);
+                const tone = disputeTone({ evidenceDueBy: d.evidence_due_by, status: d.status, closedAt: d.closed_at });
+                const due = deadlineLine(
+                  { evidenceDueBy: d.evidence_due_by, status: d.status, closedAt: d.closed_at },
+                  d.evidence_due_by ? expiryDayLabel(String(d.evidence_due_by).slice(0, 10)) : null,
+                );
+                return (
+                  <View key={d.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                    {/* THE DATE FIRST, above the name and above the money.
+                        Everything else about a chargeback can wait until the
+                        coach has read the deadline; the deadline cannot. */}
+                    {due ? (
+                      <Text style={{ ...ty.body, fontWeight: '500', color: tone === 'urgent' ? t.ink : t.ink2 }}>{due}</Text>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: due ? 4 : 0 }}>
+                      {/* A name we could not read is a dash, and so is a
+                          dispute that carries no client at all — which happens
+                          whenever the charge it is against was never recorded
+                          here. That is a real state, and it is the case with
+                          the least other warning attached to it. */}
+                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, flex: 1 }}>{fig(d.client_name)}</Text>
+                      {/* Dashed rather than dollared when Stripe stated no
+                          currency. There is no default currency in this
+                          product and this screen invents nothing. */}
+                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(d.amount_cents, d.currency))}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: over ? t.ink3 : tone === 'urgent' ? t.crit : t.warn }} />
+                      <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
+                        {disputeStatusLabel(d.status)}
+                        {disputeReasonLabel(d.reason) ? ' · ' + disputeReasonLabel(d.reason) : ''}
+                      </Text>
+                    </View>
+                    {needsResponse(d.status) ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{WHAT_EVIDENCE_LOOKS_LIKE}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+
+              {disputesStatus !== 'error' && disputes.length ? (<>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{DISPUTE_MONEY_IS_ALREADY_GONE}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{EVIDENCE_GOES_TO_STRIPE}</Text>
+              </>) : null}
+            </Section>
+
+            <Rule />
+
             {/* ── session packs sold, and what is left on them ───────────── */}
             <Section>
               {/* Counted only under 'ready'. Under 'partial' the packs shown
@@ -1269,9 +1432,32 @@ export default function TrainerPayments() {
                   </Flag>
                 </View>
               ) : null}
+              {/* A separate flag from the one above, and separate on purpose:
+                  a client who used everything they bought got what they paid
+                  for, and a client whose pack ran out with four sessions on it
+                  did not. Only the second is a conversation somebody has to
+                  start, and folding the two into one count would hide it inside
+                  a number that reads as ordinary business. */}
+              {buysStatus !== 'error' && stranded > 0 ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Flag tone={t.warn}>
+                    {stranded === 1
+                      ? 'One session somebody paid for ran out of time before it was used. It is marked below.'
+                      : stranded + ' sessions your clients paid for ran out of time before they were used. They are marked below.'}
+                  </Flag>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{EXPIRY_IS_NOT_A_REFUND}</Text>
+                </View>
+              ) : null}
               {(buysStatus === 'error' ? [] : packsShown).map((b, i) => {
                 const left = packLeft(b);
-                const out = packRunOut(b);
+                const gone = !!b.expired_at;
+                const lost = Math.max(0, Number(b.sessions_expired ?? 0));
+                // What they BOUGHT. `sessions_total` has already had the
+                // stranded credits taken off it by the time an expired pack is
+                // read back, so printing it raw would relabel a ten-pack as a
+                // six-pack on the coach's own screen.
+                const sold = Number(b.sessions_total ?? 0) + lost;
+                const out = !gone && packRunOut(b);
                 const target = purchaseTarget(b);
                 return (
                   <View key={b.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -1284,7 +1470,7 @@ export default function TrainerPayments() {
                       <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>{fig(minorMoney(b.amount_cents, b.currency))}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: out ? t.warn : t.brand }} />
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: out || (gone && lost > 0) ? t.warn : t.brand }} />
                       {/* "Used up" rather than "0 of 10 left". Both are true;
                           only one of them reads as a thing to act on, and a
                           zero in a row of numbers is easy to scan past. `left`
@@ -1294,8 +1480,22 @@ export default function TrainerPayments() {
                       {/* The dot above is the mark and always was; the ink no
                           longer doubles it. warn as caption text is 3.87–4.08:1
                           on the three light palettes, under AA. */}
-                      <Text style={{ ...ty.caption, color: out ? t.ink2 : t.ink3, flex: 1 }}>
-                        {out ? `Used up — all ${fig(b.sessions_total)} sessions` : `${fig(left)} of ${fig(b.sessions_total)} left`}
+                      {/* "Used up" rather than "0 of 10 left", and "ran out of
+                          time" rather than either — three states, three
+                          sentences. A pack that expired with credits on it says
+                          how many, because that number is the whole of what the
+                          coach has to talk to somebody about. */}
+                      <Text style={{ ...ty.caption, color: out || (gone && lost > 0) ? t.ink2 : t.ink3, flex: 1 }}>
+                        {gone
+                          // `lost` and `sold` are plain numbers rather than
+                          // `fig()` calls: both are arithmetic over a row this
+                          // list has already filtered to `sessions_total != null`,
+                          // so neither can be absent, and a dash producer in a
+                          // sentence is a hole where a word should be (check:prose).
+                          ? (lost > 0
+                            ? `Ran out of time — ${lost} of ${sold} unused`
+                            : `Ran out of time — all ${sold} had been used`)
+                          : out ? `Used up — all ${fig(sold)} sessions` : `${fig(left)} of ${fig(sold)} left`}
                         {b.package_name ? ' · ' + b.package_name : ''}
                         {' · '}{new Date(b.created_at).toLocaleDateString()}
                       </Text>
@@ -1308,6 +1508,22 @@ export default function TrainerPayments() {
                         screen come to disagree. A refunded sale is still a
                         sale that happened, and it is marked rather than
                         rewritten or removed. */}
+                    {/* The conversation, in the coach's direction. `expiryLine`
+                        is the client's version of the same fact and says what
+                        happened to their money; this one is about a decision
+                        that is the coach's to make. Both are null for a pack
+                        with no window, which is every pack sold before part
+                        612 — so nothing is added to the ninety-nine per cent of
+                        rows this does not concern. */}
+                    {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, todayKey) ? (
+                      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>
+                        {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, todayKey)}
+                      </Text>
+                    ) : expiryLine({ expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, left, todayKey) ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                        {expiryLine({ expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, left, todayKey)}
+                      </Text>
+                    ) : null}
                     {refundedLine(target) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refundedLine(target)}</Text>
                     ) : null}
@@ -1778,6 +1994,29 @@ export default function TrainerPayments() {
                   </View>
                 )}
               </View>
+
+              {/* ── how long the sessions last ─────────────────────────────
+                  Offered only on a PACK. A membership has no credits to run out
+                  of — it is stopped by cancelling it — and part 612 refuses the
+                  combination in the database, so the field is not shown rather
+                  than shown and rejected.
+
+                  Empty is the default and empty means forever, which is what
+                  every pack in this product has done until now. The sentence
+                  under the box is there because the alternative to saying it is
+                  a coach discovering, a year later, that adding a window here
+                  did or did not reach the ten-packs their clients are already
+                  holding. It did not, and that is the whole design. */}
+              {!interval && sessions.trim() && parseInt(sessions, 10) > 0 ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Valid for (days — blank = never expires)</Text>
+                  <TextInput value={validity} onChangeText={setValidity} keyboardType="number-pad" placeholder="90" placeholderTextColor={t.ink3} style={input} />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5 }}>
+                    {validityLine(readValidityDays(validity).ok ? (readValidityDays(validity) as { ok: true; days: number | null }).days : null) ?? NO_VALIDITY_IS_FOREVER}
+                  </Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5 }}>{VALIDITY_NOT_RETROACTIVE}</Text>
+                </View>
+              ) : null}
 
               {/* Read back exactly what will be charged, in the unit it will be
                   charged in — or nothing at all. A preview that says "AED" on a

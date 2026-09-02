@@ -62,6 +62,9 @@ export default function TrainerLayout() {
       <Tabs.Screen name="analytics" options={{ title: 'Analytics', tabBarIcon: ({ color }) => <Icon name="chart" size={23} color={color} /> }} />
             <Tabs.Screen name="sessions" options={{ href: null, title: 'Mark Sessions' }} />
 <Tabs.Screen name="leaderboard" options={{ href: null, title: 'Leaderboard' }} />
+      <Tabs.Screen name="client-attendance" options={{ href: null, title: 'Their Attendance' }} />
+      <Tabs.Screen name="my-register" options={{ href: null, title: 'Your Register' }} />
+      <Tabs.Screen name="referrals" options={{ href: null, title: 'Who Brings You Clients' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
       <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a Session' }} />

@@ -7,6 +7,25 @@
 // could be opened was a strip inside the client sheet on the dashboard. This is
 // the screen for actually looking at them.
 //
+// ── AND HOW A COACH KNOWS TO OPEN IT ───────────────────────────────────────
+//
+// They are told. `progress_photo_share_notify` (supabase/parts/614) sends the
+// coach a notification when a client shares one, and it opens this screen with
+// that client's id on it — which is the only discovery mechanism there can be,
+// because the paragraph below is true: there is no cross-client read at either
+// layer, so nothing can list "photos my clients have sent me" and nothing
+// should be able to.
+//
+// That notification says two things and nothing else: a photo exists, and who
+// from. NO image, no thumbnail, no storage path, no photo id, no date it was
+// taken, no count and nothing about the body — a push renders on a LOCK SCREEN,
+// read by whoever is standing near the coach's phone, and everything part 45
+// says about why coach access was closed in the first place applies there most
+// of all. It is also outside anything a revocation can reach: a thumbnail
+// handed to a notification service outlives the five-minute signature this
+// whole feature is built on. The notification is a knock on the door; the
+// photograph is on the other side of it, here.
+//
 // ── WHAT A COACH CAN SEE HERE, AND WHY IT IS SO LITTLE ─────────────────────
 //
 // Exactly the photos this client sent to this coach, one at a time, and nothing

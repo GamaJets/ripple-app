@@ -40945,3 +40945,1265 @@ comment on table public.notify_quiet_hours_rollout is
 -- read of this table SENDS. A database fault must not be able to swallow the
 -- notification that somebody's payment failed, and there would be nothing
 -- anywhere to discover that from.
+
+-- ▶ a-refund-the-coach-made-somewhere-else.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A refund the coach made in their own Stripe dashboard.
+--
+-- Part 192 added `refunded_cents` / `refunded_at` to both money tables and
+-- wrote, in the column comments, that they are "written only by
+-- supabase/functions/connect-refund". That was true of the only writer that
+-- existed and it was never the only way a refund happens.
+--
+-- Under DIRECT charges (part 161) the coach is the merchant of record. Their
+-- Stripe dashboard is the full one, the charge is theirs, and the Refund button
+-- in it works — with no involvement from this app at all. A coach who refunds a
+-- client that way, which is the obvious way when they are already looking at
+-- the payment, leaves this database holding a sale that still says the money
+-- was taken. Their takings figure overstates them, permanently, and the client
+-- shows as having paid for a pack they were given the money back for.
+--
+-- Stripe already tells us. `charge.refunded` fires on every refund of a charge
+-- whatever made it — the dashboard, the API, connect-refund, or Stripe itself
+-- reversing a disputed charge. It carries `amount_refunded`, which is the
+-- RUNNING TOTAL across every refund on that charge, in the same minor units and
+-- the same shape as the column part 192 created. The event was simply never
+-- subscribed to and never handled.
+--
+-- ── What is in this part, and what is in the function ─────────────────────
+--
+-- The handler is in supabase/functions/stripe-webhook. What is HERE is the one
+-- thing it cannot do for itself: a way to get from a Stripe charge back to the
+-- row it paid for.
+--
+--   A RENEWAL already has one. `charge.invoice` is the invoice id and
+--   `client_subscription_payments.stripe_invoice_id` is `not null unique`, so
+--   the join exists and needs nothing added.
+--
+--   A ONE-OFF does not. `client_purchases` records `stripe_session_id` — the
+--   Checkout Session — and a charge does not carry one. The webhook can walk
+--   back through `checkout.sessions.list({ payment_intent })`, and it does for
+--   every sale made before this part; but that is a Stripe round trip on the
+--   hot path of a money event, and it fails for a session Stripe has aged out.
+--   So the PaymentIntent is stamped on the row at checkout from now on, and the
+--   list call becomes the fallback rather than the mechanism.
+--
+-- ── Why the column is nullable and stays nullable ─────────────────────────
+--
+-- Every sale made before this part has no PaymentIntent recorded and never
+-- will: the column can only be filled at the moment of checkout, and those
+-- moments are gone. A backfill would mean listing sessions for every historic
+-- sale against every connected account, and getting one wrong writes a
+-- payment reference onto the wrong person's purchase. NULL means "ask Stripe",
+-- which is exactly what the fallback does.
+--
+-- ── What this part does NOT add ───────────────────────────────────────────
+--
+-- No refunds table. Part 192's argument stands unchanged: what every screen
+-- asks is "how much of this sale still stands", which is one subtraction from
+-- one row, and Stripe holds the full list of refund objects. Mirroring them
+-- here would be the reconciliation problem that file spends a paragraph
+-- refusing.
+--
+-- No write path for an app. Both columns stay unwritable from a phone, for
+-- part 192's reason: a refund this app believes in and Stripe did not make is
+-- the worst kind of wrong, because both parties are looking at it.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── The PaymentIntent on a one-off sale ───────────────────────────────────
+
+alter table public.client_purchases add column if not exists stripe_payment_intent text;
+
+comment on column public.client_purchases.stripe_payment_intent is
+  'The Stripe PaymentIntent this sale was charged on, stamped at checkout. NULL on every sale made before part 610 — the webhook walks back through checkout.sessions.list({ payment_intent }) for those. Never backfilled: a mis-resolved reference would attach somebody else''s payment to this purchase.';
+
+-- How `charge.refunded` and `charge.dispute.*` find the sale. Partial, because
+-- a row with no PaymentIntent is one this lookup can never match and indexing
+-- the nulls would be indexing exactly the rows the query does not want.
+create index if not exists client_purchases_payment_intent_idx
+  on public.client_purchases (stripe_payment_intent)
+  where stripe_payment_intent is not null;
+
+-- ── The two comments part 192 wrote, corrected ────────────────────────────
+--
+-- Restated here rather than edited in part 192, so the history of the column
+-- reads in the order it happened: 192 created it with one writer, this part
+-- added the second. Both comments said "written only by connect-refund", which
+-- became false the moment the webhook learned to mirror a dashboard refund —
+-- and a column comment that names the wrong writer is how the next person
+-- concludes a figure cannot have moved and goes looking somewhere else.
+
+comment on column public.client_purchases.refunded_cents is
+  'Minor units given back, as a RUNNING TOTAL across every refund on this sale. Written by supabase/functions/connect-refund from Stripe''s answer to a refund it made, and by supabase/functions/stripe-webhook from charge.refunded — which is how a refund the coach made in their own Stripe dashboard reaches this app. Never written optimistically by anything. Zero means none, never unknown.';
+comment on column public.client_purchases.refunded_at is
+  'When the LAST refund on this sale was made — not the only one. Stripe holds the full list of refund objects; this app deliberately does not duplicate them.';
+
+comment on column public.client_subscription_payments.refunded_cents is
+  'Minor units given back on this renewal, as a running total. Written by supabase/functions/connect-refund and by supabase/functions/stripe-webhook''s charge.refunded branch, in both cases from Stripe''s own figure.';
+comment on column public.client_subscription_payments.refunded_at is
+  'When the last refund on this renewal was made. Stripe holds the full list.';
+
+-- ▶ a-chargeback-and-the-date-on-it.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A chargeback, and the date nobody was told about.
+--
+-- app/(trainer)/payments.tsx tells a coach on a STANDARD account, out loud,
+-- that "a dispute is theirs to answer". That sentence is true and it was, until
+-- this part, the whole of what this app did about a dispute: it told a coach
+-- that answering one was their job while giving them no way to know one
+-- existed.
+--
+-- ── Why this is not just another silence ─────────────────────────────────
+--
+-- Every other thing the notification sweeps have found — a quiet client, a
+-- block that ran out, an expiring certificate — costs something by degrees. A
+-- chargeback costs everything on a fixed day. Stripe gives the merchant a
+-- window to submit evidence (`evidence_details.due_by`), and when that instant
+-- passes the case is decided on whatever was submitted. Nothing is the
+-- commonest submission and it loses by default: the money is taken back out of
+-- the coach's balance and, on a direct charge, a dispute fee with it.
+--
+-- So the DEADLINE is the content of this feature. Not the amount, not the
+-- reason code, not the client's name: the date. It is in the title of the
+-- notification, at the top of the row on the Payments screen, and it is the one
+-- field a screen may never render as "—" while quietly showing the rest.
+--
+-- ── What this part adds ──────────────────────────────────────────────────
+--
+--   client_disputes         one row per Stripe dispute, mirrored by the
+--                           webhook from charge.dispute.created / .updated /
+--                           .closed.
+--   client_dispute_notify   the coach is told when one opens and when it is
+--                           decided, and told the date both times.
+--
+-- ── Why a table and not a column on the sale ─────────────────────────────
+--
+-- A dispute is not a property of a purchase. It has its own identity at Stripe,
+-- its own status machine, its own deadline, and — the part that settles it — it
+-- can exist with NO row in either money table to hang off. A client can charge
+-- back a payment whose `checkout.session.completed` was never delivered (which
+-- is precisely the failure mode the stripe-webhook header describes at length),
+-- and a design that could only record a dispute against a sale it already knew
+-- about would lose exactly the disputes that matter most. `purchase_id` and
+-- `renewal_id` are therefore both nullable: the dispute is recorded either way,
+-- and an unattached one is a louder signal rather than a dropped one.
+--
+-- ── What is NOT recorded here, and will not be ───────────────────────────
+--
+-- EVIDENCE. Stripe's evidence object holds receipts, customer communications,
+-- service documentation and a shipping address; mirroring any of that would put
+-- a client's correspondence into this database with no policy written for it,
+-- and it is submitted in the coach's own Stripe dashboard, which is the only
+-- place it can be submitted from on a direct charge. This app records that a
+-- case exists and when it closes.
+--
+-- A NET FIGURE. There is no `fee_cents` and no `net_cents`, exactly as part 132
+-- refused them: Stripe's dispute fee is not on this event, and a column that
+-- exists is a column a screen will one day print as a fact.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.client_disputes (
+  id uuid primary key default gen_random_uuid(),
+
+  -- The idempotency key. Stripe sends `created`, any number of `updated`s and
+  -- one `closed` for the same case, and every one of them lands on this row.
+  stripe_dispute_id text not null unique,
+
+  -- What was disputed, as Stripe names it. Both are kept because the two
+  -- lookups below need different ones: the charge is what a person sees in the
+  -- Stripe dashboard, the PaymentIntent is what `client_purchases` now carries
+  -- (part 610).
+  stripe_charge_id text,
+  stripe_payment_intent text,
+
+  -- Which ledger it happened on. Null is the platform — a destination charge,
+  -- where Repple is the merchant of record and the dispute is Repple's to
+  -- answer. Non-null is the coach's own connected account, where it is theirs.
+  -- The distinction changes who has to do something, so it is stored rather
+  -- than inferred from whatever the coach's account type says today.
+  stripe_account_id text,
+
+  -- Who is affected. Both nullable and both `on delete set null`, exactly like
+  -- the two money tables: a deleted account must not delete the record that a
+  -- chargeback happened.
+  trainer_id uuid references public.profiles(id) on delete set null,
+  client_id  uuid references public.profiles(id) on delete set null,
+
+  -- What it was for, when this database can tell. Nullable on purpose — see the
+  -- header: a dispute against a payment this app never recorded is still a
+  -- dispute, and refusing to write it would lose the worst case of all.
+  purchase_id uuid references public.client_purchases(id) on delete set null,
+  renewal_id  uuid references public.client_subscription_payments(id) on delete set null,
+
+  -- Gross, in minor units, as Stripe states it on the dispute. Null when Stripe
+  -- somehow states none, and null stays null: an amount with no unit joins no
+  -- total, and there is no default currency in this product (part 150).
+  amount_cents bigint,
+  currency text,
+
+  -- Stripe's own reason code — 'fraudulent', 'product_not_received',
+  -- 'subscription_canceled' and the rest. Stored raw and untranslated, because
+  -- the list is Stripe's and grows, and a word this app did not recognise
+  -- rendered as "Other" is worse than the word itself.
+  reason text,
+
+  -- Stripe's own status: needs_response, under_review, won, lost,
+  -- warning_needs_response, warning_under_review, warning_closed. Not
+  -- constrained to a list, for the same reason `reason` is not: Stripe adds
+  -- values, and a check constraint that refuses one would make the webhook
+  -- answer Stripe with a 500 forever on a case the coach most needs to see.
+  status text not null,
+
+  -- ── THE FIELD THIS TABLE EXISTS FOR ────────────────────────────────────
+  --
+  -- `evidence_details.due_by` from Stripe, as an instant. Nullable, and the
+  -- null is a real state rather than an omission: an inquiry or an already
+  -- closed case carries no deadline, and a screen that printed today's date
+  -- into that gap would send a coach running at nothing. Where it is null the
+  -- app says the deadline is in their Stripe dashboard and does not invent one.
+  evidence_due_by timestamptz,
+
+  -- When Stripe says the case opened, and when it closed. `closed_at` null
+  -- means live, which is what every "do I have to do something" read filters on.
+  opened_at timestamptz,
+  closed_at timestamptz,
+
+  -- Webhooks are not ordered. A stale `updated` delivered after the `closed`
+  -- would otherwise reopen a case the coach has already been told the result
+  -- of, and they would go and prepare evidence for it.
+  stripe_event_at timestamptz,
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- The coach's own read: their live cases, soonest deadline first, which is the
+-- order a person acts in.
+create index if not exists idx_client_disputes_trainer
+  on public.client_disputes (trainer_id, evidence_due_by);
+-- How the webhook finds an existing row when it holds a charge rather than the
+-- dispute id.
+create index if not exists idx_client_disputes_charge
+  on public.client_disputes (stripe_charge_id) where stripe_charge_id is not null;
+
+alter table public.client_disputes enable row level security;
+
+-- The same shape as `client_sub_pay_read` on part 132, deliberately identical:
+-- the coach whose money it is, and the owner OF THAT COACH'S GYM. The owner
+-- branch goes through the trainer's tenant rather than testing `role = 'owner'`
+-- — the role test lets any owner read every dispute on the platform, one
+-- white-label customer reading another's chargebacks.
+--
+-- The CLIENT is deliberately not on this policy. They raised the dispute with
+-- their own bank and their bank tells them what happens to it; showing somebody
+-- a merchant-side case file with a reason code and an evidence deadline on it
+-- is a different act entirely, and it is not one this app has been asked to do.
+drop policy if exists client_disputes_read on public.client_disputes;
+create policy client_disputes_read on public.client_disputes for select using (
+  trainer_id = (select auth.uid())
+  or exists (
+    select 1 from public.trainers tr
+     where tr.id = client_disputes.trainer_id
+       and public.is_owner_of(tr.tenant_id)));
+
+-- No insert, update or delete policy, on purpose. RLS denies what no policy
+-- permits, so this table is read-only to every signed-in user and writable only
+-- by the service role the stripe-webhook runs as. Whether a bank reversed a
+-- payment is Stripe's to state and nobody else's — least of all either party to
+-- it.
+--
+-- Both API roles are revoked outright first rather than left to Supabase's
+-- stock default privileges, which hand `anon` AND `authenticated` the full
+-- select/insert/update/delete set on every new table (part 119 found that on 80
+-- of 89 tables). `revoke ... from public` alone does not clear it: both are
+-- grantees in their own right.
+revoke all on public.client_disputes from anon;
+revoke all on public.client_disputes from authenticated;
+grant select on public.client_disputes to authenticated;
+
+comment on table public.client_disputes is
+  'One row per Stripe dispute on a coach''s charge, mirrored by supabase/functions/stripe-webhook from charge.dispute.created / .updated / .closed. Read-only to every signed-in user. evidence_due_by is the field this table exists for.';
+comment on column public.client_disputes.evidence_due_by is
+  'When Stripe stops accepting evidence on this case. NULL means Stripe stated none — an inquiry, or a case already closed — and must render as "the date is in your Stripe dashboard", NEVER as a date this app chose.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- The coach is told, and told the date
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- A trigger and not a scheduled pass, on part 202's test: this is a WRITE
+-- happening — the webhook inserting or closing a case — rather than the absence
+-- of one, and a chargeback a coach hears about tomorrow morning has spent a
+-- night of a window that is often seven days long.
+--
+-- Two crossings, and only two. The INSERT, which is the case opening; and the
+-- update that first sets `closed_at`, which is the result. Every `updated` in
+-- between moves a status Stripe owns and says nothing a coach can act on, and a
+-- notification per status change would wake a phone for a case the coach has
+-- already submitted evidence on.
+--
+-- ── What the body may say ────────────────────────────────────────────────
+--
+-- NO FIGURE AND NO CURRENCY, which is part 163's rule and part 202's, held here
+-- for the same reason: `minorMoney` in src/lib/coachMoney.ts is the one
+-- formatter for money in this codebase, it knows how many decimal places a
+-- currency has, and it is not reachable from plpgsql. A second formatter is the
+-- copy that drifts. The amount is on the Payments screen, priced by the code
+-- that knows how.
+--
+-- NO CLIENT NAME. `client_id` is frequently null here — a dispute can arrive
+-- against a payment this app never recorded — and a sentence that sometimes
+-- names a person and sometimes does not reads as though the app has lost track
+-- of who it was. The sale is on the Payments screen with the name on it.
+--
+-- THE DATE, first, in the title. `to_char(... 'DD Mon YYYY')` is the same
+-- format part 202 and part 471 already use for a date in a notification body,
+-- so a coach reads one shape of date across their whole inbox.
+
+create or replace function public.client_dispute_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_opened boolean;
+  v_due    text;
+  v_title  text;
+  v_body   text;
+begin
+  -- `notifications.user_id` is `not null references profiles(id)`, so a dispute
+  -- on an account whose coach has deleted theirs has nobody to tell. Guarded
+  -- rather than left to throw: this fires inside the webhook's transaction, and
+  -- an exception here answers Stripe with a 500 on an event that would then be
+  -- retried forever.
+  if new.trainer_id is null then
+    return null;
+  end if;
+
+  if TG_OP = 'INSERT' then
+    -- A case can arrive here ALREADY CLOSED. That is not hypothetical: it is
+    -- what happens the first time a connected destination is subscribed to
+    -- `charge.dispute.closed` without `charge.dispute.created`, and what
+    -- happens when the two are delivered out of order. Telling a coach "evidence
+    -- due by the 14th" about a case Stripe has already decided would send them
+    -- to prepare a submission nothing will accept, so the result is what they
+    -- are told instead.
+    v_opened := new.closed_at is null;
+  elsif new.closed_at is not null and old.closed_at is null then
+    v_opened := false;
+  else
+    -- A status moving between two live states. Nothing here for a person to do
+    -- that they were not already told to do.
+    return null;
+  end if;
+
+  v_due := case
+    when new.evidence_due_by is null then null
+    else to_char(new.evidence_due_by at time zone 'UTC', 'DD Mon YYYY')
+  end;
+
+  if v_opened then
+    -- The date is in the TITLE, which is the line that renders on a lock screen
+    -- and the line a coach reads in a list of eleven rows. Everything else
+    -- about a chargeback can wait until they open it; the date cannot.
+    v_title := case
+      when v_due is null then 'A chargeback — the deadline is in your Stripe dashboard'
+      else 'A chargeback — evidence due by ' || v_due
+    end;
+    v_body := 'A client has disputed a payment with their bank, and their card issuer has taken the money back while it is decided.'
+      || case
+           when v_due is null then ' Stripe has not stated a date on this one; your Stripe dashboard has it, and it is the only place evidence can be submitted.'
+           else ' Stripe stops accepting evidence on ' || v_due || ', and after that the case is decided on whatever was submitted by then.'
+         end
+      || ' Sending nothing loses it by default, so send something even if it is thin: session records, your messages with them, the agreement they signed.'
+      || ' Payments & Packages has the sale and the amount; the evidence itself goes in through your Stripe dashboard.';
+  else
+    v_title := case
+      when new.status = 'won' then 'A chargeback was decided in your favour'
+      when new.status = 'lost' then 'A chargeback went against you'
+      else 'A chargeback has been closed'
+    end;
+    v_body := case
+      when new.status = 'won' then 'The bank found for you and the money stays with you. Nothing further is needed on this one.'
+      when new.status = 'lost' then 'The bank found for the client. The money has gone back to them and it is not coming back — a lost dispute cannot be appealed through Stripe, and on your own charges the dispute fee comes out of your balance too.'
+      else 'The case is closed at Stripe with the status ' || coalesce(new.status, 'unknown') || '. Your Stripe dashboard has what that means for this one.'
+    end
+      || ' Payments & Packages still shows the sale, marked, so the money you can see there is the money that actually stood.';
+  end if;
+
+  insert into public.notifications (user_id, title, body, icon, route)
+  values (new.trainer_id, left(v_title, 200), left(v_body, 500), 'grid', '/(trainer)/payments');
+
+  return null;
+end $fn$;
+
+comment on function public.client_dispute_notify() is
+  'Tells the COACH when a chargeback opens and when it is decided, and puts Stripe''s evidence deadline in the TITLE both times. Carries no amount and no currency — coachMoney.ts is the one money formatter in this codebase and it is not reachable from here.';
+
+drop trigger if exists client_disputes_notify_open on public.client_disputes;
+create trigger client_disputes_notify_open
+  after insert on public.client_disputes
+  for each row execute function public.client_dispute_notify();
+
+drop trigger if exists client_disputes_notify_closed on public.client_disputes;
+create trigger client_disputes_notify_closed
+  after update of closed_at on public.client_disputes
+  for each row execute function public.client_dispute_notify();
+
+-- Revoked from public, anon AND authenticated. Postgres checks EXECUTE when a
+-- trigger is CREATED and not when it fires (parts 51, 141, 158, 202), so a
+-- trigger function needs no grant to anybody; Postgres grants EXECUTE to PUBLIC
+-- on every new function and `anon` resolves through that grant, so both are
+-- named.
+revoke all on function public.client_dispute_notify() from public;
+revoke all on function public.client_dispute_notify() from anon;
+revoke all on function public.client_dispute_notify() from authenticated;
+
+-- ▶ a-pack-that-ran-out-of-time.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A session pack that never ran out of time.
+--
+-- `trainer_packages` says how many sessions a pack holds and what it costs, and
+-- has never said how long the buyer has to use them. `client_purchases` records
+-- `sessions_total` and `sessions_used` and carries nothing about a window. So a
+-- ten-pack bought in 2024 is still ten sessions a coach owes somebody in 2026,
+-- at 2024's price, and the coach's only way out of that conversation is to have
+-- the conversation.
+--
+-- Every gym in the world sells packs with a validity on them for that reason.
+-- This app could not express one.
+--
+-- ══ 1 · THE TWO THINGS THAT MUST NOT HAPPEN ══════════════════════════════
+--
+-- ── A pack somebody already bought must not expire retroactively ─────────
+--
+-- The window is a property of the SALE, not of the package. `expires_on` is
+-- stamped on `client_purchases` at checkout, computed from the package's
+-- `validity_days` AS IT STOOD THAT DAY, and nothing recomputes it afterwards.
+--
+-- That is not a convenience, it is the whole safety property. If the window
+-- lived only on `trainer_packages`, then a coach adding a ninety-day validity
+-- to a package they have been selling for two years would, at the instant they
+-- pressed Save, void every unspent credit every one of those clients is
+-- holding. Nobody would have agreed to that and nobody would have been told.
+--
+-- The same rule gives the migration its answer for free: every row already in
+-- `client_purchases` has `expires_on` NULL, NULL means no window, and this pass
+-- never touches a row that has none. Switching this feature on expires nothing.
+--
+-- ── A pack that expires with sessions left is a conversation ─────────────
+--
+-- Not a silent zero. Somebody paid for six sessions they did not take, and the
+-- honest outcome is that their coach finds out on the day, by name, with the
+-- number in the sentence — so the coach can decide to extend it, sell them
+-- something, or say no, which is a decision that belongs to a person.
+--
+-- So `sessions_expired` is a COLUMN and not an absence. The count is kept, the
+-- day it happened is kept, and `packBalance` in src/lib/packDraw.ts renders both
+-- to the client and to the coach rather than showing a pack that quietly holds
+-- nothing.
+--
+-- ══ 2 · HOW AN EXPIRED CREDIT STOPS BEING SPENDABLE ══════════════════════
+--
+-- This is the part that decided the shape of the columns, so it is written out.
+--
+-- FOUR functions draw a credit off `client_purchases`, in three parts:
+-- `redeem_pack_session` and `refund_pack_session` (part 123), `sessions_pack_draw`
+-- (part 370, which supersedes part 193's) and `_promote_session_waitlist`
+-- (part 370). Together they are about four hundred lines of plpgsql, and every
+-- one of them selects with the same two predicates:
+--
+--     cp.status = 'paid'   and   cp.sessions_used < cp.sessions_total
+--
+-- There were three ways to make them stop at an expired pack and only one of
+-- them is safe.
+--
+--   COPY THE FOUR FUNCTIONS IN HERE with an `expires_on` predicate added.
+--   Four hundred lines of duplicated plpgsql, free to drift from the parts that
+--   own them, in the two functions that decide whether somebody's paid-for
+--   session was spent. Refused.
+--
+--   MOVE `status` TO 'expired'. One word, and every draw site already filters
+--   on it — which is exactly why it is wrong. `status` is the MONEY fact on
+--   this row: `my_code_returns()` (part 98) joins `status = 'paid'` to work out
+--   what a coach's join codes earned, and `refundableRow` in src/lib/refunds.ts
+--   reads it to decide whether a sale was ever charged. A pack expiring would
+--   silently drop its price out of the coach's marketing attribution and make
+--   the app tell them "this one was never charged" when they went to refund it.
+--   The money landed. It is still landed. Refused.
+--
+--   REDUCE `sessions_total` TO `sessions_used`, which is what this part does.
+--   The pack keeps its status, its amount, its currency and its used count —
+--   every fact about the money and about what the client actually took is
+--   untouched — and `sessions_used < sessions_total` becomes false, so all four
+--   draw sites stop without one line of them being rewritten.
+--
+-- The cost is stated rather than hidden: `sessions_total` no longer means "how
+-- big the pack was when it was sold", it means "how many credits this pack can
+-- ever be drawn on". `sessions_expired` is what makes the original
+-- reconstructible — `sessions_total + sessions_expired` is what they bought —
+-- and `packLabel` is handed the sum so a ten-pack is not relabelled a
+-- seven-pack on the client's own screen. The column comments below say so.
+--
+-- Two consequences worth having written down before somebody finds them:
+--
+--   · `redeem_pack_session` answers a booking against an expired pack with
+--     'exhausted', not with a word of its own, and src/lib/packDraw.ts renders
+--     that as "every session on your pack is already used". For a pack that
+--     expired with credits left that sentence is not the reason. The Packages
+--     screen is where the expiry is explained, off `sessions_expired` and
+--     `expired_at`, and adding a fifth outcome word to an RPC four screens read
+--     is not worth doing for a toast.
+--   · `refund_pack_session` (part 123) hands a credit BACK by decrementing
+--     `sessions_used`, and it does not know about windows. So cancelling a
+--     session that was drawn off a pack whose window has since closed puts one
+--     credit back on that pack and makes it briefly spendable again — the
+--     constraint `sessions_used <= sessions_total` still holds, and the pass
+--     will not touch the row a second time because `expired_at` is set. That is
+--     left as it is rather than closed off: the client is getting back a credit
+--     they were charged for a session that did not happen, and refusing it
+--     would be the app keeping somebody's money because a date passed in
+--     between. It is written down here so it reads as a decision.
+--   · `sessions_pack_draw` (part 370) asks "does this client hold a pack from
+--     this coach at all" before it considers the gym's credits, and an expired
+--     pack still answers yes. So a session delivered after the window closes is
+--     recorded as `pack_draw_shortfall_at` — an hour the coach delivered that
+--     nothing paid for — rather than quietly falling through onto the gym's
+--     money. That is the right answer and it is the reason the row is kept
+--     rather than deleted.
+--
+-- ── Why nightly, and what a missed night costs ───────────────────────────
+--
+-- The event is the ABSENCE of a write: nobody inserts a row saying "this pack
+-- ran out of time". There is nothing to hang a trigger on, which is part 202's
+-- and part 471's reasoning unchanged.
+--
+-- A pack is therefore spendable until the pass runs on the morning after its
+-- last day, and a night the cron does not run is a day longer. Erring in the
+-- client's favour by hours is the right direction for the one error this
+-- feature can make: the alternative is a credit refused at the moment somebody
+-- tries to book with it, on a day they still believed they had it.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1 · the window, on the package ────────────────────────────────────────
+
+alter table public.trainer_packages add column if not exists validity_days integer;
+
+-- Nullable with NO default, and this is the same refusal part 188 made about a
+-- payment term: thirty days, ninety days and a year are conventions in
+-- somebody's trade in somebody's country, and a default of any number would put
+-- an expiry on every pack every coach on this platform is already selling. NULL
+-- is "the coach did not state one", which means the pack does not expire, which
+-- is what every pack in this database does today.
+alter table public.trainer_packages drop constraint if exists trainer_packages_validity_positive;
+alter table public.trainer_packages add constraint trainer_packages_validity_positive
+  check (validity_days is null or (validity_days > 0 and validity_days <= 3650));
+
+-- And it is only meaningful on a pack. A membership has no credits to run out
+-- of; it is stopped by cancelling it, and a validity on one would be a second,
+-- silent way for it to end.
+alter table public.trainer_packages drop constraint if exists trainer_packages_validity_is_for_packs;
+alter table public.trainer_packages add constraint trainer_packages_validity_is_for_packs
+  check (validity_days is null or sessions is not null);
+
+comment on column public.trainer_packages.validity_days is
+  'How many days a buyer has to use this pack, from the day they buy it. NULL means it does not expire — there is no default and there must never be one, because a default would put a window on every pack already on sale. Read ONCE, at checkout, and copied onto client_purchases.expires_on; changing it here never touches a pack somebody has already bought.';
+
+-- ── 2 · the window, on the sale ───────────────────────────────────────────
+
+alter table public.client_purchases add column if not exists expires_on date;
+alter table public.client_purchases add column if not exists expired_at timestamptz;
+alter table public.client_purchases add column if not exists sessions_expired integer not null default 0;
+
+alter table public.client_purchases drop constraint if exists client_purchases_expiry_coherent;
+alter table public.client_purchases add constraint client_purchases_expiry_coherent
+  check (
+    sessions_expired >= 0
+    -- A count of credits taken away with no day it happened on is the shape a
+    -- half-finished write leaves behind. NOT the reverse, and the asymmetry is
+    -- deliberate: a pack whose window closed after the client used every
+    -- session has an `expired_at` and a `sessions_expired` of nought, which is
+    -- an ordinary and common row. Writing this as an equivalence — the shape
+    -- part 192 uses for `refunded_cents` / `refunded_at`, where it is right —
+    -- would make `run_pack_expiry` fail on the happiest case it handles.
+    and (sessions_expired = 0 or expired_at is not null)
+    -- Nothing can expire on a pack that never had a window. This is the
+    -- constraint that makes the retroactive case unreachable rather than merely
+    -- unwritten: no future pass can take credits off a row that carries no
+    -- expiry date.
+    and (expired_at is null or expires_on is not null)
+  );
+
+comment on column public.client_purchases.expires_on is
+  'The last day the credits on this pack can be used, copied from the package''s validity_days at CHECKOUT and never recomputed. NULL means this pack does not expire, which is every pack sold before part 612 and every pack of a package whose coach set no validity. A later edit to the package does not reach this column — see the header of part 612.';
+comment on column public.client_purchases.sessions_expired is
+  'How many credits the window closed on unspent. Zero means none were lost, never unknown. sessions_total + sessions_expired is what the client originally bought, and packLabel() is handed that sum so the pack keeps its own name.';
+comment on column public.client_purchases.expired_at is
+  'When run_pack_expiry() closed the window on this pack. NULL means it has not been closed — either it has no window, or its last day has not passed yet.';
+
+comment on column public.client_purchases.sessions_total is
+  'How many credits this pack can EVER be drawn on. Written at checkout as what the client bought, and reduced to sessions_used by run_pack_expiry() when a validity window closes — which is how every draw site stops at an expired pack without one of them being rewritten. Add sessions_expired to get what was originally sold.';
+
+-- The nightly pass reads "packs with a window, still open, whose last day has
+-- passed". Partial on `expires_on`, because a pack with no window is a pack
+-- this query can never want and indexing the nulls would be indexing every row
+-- in the table.
+create index if not exists client_purchases_expires_idx
+  on public.client_purchases (expires_on)
+  where expires_on is not null and expired_at is null;
+
+-- ── 3 · the pass ──────────────────────────────────────────────────────────
+
+create or replace function public.run_pack_expiry()
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_closed integer := 0;
+  v_told   integer := 0;
+  v_lost   integer;
+  r        record;
+begin
+  for r in
+    select cp.id, cp.client_id, cp.trainer_id, cp.expires_on
+      from public.client_purchases cp
+     where cp.expires_on is not null
+       and cp.expired_at is null
+       and cp.sessions_total is not null
+       -- The day AFTER the last day. `expires_on` is the last day the credits
+       -- can be used, so a pack is still live all of the day it names.
+       and cp.expires_on < current_date
+       -- A pack that was never paid for has nothing to expire. A pending or
+       -- failed checkout is not a window closing on somebody.
+       and cp.status = 'paid'
+  loop
+    -- The count that goes in the message comes back out of the WRITE, not out
+    -- of the select above. A booking between the two would draw a credit the
+    -- select had already counted as lost, and the coach would be told a number
+    -- one too high about somebody's money. Postgres evaluates every SET
+    -- expression against the OLD row, so `sessions_total - sessions_used` here
+    -- is the balance as it stood the instant this statement locked it.
+    --
+    -- `expired_at is null` in the WHERE is what makes a second run of this pass
+    -- — a retry, or two schedules firing — a no-op rather than a second write
+    -- that would zero `sessions_expired` on a pack it had already closed.
+    v_lost := null;
+    update public.client_purchases cp
+       set sessions_total    = coalesce(cp.sessions_used, 0),
+           sessions_expired  = greatest(0, cp.sessions_total - coalesce(cp.sessions_used, 0)),
+           expired_at        = now()
+     where cp.id = r.id
+       and cp.expired_at is null
+    returning cp.sessions_expired into v_lost;
+
+    -- Nothing returned means somebody else closed it first. Not an error, and
+    -- not a reason to tell the coach about a pack already dealt with.
+    if v_lost is null then
+      continue;
+    end if;
+    v_closed := v_closed + 1;
+
+    -- ── the conversation ────────────────────────────────────────────────
+    --
+    -- Only when credits were actually lost. A pack that ran out of time with
+    -- nothing on it is not news: part 163 already told the coach on the day the
+    -- last session was used, and a second message about the same pack a month
+    -- later is the nagging this whole family of notifications refuses.
+    --
+    -- `notifications.user_id` is `not null references profiles(id)`, so a pack
+    -- whose coach deleted their account has nobody to tell. Guarded rather than
+    -- left to throw: this runs as a scheduled job, and an exception here costs
+    -- every pack after it in the loop.
+    if v_lost > 0 and r.trainer_id is not null then
+      insert into public.notifications (user_id, title, body, icon, route)
+      values (
+        r.trainer_id,
+        'A session pack has run out of time',
+        left(
+          -- The name is theirs to give: the coach can already read it through
+          -- `profiles_trainer_r_clients`, so this states nothing the recipient
+          -- could not already see. A blank or missing name falls back to "A
+          -- client", never to an empty string that would render a sentence
+          -- starting with a space.
+          coalesce(
+            (select nullif(btrim(coalesce(p.full_name, '')), '') from public.profiles p where p.id = r.client_id),
+            'A client'
+          )
+          || ' had ' || v_lost || ' session' || case when v_lost = 1 then '' else 's' end
+          || ' left on a pack whose validity ran out on ' || to_char(r.expires_on, 'DD Mon YYYY') || '.'
+          || ' Those credits can no longer be booked against, and they paid for them.'
+          || ' Whether you extend it, sell them something else or leave it is yours to decide — but they will notice, and it is better that you raise it.'
+          || ' Payments & Packages has the pack and what it was worth.',
+          500),
+        'grid',
+        '/(trainer)/payments'
+      );
+      v_told := v_told + 1;
+    end if;
+  end loop;
+
+  return jsonb_build_object('closed', v_closed, 'told', v_told);
+end $fn$;
+
+revoke all on function public.run_pack_expiry() from public, anon, authenticated;
+
+comment on function public.run_pack_expiry() is
+  'Nightly. Closes the window on any session pack whose expires_on has passed: sessions_total drops to sessions_used, the difference lands in sessions_expired and the day lands in expired_at. Tells the COACH, by name and with the number, whenever credits were actually lost. Never touches a pack with no expires_on, which is every pack sold before part 612.';
+
+-- ── 4 · the schedule ──────────────────────────────────────────────────────
+
+create extension if not exists pg_cron;
+
+-- Unschedule first so re-running this file does not accumulate duplicate jobs
+-- each firing the same pass, exactly as parts 48, 135, 202 and 471 do.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'pack-expiry') then
+    perform cron.unschedule('pack-expiry');
+  end if;
+end $$;
+
+-- 07:33 UTC. Morning rather than the small hours for part 202's reason — this
+-- wakes a phone, and a coach whose notifications arrive at 03:17 is a coach who
+-- turns notifications off — and seven minutes clear of part 471's 07:26 so the
+-- passes do not contend.
+select cron.schedule(
+  'pack-expiry',
+  '33 7 * * *',
+  $cron$ select public.run_pack_expiry(); $cron$
+);
+
+-- ▶ an-invoice-that-went-overdue-and-told-nobody.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The invoice that went overdue and told nobody.
+--
+-- Part 188 collected the due date and built the chase. `invoiceAge()` and
+-- `ageingBook()` in src/lib/coachInvoice.ts sort a coach's book into overdue,
+-- upcoming and undated, band it by how late it is, and tell them what to chase
+-- first. All of it runs when somebody opens the Invoices screen, and nowhere
+-- else: part 188 contains no `cron.schedule`, and grep `coach_invoices` across
+-- supabase/parts finds no trigger and no scheduled pass.
+--
+-- So "who owes me money" is answered accurately and only when asked, and the
+-- moment it matters is the moment nobody is asking. A self-employed coach does
+-- not open an invoicing screen on the day an invoice falls due; they open it at
+-- the end of a quarter, and find four things they could have chased eight weeks
+-- earlier when the client still remembered the sessions.
+--
+-- ── Why a scheduled pass ─────────────────────────────────────────────────
+--
+-- The event is the ABSENCE of a write. Nothing happens to a `coach_invoices`
+-- row on the day it becomes late — the last thing that happened to it was the
+-- coach issuing it, six weeks ago — so there is no INSERT or UPDATE to hang a
+-- trigger on. That is part 202's argument for the overdue-client and credential
+-- passes, and part 471's for a block ending, unchanged.
+--
+-- ── The bands, borrowed rather than invented ─────────────────────────────
+--
+-- `ageBucket()` in src/lib/coachInvoice.ts is four bands — 1-7, 8-30, 31-60,
+-- 61+ — and it is what the Invoices screen already groups by. This pass files
+-- one notice per invoice per BAND, so a coach hears on the day it goes late and
+-- again as it ages into a band they have not been told about: at 1 day, at 8, at
+-- 31 and at 61. Four messages in the life of an invoice, spread over two months.
+--
+-- The bands are re-stated in SQL below rather than shared, which is a copy and
+-- copies drift. It is the smallest possible one — three integer comparisons and
+-- no notion of what an invoice is — and it is named here so the two can be read
+-- against each other. The alternative is a nightly message, which is the
+-- nagging every notification in this product refuses.
+--
+-- ── The honest cost of this feature, stated up front ─────────────────────
+--
+-- Nothing tells this app when a client pays. An invoice leaves the ageing list
+-- in exactly two ways: the coach VOIDS it, or they issue a 'received' one
+-- instead — `invoiceAge()` has no third door, `kind` is immutable after issue
+-- (part 188), and `AGEING_IS_YOUR_OWN_RECORD` says so on the screen.
+--
+-- Which means a coach who was paid in cash on Friday and did not write it down
+-- WILL be told their invoice is late. That is not a bug to be engineered away;
+-- it is the same thing the screen already says, arriving without being asked
+-- for. What this pass owes them is that the message says so and names the way
+-- out, and the body below does: void it, or record what you were paid.
+--
+-- It is bounded by construction, which is the other half of making that
+-- acceptable. Four messages, ever, per invoice.
+--
+-- ── And nothing about money in the message ───────────────────────────────
+--
+-- No amount and no currency, which is part 163's rule and part 202's.
+-- `minorMoney` in src/lib/coachMoney.ts is the one money formatter in this
+-- codebase — it is what knows a currency's decimal places — and it is not
+-- reachable from plpgsql. A second one is the copy that drifts, and a drifted
+-- copy quotes a coach a figure that is not the figure. The invoice number and
+-- the day are certain, they are what identifies the document, and the Invoices
+-- screen prices it.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── The dedupe record ─────────────────────────────────────────────────────
+--
+-- The same shape as `coach_credential_notices` in part 202: one row per subject
+-- per stage, so a nightly pass speaks once at each crossing rather than every
+-- night in between. The band is the stage.
+create table if not exists public.coach_invoice_ageing_notices (
+  invoice_id uuid not null references public.coach_invoices(id) on delete cascade,
+  -- Which of `ageBucket()`'s four bands this row records. An invoice gets one
+  -- of each and never two of any.
+  bucket     text not null check (bucket in ('1-7', '8-30', '31-60', '61+')),
+  notified_at timestamptz not null default now(),
+  primary key (invoice_id, bucket)
+);
+
+comment on table public.coach_invoice_ageing_notices is
+  'One row per invoice per ageing band (ageBucket() in src/lib/coachInvoice.ts), so a coach is told once as an invoice crosses into each band rather than every night it sits there. Bookkeeping for run_invoice_ageing_notices(); read by nothing.';
+
+alter table public.coach_invoice_ageing_notices enable row level security;
+
+-- No policy at all, and that is the intent rather than an omission — the same
+-- call parts 202's two bookkeeping tables make. RLS with no policy denies every
+-- row to every non-superuser role, which is exactly right: this is bookkeeping
+-- for a job that runs as the table owner, and nothing in any of the three apps
+-- reads or writes it. A coach-readable policy would be a second, differently
+-- shaped answer to "what is late" sitting beside the one `ageingBook()`
+-- computes.
+
+create or replace function public.run_invoice_ageing_notices()
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_sent integer := 0;
+  r      record;
+begin
+  for r in
+    select i.id, i.coach_id, i.seq, i.bill_to, i.due_on, i.reminder_count,
+           (current_date - i.due_on) as days_late,
+           -- `ageBucket()` in src/lib/coachInvoice.ts, written out. Named here
+           -- so the two can be read against each other, and so that changing
+           -- one is visibly not changing the other.
+           case
+             when (current_date - i.due_on) <= 7  then '1-7'
+             when (current_date - i.due_on) <= 30 then '8-30'
+             when (current_date - i.due_on) <= 60 then '31-60'
+             else '61+'
+           end as bucket
+      from public.coach_invoices i
+       -- No recipient guard, and it is checked rather than assumed: part 138
+       -- declares `coach_id uuid not null references trainers(id)`, and part 01
+       -- declares `trainers.id references profiles(id)`, which is exactly what
+       -- `notifications.user_id` requires. Every row here has a coach who has a
+       -- profile — unlike part 471's assigned_programs, whose coach_id is
+       -- nullable and therefore guarded.
+     where
+       -- Only what the coach is ASKING for. A 'received' invoice is their own
+       -- statement that the money came in, and `invoiceAge()` calls it settled.
+       and i.kind = 'requested'
+       -- A voided invoice is on no list at all: the coach has already told
+       -- somebody that number was cancelled.
+       and i.voided_at is null
+       -- No due date is not "not due" — it is the coach never having stated
+       -- one, and part 188 is emphatic that those must never be read as being
+       -- comfortably within terms nobody wrote down. An invoice with no date
+       -- cannot be late and is not this pass's business.
+       and i.due_on is not null
+       -- Past the day itself. `invoiceAge()` calls the due date 'due-today' and
+       -- not overdue, so the first day this can speak is the day after.
+       and i.due_on < current_date
+       -- Nothing about an invoice that fell due before this feature existed.
+       -- A coach opening the app to nine notifications about documents from
+       -- last year learns to clear the inbox without reading it — part 202
+       -- makes this exact trade for credentials, with the same thirty-day
+       -- shape. Ninety days here rather than thirty, because the last band
+       -- opens at sixty-one and a shorter window would mean an invoice could
+       -- never reach it.
+       and i.due_on >= current_date - 90
+  loop
+    if exists (
+      select 1 from public.coach_invoice_ageing_notices n
+       where n.invoice_id = r.id and n.bucket = r.bucket
+    ) then
+      continue;
+    end if;
+
+    -- Written BEFORE the notification, and the ordering is part 202's. If the
+    -- insert into `notifications` fails the whole iteration rolls back and the
+    -- coach is told tomorrow; if it succeeded and the bookkeeping then failed,
+    -- the coach would be told again every night forever.
+    insert into public.coach_invoice_ageing_notices (invoice_id, bucket, notified_at)
+    values (r.id, r.bucket, now())
+    on conflict (invoice_id, bucket) do nothing;
+
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      case when r.bucket = '1-7' then 'An invoice has gone past its date'
+           else 'An invoice is still unpaid' end,
+      left(
+        -- `invoiceNumber()` in src/lib/coachInvoice.ts formats the sequence for
+        -- the document; here it is the bare number, because the notification is
+        -- identifying which one rather than reproducing the document.
+        'Invoice ' || r.seq || ' to ' || coalesce(nullif(btrim(coalesce(r.bill_to, '')), ''), 'a client')
+        || ' was due on ' || to_char(r.due_on, 'DD Mon YYYY') || ', which is '
+        || r.days_late || ' day' || case when r.days_late = 1 then '' else 's' end || ' ago.'
+        || case
+             when coalesce(r.reminder_count, 0) = 0 then ' You have not chased it yet.'
+             when r.reminder_count = 1 then ' You have chased it once.'
+             else ' You have chased it ' || r.reminder_count || ' times.'
+           end
+        -- The way out, named, because otherwise this is a message a coach who
+        -- was paid in cash cannot make stop.
+        || ' Nothing tells this app when a client pays you, so if they already have,'
+        || ' void this one or record what you were paid — otherwise it goes on ageing.'
+        || ' Invoices has the amount and the chase.',
+        500),
+      'grid',
+      '/(trainer)/invoices'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+
+  -- Bookkeeping. A cascade already clears the rows of a deleted invoice; this
+  -- is for the rest, and it keeps the table from growing one row per band per
+  -- invoice forever. Well past the ninety-day window above, so nothing can be
+  -- swept and then re-notified.
+  delete from public.coach_invoice_ageing_notices n
+   where n.notified_at < now() - interval '400 days';
+
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+revoke all on function public.run_invoice_ageing_notices() from public, anon, authenticated;
+
+comment on function public.run_invoice_ageing_notices() is
+  'Nightly. Tells a coach when one of their own requested invoices crosses into a new ageing band — ageBucket() in src/lib/coachInvoice.ts: 1-7, 8-30, 31-60, 61+ — so at most four messages in the life of an invoice. Ignores anything that fell due more than ninety days ago, so switching it on does not produce an inbox of history. Carries no amount and no currency.';
+
+-- ── The schedule ─────────────────────────────────────────────────────────
+
+create extension if not exists pg_cron;
+
+-- Unschedule first so re-running this file does not accumulate duplicate jobs
+-- each firing the same pass, exactly as parts 48, 135, 202, 471 and 612 do.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'invoice-ageing-notices') then
+    perform cron.unschedule('invoice-ageing-notices');
+  end if;
+end $$;
+
+-- 07:40 UTC, seven minutes after part 612's pass and on the same morning
+-- reasoning parts 202 and 471 set out: this wakes a phone, and a coach whose
+-- notification arrives at 03:17 is a coach who turns notifications off. Off the
+-- top of the hour, and clear of every pass already scheduled.
+select cron.schedule(
+  'invoice-ageing-notices',
+  '40 7 * * *',
+  $cron$ select public.run_invoice_ageing_notices(); $cron$
+);
+
+-- ▶ a-photo-a-client-sent-and-nobody-mentioned.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A client sent their coach a progress photo, and nothing said so.
+--
+-- ── What was silent, and how that was established ────────────────────────
+--
+-- app/(trainer)/client-photos.tsx says it in its own header: a coach can see
+-- "exactly the photos this client sent to this coach … not 'my clients' photos'
+-- — there is no such read, at either layer". That is the right design and it
+-- has a consequence nobody had closed: with no cross-client read, a coach can
+-- only discover a photo exists by opening a NAMED client and looking. So the
+-- discovery mechanism for a photo is remembering to check, one person at a
+-- time, on the off-chance.
+--
+-- Grep `SERVER_WRITTEN` in src/lib/notifyInbox.ts and there is no photo row.
+-- Grep `progress_photo_shares` in supabase/parts and part 47 creates it, two
+-- triggers DELETE from it when a coaching link ends, and nothing anywhere
+-- notifies on the insert.
+--
+-- The cost is small and it compounds: sending a photo is the most exposed thing
+-- a client does in this product, and the reply arriving three days late reads
+-- as indifference to somebody who has just photographed themselves in
+-- underwear in a bathroom to show their coach.
+--
+-- ══ WHAT THIS NOTIFICATION MAY CONTAIN, AND WHY IT IS SO LITTLE ══════════
+--
+-- A push is rendered on a LOCK SCREEN. It is read by whoever is standing near
+-- the coach's phone: a partner, a colleague, the next client on the gym floor.
+-- That is the audience this message is actually written for, and it decides
+-- every word of it.
+--
+-- The rule is the one src/lib/injuryDocView.ts arrives at for a stored medical
+-- report — the promise the database makes must not be broken by the convenience
+-- at the other end. Part 45 closed coach access to progress photos at BOTH
+-- layers because "a progress photo is typically taken in underwear, alone, in a
+-- bathroom"; part 47 reopened it one photo at a time, to one named person, with
+-- the grant revocable and re-checked against a live coaching link on every
+-- read; and photoShare.ts mints coach URLs with a five-minute signature so that
+-- taking a photo back actually takes it back. A notification carrying the image
+-- itself, or a thumbnail, or a storage path, would hand a copy of that photo to
+-- the notification service, to the lock screen and to the phone's own
+-- notification history — none of which is reachable by a revocation, and all of
+-- which outlive the five-minute window the whole feature is built on.
+--
+-- So, said as a list, because a future edit will be tempted by each of them:
+--
+--   NO IMAGE and NO THUMBNAIL. Nothing that renders as a picture.
+--   NO STORAGE PATH and NO PHOTO ID. Not a URL, not an object name, not the
+--     primary key — nothing another request could be built out of.
+--   NOTHING ABOUT THE BODY. Not the weight or the body-fat percentage that
+--     live on the same `progress_photos` row, not the pose, not a date the
+--     photo was TAKEN, and not a comparison with anything. The screen refuses
+--     to say anything about the body in the picture (client-photos.tsx, failure
+--     3) and a notification is not the place that rule gets relaxed.
+--   NO COUNT of how many they have ever sent. That is a shape of somebody's
+--     habits and it is nobody's business on a lock screen.
+--
+-- What is left is the whole of the message: a photo exists, and who from. The
+-- name is theirs to give in the same sense parts 202, 470 and 471 use — the
+-- coach can already read it through `profiles_trainer_r_clients` — and without
+-- it the notification opens a screen the coach then has to guess at.
+--
+-- ── Why the coach and not the client ─────────────────────────────────────
+--
+-- Part 160's test: the recipient must be able to act, AND have no other way to
+-- learn. The coach passes both. The client fails the second half completely —
+-- they are the one who pressed send.
+--
+-- ── One message for a handful of photos ──────────────────────────────────
+--
+-- Sending three photos is one act and writes three grant rows. Three pushes for
+-- one act is the nagging every notification in this product refuses, so a grant
+-- stays silent when the same client already granted this coach something in the
+-- previous hour.
+--
+-- The guard is written as "is there an EARLIER grant", not "is there another
+-- one", and the difference is not cosmetic: an AFTER ROW trigger fires once
+-- every row of the statement is in, so on a three-photo send all three rows can
+-- see the other two and "is there another" would silence every one of them.
+-- Ordering on `(shared_at, photo_id)` makes exactly one win. See the trigger.
+--
+-- The window is an hour rather than a minute deliberately — somebody sending
+-- four photos one at a time over ten minutes has done one thing, and being told
+-- about it once is what they would expect. The cost is stated: a genuinely
+-- separate photo sent forty minutes later is silent, and the coach finds it
+-- when they open the screen the first message sent them to.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create or replace function public.progress_photo_share_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_name text;
+begin
+  -- This fires inside the transaction of a client pressing Send. An exception
+  -- here rolls that back, and they would tap and watch nothing happen — so
+  -- every reachable failure is guarded rather than raised.
+  --
+  -- `progress_photo_shares.coach_id` is `not null references profiles(id)` and
+  -- `notifications.user_id` requires exactly that, so the recipient cannot be
+  -- missing. It is not wrapped in `exception when others then null` either,
+  -- for part 158's reason: that swallows a real defect silently and forever.
+
+  -- One act, one message.
+  --
+  -- The test is "is there an EARLIER grant to this coach in the last hour",
+  -- not "is there another one" — and the difference is the whole correctness of
+  -- this guard. An AFTER ROW trigger fires once every row of the statement has
+  -- been inserted, so on a three-photo send all three rows can see the other
+  -- two: "is there another" would be true for every one of them and the coach
+  -- would be told nothing at all.
+  --
+  -- Ordering on `(shared_at, photo_id)` is what makes exactly one win. Every
+  -- row of one statement carries the same `shared_at` — it defaults to now(),
+  -- which is the transaction's timestamp — so the tie breaks on the photo id,
+  -- which is unique. A photo sent forty minutes later has a strictly later
+  -- `shared_at` and is suppressed by the row before it, which is the intended
+  -- behaviour rather than a side effect: the first message already sent the
+  -- coach to the screen that lists everything.
+  if exists (
+    select 1 from public.progress_photo_shares s
+     where s.coach_id  = new.coach_id
+       and s.client_id = new.client_id
+       and s.photo_id <> new.photo_id
+       and s.shared_at > now() - interval '1 hour'
+       and (s.shared_at, s.photo_id) < (new.shared_at, new.photo_id)
+  ) then
+    return null;
+  end if;
+
+  select nullif(btrim(coalesce(p.full_name, '')), '')
+    into v_name
+    from public.profiles p
+   where p.id = new.client_id;
+
+  insert into public.notifications (user_id, title, body, icon, route)
+  values (
+    new.coach_id,
+    'A client has sent you a progress photo',
+    left(
+      -- A blank or missing name falls back to "A client" and never to an empty
+      -- string, which would render a sentence starting with a space.
+      coalesce(v_name, 'A client')
+      || ' has shared a progress photo with you.'
+      -- Said out loud, because the coach should know it and because the person
+      -- standing next to them reading this should know it too.
+      || ' The photo itself is not in this message and is not on your lock screen —'
+      || ' it opens on their Progress Photos page and nowhere else.'
+      -- The one thing a coach has to understand about looking at these, and the
+      -- reason to look today rather than on Friday.
+      || ' They can take it back whenever they like, and it goes from your app the moment they do.',
+      500),
+    'heart',
+    -- The parameter is the point, as it is for the coach's chat thread and
+    -- their client's intake: client-photos.tsx reads `clientId` when it is given
+    -- one and falls back to its own picker when it is not, so a missing id turns
+    -- a notification about a named person into a list of everybody.
+    '/(trainer)/client-photos?clientId=' || new.client_id::text
+  );
+
+  return null;
+end $fn$;
+
+comment on function public.progress_photo_share_notify() is
+  'Tells the COACH that a named client has shared a progress photo. Carries NO image, no thumbnail, no storage path, no photo id, no date the photo was taken and nothing about the body — a push renders on a lock screen, and part 45''s reason for closing coach access in the first place applies there most of all. One message per hour per client, so a batch of photos is one act.';
+
+drop trigger if exists progress_photo_shares_notify on public.progress_photo_shares;
+create trigger progress_photo_shares_notify
+  after insert on public.progress_photo_shares
+  for each row execute function public.progress_photo_share_notify();
+
+-- Revoked from public, anon AND authenticated. Postgres checks EXECUTE when a
+-- trigger is CREATED and not when it fires (parts 51, 141, 158, 202), so a
+-- trigger function needs no grant to anybody; Postgres grants EXECUTE to PUBLIC
+-- on every new function and `anon` resolves through that grant, so both are
+-- named.
+revoke all on function public.progress_photo_share_notify() from public;
+revoke all on function public.progress_photo_share_notify() from anon;
+revoke all on function public.progress_photo_share_notify() from authenticated;
+
+-- ▶ the-clients-who-bring-a-coach-clients.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The clients who bring a coach clients, and the coach who could not see them.
+--
+-- Part 128 gave referrals a referrer. It gave the REFERRER two functions to read
+-- their own side — `my_referrals()` and `my_referral_summary()`, both keyed on
+-- `r.referrer_id = auth.uid()` — and it gave nobody else anything. The base
+-- table carries one select policy, from 02-domain-schema.sql:
+--
+--     referrals_self   select   referred_user_id = auth.uid()
+--
+-- So a coach reading `referrals` directly gets ZERO ROWS AND NO ERROR, which is
+-- the failure mode part 165 spends a page on: RLS filters, it does not refuse.
+-- A member who has personally brought four people into a coach's book is, to
+-- that coach's app, indistinguishable from one who has brought nobody.
+--
+-- That is the one fact a coach would act on. Referral is how a small coaching
+-- business actually grows, the people doing it are on the coach's own roster,
+-- and thanking them is free — but only if the coach knows who they are.
+--
+-- ── What this returns, and what it deliberately does not ──────────────────
+--
+-- COUNTS, and the coach's own client's name. Nothing else.
+--
+--   · No name, no first name, no id and no date for the people who were
+--     REFERRED. They are somebody else's referral, they may be nobody's client,
+--     and they never agreed to be listed to a coach they have not met.
+--     `my_referrals()` shows a first name to the person whose code was used —
+--     that is a relationship those two have — and this is not that person.
+--   · No money. Not a credit, not a discount, not a projected value, not
+--     "worth". REWARD_NOTE in src/lib/referralCredit.ts is the rule and it is
+--     unchanged by this file: what a referral is worth is a commercial decision
+--     belonging to each gym and each coach, in their own currency, and nothing
+--     in this product has been told it. A schema that returned an amount would
+--     be committing somebody else's business to a cost they never agreed.
+--
+-- ── Joined is not converted, and both are returned ────────────────────────
+--
+-- The same distinction part 128 draws and for the same reason: a signup, a
+-- first session and a first payment are three different promises, and the one
+-- this database can keep is the middle one. `converted` is derived from
+-- `workouts` at read time rather than stored, exactly as `my_referral_summary`
+-- derives it — a stored copy of a fact `workouts` already holds can only
+-- disagree with it, and the trigger that would maintain it would sit on the
+-- hottest write path in the product.
+--
+-- Both counts are returned on every row so that no caller can infer one from
+-- the other. A coach shown "4 brought in" learns nothing about whether any of
+-- them stayed, and a coach shown only conversions cannot see who is trying.
+--
+-- ── Scope: the caller's own clients, through the existing helper ──────────
+--
+-- `is_my_client(uuid)` (02-domain-schema.sql) is `clients.trainer_id =
+-- auth.uid()`, which is the same test every `*_coach_read` policy in this
+-- schema uses. Not a new definition of "my client": a second one is how two
+-- surfaces come to disagree about who a coach coaches.
+--
+-- SECURITY DEFINER because the base table's only policy is the referred user's,
+-- and the alternative — a `referrals_coach_r` policy on the table — would grant
+-- a coach the ROW, which carries `referred_user_id` and `code`. RLS chooses
+-- rows and never columns (115-the-face-that-goes-with-the-name says this at
+-- length), so "the coach may see the counts and not the people" is not a
+-- sentence a policy can say. Only a select list can say it, and this is that
+-- select list.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create or replace function public.coach_referrals()
+returns table (referrer_id uuid, referrer_name text, joined int, converted int)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select r.referrer_id,
+         -- A first name, like `my_referrals()`. The coach already holds this
+         -- person's full name on their own roster and the app prefers that;
+         -- this is the fallback, and it is the smaller of the two on purpose.
+         coalesce(nullif(btrim(split_part(btrim(p.full_name), ' ', 1)), ''), 'A client') as referrer_name,
+         count(*)::int as joined,
+         count(*) filter (
+           where exists (select 1 from workouts w where w.user_id = r.referred_user_id)
+         )::int as converted
+    from referrals r
+    left join profiles p on p.id = r.referrer_id
+   where r.referrer_id is not null
+     and is_my_client(r.referrer_id)
+   group by r.referrer_id, p.full_name
+   -- Most brought in first, then by name so two clients on the same count hold
+   -- a stable order between reads. Without the tie-break the list reshuffles
+   -- people who have done nothing, which reads on a screen as movement.
+   order by count(*) desc, 2 asc
+   -- The same ceiling `my_referrals()` takes. A coach with more than 200 clients
+   -- who have each referred somebody is not a case this product has, and the
+   -- app treats a read that came back at its cap as a prefix rather than a
+   -- total — see src/lib/rowCap.ts.
+   limit 200;
+$fn$;
+
+revoke execute on function public.coach_referrals() from public;
+revoke execute on function public.coach_referrals() from anon;
+grant execute on function public.coach_referrals() to authenticated;
+
+comment on function public.coach_referrals() is
+  'Which of the caller''s own clients have brought people in, as counts only. Returns no identifying detail about the people who were referred, and no monetary value of any kind: what a referral is worth is the gym''s or the coach''s decision and this database has never been told it.';

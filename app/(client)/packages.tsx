@@ -33,6 +33,11 @@ import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/the
 import { normaliseCode, checkoutCodeBlocker, type PromoTarget } from '../../src/lib/packagePromo';
 import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, openPurchasePortal, portalPurchase, type Purchase, type TrainerPackage } from '../../src/lib/connect';
 import { packBalance, type PackPurchase } from '../../src/lib/packDraw';
+// What a validity window means on the client's own side of the sale: the day it
+// closes, and — where it closed with credits on it — how many they paid for and
+// did not take. Never a silent zero. See src/lib/packExpiry.ts.
+import { expiryLine } from '../../src/lib/packExpiry';
+import { isoToday } from '../../src/lib/dayPlan';
 import { useAuth } from '../../src/ui/auth';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
 import {
@@ -191,7 +196,14 @@ export default function ClientPackages() {
   // `balance.lines` is oldest first, the order redeem_pack_session spends them
   // in, so the first one with anything left is the one the next booking draws
   // from. null when nothing is left to draw.
-  const nextPackId = balance.lines.find((l) => !l.exhausted)?.id ?? null;
+  // A pack whose validity window has closed can no longer be drawn on, whatever
+  // its balance says — part 612 reduces `sessions_total` so that every draw site
+  // in the database stops at it — so it is not the pack anything comes off next.
+  const nextPackId = balance.lines.find((l) => !l.exhausted && !l.expired && l.left > 0)?.id ?? null;
+  // Fixed for the render. Every expiry sentence below is about a calendar day,
+  // and a bound recomputed per row would let two lines on the same screen
+  // disagree about what today is across a midnight.
+  const todayKey = isoToday(new Date());
   // Subscriptions the client is actually on the hook for. A cancelled one from
   // last year is history, not a thing they are paying.
   const liveSubs = (subs ?? []).filter((s) => isLive(s.status));
@@ -313,8 +325,14 @@ export default function ClientPackages() {
             {balance.lines.length > 0 && remaining != null ? (
               <Hero label="Sessions Remaining" figure={fig(remaining)}
                 note={balance.live > 0
-                  ? `Across ${balance.live} active pack${balance.live === 1 ? '' : 's'}${balance.exhausted ? ` · ${balance.exhausted} used up` : ''}`
-                  : `Every pack you have bought is used up`} />
+                  ? `Across ${balance.live} active pack${balance.live === 1 ? '' : 's'}${balance.exhausted ? ` · ${balance.exhausted} used up` : ''}${balance.stranded ? ` · ${balance.stranded} ran out of time` : ''}`
+                  // "Used up" is a claim that they had the sessions, and it is
+                  // false of a pack that ran out of time with credits on it.
+                  // The two are the same zero and opposite sentences about
+                  // somebody's money — see src/lib/packExpiry.ts.
+                  : balance.stranded
+                    ? `${balance.stranded} session${balance.stranded === 1 ? '' : 's'} you paid for ran out of time before ${balance.stranded === 1 ? 'it was' : 'they were'} used`
+                    : `Every pack you have bought is used up`} />
             ) : null}
 
             {/* Their next booking is not covered by anything they have paid
@@ -503,8 +521,28 @@ export default function ClientPackages() {
                             {line.named ? (
                               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line.sessions_total}-session pack</Text>
                             ) : null}
-                            <Meter label={line.exhausted ? `None left of ${line.sessions_total}` : `${line.left} of ${line.sessions_total} left`}
+                            <Meter label={line.expired
+                              ? (line.sessionsExpired > 0
+                                // Never "none left of ten". They had them and
+                                // the window closed on them, which is a
+                                // different thing to be told about your own
+                                // money and the start of a conversation with
+                                // the coach rather than the end of one.
+                                ? `${line.sessionsExpired} of ${line.sessions_total} ran out of time`
+                                : `All ${line.sessions_total} used before it ran out`)
+                              : line.exhausted ? `None left of ${line.sessions_total}` : `${line.left} of ${line.sessions_total} left`}
                               val={line.left} target={line.sessions_total} unit="" />
+                            {/* The date, because "ran out of time" without one
+                                is a thing that happened to them at no
+                                particular moment. Null for the packs with no
+                                window, which is every pack sold before part
+                                612 — so nothing is added to a screen this does
+                                not concern. */}
+                            {expiryLine({ expiresOn: line.expiresOn, expiredAt: line.expiredAt, sessionsExpired: line.sessionsExpired }, line.left, todayKey) ? (
+                              <Text style={{ ...ty.caption, color: line.expired && line.sessionsExpired > 0 ? t.ink2 : t.ink3, marginTop: 4 }}>
+                                {expiryLine({ expiresOn: line.expiresOn, expiredAt: line.expiredAt, sessionsExpired: line.sessionsExpired }, line.left, todayKey)}
+                              </Text>
+                            ) : null}
                           </>
                         ) : (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Active since {new Date(r.created_at).toLocaleDateString()}</Text>

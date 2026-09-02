@@ -5,7 +5,7 @@
 // arithmetic and pure interpretation — no supabase, no react-native — so it can
 // be run under `npm test`. The reads and the RPC calls stay in connect.ts.
 //
-// ── The two things that go wrong with a pack, and are defended here ────────
+// ── The three things that go wrong with a pack, and are defended here ──────
 //
 // 1. A BALANCE THAT WAS NEVER READ IS NOT A BALANCE OF ZERO.
 //
@@ -29,17 +29,60 @@
 //    An empty response, two responses, or an outcome word this build has never
 //    heard of are all 'unknown' — which the caller reports as "we could not
 //    tell", never as "drawn" and never as "you have none left".
+//
+// 3. A PACK THAT RAN OUT OF TIME IS NOT A PACK SOMEBODY USED UP.
+//
+//    Packs can carry a validity from supabase/parts/612, and the nightly pass
+//    that closes one reduces `sessions_total` to `sessions_used` — which is how
+//    every draw site in the database stops at an expired pack without any of
+//    them being rewritten, and which means an expired pack and a fully used one
+//    arrive here as the same two numbers. They are opposite sentences: one is
+//    somebody who got what they paid for and one is somebody who did not. So
+//    `expired_at` and `sessions_expired` are carried on the row, `exhausted` is
+//    false for an expired pack however little is left, and `stranded` states
+//    what was paid for and can no longer be booked rather than quietly
+//    dropping it. src/lib/packExpiry.ts holds the words.
 
 /** A purchase row as the client's own screens read it. The shape `Purchase` in
  *  connect.ts has, narrowed to what a balance depends on. */
 export interface PackPurchase {
   id: string;
   package_id: string | null;
-  /** null for a membership — a thing with no credits, not a thing with none left. */
+  /**
+   * How many credits this pack can EVER be drawn on. Null for a membership — a
+   * thing with no credits, not a thing with none left.
+   *
+   * Reduced to `sessions_used` by `run_pack_expiry()` when a validity window
+   * closes (supabase/parts/612), which is how every draw site in the database
+   * stops at an expired pack without one of them being rewritten. Add
+   * `sessions_expired` back on to get what the client originally bought — which
+   * is what `packLabel` is handed below, so a ten-pack does not become a
+   * seven-pack on the screen of the person who bought a ten.
+   */
   sessions_total: number | null;
   sessions_used: number;
   status: string;
   created_at: string;
+  /**
+   * The three expiry columns part 612 added, all OPTIONAL.
+   *
+   * Optional and not required, deliberately: every existing caller of this
+   * shape — and there are several, in two apps — predates them, and a required
+   * field here would be a compile error in files that have nothing to do with
+   * expiry. Absent means the same thing as null, which is a pack with no
+   * window: every pack sold before part 612 and every pack of a package whose
+   * coach set no validity.
+   */
+  expires_on?: string | null;
+  /** When `run_pack_expiry()` closed the window. Absent or null means it has
+   *  not been closed — either there is no window, or its last day has not
+   *  passed, or the nightly pass has not run since it did. */
+  expired_at?: string | null;
+  /** Credits the window closed on unspent. This is the figure that makes an
+   *  expiry a conversation rather than a silent zero, so it is carried all the
+   *  way to the screen rather than inferred from a total that has already been
+   *  reduced. */
+  sessions_expired?: number | null;
 }
 
 /** One pack, as a line on the client's screen. */
@@ -52,12 +95,35 @@ export interface PackLine {
    *  The screen says "10-session pack" plainly and a real name in quotes. */
   named: boolean;
   left: number;
-  /** How big the pack is. Named for the column it comes from rather than
+  /** How big the pack is, as it was SOLD — `sessions_total` plus anything a
+   *  closed window took off it. Named for the column it comes from rather than
    *  `total`, so `check:numbers` recognises it as the figure it already knows
    *  cannot pass a thousand — a session pack is 5, 10 or 20, never 1,200. */
   sessions_total: number;
-  /** Paid for, and nothing left on it. The one line the client has to act on. */
+  /**
+   * Paid for, used, and nothing left on it. The one line the client has to act
+   * on.
+   *
+   * FALSE for a pack whose window closed, however little is left on it. Those
+   * two are the same number and completely different sentences: one is somebody
+   * who got what they paid for, the other is somebody who did not, and "you
+   * have used everything on this pack" said to the second is the app taking the
+   * coach's side in a conversation it should be starting.
+   */
   exhausted: boolean;
+  /** The window closed on this pack. See `expiryLine` in src/lib/packExpiry.ts
+   *  for what a screen says about it. */
+  expired: boolean;
+  /** When it closed, straight off the row, so a caller can hand a real
+   *  `PackExpiry` to src/lib/packExpiry.ts rather than reconstructing one out of
+   *  the boolean above. Null on every pack that has not been closed. */
+  expiredAt: string | null;
+  /** Credits the window closed on unspent. Zero on a pack that ran out of time
+   *  having been fully used, and zero on every pack that has no window. */
+  sessionsExpired: number;
+  /** The last day this pack's credits can be used, or null for a pack with no
+   *  window — which is every pack sold before supabase/parts/612. */
+  expiresOn: string | null;
   created_at: string;
 }
 
@@ -73,8 +139,24 @@ export interface PackBalance {
   left: number | null;
   /** Packs with something left on them. */
   live: number;
-  /** Packs paid for and used up. */
+  /** Packs paid for and used up. Does NOT include packs whose window closed —
+   *  see `PackLine.exhausted`. */
   exhausted: number;
+  /** Packs whose validity window has closed, whether or not anything was left
+   *  on them. */
+  expired: number;
+  /**
+   * Sessions that were paid for and can no longer be booked, across every
+   * expired pack.
+   *
+   * The figure this whole feature exists to state. It is deliberately NOT part
+   * of `left`, which is what a booking can still draw on, and it is deliberately
+   * not dropped either: somebody paid for these, and a screen that simply
+   * stopped counting them would be the silent zero part 612 was written to
+   * avoid. `null` for the same reason `left` is — an unread history is not a
+   * history with nothing stranded in it.
+   */
+  stranded: number | null;
 }
 
 /**
@@ -117,7 +199,7 @@ export function packBalance(
   rows: readonly PackPurchase[] | null | undefined,
   names?: ReadonlyMap<string, string | null> | null,
 ): PackBalance {
-  if (rows == null) return { lines: [], left: null, live: 0, exhausted: 0 };
+  if (rows == null) return { lines: [], left: null, live: 0, exhausted: 0, expired: 0, stranded: null };
 
   const lines: PackLine[] = [];
   for (const r of rows) {
@@ -128,8 +210,27 @@ export function packBalance(
     // already be in this table on somebody's project. A negative balance is not
     // a sentence to show a person about their own money.
     const left = Math.max(0, Math.min(total, total - used));
-    const { label, named } = packLabel(total, r.package_id ? names?.get(r.package_id) : null);
-    lines.push({ id: r.id, label, named, left, sessions_total: total, exhausted: left === 0, created_at: r.created_at });
+    // A closed window, and what it took. `expired_at` is the fact — the pass in
+    // part 612 writes it and nothing else does — rather than a date comparison
+    // run here, because until that pass has run the credits are genuinely still
+    // spendable and this app must not say otherwise.
+    const expired = !!r.expired_at;
+    const lostRaw = Number(r.sessions_expired ?? 0);
+    const sessionsExpired = Number.isFinite(lostRaw) && lostRaw > 0 ? Math.trunc(lostRaw) : 0;
+    // What they BOUGHT, which is what the pack is called. `sessions_total` has
+    // already had the stranded credits taken off it by the time an expired pack
+    // is read back, and labelling a ten-pack "7-session pack" would rename a
+    // thing on the screen of the person who bought it.
+    const sold = total + sessionsExpired;
+    const { label, named } = packLabel(sold, r.package_id ? names?.get(r.package_id) : null);
+    lines.push({
+      id: r.id, label, named, left, sessions_total: sold,
+      exhausted: left === 0 && !expired,
+      expired, sessionsExpired,
+      expiredAt: r.expired_at ?? null,
+      expiresOn: r.expires_on ?? null,
+      created_at: r.created_at,
+    });
   }
 
   // Oldest first. A row with an unparseable date sorts last rather than being
@@ -146,8 +247,13 @@ export function packBalance(
   return {
     lines,
     left: lines.reduce((a, l) => a + l.left, 0),
-    live: lines.filter((l) => !l.exhausted).length,
+    // A pack whose window has closed is not live, whatever `left` says about
+    // it — nothing can be booked against it, which is the only thing "live"
+    // means to somebody looking at their own packs.
+    live: lines.filter((l) => !l.exhausted && !l.expired && l.left > 0).length,
     exhausted: lines.filter((l) => l.exhausted).length,
+    expired: lines.filter((l) => l.expired).length,
+    stranded: lines.reduce((a, l) => a + l.sessionsExpired, 0),
   };
 }
 

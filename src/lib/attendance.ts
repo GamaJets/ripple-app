@@ -8,6 +8,12 @@
 // floor and leaves is invisible". Both are about the member. Only the gym could
 // see them.
 //
+// Both ends are read from here now. `fetchMyAttendance` is the member's own
+// history (app/(client)/attendance.tsx) and `fetchClientAttendance` is their
+// coach's read of the same record (app/(trainer)/client-attendance.tsx) — the
+// same rules, the same refusals, and one extra caveat that belongs only to the
+// coach's side, set out above that function.
+//
 // Framework-agnostic, the shape src/lib/memberRecord.ts and src/lib/gymVisits.ts
 // already use: the Supabase client arrives as an argument, so every rule below
 // is testable without a database.
@@ -440,6 +446,22 @@ export interface AttendanceRecord {
  */
 export async function fetchMyAttendance(sb: Queryable, uid: string): Promise<Read<AttendanceRecord>> {
   if (!uid) return { ok: false, reason: 'Not signed in.' };
+  return readAttendance(sb, uid);
+}
+
+/**
+ * The same three queries, for whoever's record is being read.
+ *
+ * One body rather than two, because the honesty of this module is in the
+ * BRANCHES — a failed class read that does not fail the call, a class id with
+ * no row that lands on `classesComplete: false` — and two copies of that is two
+ * places for one of those branches to be dropped. Which rows come back is
+ * decided by RLS from the caller's own session, never by an argument here: the
+ * member arm is `class_bookings_self_r` / `gym_visits_own_r`, the coach's is
+ * `class_bookings_staff_r` / `gym_visits_staff_rw` (parts 165 and 32), and this
+ * function is the same three selects under both.
+ */
+async function readAttendance(sb: Queryable, uid: string): Promise<Read<AttendanceRecord>> {
   try {
     const [bookingRes, visitRes] = await Promise.all([
       sb.from('class_bookings').select(BOOKING_COLUMNS)
@@ -514,3 +536,73 @@ export async function fetchMyAttendance(sb: Queryable, uid: string): Promise<Rea
     return { ok: false, reason: (e as Error).message || 'The read failed.' };
   }
 }
+
+/* ── the coach's side of the same record ──────────────────────────────────── */
+
+/**
+ * One client's attendance, read by their coach.
+ *
+ * The rules above do not change because the reader did. Rule 1 is the reason
+ * this exists: the header names the person "having the retention conversation"
+ * as the one an invented absence gets handed to, and that person is the coach.
+ * A coach reading `unmarked` as "missed" rings a client to ask why they have
+ * stopped coming, about a class they were at.
+ *
+ * ── What the coach's read is scoped by, and why it is not the roster ───────
+ *
+ * Nothing here filters by coaching relationship, because RLS already decides
+ * this and the app must not appear to decide it a second time. A coach reaches
+ * these rows as GYM STAFF: `class_bookings_staff_r` (part 165) admits bookings
+ * on classes whose `gym_classes.tenant_id = my_tenant()`, and
+ * `gym_visits_staff_rw` (part 32) admits visits with the same tenant. Both are
+ * the door-log line part 165 states in full — working the door is staff work.
+ *
+ * The consequence is the one thing a screen over this must carry, and it is why
+ * `staffScopeNote` below exists rather than being prose in a component:
+ *
+ *   · A coach with NO gym (`my_tenant()` null — an independent coach, which
+ *     this product has plenty of) matches neither policy and gets ZERO ROWS AND
+ *     NO ERROR. RLS filters; it does not refuse. That empty result is
+ *     byte-identical to a client who has genuinely never been recorded.
+ *   · A client who also trains at another gym has rows this coach cannot see,
+ *     so even a full read is this gym's record and not the client's life.
+ *
+ * `{ ok: true }` with an empty list therefore does NOT mean "they have not been
+ * in", and the only honest screen is one that says which of the two it is
+ * looking at. It cannot work that out from the rows, so it is told.
+ */
+export async function fetchClientAttendance(sb: Queryable, clientId: string): Promise<Read<AttendanceRecord>> {
+  if (!clientId) return { ok: false, reason: 'No client to read.' };
+  return readAttendance(sb, clientId);
+}
+
+/**
+ * Whether an empty coach-side read is an answer at all — and the sentence for
+ * it when it is not.
+ *
+ * `hasGym` is the coach's own tenant as their profile has it: true, false, or
+ * NULL for "we could not find out", which is `useTenant`'s 'error' and is a
+ * third state rather than a falsy second one.
+ *
+ * Returns null when an empty list is a real answer the screen may state, and a
+ * sentence otherwise. The sentence never contains a number and never contains
+ * the word "no" about the client — it is about the read, because that is the
+ * only thing that is known.
+ */
+export function staffScopeNote(hasGym: boolean | null): string | null {
+  if (hasGym === null) {
+    return 'We could not tell which gym your account belongs to, so we cannot say whether this is '
+      + 'their whole record or none of it.';
+  }
+  if (!hasGym) {
+    return 'Your account is not attached to a gym, so this app can read neither a class register nor '
+      + 'a door log for anybody. Nothing below is a record of them staying away — there is no record '
+      + 'here to read.';
+  }
+  return null;
+}
+
+/** What a coach is looking at even on a whole read, said once. A client trains
+ *  where they like, and one gym's record is one gym's record. */
+export const STAFF_RECORD_NOTE =
+  'This is your gym’s own record of them. Classes and visits at anywhere else are not in it.';

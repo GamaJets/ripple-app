@@ -14,6 +14,35 @@
 // activity could not be read is not a quiet client, a pack that could not be
 // read is not an empty pack, and a client who has never logged a weight has not
 // failed to make progress. Each of those is a dash with the reason beside it.
+//
+// ── How much this screen reads, and how ────────────────────────────────────
+//
+// Every read below used to be a bare `.in('user_id', ids)` with no date bound
+// and no `.limit()`, which fails in three ways at once and all of them quietly.
+//
+//   · PostgREST answers an unbounded request with 1000 rows and says nothing
+//     (src/lib/rowCap.ts). A coach with forty clients crosses that in a month
+//     of workouts, and the rows that fall off the end are not spread evenly —
+//     they are whichever clients sort last. Those clients then render as "—
+//     nothing logged", which is this screen's most expensive sentence said
+//     about somebody who trained yesterday.
+//   · The id list travels in the query string. A uuid costs 39 bytes inside an
+//     `in.(…)`, so a big book is a query a proxy refuses with a 414 that
+//     arrives nowhere near the code that caused it.
+//   · A coach's whole client history is not a bounded set. It grows for as long
+//     as they coach, and the screen was dragging all of it into a browser to
+//     work out one date per person.
+//
+// So the id lists are chunked and paged through `readByIds`
+// (src/lib/idLookup.ts), the two reads that make up the book are paged through
+// `readAll`, and the three ACTIVITY reads are bounded to `ACTIVITY_DAYS`.
+//
+// Both of those change what an empty answer means, and the copy below says so
+// rather than leaving it to be inferred. A client with nothing in the window
+// has not "never trained"; they have not trained in the window. And every read
+// here now orders by the PRIMARY KEY rather than by a date — a total order, per
+// `readAll`'s contract — so nothing downstream may assume rows arrive newest
+// first. The two loops that did are rewritten to compare timestamps instead.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
@@ -29,8 +58,38 @@ import { unitsFor, weightText, deltaText, unitSourceNote } from '@/lib/units';
 import { COACHED_MODE_SHORT, readCoachedModeOrNull, type CoachedMode } from '@lib/types';
 import { goalLabel, sortGoals, GOAL_METRIC, type GoalTarget, type MeasuredKind } from '@lib/goalTargets';
 import { fmtDay } from '@lib/format';
+import { readByIds } from '@lib/idLookup';
+import { readAll } from '@lib/rowCap';
 
 const DAY = 86400000;
+
+/**
+ * How far back the activity reads go.
+ *
+ * Chosen against what this screen actually DECIDES, not against what a coach
+ * might one day want to scroll. `signalFor` below distinguishes three silences
+ * — a week, a fortnight, three weeks — and past that every answer it can give
+ * is the same one. Six months therefore answers every question the ranking
+ * asks, several times over, while turning an unbounded read of a coach's whole
+ * history into a set whose size is a function of their book rather than of how
+ * long they have been coaching.
+ *
+ * Not smaller, because the columns beside the ranking are read by a human: a
+ * coach wants "4 months ago" to say four months ago rather than collapsing into
+ * the same dash as never. Not larger, because a hundred and fifty clients times
+ * a year of daily logs is a chunk that would start testing `PAGE_CEILING`, and
+ * a `TruncatedRead` on a roster is a working screen taken away.
+ *
+ * The scans are inside the same window on purpose, so this screen states ONE
+ * span rather than making a reader hold two. It does cost something — the
+ * weight delta is now "since their first scan in the window" rather than since
+ * their first scan ever — and every place that figure is printed says so.
+ */
+const ACTIVITY_DAYS = 180;
+
+/** The span, in the words the cells and the notes use. One phrase, so a reader
+ *  who meets it four times meets the same sentence four times. */
+const IN_WINDOW = `in the last ${ACTIVITY_DAYS} days`;
 
 /**
  * What a piece of state is when it is still null: a read in flight, or one that
@@ -42,18 +101,13 @@ const DAY = 86400000;
  */
 type Unread = 'loading' | 'failed' | null;
 
-/**
- * supabase-js resolves with `{ data: null, error }` instead of throwing, so a
- * refused query handed to Promise.allSettled comes back *fulfilled* carrying
- * null. Every "the roster is empty" bug in this codebase started there. This
- * turns a database error back into a rejection so allSettled can tell the two
- * apart.
- */
-async function ask<T>(p: PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
-  const { data, error } = await p;
-  if (error) throw error;
-  return data ?? [];
-}
+// A local `ask()` used to sit here, turning `{ data: null, error }` back into a
+// rejection: supabase-js RESOLVES on a database error, so a refused query handed
+// to Promise.allSettled comes back *fulfilled* carrying null, and every "the
+// roster is empty" bug in this codebase started there. It is gone because every
+// read below now goes through `readAll` or `readByIds`, which check `error` on
+// every page and throw for the same reason — a read that fails half way through
+// must not hand back the pages that did arrive as though they were the set.
 
 /** One settled read, as a line for the banner. Null when it came back fine. */
 function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
@@ -85,17 +139,21 @@ interface Row {
   since: string | null;
 
   /** Most recent workout or check-in, in ms. Null with activityKnown means the
-   *  client genuinely has nothing logged. */
+   *  client logged nothing INSIDE `ACTIVITY_DAYS` — not that they never have.
+   *  Every cell and label built from it says which. */
   lastMs: number | null;
   activityKnown: boolean;
 
-  /** 0-100, converted from the 1-5 self-rating. See adherencePct(). */
+  /** 0-100, converted from the 1-5 self-rating on their latest check-in inside
+   *  the window. See adherencePct(). */
   adherence: number | null;
   adherenceKnown: boolean;
 
   weightKg: number | null;
   weightAtMs: number | null;
-  /** Change between the first and last InBody scan. Needs two of them. */
+  /** Change between the first and last InBody scan INSIDE THE WINDOW. Needs two
+   *  of them, and it is not "since they started" — a client scanned before the
+   *  window opened has an earlier first reading that this figure does not see. */
   scanDelta: number | null;
   scanCount: number;
   weightKnown: boolean;
@@ -158,7 +216,12 @@ function signalFor(r: Row): Signal {
   if (!r.packsKnown) missing.push('packs');
 
   if (r.activityKnown && r.lastMs == null) {
-    return { rank: 3, label: 'Nothing logged yet', note: 'never trained or checked in' };
+    // "Nothing logged yet · never trained or checked in" is what this said, and
+    // it was true only while the read went back to the beginning of time. It no
+    // longer does, so the claim is narrowed to the one the read can support: it
+    // is the same rank either way, because a client silent for six months and a
+    // client who has never started are the same morning's phone call.
+    return { rank: 3, label: `Silent ${ACTIVITY_DAYS} days`, note: `nothing logged ${IN_WINDOW}` };
   }
   if (r.activityKnown && r.lastMs != null) {
     const d = daysSince(r.lastMs);
@@ -231,15 +294,29 @@ export default function CoachRoster() {
     // trainer. link_coaching() writes both, but they drift — a client whose
     // relationship was ended still carries trainer_id, and a client linked
     // before that function existed has only one of the two.
+    //
+    // Paged, and that is not belt-and-braces on a small read: these two are what
+    // `ids` is built from, so a thousand-row cut here does not shorten one
+    // column — it removes people from the book entirely, and the screen would
+    // then be complete and correct about a roster that is missing its tail.
+    // Ordered by the primary key because `readAll` requires an order that cannot
+    // tie, and neither table has another one that qualifies.
     const [relRes, cliRes] = await Promise.allSettled([
-      ask<{ client_id: string; mode: string | null; status: string | null; created_at: string | null }>(
-        supabase
+      readAll<{ client_id: string; mode: string | null; status: string | null; created_at: string | null }>(
+        (from, to) => supabase
           .from('coaching_relationships')
           .select('client_id, mode, status, created_at')
-          .eq('coach_id', coachId),
+          .eq('coach_id', coachId)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'your coaching links',
       ),
-      ask<{ id: string; goal: string | null; mode: string | null }>(
-        supabase.from('clients').select('id, goal, mode').eq('trainer_id', coachId),
+      readAll<{ id: string; goal: string | null; mode: string | null }>(
+        (from, to) => supabase.from('clients').select('id, goal, mode')
+          .eq('trainer_id', coachId)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'your client records',
       ),
     ]);
 
@@ -288,45 +365,84 @@ export default function CoachRoster() {
     // one by one: a refused check_ins read must not empty the workouts column,
     // and a refused client_purchases read must never reach the screen as a
     // sessions count of any kind.
+    //
+    // Every one is chunked and paged. `readByIds` splits `ids` into `.in()`-sized
+    // batches and finishes each one with `readAll`, so neither the row cap nor
+    // the length of the query string can cut a read short without saying so.
+    //
+    // The three ACTIVITY reads carry a date bound as well. The other three do
+    // not, and the difference is deliberate: a goal set eighteen months ago is
+    // still what somebody is working toward, and a pack bought two years ago may
+    // still have sessions owed against it, so bounding either would hide a fact
+    // that is still true. Workouts, check-ins and scans are read to answer "when
+    // did this person last do anything", which `ACTIVITY_DAYS` answers in full.
+    const now = Date.now();
+    const sinceIso = new Date(now - ACTIVITY_DAYS * DAY).toISOString();
+    // `scans.taken_at` is a DATE, not a timestamptz. Compared against a plain
+    // yyyy-mm-dd so the bound is the same day whichever timezone the browser is
+    // in, rather than a timestamp Postgres has to coerce.
+    const sinceDay = sinceIso.slice(0, 10);
+
     const [nameRes, woRes, ciRes, scRes, gtRes, cpRes] = await Promise.allSettled([
-      ask<{ id: string; full_name: string | null }>(
-        supabase.from('profiles').select('id, full_name').in('id', ids),
+      readByIds<{ id: string; full_name: string | null }>(
+        ids,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'your clients’ names',
       ),
-      ask<{ user_id: string; performed_at: string }>(
-        supabase.from('workouts').select('user_id, performed_at').in('user_id', ids)
-          .order('performed_at', { ascending: false }),
+      readByIds<{ user_id: string; performed_at: string }>(
+        ids,
+        (chunk, from, to) => supabase.from('workouts').select('user_id, performed_at')
+          .in('user_id', chunk).gte('performed_at', sinceIso)
+          // A TOTAL order, per `readAll`'s contract. `performed_at` was the sole
+          // key here and it ties freely — two sessions logged in the same second
+          // are two rows Postgres may return in either order, and each page is a
+          // separate request that may be planned differently. Paging over that
+          // drops rows silently. The primary key cannot tie.
+          .order('id', { ascending: true }).range(from, to),
+        `the workouts your clients logged ${IN_WINDOW}`,
       ),
-      ask<{ user_id: string; at: string; adherence: number | null; weight_kg: number | null }>(
-        supabase.from('check_ins').select('user_id, at, adherence, weight_kg').in('user_id', ids)
-          .order('at', { ascending: false }),
+      readByIds<{ user_id: string; at: string; adherence: number | null; weight_kg: number | null }>(
+        ids,
+        (chunk, from, to) => supabase.from('check_ins').select('user_id, at, adherence, weight_kg')
+          .in('user_id', chunk).gte('at', sinceIso)
+          .order('id', { ascending: true }).range(from, to),
+        `the check-ins your clients wrote ${IN_WINDOW}`,
       ),
-      ask<{ client_id: string; taken_at: string; weight_kg: number | null }>(
-        supabase.from('scans').select('client_id, taken_at, weight_kg').in('client_id', ids)
-          .order('taken_at', { ascending: true }),
+      readByIds<{ client_id: string; taken_at: string; weight_kg: number | null }>(
+        ids,
+        (chunk, from, to) => supabase.from('scans').select('client_id, taken_at, weight_kg')
+          .in('client_id', chunk).gte('taken_at', sinceDay)
+          .order('id', { ascending: true }).range(from, to),
+        `the scans your clients had taken ${IN_WINDOW}`,
       ),
       // What each client is working toward. RLS (goal_targets_coach_read) already
       // limits this to clients this coach actually coaches, so the `in` is for
       // the size of the answer rather than for who may see it.
-      ask<{
+      readByIds<{
         id: string; client_id: string; kind: string; target_value: string | number | null;
         title: string | null; target_date: string | null; achieved_at: string | null; created_at: string;
       }>(
-        supabase.from('goal_targets')
+        ids,
+        (chunk, from, to) => supabase.from('goal_targets')
           .select('id, client_id, kind, target_value, title, target_date, achieved_at, created_at')
-          .in('client_id', ids),
+          .in('client_id', chunk).order('id', { ascending: true }).range(from, to),
+        'the goals your clients set',
       ),
       // Scoped to this coach as well as to these clients: a client may hold
       // packs bought from someone else, and those are not this coach's to spend
       // or to count.
-      ask<{
+      readByIds<{
         id: string; client_id: string | null; amount_cents: number | null;
         sessions_total: number | null; sessions_used: number | null;
         status: string; created_at: string | null;
       }>(
-        supabase.from('client_purchases')
+        ids,
+        (chunk, from, to) => supabase.from('client_purchases')
           .select('id, client_id, amount_cents, sessions_total, sessions_used, status, created_at')
-          .eq('trainer_id', coachId).in('client_id', ids)
-          .order('created_at', { ascending: false }),
+          .eq('trainer_id', coachId).in('client_id', chunk)
+          .order('id', { ascending: true }).range(from, to),
+        'the session packs you have sold',
       ),
     ]);
 
@@ -365,18 +481,28 @@ export default function CoachRoster() {
     }
 
     const lastCheckIn = new Map<string, number>();
-    const latestAdherence = new Map<string, number>();
+    // Each carries the time it was recorded at, and "latest" is COMPARED for.
+    //
+    // This loop used to take the first reading it saw per client, on the
+    // strength of a `.order('at', { ascending: false })` on the read. That order
+    // is gone — the read is paged now and pages need a total order, which `at`
+    // is not — so the assumption would silently become "whichever row this
+    // client's primary keys happened to sort first", and a coach would be shown
+    // a rating from March as this week's.
+    const latestAdherence = new Map<string, { pct: number; at: number }>();
     const latestCheckWeight = new Map<string, { kg: number; at: number }>();
     for (const c of checkIns ?? []) {
       const t = Date.parse(c.at);
       if (!Number.isFinite(t)) continue;
       lastCheckIn.set(c.user_id, Math.max(lastCheckIn.get(c.user_id) ?? 0, t));
-      // Rows arrive newest first, so the first numeric reading per client is the
-      // latest one.
       const pct = adherencePct(c.adherence);
-      if (pct != null && !latestAdherence.has(c.user_id)) latestAdherence.set(c.user_id, pct);
-      if (c.weight_kg != null && !latestCheckWeight.has(c.user_id)) {
-        latestCheckWeight.set(c.user_id, { kg: Number(c.weight_kg), at: t });
+      if (pct != null) {
+        const held = latestAdherence.get(c.user_id);
+        if (!held || t > held.at) latestAdherence.set(c.user_id, { pct, at: t });
+      }
+      if (c.weight_kg != null) {
+        const held = latestCheckWeight.get(c.user_id);
+        if (!held || t > held.at) latestCheckWeight.set(c.user_id, { kg: Number(c.weight_kg), at: t });
       }
     }
 
@@ -389,6 +515,12 @@ export default function CoachRoster() {
       arr.push({ kg: Number(s.weight_kg), at: t });
       scansBy.set(s.client_id, arr);
     }
+    // Sorted here rather than taken from the read. `series[0]` and the last
+    // element are used below as the FIRST and LAST readings, which is a claim
+    // about `taken_at` — and the read is now ordered by the primary key, which
+    // carries no chronology at all. Unsorted, the delta would be the difference
+    // between two arbitrary scans, printed as progress.
+    scansBy.forEach((arr) => arr.sort((a, b) => a.at - b.at));
 
     const packRows: Pack[] = (purchases ?? []).map((p) => ({
       id: p.id,
@@ -399,6 +531,11 @@ export default function CoachRoster() {
       status: p.status,
       createdAt: p.created_at,
     }));
+    // Newest first, as the read used to hand them over. The `.order('created_at')`
+    // that did it was replaced by a total order on the primary key, and the Packs
+    // table below is read top-down — a coach checking what somebody just bought
+    // should not have to sort a column to find it.
+    packRows.sort((a, b) => (Date.parse(b.createdAt ?? '') || 0) - (Date.parse(a.createdAt ?? '') || 0));
 
     // Only a paid pack with a session count is a pack of sessions. A pack still
     // pending, or one sold as a flat fee with no sessions_total, tells us
@@ -452,7 +589,7 @@ export default function CoachRoster() {
         since: rel?.created_at ?? null,
         lastMs,
         activityKnown,
-        adherence: latestAdherence.get(id) ?? null,
+        adherence: latestAdherence.get(id)?.pct ?? null,
         adherenceKnown: checkIns !== null,
         weightKg: latestWeight ? Math.round(latestWeight.kg * 10) / 10 : null,
         weightAtMs: latestWeight ? latestWeight.at : null,
@@ -475,9 +612,9 @@ export default function CoachRoster() {
     const trouble = [
       ...bookTrouble,
       failure(nameRes, 'your clients’ names'),
-      failure(woRes, 'their logged workouts'),
-      failure(ciRes, 'their check-ins'),
-      failure(scRes, 'their scans'),
+      failure(woRes, `their logged workouts ${IN_WINDOW}`),
+      failure(ciRes, `their check-ins ${IN_WINDOW}`),
+      failure(scRes, `their scans ${IN_WINDOW}`),
       failure(gtRes, 'the goals they set'),
       failure(cpRes, 'their session packs'),
     ].filter((s): s is string => s !== null);
@@ -645,7 +782,7 @@ export default function CoachRoster() {
       value: (r) => r.row.lastMs, numeric: true,
       render: (r) => {
         if (!r.row.activityKnown) return <span className="dash">— activity unreadable</span>;
-        if (r.row.lastMs == null) return <span className="dash">— nothing logged</span>;
+        if (r.row.lastMs == null) return <span className="dash">— nothing {IN_WINDOW}</span>;
         return <span title={new Date(r.row.lastMs).toLocaleString()}>{ago(r.row.lastMs)}</span>;
       },
     },
@@ -655,7 +792,7 @@ export default function CoachRoster() {
       render: (r) => {
         if (!r.row.adherenceKnown) return <span className="dash">— check-ins unreadable</span>;
         // Their own 1-5 rating, converted. Never the raw column.
-        if (r.row.adherence == null) return <span className="dash">— not rated yet</span>;
+        if (r.row.adherence == null) return <span className="dash">— none rated {IN_WINDOW}</span>;
         return `${r.row.adherence}%`;
       },
     },
@@ -666,8 +803,10 @@ export default function CoachRoster() {
         if (!r.row.weightKnown) return <span className="dash">— readings unreadable</span>;
         // No weight logged is a missing reading, not a stalled client. It is a
         // dash — never 0 kg, and never "no progress", which is a claim about
-        // the person rather than about the data.
-        if (r.row.weightKg == null) return <span className="dash">— none logged</span>;
+        // the person rather than about the data. And it is now a statement
+        // about the window rather than about their whole history: they may have
+        // been weighed before it opened.
+        if (r.row.weightKg == null) return <span className="dash">— none {IN_WINDOW}</span>;
         // Through `weightLabel` in src/lib/units.ts, the same function the phone
         // screens use, so a coach cannot read one figure here and a differently
         // rounded one in the app they had open five minutes ago. The delta is
@@ -679,11 +818,11 @@ export default function CoachRoster() {
             {weightText(r.row.weightKg, units.weightUnit)}
             {r.row.scanDelta != null ? (
               <span style={{ color: 'var(--ink3)', fontSize: 11.5, marginLeft: 6 }}>
-                {deltaText(r.row.scanDelta, units.weightUnit)} since first scan
+                {deltaText(r.row.scanDelta, units.weightUnit)} since their first scan {IN_WINDOW}
               </span>
             ) : (
               <span style={{ color: 'var(--ink3)', fontSize: 11.5, marginLeft: 6 }}>
-                {r.row.scanCount === 1 ? 'one scan only' : 'no scan to compare'}
+                {r.row.scanCount === 1 ? `one scan ${IN_WINDOW}` : `no scan ${IN_WINDOW} to compare`}
               </span>
             )}
           </span>
@@ -732,6 +871,15 @@ export default function CoachRoster() {
         by who has gone quietest, so the top of this list is the morning&rsquo;s call
         list.
       </p>
+      {/* Said once, at the top, because it governs the tiles as well as the
+          table. Workouts, check-ins and scans are read over this span and no
+          further, so an empty cell below means nothing in it — never "nothing
+          ever". Goals and packs are not bounded and are stated in full. */}
+      <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 12.5, maxWidth: 640 }}>
+        Training, check-ins and scans are read over the last {ACTIVITY_DAYS} days. A dash in
+        those columns is nothing recorded in that span, not nothing on record. Goals and
+        session packs are read in full, however old they are.
+      </p>
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {partial ? <Banner>{partial}</Banner> : null}
@@ -763,7 +911,7 @@ export default function CoachRoster() {
           text={avgAdherence == null ? null : `${avgAdherence}%`}
           note={
             ranked === null ? 'nothing read yet'
-              : avgAdherence == null ? 'nobody has rated a check-in yet'
+              : avgAdherence == null ? `nobody has rated a check-in ${IN_WINDOW}`
               : `from ${rated.length} of ${ranked.length}`
           }
         />

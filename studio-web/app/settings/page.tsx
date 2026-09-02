@@ -1,6 +1,6 @@
 'use client';
 
-// Settings — the four things about this gym that everything else is computed
+// Settings — the five things about this gym that everything else is computed
 // from, and the first screen in this console that writes any of them.
 //
 // ── Why this had to exist ──────────────────────────────────────────────────
@@ -36,6 +36,21 @@
 // guarantees one spelling. The console and the phone can disagree about
 // whitespace and case all they like; the stored value is the same either way.
 //
+// ── The fifth field, and why it took a decision ────────────────────────────
+//
+// The brand colour. `GymProfile` has always READ `tenants.brand_color` and the
+// patch could not write it, so `app/Console.tsx` themed this entire console —
+// every accent, link, button and focus ring — from a column whose only control
+// was on the owner's phone. A white-label console whose branding requires the
+// app installed is not white-label.
+//
+// Widening the patch is not a free act: `tenants` is granted at TABLE level to
+// `authenticated` with no per-column ACLs, so the patch type IS the boundary
+// between a column and a browser form. `GymProfilePatch` in src/lib/gymPolicy.ts
+// now carries, for each field it accepts, who may change it and what happens to
+// what was there before — and, beside it, the four columns deliberately left out
+// and why. That list is the decision; this screen is only the form for it.
+//
 // ── What it writes with ────────────────────────────────────────────────────
 //
 // The anon key and the signed-in owner's session, like every other screen here.
@@ -49,10 +64,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import {
-  fetchGymProfile, saveGymProfile, parseTenantCurrency,
+  fetchGymProfile, saveGymProfile, parseTenantCurrency, parseBrandColor,
   payPolicyOf, payPolicyCode, PAY_POLICY_CODES, PAY_POLICY_LABEL,
   type GymProfile, type PayPolicyCode,
 } from '@lib/gymPolicy';
+import { applyBrandColour } from '@/app/Console';
 import { parseSessionFee, parseGymName, sessionFeeFieldValue } from '@lib/gymSettings';
 import { NO_CURRENCY_NOTE } from '@/lib/currency';
 
@@ -74,13 +90,14 @@ export default function Settings() {
   const [gym, setGym] = useState<GymProfile | null>(null);
   const [readErr, setReadErr] = useState<string | null>(null);
 
-  // The four fields, as typed. Seeded from the stored row once it arrives and
+  // The five fields, as typed. Seeded from the stored row once it arrives and
   // not touched again — a re-read after a save reseeds them deliberately, so
   // what is on screen is what is in the database.
   const [name, setName] = useState('');
   const [currency, setCurrency] = useState('');
   const [fee, setFee] = useState('');
   const [policy, setPolicy] = useState<PayPolicyCode | ''>('');
+  const [colour, setColour] = useState('');
 
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
@@ -98,6 +115,15 @@ export default function Settings() {
       // and not the same as the conservative reading. An unrecognised stored
       // value lands here too, and the note beside the control says so.
       setPolicy(payPolicyOf(profile.payPolicy) ? (profile.payPolicy as PayPolicyCode) : '');
+      // As stored, not as parsed. A value the column holds that this build
+      // cannot render is still what is stored, and showing the owner a blank
+      // where it sits would invite them to save the blank over it — the same
+      // failure the banner about a failed read warns about, one field down.
+      setColour(profile.brandColor ?? '');
+      // The console reads this column once, on mount. A save that re-seeds the
+      // field without repainting would leave this screen telling the owner a
+      // colour it is not drawn in.
+      applyBrandColour(profile.brandColor);
     }
   }, []);
 
@@ -163,10 +189,12 @@ export default function Settings() {
   const nameCheck = parseGymName(name);
   const feeCheck = parseSessionFee(fee);
   const ccyCheck = parseTenantCurrency(currency);
+  const colCheck = parseBrandColor(colour);
   const blocker =
     nameCheck.kind === 'bad' ? nameCheck.reason
     : feeCheck.kind === 'bad' ? feeCheck.reason
     : ccyCheck.kind === 'bad' ? ccyCheck.reason
+    : colCheck.kind === 'bad' ? colCheck.reason
     : null;
 
   const save = async (e: React.FormEvent) => {
@@ -185,6 +213,11 @@ export default function Settings() {
         currency: ccyCheck.kind === 'currency' ? ccyCheck.currency : null,
         sessionFee: feeCheck.kind === 'fee' ? feeCheck.fee : null,
         payPolicy: policy === '' ? null : policy,
+        // Cleared means the gym has not chosen a colour — not black, and not
+        // Studio's amber written into the gym's own row as though it had been
+        // picked. Part 118 dropped the default on this column for exactly that
+        // reason, and every surface already draws its own accent over a null.
+        brandColor: colCheck.kind === 'color' ? colCheck.color : null,
       });
       setSaved('Saved.');
       // Re-read rather than trust the patch. The trigger normalises what was
@@ -200,9 +233,9 @@ export default function Settings() {
     <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!readErr} current="/settings">
       <h1>Gym</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13, maxWidth: '72ch' }}>
-        Four settings, and everything else in this console is computed from them. A blank field is a
-        setting this gym has not made — which is a different thing from a zero, and every screen
-        here already knows how to say so.
+        Five settings, and everything else in this console is computed from them or drawn in them. A
+        blank field is a setting this gym has not made — which is a different thing from a zero, and
+        every screen here already knows how to say so.
       </p>
 
       {readErr ? (
@@ -286,6 +319,55 @@ export default function Settings() {
           </Field>
 
           <Field
+            label="Brand colour"
+            note={
+              gym?.brandColor
+                ? 'The accent this console and the gym’s apps are drawn in — every link, button, focus ring and active nav pill. It is the gym’s, not one person’s: changing it changes what every owner, coach and member sees, on every device.'
+                : 'Not set — this gym has not chosen a colour, so every surface draws its own. Set one and this console, the owner app and the coach app all follow it. Clear it again to go back.'
+            }
+          >
+            <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                value={colour} onChange={(e) => setColour(e.target.value)}
+                placeholder="Leave empty to choose no colour"
+                maxLength={7}
+                disabled={state === 'failed'}
+                style={{ ...field, width: 200 }}
+                aria-label="The gym's brand colour, as a hex code"
+              />
+              {/* A swatch rather than a colour picker input. `type="color"`
+                  cannot express "not set" — it opens on black and posts
+                  #000000, which would store a colour the owner never chose the
+                  moment they touched it, which is the whole thing this screen
+                  refuses to do. */}
+              <span
+                aria-hidden
+                style={{
+                  width: 26, height: 26, border: '1px solid var(--ring)',
+                  background: colCheck.kind === 'color' ? colCheck.color : 'transparent',
+                }}
+              />
+              {colCheck.kind === 'color' ? (
+                <span className="mono" style={{ fontSize: 12, color: 'var(--ink3)' }}>{colCheck.color}</span>
+              ) : null}
+            </div>
+            {colCheck.kind === 'bad' ? <Bad>{colCheck.reason}</Bad> : null}
+            {/* The stored value cannot be rendered. There is no check
+                constraint on this column — the phone and this console are the
+                only things that have ever validated it — so a gym can be
+                holding text no theme can parse, and the console is silently
+                drawing itself in Studio's amber over it. Said out loud, because
+                otherwise the field looks fine and the console looks unbranded. */}
+            {gym?.brandColor && parseBrandColor(gym.brandColor).kind !== 'color' ? (
+              <Bad>
+                The stored colour is <span className="mono">{gym.brandColor}</span>, which is not a
+                hex code, so nothing is drawn in it — this console and the apps are showing their
+                own accent instead. Type one above to replace it, or empty the field to clear it.
+              </Bad>
+            ) : null}
+          </Field>
+
+          <Field
             label="What a coach is paid for"
             note="A delivered session is always paid. This is the rest of the answer, and it is the gym's to give — Sessions, Staff, Close and every coach's own earnings screen all read it from here."
           >
@@ -341,7 +423,9 @@ export default function Settings() {
             The pay policy is read by{' '}
             <a href="/sessions" style={{ color: 'var(--brand)' }}>Sessions</a>,{' '}
             <a href="/staff" style={{ color: 'var(--brand)' }}>Staff</a> and{' '}
-            <a href="/close" style={{ color: 'var(--brand)' }}>Close</a>.
+            <a href="/close" style={{ color: 'var(--brand)' }}>Close</a>. The brand colour is what
+            every screen in this console, and both phone apps, draw their accent in — it takes
+            effect here as soon as it saves, and everywhere else on the next load.
           </p>
         </form>
       )}

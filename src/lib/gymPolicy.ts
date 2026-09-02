@@ -1,10 +1,10 @@
 // What a gym has said about itself — and the difference between a setting it
 // has not made and a setting somebody guessed for it.
 //
-// Three things live here, and they are together because they are the same
-// question asked three ways: what does this gym charge in, what does it pay a
-// coach for, and how does a screen write either of them without inventing an
-// answer.
+// Four things live here, and they are together because they are the same
+// question asked four ways: what does this gym charge in, what does it pay a
+// coach for, what colour is it, and how does a screen write any of them without
+// inventing an answer.
 //
 // Framework-agnostic like the rest of src/lib: the Supabase client arrives as
 // an argument, so the web console and the phone app can both use this and
@@ -28,6 +28,7 @@
 // decided — which is a thing to say on screen, not a thing to fill in.
 
 import { assertWrote } from './wroteRows';
+import { brandColorOf } from './gymSettings';
 import type { PayPolicy } from './gymSessions';
 
 type Queryable = { from: (table: string) => any };
@@ -136,6 +137,46 @@ export function parseTenantCurrency(input: string | null | undefined): CurrencyI
   return { kind: 'currency', currency: code };
 }
 
+/* ── the brand colour ──────────────────────────────────────────────────────── */
+
+export type BrandColorInput =
+  | { kind: 'clear' }
+  | { kind: 'color'; color: string }
+  | { kind: 'bad'; reason: string };
+
+/**
+ * What the owner typed → what to write to `tenants.brand_color`.
+ *
+ * There is NO check constraint on that column — the same finding
+ * `isBrandColor` in src/lib/gymSettings.ts records — so unlike the currency,
+ * nothing downstream will refuse a bad value on the way in. It is refused here
+ * because the alternative is that it is not refused anywhere: the phone theme
+ * parses it as hex without asking, and studio-web's own `safeHex` silently
+ * keeps its default. Both of those are a gym whose buttons are the wrong colour
+ * or unreadable, with nothing on screen to say why.
+ *
+ * Blank CLEARS, for the reason `parseTenantCurrency` gives about currency: an
+ * owner who empties the field is saying they have not chosen a colour, part 118
+ * dropped the default precisely so that could be said, and every surface
+ * already renders the null as its own accent.
+ *
+ * Three- and six-digit hex only, and lower-cased, which is what `brandColorOf`
+ * already decides for the READ side. One rule, asked here before the round trip
+ * and again when the stored value is handed to a theme.
+ */
+export function parseBrandColor(input: string | null | undefined): BrandColorInput {
+  const raw = String(input ?? '').trim();
+  if (!raw) return { kind: 'clear' };
+  const color = brandColorOf(raw);
+  if (!color) {
+    return {
+      kind: 'bad',
+      reason: 'A brand colour is a hex code — #1e88e5 or #1b5, with the hash. Not a colour name and not rgb().',
+    };
+  }
+  return { kind: 'color', color };
+}
+
 /* ── reading and writing the gym's row ─────────────────────────────────────── */
 
 export interface GymProfile {
@@ -188,13 +229,76 @@ export async function fetchGymProfile(
   };
 }
 
-/** What may be written to a gym's row from a settings screen. Every field is
- *  optional and an absent field is left alone; `null` is a deliberate clear. */
+/**
+ * What may be written to a gym's row from a settings screen. Every field is
+ * optional and an absent field is left alone; `null` is a deliberate clear.
+ *
+ * ── Why this list is shorter than the table ────────────────────────────────
+ *
+ * Widening it is not free. `tenants` is granted `arwdDxtm` to `authenticated`
+ * at TABLE level with no per-column ACLs (part 101 §4 checked this on the live
+ * database), so RLS cannot say which columns an update touches — which means
+ * the only thing standing between a column and a browser form is whether some
+ * TypeScript somewhere puts it in a patch. Every field below is therefore a
+ * deliberate decision, recorded with who may change it and what happens to what
+ * was there before, and every field NOT below is a decision too.
+ *
+ *   name         · the owner, and the phone (`updateTenant` in src/ui/tenant.tsx).
+ *                  Replaces the old name everywhere at once — the rail, every
+ *                  coach's app, the browser tab. Nothing keeps the previous one;
+ *                  it is a label, not a record. NOT NULL, so it cannot be
+ *                  cleared, only replaced.
+ *   currency     · the owner, and the phone. Rows already written KEEP the
+ *                  currency they were written in — a payment is a historical
+ *                  fact — so changing it gives the gym two, and every total that
+ *                  mixes them is withheld rather than added up. Clearing it is
+ *                  allowed and means "we have not decided", which every money
+ *                  screen already knows how to render.
+ *   sessionFee   · the owner, and the phone. Not retrospective: settlements
+ *                  already written hold their own figure, and this is what the
+ *                  NEXT one multiplies. Clearing it withholds payroll rather
+ *                  than pricing a session at nothing.
+ *   payPolicy    · the owner, from this console only — the phone's
+ *                  `updateTenant` has never carried it. Changes what Sessions,
+ *                  Staff, Close and every coach's earnings screen count as
+ *                  payable, INCLUDING for months already worked but not yet
+ *                  settled. Clearing it is "the gym has not decided" and every
+ *                  dependent figure is withheld rather than guessed.
+ *   brandColor   · the owner, and the phone (app/(owner)/brand.tsx). Overwrites
+ *                  the previous colour on every device that owner's gym signs in
+ *                  on, this console included; there is no history and nothing to
+ *                  revert to. Clearing it returns each surface to its own build
+ *                  accent, which is what part 118 made representable when it
+ *                  dropped the teal default.
+ *
+ * ── and what is deliberately still not here ────────────────────────────────
+ *
+ *   brand        · NOT WRITABLE BY ANYONE from a client session. Part 101 §4
+ *                  installs a trigger that raises on a change, precisely so an
+ *                  owner cannot walk their gym into another white-label
+ *                  product's app. Putting it in this patch would produce a save
+ *                  that always fails, on a field nobody should be offered.
+ *   plan         · what the gym is BILLED on. A form that let an owner set their
+ *                  own plan is a form that lets them upgrade themselves, and the
+ *                  answer belongs wherever billing is decided rather than beside
+ *                  the session fee.
+ *   record_retention_years
+ *                · already writable, and from its own screen. /compliance owns
+ *                  it, with the argument for the number beside the field. Adding
+ *                  it here would put two writers of one column in one console —
+ *                  the exact drift this module's header says it exists to stop.
+ *   logo         · nothing reads it. It has existed since part 01 and neither
+ *                  app nor console renders it, so a control for it would be a
+ *                  field an owner fills in and never sees again.
+ */
 export interface GymProfilePatch {
   name?: string;
   currency?: string | null;
   sessionFee?: number | null;
   payPolicy?: PayPolicyCode | null;
+  /** Lower-case `#rgb` or `#rrggbb`, per `parseBrandColor`. Null clears it, and
+   *  a cleared colour is a gym that has not chosen one — never a default. */
+  brandColor?: string | null;
 }
 
 /**
@@ -220,6 +324,12 @@ export async function saveGymProfile(
   if (patch.currency !== undefined) row.currency = patch.currency;
   if (patch.sessionFee !== undefined) row.session_fee = patch.sessionFee;
   if (patch.payPolicy !== undefined) row.session_pay_policy = patch.payPolicy;
+  // `tenants_normalise_settings` does NOT touch this one — it trims the name and
+  // folds the case of the currency and the policy, and nothing else — so what is
+  // sent here is what is stored. `parseBrandColor` is therefore the only thing
+  // between an owner's typing and the column, which is why it lower-cases rather
+  // than leaving that to a trigger that will not do it.
+  if (patch.brandColor !== undefined) row.brand_color = patch.brandColor;
   if (Object.keys(row).length === 0) return;
 
   const r = await sb.from('tenants').update(row, { count: 'exact' }).eq('id', tenantId);

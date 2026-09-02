@@ -2892,18 +2892,26 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   const whole: GymExportInput = {
     gymName: 'Iron House Dubai', tenantId: 'T', generatedAt: '2026-08-26T08:00:00.000Z',
-    from: '1970-01-01T00:00:00.000Z', to: '2100-01-01T00:00:00.000Z',
+    // Null on both sides, which is what "the whole record" is. It used to be
+    // 1970-to-2100, and those two sentinels were the defect rather than a
+    // fixture detail: a very wide window and no window are different claims,
+    // and a bundle that could not tell them apart put a period in its own
+    // filename that nobody had asked for.
+    from: null, to: null,
     plans: sliceReady(plansIn), memberships: sliceReady(msIn), payments: sliceReady(payIn),
     classes: sliceReady(clsIn), attendance: sliceReady(bkIn), sessions: sliceReady(sessIn),
     passTypes: sliceReady(ptIn), passes: sliceReady(passIn), visits: sliceReady(visIn),
     invites: sliceReady(invIn),
-    // The eight parts the bundle used to leave behind. Empty rather than
-    // omitted: this fixture is about ESCAPING, and every one of these is stated
-    // so that adding a twentieth part to EXPORT_PARTS fails to compile here
-    // rather than quietly producing a bundle with a hole in it.
+    // The parts the bundle used to leave behind — the eight of one round and
+    // the four of the paperwork round after it. Empty rather than omitted: this
+    // fixture is about ESCAPING, and every one of these is stated so that
+    // adding a part to EXPORT_PARTS fails to compile here rather than quietly
+    // producing a bundle with a hole in it.
     invoices: sliceReady([]), settlements: sliceReady([]), equipment: sliceReady([]),
     shifts: sliceReady([]), interventions: sliceReady([]), promos: sliceReady([]),
     events: sliceReady([]), purchases: sliceReady([]),
+    memberRecords: sliceReady([]), agreements: sliceReady([]),
+    signatures: sliceReady([]), documents: sliceReady([]),
   };
 
   // ── escaping: the assertion the whole file stands on ──

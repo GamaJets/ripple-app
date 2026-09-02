@@ -109,12 +109,17 @@ eq(shapeChallenges([]).length, 0, 'so does an empty one');
 
 /* ── running first, then upcoming, then done ───────────────────────────── */
 
+// NOW is passed in rather than left to the clock. Every date in this file is
+// relative to NOW, so a sort that read `Date.now()` instead was comparing
+// fixtures from 31 Aug against whatever day the suite happened to run on — and
+// on 2 Sep at noon the challenge given two days to run had finished, which made
+// this assertion fail without a line of code changing.
 const sorted = shapeChallenges([
   raw({ id: 'done', title: 'Finished', starts_at: iso(-20), ends_at: iso(-5) }),
   raw({ id: 'later', title: 'Later', starts_at: iso(3), ends_at: iso(30) }),
   raw({ id: 'soon', title: 'Ends soon', starts_at: iso(-10), ends_at: iso(2) }),
   raw({ id: 'open', title: 'Ends later', starts_at: iso(-10), ends_at: iso(9) }),
-]);
+], NOW);
 eq(sorted.map((c) => c.id).join(','), 'soon,open,later,done',
   'running challenges first, soonest to end at the top; then upcoming; then finished');
 

@@ -1,5 +1,12 @@
 // What a referral is worth saying about, once there is something to say.
 //
+// Both sides of it live here: the referrer's own view of the friends they
+// brought in, and — at the bottom of the file — the coach's view of which of
+// their clients have been doing the bringing. The rules are the same rules and
+// that is why they share a file rather than a name: joined is not converted,
+// nothing is stated under a read that did not land, and no figure in either
+// half is money.
+//
 // ── Why this is a separate file from src/lib/referrals.ts ──────────────────
 //
 // referrals.ts is the network side: it imports `./supabase`, which imports
@@ -181,3 +188,147 @@ export function rewardNote(brand: string): string {
 export const REFERRAL_PRIVACY_NOTE =
   'You see a friend’s first name and whether they have started training — '
   + 'nothing else about them. They are never shown anything about your training.';
+
+/* ── the coach's side of the same rows ─────────────────────────────────────
+ *
+ * Everything above is the referrer's own view: my code, my friends, my two
+ * counts. The COACH could see none of it — `referrals` carries one select
+ * policy and it is the referred user's — so the clients who bring a coach
+ * clients were invisible to the one person who could thank them.
+ *
+ * `coach_referrals()` (supabase/parts/630) is the read. The rules below shape
+ * it, and they are the same three rules as above with one addition:
+ *
+ *   · Joined and converted are always rendered together and neither is ever
+ *     inferred from the other.
+ *   · Under anything but 'ready' no figure is stated, and — the one that
+ *     matters — the words "nobody has referred anybody" are never said. A coach
+ *     told that stops asking, which is exactly the failure src/lib/joinCodes.ts
+ *     documents for a coach's join codes.
+ *   · NOTHING here is money. Not a credit, not a discount, not a value per
+ *     referred client, not a projection. See `rewardNote` above: what a referral
+ *     is worth belongs to each gym and each coach in their own currency, and
+ *     this app has never been told it. A coach handed "worth £240" would offer
+ *     it to somebody, and it would be a promise nobody made.
+ *   · And the referred person is not named. `coach_referrals()` returns no
+ *     identifying detail about them, deliberately, so there is nothing here to
+ *     render even if a screen wanted to.
+ */
+
+/** A row of coach_referrals(), as PostgREST hands it back. */
+export interface RawCoachReferrer {
+  referrer_id: string | null;
+  referrer_name: string | null;
+  joined: number | null;
+  converted: number | null;
+}
+
+/** One of this coach's clients, and how many people they have brought in. */
+export interface CoachReferrer {
+  id: string;
+  /** The server's first name. A screen that holds the coach's own roster should
+   *  prefer the name on it — this is the fallback, and the smaller of the two. */
+  name: string;
+  joined: number;
+  /** Of those, how many have logged a first workout. Never above `joined`. */
+  converted: number;
+}
+
+/**
+ * Raw rows → rows worth rendering, most brought in first.
+ *
+ * A row with no referrer id is dropped: it names nobody, so a coach cannot
+ * thank them and cannot check it. A row whose counts are not finite numbers is
+ * dropped for the harder reason — a count that is not a count must not become a
+ * zero on the way through, and there is no honest row to draw without one.
+ *
+ * `converted` is clamped to `joined` rather than trusted. The server computes
+ * both over the same set and cannot exceed it; the clamp is here so that a
+ * future caller of this shape cannot render "3 of 2 started training", which is
+ * the sort of line that makes a reader stop believing the other figure too.
+ */
+export function shapeCoachReferrers(rows: RawCoachReferrer[] | null | undefined): CoachReferrer[] {
+  const out: CoachReferrer[] = [];
+  for (const r of rows || []) {
+    const id = (r?.referrer_id || '').trim();
+    if (!id) continue;
+    const joined = Number(r.joined);
+    const converted = Number(r.converted);
+    if (!Number.isFinite(joined) || !Number.isFinite(converted)) continue;
+    if (joined <= 0) continue;
+    out.push({
+      id,
+      name: (r.referrer_name || '').trim() || 'A client',
+      joined: Math.trunc(joined),
+      converted: Math.max(0, Math.min(Math.trunc(joined), Math.trunc(converted))),
+    });
+  }
+  return out.sort((a, b) => b.joined - a.joined || b.converted - a.converted || a.name.localeCompare(b.name));
+}
+
+/**
+ * The line under one client's name on the coach's screen.
+ *
+ * Two counts, always both, in the order they happen. "4 joined" on its own
+ * would let a coach thank somebody for four people who never came back, and
+ * "1 started training" on its own hides the three who tried. Neither number is
+ * a score and neither is money.
+ */
+export function referrerLine(r: CoachReferrer): string {
+  const j = `${num(r.joined)} ${r.joined === 1 ? 'person' : 'people'} joined with their code`;
+  if (r.converted <= 0) return `${j} · none training yet`;
+  const c = r.converted === 1 ? '1 has started training' : `${num(r.converted)} have started training`;
+  return `${j} · ${c}`;
+}
+
+/**
+ * The counts across everyone, or an honest refusal to state them.
+ *
+ * `rows` is null for a read that did not land. Under anything but 'ready' this
+ * states no figure, and it never says nobody — the sentence a coach acts on by
+ * giving up on the one channel that costs them nothing.
+ *
+ * Computed over the rows because `coach_referrals()` returns one row per
+ * referring client rather than a page of referrals, and a coach with more than
+ * two hundred referring clients is not a case this product has. The caller
+ * still passes 'partial' if the read came back at its cap, and this refuses to
+ * total under it — src/lib/rowCap.ts.
+ */
+export function coachSummaryLine(status: LoadStatus, rows: CoachReferrer[] | null): string {
+  if (status === 'loading') return 'Checking who has been bringing people in…';
+  if (status === 'error') return 'We couldn’t check who has been bringing people in.';
+  if (status === 'partial') return 'Not all of your clients could be read, so these are not totals.';
+  if (rows == null) return 'We couldn’t check who has been bringing people in.';
+  if (rows.length === 0) {
+    return 'None of your clients has brought anybody in with their code yet.';
+  }
+  const joined = rows.reduce((a, r) => a + r.joined, 0);
+  const converted = rows.reduce((a, r) => a + r.converted, 0);
+  const who = `${num(rows.length)} of your clients`;
+  const j = `${num(joined)} ${joined === 1 ? 'person' : 'people'}`;
+  const c = converted <= 0
+    ? 'none of whom are training yet'
+    : `${num(converted)} of whom ${converted === 1 ? 'has' : 'have'} started training`;
+  return `${who} brought in ${j} · ${c}`;
+}
+
+/**
+ * What the coach may and may not do with this, said on the screen.
+ *
+ * The same rule as `rewardNote`, aimed at the other party. A coach reading a
+ * list of people who have grown their business will reach for a thank-you, and
+ * that is the point of the screen — but the app must not be the thing that
+ * decides what the thank-you is, because it does not know what the coach
+ * charges, in what currency, or against what margin.
+ */
+export const COACH_REWARD_NOTE =
+  'Nothing has been credited to anybody. There is no discount, no free session and no balance '
+  + 'here — what a referral is worth is yours to decide, in your own money, and this app has '
+  + 'never been told what that is.';
+
+/** What a coach sees about the people their client brought in, which is nothing.
+ *  Held against coach_referrals()'s select list by the test beside this file. */
+export const COACH_REFERRAL_PRIVACY_NOTE =
+  'You see which of your own clients brought people in and how many. You are not shown who those '
+  + 'people are — they used your client’s code, not yours, and most of them never agreed to be '
+  + 'listed to you.';

@@ -335,12 +335,35 @@ export const TRAINER_NAV: NavItem[] = [
   // Training is whose history it writes to.
   { key: 'log-session', label: 'Log a Session', note: 'Type up what you just ran, into their record', route: '/(trainer)/log-session', icon: 'pencil', keywords: 'log a session log session record write up sets reps weights workout for them their record in person on the floor pt session just did today did with client entered typed' },
   { key: 'classes', label: 'Classes', note: 'Create and manage group classes', route: '/(trainer)/classes', icon: 'calendar', keywords: 'class classes group schedule branch capacity room instructor hiit spin yoga' },
+  // Directly under Classes, because it is the other end of the same act: that
+  // screen is where a register is taken and this is what the register said. The
+  // figures were readable by the coach the whole time — `class_attendance_summary`
+  // admits the class's own trainer — and surfaced only on the owner's console.
+  //
+  // Keyworded with the words a coach types when they are checking they were paid
+  // right: "how many turned up", "show rate", "walk-ins", "headcount". It
+  // carries 'pay' and 'payroll' while printing no amount at all, for the same
+  // reason the Money row carries 'profit' — those are the words people search
+  // with, and landing them on the screen that explains why no amount is shown
+  // beats landing them nowhere.
+  { key: 'my-register', label: 'Your Register', note: 'What the registers you took actually say', route: '/(trainer)/my-register', icon: 'check', keywords: 'register attendance check in checkin checked in turned up showed up show rate fill rate headcount how many came walk in walkins waitlist my classes classes i taught taught teaching pay payroll per attendee per head paid right am i owed numbers from my check ins' },
   { key: 'videos', label: 'Videos', note: 'Exercise video library', route: '/(trainer)/videos', icon: 'video', keywords: 'exercise demo upload' },
   { key: 'library', label: 'Exercise Library', note: 'What you can programme, and what you have filmed', route: '/(trainer)/library', icon: 'grid', keywords: 'exercise library catalogue movements coverage filmed clips muscles' },
   { key: 'checklists', label: 'Client Checklists', note: 'The daily lines you set one client', route: '/(trainer)/checklists', icon: 'check', keywords: 'checklist checklists daily tasks habits client adherence ticked' },
   { key: 'client-goals', label: 'Working Toward', note: 'What a client is aiming at, and how it is going', route: '/(trainer)/client-goals', icon: 'target', keywords: 'goal goals target working toward client aim weight measurement' },
   { key: 'client-nutrition', label: "A Client's Nutrition", note: 'Their targets, and the week of meals you write them', route: '/(trainer)/client-nutrition', icon: 'meals', keywords: 'nutrition meals macros calories diet plan client food week allergens targets deltas' },
   { key: 'client-report', label: 'Client Report', note: 'The handover document at the end of a block', route: '/(trainer)/client-report', icon: 'pencil', keywords: 'report handover document summary end of block twelve week pdf share export client progress what we did' },
+  // Beside Quiet Clients on purpose: both are read before ringing somebody, and
+  // this is the one that says whether there is anything to ring about. The
+  // member has been able to see this record since part 136 and the coach could
+  // not, which left the retention conversation being had off a register nobody
+  // ticked. Takes an optional clientId and falls back to its own picker, so a
+  // bare push from search opens something useful.
+  //
+  // 'missed' and 'no show' are here because they are what a coach types, and the
+  // screen exists to tell them that the record cannot answer that question —
+  // landing them on the honest answer beats landing them on nothing.
+  { key: 'client-attendance', label: 'Their Attendance', note: 'Every time your gym recorded a client coming in', route: '/(trainer)/client-attendance', icon: 'check', keywords: 'attendance attended visits been in came in turned up showed up register door entry swipe scan class register how often do they come missed no show absent stopped coming retention drop off client history' },
   // The screen that does something with the drift figure. 'quiet', 'ghosting'
   // and 'churn' are the words a coach uses for this; 'drift' is the word the
   // code uses, and both have to find it.
@@ -423,6 +446,13 @@ export const TRAINER_NAV: NavItem[] = [
   // run one on a different platform.
   { key: 'leads', label: 'Enquiries', note: 'People who asked about coaching without joining', route: '/(trainer)/leads', icon: 'message', keywords: 'lead leads enquiry enquiries inquiry inquiries prospect prospects form contact details signup sign up waiting list interested asked about follow up followup capture funnel join link' },
   { key: 'leaderboard', label: 'Leaderboard', note: 'Rank clients by consistency', route: '/(trainer)/leaderboard', icon: 'trophy', keywords: 'ranking standings' },
+  // The growth channel that costs a coach nothing and that they could not see.
+  // `referrals` carries one select policy and it is the referred user's, so a
+  // client who had brought four people onto the book looked identical to one who
+  // had brought none. Counts only — the keywords carry 'reward', 'credit' and
+  // 'discount' because they are what a coach searches, and the screen's whole
+  // job is to say that this app has not decided any of them.
+  { key: 'referrals', label: 'Who Brings You Clients', note: 'The clients bringing you other clients, and how far they got', route: '/(trainer)/referrals', icon: 'people', keywords: 'referral referrals referred refer a friend word of mouth recommend recommendation brought in introduced invite code who is sending me clients reward credit discount thank you loyalty advocate' },
   // Searched for with the words a coach actually types when they are worried
   // about money — "how much did I make", "profit", "income" — none of which
   // matched anything before this screen existed. It carries 'profit' and 'net'

@@ -7,10 +7,10 @@
 // ── Why this is worth building carefully ──────────────────────────────────
 //
 // An export is a promise, and a partial one is a broken promise. A gym that
-// downloads eleven files, finds ten of them, and does not notice the eleventh
-// is missing has been told something false: that this is their record. Months
-// later they cancel, delete the account, and discover the door log was never in
-// the bundle. So the single rule this module is built around:
+// downloads a folder of files, finds all but one of them, and does not notice
+// which one is missing has been told something false: that this is their
+// record. Months later they cancel, delete the account, and discover the door
+// log was never in the bundle. So the single rule this module is built around:
 //
 //   A read that FAILED never produces an empty CSV.
 //
@@ -20,6 +20,22 @@
 // gains INCOMPLETE, the manifest carries `"complete": false`, and the README
 // opens with what is missing and what that costs. Four independent signals,
 // because the gym only has to miss one.
+//
+// ── And the same rule pointed at the period ──────────────────────────────
+//
+// A bundle taken over a PERIOD has the identical failure available to it, one
+// level up: the same filenames, the same README, and one quarter of the record
+// inside. Missing rows that were never asked for do not look missing. So the
+// window is not a filter this module applies and forgets — it is applied HERE,
+// from the window on the input, so that what the bundle says about its bounds
+// is true of its contents by construction, and it is then stated in the
+// filename, in the manifest, at the top of the README, and per part.
+//
+// Per part, because a window does not narrow all of them and the exceptions
+// matter: a membership is a period rather than an instant, an agreement is the
+// wording a later signature points at, and the price book has no event date at
+// all. `EXPORT_DATE_FIELD` names the column each part is bounded by, or null
+// with a stated reason, and the README prints both lists. See exportWindow.ts.
 //
 // ── The other three rules ────────────────────────────────────────────────
 //
@@ -43,8 +59,9 @@
 //   — so a semicolon in a note cannot turn into a column break for whoever
 //   opens the file in a comma-decimal locale.
 //
-// Pure and framework-free, further even than gymRecord.ts: there is not a
-// single runtime import in this file, Supabase or otherwise. Everything below
+// Pure and framework-free, further even than gymRecord.ts: the only runtime
+// import in this file is exportWindow.ts, which is pure by the same rule and
+// touches nothing — no Supabase, no browser, no clock. Everything below
 // takes rows that some screen has already loaded and returns text. That is
 // deliberate — the *reads* are where the failure modes live, and a screen has
 // to render its own failures. This module's job is to refuse to paper over them.
@@ -56,10 +73,20 @@ import type { PassType, GymPass } from './gymPasses';
 import type { Visit } from './gymVisits';
 import type { MemberInvite } from './memberInvites';
 import type { Slice, MemberBooking } from './memberView';
+import type { SignatureAttribution } from './gymSigning';
+// The window's arithmetic and its prose. A `import type` for the shape and
+// named functions for the rest — this stays the one file in the export path
+// with no runtime import of a MODULE THAT TOUCHES ANYTHING, and exportWindow.ts
+// is pure by the same rule, so the promise at the top of this header is intact.
+import {
+  type ExportWindow, isBounded, placeInWindow, windowSlug, describeWindow,
+} from './exportWindow';
 
 // Re-exported so a caller building a GymExportInput — a screen, or a test —
 // can name every row type from here rather than importing six modules to do it.
-// Types only: this file still has no runtime import of any kind.
+// Types only: none of these lines adds a runtime import.
+export type { ExportWindow } from './exportWindow';
+export type { SignatureAttribution } from './gymSigning';
 export type { MembershipPlan, Membership, GymPayment } from './gymRecord';
 export type { GymClass } from './gymSchedule';
 export type { PtSession } from './gymSessions';
@@ -200,10 +227,32 @@ export function slug(name: string | null | undefined): string {
  * `member_interventions` belong to other parts of this codebase, and an export
  * that breaks when one of them changes a field name is an export nobody can
  * rely on at exactly the moment they need it.
+ *
+ * ── And the four this one left behind ─────────────────────────────────────
+ *
+ * The list still had no PAPERWORK in it, which is the thing a gym is asked to
+ * produce first and most often. A gym told "show us what she signed" could
+ * export nineteen files and not one of them held a waiver, a signature, a
+ * consent, or the index of the filing cabinet — and the one-member bundle, the
+ * bundle produced for a subject-access request, did not carry the member's own
+ * record either: no contact details, no next of kin, no medical note, none of
+ * what the desk had written about them.
+ *
+ *   memberRecords  `gym_member_records`. The member's own file, which is the
+ *                  one thing a subject-access response cannot be missing.
+ *   agreements     `gym_agreements`. The WORDING of each version, because a
+ *                  signature naming version 2 is unreadable without it.
+ *   signatures     `gym_agreement_signatures`, attribution and all — see the
+ *                  note on `ExportSignature` for why that column is the point.
+ *   documents      `gym_documents`. The INDEX of the filing cabinet. The files
+ *                  themselves are bytes in a bucket and cannot travel in a CSV;
+ *                  the table says so in its own note rather than leaving a
+ *                  reader to assume the export contained them.
  */
 export type ExportPart =
   | 'plans'
   | 'members'
+  | 'memberRecords'
   | 'memberships'
   | 'payments'
   | 'invoices'
@@ -220,14 +269,18 @@ export type ExportPart =
   | 'interventions'
   | 'promos'
   | 'events'
-  | 'purchases';
+  | 'purchases'
+  | 'agreements'
+  | 'signatures'
+  | 'documents';
 
 export const EXPORT_PARTS: ExportPart[] = [
-  'plans', 'members', 'memberships', 'payments', 'invoices',
+  'plans', 'members', 'memberRecords', 'memberships', 'payments', 'invoices',
   'classes', 'attendance', 'sessions',
   'passTypes', 'passes', 'visits', 'invites',
   'settlements', 'equipment', 'shifts',
   'interventions', 'promos', 'events', 'purchases',
+  'agreements', 'signatures', 'documents',
 ];
 
 /* ── the rows the eight new parts are made of ──────────────────────────────── */
@@ -306,10 +359,102 @@ export interface ExportPurchase {
   status: string | null; createdAt: string | null;
 }
 
+/* ── the four the paperwork is made of ─────────────────────────────────────── */
+
+/**
+ * One row of `gym_member_records` — what the gym itself knows about a person.
+ *
+ * Contact, next of kin, the operational medical note and the desk's own note.
+ * The single most personal table in the tenant, and the one a subject-access
+ * response is least able to be missing: everything else in a member bundle is
+ * about what they DID, and this is about who they are.
+ *
+ * `medicalNote` is the gym's operational note — what the desk was told, for the
+ * people standing on the floor. It is not the member's own injuries, which are
+ * theirs and are exported from their own account by src/lib/gdpr.ts.
+ */
+export interface ExportMemberRecord {
+  memberId: string; memberName: string | null;
+  phone: string | null; email: string | null;
+  emergencyName: string | null; emergencyPhone: string | null;
+  medicalNote: string | null; note: string | null;
+  tags: string[]; updatedAt: string | null;
+}
+
+/**
+ * One version of one thing the gym asks people to agree to, WORDING AND ALL.
+ *
+ * The body travels. A signature row says "version 2 of the liability waiver",
+ * and without the text of version 2 that is a reference to a document the
+ * bundle does not contain — which is precisely the position the gym was in
+ * before any of this was exported at all. `gym_agreements.body` is immutable
+ * once signed (supabase/parts/185), so the row here is the wording as it stood
+ * when it was agreed to, not as it stands today.
+ */
+export interface ExportAgreement {
+  id: string; kind: string; title: string; body: string;
+  version: number | null; active: boolean | null; required: boolean | null;
+  createdAt: string | null;
+}
+
+/**
+ * One signature — and the answer to who actually gave it.
+ *
+ * ── Why `attribution` is the column this row exists for ───────────────────
+ *
+ * Until supabase/parts/520 landed, every signature this product held was a
+ * member of staff typing the member's name into a box at the desk, and every
+ * screen called it "signed". The row could not tell the two apart. It now
+ * carries `signed_by` (the account whose session wrote it, from `auth.uid()`,
+ * never from anything a caller sends) and `attribution`:
+ *
+ *   member   the member's own signed-in session wrote it. The strong form.
+ *   staff    somebody at the desk recorded it on their behalf. A real business
+ *            record — a staff attestation — but not the member's own act.
+ *   unknown  written before this was recorded. Not a synonym for staff: no row
+ *            is relabelled by guesswork.
+ *
+ * An export that showed a signature WITHOUT saying which of those three it was
+ * would be worse than no export: it would hand a gym a file that reads as
+ * evidence of the strong form for rows that are the weak one, and the file
+ * would then be produced in a dispute. So `attribution` is exported beside a
+ * plain-English column saying what it means — see `signaturesTable`.
+ */
+export interface ExportSignature {
+  id: string; agreementId: string;
+  agreementKind: string | null; agreementTitle: string | null;
+  memberId: string | null; memberName: string | null;
+  signedName: string; signedAt: string; versionSigned: number | null;
+  attribution: SignatureAttribution;
+  signedById: string | null; signedByName: string | null;
+  witnessedById: string | null; witnessedByName: string | null;
+  guardianName: string | null; guardianRelationship: string | null;
+  note: string | null;
+}
+
+/**
+ * One row of `gym_documents` — the index in front of the `gym-docs` bucket.
+ *
+ * `storagePath` is exported and the FILE IS NOT. A CSV bundle cannot carry a
+ * 25 MB scan, and a filing-cabinet index that did not say so would be read as
+ * "the gym holds no documents" by whoever opened a bundle expecting the
+ * contracts to be in it. The path is what makes each one findable afterwards.
+ * It is an object key, not a URL and not a credential: reading the object still
+ * requires a session that supabase/parts/390 permits.
+ */
+export interface ExportDocument {
+  id: string; memberId: string | null; memberAttached: boolean | null;
+  equipmentId: string | null; kind: string; title: string;
+  storagePath: string; mime: string | null; sizeBytes: number | null;
+  expiresOn: string | null; note: string | null;
+  uploadedById: string | null; uploadedByName: string | null; uploadedAt: string;
+}
+
 /** What each part is called in a sentence an owner reads. */
 export const EXPORT_LABEL: Record<ExportPart, string> = {
   plans: 'the price book',
   members: 'the member roster',
+  memberRecords: 'the gym’s own file on each member',
   memberships: 'memberships',
   payments: 'payments',
   invoices: 'the invoice register',
@@ -327,6 +472,9 @@ export const EXPORT_LABEL: Record<ExportPart, string> = {
   promos: 'promo codes',
   events: 'the activity log',
   purchases: 'PT packs sold',
+  agreements: 'the documents people are asked to sign',
+  signatures: 'signatures',
+  documents: 'the filing cabinet',
 };
 
 /** What leaving a part out of the bundle actually costs. Named so the warning
@@ -334,6 +482,7 @@ export const EXPORT_LABEL: Record<ExportPart, string> = {
 export const EXPORT_COST: Record<ExportPart, string> = {
   plans: 'what the gym sells and for how much',
   members: 'who the members are',
+  memberRecords: 'contact numbers, next of kin, the medical note and what the desk wrote about each member',
   memberships: 'who holds what plan, since when, and in what state',
   payments: 'every payment the gym has recorded',
   invoices: 'what the gym billed, to whom, and what is still owed on it',
@@ -351,12 +500,16 @@ export const EXPORT_COST: Record<ExportPart, string> = {
   promos: 'what was discounted and how often it was used',
   events: 'what happened in the building, as the database recorded it',
   purchases: 'what the coaches sold through their own checkout',
+  agreements: 'the wording of every waiver, consent and set of terms, as each version stood',
+  signatures: 'who signed what, when, and whether they signed it themselves',
+  documents: 'what is in the filing cabinet — the contracts, insurance, certificates and incident reports the gym holds',
 };
 
 /** The basename each part writes to, before the bundle prefix. */
 export const EXPORT_FILE: Record<ExportPart, string> = {
   plans: 'plans.csv',
   members: 'members.csv',
+  memberRecords: 'member-records.csv',
   memberships: 'memberships.csv',
   payments: 'payments.csv',
   invoices: 'invoices.csv',
@@ -374,6 +527,73 @@ export const EXPORT_FILE: Record<ExportPart, string> = {
   promos: 'promos.csv',
   events: 'activity-log.csv',
   purchases: 'pt-packs.csv',
+  agreements: 'agreements.csv',
+  signatures: 'signatures.csv',
+  documents: 'documents.csv',
+};
+
+/* ── what a period does and does not narrow ────────────────────────────────── */
+
+/**
+ * The stored column each part is bounded by when an export is taken over a
+ * period, or null for a part a period does not narrow at all.
+ *
+ * Named as the COLUMN rather than as a boolean, because "bounded" on its own is
+ * ambiguous in the one direction that matters. `passes` is bounded by
+ * `issued_on`: a pass sold inside the quarter is here and a pass sold before it
+ * is not, EVEN IF it was still being used all through the quarter. That is a
+ * defensible reading of "passes in this period" and it is not the only one, so
+ * the file says which one it used rather than leaving an auditor to assume.
+ *
+ * The nulls are the load-bearing half of this table. See
+ * `EXPORT_UNBOUNDED_WHY` — every one of them has a reason that is about the
+ * shape of the data, not about the read being awkward to filter.
+ */
+export const EXPORT_DATE_FIELD: Record<ExportPart, string | null> = {
+  plans: null,
+  members: null,
+  memberRecords: null,
+  memberships: null,
+  payments: 'taken_at',
+  invoices: 'issued_on',
+  classes: 'starts_at',
+  attendance: 'class_starts_at',
+  sessions: 'starts_at',
+  passTypes: null,
+  passes: 'issued_on',
+  visits: 'entered_at',
+  invites: 'created_at',
+  settlements: 'settled_at',
+  equipment: null,
+  shifts: 'starts_at',
+  interventions: 'at',
+  promos: null,
+  events: 'at',
+  purchases: 'created_at',
+  agreements: null,
+  signatures: 'signed_at',
+  documents: 'uploaded_at',
+};
+
+/**
+ * Why a period leaves a part whole, in the words the README prints.
+ *
+ * A reader who asked for one quarter and got the whole equipment register is
+ * entitled to know whether that was a decision or a bug. Each of these is a
+ * decision, and four of the seven would produce a WRONG file if they were
+ * bounded — which is the opposite of what somebody would guess.
+ */
+export const EXPORT_UNBOUNDED_WHY: Partial<Record<ExportPart, string>> = {
+  plans: 'a standing price list, with no event date to bound it by.',
+  members: 'one row per person, derived from the memberships below it.',
+  memberRecords: 'a standing file on each person, not a dated event.',
+  memberships:
+    'a membership is a PERIOD, not an instant. One that ran all the way through your window may have started years before it, and bounding on its start date would drop exactly the memberships the window is about.',
+  passTypes: 'a standing list of what a pass costs.',
+  equipment: 'a standing register of what the gym owns.',
+  promos: 'a standing list of codes.',
+  agreements:
+    'the WORDING each signature points at. Bounding these to your window would leave a signature from inside it naming a version of the waiver that is not in the bundle, which is the position this file exists to get a gym out of.',
 };
 
 /* ── what goes in ──────────────────────────────────────────────────────────── */
@@ -390,8 +610,13 @@ export interface GymExportInput {
   tenantId: string | null;
   /** ISO instant the export was taken. Passed in so the output is testable. */
   generatedAt: string;
-  /** The bounds the time-ranged reads were made over, stated so the bundle
-   *  cannot imply it covers more than it asked for. Null for "everything". */
+  /**
+   * The period this export covers. Null on both sides is the whole record.
+   *
+   * `buildGymExport` APPLIES these rather than merely reporting them, so a
+   * bundle cannot state a window its rows fall outside. Which parts they
+   * actually narrow is `EXPORT_DATE_FIELD`, and the bundle prints both lists.
+   */
   from?: string | null;
   to?: string | null;
   /**
@@ -422,6 +647,10 @@ export interface GymExportInput {
   promos: Slice<ExportPromo>;
   events: Slice<ExportEvent>;
   purchases: Slice<ExportPurchase>;
+  memberRecords: Slice<ExportMemberRecord>;
+  agreements: Slice<ExportAgreement>;
+  signatures: Slice<ExportSignature>;
+  documents: Slice<ExportDocument>;
 }
 
 /** The slice a part is read from. `members` rides on `memberships`. */
@@ -446,7 +675,95 @@ export function partSlice(input: GymExportInput, part: ExportPart): Slice<unknow
     case 'promos': return input.promos;
     case 'events': return input.events;
     case 'purchases': return input.purchases;
+    // The roster rides on `memberships`; the gym's own FILE on each member is
+    // its own table and its own read, so it fails on its own too.
+    case 'memberRecords': return input.memberRecords;
+    case 'agreements': return input.agreements;
+    case 'signatures': return input.signatures;
+    case 'documents': return input.documents;
   }
+}
+
+/* ── narrowing to a period ─────────────────────────────────────────────────── */
+
+/**
+ * The date one row is placed by, or null when the part is not bounded at all.
+ *
+ * One switch rather than a date accessor on each row shape, so that
+ * `EXPORT_DATE_FIELD` and the value actually read cannot drift apart: adding a
+ * part to the record without answering "what dates it" fails to compile here.
+ */
+export function rowDate(part: ExportPart, row: unknown): string | null {
+  const r = row as Record<string, unknown>;
+  const str = (k: string): string | null => {
+    const v = r?.[k];
+    return typeof v === 'string' && v.trim() ? v : null;
+  };
+  switch (part) {
+    case 'plans': case 'members': case 'memberRecords': case 'memberships':
+    case 'passTypes': case 'equipment': case 'promos': case 'agreements':
+      return null;
+    case 'payments': return str('takenAt');
+    case 'invoices': return str('issuedOn');
+    case 'classes': return str('startsAt');
+    case 'attendance': return str('startsAt');
+    case 'sessions': return str('startsAt');
+    case 'passes': return str('issuedOn');
+    case 'visits': return str('enteredAt');
+    case 'invites': return str('createdAt');
+    case 'settlements': return str('settledAt');
+    case 'shifts': return str('startsAt');
+    case 'interventions': return str('at');
+    case 'events': return str('at');
+    case 'purchases': return str('createdAt');
+    case 'signatures': return str('signedAt');
+    case 'documents': return str('uploadedAt');
+  }
+}
+
+/**
+ * Every dated part narrowed to the window, and every other part untouched.
+ *
+ * A row that could not be PLACED is kept, deliberately, and counted separately
+ * so the bundle can say how many there were. Dropping it would assert that it
+ * happened outside the period, and nothing here knows that — see the header on
+ * exportWindow.ts. A part that did not read stays unread: a failed query is
+ * still a failed query when somebody asks for three months of it.
+ */
+export function windowSlices(input: GymExportInput, w: ExportWindow): GymExportInput {
+  if (!isBounded(w)) return { ...input, from: w.from, to: w.to };
+  const cut = <T>(part: ExportPart, s: Slice<T>): Slice<T> => {
+    if (s.state !== 'ready' || !EXPORT_DATE_FIELD[part]) return s;
+    return { state: 'ready', rows: s.rows.filter((r) => placeInWindow(rowDate(part, r), w) !== 'outside') };
+  };
+  return {
+    ...input,
+    from: w.from,
+    to: w.to,
+    payments: cut('payments', input.payments),
+    invoices: cut('invoices', input.invoices),
+    classes: cut('classes', input.classes),
+    attendance: cut('attendance', input.attendance),
+    sessions: cut('sessions', input.sessions),
+    passes: cut('passes', input.passes),
+    visits: cut('visits', input.visits),
+    invites: cut('invites', input.invites),
+    settlements: cut('settlements', input.settlements),
+    shifts: cut('shifts', input.shifts),
+    interventions: cut('interventions', input.interventions),
+    events: cut('events', input.events),
+    purchases: cut('purchases', input.purchases),
+    signatures: cut('signatures', input.signatures),
+    documents: cut('documents', input.documents),
+  };
+}
+
+/** How many rows of a part carry no date to place them by. Null when the part
+ *  is unbounded or unread — which is not the same as none. */
+export function undatedRows(input: GymExportInput, part: ExportPart): number | null {
+  const s = partSlice(input, part);
+  if (s.state !== 'ready' || !EXPORT_DATE_FIELD[part]) return null;
+  return s.rows.filter((r) => rowDate(part, r) === null).length;
 }
 
 /* ── what comes out ────────────────────────────────────────────────────────── */
@@ -471,6 +788,28 @@ export interface MissingPart {
   file: string;
 }
 
+/**
+ * What the period did to one part.
+ *
+ * `bounded: false` on a bundle that HAS a period is the interesting case and
+ * the reason this is a per-part field rather than one line at the top: it means
+ * this file is whole while its neighbours are slices, and a reader summing
+ * across the two without knowing that gets a number nobody can defend.
+ */
+export interface ExportPartWindow {
+  /** True when the period narrowed this file. False on an unbounded export too
+   *  — nothing was narrowed, so nothing was bounded. */
+  bounded: boolean;
+  /** The stored column it was narrowed by, or null. */
+  field: string | null;
+  /** Why the period left this one whole. Null when it narrowed it, and null on
+   *  an unbounded bundle where the question does not arise. */
+  why: string | null;
+  /** Rows carrying no date to place them by, which are kept. Null when the
+   *  question does not apply — never 0, which would say there were none. */
+  undated: number | null;
+}
+
 export interface ExportPartReport {
   part: ExportPart;
   label: string;
@@ -480,6 +819,18 @@ export interface ExportPartReport {
   reason: string | null;
   columns: string[] | null;
   note: string | null;
+  window: ExportPartWindow;
+}
+
+/** The window statement for one part. */
+export function partWindow(
+  part: ExportPart, bounded: boolean, undated: number | null,
+): ExportPartWindow {
+  const field = EXPORT_DATE_FIELD[part];
+  if (!bounded) return { bounded: false, field, why: null, undated: null };
+  return field
+    ? { bounded: true, field, why: null, undated }
+    : { bounded: false, field: null, why: EXPORT_UNBOUNDED_WHY[part] ?? 'no event date to bound it by.', undated: null };
 }
 
 export interface ExportManifest {
@@ -494,9 +845,16 @@ export interface ExportManifest {
   gym: string | null;
   tenantId: string | null;
   exportedAt: string;
-  window: { from: string | null; to: string | null };
-  /** False if a single part could not be read. Never true on a hopeful guess. */
+  /** The period, and a sentence saying it. `bounded` is the field to read: null
+   *  on both sides is the whole record, which is a different claim from a very
+   *  wide window and used to be indistinguishable from one. */
+  window: { from: string | null; to: string | null; bounded: boolean; covers: string };
+  /** False if a single part could not be read. Never true on a hopeful guess.
+   *  Says nothing about the period — see `wholeRecord`. */
   complete: boolean;
+  /** True only when every part was read AND no period was applied. The claim
+   *  "this is the gym's record"; `complete` is only ever the weaker one. */
+  wholeRecord: boolean;
   warning: string | null;
   parts: ExportPartReport[];
   caveats: string[];
@@ -561,10 +919,22 @@ export function incompleteWarning(missing: MissingPart[]): string | null {
  * member's file would hand a subject-access request the gym's whole commercial
  * position, which is both wrong and — under every regime that grants the right
  * — outside what was asked for.
+ *
+ * The AGREEMENTS are the exception that proves the line. They are gym-authored
+ * documents, and they are in a member's bundle anyway, narrowed to the versions
+ * that member actually signed — because those are not the gym's commercial
+ * position, they are the words this person agreed to, and a signature row
+ * without them is a citation to a document nobody enclosed.
  */
 export const MEMBER_PARTS: ExportPart[] = [
+  // First, because it is the part a subject-access response is least able to be
+  // missing and the part this bundle went out without: their own file.
+  'memberRecords',
   'memberships', 'payments', 'invoices', 'attendance', 'sessions',
   'passes', 'visits', 'invites', 'interventions', 'purchases', 'events',
+  // The paperwork. `agreements` is here because a signature without the wording
+  // it points at names a document the bundle does not contain.
+  'agreements', 'signatures', 'documents',
 ];
 
 /**
@@ -610,6 +980,7 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
     shifts: none(input.shifts),
     promos: none(input.promos),
 
+    memberRecords: keep(input.memberRecords, (r) => r.memberId === memberId),
     memberships: keep(input.memberships, (m) => m.memberId === memberId),
     payments: keep(input.payments, (p) => p.memberId === memberId),
     invoices: keep(input.invoices, (i) => i.memberId === memberId),
@@ -629,7 +1000,33 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
     // event is about; `actor_id` is who did it, and a member is never the actor
     // of a gym event, so filtering on the subject is the whole of it.
     events: keep(input.events, (e) => e.subjectId === memberId),
+
+    signatures: keep(input.signatures, (g) => g.memberId === memberId),
+    // Documents ABOUT them. Filtered on `member_id` and not on the latched
+    // `member_attached` flag: part 390 keeps that flag true after an erasure
+    // sets the id to null, which is right for deciding who may READ a row and
+    // wrong here — a document that no longer names anybody cannot be handed to
+    // somebody as theirs on the strength of once having named someone.
+    documents: keep(input.documents, (d) => d.memberId === memberId),
+    // The wording they agreed to, and only that. Narrowable only where the
+    // signatures actually read: with that query refused there is no way to know
+    // WHICH versions they signed, so the agreements travel whole rather than
+    // narrowed by a guess, and `buildGymExport` says so in a caveat. The
+    // over-inclusive answer is the safe one here — these are the gym's own
+    // published terms, not its commercial position.
+    agreements: input.signatures.state === 'ready'
+      ? keepSigned(input.agreements, input.signatures.rows, memberId)
+      : input.agreements,
   };
+}
+
+/** The agreement versions one member has a signature against. */
+function keepSigned(
+  agreements: Slice<ExportAgreement>, signatures: ExportSignature[], memberId: string,
+): Slice<ExportAgreement> {
+  if (agreements.state !== 'ready') return agreements;
+  const mine = new Set(signatures.filter((g) => g.memberId === memberId).map((g) => g.agreementId));
+  return { state: 'ready', rows: agreements.rows.filter((a) => mine.has(a.id)) };
 }
 
 /**
@@ -640,7 +1037,11 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
  * send a bundle of empty files with a covering note saying it is complete.
  */
 export function memberRowCount(input: GymExportInput, memberId: string): number | null {
-  const scoped = memberSlices(input, memberId);
+  // Windowed FIRST, for the same reason `buildGymExport` windows: the number
+  // offered before the download has to be the number of rows the download
+  // contains, and an owner told "412 rows" over a bundle holding 40 has been
+  // given the one figure they were going to quote in a covering letter.
+  const scoped = memberSlices(windowSlices(input, { from: input.from ?? null, to: input.to ?? null }), memberId);
   let n = 0;
   for (const part of MEMBER_PARTS) {
     const s = partSlice(scoped, part);
@@ -654,7 +1055,14 @@ export function memberRowCount(input: GymExportInput, memberId: string): number 
 
 /* ── the bundle ────────────────────────────────────────────────────────────── */
 
-export function buildGymExport(input: GymExportInput): GymExportBundle {
+export function buildGymExport(raw: GymExportInput): GymExportBundle {
+  // The window is applied here, once, from the bounds the input states — so
+  // there is no arrangement of calls in which the manifest names a period the
+  // rows do not respect. A caller that has already narrowed loses nothing:
+  // narrowing rows that are already inside the window is a no-op.
+  const window: ExportWindow = { from: raw.from ?? null, to: raw.to ?? null };
+  const bounded = isBounded(window);
+  const input = windowSlices(raw, window);
   const pending = EXPORT_PARTS.filter((p) => partSlice(input, p).state === 'loading');
 
   const missing: MissingPart[] = [];
@@ -687,12 +1095,18 @@ export function buildGymExport(input: GymExportInput): GymExportBundle {
 
   const complete = missing.length === 0;
   const day = isoDatePart(input.generatedAt) || 'undated';
+  // The period, in the filename, before the day it was taken. A bundle sitting
+  // in a Downloads folder among four others is read by its NAME long before
+  // anybody opens the README, and "this is the first quarter, not the record"
+  // is the fact most likely to be lost between one and the other. `taken-`
+  // labels the trailing date so two dates in one name cannot be misread.
+  const span = windowSlug(window);
   const stem = input.subject
     // Named for the person, so a folder of these does not need opening to tell
     // one member's record from another's — and so a whole-gym backup can never
     // be mistaken for a subject-access response by its filename alone.
-    ? ['repple-member-record', slug(input.gymName), slug(input.subject.memberName) || input.subject.memberId.slice(0, 8), day].filter(Boolean).join('-')
-    : ['repple-export', slug(input.gymName), day].filter(Boolean).join('-');
+    ? ['repple-member-record', slug(input.gymName), slug(input.subject.memberName) || input.subject.memberId.slice(0, 8), span, span ? 'taken-' + day : day].filter(Boolean).join('-')
+    : ['repple-export', slug(input.gymName), span, span ? 'taken-' + day : day].filter(Boolean).join('-');
   const prefix = complete ? stem : stem + '-INCOMPLETE';
   const named = (basename: string) => `${prefix}-${basename}`;
 
@@ -709,6 +1123,38 @@ export function buildGymExport(input: GymExportInput): GymExportBundle {
       'read did not come back. The column is absent rather than blank, because a blank one would ' +
       'read as "this member has no email address".',
     );
+  }
+  if (bounded) {
+    caveats.push(
+      `This is a SLICE of the record, not the record. It covers ${describeWindow(window)}; ` +
+      'anything the gym holds outside those dates is absent from every file here and is not ' +
+      'missing, not deleted and not zero. The README lists which files the period actually ' +
+      'narrowed and which are whole whatever it says.',
+    );
+  }
+  if (input.subject && input.signatures.state !== 'ready') {
+    caveats.push(
+      'agreements.csv holds EVERY version this gym publishes rather than only the ones this ' +
+      'member signed. Which ones they signed is on the signatures read, and that read did not ' +
+      'come back, so narrowing them would have been a guess about what somebody agreed to.',
+    );
+  }
+  // Counted rather than dropped, and said out loud. A row with no date could
+  // not be placed inside or outside the period, and leaving it out would have
+  // asserted that it happened elsewhere.
+  if (bounded) {
+    const stray: string[] = [];
+    for (const part of EXPORT_PARTS) {
+      const n = undatedRows(input, part);
+      if (n) stray.push(`${EXPORT_FILE[part]} (${n})`);
+    }
+    if (stray.length) {
+      caveats.push(
+        `Some rows carry no date to place them by, so they could not be put inside or outside ` +
+        `the period: ${stray.join(', ')}. They are INCLUDED. Leaving them out would have said ` +
+        `they happened outside your dates, and nothing here knows that.`,
+      );
+    }
   }
 
   for (const part of EXPORT_PARTS) {
@@ -733,6 +1179,7 @@ export function buildGymExport(input: GymExportInput): GymExportBundle {
         reason: m.reason,
         columns: null,
         note: `Not in this bundle. ${capitalise(EXPORT_COST[part])} is unknown here — absent, not zero.`,
+        window: partWindow(part, bounded, null),
       });
       continue;
     }
@@ -756,6 +1203,7 @@ export function buildGymExport(input: GymExportInput): GymExportBundle {
       reason: null,
       columns: table.header,
       note: table.note,
+      window: partWindow(part, bounded, undatedRows(input, part)),
     });
   }
 
@@ -767,8 +1215,19 @@ export function buildGymExport(input: GymExportInput): GymExportBundle {
     gym: input.gymName ?? null,
     tenantId: input.tenantId ?? null,
     exportedAt: input.generatedAt,
-    window: { from: input.from ?? null, to: input.to ?? null },
+    window: {
+      from: window.from,
+      to: window.to,
+      bounded,
+      covers: describeWindow(window),
+    },
     complete,
+    // `complete` has always meant "every part was read, and read whole". It
+    // says nothing at all about the period, and on a bounded bundle a reader
+    // takes exactly the wrong thing from it — so the claim a reader actually
+    // wants is spelled separately rather than left to be inferred from two
+    // fields that are true at once.
+    wholeRecord: complete && !bounded,
     warning: incompleteWarning(missing),
     parts: reports,
     caveats,
@@ -820,7 +1279,129 @@ function tableFor(part: ExportPart, input: GymExportInput): Table {
     case 'promos': return promosTable(readyRows(input.promos));
     case 'events': return eventsTable(readyRows(input.events));
     case 'purchases': return purchasesTable(readyRows(input.purchases));
+    case 'memberRecords': return memberRecordsTable(readyRows(input.memberRecords));
+    case 'agreements': return agreementsTable(readyRows(input.agreements));
+    case 'signatures': return signaturesTable(readyRows(input.signatures));
+    case 'documents': return documentsTable(readyRows(input.documents));
   }
+}
+
+/* ── the paperwork ─────────────────────────────────────────────────────────── */
+
+/**
+ * The gym's own file on each member.
+ *
+ * Tags are joined with `; ` rather than with a comma, and the whole cell is
+ * quoted by `csvCell` either way — but a comma inside a cell that a reader then
+ * hand-edits in a text editor is how a roster gets shifted by one column six
+ * months from now, and there is no reason to write one when a semicolon says
+ * the same thing.
+ */
+function memberRecordsTable(rows: ExportMemberRecord[]): Table {
+  return {
+    header: ['member_name', 'member_id', 'phone', 'email', 'emergency_name', 'emergency_phone', 'medical_note', 'desk_note', 'tags', 'updated_at'],
+    rows: rows.map((r) => [
+      r.memberName, r.memberId, r.phone, r.email,
+      r.emergencyName, r.emergencyPhone, r.medicalNote, r.note,
+      r.tags.length ? r.tags.join('; ') : null,
+      r.updatedAt,
+    ]),
+    note: 'What the gym itself recorded about each person: how to reach them, who to ring, what it was told for the floor, and what the desk wrote. `medical_note` is the GYM\u2019s operational note and is not the member\u2019s own injury record, which is theirs and leaves from their own account. A blank emergency contact means none was ever recorded — it does not mean the member has nobody.',
+  };
+}
+
+/**
+ * The documents themselves, wording included.
+ *
+ * `body` is a whole agreement in one cell — long, and full of line breaks and
+ * commas. That is exactly what `csvCell` is for, and shortening it would defeat
+ * the point: the reason this file exists is that a signature naming version 2
+ * is worth nothing without the text of version 2 beside it.
+ */
+function agreementsTable(rows: ExportAgreement[]): Table {
+  return {
+    header: ['kind', 'title', 'version', 'active', 'required', 'created_at', 'agreement_id', 'body'],
+    rows: rows.map((a) => [
+      a.kind, a.title, a.version,
+      a.active == null ? '' : a.active,
+      a.required == null ? '' : a.required,
+      a.createdAt, a.id, a.body,
+    ]),
+    note: 'The wording as it stood, which is what a signature points at. The body is immutable once anybody has signed it, so an old version here is what those people actually agreed to and not what the gym says today. `active` is whether this version is the one currently handed out; a retired version is kept because its signatures are still evidence.',
+  };
+}
+
+/**
+ * Who signed what — and which of the three kinds of signature it is.
+ *
+ * ── Why `what_the_attribution_means` is a column and not a footnote ───────
+ *
+ * The file is opened by a solicitor, an insurer or a regulator, and none of
+ * them has read supabase/parts/520. `attribution = staff` in a cell on its own
+ * is a token they will map onto whatever they already believe a signature is,
+ * which is the strong form — the exact misreading that made part 520 necessary.
+ * The sentence rides in the row, so the row cannot be quoted without it.
+ *
+ * `signed_by_id` is beside it and not instead of it: the id is the evidence and
+ * the word is the reading, and only the first survives being disputed.
+ */
+function signaturesTable(rows: ExportSignature[]): Table {
+  return {
+    header: [
+      'signed_at', 'member_name', 'member_id', 'signed_name',
+      'agreement_kind', 'agreement_title', 'version_signed',
+      'attribution', 'what_the_attribution_means',
+      'signed_by_id', 'signed_by_name', 'witnessed_by_id', 'witnessed_by_name',
+      'guardian_name', 'guardian_relationship', 'note',
+      'signature_id', 'agreement_id',
+    ],
+    rows: rows.map((g) => [
+      g.signedAt, g.memberName, g.memberId, g.signedName,
+      g.agreementKind, g.agreementTitle, g.versionSigned,
+      g.attribution, ATTRIBUTION_MEANS[g.attribution],
+      g.signedById, g.signedByName, g.witnessedById, g.witnessedByName,
+      g.guardianName, g.guardianRelationship, g.note,
+      g.id, g.agreementId,
+    ]),
+    note: 'Read the attribution column before relying on any row here. Only \u2018member\u2019 is the member\u2019s own act; \u2018staff\u2019 is somebody at the desk recording that they agreed, and \u2018unknown\u2019 is a row written before this product recorded which. The signed name is what was typed at the time and is kept apart from the account name on purpose — the name on a waiver IS the waiver. The wording each row points at is in agreements.csv.',
+  };
+}
+
+/** What each attribution means, in the words that have to survive being quoted
+ *  out of the row they sit in. Written here rather than taken from the screen
+ *  copy in gymSigning.ts: that is read in a table cell beside a filter and a
+ *  count, and this is read cold, alone, months later, by somebody deciding
+ *  whether the gym can rely on the row. */
+const ATTRIBUTION_MEANS: Record<SignatureAttribution, string> = {
+  member:
+    'The member gave this themselves, from their own signed-in account, against this version of the wording.',
+  staff:
+    'A member of staff recorded this on the member\u2019s behalf. It is a staff attestation that the member agreed. It is NOT the member\u2019s own signature.',
+  unknown:
+    'Written before this product recorded who typed a signature. It is not known whether the member gave it or a member of staff entered it for them, and nothing here will guess.',
+};
+
+/**
+ * The index of the filing cabinet — and the file that says the files are not
+ * in this bundle.
+ *
+ * A CSV cannot carry a 25 MB scan. The alternative to saying so is a gym that
+ * exports its record, sees `documents.csv`, and believes the signed contracts
+ * left with it. `storage_path` is the object key each one is findable by; it is
+ * not a link and not a credential, and reading the object still needs a session
+ * the database permits.
+ */
+function documentsTable(rows: ExportDocument[]): Table {
+  return {
+    header: ['uploaded_at', 'kind', 'title', 'member_name_or_id', 'member_attached', 'equipment_id', 'expires_on', 'mime', 'size_bytes', 'note', 'uploaded_by_name', 'uploaded_by_id', 'storage_path', 'document_id'],
+    rows: rows.map((d) => [
+      d.uploadedAt, d.kind, d.title, d.memberId,
+      d.memberAttached == null ? '' : d.memberAttached,
+      d.equipmentId, d.expiresOn, d.mime, d.sizeBytes, d.note,
+      d.uploadedByName, d.uploadedById, d.storagePath, d.id,
+    ]),
+    note: 'THE FILES THEMSELVES ARE NOT IN THIS BUNDLE. This is the index in front of the gym-docs bucket — what each document is, what it is about and when it expires — and a CSV cannot carry a scan. `storage_path` is the key each file is stored under, so every row here is findable; downloading them is a separate act against the bucket. An empty expires_on means it does not expire or nobody said, and those two were never distinguished.',
+  };
 }
 
 /* ── the eight that used to be left behind ─────────────────────────────────── */
@@ -1177,6 +1758,46 @@ function notExportedText(m: MissingPart, input: GymExportInput): string {
 function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
   const out: string[] = [];
 
+  // The period comes FIRST, above even the incomplete warning, because it is
+  // the claim most likely to be carried away wrong. "Could not read the door
+  // log" is a fact about this bundle; "this is one quarter and not the record"
+  // is a fact about what the bundle IS, and a reader who takes only the first
+  // line away has to take that one.
+  if (manifest.window.bounded) {
+    out.push('='.repeat(72));
+    out.push(`THIS EXPORT COVERS ${manifest.window.covers.toUpperCase()}.`);
+    out.push('IT IS A SLICE OF THE RECORD AND NOT THE RECORD.');
+    out.push('='.repeat(72));
+    out.push('');
+    out.push('Anything the gym holds outside those dates is absent from every file here.');
+    out.push('Absent is not missing, not deleted and not zero — it was not asked for.');
+    out.push('');
+
+    const cut = manifest.parts.filter((p) => p.window.bounded);
+    const whole = manifest.parts.filter((p) => !p.window.bounded);
+    // Basenames in these two lists, not the full prefixed filenames. Every file
+    // in the bundle shares the stem and the stem carries the period, so
+    // repeating it on twenty-three lines buries the one word that differs.
+    if (cut.length) {
+      out.push('Narrowed by the period — only rows dated inside it are here:');
+      for (const p of cut) {
+        const stray = p.window.undated ? `; ${p.window.undated} row(s) carry no ${p.window.field} and are INCLUDED, because leaving them out would say they happened outside your dates` : '';
+        out.push(`  - ${EXPORT_FILE[p.part]}  (by ${p.window.field}${stray})`);
+      }
+      out.push('');
+    }
+    if (whole.length) {
+      out.push('NOT narrowed — the whole set is here whatever period you asked for:');
+      for (const p of whole) {
+        out.push(`  - ${EXPORT_FILE[p.part]}  ${p.window.why ?? ''}`);
+      }
+      out.push('');
+      out.push('So do not add a figure from a narrowed file to one from a whole file and');
+      out.push('call the answer a figure for the period. They do not cover the same span.');
+      out.push('');
+    }
+  }
+
   if (manifest.warning) {
     out.push('!'.repeat(72));
     out.push(manifest.warning);
@@ -1198,7 +1819,10 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
     // Every read behind it now either returns the whole set or fails and is
     // named above, so the claim is one somebody verified rather than one nobody
     // had reason to doubt. See src/lib/rowCap.ts.
-    out.push('This bundle is complete: every part of the record was read, and read whole.');
+    out.push(manifest.wholeRecord
+      ? 'This bundle is complete: every part of the record was read, and read whole.'
+      : 'Every part was read, and read whole — within the period above. Complete here means'
+        + ' nothing was lost to a failed read. It does not mean this is the whole record.');
     out.push('');
     out.push('No read here can come back short without saying so. The database returns at most a');
     out.push('fixed number of rows per request and does not mention when it has stopped, so every');
@@ -1212,9 +1836,10 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
   out.push(`Gym:      ${manifest.gym ?? '(not read)'}`);
   out.push(`Tenant:   ${manifest.tenantId ?? '(not read)'}`);
   out.push(`Exported: ${manifest.exportedAt}`);
-  if (manifest.window.from || manifest.window.to) {
-    out.push(`Window:   ${manifest.window.from ?? 'the beginning'} to ${manifest.window.to ?? 'now'}`);
-  }
+  // Printed on an unbounded bundle too, and as a sentence rather than as two
+  // raw instants. "Covers: the whole record, with no period applied" is a
+  // claim somebody can check; a missing line is one they have to infer.
+  out.push(`Covers:   ${manifest.window.covers}`);
   out.push('');
 
   out.push('Files');
@@ -1248,6 +1873,20 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
   out.push('CSV import understands, so a bundle from one gym loads into another without');
   out.push('anybody renaming a header. The extra id and *_cents columns are reported by');
   out.push('the importer as unrecognised and ignored — they are there for other systems.');
+  out.push('');
+  out.push('The paperwork');
+  out.push('-------------');
+  out.push('signatures.csv says WHO gave each signature in its attribution column, and');
+  out.push('every row carries a sentence saying what that means. Only “member” is the');
+  out.push('member’s own act; “staff” is somebody at the desk recording that they agreed,');
+  out.push('and “unknown” is a row written before this was recorded. Do not quote a row');
+  out.push('from this file without that column — it is the difference between a signature');
+  out.push('and a note about one.');
+  out.push('');
+  out.push('agreements.csv carries the full wording each signature points at, as it stood.');
+  out.push('documents.csv is the INDEX of the filing cabinet and NOT the files: a CSV');
+  out.push('cannot carry a scan. Every row names the key its file is stored under, so the');
+  out.push('documents are findable, but they did not leave in this bundle.');
   out.push('');
   return out.join('\n');
 }
