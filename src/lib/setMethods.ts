@@ -136,6 +136,39 @@ export function methodFor(id: string | null | undefined): { method: SetMethod; k
   return { method: BY_ID.get(DEFAULT_METHOD)!, known: false };
 }
 
+/**
+ * The sentence under the Set type control, telling a coach what tapping it does.
+ *
+ * ── The defect this answers ───────────────────────────────────────────────
+ *
+ * The control read `Normal` and nothing else. On its own that is not a label:
+ * it names a value without naming the field, so a coach cannot tell what is
+ * normal about it, and there is nothing to suggest anything else is on offer.
+ * It sat at the end of the Rest row, which made it look like a property of the
+ * rest timer rather than of the sets.
+ *
+ * ── Why it is derived rather than written out ─────────────────────────────
+ *
+ * Naming "warm-up, drop set, to failure" in a screen's copy is a second copy of
+ * the catalogue, and the day somebody adds or renames a method the sentence
+ * starts lying about what the picker contains. This reads the catalogue, so it
+ * cannot. It names the first few OTHER methods and counts the rest rather than
+ * listing twelve.
+ */
+export function otherMethodsHint(currentId: string | null | undefined, show = 3): string {
+  const current = methodFor(currentId).method.id;
+  const others = SET_METHODS.filter((m) => m.id !== current);
+  if (others.length === 0) return '';
+  const named = others.slice(0, Math.max(1, show)).map((m) => m.label.toLowerCase());
+  const rest = others.length - named.length;
+  // "and 6 more" rather than an ellipsis: a coach deciding whether it is worth
+  // a tap is told the size of what is behind it.
+  const tail = rest > 0 ? `${named.join(', ')} and ${rest} more` : named.length > 1
+    ? `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`
+    : named[0];
+  return `Tap to change — ${tail}.`;
+}
+
 /** Whether a set recorded under this method counts toward training volume. */
 export function countsToVolume(id: string | null | undefined): boolean {
   return methodFor(id).method.countsToVolume;

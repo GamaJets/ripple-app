@@ -1,4 +1,4 @@
-import { badgeFor, countsToVolume, DEFAULT_METHOD, methodFor, restAfter, SET_METHODS } from './setMethods';
+import { badgeFor, countsToVolume, DEFAULT_METHOD, methodFor, restAfter, SET_METHODS, otherMethodsHint} from './setMethods';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -50,6 +50,26 @@ eq(badgeFor(null), null, 'nor does an unset one');
 eq(badgeFor('myotatic-crunch-2029'), null, 'nor does an unrecognised one — never a badge nobody can read');
 eq(badgeFor('warmup'), { short: 'W', label: 'Warm-up' }, 'a warm-up is marked');
 eq(badgeFor('drop'), { short: 'D', label: 'Drop set' }, 'so is a drop set');
+
+/* ── The sentence under the Set type control ───────────────────────────────
+ *
+ * The control read `Normal` and nothing else, so nobody tapped it. These
+ * assert the hint is DERIVED: it must never name the method a coach is already
+ * on, and the count at the end has to add up to the catalogue, or the sentence
+ * is telling a coach there is more behind the control than there is. */
+ok(otherMethodsHint('normal').startsWith('Tap to change'), 'the hint says what tapping does');
+ok(!/\bnormal\b/i.test(otherMethodsHint('normal')), 'and never offers the method already selected');
+ok(/\bnormal\b/i.test(otherMethodsHint('drop')), 'but does offer it once the coach is on another');
+eq(otherMethodsHint('normal', SET_METHODS.length).includes(' more'), false,
+  'showing every other method leaves nothing to count');
+{
+  // The counted tail must equal the catalogue: named + counted + the current one.
+  const hint = otherMethodsHint('normal', 3);
+  const m = /and (\d+) more/.exec(hint);
+  ok(!!m, 'the short form counts the rest rather than listing twelve');
+  eq(3 + Number(m ? m[1] : 0) + 1, SET_METHODS.length, 'and that count is the catalogue, not a number somebody typed');
+}
+eq(otherMethodsHint('normal', 0), otherMethodsHint('normal', 1), 'asking for none still names one, so the sentence is never empty');
 
 if (errors.length) { errors.forEach((e) => console.error('FAIL', e)); process.exit(1); }
 console.log(`setMethods ok — ${SET_METHODS.length} methods, and warm-ups stay out of the volume chart`);

@@ -39,7 +39,7 @@
 //    the counts of unlabelled and unpriced rows ADD rather than being taken
 //    from whichever side had more, and neither subtotal is modified — the
 //    screen renders both of them beside the total.
-import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, feeMismatches, type TakenRow, type PackRow } from './coachMoney';
+import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, feeMismatches, type TakenRow, type PackRow, minorFromWhole, majorFromMinor} from './coachMoney';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -305,6 +305,27 @@ eq(feeMismatches([{ fee_variance_cents: 5 }, { fee_variance_cents: -40 }, { fee_
   'the worst gap is the largest by size, whichever way it went');
 eq(feeMismatches([{ fee_variance_cents: 0 }]).worstCents, 0, 'and there is no worst gap where there are no gaps');
 
+
+/* ── minorFromWhole: the converter two screens did by hand, wrongly ────────
+ *
+ * `sessionFee * 100` was written at app/(trainer)/calendar.tsx and
+ * sessions.tsx into `sessions.rate_cents`, the column a gym settles payroll
+ * from. These assert the two families where a hundred is the wrong factor,
+ * because those are the ones nobody would catch by looking at the screen. */
+eq(minorFromWhole(40, 'gbp'), 4000, 'a two-decimal currency does multiply by a hundred');
+eq(minorFromWhole(6300, 'jpy'), 6300, 'yen has no minor unit — a 6,300 yen fee is 6,300, not 630,000');
+eq(minorFromWhole(40, 'kwd'), 40000, 'a dinar has three places — 40 KWD is 40,000 fils, not 4,000');
+eq(minorFromWhole(12.345, 'kwd'), 12345, 'and the third place survives the binary floating point');
+eq(minorFromWhole(40, null), null, 'no currency means no factor, so it refuses rather than assuming one');
+eq(minorFromWhole(40, ''), null, 'and a blank currency is not a currency either');
+eq(minorFromWhole(null, 'gbp'), null, 'nothing to convert converts to nothing');
+eq(minorFromWhole(Number.NaN, 'gbp'), null, 'an unreadable fee is not a zero fee');
+eq(minorFromWhole(1e18, 'kwd'), null, 'a figure past safe integers is refused rather than silently rounded');
+
+// The round trip the two screens actually perform: read the gym's whole-unit
+// fee, store minor units, show it back. It has to survive both odd families.
+eq(majorFromMinor(minorFromWhole(40, 'kwd'), 'kwd'), '40.000', 'a dinar fee reads back as the fee');
+eq(majorFromMinor(minorFromWhole(6300, 'jpy'), 'jpy'), '6300', 'and so does a yen one');
 
 if (errors.length) { console.error(`coachMoney: ${errors.length} failure(s)\n` + errors.map((e) => '  - ' + e).join('\n')); process.exit(1); }
 console.log('coachMoney ok — currencies stay apart, the two halves of a coach’s takings add without merging currencies, unlabelled amounts stay counted, memberships have no balance');

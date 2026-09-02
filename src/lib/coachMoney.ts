@@ -176,6 +176,39 @@ export function majorFromMinor(minorUnits: number | null | undefined, currency: 
   return `${neg ? '-' : ''}${Math.trunc(abs / f)}.${rest}`;
 }
 
+/**
+ * A whole-unit figure ALREADY HELD AS A NUMBER, converted to minor units.
+ *
+ * Not `readMinorAmount`: that one reads a string somebody typed and owns the
+ * refusals that go with typing. This one takes a number the database already
+ * holds — `tenants.session_fee`, which is stored in whole units — and turns it
+ * into the minor units every `*_cents` column is denominated in.
+ *
+ * ── Why this exists rather than `* 100` ───────────────────────────────────
+ *
+ * Two call sites wrote `sessionFee * 100` into `sessions.rate_cents`, which is
+ * the figure a gym settles payroll against. In yen that is a hundred times the
+ * fee, and in Kuwaiti dinar a tenth of it, and neither reads as wrong on the
+ * screen afterwards — it is simply a coach paid the wrong amount, computed from
+ * a snapshot nobody re-derives.
+ *
+ * ── An unknown currency returns null, and null must not become a zero ─────
+ *
+ * There is no default currency in this product, so there is no factor to
+ * assume. A caller that cannot name the currency gets null and must write NO
+ * rate at all: `payrollByTrainer` already treats a missing snapshot as unknown
+ * and falls back to the rate the gym states today, which is a defensible
+ * figure. A guessed one is not.
+ */
+export function minorFromWhole(whole: number | null | undefined, currency: string | null | undefined): number | null {
+  const dp = currencyDecimals(currency);
+  if (dp == null || whole == null || !Number.isFinite(whole)) return null;
+  // Rounded rather than truncated: 12.345 * 1000 is 12344.999999999998 in
+  // binary floating point, and truncating it would quietly lose a fils.
+  const scaled = Math.round(whole * 10 ** dp);
+  return Number.isSafeInteger(scaled) ? scaled : null;
+}
+
 export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined): TypedAmount {
   const cur = (currency || '').trim().toUpperCase();
   const dp = currencyDecimals(currency);

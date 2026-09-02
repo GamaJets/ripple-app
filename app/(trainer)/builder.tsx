@@ -41,9 +41,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { badges as groupBadges, canJoinNext, isGrouped, joinNext, leaveGroup } from '../../src/lib/setGroups';
 import { applyMove, shifts as dragShifts, targetIndex } from '../../src/lib/dragReorder';
-import { SET_METHODS, DEFAULT_METHOD, badgeFor, methodFor } from '../../src/lib/setMethods';
+import { SET_METHODS, DEFAULT_METHOD, badgeFor, methodFor, otherMethodsHint } from '../../src/lib/setMethods';
 import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount, type SetRow } from '../../src/lib/setRows';
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -2524,10 +2525,12 @@ export default function Builder() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{tempoMeaning(e.tempo)}</Text>
                   ) : null}
 
-                  {/* ── Rest, method, and grouping ────────────────────────
-                      Three things a coach could not say before, on one row
-                      because they are all answers to "how is this performed"
-                      rather than "what is it". */}
+                  {/* ── Rest and grouping ─────────────────────────────────
+                      Both answers to "how is this performed" rather than "what
+                      is it". Set type used to sit on the end of this row too,
+                      which is exactly why nobody tapped it: a bare `Normal`
+                      after "sec · default 1:30" reads as a property of the REST
+                      timer. It has its own labelled control below. */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
                     {/* The rest between sets, in SECONDS. The client's guided
                         runner already had a timer — hardcoded to the same
@@ -2569,15 +2572,6 @@ export default function Builder() {
                       {e.restSec != null ? `sec · ${restClock(e.restSec)}` : `sec · default ${restClock(DEFAULT_REST_SEC)}`}
                     </Text>
 
-                    {/* How the sets are performed. The label shown is the
-                        catalogue's, never a stored string, so a method renamed
-                        later reads correctly in programmes already written. */}
-                    <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: null })} accessibilityRole="button"
-                      accessibilityLabel={`How ${e.name} is performed${rows.tabled ? ', by default' : ''} — currently ${methodFor(e.method).method.label}`}
-                      style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
-                      <Text style={{ ...ty.caption, color: t.ink }}>{methodFor(e.method).method.label}</Text>
-                    </Pressable>
-
                     {/* Grouping is an act on a PAIR, so the control lives on
                         the upper exercise and names the lower one. Hidden
                         rather than disabled where there is nothing below to
@@ -2597,6 +2591,42 @@ export default function Builder() {
                       </Pressable>
                     ) : null}
                   </View>
+
+                  {/* ── Set type ──────────────────────────────────────────
+                      `Normal` on its own was a value with no field beside it.
+                      It named what this set is without ever saying that it is
+                      a CHOICE, and a coach who has not opened the sheet has no
+                      way to learn that warm-ups, drop sets and AMRAP live
+                      behind it.
+
+                      So: the field is named above the control, the control is
+                      a full 44pt target rather than a 32pt chip, it carries a
+                      chevron so it reads as something that opens, and the line
+                      underneath says what the current method MEANS and what
+                      else is in there. Both sentences come out of the
+                      catalogue — see otherMethodsHint — so neither can drift
+                      from what the picker actually offers. */}
+                  {(() => {
+                    const m = methodFor(e.method).method;
+                    return (
+                      <View style={{ marginTop: sp.md }}>
+                        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.xs }}>
+                          {rows.tabled ? 'Set type · every set unless a row says otherwise' : 'Set type'}
+                        </Text>
+                        <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: null })} accessibilityRole="button"
+                          accessibilityLabel={`Set type for ${e.name}${rows.tabled ? ', applied to every set unless a row says otherwise' : ''} — currently ${m.label}. ${m.blurb} Opens the list of set types.`}
+                          style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: sp.sm,
+                                   minHeight: MIN_TARGET, paddingHorizontal: sp.lg, paddingVertical: sp.sm,
+                                   borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
+                          <Text style={{ ...ty.body, color: t.ink }}>{m.label}</Text>
+                          <Icon name="chevron" size={16} color={t.ink3} />
+                        </Pressable>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                          {m.blurb} {otherMethodsHint(e.method)}
+                        </Text>
+                      </View>
+                    );
+                  })()}
 
                   <View style={{ marginTop: sp.sm }}>
                     <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 4 }}>Notes for this exercise</Text>

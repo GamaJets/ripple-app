@@ -43,6 +43,7 @@ import { useAuth } from '../../src/ui/auth';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+import { minorFromWhole } from '../../src/lib/coachMoney';
 import { tapLight } from '../../src/ui/haptics';
 import { type PtSession, type SessionOutcome } from '../../src/lib/gymSessions';
 import {
@@ -274,7 +275,13 @@ export default function TrainerSessions() {
       // session marked on Tuesday and sent on Thursday is worth what it was
       // worth on Tuesday, and re-reading the fee would let a rate change in
       // between quietly rewrite it.
-      const rateCents = feeToSnapshot != null ? feeToSnapshot * 100 : undefined;
+      // Converted by the gym's currency, never by a factor of a hundred: in
+      // yen that snapshot was a hundred times the fee and in dinar a tenth of
+      // it, on the column payroll is settled from. An independent coach's own
+      // fee has no currency recorded anywhere, so it converts to null and NO
+      // rate is written — payrollByTrainer falls back to the rate the gym
+      // states today, which is a figure somebody chose.
+      const rateCents = minorFromWhole(feeToSnapshot, tenant?.currency) ?? undefined;
       // ── the outcome, and the room it is recorded in ────────────────────
       //
       // This is the same money as the class tick, one session at a time, and

@@ -33,6 +33,7 @@ import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { markOutcome } from '../../src/lib/gymSessions';
+import { minorFromWhole } from '../../src/lib/coachMoney';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
@@ -1661,7 +1662,14 @@ export default function TrainerSchedule() {
     if (!s.clientId) return;
     const who = nameOf(s.clientId);
     try {
-      await markOutcome(supabase, s.id, 'completed', tenant?.sessionFee != null ? tenant.sessionFee * 100 : undefined);
+      // `* 100` was wrong everywhere the minor unit is not a hundredth: a
+      // ¥6,300 fee snapshotted as 630,000 and a KWD 40 one as 4,000. This is
+      // the figure the gym settles payroll against, so it is converted by the
+      // currency or it is not written at all — `undefined` leaves `rate_cents`
+      // unset, and payrollByTrainer already reads that as unknown rather than
+      // as nothing owed.
+      const rateCents = minorFromWhole(tenant?.sessionFee, tenant?.currency) ?? undefined;
+      await markOutcome(supabase, s.id, 'completed', rateCents);
     } catch (e) {
       reportError('calendar.checkIn', e, { sessionId: s.id });
       Alert.alert('Not checked in', `${who} was not marked present — that did not save. Check your connection and try again.`);
