@@ -43,7 +43,7 @@ import type { CoachSetupFacts } from '../lib/coachFirstRun';
 /** Nothing established. The honest starting point and the honest answer to a
  *  signed-out session — not a row of falses. */
 export const UNKNOWN_SETUP: CoachSetupFacts = {
-  currency: null, rate: null, client: null, availability: null,
+  mode: null, currency: null, rate: null, client: null, availability: null,
   package: null, stripe: null, code: null, document: null,
 };
 
@@ -106,9 +106,15 @@ export function useCoachSetup(): CoachSetupRead {
       //     the whole reason src/lib/currencyGap.ts exists. A null currency with
       //     no error is genuinely unset; with an error it is unknown.
       myTenantCurrency(),
-      // 2 · the rate. `session_fee` is nullable and 0 is a rate a coach may
-      //     really charge, so `!= null` is the test and never truthiness.
-      supabase.from('trainers').select('session_fee').eq('id', uid).maybeSingle(),
+      // 2 · the rate, AND how they coach. Two facts, one row, one read: both
+      //     live on `trainers` and asking twice would let the same row answer
+      //     one question and fail the other. `session_fee` is nullable and 0 is
+      //     a rate a coach may really charge, so `!= null` is the test and
+      //     never truthiness. `delivery_mode` (part 410) is nullable too, and
+      //     ITS null is the coach not having answered — which is a real
+      //     answer, and is why a refused read on this row has to blank both
+      //     facts rather than report an unanswered question.
+      supabase.from('trainers').select('session_fee, delivery_mode').eq('id', uid).maybeSingle(),
       // 3 · somebody on the book. Two tables, because a coach who has written
       //     down forty people by hand has a book: `clients` is people with a
       //     Repple account, `coach_clients` is people the coach typed in.
@@ -153,6 +159,12 @@ export function useCoachSetup(): CoachSetupRead {
           : false;
 
     setFacts({
+      // A refused read is null, not false. `trainers.delivery_mode` holds NULL
+      // for a coach who has not been asked and for one who skipped, and both of
+      // those are genuinely "not answered" — but only when the read itself came
+      // back. Reading the data before the error is exactly how a refusal
+      // becomes a nag to answer a question they already answered.
+      mode: rateRow == null || rateRow.error ? null : (rateRow.data?.delivery_mode ?? null) != null,
       currency: cur == null ? null : cur.currency ? true : cur.error ? null : false,
       rate: rateRow == null || rateRow.error ? null : (rateRow.data?.session_fee ?? null) != null,
       client,

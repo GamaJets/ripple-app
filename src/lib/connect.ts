@@ -12,6 +12,7 @@ import { writeFailure } from './wroteRows';
 import { packBalance, readDraw, drew, drawReason, type PackPurchase, type PackBalance } from './packDraw';
 import { PACKAGE_NOT_SAVED, packageEditBlocker, packageUpdateRow, type PackagePatch } from './packageEdit';
 import { subState } from './subscriptionScope';
+import type { CreditSession } from './sessionCredits';
 import type { PromoCode } from './packagePromo';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -92,6 +93,14 @@ export interface Purchase { id: string; client_id: string | null; trainer_id: st
    *  be manufactured afterwards. `portalPurchase` is what picks a row that has
    *  one. */
   stripe_customer_id?: string | null;
+  /** Stripe's `amount_total` minus the total connect-checkout PREDICTED when it
+   *  worked this sale's platform fee out (part 311). NULL on every sale where
+   *  nothing was predicted — which is every sale with no discount code on it,
+   *  and every sale made before the column existed — 0 where a prediction was
+   *  made and Stripe agreed with it, and a signed difference otherwise. The
+   *  three are different facts: null is "never checked" and 0 is "checked and
+   *  right", and `feeMismatches` in coachMoney.ts is what keeps them apart. */
+  fee_variance_cents?: number | string | null;
   /** The connected account this sale was charged ON, or null for the platform
    *  (part 161). Written from the Checkout Session's metadata by the webhook,
    *  and it is a fact about THIS SALE rather than about the coach's current
@@ -387,10 +396,26 @@ export async function packageLabels(ids: string[]): Promise<Map<string, { name: 
   } catch (e) { reportError('connect.packageLabels', e); return new Map(); }
 }
 
-/** Client buys a package → Stripe Checkout (funds to the trainer, minus fee). */
-export async function buyPackage(packageId: string): Promise<{ ok: boolean; error?: string }> {
+/**
+ * Client buys a package → Stripe Checkout (funds to the trainer, minus fee).
+ *
+ * `code` is the coach's own discount code, as the client typed it. It used not
+ * to be here at all, and the reason it is now is `oneOffDiscount` in
+ * src/lib/packagePromo.ts: Repple's cut on a one-off is an absolute figure
+ * Stripe wants in the same call it works the discount out in, so a code can
+ * only be honoured where the discounted total is knowable exactly beforehand —
+ * which it is for an amount off in the package's own currency, and for a
+ * percentage that divides the price without rounding.
+ *
+ * Sending one is not the same as it being accepted. connect-checkout resolves
+ * the coupon on the coach's Stripe account and refuses every shape it cannot
+ * state exactly, before anything is charged. Omitted means no code, which is
+ * the ordinary case and takes the path it always did.
+ */
+export async function buyPackage(packageId: string, code?: string): Promise<{ ok: boolean; error?: string }> {
   try {
-    const { data, error } = await supabase.functions.invoke('connect-checkout', { body: { package_id: packageId, success_url: appLink('purchase/success'), cancel_url: appLink('purchase/cancel') } });
+    const promo = String(code ?? '').trim();
+    const { data, error } = await supabase.functions.invoke('connect-checkout', { body: { package_id: packageId, success_url: appLink('purchase/success'), cancel_url: appLink('purchase/cancel'), ...(promo ? { promo_code: promo } : {}) } });
     if (error) return { ok: false, error: error.message };
     if (data?.url) { await openUrl(data.url); return { ok: true }; }
     return { ok: false, error: data?.error || 'Could not start checkout.' };
@@ -811,9 +836,21 @@ async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?
 export const refundPurchase = (purchaseId: string, amountCents?: number): Promise<RefundResult> =>
   callRefund('purchase', purchaseId, amountCents);
 
-/** Refund one paid renewal invoice. A DIFFERENT act from cancelling the
- *  subscription: this returns money and stops nothing, and
- *  `endSubscriptionNow` stops the next charge and returns nothing. */
+/**
+ * Refund one paid renewal invoice. A DIFFERENT act from cancelling the
+ * subscription: this returns money and stops nothing, and `endSubscriptionNow`
+ * stops the next charge and returns nothing.
+ *
+ * Called from the Renewals Paid list on app/(trainer)/payments.tsx. It was
+ * called from NOWHERE for as long as that list did not exist, and everything
+ * behind it — connect-refund's `kind: 'renewal'` branch, part 192's
+ * `refunded_cents` on `client_subscription_payments` — was reachable only
+ * through this function, so none of it had ever run. What that hid is in part
+ * 310: connect-refund selects `stripe_account_id` off the row, and the column
+ * was on `client_purchases` and on `client_subscriptions` and not on this
+ * table, so every renewal refund would have failed on the read with 42703.
+ * A feature nothing calls is a feature nothing has tested.
+ */
 export const refundRenewal = (paymentId: string, amountCents?: number): Promise<RefundResult> =>
   callRefund('renewal', paymentId, amountCents);
 
@@ -908,4 +945,112 @@ export async function archivePromoCode(promotionCodeId: string): Promise<{ ok: b
     reportError('connect.promoArchive', e);
     return { ok: false, error: 'That code was not withdrawn, so it is still live.' };
   }
+}
+
+/* ── what pays for a one-to-one ───────────────────────────────────────────── */
+
+/**
+ * The client's own gym passes that can pay for a one-to-one.
+ *
+ * `gym_passes_own_r` (part 31) shows a holder their own passes and nobody
+ * else's, and `gym_pass_types_tenant_r` shows the price book to anyone in the
+ * tenant — so both halves of this join are readable by the member without a new
+ * policy. `covers` arrives from part 370 and is the whole point of the read: a
+ * ten-CLASS pack must never pay for an hour of PT, so a pass whose type does
+ * not say 'pt' is filtered out by `gymPtLines` rather than counted here.
+ *
+ * **Null is a read that did not land, and is not an empty pass list.** A member
+ * holding six PT credits whose read failed must not be shown a zero.
+ */
+export async function myPtPasses(): Promise<PtPassRow[] | null> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return null;
+    const { data, error } = await supabase
+      .from('gym_passes')
+      .select('id, pass_type_id, expires_on, uses_total, uses_spent, gym_pass_types(name, covers)')
+      .eq('holder_id', uid)
+      .order('issued_on', { ascending: false })
+      .limit(capLimit());
+    if (error) { reportError('connect.myPtPasses', error); return null; }
+    if (!data) return null;
+    const page = capped(data as unknown[]);
+    // A figure over a partial set is not a smaller number, it is a wrong one —
+    // the same rule `fetchMyPurchases` follows, and for the same reason: these
+    // rows become a balance somebody books against.
+    if (page.truncated) {
+      reportError('connect.myPtPasses', new TruncatedRead('your gym passes', ROW_CAP));
+      return null;
+    }
+    return page.rows.map((r: any) => {
+      const ty = Array.isArray(r.gym_pass_types) ? r.gym_pass_types[0] : r.gym_pass_types;
+      return {
+        id: r.id as string,
+        passTypeId: (r.pass_type_id ?? null) as string | null,
+        passTypeName: (ty?.name ?? null) as string | null,
+        covers: (ty?.covers ?? null) as string | null,
+        expiresOn: (r.expires_on ?? null) as string | null,
+        usesTotal: (r.uses_total ?? 0) as number,
+        usesSpent: (r.uses_spent ?? 0) as number,
+      };
+    });
+  } catch (e) { reportError('connect.myPtPasses', e); return null; }
+}
+
+/** One of the client's gym passes, narrowed to what a PT balance depends on. */
+export interface PtPassRow {
+  id: string;
+  passTypeId: string | null;
+  passTypeName: string | null;
+  /** 'visit' or 'pt' (part 370). Null when the type could not be read, which is
+   *  NOT the same as a type that covers visits — an unnamed coverage is never
+   *  assumed to be the one that lets a credit be spent. */
+  covers: string | null;
+  expiresOn: string | null;
+  usesTotal: number;
+  usesSpent: number;
+}
+
+/**
+ * The client's own sessions, with what paid for each one.
+ *
+ * `sessions_client_read` (part 22) already shows a client every session that is
+ * theirs, so this needs no policy and no RPC — only the columns parts 193 and
+ * 370 added, which no existing read selects.
+ *
+ * Null for a read that failed, because `buildLedger(null)` is null and an empty
+ * ledger under a failed read tells somebody who has used nine sessions that
+ * they have never used one.
+ */
+export async function mySessionCredits(): Promise<CreditSession[] | null> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id; if (!uid) return null;
+    const { data, error } = await supabase
+      .from('sessions')
+      .select('id, starts_at, status, outcome, series_id, pack_drawn_at, pack_drawn_kind, pack_drawn_purchase_id, pack_drawn_pass_id, pack_draw_shortfall_at, booking_drew_credit_at')
+      .eq('client_id', uid)
+      .order('starts_at', { ascending: false })
+      .limit(capLimit());
+    if (error) { reportError('connect.mySessionCredits', error); return null; }
+    if (!data) return null;
+    const page = capped(data as unknown[]);
+    if (page.truncated) {
+      reportError('connect.mySessionCredits', new TruncatedRead('your session history', ROW_CAP));
+      return null;
+    }
+    return page.rows.map((r: any): CreditSession => ({
+      id: r.id,
+      startsAt: r.starts_at,
+      status: r.status,
+      outcome: r.outcome ?? null,
+      seriesId: r.series_id ?? null,
+      packDrawnAt: r.pack_drawn_at ?? null,
+      packDrawnKind: (r.pack_drawn_kind ?? null) as CreditSession['packDrawnKind'],
+      packDrawnPurchaseId: r.pack_drawn_purchase_id ?? null,
+      packDrawnPassId: r.pack_drawn_pass_id ?? null,
+      shortfallAt: r.pack_draw_shortfall_at ?? null,
+      bookingDrewCreditAt: r.booking_drew_credit_at ?? null,
+    }));
+  } catch (e) { reportError('connect.mySessionCredits', e); return null; }
 }

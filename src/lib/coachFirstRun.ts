@@ -57,11 +57,11 @@
 // sends them to disconnect and reconnect a working payout account.
 import type { LoadStatus } from '../ui/loadStatus';
 
-/** The eight, by id. Storage-free — nothing persists a coach's position here,
+/** The nine, by id. Storage-free — nothing persists a coach's position here,
  *  because every one of these is read from the account rather than from the
  *  handset, so the list is correct on a new phone with no migration. */
 export type CoachSetupId =
-  | 'currency' | 'rate' | 'client' | 'availability'
+  | 'mode' | 'currency' | 'rate' | 'client' | 'availability'
   | 'package' | 'stripe' | 'code' | 'document';
 
 export interface CoachSetupItem {
@@ -95,6 +95,18 @@ export interface CoachSetupItem {
  * written, connecting is the step that makes it purchasable.
  */
 export const COACH_SETUP: readonly CoachSetupItem[] = [
+  {
+    // Asked FIRST, and before the currency, because it is the only item on the
+    // list that changes what the rest of the list is. An online coach who
+    // answers here never sees "Set When You Work" as an outstanding task, and
+    // an in-person coach's app is unchanged by answering. Everything is shown
+    // until it is answered, so skipping costs nothing.
+    id: 'mode',
+    title: 'Say How You Coach',
+    note: 'in person, online, or both',
+    breaks: 'the app cannot set itself up around your coaching, so you are shown every in-person tool whether you use one or not',
+    route: '/(trainer)/profile',
+  },
   {
     id: 'currency',
     title: 'Set Your Currency',
@@ -161,6 +173,10 @@ export const COACH_SETUP: readonly CoachSetupItem[] = [
 /** What the app knows about each item. `null` means the read behind it did not
  *  answer, which is NOT that the thing has not been done. */
 export interface CoachSetupFacts {
+  /** Whether the coach has answered how they coach. Null while unread, which is
+   *  NOT the same as having skipped: a coach whose `trainers` read was refused
+   *  must not be told to answer a question they answered in March. */
+  mode: boolean | null;
   currency: boolean | null;
   rate: boolean | null;
   client: boolean | null;
@@ -171,10 +187,37 @@ export interface CoachSetupFacts {
   document: boolean | null;
 }
 
-/** Done, still to do, or nobody could tell us. Deliberately the same three
- *  words `firstRun.ts` uses, because the tick, the dash and the empty circle
- *  are drawn by two screens that should not diverge. */
-export type CoachItemState = 'done' | 'todo' | 'unknown';
+/**
+ * Done, still to do, nobody could tell us, or it does not apply to this coach.
+ *
+ * The first three are `firstRun.ts`'s own three words, because the tick, the
+ * dash and the empty circle are drawn by two screens that should not diverge.
+ *
+ * ── Why a fourth was needed rather than reusing one of the three ──────────
+ *
+ * "Set When You Work" publishes bookable hours. An online-only client gets no
+ * booking calendar at all — `COACHED_MODE_NOTE_COACH` in src/lib/types.ts says
+ * so in the coach's own voice — so for a coach with no in-person clients there
+ * is nobody who could ever take one of those slots. That row would sit on their
+ * Getting Started for ever as a task they cannot complete, `coachSetupLeft`
+ * would count it against them, and the fraction would never reach the end.
+ *
+ * None of the other three is honest about it:
+ *
+ *   'todo'     is the bug. It is a nag for something that would change nothing.
+ *   'done'     is a different lie, and a worse one — it says they published
+ *              hours they have not published, which is exactly the sort of
+ *              claim this file's header is about.
+ *   'unknown'  means a read did not answer. It did answer; the answer simply
+ *              does not apply. Reusing it would put a dash on the row and
+ *              stop the list ever calling itself finished, for a coach with
+ *              nothing outstanding.
+ *
+ * So: 'na'. Counted as neither done nor outstanding, out of the denominator,
+ * and shown with the reason rather than silently dropped — a row that vanishes
+ * is a row a coach cannot ask about.
+ */
+export type CoachItemState = 'done' | 'todo' | 'unknown' | 'na';
 
 export interface CoachSetupRow {
   item: CoachSetupItem;
@@ -183,9 +226,58 @@ export interface CoachSetupRow {
 
 const stateOf = (v: boolean | null): CoachItemState => (v == null ? 'unknown' : v ? 'done' : 'todo');
 
-/** The rows, each with where it stands. */
-export function coachSetupRows(f: CoachSetupFacts): CoachSetupRow[] {
-  return COACH_SETUP.map((it) => ({ item: it, state: stateOf(f[it.id]) }));
+/**
+ * Whether a step applies to a coach who works this way.
+ *
+ * `shape` is `DeliveryShape` from src/lib/coachDelivery.ts, and null means we
+ * do not know — which resolves the same way everything else about this fact
+ * resolves, to the WIDEST answer: every step applies. A coach whose roster read
+ * failed, or who has not answered, gets the whole list.
+ *
+ * All nine, decided one at a time rather than by rule, because "it sounds
+ * in-person" is not an argument:
+ *
+ *   mode          applies. It is the question itself.
+ *   currency      applies. It blanks six screens either way, and a remote
+ *                 coach's takings need it more than anybody's.
+ *   rate          applies. It is not only what prices a delivered session: it
+ *                 is on the coach's directory listing and their public page,
+ *                 and it is the base a late-cancellation fee is set against.
+ *                 A remote coach selling a package still quotes an hour.
+ *   client        applies. Everything else on the list has somebody to be for.
+ *   availability  DOES NOT APPLY to a remote coach. The whole argument is
+ *                 above. This is the only one.
+ *   package       applies, and matters MORE remotely: a package is how a
+ *                 remote coach is paid at all.
+ *   stripe        applies, and for the same reason.
+ *   code          applies. Attribution is about where clients came from, which
+ *                 has nothing to do with where they train.
+ *   document      applies. A waiver and a par-q are not a room.
+ */
+export function stepApplies(id: CoachSetupId, shape: 'inperson' | 'remote' | null): boolean {
+  if (shape !== 'remote') return true;
+  return id !== 'availability';
+}
+
+/** Why a row is greyed rather than ticked. Sentence case: it is prose on a
+ *  row, and it says what to do to make the row come back. */
+export const NOT_YOUR_SETUP: Record<string, string> = {
+  availability: 'You coach online, so there are no slots for anybody to book and this is not counted against you. It comes back the moment you take on a client in person.',
+};
+
+/**
+ * The rows, each with where it stands.
+ *
+ * `shape` defaults to null, which means every step applies. Callers that have
+ * not worked out how the coach coaches therefore get exactly the list this
+ * function has always returned, and no caller can narrow the list by
+ * forgetting to pass something.
+ */
+export function coachSetupRows(f: CoachSetupFacts, shape: 'inperson' | 'remote' | null = null): CoachSetupRow[] {
+  return COACH_SETUP.map((it) => ({
+    item: it,
+    state: stepApplies(it.id, shape) ? stateOf(f[it.id]) : 'na',
+  }));
 }
 
 /** How many are done. Never counts an unread one. */
@@ -194,12 +286,20 @@ export function coachSetupDone(rows: readonly CoachSetupRow[]): number {
 }
 
 /** How many are KNOWN to be outstanding. Never counts an unread one either —
- *  "3 left" over a failed read is a number made out of our own failure. */
+ *  "3 left" over a failed read is a number made out of our own failure — and
+ *  never counts one that does not apply, which would be a task this coach
+ *  cannot complete held permanently against them. */
 export function coachSetupLeft(rows: readonly CoachSetupRow[]): number {
   return rows.filter((r) => r.state === 'todo').length;
 }
 
-/** How many could not be established. `done + left + unknown` is the list. */
+/** How many do not apply to this coach. Out of the denominator, and named so a
+ *  screen can say WHY a row is greyed rather than leaving it to be guessed. */
+export function coachSetupNa(rows: readonly CoachSetupRow[]): number {
+  return rows.filter((r) => r.state === 'na').length;
+}
+
+/** How many could not be established. `done + left + unknown + na` is the list. */
 export function coachSetupUnknown(rows: readonly CoachSetupRow[]): number {
   return rows.filter((r) => r.state === 'unknown').length;
 }
@@ -220,7 +320,7 @@ export function coachSetupNext(rows: readonly CoachSetupRow[]): CoachSetupItem |
  * coach it exists for.
  */
 export function showCoachSetup(rows: readonly CoachSetupRow[]): boolean {
-  return rows.some((r) => r.state !== 'done');
+  return rows.some((r) => r.state !== 'done' && r.state !== 'na');
 }
 
 /**
@@ -232,7 +332,11 @@ export function showCoachSetup(rows: readonly CoachSetupRow[]): boolean {
  */
 export function coachSetupHeading(rows: readonly CoachSetupRow[]): string {
   const done = coachSetupDone(rows);
-  return coachSetupUnknown(rows) > 0 ? `${done} done` : `${done} of ${rows.length} done`;
+  // The denominator is the steps that apply to THIS coach. Counting a step
+  // that cannot be completed into the total means the fraction never reaches
+  // the end, which is the arithmetic equivalent of nagging.
+  const applicable = rows.length - coachSetupNa(rows);
+  return coachSetupUnknown(rows) > 0 ? `${done} done` : `${done} of ${applicable} done`;
 }
 
 /**

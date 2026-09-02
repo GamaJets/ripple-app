@@ -42,8 +42,11 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useCoachSetup } from '../../src/ui/coachSetup';
+import { useCoachDelivery, useDeliveryFact } from '../../src/ui/coachDelivery';
+import { DeliveryModeChoice } from '../../src/ui/DeliveryModeChoice';
+import { deliveryNote } from '../../src/lib/coachDelivery';
 import {
-  coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext,
+  coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, NOT_YOUR_SETUP,
   type CoachSetupRow,
 } from '../../src/lib/coachFirstRun';
 
@@ -51,14 +54,23 @@ export default function CoachGettingStarted() {
   const t = useTheme();
   const router = useRouter();
   const { facts, status, reload } = useCoachSetup();
+  // How this coach works, from their own answer and their roster together. It
+  // decides which steps are on the list at all: an online coach has no slots
+  // for anybody to book, so "Set When You Work" is not a task they can finish.
+  //
+  // Under anything but a whole read this resolves to 'inperson', so a coach
+  // whose roster or declaration did not come back gets the entire list. Nothing
+  // is ever removed from a list because a read failed.
+  const delivery = useDeliveryFact();
+  const { refresh: refreshDelivery } = useCoachDelivery();
 
   // Re-read on every focus, so a tick appears the moment the coach comes back
   // from the screen that earned it. Without this a coach sets their currency,
   // returns, and is still being told to set their currency — which reads as the
   // setting not having saved.
-  useFocusEffect(useCallback(() => { void reload(); }, [reload]));
+  useFocusEffect(useCallback(() => { void reload(); void refreshDelivery(); }, [reload, refreshDelivery]));
 
-  const rows = coachSetupRows(facts);
+  const rows = coachSetupRows(facts, delivery.shape);
   const next = coachSetupNext(rows);
   const G = layout.gutter;
 
@@ -75,6 +87,10 @@ export default function CoachGettingStarted() {
           not been done, and under a failed read that is a claim we have not
           earned. */}
       {state === 'unknown' ? <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text> : null}
+      {/* Neither a tick nor a dash. A step that does not apply to this coach
+          has been answered and does not need doing, and both of the other two
+          marks would say something untrue about it. */}
+      {state === 'na' ? <View style={{ width: 8, height: hairline * 2, backgroundColor: t.ink3, borderRadius: 1 }} /> : null}
     </View>
   );
 
@@ -100,12 +116,12 @@ export default function CoachGettingStarted() {
               key={r.item.id}
               onPress={() => router.push(r.item.route as any)}
               accessibilityRole="button"
-              accessibilityLabel={`${r.item.title}. ${r.state === 'done' ? 'Done' : r.state === 'unknown' ? 'Not known' : 'Still to do'}. ${r.item.note}`}
+              accessibilityLabel={`${r.item.title}. ${r.state === 'done' ? 'Done' : r.state === 'unknown' ? 'Not known' : r.state === 'na' ? 'Does not apply to you' : 'Still to do'}. ${r.item.note}`}
               style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}
             >
               <View style={{ paddingTop: 2 }}><Tick state={r.state} /></View>
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' ? t.ink3 : t.ink }}>{r.item.title}</Text>
+                <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' || r.state === 'na' ? t.ink3 : t.ink }}>{r.item.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.item.note}</Text>
                 {/* Why it is worth doing, on the rows that are not done. This is
                     the half a checklist usually leaves out and the reason a
@@ -118,10 +134,35 @@ export default function CoachGettingStarted() {
                     Until this is done, {r.item.breaks}.
                   </Text>
                 ) : null}
+                {/* A step that does not apply says WHY, and says how it comes
+                    back. A row that quietly greyed itself is a row a coach
+                    cannot ask a question about, and the answer to "where did
+                    my availability step go" has to be on the row. */}
+                {r.state === 'na' && NOT_YOUR_SETUP[r.item.id] ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                    {NOT_YOUR_SETUP[r.item.id]}
+                  </Text>
+                ) : null}
               </View>
               <View style={{ paddingTop: 4 }}><Icon name="chevron" size={15} color={t.ink3} /></View>
             </Pressable>
           ))}
+        </Section>
+
+        {/* ── the one step that is answered HERE ──────────────────────────
+            Every other row opens the screen that does the thing. This one is
+            three taps, so it is offered in place: a coach asked how they coach
+            on the first run of a new app should not have to leave the list to
+            say. The row above still opens Profile, which is where it is
+            CHANGED later, and both render this same control — one set of words
+            for one question. Skipping is simply not tapping: nothing is
+            declared, nothing is hidden, and the row stays on the list. */}
+        <Section>
+          <SectionHead title="How Do You Coach?" />
+          <DeliveryModeChoice onPicked={() => { void reload(); }} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {deliveryNote(delivery)}
+          </Text>
         </Section>
 
         {next ? (

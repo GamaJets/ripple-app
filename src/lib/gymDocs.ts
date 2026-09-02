@@ -22,11 +22,30 @@
 // database, not only here — and publishing a change means publishing a new
 // version. `nextVersion` below is what a screen calls to do that.
 //
+// ── Who can read a document, and being seen to read one ───────────────────
+//
+// The filing cabinet shipped readable by every trainer in the gym: the storage
+// policy was `my_role() in ('trainer','owner')` across the whole bucket, so a
+// part-time coach hired last week could open a member's signed contract and
+// their health questionnaire, and nothing recorded that they had.
+//
+// supabase/parts/390 narrows that to one rule — a document about a PERSON is
+// the owner's alone, and a document about the BUILDING is readable by staff for
+// the four kinds the floor needs (service reports, photographs, certificates,
+// insurance). `documentAudience()` below says which a row is, for labelling; it
+// does not decide anything, because a screen deciding this is the defect.
+//
+// And opening a member-attached document writes a row FIRST, through
+// `openDocument()`. A trigger cannot see a signed URL being minted — it happens
+// here, in the client, and Postgres never hears about the fetch — so the record
+// is written by the only party that can observe it, and the link is not issued
+// if the record will not write.
+//
 // Framework-agnostic like the rest of src/lib: the client arrives as an
 // argument, so the console and the phone can both use this.
 
 import { assertWhole, capLimit } from './rowCap';
-import { assertWrote } from './wroteRows';
+import { writeFailure } from './wroteRows';
 
 type Queryable = { from: (table: string) => any; storage?: any };
 
@@ -285,6 +304,17 @@ export const DOCUMENT_LABEL: Record<DocumentKind, string> = {
 export interface GymDocument {
   id: string;
   memberId: string | null;
+  /**
+   * This document is about a person, whether or not the link to them still
+   * exists.
+   *
+   * Separate from `memberId` because `gym_documents.member_id` is `on delete
+   * set null`: erasing a member detaches their contract, and a rule that read
+   * `memberId != null` would WIDEN at that moment — the incident report about
+   * somebody who has just been erased would become gym-wide paperwork. The
+   * database latches this on and never clears it (supabase/parts/390).
+   */
+  memberAttached: boolean;
   equipmentId: string | null;
   kind: DocumentKind;
   title: string;
@@ -299,6 +329,50 @@ export interface GymDocument {
   uploadedByName: string | null;
   uploadedAt: string;
 }
+
+/** The bucket, named once. */
+export const GYM_DOCS_BUCKET = 'gym-docs';
+
+/** Long enough to open one, short enough that a link pasted into a chat is dead
+ *  before anybody clicks it. */
+export const SIGNED_URL_TTL_S = 60;
+
+/**
+ * The kinds a trainer may read when the document is about the BUILDING and not
+ * about a person.
+ *
+ * This list is the TypeScript half of the rule; the enforcing half is
+ * `gym_doc_readable()` in supabase/parts/390, and a test in gymDocAccess.test.ts
+ * reads that file and fails if the two lists ever differ. What is here is used
+ * to LABEL a row, never to decide access — a screen that decided this would be
+ * the defect part 390 exists to remove.
+ *
+ * `contract`, `incident` and `other` are absent deliberately. A contract is a
+ * lease or a supplier agreement; an incident report is an account of somebody
+ * being hurt; and `other` is where a GP letter or a physio report lands when
+ * nobody picked a kind, which makes it the one kind whose contents cannot be
+ * reasoned about.
+ */
+export const STAFF_READABLE_KINDS: readonly DocumentKind[] =
+  ['service_report', 'photo', 'certificate', 'insurance'] as const;
+
+/**
+ * Who can read this document, in the words a screen shows beside it.
+ *
+ * Describes what the database will do; it does not cause it. See
+ * `gym_doc_readable()` in supabase/parts/390.
+ */
+export function documentAudience(
+  d: { memberAttached: boolean; kind: DocumentKind },
+): 'owner' | 'staff' {
+  if (d.memberAttached) return 'owner';
+  return STAFF_READABLE_KINDS.includes(d.kind) ? 'staff' : 'owner';
+}
+
+export const AUDIENCE_LABEL: Record<'owner' | 'staff', string> = {
+  owner: 'Owner only',
+  staff: 'Staff',
+};
 
 /** 25 MB, matching the bucket's own limit in supabase/parts/185. Checked here
  *  as well so the refusal arrives before the upload rather than after it. */
@@ -348,7 +422,7 @@ export function documentPath(tenantId: string, fileName: string): string {
 export async function fetchDocuments(sb: Queryable, tenantId: string): Promise<GymDocument[]> {
   const { data, error } = await sb
     .from('gym_documents')
-    .select('id, member_id, equipment_id, kind, title, storage_path, mime, size_bytes, expires_on, note, uploaded_by, uploaded_at')
+    .select('id, member_id, member_attached, equipment_id, kind, title, storage_path, mime, size_bytes, expires_on, note, uploaded_by, uploaded_at')
     .eq('tenant_id', tenantId)
     .order('uploaded_at', { ascending: false })
     .limit(capLimit());
@@ -359,6 +433,13 @@ export async function fetchDocuments(sb: Queryable, tenantId: string): Promise<G
   return rows.map((r: any) => ({
     id: r.id,
     memberId: r.member_id ?? null,
+    // The column where there is one, and `member_id` where there is not —
+    // which is the answer a database built before supabase/parts/390 would
+    // give. Never `?? false`: a missing column must not be read as "this is
+    // nobody's paperwork".
+    memberAttached: typeof r.member_attached === 'boolean'
+      ? r.member_attached
+      : r.member_id != null,
     equipmentId: r.equipment_id ?? null,
     kind: (DOCUMENT_KINDS as readonly string[]).includes(r.kind) ? r.kind : 'other',
     title: r.title,
@@ -408,10 +489,186 @@ export async function recordDocument(
   if (error) throw error;
 }
 
-export async function deleteDocument(sb: Queryable, id: string): Promise<void> {
-  const r = await sb.from('gym_documents').delete({ count: 'exact' }).eq('id', id);
-  if (r.error) throw r.error;
-  assertWrote('Removing that document', r);
+/* ── opening one, and being seen to ────────────────────────────────────────── */
+
+/**
+ * Record that a link was cut for a member-attached document.
+ *
+ * Throws when the row will not write, and `openDocument` below does not mint
+ * the link if it does. That is the whole design: the log is a GATE, not a
+ * receipt. See the long argument in supabase/parts/390 — of the two ways to be
+ * wrong about a read, an entry for a link that was issued and then failed to
+ * open is a statement about an attempt that was authorised and made, and an
+ * unlogged read is a hole in the only record there is.
+ */
+export async function recordDocumentRead(
+  sb: Queryable, tenantId: string, d: GymDocument, readBy: string | null,
+): Promise<void> {
+  const { error } = await sb.from('gym_document_reads').insert({
+    tenant_id: tenantId,
+    document_id: d.id,
+    storage_path: d.storagePath,
+    doc_kind: d.kind,
+    doc_title: d.title,
+    read_by: readBy,
+  });
+  if (error) {
+    throw new Error(
+      'That file was NOT opened. Opening a document about a member has to be recorded first, and the '
+      + `record could not be written: ${errText(error)}. No link has been issued.`,
+    );
+  }
+}
+
+/**
+ * A signed URL for one document, and the record of having asked for it.
+ *
+ * The bucket is private, so this is the only way in — and signing is itself
+ * checked against the SELECT policy, which is what makes supabase/parts/390 the
+ * gate rather than this function.
+ */
+export async function openDocument(
+  sb: Queryable, tenantId: string, d: GymDocument, readBy: string | null,
+): Promise<string> {
+  if (d.memberAttached) await recordDocumentRead(sb, tenantId, d, readBy);
+
+  const { data, error } = await bucket(sb).createSignedUrl(d.storagePath, SIGNED_URL_TTL_S);
+  if (error || !data?.signedUrl) {
+    throw new Error(
+      `That file could not be opened: ${error ? errText(error) : 'no link came back'}. The record of it `
+      + 'is still here; the object may have been removed from storage.',
+    );
+  }
+  return data.signedUrl;
+}
+
+/* ── removing one ──────────────────────────────────────────────────────────── */
+
+/**
+ * Did the Storage API say it removed this path?
+ *
+ * Pure, because the answer decides whether an owner is told a member's record
+ * is gone. `remove()` answers with the list of objects it actually deleted, and
+ * an empty list is NOT an error: an object the policy would not let the caller
+ * delete is silently omitted, exactly the way a PostgREST delete that matches
+ * no rows returns 204 (see wroteRows.ts, which is this same bug wearing its
+ * other face).
+ */
+export function objectRemoved(path: string, data: unknown): boolean {
+  if (!Array.isArray(data)) return false;
+  const base = path.slice(path.lastIndexOf('/') + 1);
+  return data.some((o: any) => o?.name === path || o?.name === base);
+}
+
+/** Is this object absent from a listing of its own folder? Pure, for the same
+ *  reason. An empty listing means absent; a listing that names it means the
+ *  removal was refused rather than unnecessary. */
+export function absentFromListing(path: string, data: unknown): boolean {
+  if (!Array.isArray(data)) return false;
+  const base = path.slice(path.lastIndexOf('/') + 1);
+  return !data.some((o: any) => o?.name === base || o?.name === path);
+}
+
+/**
+ * Delete the bytes, and refuse to claim it unless they went.
+ *
+ * `remove()` returning an empty list is ambiguous — the object was already
+ * gone, or the policy refused — and the two are opposite answers to "has this
+ * member's record been erased". So the ambiguous case is resolved by looking:
+ * a listing of the folder either still names the object, in which case the
+ * removal was refused and this throws, or it does not, in which case the object
+ * is genuinely absent and that is what was asked for.
+ *
+ * A listing that cannot be read is not an answer either, and is also refused.
+ * The one thing this must never do is report success it has not observed.
+ */
+export async function removeDocumentObject(sb: Queryable, path: string): Promise<void> {
+  const b = bucket(sb);
+  const { data, error } = await b.remove([path]);
+  if (error) {
+    throw new Error(
+      `That file could not be deleted from storage: ${errText(error)}. Nothing has been removed — the `
+      + 'document is still on file and still readable by everybody the policy admits.',
+    );
+  }
+  if (objectRemoved(path, data)) return;
+
+  const slash = path.lastIndexOf('/');
+  const dir = slash >= 0 ? path.slice(0, slash) : '';
+  const base = path.slice(slash + 1);
+  const listing = await b.list(dir, { search: base, limit: 100 });
+  if (listing.error) {
+    throw new Error(
+      'Storage accepted the delete without saying what it removed, and the folder could not be listed to '
+      + `check: ${errText(listing.error)}. Nothing has been changed here, because a file that cannot be `
+      + 'confirmed gone is not gone.',
+    );
+  }
+  if (!absentFromListing(path, listing.data)) {
+    throw new Error(
+      'Storage accepted the delete and removed nothing — the file is still in the bucket. That usually '
+      + 'means the delete was refused rather than performed. The document is still on file.',
+    );
+  }
+}
+
+/**
+ * Remove a document: the OBJECT first, then the row. Both, or the caller is
+ * told it did not happen.
+ *
+ * The order is the opposite of the upload's and it is the opposite on purpose.
+ * Filing writes the object first because a row pointing at a file that does not
+ * exist is a false statement in a compliance record. Removing writes the object
+ * first because the other order is the defect this replaces: delete the row
+ * first and, if the object will not go, what is left is a file in a private
+ * bucket that nothing indexes — still readable by everybody the policy admits,
+ * and INVISIBLE to the one screen that could have removed it. A member who asked
+ * for their record to be erased would have it deleted from a list and kept on
+ * disk.
+ *
+ * This way round, the surviving half is the row. It is visible, it still says
+ * what the document was, opening it fails with a sentence that says the object
+ * is gone, and pressing Remove again clears it — removing an object that is
+ * already absent is confirmed absent and succeeds. A visible half that can be
+ * finished beats an invisible half that cannot be found.
+ */
+export async function deleteDocument(
+  sb: Queryable, d: { id: string; storagePath: string },
+): Promise<void> {
+  await removeDocumentObject(sb, d.storagePath);
+
+  const r = await sb.from('gym_documents').delete({ count: 'exact' }).eq('id', d.id);
+  const why = r.error ? `Removing that document could not be saved: ${errText(r.error)}` : writeFailure('Removing that document', r);
+  if (why) {
+    throw new Error(
+      `${why} The file itself HAS been deleted from storage, so what is left is an entry pointing at `
+      + 'nothing. Press Remove again to clear it.',
+    );
+  }
+}
+
+/**
+ * A file that uploaded and could not be filed.
+ *
+ * Best effort and deliberately silent: the caller is already reporting that the
+ * document was not filed, and a second failure on the way out does not change
+ * that sentence. Without this the object sits in the bucket with no row — which
+ * is the same invisible orphan the old Remove produced, arriving by the other
+ * door.
+ */
+export async function discardUnfiledObject(sb: Queryable, path: string): Promise<void> {
+  try { await removeDocumentObject(sb, path); } catch { /* reported by the caller as "not filed" */ }
+}
+
+function bucket(sb: Queryable): any {
+  const b = sb.storage?.from?.(GYM_DOCS_BUCKET);
+  if (!b) throw new Error('This client has no storage attached, so the file itself cannot be reached.');
+  return b;
+}
+
+function errText(e: unknown): string {
+  const m = (e as any)?.message;
+  return typeof m === 'string' && m.trim() ? m : 'the server did not say why';
 }
 
 /**

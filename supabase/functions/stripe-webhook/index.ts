@@ -696,6 +696,41 @@ Deno.serve(async (req) => {
         // that would correct it — unlike a subscription, a one-off is
         // mentioned by Stripe exactly once.
         const trainerId = meta.trainer_id || (await trainerOfAccount(eventAccount)) || null;
+
+        // ── the prediction, checked ──────────────────────────────────────
+        //
+        // A discount code on a one-off is the one place this app computes a
+        // figure it cannot read back from Stripe first. Repple's cut there is
+        // `application_fee_amount`, an INPUT to the call whose OUTPUT is
+        // `amount_total`, so connect-checkout derives the fee from a total it
+        // worked out and stamps that total here. Part 311 has the full
+        // argument, including why this is recorded rather than refused.
+        //
+        // Only present when a code was involved. With no discount the fee comes
+        // off the list price, which is what Stripe charges, and there is
+        // nothing predicted — so the column stays NULL and null means exactly
+        // that, never "checked and equal".
+        const predicted = meta.repple_expected_total ? Number(meta.repple_expected_total) : null;
+        const charged = typeof sess.amount_total === 'number' ? sess.amount_total : null;
+        const variance = predicted != null && Number.isFinite(predicted) && charged != null
+          ? charged - predicted
+          : null;
+        if (variance) {
+          // Loudly, and with everything needed to work out who is short and by
+          // how much. Repple's cut on this sale came off `predicted`, so the
+          // coach is out by roughly the platform percentage of `variance` — and
+          // if this ever fires it fires on EVERY sale of that package, because
+          // the cause is arithmetic rather than luck.
+          console.error('stripe-webhook: ONE-OFF FEE TAKEN FROM THE WRONG TOTAL', {
+            session: sess.id,
+            package: meta.package_id,
+            trainer: trainerId,
+            predicted,
+            charged,
+            variance,
+          });
+        }
+
         const { error } = await service.from('client_purchases').upsert({
           client_id: meta.client_id || null,
           trainer_id: trainerId,
@@ -731,6 +766,10 @@ Deno.serve(async (req) => {
           currency: sess.currency ?? null,
           sessions_total: isNaN(sessions as number) ? null : sessions,
           status: 'paid',
+          // NULL when nothing was predicted, 0 when the prediction was right,
+          // and the signed difference otherwise. See part 311 — the three are
+          // different facts and the column is worthless if they collapse.
+          fee_variance_cents: variance,
         }, { onConflict: 'stripe_session_id' });
         if (error) return fail('client_purchases', error.message);
       }
@@ -826,6 +865,21 @@ Deno.serve(async (req) => {
             // subscription_cycle for a renewal.
             billing_reason: inv.billing_reason ?? null,
             paid_at: paidSec ? new Date(paidSec * 1000).toISOString() : eventAt,
+            // WHICH LEDGER this renewal was charged on (part 310), and it is
+            // the only place the answer can be recorded. A refund of this
+            // invoice has to be issued in the same account context the charge
+            // was made in — Stripe answers "No such charge" otherwise — and
+            // that cannot be recovered later from the coach's current
+            // `charge_model`, because a coach who moves to direct charges
+            // still has last month's renewals on the platform.
+            //
+            // `eventAccount` rather than the mirrored subscription: the event
+            // IS the delivery, and an invoice can arrive before the
+            // subscription has been mirrored at all. Null for a platform
+            // event, which is exactly what `accountForObject` reads as "the
+            // platform" — the same null `client_purchases` has carried since
+            // part 161.
+            stripe_account_id: eventAccount,
           }, { onConflict: 'stripe_invoice_id' });
           if (payErr) return fail('client_subscription_payments', payErr.message);
         }

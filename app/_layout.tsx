@@ -14,6 +14,7 @@ import { SessionsProvider } from '../src/ui/sessions';
 import { WorkoutLogProvider } from '../src/ui/workoutLog';
 import { MyTrainerProfileProvider } from '../src/ui/coachProfile';
 import { RosterProvider } from '../src/ui/roster';
+import { CoachDeliveryProvider } from '../src/ui/coachDelivery';
 import { InjuryAcksProvider } from '../src/ui/injuryAcks';
 import { AssignedProgramsProvider } from '../src/ui/assignedPrograms';
 import { CoachFeedbackProvider } from '../src/ui/feedback';
@@ -159,6 +160,12 @@ export default function RootLayout() {
                     anything off an incomplete read of it. Renders nothing. */}
                 <MotivationNudgeProvider>
                 <MyTrainerProfileProvider>
+                {/* How the coach says they coach. One row, one column, and it sits
+                    OUTSIDE the roster because the two are the two halves of one
+                    answer: the declaration is the floor and the roster may only
+                    widen it. See src/lib/coachDelivery.ts. Reads nothing at all
+                    off the coach app. */}
+                <CoachDeliveryProvider>
                   <RosterProvider>
                     <InjuryAcksProvider>
                     <AssignedProgramsProvider>
@@ -228,6 +235,7 @@ export default function RootLayout() {
                     </AssignedProgramsProvider>
                     </InjuryAcksProvider>
                   </RosterProvider>
+                </CoachDeliveryProvider>
                 </MyTrainerProfileProvider>
                 </MotivationNudgeProvider>
                 </BadgeWatchProvider>

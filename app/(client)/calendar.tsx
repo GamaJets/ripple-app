@@ -84,6 +84,11 @@ import type { TrainingSession } from '../../src/lib/types';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { workoutKind, KIND_LABEL, WORKOUT_KINDS, type WorkoutKind } from '../../src/lib/workoutKind';
 import { dateParts } from '../../src/lib/localDate';
+// Paging back into a month the read never reached must not draw an empty grid.
+// See the note beside `monthNote` below for the two months that are not empty
+// and look it.
+import { readBoundary, monthCoverage, monthCoverageNote, hasEnded, pastVerdict, PAST_STATE_NOTE } from '../../src/lib/sessionHistory';
+import { appLocale } from '../../src/lib/locale';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 // Which week of the block a date belongs to. See src/lib/clientBlock.ts.
 import { useClientWeek } from '../../src/ui/clientWeek';
@@ -421,6 +426,50 @@ export default function Calendar() {
     if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
     setViewMonth(m); setViewYear(y);
   }
+
+  /* ── how far back this grid can honestly draw ─────────────────────────────
+   *
+   * The arrows have always gone backwards without limit, and the grid has
+   * always been drawn from ONE read: the provider's, which is newest-first and
+   * stops at the row cap (src/ui/sessions.tsx, src/lib/rowCap.ts). So a member
+   * with a long record could page back to March, find nothing under any date,
+   * and read that as a month they did not train — when what actually happened
+   * is that the read stopped in June and March was never asked for.
+   *
+   * Two months are wrong in different ways and both need saying:
+   *
+   *   · the month the read STOPS INSIDE is half drawn. This is the case
+   *     src/lib/historyWindow.ts handles by removing the month from a chart,
+   *     because a part-month bar at full scale reads as a quiet month. A
+   *     calendar cannot remove a month — the arrows go there — so it names the
+   *     day it is complete from instead.
+   *   · every month OLDER than that is not empty, it is unread.
+   *
+   * And under 'error' or 'loading' no month is known at all, which is the state
+   * that must never render as a blank grid with nothing said. `monthCoverage`
+   * answers 'unknown' for both.
+   *
+   * A whole read produces 'covered' for every month back to the beginning of
+   * time and `monthCoverageNote` returns null, so nothing is said to the
+   * overwhelming majority of members whose record fits inside one read.
+   */
+  const monthEdge = readBoundary(sessions, sessionsStatus === 'partial');
+  // Only for a month that has already been. The note is about what has been
+  // READ of the past, and on this month or a future one it would be answering a
+  // question nobody asked — the boundary of a newest-first read is always
+  // behind the reader, never in front of them.
+  const viewingPastMonth = viewYear < now.getFullYear()
+    || (viewYear === now.getFullYear() && viewMonth < now.getMonth());
+  const monthNote = viewingPastMonth
+    ? monthCoverageNote(
+      monthCoverage(viewYear, viewMonth, monthEdge, sessionsStatus),
+      monthEdge,
+      (iso) => {
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
+      },
+    )
+    : null;
 
   function openPlanner(dateISO: string) {
     const existing = plans.find((p) => p.dateISO === dateISO) ?? null;
@@ -826,6 +875,11 @@ export default function Calendar() {
               </View>
             ))}
           </View>
+          {/* A past month the read did not reach. Under the grid rather than
+              over it, because the grid is still worth showing — some of the
+              month may be there — but never without this. An empty April with
+              nothing said is the screen telling somebody they did not train. */}
+          {monthNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{monthNote}</Flag> : null}
         </Section>
 
         <Rule />
@@ -922,6 +976,21 @@ export default function Calendar() {
 
           {selDaySessions.map((s, si) => {
             const isMine = s.status === 'booked';
+            /* A day in the past is a record, not a diary.
+             *
+             * Every booked session on this grid said "Confirmed with your
+             * coach" and carried a Cancel button, whatever date it was on. On a
+             * day that has already been, both of those are wrong: the sentence
+             * is about a session that is coming, and the button offers to call
+             * off an hour that has already happened. A member looking back at
+             * March was shown a session their coach had recorded as a no-show,
+             * described as confirmed, with an invitation to cancel it.
+             *
+             * So a session whose time has passed shows what became of it —
+             * delivered, not attended, cancelled, or still waiting on the coach
+             * to say — and offers nothing to press. */
+            const ended = isMine && hasEnded(s);
+            const v = ended ? pastVerdict(s) : null;
             return (
               <View key={s.id}>
                 {si > 0 ? <Rule /> : null}
@@ -929,9 +998,11 @@ export default function Calendar() {
                   <View style={{ width: 3, height: 34, borderRadius: 2, backgroundColor: isMine ? t.brand : t.surface3 }} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{isMine ? 'Confirmed with your coach' : (s.released ? 'Just opened up' : 'Available')}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {v ? PAST_STATE_NOTE[v.state] : isMine ? 'Confirmed with your coach' : (s.released ? 'Just opened up' : 'Available')}
+                    </Text>
                   </View>
-                  {isMine ? (
+                  {ended ? null : isMine ? (
                     <Ghost label="Cancel" onPress={() => cancel(s)} />
                   ) : (
                     <Cta label="Book" onPress={() => book(s)} />

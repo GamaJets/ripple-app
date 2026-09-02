@@ -32,7 +32,7 @@
 // The client app names its coach through `useThreadPeerName`
 // (src/lib/threadPeer.ts), which reads `clients.trainer_id` and then that id's
 // profile and no other. It is the right source there. This one never is.
-import { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -47,6 +47,7 @@ import {
   type TrainerProfileFields,
   type TrainerRowRead,
 } from '../lib/trainerProfileAccess';
+import { asPublishResult, normaliseHandle, type PublishResult } from '../lib/publicProfile';
 
 interface MyTrainerProfileValue extends TrainerProfileFields {
   /** Whether these fields are really the signed-in user's own, and if not, why
@@ -64,6 +65,22 @@ interface MyTrainerProfileValue extends TrainerProfileFields {
   /** Null clears the rate. It is not the same as 0, which is a rate. */
   setSessionFee: (v: number | null) => void;
   setListed: (v: boolean) => void;
+  /**
+   * Claim a public-page address and switch the page on or off, in one call.
+   *
+   * NOT a setter, and deliberately shaped unlike every other member of this
+   * object. The debounced write below is fire-and-forget — `.then(() => {}, ()
+   * => {})` — which is right for a bio and wrong for this: a handle can be
+   * TAKEN, it can be a word we reserve, and a coach who is not in the directory
+   * cannot publish at all. Each of those is a sentence somebody has to read,
+   * and a swallowed 23505 would leave a coach looking at a handle they do not
+   * own. So `set_my_public_page` returns a word, this awaits it, and the screen
+   * says which one happened.
+   *
+   * `trainers.public_handle` and `trainers.public_page` also hold no UPDATE
+   * grant (part 340 §4), so there is no other route to them from here.
+   */
+  publishPage: (handle: string, on: boolean) => Promise<PublishResult>;
 }
 
 const Ctx = createContext<MyTrainerProfileValue | null>(null);
@@ -84,6 +101,11 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
   // apply" to somebody deciding whether cancelling would cost them money.
   const [sessionFee, setSessionFee] = useState<number | null>(null);
   const [listed, setListed] = useState(false);
+  // Both read back from the server and written only through publishPage below.
+  // Null is "no address claimed", which is a different thing from the empty
+  // string a text field holds while somebody is typing one.
+  const [publicHandle, setPublicHandle] = useState<string | null>(null);
+  const [publicPage, setPublicPage] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   // Set only once the server copy has been read for this uid. Nothing is written
   // back before then, so a stale local value can never clobber the real profile
@@ -139,7 +161,7 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
         if (typeof real === 'string' && real.trim()) setName(real.trim());
         if (typeof prof.data?.avatar === 'string' && prof.data.avatar) setPhoto(prof.data.avatar);
 
-        const tr = await supabase.from('trainers').select('bio, tagline, offers, specialties, session_fee, listed').eq('id', u.id).single();
+        const tr = await supabase.from('trainers').select('bio, tagline, offers, specialties, session_fee, listed, public_page, public_handle').eq('id', u.id).single();
         if (cancelled) return;
         const t = tr.data as any;
         // PGRST116 is PostgREST's "the .single() matched no rows", which is the
@@ -169,6 +191,11 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
           const fee = Number(t.session_fee);
           setSessionFee(t.session_fee != null && Number.isFinite(fee) && fee > 0 ? fee : null);
           if (typeof t.listed === 'boolean') setListed(t.listed);
+          // Assigned in both directions, like session_fee above and for the
+          // same reason: a page the coach has just taken down must not go on
+          // reading as live because the previous value was left in place.
+          setPublicHandle(typeof t.public_handle === 'string' && t.public_handle.trim() ? t.public_handle.trim() : null);
+          setPublicPage(t.public_page === true);
         }
       } catch (e) { reportError('coachProfile.hydrate', e); }
       if (!cancelled) setSynced(true);
@@ -209,8 +236,49 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
   // details. The setters go out through the same test: a screen that cannot read
   // this profile must not be able to write it either, and a silent no-op is
   // better than a write that lands on somebody's real `profiles` row.
+  /**
+   * The one write on this provider that is not a setter. See the docstring on
+   * `publishPage` in the value shape above for why it is awaited and why it
+   * comes back as a word.
+   *
+   * On a build that may not read this profile it returns 'not_a_coach' without
+   * issuing anything, which is the same refusal `off` makes for every setter
+   * beside it — except that a caller of this one is owed an answer rather than
+   * a silent no-op, because it is about to print one.
+   */
+  const publishPage = useCallback(async (handle: string, on: boolean): Promise<PublishResult> => {
+    if (!mine || !uid) return 'not_a_coach';
+    if (!USE_SUPABASE) return 'failed';
+    try {
+      const { data, error } = await supabase.rpc('set_my_public_page', {
+        p_handle: normaliseHandle(handle),
+        p_on: on,
+      });
+      // supabase-js resolves rather than rejecting, so `error` is read here and
+      // not inferred from a missing `data`: a refusal arrives as a word and a
+      // failure arrives as an error, and the two say different things.
+      if (error) { reportError('coachProfile.publishPage', error); return 'failed'; }
+      const result = asPublishResult(data);
+      // Re-read from what the server actually did rather than from what was
+      // asked for. 'needs_directory' and 'taken' both leave the row alone, and
+      // a screen showing the requested state after one of those would be
+      // showing a page that is not there.
+      if (result === 'published' || result === 'saved') {
+        setPublicHandle(normaliseHandle(handle) || null);
+        setPublicPage(result === 'published');
+      } else if (result === 'cleared') {
+        setPublicHandle(null);
+        setPublicPage(false);
+      }
+      return result;
+    } catch (e) {
+      reportError('coachProfile.publishPage', e);
+      return 'failed';
+    }
+  }, [mine, uid]);
+
   const value = useMemo<MyTrainerProfileValue>(() => {
-    const fields = guardTrainerProfile(access, { name, photo, tagline, bio, offers, specialties, sessionFee, listed });
+    const fields = guardTrainerProfile(access, { name, photo, tagline, bio, offers, specialties, sessionFee, listed, publicHandle, publicPage });
     const off = () => {};
     return {
       ...fields,
@@ -224,8 +292,9 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
       setSpecialties: mine ? setSpecialties : off,
       setSessionFee: mine ? setSessionFee : off,
       setListed: mine ? setListed : off,
+      publishPage,
     };
-  }, [access, mine, name, photo, tagline, bio, offers, specialties, sessionFee, listed]);
+  }, [access, mine, name, photo, tagline, bio, offers, specialties, sessionFee, listed, publicHandle, publicPage, publishPage]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

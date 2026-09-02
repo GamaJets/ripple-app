@@ -160,6 +160,26 @@ export interface TrainingSession {
   /** What the objection is: did_not_happen | wrong_time | wrong_length | other.
    *  Null unless disputed. */
   disputeKind?: string | null;
+  /**
+   * What actually happened: completed | no_show | cancelled | late_cancelled,
+   * or null when nobody has recorded one. `sessions.outcome`, added by
+   * supabase/parts/33-session-outcomes.sql.
+   *
+   * Deliberately NOT derived from `status` or from the clock. "Booked, and the
+   * clock has passed" is the inference part 33 exists to end — it counts
+   * no-shows and un-cancelled slots as delivered work and then pays for them.
+   * Null here means unrecorded, which src/lib/sessionHistory.ts renders as its
+   * own state and never as delivered.
+   *
+   * It rode in on `select('*')` all along and was thrown away by the row
+   * mapper, so both phone apps could show what was BOOKED and neither could
+   * show what BECAME of it.
+   */
+  outcome?: 'completed' | 'no_show' | 'cancelled' | 'late_cancelled' | null;
+  /** When that outcome was recorded. Null while unmarked — and also null on a
+   *  row marked before the column existed, which is not the same thing, so the
+   *  two are never collapsed into one. */
+  outcomeAt?: string | null;
 }
 
 export interface CancellationResult {

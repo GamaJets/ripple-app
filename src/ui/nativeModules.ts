@@ -68,6 +68,12 @@ const FILE_SYSTEM = 'ExpoFileSystem';
 // be the reason it has to be re-argued.
 const WEB_BROWSER = 'ExpoWebBrowser';
 
+// Not 'ExpoCalendar'. The package registers its native module as `CalendarNext`
+// — `requireNativeModule('CalendarNext')` in its own build output — and a probe
+// for the wrong name answers "no" on every binary including the ones that have
+// it, which would hide the feature for ever with nothing to show why.
+const CALENDAR = 'CalendarNext';
+
 export const HAS_NATIVE_VIDEO = requireOptionalNativeModule(VIDEO) != null;
 /** Whether the rest timer can make a noise on THIS install. expo-audio landed
  *  after several builds shipped, and on those the sound is simply absent — the
@@ -108,6 +114,24 @@ export const HAS_NATIVE_FILE_SYSTEM = requireOptionalNativeModule(FILE_SYSTEM) !
 export const HAS_NATIVE_WEB_BROWSER = requireOptionalNativeModule(WEB_BROWSER) != null;
 
 /**
+ * Whether this binary can read the phone's own calendar.
+ *
+ * `expo-calendar` was added on 2 Sep, well after the binaries in people's
+ * hands, and the version was DELIBERATELY not moved with it. With
+ * `runtimeVersion` on the `appVersion` policy, bumping it would have stopped
+ * every install already out there receiving any update at all until its owner
+ * took a store update — frozen, not broken, but frozen. Guarding the module
+ * instead costs one branch and orphans nobody: an older binary answers `false`
+ * here, the feature says so in words, and every other thing in the same bundle
+ * keeps working.
+ *
+ * This is the same trade the app already makes for clipboard, document picking,
+ * video and audio. It is only worth restating because the alternative looks
+ * cheaper right up until the day somebody cannot be reached.
+ */
+export const HAS_NATIVE_CALENDAR = requireOptionalNativeModule(CALENDAR) != null;
+
+/**
  * The same sentence as UPDATE_REQUIRED_NOTE, for the two modules that landed
  * after it was written. Same shape deliberately: name the missing thing, say a
  * newer build brings it back, and rule out the thing the person would otherwise
@@ -115,6 +139,9 @@ export const HAS_NATIVE_WEB_BROWSER = requireOptionalNativeModule(WEB_BROWSER) !
  */
 export const CLIPBOARD_UNAVAILABLE_NOTE =
   'This version of the app was installed before copying was added, so it cannot put anything on the clipboard. The link is shown here in full to copy by hand, and updating to the latest build brings the button back.';
+
+export const CALENDAR_UNAVAILABLE_NOTE =
+  'This version of the app was installed before reading your phone\u2019s calendar was added, so it cannot see what is already in your diary. Blocking time by hand still works and is unaffected, and updating to the latest build brings this in.';
 
 export const DOCUMENT_PICKER_UNAVAILABLE_NOTE =
   'This version of the app was installed before choosing a file was added, so it cannot open your files. Updating to the latest build restores it — there is nothing wrong with the file itself.';
@@ -130,6 +157,19 @@ try { Clipboard = require('expo-clipboard'); } catch { /* not in this build yet 
 
 let DocumentPicker: any = null;
 try { DocumentPicker = require('expo-document-picker'); } catch { /* not in this build yet */ }
+
+let CalendarMod: any = null;
+try { CalendarMod = require('expo-calendar'); } catch { /* not in this build yet */ }
+
+/**
+ * expo-calendar, or null on a binary that predates the dependency.
+ *
+ * Every caller must branch on `HAS_NATIVE_CALENDAR` rather than on this being
+ * non-null: `require` succeeding only means the JavaScript is in the bundle,
+ * which it always is. Whether the NATIVE half is in the binary is the separate
+ * question, and it is the one that decides whether a call throws.
+ */
+export const deviceCalendar = (): any => (HAS_NATIVE_CALENDAR ? CalendarMod : null);
 
 // Required, not imported, for the reason given at IMAGE above. Exported as the
 // component itself so a caller can render it directly; null on a binary without

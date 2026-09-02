@@ -61,6 +61,7 @@ import { MEASURE_SITES } from '../../src/lib/clientMeasurements';
 import { areaLabel, type Injury } from '../../src/lib/injuries';
 import { shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
 import { fetchInvoiceIssuer } from '../../src/ui/coachInvoices';
+import { useMyCoachLogo } from '../../src/ui/coachLogo';
 import {
   coachClientReportDoc, coachReportShareBlurb, sessionTally,
   type CoachSessionRow, type ReportScan, type ReportMeasureEntry, type ReportInjury,
@@ -119,6 +120,7 @@ export default function ClientReport() {
   const [picked, setPicked] = useState<string | null>(clientId ?? null);
   const [reads, setReads] = useState<Reads>(EMPTY);
   const [issuer, setIssuer] = useState<{ name: string | null; status: LoadStatus }>({ name: null, status: 'loading' });
+  const logo = useMyCoachLogo();
   const [note, setNote] = useState('');
   const [today, setToday] = useState<string>(() => isoToday(new Date()));
 
@@ -319,6 +321,10 @@ export default function ClientReport() {
     coachName: issuer.name,
     coachStatus: issuer.status,
     brand: appName,
+    // The coach's own mark on a document they hand to a client. Null when there
+    // is none and null when it could not be fetched; the report is identical
+    // either way, which is the fallback src/lib/coachLogo.ts owns.
+    logoDataUri: logo.dataUri,
     generatedOn: today,
     weightUnit: pick.unit,
     lengthUnit,

@@ -41,7 +41,7 @@ const byTitle = (title: string) => KNOWN_PUSHES.filter((p) => p.title === title)
 for (const p of KNOWN_PUSHES.filter((x) => [
   'Session booked', 'Session cancelled', 'A new offer', 'New booking',
   'Your coach asked about an injury', 'Your coach asked for your intake',
-  'The slot you were waiting for is yours',
+  'The slot you were waiting for is yours', 'A client set a personal best',
 ].includes(x.title))) {
   ok(inboxDecision(p.title, p.body, p.route).record, `“${p.title}” from ${p.where} is worth an inbox row`);
 }
@@ -58,11 +58,11 @@ for (const p of KNOWN_PUSHES.filter((x) => /just opened|has read your/i.test(x.t
 
 // The catalogue is the thing the two rules above are read against, so it has to
 // still contain them. An empty filter passes a `for` loop silently.
-ok(KNOWN_PUSHES.length >= 19, 'the catalogue still lists every push in the repo');
+ok(KNOWN_PUSHES.length >= 20, 'the catalogue still lists every push in the repo');
 ok(byTitle('Session cancelled').length === 2, 'both cancellation pushes are listed — the coach one and the client one');
 ok(byTitle('The slot you were waiting for is yours').length === 2,
   'both waitlist promotions are listed — the coach cancelling and the client cancelling send the same news');
-// Seven of the nineteen: four that route to a chat thread (two from
+// Seven of the twenty: four that route to a chat thread (two from
 // messaging.ts, one from the coach's broadcast, one from the coach's nudge, all
 // four already written by part 26), two slot races, and one read receipt.
 // Stated as a total so that a rule which starts dropping something it did not
@@ -70,11 +70,13 @@ ok(byTitle('The slot you were waiting for is yours').length === 2,
 //
 // The three added when the notice fan-out and the invoice notification were
 // built are all on the recorded side, which is the whole point of them: they
-// are the kinds nothing else in the product tells anybody about.
+// are the kinds nothing else in the product tells anybody about. So is the
+// personal best: a coach who missed the banner learns about a record only by
+// opening that client's training screen and reading the sets.
 eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 7,
-  'seven of the nineteen pushes are deliberately not recorded');
-eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 12,
-  'the other twelve are');
+  'seven of the twenty pushes are deliberately not recorded');
+eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 13,
+  'the other thirteen are');
 
 /* ── the rule that actually matters: chat is decided by route ──────────── */
 

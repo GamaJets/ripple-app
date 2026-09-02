@@ -27,7 +27,7 @@ const ago = (h: number) => new Date(NOW - h * 3600_000).toISOString();
 const sess = (o: Partial<PtSession> = {}): PtSession => ({
   id: 's1', trainerId: 't1', trainerName: 'Ana', clientId: 'c1', clientName: 'Sara',
   startsAt: ago(24), durationMin: 60, status: 'booked', outcome: 'completed',
-  outcomeAt: ago(23), rateCents: null, settlementId: null, ...o,
+  outcomeAt: ago(23), rateCents: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
 });
 
 const rate = (o: Partial<TrainerPay> = {}): TrainerPay => ({

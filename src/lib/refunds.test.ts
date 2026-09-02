@@ -18,6 +18,7 @@
 // it, so the rule the screen enforces and the rule the refund is actually
 // checked against cannot drift apart.
 import {
+  refundableRow,
   refundableCents,
   isPartlyRefunded,
   isFullyRefunded,
@@ -165,6 +166,56 @@ ok(/right answer nearly always/i.test(END_AT_PERIOD_IS_KINDER), 'the safer optio
 // types and refuses the comparison outright, which is itself half the
 // assertion — the two are different values and the type system knows it.
 ok(String(END_NOW_TAKES_THE_REST) !== String(END_AT_PERIOD_IS_KINDER), 'and the two are different sentences');
+
+/* ── 7. a row from either table, in the shape the rule reads ────────────── */
+//
+// The mapping the screen and supabase/functions/connect-refund now share. It
+// used to be written out at each of them, and the field they each decided for
+// themselves was `paid` — which is the one a refund is gated on.
+
+// A renewal is PAID because it exists. `client_subscription_payments` has no
+// status column and wants none: part 132 writes a row there only after checking
+// the invoice itself said paid. A copy of this mapping that reached for
+// `row.status` on a renewal would read undefined, decide the money was never
+// charged, and refuse every renewal refund with a sentence that is false.
+const renewal = refundableRow('renewal', { amount_cents: 60000, currency: 'AED', refunded_cents: 0 }, 'in_123');
+eq(renewal.paid, true, 'a renewal row exists only because Stripe said paid, so it is paid');
+eq(refundBlocker(renewal), null, 'and nothing blocks refunding one');
+eq(renewal.kind, 'renewal', 'and it carries its own kind through to the server');
+
+// A one-off sale asks the column, and a sale that never completed is refused
+// rather than refunded — there is no charge behind it to credit.
+eq(refundableRow('purchase', { amount_cents: 48000, currency: 'GBP', refunded_cents: 0, status: 'paid' }, 'cs_1').paid, true, 'a paid sale is paid');
+eq(refundableRow('purchase', { amount_cents: 48000, currency: 'GBP', refunded_cents: 0, status: 'pending' }, 'cs_1').paid, false, 'a pending sale is not');
+ok(refundBlocker(refundableRow('purchase', { amount_cents: 48000, currency: 'GBP', refunded_cents: 0, status: 'pending' }, 'cs_1')) !== null, 'and it is refused with a reason rather than a dead button');
+
+// PostgREST hands a BIGINT back as a string so a value above 2^53 survives
+// JSON, and `refunded_cents` is a bigint in part 192. Read as a string this
+// fails every arithmetic check below it, and a sale that is half refunded
+// comes back as one nobody has touched — so the second refund is bounded by
+// the full price and gives the same money back twice.
+eq(refundableRow('purchase', { amount_cents: 48000, currency: 'GBP', refunded_cents: '10000', status: 'paid' }, 'cs_1').refundedCents, 10000, 'a bigint arriving as a string is still a number of minor units');
+eq(refundableCents(refundableRow('purchase', { amount_cents: 48000, currency: 'GBP', refunded_cents: '10000', status: 'paid' }, 'cs_1')), 38000, 'and what is left is computed off it');
+
+// Absent, unreadable and negative all mean NONE refunded, and none of them may
+// mean "unknown" — the column has a default and only the edge function writes
+// it, from Stripe's own answer.
+eq(refundableRow('renewal', { amount_cents: 60000, currency: 'AED', refunded_cents: null }, 'in_1').refundedCents, 0, 'a null already-refunded is none');
+eq(refundableRow('renewal', { amount_cents: 60000, currency: 'AED', refunded_cents: 'x' }, 'in_1').refundedCents, 0, 'and so is one that will not parse');
+eq(refundableRow('renewal', { amount_cents: 60000, currency: 'AED', refunded_cents: -50 }, 'in_1').refundedCents, 0, 'and a negative is not extra headroom');
+
+// An amount that will not read is not zero. Zero would be a sale with nothing
+// left on it; this is a sale nothing can be worked out from, and the blocker
+// says so in different words.
+eq(refundableRow('purchase', { amount_cents: null, currency: 'GBP', refunded_cents: 0, status: 'paid' }, 'cs_1').amountCents, null, 'an amount Stripe never stated stays null');
+ok(/nothing to work a refund out from/i.test(refundBlocker(refundableRow('purchase', { amount_cents: null, currency: 'GBP', refunded_cents: 0, status: 'paid' }, 'cs_1'))!), 'and it is refused for that reason');
+
+// The reference is passed rather than read off the row, because the screen
+// holds the Checkout Session or the Invoice and the server has since resolved
+// it to a PaymentIntent. Blank and whitespace are the same as absent: there is
+// nothing to refund AGAINST, which is a different sentence from nothing left.
+eq(refundableRow('purchase', { amount_cents: 48000, currency: 'GBP', refunded_cents: 0, status: 'paid' }, '   ').stripeRef, null, 'a blank reference is no reference');
+ok(/no payment reference/i.test(refundBlocker(refundableRow('purchase', { amount_cents: 48000, currency: 'GBP', refunded_cents: 0, status: 'paid' }, null))!), 'and the coach is told to give the money back the way it arrived');
 
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'REFUND FAILURES:\n' + errors.join('\n') : 'ALL REFUND TESTS PASSED');

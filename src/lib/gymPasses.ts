@@ -19,6 +19,28 @@ type Queryable = { from: (table: string) => any };
 
 export type PassKind = 'drop_in' | 'guest' | 'pack';
 
+/**
+ * What a pass may be spent ON, as opposed to how it was sold.
+ *
+ * `kind` says drop-in, guest or pack. It says nothing about whether a credit
+ * may pay for an hour of one-to-one, and until supabase/parts/370 nothing did:
+ * every pass was spent at the door or against a class. A ten-CLASS pack is not
+ * a ten-PT-session pack, so a gym that sells PT through passes says so, and
+ * only a 'pt' type is ever drawn by a delivered session.
+ *
+ * One or the other, never both. A single balance drawn down by two different
+ * things is one neither the member nor the desk can predict.
+ */
+export type PassCovers = 'visit' | 'pt';
+
+export const PASS_COVERS: readonly PassCovers[] = ['visit', 'pt'] as const;
+
+/** How each reads on screen, in the desk's own words rather than the column's. */
+export const PASS_COVERS_LABEL: Record<PassCovers, string> = {
+  visit: 'Door and classes',
+  pt: 'Personal training',
+};
+
 export interface PassType {
   id: string;
   name: string;
@@ -28,6 +50,9 @@ export interface PassType {
   uses: number;
   /** Days from issue until expiry. Null means it does not expire. */
   validDays: number | null;
+  /** What a credit on this type may be spent on. Defaults to 'visit' in the
+   *  database, so every type sold before part 370 keeps its old meaning. */
+  covers: PassCovers;
   active: boolean;
 }
 
@@ -36,6 +61,10 @@ export interface GymPass {
   passTypeId: string | null;
   passTypeName: string | null;
   kind: PassKind | null;
+  /** What this pass may be spent on. Null when the type could not be read,
+   *  which is NOT the same as 'visit' — an unknown coverage is never counted as
+   *  a PT credit and never counted as a class one either. */
+  covers: PassCovers | null;
   holderId: string | null;
   holderName: string | null;
   hostMemberId: string | null;
@@ -194,7 +223,7 @@ export function passStatus(p: GymPass, today: string): 'live' | 'expired' | 'use
 export async function fetchPassTypes(sb: Queryable, tenantId: string): Promise<PassType[]> {
   const { data, error } = await sb
     .from('gym_pass_types')
-    .select('id, name, kind, price_cents, currency, uses, valid_days, active')
+    .select('id, name, kind, price_cents, currency, uses, valid_days, covers, active')
     .eq('tenant_id', tenantId)
     .order('active', { ascending: false })
     .order('price_cents', { ascending: true })
@@ -212,6 +241,9 @@ function rowToPassType(r: any): PassType {
     currency: r.currency,
     uses: r.uses,
     validDays: r.valid_days ?? null,
+    // Never assumed to be 'pt' when the column is missing or unreadable: the
+    // default direction is the one that spends nobody's credit by accident.
+    covers: r.covers === 'pt' ? 'pt' : 'visit',
     active: !!r.active,
   };
 }
@@ -223,6 +255,9 @@ export interface NewPassType {
   currency: string;
   uses?: number;
   validDays?: number | null;
+  /** Omitted means 'visit', which is what the column defaults to and what every
+   *  pass sold before part 370 is. A gym opts a type IN to paying for PT. */
+  covers?: PassCovers;
 }
 
 /**
@@ -258,6 +293,7 @@ export function passTypeBlocker(t: {
   currency?: string | null;
   uses?: number | null;
   validDays?: number | null;
+  covers?: string | null;
 }): string | null {
   if (!(t.name ?? '').trim()) return 'Give the pass a name — it is what the desk picks from.';
   if (t.priceCents == null || !Number.isFinite(t.priceCents)) {
@@ -274,6 +310,13 @@ export function passTypeBlocker(t: {
   }
   if (t.validDays != null && (!Number.isInteger(t.validDays) || t.validDays < 1)) {
     return 'How many days does it last? Leave it blank for a pass that does not expire — 0 is not the same thing.';
+  }
+  // Refused rather than repaired. A word this build does not know would be
+  // written into a column that decides whether a credit can pay for an hour of
+  // somebody's time, and quietly rewriting it to 'visit' would sell a PT pack
+  // that pays for nothing.
+  if (t.covers != null && t.covers !== 'visit' && t.covers !== 'pt') {
+    return 'What is this pass good for? A pass covers the door and classes, or personal training.';
   }
   return null;
 }
@@ -293,6 +336,7 @@ export async function createPassType(
     currency: t.currency,
     uses: t.uses ?? 1,
     valid_days: t.validDays ?? null,
+    covers: t.covers ?? 'visit',
   });
   if (error) throw error;
 }
@@ -354,7 +398,7 @@ export async function fetchPasses(sb: Queryable, tenantId: string): Promise<GymP
     .select(
       'id, pass_type_id, holder_id, holder_name, host_member_id, issued_on, expires_on, ' +
         'uses_total, uses_spent, paid_cents, currency, note, ' +
-        'gym_pass_types(name, kind), profiles!gym_passes_holder_id_fkey(full_name)',
+        'gym_pass_types(name, kind, covers), profiles!gym_passes_holder_id_fkey(full_name)',
     )
     .eq('tenant_id', tenantId)
     .order('issued_on', { ascending: false })
@@ -371,6 +415,7 @@ function rowToPass(r: any): GymPass {
     passTypeId: r.pass_type_id ?? null,
     passTypeName: type?.name ?? null,
     kind: type?.kind ?? null,
+    covers: type?.covers === 'pt' ? 'pt' : type?.covers === 'visit' ? 'visit' : null,
     holderId: r.holder_id ?? null,
     // A linked profile's name wins; the desk-written name is the fallback for a
     // walk-in who never made an account.

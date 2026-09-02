@@ -9,8 +9,15 @@
 // comment on their calendar.
 //
 // Still true, and still worth saying on screen: approving does not spend a
-// package credit. A credit is redeemed when the session is BOOKED, in
-// calendar.tsx.
+// package credit.
+//
+// WHEN one is spent is no longer a single sentence, and this screen no longer
+// pretends otherwise. Since supabase/parts/370 there are three answers — a
+// one-off the client books draws at booking, a standing appointment and a
+// one-off the coach or the gym books draw at delivery, and a gym-sold PT pass
+// always draws at delivery — so the copy here points at the ledger
+// (app/(client)/session-credits.tsx) instead of naming a moment that is right
+// for one route in three.
 //
 // Re-skinned onto the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`): no hero, cards spent only on the sessions you can act
@@ -54,8 +61,44 @@ import {
 import { useSessions } from '../../src/ui/sessions';
 import { useClientData } from '../../src/ui/clientData';
 import { sessionPacks } from '../../src/lib/connect';
+// The record of what became of each session, as opposed to what the member said
+// about it. See the note on the "What Already Happened" section below for why
+// those are two different lists and not one.
+import {
+  pastSessions, pastVerdict, readBoundary, emptyHistoryLine,
+  PAST_STATE_LABEL, PAST_STATE_NOTE, CLIENT_CANCELLED_GAP_NOTE,
+  type PastState,
+} from '../../src/lib/sessionHistory';
+import { appLocale } from '../../src/lib/locale';
+import type { Theme } from '../../src/theme/tokens';
 
 const fmt = (iso: string) => { const d = new Date(iso); return d.toLocaleDateString() + ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+/** A bare day, for the sentence naming how far back the record has been read.
+ *  Through `appLocale()` like every other formatted date in this app — a
+ *  hardcoded tag is what `check:locale` exists to refuse. */
+const dayLabel = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+/**
+ * The mark beside a past session, never the colour of its text.
+ *
+ * House rule: `t.crit`/`t.warn`/`t.good` are marks, so each of these is a 6pt
+ * dot with the label rendered in ink beside it. 'unmarked' takes `warn` because
+ * it is the state that asks somebody to look — the same state that blocks a
+ * payroll settlement in src/lib/gymSessions.ts — and a plain cancellation takes
+ * the neutral ink3, because it is a thing that happened rather than a problem.
+ */
+const stateTone = (t: Theme, s: PastState): string => {
+  switch (s) {
+    case 'delivered': return t.good;
+    case 'missed': return t.crit;
+    case 'late_cancelled': return t.warn;
+    case 'cancelled': return t.ink3;
+    case 'unmarked': return t.warn;
+  }
+};
 
 export default function PtSessions() {
   const t = useTheme();
@@ -117,6 +160,37 @@ export default function PtSessions() {
   const done = mine.filter((s) => verdict(s) === 'approved');
   const disputed = mine.filter((s) => verdict(s) === 'disputed');
 
+  /* ── the record, as distinct from the answer the member gave to it ────────
+   *
+   * The three lists above are sorted by the MEMBER'S verdict: approved,
+   * disputed, or not answered. That is the right shape for the thing this
+   * screen does, and it is not a history. A session the coach marked as a
+   * no-show and a session nobody has marked at all both sit under "Awaiting
+   * Your Approval", identically, because `verdictOf` is not asked what
+   * happened — only what the member said.
+   *
+   * `sessions.outcome` is what happened, and it has been readable on these rows
+   * since supabase/parts/33 (the row mapper in src/ui/sessions.tsx was throwing
+   * it away; it no longer does). So this list is the same sessions ordered by
+   * time with the record beside each, and the member's own verdict shown next
+   * to it rather than instead of it. Where they disagree — the coach recorded
+   * delivered, the member disputed — BOTH are on the row. Neither is edited.
+   *
+   * `mine` cannot be reused: it filters `status === 'booked'`, which drops any
+   * row whose slot state moved after the fact, and dropping a cancellation from
+   * a history is precisely what supabase/parts/195 argues against.
+   */
+  const history = useMemo(
+    () => pastSessions(sessions.filter((s) => s.clientId === c.id)),
+    [sessions, c.id],
+  );
+  /* How far back these rows actually reach. The provider reads newest-first and
+   * capped (src/lib/rowCap.ts), so under 'partial' the cut is at the OLD end of
+   * the member's record — and the screen has to say where, or a member who
+   * trained through 2024 reads a list that starts in 2025 as their whole
+   * history with the gym. */
+  const historyEdge = readBoundary(history, sessionStatus === 'partial');
+
   const approve = async (id: string) => {
     setBusy(id);
     const r = await approveSession(id, note[id]);
@@ -137,7 +211,7 @@ export default function PtSessions() {
     // booked. The balance is re-read anyway rather than left stale, because
     // the number beside this button is the one the client is checking.
     loadLeft();
-    Alert.alert('Approved', 'Your trainer can see this. Package credits are drawn when a session is booked, not here.');
+    Alert.alert('Approved', 'Your trainer can see this. Approving spends nothing. Session Credits shows what actually paid for each one.');
   };
 
   /**
@@ -211,6 +285,15 @@ export default function PtSessions() {
             ) : null}
           </>
         ) : null}
+
+        {/* The balance says how many. Which hours used the rest, and which of
+            the booked ones are due to draw, are the next two questions and
+            they live on the ledger. It reads a gym-sold PT pass and a
+            coach-sold pack the same way, so a member assigned a coach by their
+            gym gets the same answer as one who buys direct. */}
+        <ListRow icon="calendar" title="Session Credits"
+          note="Which sessions used a credit, and what your bookings are due to draw"
+          onPress={() => router.push('/(client)/session-credits')} />
 
         <Rule />
 
@@ -346,6 +429,98 @@ export default function PtSessions() {
             </Section>
           </>
         ) : null}
+
+        {/* ── what already happened ───────────────────────────────────────
+            Every past session in one place, newest first, each with what the
+            record says became of it and when. Not a filtered view of the three
+            lists above: those are sorted by the member's answer, and a member
+            who has never opened this screen has no answers at all — so before
+            this section a client could see that a session was booked and could
+            not see whether their coach had recorded it as delivered, as a
+            no-show, or as nothing yet. */}
+        <Rule />
+        <Section>
+          <SectionHead title="What Already Happened"
+            note={sessionsWhole && history.length > 0 ? String(history.length) : undefined} />
+
+          {/* Said above the list, not below it. `PartialRead` is the existing
+              shape for "this is real but it is not all of it", and it is the
+              first thing read rather than a footnote under thirty rows. */}
+          {sessionStatus === 'partial' ? <PartialRead what="past sessions" shown={history.length} /> : null}
+
+          {/* Rows under 'error' are whatever this device had before the read
+              failed — the provider keeps a cached calendar rather than blanking
+              the screen, which is right in a basement gym and wrong to present
+              as current. The empty case is handled below by
+              `emptyHistoryLine`; this is the other half of the same rule. */}
+          {sessionStatus === 'error' && history.length > 0 ? (
+            <Flag tone={t.crit}>
+              We couldn&apos;t reach the server, so this list is the copy already on this phone. Anything
+              recorded since is not on it, and nothing here has been confirmed as still current.
+            </Flag>
+          ) : null}
+
+          {history.length === 0 ? (
+            /* Four statuses, four sentences, and only 'ready' may state that
+               nothing has happened. `emptyHistoryLine` holds that rule where a
+               test can reach it — an empty history under a failed read telling
+               a member their own past is empty is the one outcome this whole
+               feature exists to prevent. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>{emptyHistoryLine(sessionStatus, 'sessions')}</Text>
+          ) : history.map((s, i) => {
+            const v = pastVerdict(s);
+            return (
+              <View key={s.id}>
+                {i > 0 ? <Rule /> : null}
+                <View style={{ paddingVertical: sp.md }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    <Text style={{ ...ty.body, ...numeric, color: t.ink2, flex: 1 }}>{fmt(s.startsAt)}</Text>
+                    {/* The tone is the dot. The words stay in ink. */}
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateTone(t, v.state) }} />
+                    <Text style={{ ...ty.caption, color: t.ink2 }}>{PAST_STATE_LABEL[v.state]}</Text>
+                  </View>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
+                    {PAST_STATE_NOTE[v.state]}
+                    {v.at ? ` Recorded ${fmt(v.at)}.` : ''}
+                  </Text>
+                  {/* The member's own answer, beside the record and never
+                      instead of it. A session marked delivered that the member
+                      disputed is both things at once, and hiding either half is
+                      how one side comes to believe the other agreed. */}
+                  {v.disputed ? (
+                    <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
+                      {disputedSummary((s.disputeKind as DisputeKind) ?? 'other', v.disputedAt ? fmt(v.disputedAt) : null)}
+                    </Flag>
+                  ) : verdict(s) === 'approved' ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.good }} />
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>You approved this</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            );
+          })}
+
+          {/* Where the record stops, stated rather than left to be inferred
+              from a list that simply ends. Only under 'partial' is there a
+              boundary to name; a whole read has none and says nothing, which
+              keeps this quiet for every member under the row cap. */}
+          {historyEdge.bounded && historyEdge.oldestISO ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+              This goes back to {dayLabel(historyEdge.oldestISO)} and no further. Anything before that is on
+              the server and has not been read onto this screen, so it is missing here rather than absent
+              from your record.
+            </Flag>
+          ) : null}
+
+          {/* The omission that cannot be closed in this app at all, said out
+              loud. `cancel_my_session` (supabase/parts/126) hands the hour back
+              by clearing `client_id`, so a booking the member cancelled
+              themselves stops being theirs and cannot be read back. A list that
+              stayed silent about that would be read as complete. */}
+          <Flag tone={t.ink3} style={{ marginTop: sp.md }}>{CLIENT_CANCELLED_GAP_NOTE}</Flag>
+        </Section>
 
         <Rule />
 

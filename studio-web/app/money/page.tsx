@@ -22,6 +22,7 @@ import {
 import { isoDay } from '@lib/gymInvoices';
 import {
   fetchPassTypes, createPassType, setPassTypeActive, passTypeBlocker,
+  PASS_COVERS, PASS_COVERS_LABEL, type PassCovers,
   type PassType, type PassKind,
 } from '@lib/gymPasses';
 
@@ -354,6 +355,11 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
 }) {
   const [name, setName] = useState('');
   const [kind, setKind] = useState<PassKind>('drop_in');
+  // What a credit on this type may be spent on. Defaults to the door and
+  // classes, which is what every pass sold before supabase/parts/370 is: a gym
+  // opts a type IN to paying for personal training, so no existing class pack
+  // starts paying for PT the day this ships.
+  const [covers, setCovers] = useState<PassCovers>('visit');
   const [price, setPrice] = useState('');
   const [uses, setUses] = useState('1');
   const [validDays, setValidDays] = useState('');
@@ -370,6 +376,7 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
     currency: ccy,
     uses: uses.trim() === '' ? 1 : parseInt(uses, 10),
     validDays: validDays.trim() === '' ? null : parseInt(validDays, 10),
+    covers,
   };
   // Only nag once there is something to nag about, and never about the currency
   // before they have typed a price — the banner below already says that.
@@ -392,6 +399,7 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
         currency: ccy!,
         uses: draft.uses,
         validDays: draft.validDays,
+        covers: draft.covers,
       });
       setName(''); setPrice('');
       onChange();
@@ -408,6 +416,11 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
       // its currency still states the money it was priced in.
       render: (t) => money(t.priceCents, t.currency) ?? <span className="dash">no currency on this pass</span> },
     { key: 'uses', header: 'Visits', value: (t) => t.uses, numeric: true },
+    // What the credit is good FOR, beside how many of them there are. Without
+    // this column the desk cannot tell a ten-class pack from a ten-PT pack, and
+    // the two are the same three words on a receipt.
+    { key: 'covers', header: 'Good for', value: (t) => t.covers,
+      render: (t) => PASS_COVERS_LABEL[t.covers] ?? t.covers },
     { key: 'valid', header: 'Expires after', value: (t) => t.validDays, numeric: true,
       // Null is a decision — this pass does not expire — and not a gap, so it
       // gets words rather than a bare dash.
@@ -444,6 +457,14 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
             <option key={k} value={k}>{KIND_LABEL[k]}</option>
           ))}
         </select>
+        {/* Two different products that look identical on a receipt. A pass good
+            for personal training is drawn down when a coach marks a session
+            complete; one good for the door and classes never is. */}
+        <select value={covers} onChange={(e) => setCovers(e.target.value as PassCovers)} style={{ ...field, flex: 1, minWidth: 150 }}>
+          {PASS_COVERS.map((c) => (
+            <option key={c} value={c}>{PASS_COVERS_LABEL[c]}</option>
+          ))}
+        </select>
         {/* The placeholder names the currency the number will be STORED in. A
             bare "Price" is the gap that let a GBP gym type 50 into a field whose
             write said dirhams. */}
@@ -462,7 +483,10 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
       <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>
         {KIND_LABEL[kind]}: {KIND_NOTE[kind]}. Leave the days blank for a pass
         that does not expire — that is a decision a gym makes, and it is not the
-        same as nought days.
+        same as nought days.{' '}
+        {covers === 'pt'
+          ? 'A personal training pass is drawn down when a coach marks a session complete, and the member sees which session used which credit.'
+          : 'A door and classes pass is never drawn down by a personal training session, however many visits are left on it.'}
       </p>
       {ccy ? null : (
         <Banner>

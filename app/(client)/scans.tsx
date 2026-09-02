@@ -77,6 +77,15 @@ import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePa
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import { goalOfKind, goalOnBody } from '../../src/lib/goalOnBody';
 import { fetchMyCoach, fetchMyShares, sharePhoto, unsharePhoto, shareStateOf, shareLabel, sharedNote, sendBlocker, revokeCaveat, type ShareGrant, type CoachRef } from '../../src/lib/photoShare';
+// Publication is a SECOND permission and a separate table (supabase/parts/331).
+// Sending a photo lets a coach look at it; this is the client agreeing it may
+// go in something the coach posts in public, and nothing about the first
+// implies the second. src/lib/photoPublish.ts holds the whole argument.
+import {
+  PUBLISH_IS_SEPARATE_NOTE, publishAskBody, publishAskTitle, publishBlocker,
+  publishLabel, publishStateOf, withdrawPublishBody, type PublishGrant,
+} from '../../src/lib/photoPublish';
+import { allowPublish, fetchMyPublishGrants, withdrawPublish } from '../../src/ui/photoPublish';
 import { spanLabel } from '../../src/lib/photoCompare';
 // ── the handover document ─────────────────────────────────────────────────
 // The third thing a client can do with their own record, alongside the report
@@ -91,10 +100,10 @@ import { useMeasurements, METRICS as MEASURE_METRICS } from '../../src/ui/measur
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { sessionsOf, trainingBoard } from '../../src/lib/clientTraining';
 import { areaLabel } from '../../src/lib/injuries';
+import { yearsAround } from '../../src/lib/scanYears';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 42, VISIBLE = 5;
-const YEARS = Array.from({ length: 8 }, (_, i) => 2019 + i);
 const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
 
 // The OCR key is NOT in the app. It used to be
@@ -407,6 +416,14 @@ export default function Scans() {
   const [coach, setCoach] = useState<CoachRef | null>(null);
   const [sharesErr, setSharesErr] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
+  /** What this client has agreed may be PUBLISHED, kept apart from `shares` on
+   *  purpose. Null is "not known" and is never rendered as "you have agreed to
+   *  none" — a permission read that failed is not a permission, and it is not a
+   *  refusal either. Its own error string too, because either read can fail
+   *  alone and they mean different things. */
+  const [pubs, setPubs] = useState<PublishGrant[] | null>(null);
+  const [pubsErr, setPubsErr] = useState<string | null>(null);
+  const [pubBusy, setPubBusy] = useState(false);
   const [phys, setPhys] = useState<PhysiqueVision | null>(null);
   const [physBusy, setPhysBusy] = useState(false);
   const [physOpen, setPhysOpen] = useState(false);
@@ -471,11 +488,24 @@ export default function Scans() {
   const now = new Date();
   const [dD, setDD] = useState(now.getDate() - 1);
   const [dM, setDM] = useState(now.getMonth());
-  const [dY, setDY] = useState(Math.max(0, YEARS.indexOf(now.getFullYear())));
+  // State rather than a module constant, because opening a scan from a year
+  // outside the ordinary window widens it rather than being refused.
+  const [years, setYears] = useState<number[]>(() => yearsAround(now));
+  const [dY, setDY] = useState(() => {
+    // `yearsAround` always contains today, so this index exists. The old
+    // `Math.max(0, ...)` is gone deliberately: it turned "not in the list" into
+    // "the first year in the list", which is how a scan came to be dated 2019.
+    const ys = yearsAround(now);
+    return Math.max(0, ys.indexOf(now.getFullYear()));
+  });
   const [showDate, setShowDate] = useState(false);
 
-  const scanDateISO = () => { const y = YEARS[dY]; const maxd = daysIn(dM, y); const dd = Math.min(dD, maxd - 1) + 1; return `${y}-${String(dM + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`; };
-  const scanDateLabel = () => { const y = YEARS[dY]; const maxd = daysIn(dM, y); return `${Math.min(dD, maxd - 1) + 1} ${MONTHS[dM]} ${y}`; };
+  // Never `years[dY]` bare: a widen can move the index, and an undefined year
+  // reaches `daysIn` as NaN and renders "NaN" where a date should be.
+  const pickedYear = years[dY] ?? now.getFullYear();
+
+  const scanDateISO = () => { const y = pickedYear; const maxd = daysIn(dM, y); const dd = Math.min(dD, maxd - 1) + 1; return `${y}-${String(dM + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`; };
+  const scanDateLabel = () => { const y = pickedYear; const maxd = daysIn(dM, y); return `${Math.min(dD, maxd - 1) + 1} ${MONTHS[dM]} ${y}`; };
 
   const pick = async (fromCamera: boolean) => {
     if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a scan'))) return;
@@ -493,7 +523,7 @@ export default function Scans() {
           // Body fat comes back a percentage and goes in as one.
           if (v.bodyFatPct != null) setBf(String(v.bodyFatPct));
           if (v.skeletalMuscleKg != null) setSm(fieldFromKg(v.skeletalMuscleKg));
-          if (v.takenAt) { const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.takenAt); if (dm) { const yi = YEARS.indexOf(parseInt(dm[1], 10)); const mo = parseInt(dm[2], 10) - 1; const dd = parseInt(dm[3], 10) - 1; if (yi >= 0 && mo >= 0 && mo <= 11 && dd >= 0) { setDY(yi); setDM(mo); setDD(dd); } } }
+          if (v.takenAt) { const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.takenAt); if (dm) { const yr = parseInt(dm[1], 10); /* Widen FIRST, then index into the widened list: a stored date the wheel cannot show is a date the app would silently rewrite. */ const ys = yearsAround(now, yr); const yi = ys.indexOf(yr); const mo = parseInt(dm[2], 10) - 1; const dd = parseInt(dm[3], 10) - 1; if (yi >= 0 && mo >= 0 && mo <= 11 && dd >= 0) { setYears(ys); setDY(yi); setDM(mo); setDD(dd); } } }
           setOcrMsg('Read from your scan: ' + [v.weightKg != null ? 'weight ' + weightLabel(v.weightKg, wu) : '', v.bodyFatPct != null ? 'body fat ' + v.bodyFatPct + '%' : '', v.skeletalMuscleKg != null ? 'muscle ' + weightLabel(v.skeletalMuscleKg, wu) : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
           return;
         }
@@ -608,6 +638,76 @@ export default function Scans() {
     }
   }, []);
   useEffect(() => { loadShares(); }, [loadShares]);
+
+  /** The publication permissions, read separately from the send grants. One
+   *  read rather than folded into `loadShares` because a failure of either has
+   *  to be reportable on its own: "we could not check what your coach can see"
+   *  and "we could not check what you agreed could be posted" are different
+   *  sentences about different promises. */
+  const loadPubs = useCallback(async () => {
+    try {
+      const g = await fetchMyPublishGrants();
+      setPubs(g);
+      setPubsErr(null);
+    } catch (e) {
+      reportError('scans.photos.publishGrants', e);
+      setPubs(null);
+      setPubsErr('Could not check what you have agreed can be published.');
+    }
+  }, []);
+  useEffect(() => { loadPubs(); }, [loadPubs]);
+
+  /** Agree that ONE photo may be used in something the coach publishes.
+   *
+   *  The question spells out what public means before it is answered, and the
+   *  destructive-looking button is the one that says yes: this is the only
+   *  place in the app where a tap puts a picture of somebody's body in reach of
+   *  a public post, and it should not look like a preference. */
+  const allowPublishing = (p: ProgressPhoto) => {
+    const blocked = publishBlocker(p.id, coach, shares);
+    if (blocked) { Alert.alert('Nothing changed', blocked); return; }
+    const c = coach!;
+    Alert.alert(publishAskTitle(c.name), publishAskBody(c.name), [
+      { text: 'No', style: 'cancel' },
+      { text: 'Yes, they can', onPress: async () => {
+        setPubBusy(true);
+        try {
+          // The row comes back FROM the server. Nothing here records an
+          // agreement on the strength of a request that was never confirmed.
+          const g = await allowPublish(p.id, c.id);
+          setPubs((x) => (x === null ? [g] : [g, ...x.filter((y) => y.photoId !== g.photoId)]));
+          setPubsErr(null);
+        } catch (e) {
+          reportError('scans.photos.allowPublish', e);
+          Alert.alert('Nothing changed', 'That was not saved, so this photo still cannot be published. Try again in a moment.');
+          await loadPubs();
+        } finally { setPubBusy(false); }
+      } },
+    ]);
+  };
+
+  /** Take that permission back. It does NOT unshare the photo: the coach may
+   *  still open it, because that is a separate thing that was separately
+   *  agreed, and quietly undoing it would be the app deciding something nobody
+   *  asked it to decide. */
+  const stopPublishing = (p: ProgressPhoto) => {
+    const c = coach;
+    if (!c) return;
+    Alert.alert('Take this permission back?', withdrawPublishBody(c.name), [
+      { text: 'Leave it', style: 'cancel' },
+      { text: 'Take it back', style: 'destructive', onPress: async () => {
+        setPubBusy(true);
+        try {
+          await withdrawPublish(p.id, c.id);
+          setPubs((x) => (x === null ? null : x.filter((y) => y.photoId !== p.id)));
+        } catch (e) {
+          reportError('scans.photos.withdrawPublish', e);
+          Alert.alert('Still allowed', 'That was not withdrawn, so this photo can still be published. Try again in a moment.');
+          await loadPubs();
+        } finally { setPubBusy(false); }
+      } },
+    ]);
+  };
 
   /** Upload + record. Re-reads the list rather than guessing at it, so the
    *  screen only ever shows photos the server has confirmed it holds. */
@@ -830,21 +930,33 @@ export default function Scans() {
     ]);
   };
 
-  /** Long press on a photo. One sheet, so "who can see this" and "delete this"
-   *  are the same gesture and neither can be missed. */
+  /** Long press on a photo. One sheet, so "who can see this", "who can post
+   *  this" and "delete this" are the same gesture and none can be missed.
+   *
+   *  Publication is only offered for a photo that has already been sent, and
+   *  never when either read is unknown: an action that depends on knowing must
+   *  not be offered when nothing is known. */
   const photoActions = (p: ProgressPhoto) => {
     const state = shareStateOf(p.id, shares);
+    const pubState = publishStateOf(p.id, pubs);
     const when = new Date(p.takenAt).toLocaleDateString();
     const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
     if (state === 'sent') buttons.push({ text: 'Take back from coach', onPress: () => takeBackFromCoach(p) });
     else if (state === 'private') buttons.push({ text: 'Send to coach', onPress: () => sendToCoach(p) });
+    if (state === 'sent' && pubState === 'allowed') buttons.push({ text: 'Stop them publishing it', onPress: () => stopPublishing(p) });
+    else if (state === 'sent' && pubState === 'not-allowed') buttons.push({ text: 'Let them publish it', onPress: () => allowPublishing(p) });
     buttons.push({ text: 'Delete photo', style: 'destructive', onPress: () => removePhoto(p) });
     buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert(`Photo from ${when}`,
-      state === 'sent' ? 'Your coach can open this one.'
+    // Two sentences, because there are two separate promises about this photo
+    // and collapsing them is exactly the confusion this feature exists inside.
+    const seeing = state === 'sent' ? 'Your coach can open this one.'
       : state === 'private' ? 'Only you can see this one.'
-      : 'We could not check whether your coach can see this one, so nothing is offered that depends on knowing.',
-      buttons);
+      : 'We could not check whether your coach can see this one, so nothing is offered that depends on knowing.';
+    const posting = state !== 'sent' ? ''
+      : pubState === 'allowed' ? ' You have agreed they can use it in something they publish.'
+      : pubState === 'not-allowed' ? ' They cannot put it in anything they publish.'
+      : ' We could not check whether they may publish it, so nothing is offered about that.';
+    Alert.alert(`Photo from ${when}`, seeing + posting, buttons);
   };
 
   const toggleCmp = (id: string) => setCmp((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 2 ? [c[1], id] : [...c, id]));
@@ -1260,6 +1372,55 @@ export default function Scans() {
             )}
           </View>
 
+          {/* ── who can PUBLISH these ───────────────────────────────────────
+              A second panel rather than a badge on the first, because it is a
+              second promise about the same photos and a badge would read as a
+              detail of the one above it. The four renders are the four the
+              panel above has, for the same reasons: a failed read says so, an
+              unlanded read says so, no coach means there is nobody to agree
+              with, and a real empty list is a real answer. */}
+          <View style={{ backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.md, marginBottom: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>Your coach can publish</Text>
+            {pubsErr ? (
+              <View>
+                <Flag tone={t.warn}>
+                  {pubsErr} Nothing has changed either way, and this screen will not tell you none of them can be published when it could not read the list.
+                </Flag>
+                <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}><Ghost label="Try Again" onPress={loadPubs} /></View>
+              </View>
+            ) : pubs === null ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Checking what you have agreed can be published…</Text>
+            ) : !coach ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                You have no coach linked, so there is nobody who could publish any of these.
+              </Text>
+            ) : pubs.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                None of your photos can be put in anything your coach posts in public. Press and hold a photo you have already sent to agree to one.
+              </Text>
+            ) : (
+              <View>
+                <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.sm }}>
+                  {coachSubject(coach.name)} may use {pubs.length === 1 ? 'this one' : `these ${pubs.length}`} in something they post publicly:
+                </Text>
+                {pubs.map((g) => {
+                  const p = photos?.find((x) => x.id === g.photoId) ?? null;
+                  return (
+                    <View key={g.photoId} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5 }}>
+                      <Text style={{ ...ty.label, color: t.ink }}>
+                        {p ? new Date(p.takenAt).toLocaleDateString() : 'A photo not in the list above'}
+                      </Text>
+                      <Pressable onPress={() => { if (p && !pubBusy) stopPublishing(p); }} hitSlop={8} disabled={!p || pubBusy}>
+                        <Text style={{ ...ty.caption, fontWeight: '600', color: p ? t.brand : t.ink3 }}>Take back</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PUBLISH_IS_SEPARATE_NOTE}</Text>
+          </View>
+
           {photos === null ? (
             photosErr ? (
               <View>
@@ -1319,10 +1480,15 @@ export default function Scans() {
                 {photos.map((p) => {
                   const selIdx = cmp.indexOf(p.id);
                   const shState = shareStateOf(p.id, shares);
+                  // Announced only for a photo that has been sent. For one that
+                  // has not, "not for publishing" is true and says nothing:
+                  // nobody can open it in the first place.
+                  const pubState = publishStateOf(p.id, pubs);
+                  const pubSaid = shState === 'sent' ? `, ${publishLabel(pubState).toLowerCase()}` : '';
                   return (
                     <Pressable key={p.id} onPress={() => toggleCmp(p.id)} onLongPress={() => photoActions(p)} delayLongPress={400}
                       accessibilityRole="button"
-                      accessibilityLabel={`Progress photo from ${new Date(p.takenAt).toLocaleDateString()} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}`}
+                      accessibilityLabel={`Progress photo from ${new Date(p.takenAt).toLocaleDateString()} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}${pubSaid}`}
                       accessibilityHint="Tap to compare, press and hold to send it to your coach or delete it">
                       <View style={{ borderRadius: radius.md, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
                         {p.url ? (
@@ -1613,9 +1779,9 @@ export default function Scans() {
           <View style={{ position: 'relative' }}>
             <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
             <View style={{ flexDirection: 'row' }}>
-              <Wheel items={Array.from({ length: daysIn(dM, YEARS[dY]) }, (_, i) => String(i + 1))} index={Math.min(dD, daysIn(dM, YEARS[dY]) - 1)} onChange={setDD} t={t} />
+              <Wheel items={Array.from({ length: daysIn(dM, pickedYear) }, (_, i) => String(i + 1))} index={Math.min(dD, daysIn(dM, pickedYear) - 1)} onChange={setDD} t={t} />
               <Wheel items={MONTHS} index={dM} onChange={setDM} t={t} />
-              <Wheel items={YEARS.map(String)} index={dY} onChange={setDY} t={t} />
+              <Wheel items={years.map(String)} index={dY} onChange={setDY} t={t} />
             </View>
           </View>
         </View>

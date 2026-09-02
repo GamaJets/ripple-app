@@ -14,13 +14,14 @@
 // this is the coach's half of it.
 import {
   COACH_SETUP, coachSetupRows, coachSetupDone, coachSetupLeft, coachSetupUnknown,
-  coachSetupNext, showCoachSetup, coachSetupHeading, coachSetupNote,
+  coachSetupNa, coachSetupNext, showCoachSetup, coachSetupHeading, coachSetupNote,
+  stepApplies, NOT_YOUR_SETUP,
   type CoachSetupFacts, type CoachSetupId,
 } from './coachFirstRun';
 
 /** The only screens a setup step may open. Every one of them takes no params
  *  and does the thing its step describes. Written out rather than derived, so
- *  adding a ninth item is a decision somebody has to make here too. */
+ *  adding a tenth item is a decision somebody has to make here too. */
 const REACHABLE: readonly string[] = [
   '/(trainer)/settings', '/(trainer)/profile', '/(trainer)/dashboard',
   '/(trainer)/calendar', '/(trainer)/payments', '/(trainer)/documents',
@@ -34,15 +35,15 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 /** Nothing read. The state a brand-new mount is in, and the state a signed-out
  *  session is in, and they must produce the same answers. */
 const NONE: CoachSetupFacts = {
-  currency: null, rate: null, client: null, availability: null,
+  mode: null, currency: null, rate: null, client: null, availability: null,
   package: null, stripe: null, code: null, document: null,
 };
 const ALL_TODO: CoachSetupFacts = {
-  currency: false, rate: false, client: false, availability: false,
+  mode: false, currency: false, rate: false, client: false, availability: false,
   package: false, stripe: false, code: false, document: false,
 };
 const ALL_DONE: CoachSetupFacts = {
-  currency: true, rate: true, client: true, availability: true,
+  mode: true, currency: true, rate: true, client: true, availability: true,
   package: true, stripe: true, code: true, document: true,
 };
 
@@ -50,13 +51,16 @@ const ALL_DONE: CoachSetupFacts = {
 
 // Eight, and every id distinct. A duplicate id would make `f[it.id]` read one
 // fact twice and leave another unread with nothing saying so.
-eq(COACH_SETUP.length, 8, 'eight items');
-eq(new Set(COACH_SETUP.map((i) => i.id)).size, 8, 'every id is distinct');
+eq(COACH_SETUP.length, 9, 'nine items');
+eq(new Set(COACH_SETUP.map((i) => i.id)).size, 9, 'every id is distinct');
 
-// Currency first. Not decoration: it is the one setting whose absence blanks
-// six other screens, and a list that puts it fourth spends a coach's first
+// How they coach first, because it is the only item that changes what the rest
+// of the list IS: answering "online" takes the availability step off it.
+eq(COACH_SETUP[0].id, 'mode', 'how they coach is asked before anything it changes');
+// Currency second. Not decoration: it is the one setting whose absence blanks
+// six other screens, and a list that puts it fifth spends a coach's first
 // fortnight teaching them the money features do not work.
-eq(COACH_SETUP[0].id, 'currency', 'currency is the first thing asked for');
+eq(COACH_SETUP[1].id, 'currency', 'currency is the first thing that has to be set');
 
 for (const it of COACH_SETUP) {
   // Title Case — these render as a row title, and check:caps cannot see inside
@@ -89,27 +93,28 @@ for (const it of COACH_SETUP) {
 /* ── a dash is not a cross ──────────────────────────────────────────────── */
 
 const noneRows = coachSetupRows(NONE);
-eq(noneRows.length, 8, 'every item gets a row whatever was read');
+eq(noneRows.length, 9, 'every item gets a row whatever was read');
 eq(coachSetupDone(noneRows), 0, 'nothing read is nothing done');
 // THE assertion. Eight unread rows are not eight outstanding tasks.
 eq(coachSetupLeft(noneRows), 0, 'nothing read is nothing OUTSTANDING either');
-eq(coachSetupUnknown(noneRows), 8, 'they are all unknown');
+eq(coachSetupUnknown(noneRows), 9, 'they are all unknown');
 eq(coachSetupNext(noneRows), null, 'and there is no "next" to send anybody to');
 
 const todoRows = coachSetupRows(ALL_TODO);
-eq(coachSetupLeft(todoRows), 8, 'a settled false IS outstanding');
+eq(coachSetupLeft(todoRows), 9, 'a settled false IS outstanding');
 eq(coachSetupUnknown(todoRows), 0, 'and is not unknown');
-eq(coachSetupNext(todoRows)?.id, 'currency' as CoachSetupId, 'the next thing is the first outstanding one, in list order');
+eq(coachSetupNext(todoRows)?.id, 'mode' as CoachSetupId, 'the next thing is the first outstanding one, in list order');
 
 // The mixed case, which is the one that actually happens: some reads land and
 // one does not.
 const mixed: CoachSetupFacts = { ...ALL_DONE, stripe: null, code: false };
 const mixedRows = coachSetupRows(mixed);
-eq(coachSetupDone(mixedRows), 6, 'six known done');
+eq(coachSetupDone(mixedRows), 7, 'seven known done');
 eq(coachSetupLeft(mixedRows), 1, 'one known outstanding');
 eq(coachSetupUnknown(mixedRows), 1, 'and one unread');
-eq(coachSetupDone(mixedRows) + coachSetupLeft(mixedRows) + coachSetupUnknown(mixedRows), 8,
-  'the three counts partition the list');
+eq(coachSetupDone(mixedRows) + coachSetupLeft(mixedRows) + coachSetupUnknown(mixedRows)
+   + coachSetupNa(mixedRows), 9,
+  'the four counts partition the list');
 eq(coachSetupNext(mixedRows)?.id, 'code' as CoachSetupId,
   'the unread row is skipped over rather than offered as the next thing to do');
 
@@ -126,12 +131,12 @@ ok(!showCoachSetup(coachSetupRows(ALL_DONE)), 'and it goes only when every row i
 
 /* ── the heading, and the denominator it is allowed to state ────────────── */
 
-eq(coachSetupHeading(coachSetupRows(ALL_DONE)), '8 of 8 done', 'a fully-read list may state a fraction');
-eq(coachSetupHeading(coachSetupRows(ALL_TODO)), '0 of 8 done', 'including one where nothing is done');
+eq(coachSetupHeading(coachSetupRows(ALL_DONE)), '9 of 9 done', 'a fully-read list may state a fraction');
+eq(coachSetupHeading(coachSetupRows(ALL_TODO)), '0 of 9 done', 'including one where nothing is done');
 // "6 of 8" over two unread rows states something about the two we could not
 // see. The count stands alone instead.
-eq(coachSetupHeading(mixedRows), '6 done', 'a partly-unread list states a count and no denominator');
-eq(coachSetupHeading(noneRows), '0 done', 'and an entirely unread one says 0 done, not 0 of 8');
+eq(coachSetupHeading(mixedRows), '7 done', 'a partly-unread list states a count and no denominator');
+eq(coachSetupHeading(noneRows), '0 done', 'and an entirely unread one says 0 done, not 0 of 9');
 
 /* ── the line under it ──────────────────────────────────────────────────── */
 
@@ -157,6 +162,61 @@ for (const st of ['loading', 'ready'] as const) {
     ok(line.length > 20, 'the note says something');
   }
 }
+
+/* ── a step that does not apply is neither a task nor a tick ────────────── */
+//
+// "Set When You Work" publishes bookable slots. An online-only client gets no
+// booking calendar at all, so for a coach with nobody in the room there is
+// nobody who could ever take one. Left as 'todo' it is a permanent nag for
+// something that would change nothing; marked 'done' it is a claim that they
+// published hours they did not.
+
+// The widest answer, which is what an unknown shape resolves to: everything
+// applies, and the list is exactly what it has always been.
+for (const id of COACH_SETUP.map((i) => i.id)) {
+  ok(stepApplies(id, null), `${id} applies when we do not know how they coach`);
+  ok(stepApplies(id, 'inperson'), `${id} applies to a coach who trains in the room`);
+}
+eq(COACH_SETUP.map((i) => i.id).filter((id) => !stepApplies(id, 'remote')).join(','), 'availability',
+  'exactly one step does not apply to a remote coach, and it is availability');
+ok(NOT_YOUR_SETUP.availability != null, 'and the row says why rather than vanishing');
+ok(NOT_YOUR_SETUP.availability.includes('comes back'),
+  'and says how to get it back, because hidden is not deleted');
+
+const remoteDone = coachSetupRows(ALL_DONE, 'remote');
+eq(coachSetupNa(remoteDone), 1, 'one row does not apply');
+eq(coachSetupDone(remoteDone), 8, 'and it is not counted as done');
+eq(coachSetupHeading(remoteDone), '8 of 8 done', 'the denominator is the steps that apply to THIS coach');
+
+const remoteTodo = coachSetupRows(ALL_TODO, 'remote');
+eq(coachSetupLeft(remoteTodo), 8, 'nor is it counted as outstanding');
+ok(coachSetupNext(remoteTodo)?.id !== 'availability', 'and a coach is never sent to do it');
+
+// The one that matters: an online coach who has done everything that applies is
+// finished, and the row comes off their dashboard.
+const remoteFinished = coachSetupRows({ ...ALL_DONE, availability: false }, 'remote');
+ok(!showCoachSetup(remoteFinished),
+  'a remote coach who never published hours has still finished the list');
+ok(showCoachSetup(coachSetupRows({ ...ALL_DONE, availability: false }, 'inperson')),
+  'and an in-person coach in the same state has not');
+ok(coachSetupNote(remoteFinished, 'ready').startsWith('That is everything'),
+  'and is told so');
+
+// The unknown shape must never narrow the list. Same facts, no shape: the
+// availability step is back and outstanding.
+ok(showCoachSetup(coachSetupRows({ ...ALL_DONE, availability: false })),
+  'not knowing how a coach works never takes a step off their list');
+eq(coachSetupNa(coachSetupRows(ALL_DONE)), 0, 'and nothing is marked as not applying');
+
+/* ── the step that asks the question ────────────────────────────────────── */
+
+const unasked = coachSetupRows({ ...ALL_DONE, mode: false });
+eq(coachSetupNext(unasked)?.id, 'mode' as CoachSetupId,
+  'a coach who has not said how they coach is asked');
+// And a coach whose declaration could not be READ is not asked. A dash, not a
+// cross, on the row whose whole subject is what we know about them.
+eq(coachSetupNext(coachSetupRows({ ...ALL_DONE, mode: null })), null,
+  'a coach whose answer could not be read is not told to answer again');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('coachFirstRun.test.ts — ok');

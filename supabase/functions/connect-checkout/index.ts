@@ -3,10 +3,17 @@
 // taking an application fee. Uses STRIPE_SECRET_KEY. PLATFORM_FEE_PCT (default 10)
 // is the platform's cut.
 // Request: { package_id, success_url?, cancel_url?, promo_code? }
-//   `promo_code` is the coach's own discount code as the client typed it. It is
-//   accepted on a SUBSCRIPTION package and refused on a one-off, by name and
-//   with the reason — see `checkoutCodeBlocker` and the note in the
-//   subscription branch. Omitted is the ordinary case.
+//   `promo_code` is the coach's own discount code as the client typed it.
+//   Omitted is the ordinary case. On a SUBSCRIPTION it is applied and nothing
+//   has to be computed, because Repple's cut there is a percentage. On a
+//   ONE-OFF it is applied only where what comes off is a whole number of minor
+//   units with no rounding involved — an amount-off coupon in the package's own
+//   currency, or a percentage that divides the price exactly — because the cut
+//   there is an absolute figure Stripe wants in the same call it works the
+//   discount out in, and Stripe documents no rounding rule for a percentage
+//   discount anywhere. Everything else is refused, and the refusal is logged
+//   with its reason while the client is told the price shown is the price. See
+//   `oneOffDiscount` in src/lib/packagePromo.ts.
 //
 // ── Which account the charge is created ON, and why it moved ──────────────
 //
@@ -77,8 +84,9 @@ import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { refusalFor } from '../../../src/lib/subscriptionScope.ts';
 import {
-  normaliseCode, checkoutCodeBlocker, codeAppliesTo,
-  CODE_IS_NOT_FOR_A_ONE_OFF, CODE_IS_FOR_ANOTHER_PACKAGE, type PromoTarget,
+  normaliseCode, checkoutCodeBlocker, codeAppliesTo, oneOffDiscount,
+  CODE_CANNOT_COME_OFF_THIS_ONE, CODE_IS_FOR_ANOTHER_PACKAGE,
+  type PromoTarget, type CouponShape, type CodeRestrictions,
 } from '../../../src/lib/packagePromo.ts';
 import {
   modelForAccount, optionsForObject, platformFeePct, applicationFeeCents, canTakeDirectCharges,
@@ -480,23 +488,32 @@ Deno.serve(async (req) => {
   //     not enforce it, and a box on Stripe's page is a box no code in this
   //     repo ever sees. A code made for one recurring package therefore worked
   //     on every other one the coach sells.
-  //   · THAT A ONE-OFF TAKES NO CODE. `promoBlocker` stops a coach ATTACHING a
-  //     code to a one-off package; nothing stopped a subscription's code being
-  //     typed against a one-off sale. The only reason that never happened is
-  //     that the one-off branch below never set the flag, which is a property
-  //     of a missing feature rather than a rule.
+  //   · WHAT THE CODE IS ACTUALLY WORTH. On a one-off, Repple's cut is an
+  //     absolute figure sent in the same call that creates the session, so it
+  //     has to come off the discounted total rather than off the list price —
+  //     and the discounted total is only knowable if the coupon is knowable
+  //     first. A box on Stripe's page is resolved inside Stripe's own call,
+  //     after the fee has already been decided. This one is resolved here,
+  //     before it, which is the whole reason a one-off can take a code at all.
   //
-  // Both are `checkoutCodeBlocker` in src/lib/packagePromo.ts, imported rather
-  // than written here so the client's screen and this cannot say different
-  // things.
+  // `checkoutCodeBlocker` in src/lib/packagePromo.ts is the shared half,
+  // imported rather than written here so the client's screen and this cannot
+  // say different things. The one-off's real test — `oneOffDiscount` — runs
+  // further down, with the coupon in hand, and only here: a screen has no
+  // coupon to test.
   const typedCode = normaliseCode(String(body.promo_code ?? ''));
   let promotionCodeId: string | null = null;
+  /** The coupon behind the code, kept so the ONE-OFF branch can work out what
+   *  actually comes off before it names a fee. Null when no code was typed. */
+  let foundCoupon: Stripe.Coupon | null = null;
+  let foundRestrictions: Stripe.PromotionCode.Restrictions | null = null;
   if (typedCode) {
     const promoTarget: PromoTarget = {
       id: packageId,
       name: String(pkg.name ?? ''),
       billingInterval: interval,
       active: !!pkg.active,
+      priceCents: Number(pkg.price_cents),
     };
     const refusal = checkoutCodeBlocker(typedCode, promoTarget);
     if (refusal) return json({ error: refusal }, 400);
@@ -527,6 +544,11 @@ Deno.serve(async (req) => {
       return json({ error: CODE_IS_FOR_ANOTHER_PACKAGE }, 400);
     }
     promotionCodeId = found.id;
+    // Expanded above, so the coupon arrives with the code rather than costing a
+    // second round trip. The one-off branch needs every field on it; the
+    // subscription branch needs none of them, because its fee is a percentage.
+    foundCoupon = (found.coupon as Stripe.Coupon) ?? null;
+    foundRestrictions = found.restrictions ?? null;
   }
 
   if (interval) {
@@ -588,17 +610,16 @@ Deno.serve(async (req) => {
         // On the one-off branch below the cut is `application_fee_amount`: an
         // absolute figure in minor units, and Stripe requires it in the SAME
         // call that creates the session — the call in which Stripe itself works
-        // out what the discount comes to. There is therefore no ordering in
-        // which that fee is derived from what Stripe actually charged: it can
-        // only be derived from a discounted total this app predicted, and a
-        // predicted total that is one minor unit out is a coach underpaid on
-        // every sale of that package. Left as it was, the coach would be worse
-        // off still — a 30% off code on a £100 pack pays them £70 and charges a
-        // fee worked out on £100, and at a large enough discount the fee
-        // exceeds the charge and Stripe refuses the payment outright.
+        // out what the discount comes to. So that fee can only ever be derived
+        // from a total this app worked out, and a total one minor unit out is a
+        // coach underpaid on every sale of that package.
         //
-        // So the one-off refusal stands, and it is now enforced HERE as well as
-        // on the coach's screen. See `checkoutCodeBlocker`.
+        // That branch therefore does arithmetic where this one does none, and
+        // it refuses every coupon whose effect it cannot state exactly. NOTHING
+        // needs checking here: whatever the coupon is, whatever Stripe rounds
+        // it to, `application_fee_percent` is recomputed by Stripe against the
+        // amount it actually charged. That asymmetry is the point of the two
+        // branches sharing no parameters.
         ...(promotionCodeId ? { discounts: [{ promotion_code: promotionCodeId }] } : {}),
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -623,16 +644,65 @@ Deno.serve(async (req) => {
   // zero. It is returned rather than thrown because a cheap package is not an
   // error — Repple simply takes nothing on it.
 
-  // No code reaches this branch. `checkoutCodeBlocker` above already refused
-  // one against a package with no billing interval, and this is the second
-  // copy of that refusal rather than a first: everything below computes an
-  // application fee from `pkg.price_cents`, the LIST price, and the moment a
-  // discount exists that figure is a fee on money the coach never received.
-  // If the two rules are ever allowed to disagree, the disagreement stops here
-  // rather than at somebody's charge.
-  if (typedCode) return json({ error: CODE_IS_NOT_FOR_A_ONE_OFF }, 400);
+  // ── the discount, worked out BEFORE the fee ─────────────────────────────
+  //
+  // This branch used to refuse a code outright, and the refusal was right about
+  // the danger and wrong about the scope. Everything below computes an
+  // application fee — an absolute figure Stripe requires in the same call that
+  // creates the session — and the moment a discount exists, a fee taken from
+  // `pkg.price_cents` is a fee on money the coach never received.
+  //
+  // What is charged is not knowable here: `amount_total` is an output of the
+  // call the fee is an input to. So the fee is derived from a total THIS CODE
+  // worked out, and `oneOffDiscount` will only work one out where no rounding
+  // was needed to reach it — an amount-off coupon in this package's own
+  // currency, or a percentage that divides the price exactly. Stripe does not
+  // document how it rounds a percentage discount anywhere in its reference, so
+  // every other shape is refused rather than guessed at. src/lib/packagePromo.ts
+  // carries the full argument and the list of what is refused.
+  //
+  // The client is told one sentence; the precise reason is logged, because it
+  // is the coach's support question and it is answerable from the log.
+  let discountedTotal = Number(pkg.price_cents);
+  if (typedCode) {
+    if (!foundCoupon) {
+      console.error('connect-checkout: code ' + typedCode + ' resolved with no coupon expanded on package ' + packageId);
+      return json({ error: CODE_CANNOT_COME_OFF_THIS_ONE }, 400);
+    }
+    const shape: CouponShape = {
+      percentOff: foundCoupon.percent_off ?? null,
+      amountOff: foundCoupon.amount_off ?? null,
+      amountOffCurrency: foundCoupon.currency ?? null,
+      // A coupon holding per-currency amounts, and a code holding per-currency
+      // minimums. Which one Stripe would apply to this session is a rule this
+      // app is not going to reimplement, so their mere presence is a refusal.
+      multiCurrency: !!foundCoupon.currency_options && Object.keys(foundCoupon.currency_options).length > 0,
+      // `applies_to` names Stripe PRODUCTS. This app's line item is an inline
+      // `price_data` with an ad-hoc product, so such a coupon cannot be
+      // reasoned about here at all.
+      appliesToProducts: !!foundCoupon.applies_to,
+      valid: !!foundCoupon.valid,
+    };
+    const restrictions: CodeRestrictions = {
+      minimumAmount: foundRestrictions?.minimum_amount ?? null,
+      firstTimeTransaction: !!foundRestrictions?.first_time_transaction,
+      multiCurrency: !!foundRestrictions?.currency_options && Object.keys(foundRestrictions.currency_options).length > 0,
+    };
+    const plan = oneOffDiscount(Number(pkg.price_cents), currency, shape, restrictions);
+    if (!plan.ok) {
+      console.warn('connect-checkout: code ' + typedCode + ' refused on one-off ' + packageId + ' — ' + plan.why);
+      return json({ error: CODE_CANNOT_COME_OFF_THIS_ONE }, 400);
+    }
+    discountedTotal = plan.totalCents;
+  }
 
-  const feeCalc = applicationFeeCents(pkg.price_cents, feePct);
+  // The fee comes off the DISCOUNTED total, never the list price. At a total of
+  // nought — a coupon worth the whole package, which Stripe documents as the
+  // way to make a session free — `applicationFeeCents` answers `fee: null`,
+  // which means OMIT the field. That is the right answer twice over: Repple's
+  // share of nothing is nothing, and Stripe creates no PaymentIntent at all for
+  // a free session, so there would be nothing for a fee to attach to.
+  const feeCalc = applicationFeeCents(discountedTotal, feePct);
   if (!feeCalc.ok) {
     console.error('connect-checkout: ' + feeCalc.reason);
     return json({ error: 'This package cannot be charged for as priced, so nothing has been charged.' }, 400);
@@ -642,6 +712,9 @@ Deno.serve(async (req) => {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       line_items: [{ price_data: { currency, unit_amount: pkg.price_cents, product_data: { name: pkg.name } }, quantity: 1 }],
+      // The code the client typed, applied by id. Only ever reached with a
+      // discount this file has already worked out exactly — see above.
+      ...(promotionCodeId ? { discounts: [{ promotion_code: promotionCodeId }] } : {}),
       // Under a direct charge there is no transfer: the money lands in the
       // coach's balance because the charge was created there, and the
       // application fee travels the other way, to Repple. Sending
@@ -671,7 +744,28 @@ Deno.serve(async (req) => {
       // `client_purchases`. It is worth carrying even on a one-off, which has
       // no later Stripe calls made about it: a refund does, and a refund on a
       // direct charge has to be issued in the connected account's context.
-      metadata: { package_id: packageId, trainer_id: pkg.trainer_id, client_id: uid, sessions: String(pkg.sessions ?? ''), repple_account: acctMeta },
+      metadata: {
+        package_id: packageId,
+        trainer_id: pkg.trainer_id,
+        client_id: uid,
+        sessions: String(pkg.sessions ?? ''),
+        repple_account: acctMeta,
+        // ── the prediction, so somebody can check it ──────────────────────
+        //
+        // The total this call believes Stripe is about to charge, in minor
+        // units. Stamped ONLY when a discount is involved, because with no
+        // discount there is nothing predicted: the fee comes off the list price
+        // and the list price is what Stripe charges.
+        //
+        // The stripe-webhook compares it with the `amount_total` Stripe
+        // actually reports on `checkout.session.completed` and records any
+        // difference on the sale (part 311). Exact arithmetic on this side is
+        // not proof about Stripe's side, and a fee that is one minor unit out
+        // on every sale of a package for a year is the failure this whole
+        // feature had to answer for before it could ship. A figure nobody
+        // reconciles is not a check.
+        ...(typedCode ? { repple_expected_total: String(discountedTotal) } : {}),
+      },
     }, acctOpts);
     return json({ url: session.url });
   } catch (e) { return stripeError('checkout', e); }

@@ -156,6 +156,26 @@ export type TypedAmount = { ok: true; minorUnits: number } | { ok: false; reason
  * a smaller amount of yen, it is a slip — and a dinar has three places, where
  * Stripe also requires the last one to be a nought.
  */
+/**
+ * A stored minor-unit amount back as the major-unit string a person types.
+ *
+ * The inverse of `readMinorAmount`, and it exists for the same reason: the
+ * factor is not a hundred. Reading a KWD price back as `price_cents / 100`
+ * showed a coach ten times what they had set — which they would then correct,
+ * writing the error in properly. A currency nobody recorded gives an empty
+ * string rather than a number in no currency at all.
+ */
+export function majorFromMinor(minorUnits: number | null | undefined, currency: string | null | undefined): string {
+  const dp = currencyDecimals(currency);
+  if (dp == null || minorUnits == null || !Number.isFinite(minorUnits)) return '';
+  if (dp === 0) return String(Math.trunc(minorUnits));
+  const f = 10 ** dp;
+  const neg = minorUnits < 0;
+  const abs = Math.abs(Math.trunc(minorUnits));
+  const rest = String(abs % f).padStart(dp, '0');
+  return `${neg ? '-' : ''}${Math.trunc(abs / f)}.${rest}`;
+}
+
 export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined): TypedAmount {
   const cur = (currency || '').trim().toUpperCase();
   const dp = currencyDecimals(currency);
@@ -352,6 +372,75 @@ export function sumRecurring(rows: readonly RecurringRow[]): { pots: RecurringPo
   }
   const pots = [...by.values()].sort((a, b) => (b.minorUnits - a.minorUnits) || a.currency.localeCompare(b.currency) || a.interval.localeCompare(b.interval));
   return { pots, unlabelled, unpriced };
+}
+
+/* ── a fee taken from the wrong figure ────────────────────────────────────── */
+
+/**
+ * How many sales had their platform fee worked out from a total Stripe did not
+ * charge, and by how much in total.
+ *
+ * ── What this counts ──────────────────────────────────────────────────────
+ *
+ * `client_purchases.fee_variance_cents` (part 311). It is the one figure in
+ * this app derived from a PREDICTION rather than read back from Stripe: on a
+ * one-off with a discount code, Repple's cut is an absolute
+ * `application_fee_amount` that Stripe wants as an INPUT to the same call whose
+ * OUTPUT is `amount_total`, so it has to come off a total connect-checkout
+ * worked out beforehand. `oneOffDiscount` in packagePromo.ts only ever works
+ * one out where nothing had to be rounded to reach it, and the stripe-webhook
+ * then compares it with what Stripe actually charged.
+ *
+ * NULL is not nought and the two must not collapse. Null means no prediction
+ * was involved — no code on the sale, or a sale made before the column existed
+ * — and it is the value on very nearly every row. Nought means a prediction was
+ * made and Stripe agreed with it. Only a non-nought value is counted here.
+ *
+ * ── Why a count and a sum rather than a flag ──────────────────────────────
+ *
+ * Because the failure this exists to catch is systematic, not incidental. If
+ * the arithmetic is wrong it is wrong on EVERY sale of that package, so "one
+ * sale is out by a penny" and "forty sales are out by a penny" are the same
+ * defect at different ages, and only the second is visible in a total. The
+ * amounts are NOT summed across currencies for the same reason no other figure
+ * in this file is — a variance in yen and a variance in pence are not 2 of
+ * anything — so what comes back is a count and the worst single one, both of
+ * which are true whatever the row was charged in.
+ */
+export interface FeeMismatch {
+  /** Sales whose fee came off a figure Stripe did not charge. */
+  count: number;
+  /** The largest gap on any one of them, in minor units, ignoring sign — a
+   *  scale, not a total. Zero when there are none. */
+  worstCents: number;
+}
+
+/** One sale, reduced to whether its fee was taken from the right figure. */
+export interface FeeVarianceRow { fee_variance_cents?: number | string | null }
+
+/**
+ * Count them.
+ *
+ * The column is a BIGINT, so PostgREST hands it back as a STRING — read as one,
+ * `"-1" !== 0` is true for the wrong reason and `"0"` counts as a mismatch,
+ * which would put a warning on every correctly predicted sale in the app. It
+ * goes through `Number` for the same reason `refundableRow` does.
+ */
+export function feeMismatches(rows: readonly FeeVarianceRow[]): FeeMismatch {
+  let count = 0;
+  let worstCents = 0;
+  for (const r of rows) {
+    const v = r.fee_variance_cents;
+    if (v == null) continue;
+    const n = Number(v);
+    // A value that will not parse is not a mismatch and is not a zero either.
+    // It is a column we cannot read, and inventing a discrepancy from one would
+    // put a warning about somebody's money on a screen for no reason.
+    if (!Number.isFinite(n) || n === 0) continue;
+    count += 1;
+    worstCents = Math.max(worstCents, Math.abs(n));
+  }
+  return { count, worstCents };
 }
 
 /** Rows created on or after `fromMs`. Rows with an unparseable date are kept

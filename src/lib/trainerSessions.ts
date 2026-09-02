@@ -130,6 +130,12 @@ export function rowToSession(r: any, names: Map<string, string>): PtSession {
     outcomeAt: r.outcome_at ?? null,
     rateCents: r.rate_cents ?? null,
     settlementId: r.settlement_id ?? null,
+    // What the CLIENT paid with (supabase/parts/370). Not the same question as
+    // `settlementId`, which is what the GYM paid the coach: a session can be
+    // settled with the coach and covered by nothing at all.
+    packDrawnKind: (r.pack_drawn_kind ?? null) as PtSession['packDrawnKind'],
+    packDrawnAt: r.pack_drawn_at ?? null,
+    packDrawShortfallAt: r.pack_draw_shortfall_at ?? null,
   };
 }
 
@@ -164,7 +170,7 @@ export async function fetchMySessions(
 ): Promise<PtSession[]> {
   let q = sb
     .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id')
+    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
     .eq('trainer_id', trainerId)
     .gte('starts_at', sinceIso)
     .order('starts_at', { ascending: false });

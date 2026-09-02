@@ -24,9 +24,6 @@
 // app/(owner)/brand.tsx was corrected an hour before this was written, because
 // it sold four things that do not exist. Nothing here re-sells them:
 //
-//   · no logo upload. The coach's photo already reaches their clients through
-//     `my_coach()`, and it is set on Profile. A second image column with no
-//     uploader behind it is precisely the promise that had to be walked back.
 //   · no domain. There is no domain column anywhere in this schema.
 //   · no store listing, no app name, no icon. Those are the BUILD-time brand
 //     axis in src/lib/brands.ts — a bundle id is permanent and belongs to
@@ -35,10 +32,33 @@
 //     so that boundary is enforced rather than merely described.
 //   · no claim about fees, plans or what anybody keeps.
 //
-// The trading name and the colour are the whole of it, which is exactly what
-// the owner's screen now says about a gym.
+// ── The logo, and why it is here now ──────────────────────────────────────
+//
+// A logo upload was on that list, and the reason it was on it was NOT that a
+// coach may not have a logo. It was that "a second image column with no
+// uploader behind it is precisely the promise that had to be walked back". The
+// refusal was about a column with nothing behind it, so the answer is to build
+// the thing behind it rather than to keep refusing:
+//
+//   · supabase/parts/330 — the column, a private bucket, own-folder policies;
+//   · src/ui/coachLogo.ts — the picker, the downscale, the upload, the clean-up;
+//   · src/lib/coachInvoice.ts, src/lib/coachClientReport.ts and
+//     src/lib/shareAsset.ts — the three artefacts that actually draw it.
+//
+// It is a NARROWER promise than the colour beside it, and this screen says so
+// rather than letting a coach assume otherwise. The name and the colour reach
+// clients INSIDE the app, through `my_coach_brand()`. The logo goes on
+// artefacts this coach's own device builds and hands over: an invoice, a client
+// report, a share card. The read policy is own-folder, so a client's app never
+// fetches it, and `LOGO_SCOPE_NOTE` is that sentence in the coach's language.
+//
+// The coach's own photograph is a separate thing and is still set on Profile —
+// it reaches their clients through `my_coach()` and always did.
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
+// React Native's own <Image> rather than expo-image's. It is in every binary
+// ever built, it renders a data URI, and nothing here needs an animated format
+// — so this is one screen that does not have to branch on HAS_NATIVE_IMAGE.
+import { View, Text, TextInput, Pressable, ScrollView, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Cta, Flag } from '../../src/ui/kit';
@@ -51,12 +71,51 @@ import {
   MAX_BRAND_NAME, coachBrandColorOf, parseCoachBrandColor, parseCoachBrandName,
 } from '../../src/lib/coachBrand';
 import { reportError } from '../../src/lib/reportError';
+import { useAuth } from '../../src/ui/auth';
+import { clearMyLogo, pickLogo, uploadMyLogo, useMyCoachLogo } from '../../src/ui/coachLogo';
+import { LOGO_SCOPE_NOTE, LOGO_UNREADABLE_NOTE } from '../../src/lib/coachLogo';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 
 export default function CoachBrand() {
   const t = useTheme();
   const { palettes } = useThemeControls();
   const { name: coachName } = useMyTrainerProfile();
+  const { user: authUser } = useAuth();
+  const coachId = authUser?.id ?? null;
+  const logo = useMyCoachLogo();
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoMsg, setLogoMsg] = useState<{ bad: boolean; text: string } | null>(null);
+
+  /** Choose one, prepare it, store it, and only then say it is set. Every step
+   *  that can fail says which one it was — "not saved" with no reason is what
+   *  sends a coach back to export the same file again. */
+  const chooseLogo = async () => {
+    if (!coachId) { setLogoMsg({ bad: true, text: 'Your logo was not saved, because there is nobody signed in to save it for.' }); return; }
+    setLogoMsg(null);
+    const { picked, error } = await pickLogo();
+    // A cancel is not a failure and must not raise anything at the coach.
+    if (!picked) { if (error) setLogoMsg({ bad: true, text: error }); return; }
+    setLogoBusy(true);
+    const res = await uploadMyLogo(coachId, picked, logo.path);
+    setLogoBusy(false);
+    if (res.error) { setLogoMsg({ bad: true, text: res.error }); return; }
+    setLogoMsg({ bad: false, text: 'Saved. It goes on the invoices, reports and cards you make from now on.' });
+    logo.reload();
+  };
+
+  const removeLogo = () => {
+    if (!coachId) return;
+    Alert.alert('Remove Your Logo', 'Anything you make from now on is prepared without it, exactly as it was before you added one. Documents you have already sent are unchanged.', [
+      { text: 'Keep It', style: 'cancel' },
+      { text: 'Remove It', style: 'destructive', onPress: async () => {
+        setLogoBusy(true);
+        const failed = await clearMyLogo(coachId, logo.path);
+        setLogoBusy(false);
+        setLogoMsg(failed ? { bad: true, text: failed } : { bad: false, text: 'Removed. Your invoices and cards carry no logo now.' });
+        logo.reload();
+      } },
+    ]);
+  };
 
   const [status, setStatus] = useState<LoadStatus>('loading');
   // Null means "not loaded / not set" and is never rendered as a value. The
@@ -175,6 +234,61 @@ export default function CoachBrand() {
 
           <Rule />
 
+          {/* ── the logo ───────────────────────────────────────────────────── */}
+          <Section>
+            <SectionHead title="Your Logo" />
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>{LOGO_SCOPE_NOTE}</Text>
+
+            {/* Three states and never two. A read that failed is not a coach
+                who has set no logo, and telling them it was would have them set
+                one over the top of whatever is really there. */}
+            {logo.status === 'error' ? (
+              <Flag tone={t.warn}>{LOGO_UNREADABLE_NOTE}</Flag>
+            ) : logo.status === 'loading' ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Reading your logo…</Text>
+            ) : logo.path ? (
+              <View style={{ backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.lg, alignItems: 'flex-start' }}>
+                {logo.dataUri ? (
+                  <Image source={{ uri: logo.dataUri }} resizeMode="contain" accessibilityLabel="Your logo"
+                    style={{ width: 160, height: 56 }} />
+                ) : (
+                  // The record says there is one and the picture did not
+                  // arrive. Those are two different failures and this is the
+                  // second, so the sentence is about the download rather than
+                  // about the account.
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    Your logo is set, and the picture of it could not be fetched just now. Anything you make in the meantime is prepared without it.
+                  </Text>
+                )}
+              </View>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3 }}>
+                You have not added a logo, so your invoices and cards carry your name and your colour, as they do today.
+              </Text>
+            )}
+
+            {logoMsg ? (
+              logoMsg.bad
+                ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{logoMsg.text}</Flag>
+                : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{logoMsg.text}</Text>
+            ) : null}
+
+            <View style={{ marginTop: sp.lg }}>
+              <Cta wide label={logoBusy ? 'Saving…' : logo.path ? 'Choose a Different Logo' : 'Choose a Logo'}
+                disabled={logoBusy || logo.status !== 'ready'} onPress={() => { void chooseLogo(); }} />
+            </View>
+            {logo.path ? (
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Remove Your Logo" onPress={removeLogo} />
+              </View>
+            ) : null}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              A PNG or a JPEG, up to 2 MB. A PNG keeps a transparent background, which is what makes a mark sit properly on a dark card.
+            </Text>
+          </Section>
+
+          <Rule />
+
           {/* ── the colour, with the measurement in front of the coach ─────── */}
           <Section>
             <SectionHead title="Your Colour" />
@@ -261,7 +375,10 @@ export default function CoachBrand() {
               Puts you back to having chosen no colour, and your clients back to the app’s own.
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-              The name and the colour are the whole of your branding. They reach the clients you are actively coaching, and they stop when the coaching does.
+              The name and the colour are what your clients see inside the app. They reach the clients you are actively coaching, and they stop when the coaching does.
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Your logo is not part of that. It goes on the documents and cards you make and hand over yourself, which is why the preview above does not show it.
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               A client who trains at a gym sees that gym's branding instead of yours. Membership is what the gym holds about them; you are their coach, not their club.

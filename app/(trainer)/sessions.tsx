@@ -29,7 +29,7 @@
 // trainer sees exactly what they saw before; an independent one can finally
 // work. See src/lib/trainerSessions.ts for why that is the right key rather
 // than a convenient one.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -50,6 +50,11 @@ import {
 } from '../../src/lib/trainerSessions';
 import { useFloorQueue } from '../../src/ui/floorQueue';
 import { floorPendingNote, keptOfflineLine } from '../../src/lib/floorQueue';
+// The record, as opposed to the queue. See "What Already Happened" below.
+import {
+  pastSessions, pastVerdict, PAST_STATE_LABEL, PAST_STATE_NOTE, type PastState,
+} from '../../src/lib/sessionHistory';
+import { appLocale } from '../../src/lib/locale';
 
 /** The four outcomes, in the order a person would consider them. */
 const OUTCOMES: { id: SessionOutcome; label: string; short: string; tone: (t: Theme) => string }[] = [
@@ -65,6 +70,25 @@ const when = (iso: string) => {
   return d.toLocaleString(undefined, {
     weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
   });
+};
+
+/** The mark beside a past session. A 6pt dot; the words stay in ink beside it,
+ *  because `crit`/`warn`/`good` are marks in this app and never text colour. */
+const stateTone = (t: Theme, s: PastState): string => {
+  switch (s) {
+    case 'delivered': return t.brand;
+    case 'missed': return t.crit;
+    case 'late_cancelled': return t.s3;
+    case 'cancelled': return t.ink3;
+    case 'unmarked': return t.warn;
+  }
+};
+
+/** A bare day, through `appLocale()` — a hardcoded tag is what `check:locale`
+ *  refuses, and this string names the edge of what has been read. */
+const dayOnly = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
 /** Group by calendar day so a trainer can clear a whole day at once. */
@@ -141,7 +165,36 @@ export default function TrainerSessions() {
   // hunting for the session again once it has left the queue.
   const [justMarked, setJustMarked] = useState<{ s: PtSession; outcome: SessionOutcome }[]>([]);
 
-  const load = useCallback(async () => {
+  /* ── the window, and what it costs to widen it ────────────────────────────
+   *
+   * This screen read a fixed 90 days and kept only the UNMARKED sessions out of
+   * it. That is a to-do list, and a to-do list empties itself: a coach who
+   * cleared the queue on Monday had, by Tuesday, no screen anywhere in the app
+   * that said what they had delivered, to whom, or what became of it. The
+   * marking is what generates the record and then the record was thrown away.
+   *
+   * So the whole read is kept now, the queue is derived from it, and the window
+   * can be pushed back a quarter at a time. It is paged rather than opened
+   * wide, because going further back costs a read and `fetchMySessions` refuses
+   * a truncated one outright (`assertWhole` — a payroll figure over an unknown
+   * fraction of a set is worse than no figure). A quarter at a time keeps each
+   * read inside the row cap for any realistic coach and makes the boundary
+   * something the coach chose rather than something that happened to them.
+   */
+  const [all, setAll] = useState<PtSession[] | null>(null);
+  /** The window the rows in `all` actually cover. Never assumed from a control
+   *  the coach tapped — only set from a read that came back. */
+  const [loadedDays, setLoadedDays] = useState(MARK_WINDOW_DAYS);
+  const [widening, setWidening] = useState(false);
+  /** A widening that failed. Kept apart from `failed`: the rows already on
+   *  screen are still real and still current, and blanking them because the
+   *  quarter BEFORE them could not be read would take a working record away. */
+  const [widenErr, setWidenErr] = useState<string | null>(null);
+  // Read inside the catch below, where the state value would be the one
+  // captured when `load` was built rather than the one that is true now.
+  const haveRows = useRef(false);
+
+  const load = useCallback(async (days: number = MARK_WINDOW_DAYS) => {
     // Still working out who is signed in. Not an answer either way, so leave
     // the queue unread — the effect runs again when auth settles.
     if (authLoading) return;
@@ -151,31 +204,62 @@ export default function TrainerSessions() {
       // the one thing it must never say without having looked.
       reportError('sessions.awaiting', new Error('no signed-in coach to read sessions for'));
       setQueue(null);
+      setAll(null);
+      haveRows.current = false;
       setFailed(true);
       return;
     }
-    setFailed(false);
+    setWidening(true);
+    setWidenErr(null);
+    if (!haveRows.current) setFailed(false);
     try {
-      // 90 days back: far enough to catch a forgotten fortnight, short enough
-      // that the query stays cheap and the list stays readable.
-      const since = windowStart(MARK_WINDOW_DAYS);
+      // 90 days back by default: far enough to catch a forgotten fortnight,
+      // short enough that the query stays cheap and the list stays readable.
+      // `days` is what the coach has asked for beyond that.
+      const since = windowStart(days);
       const mine = await fetchMySessions(supabase, uid, since, new Date().toISOString());
+      setAll(mine);
+      haveRows.current = true;
+      setLoadedDays(days);
       setQueue(awaitingOutcome(mine));
+      setFailed(false);
     } catch (e) {
       reportError('sessions.awaiting', e);
-      // Leave the queue unknown rather than empty. [] here would be read as
-      // "nothing outstanding", which is a claim about the gym's payroll this
-      // screen is in no position to make.
-      setQueue(null);
-      setFailed(true);
+      if (haveRows.current) {
+        // A wider read that failed leaves the narrower one standing. What the
+        // coach loses is the extra quarter, and they are told exactly that
+        // rather than watching the screen they were working on empty itself.
+        setWidenErr('That earlier period could not be read, so this list still ends where it did. Nothing already on this screen has changed.');
+      } else {
+        // Leave the queue unknown rather than empty. [] here would be read as
+        // "nothing outstanding", which is a claim about the gym's payroll this
+        // screen is in no position to make.
+        setQueue(null);
+        setAll(null);
+        setFailed(true);
+      }
+    } finally {
+      setWidening(false);
     }
   }, [uid, authLoading]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(MARK_WINDOW_DAYS); }, [load]);
 
   const loaded = queue !== null;
   const rows = queue ?? [];
   const days = byDay(rows);
+
+  /* Everything in the window that has already finished, newest first —
+   * delivered, not attended, cancelled either way, and the ones still waiting
+   * on an outcome. Cancellations are kept rather than filtered out: they are
+   * the evidence the hour was booked, and supabase/parts/195 is the argument
+   * for why removing that evidence quietly improves every figure computed over
+   * what is left. */
+  const history = useMemo(() => pastSessions(all ?? []), [all]);
+  const historyDays = useMemo(() => byDay(history), [history]);
+  /** The instant the loaded window starts at — the edge of what this screen can
+   *  answer for, named on screen rather than implied by a list that stops. */
+  const windowFrom = useMemo(() => windowStart(loadedDays), [loadedDays]);
 
   const mark = async (s: PtSession, outcome: SessionOutcome) => {
     // Unreachable in practice — with no uid the queue is `failed` and no row is
@@ -213,6 +297,13 @@ export default function TrainerSessions() {
         return;
       }
       setQueue((prev) => (prev ?? []).filter((x) => x.id !== s.id));
+      // The session leaves the queue and JOINS the record, in the same tap. It
+      // is the same row seen two ways, and letting the history keep saying
+      // "still needs an outcome" for one it has just been given would make the
+      // two halves of this screen disagree with each other in front of the
+      // person who resolved it.
+      setAll((prev) => (prev ?? []).map((x) => (x.id === s.id
+        ? { ...x, outcome, outcomeAt: new Date().toISOString() } : x)));
       setJustMarked((prev) => [{ s, outcome }, ...prev].slice(0, 8));
       tapLight();
       if (out === 'unsent') {
@@ -230,6 +321,9 @@ export default function TrainerSessions() {
       await clearMyOutcome(supabase, uid, entry.s.id);
       setJustMarked((prev) => prev.filter((x) => x.s.id !== entry.s.id));
       setQueue((prev) => [entry.s, ...(prev ?? [])]);
+      // Back to unmarked in the record too, for the same reason as above.
+      setAll((prev) => (prev ?? []).map((x) => (x.id === entry.s.id
+        ? { ...x, outcome: null, outcomeAt: null } : x)));
       tapLight();
     } catch (e) {
       // The row keeps its outcome on the server, so saying nothing here leaves
@@ -316,7 +410,7 @@ export default function TrainerSessions() {
               There may or may not be sessions waiting on an outcome — the app could not find out.
               {hasGym ? ' Do not settle payroll on this screen until it loads.' : ' Do not treat this as a clear queue until it loads.'}
             </Text>
-            <Pressable onPress={() => void load()} hitSlop={8}
+            <Pressable onPress={() => void load(loadedDays)} hitSlop={8}
               accessibilityRole="button" accessibilityLabel="Try reading your sessions again"
               style={{ marginTop: sp.lg, borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm }}>
               <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
@@ -397,6 +491,84 @@ export default function TrainerSessions() {
                   </Pressable>
                 </View>
               ))}
+            </Section>
+          </>
+        ) : null}
+
+        {/* ── what already happened ───────────────────────────────────────
+            The queue above is a to-do list and empties itself. This is the
+            record it generates, and it is the only place in the coach app that
+            says what became of a session once it has been marked. Shown only
+            once a read has come back: under `failed` the section above already
+            says the app could not find out, and repeating a second empty list
+            underneath it would read as a coach with no history. */}
+        {all !== null ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="What Already Happened"
+                note={`${history.length} in ${loadedDays} days`} />
+
+              {/* The edge of the window, said plainly. A list that simply stops
+                  is read as a record that stops. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Sessions from {dayOnly(windowFrom)} onwards. Anything earlier is on the server and has not
+                been read onto this screen.
+              </Text>
+
+              {widenErr ? <Flag tone={t.warn}>{widenErr}</Flag> : null}
+
+              {history.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  No sessions of yours have finished in this window. Read further back to see earlier ones.
+                </Text>
+              ) : historyDays.map((day, di) => (
+                <View key={day.day}>
+                  {di > 0 ? <Rule /> : null}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, marginBottom: sp.xs }}>{day.label}</Text>
+                  {day.rows.map((s) => {
+                    const v = pastVerdict(s);
+                    return (
+                      <View key={s.id} style={{ paddingVertical: sp.sm }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                          <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>
+                            {s.clientName ?? 'Client'}
+                          </Text>
+                          {/* The tone is the dot. The label is ink beside it. */}
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateTone(t, v.state) }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>{PAST_STATE_LABEL[v.state]}</Text>
+                        </View>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                          {when(s.startsAt)} · {s.durationMin} min
+                          {v.at ? ` · marked ${when(v.at)}` : ''}
+                        </Text>
+                        {/* Said in full only where it changes what somebody
+                            should do. A delivered session needs no sentence; an
+                            unmarked one is holding up a settlement. */}
+                        {v.state === 'unmarked' ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{PAST_STATE_NOTE.unmarked}</Text>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+
+              {/* Going further back costs a read, so it is a tap and not a
+                  scroll. The label names the price rather than hiding it. */}
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+                <Pressable
+                  disabled={widening}
+                  onPress={() => void load(loadedDays + MARK_WINDOW_DAYS)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Read the ${MARK_WINDOW_DAYS} days before ${dayOnly(windowFrom)}`}
+                  style={{ borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm, opacity: widening ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>
+                    {widening ? 'Reading…' : 'Read Another 90 Days'}
+                  </Text>
+                </Pressable>
+              </View>
             </Section>
           </>
         ) : null}

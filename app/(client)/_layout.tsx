@@ -136,6 +136,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="access" options={{ href: null, title: 'Access' }} />
       <Tabs.Screen name="restday" options={{ href: null, title: 'When to Rest' }} />
       <Tabs.Screen name="pt-sessions" options={{ href: null, title: 'Personal Training' }} />
+      <Tabs.Screen name="session-credits" options={{ href: null, title: 'Session Credits' }} />
       <Tabs.Screen name="bookings" options={{ href: null, title: 'My Bookings' }} />
     </Tabs>
     <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />

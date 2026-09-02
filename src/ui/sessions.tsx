@@ -201,9 +201,22 @@ const toServerCancel = (d: any): ServerCancel => ({
   waiting: toNum(d?.waiting) ?? 0,
 });
 
+// `outcome` and `outcome_at` have been on every one of these rows since
+// supabase/parts/33-session-outcomes.sql and were dropped here, by this mapper,
+// on the way in. The read is `select('*')`, so they cost nothing extra to
+// carry — and without them neither phone app could say what BECAME of a past
+// session, only that one had been booked. Every screen that wanted to know
+// therefore had to infer it from the clock, which is the exact inference part
+// 33 was written to end.
+//
+// Unrecognised values are carried through as-is rather than coerced: it is
+// `pastVerdict` in src/lib/sessionHistory.ts that decides what an outcome this
+// build has never heard of means, and it reads it as unmarked rather than as
+// delivered work.
 const rowToSession = (r: any): TrainingSession => ({
   id: String(r.id), trainerId: r.trainer_id, clientId: r.client_id,
   startsAt: r.starts_at, durationMin: r.duration_min, status: r.status, released: !!r.released,
+  outcome: r.outcome ?? null, outcomeAt: r.outcome_at ?? null,
 });
 
 const Ctx = createContext<SessionsValue | null>(null);

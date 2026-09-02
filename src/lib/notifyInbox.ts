@@ -146,6 +146,14 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // src/ui/CoachRequests.tsx draws the accept/decline card. There is no
   // dedicated screen for a coaching request and this is deliberately not the
   // moment to invent one.
+  // A client's own training, which is where a personal best sends the coach
+  // (src/lib/prNotify.ts). "Their Training" is `href: null` in the coach's tab
+  // layout — it is reached from a client rather than from the nav — so there is
+  // no TRAINER_NAV icon to inherit. A dumbbell, which is what this table
+  // already gives the member's own training screen: it is the one row in a
+  // coach's inbox that is about a lift, and the bell would say "we have no idea
+  // what this is" over the single most encouraging thing in the product.
+  ['/(trainer)/client-training', 'dumbbell'],
   ['/(trainer)/dashboard', 'people'],
   ['/(trainer)/documents', 'pencil'],
   ['/(trainer)/payments', 'grid'],
@@ -311,6 +319,13 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   // notification is a push, and so the classification of its wording is
   // visible: it has a body, it is not chat, and it is recorded.
   { where: 'src/ui/coachInvoices.ts', title: 'An invoice from your coach', body: 'Invoice 0007 for AED 450.00 — Ten sessions. Your coach states this amount is being requested.', route: null },
+  // The personal best. The only push in this catalogue sent from inside a
+  // branch that has already made a judgement — see src/lib/prNotify.ts, which
+  // holds the wording and the once-a-day rule, and supabase/parts/202, which
+  // says why this one is not a database trigger. Recorded, and it has to be: a
+  // coach who missed the banner has no other way to learn a record was set
+  // except by opening that client's training screen and reading the sets.
+  { where: 'app/(client)/workouts.tsx', title: 'A client set a personal best', body: 'Sam just logged Back squat at 100 kg (220.5 lb) for 5 reps, and their app makes that their best set of that movement on record.', route: '/(trainer)/client-training?clientId=00000000-0000-0000-0000-000000000000' },
 ];
 
 /* ── rows nothing in this file decides about ───────────────────────────────

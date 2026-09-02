@@ -81,6 +81,10 @@
 import type { LoadStatus } from '../ui/loadStatus';
 import { weightIn, lengthIn, volumeIn, convertedNote, type WeightUnit, type LengthUnit } from './units';
 import { progressChangeLines, progressSpanLabel, figure, dayLabel } from './progressExport';
+// The coach's own mark, on the coach's own document. `logoImgHtml` returns the
+// empty string for anything it cannot validate, so a logo that could not be
+// read produces the report this module produced before logos existed.
+import { LOGO_CSS, logoImgHtml } from './coachLogo';
 // The client's own handover document. Its rules are imported rather than
 // copied — see the header. Nothing in that file is modified by this one.
 import {
@@ -204,6 +208,15 @@ export interface CoachClientReportInput {
   coachName: string | null;
   coachStatus: LoadStatus;
   brand: string;
+  /**
+   * The coach's own logo as a data URI, or null.
+   *
+   * Optional, and null-tolerant, for the same reason as on an invoice: theirs,
+   * on their own document, with no gate beyond being able to read it. It is not
+   * escaped and must not be — see `safeLogoDataUri` in src/lib/coachLogo.ts for
+   * what is done instead.
+   */
+  logoDataUri?: string | null;
   /** `YYYY-MM-DD`, supplied by the caller (todayISO()) rather than read from
    *  the clock here, so the document is a pure function of its inputs. */
   generatedOn: string;
@@ -376,6 +389,10 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
   const T: string[] = [];
 
   /* ── heading ───────────────────────────────────────────────────────────── */
+  // Above the dark heading panel rather than inside it, for the reason
+  // src/lib/coachInvoice.ts gives: most marks are dark ink on a transparent
+  // ground and would vanish into it.
+  H.push(logoImgHtml(input.logoDataUri));
   H.push(`<div class="h"><h1>Coaching record</h1><p>${escapeHtml(who)} · prepared ${escapeHtml(dayLabel(input.generatedOn))} · ${escapeHtml(brand)}</p></div>`);
   T.push(`${who} — coaching record`);
   T.push(`Prepared ${dayLabel(input.generatedOn)} · ${brand}`);
@@ -684,7 +701,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
   H.push(`<p class="foot">${escapeHtml(foot)}</p>`);
   T.push('', foot);
 
-  const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${STYLE}</style></head><body>${H.join('')}</body></html>`;
+  const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${STYLE}${LOGO_CSS}</style></head><body>${H.join('')}</body></html>`;
   return { html, text: T.join('\n'), complete, caveats };
 }
 

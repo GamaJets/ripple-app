@@ -23,13 +23,21 @@
 // name the row is titled "PT session" and carries no location. A booking that
 // reads "PT with —" in the app, and worse in the calendar it is exported to, is
 // not more honest than one that simply says what it is.
-import { useMemo, useCallback, useState } from 'react';
+import { useMemo, useCallback, useState, useEffect } from 'react';
 import { View, Text, ScrollView, Alert, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
+// What pays for each of these, read once for the whole list. See
+// supabase/parts/370 and src/lib/sessionCredits.ts: the choice of entitlement
+// is made in one place, so this screen and the ledger cannot describe the same
+// credit two ways.
+import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
+import { coachPackLines, gymPtLines, chooseRoute, creditsLeft, payingLines, ledgerStateOf,
+  clientLedgerLine, bookingCreditNote, type CreditSession } from '../../src/lib/sessionCredits';
+import type { PackBalance } from '../../src/lib/packDraw';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
@@ -134,6 +142,69 @@ export default function Bookings() {
   const coachName = head.isName ? head.text : null;
   const cd = useClientData();
   const { appName } = useBrand();
+
+  // ── what is going to pay for these ────────────────────────────────────
+  //
+  // Three-state throughout: `undefined` still reading, `null` a read that did
+  // not land, a value an answer. A booking whose credit could not be read says
+  // so rather than being shown as free or as already paid.
+  const [packs, setPacks] = useState<PackBalance | null | undefined>(undefined);
+  const [ptPasses, setPtPasses] = useState<PtPassRow[] | null | undefined>(undefined);
+  const [credits, setCredits] = useState<CreditSession[] | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const [p, g, c] = await Promise.all([sessionPacks(), myPtPasses(), mySessionCredits()]);
+      if (!live) return;
+      setPacks(p); setPtPasses(g); setCredits(c);
+    })();
+    return () => { live = false; };
+  }, []);
+
+  // The day a gym pass has to be live on, taken locally: a pass expires on a
+  // date at the gym, not at an instant in UTC.
+  const todayISO = useMemo(() => {
+    const d = new Date(); const z = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+  }, []);
+  const coachLines = useMemo(() => (packs === undefined ? null : coachPackLines(packs?.lines ?? null)), [packs]);
+  const gymLines = useMemo(() => (ptPasses === undefined ? null : gymPtLines(ptPasses, todayISO)), [ptPasses, todayISO]);
+  const creditRoute = useMemo(
+    () => chooseRoute(coachLines == null ? null : coachLines.length > 0,
+                      gymLines == null ? null : gymLines.length > 0),
+    [coachLines, gymLines]);
+  const creditsRemaining = useMemo(
+    () => creditsLeft(payingLines(creditRoute, coachLines, gymLines)), [creditRoute, coachLines, gymLines]);
+  const creditNote = useMemo(() => bookingCreditNote(creditRoute, creditsRemaining), [creditRoute, creditsRemaining]);
+  const creditById = useMemo(() => {
+    const m = new Map<string, CreditSession>();
+    for (const c of credits ?? []) m.set(c.id, c);
+    return m;
+  }, [credits]);
+  /**
+   * The one sentence under a PT row saying what pays for it.
+   *
+   * Null for a class (the gym's own timetable spends a different thing), null
+   * for a member who holds nothing, and null while the read is still in flight
+   * — a caption that appears and then changes its mind is worse than one that
+   * waits. A row whose own credit record could not be read is described as
+   * unknown rather than left blank, because blank reads as "nothing to pay".
+   */
+  const creditLineFor = (sessionId: string | null): string | null => {
+    if (!sessionId) return null;
+    if (credits === undefined || packs === undefined || ptPasses === undefined) return null;
+    if (creditRoute === 'none') return null;
+    const c = creditById.get(sessionId);
+    if (!c) {
+      return credits === null
+        ? 'We could not read what pays for this session.'
+        : null;
+    }
+    return clientLedgerLine({
+      sessionId: c.id, startsAt: c.startsAt, state: ledgerStateOf(c, creditRoute),
+      kind: c.packDrawnKind, drawnAt: c.packDrawnAt, entitlementId: null,
+    });
+  };
 
   const items = useMemo(() => {
     const out: Item[] = [];
@@ -378,6 +449,12 @@ export default function Bookings() {
               look finished, and the reader has to be told before they scroll
               past the one booking that did come back. */}
           {gap ? <Notice tone={t.warn} kicker="Bookings" title={gap.title} note={gap.note} /> : null}
+          {/* The balance, above the list, because it is what somebody is
+              deciding against when they look at this screen. `bookingCreditNote`
+              is the same function the ledger and the booking screen use, so the
+              promise is worded once. Null for a member who holds nothing, who
+              needs no sentence about packs at all. */}
+          {creditNote ? <Flag tone={t.brand} style={{ marginBottom: sp.md }}>{creditNote}</Flag> : null}
           {/* One of the two lists came off this phone rather than off the
               server. Said above the rows for the same reason the gap notice is:
               a member who reads a cached booking as a confirmed one turns up to
@@ -400,6 +477,14 @@ export default function Bookings() {
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
                       <Text style={{ ...ty.caption, color: t.ink2 }}>On the waitlist</Text>
                     </View>
+                  ) : null}
+                  {/* What pays for this hour, said on the row rather than left
+                      to be inferred from a balance on another screen. Worded
+                      as an expectation where it is one: nothing comes off a
+                      pack in advance, so a booking eight weeks out has not
+                      spent anything yet and this line does not say it has. */}
+                  {it.kind === 'pt' && creditLineFor(it.pt?.id ?? null) ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{creditLineFor(it.pt?.id ?? null)}</Text>
                   ) : null}
                 </View>
                 {/* "Cancel, button" told a screen reader nothing about WHICH

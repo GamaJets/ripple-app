@@ -72,6 +72,74 @@ export interface Refundable {
 }
 
 /**
+ * A row from either money table, as PostgREST hands it back.
+ *
+ * Both columns are read through `Number` rather than typed as one, and that is
+ * not laziness. `refunded_cents` is a BIGINT in part 192, and PostgREST returns
+ * a bigint as a STRING so a value above 2^53 can survive JSON — while
+ * `amount_cents` is an `integer` on both tables and comes back as a number. A
+ * shape that insisted on `number` would be a lie about one of the two columns,
+ * and the version of this that believed it is why connect-refund carries an
+ * `int()` helper with a comment explaining that `"48000"` fails every
+ * arithmetic check and a real sale is refused as one with no amount on it.
+ */
+export interface RefundableRow {
+  amount_cents: number | string | null;
+  currency: string | null;
+  refunded_cents: number | string | null;
+  /** `client_purchases` only. A renewal has no status column — see below. */
+  status?: string | null;
+}
+
+/** A figure from PostgREST as a number, or null when it is not one. */
+const minorOf = (v: unknown): number | null => {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * One row of either table, in the shape every rule in this file reads.
+ *
+ * ── Why this is here rather than at each caller ───────────────────────────
+ *
+ * There were three copies of this mapping — one in the coach's payments
+ * screen, one in supabase/functions/connect-refund, and a third inside the
+ * screen's own "what has already gone back" line — and each of them decided
+ * `paid` for itself. That is the field a refund is gated on, and the renewal
+ * answer is not obvious: `client_subscription_payments` has no status column
+ * and wants none, because part 132 writes a row there only after checking
+ * `inv.status === 'paid'` on the invoice itself. A copy of this mapping that
+ * reached for `row.status` on a renewal would read `undefined`, decide the
+ * money was never charged, and refuse every renewal refund with a sentence
+ * that is simply false.
+ *
+ * `stripeRef` is passed rather than read off the row because the two callers
+ * legitimately hold different things. The screen holds the Checkout Session or
+ * the Invoice id and is only asking whether there is anything to refund
+ * AGAINST; connect-refund has since resolved that to the PaymentIntent, which
+ * is the object Stripe actually refunds. Both are "the reference or null", and
+ * null means the same thing to `refundBlocker` either way.
+ */
+export function refundableRow(kind: RefundableKind, row: RefundableRow, stripeRef: string | null): Refundable {
+  const already = minorOf(row.refunded_cents);
+  return {
+    kind,
+    amountCents: minorOf(row.amount_cents),
+    currency: row.currency,
+    // Zero, never null, on a row nobody has refunded: the column has a default
+    // and only connect-refund ever writes it. A negative one — which no
+    // constraint permits and no code writes — is read as none rather than
+    // credited as extra headroom.
+    refundedCents: already != null && already > 0 ? already : 0,
+    stripeRef: String(stripeRef ?? '').trim() || null,
+    // A renewal row exists ONLY because Stripe reported the invoice paid, so
+    // there is no status to consult and none is wanted.
+    paid: kind === 'renewal' ? true : String(row.status ?? '') === 'paid',
+  };
+}
+
+/**
  * What is left to give back, in minor units.
  *
  * Never negative and never more than was charged. A row whose amount could not

@@ -35,13 +35,65 @@ import { markOutcome } from '../../src/lib/gymSessions';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
-import { isWhole } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+// Paging back into a month the read never reached must not draw an empty grid.
+// See `monthNote` below. Surgical addition alongside the calendar-sync work in
+// this file — three lines of state and one Flag under the grid, nothing else.
+import { readBoundary, monthCoverage, monthCoverageNote } from '../../src/lib/sessionHistory';
+import { appLocale } from '../../src/lib/locale';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useCoachReminders } from '../../src/ui/coachReminders';
 import {
   blockDates, summariseBlocks, blockSummaryLine, blockPlanLabel,
   type BlockOutcome, type BlockResult,
 } from '../../src/lib/blockRange';
+// The phone's own diary, and the two rules the whole feature rests on.
+//
+// NOT `import … from 'expo-calendar'`, here or anywhere. That package reaches
+// requireNativeModule at module scope, so on an install made before the
+// dependency landed the import throws while this file is LOADING and the coach
+// has no schedule tab at all — which is what expo-clipboard did to the coach's
+// home tab in August. HAS_NATIVE_CALENDAR answers false on those installs by
+// design (the version was deliberately not moved), the sheet says so in words,
+// and everything else on this screen is untouched.
+//
+// And the read takes times and nothing else: no title, no attendee, no note,
+// no location. See src/lib/deviceBusy.ts, which is where that is enforced and
+// asserted.
+import { HAS_NATIVE_CALENDAR, CALENDAR_UNAVAILABLE_NOTE } from '../../src/ui/nativeModules';
+import { readDeviceBusy, type DeviceBusyRead } from '../../src/ui/deviceBusy';
+import {
+  busyBlockLabel, busyCandidates, busyWindow, candidateMinutes, candidateTimeLabel, foldByDay,
+  BUSY_NOTES, BUSY_PRIVACY_NOTE, type BusyCandidate,
+} from '../../src/lib/deviceBusy';
+// A second calendar, and the first thing this app has ever written into one.
+//
+// S6 above reads the diary on the HANDSET. That is the whole of it, and it
+// covers nobody whose appointments live in a Google account they read on a
+// laptop — for them the phone answers "nothing found", which is the truest
+// empty list this app can produce and is still the wrong answer on the screen
+// whose job is to stop a double booking.
+//
+// The two sources are merged BEFORE anything is drawn, on spans, through the
+// same `busyCandidates` both already go through. Two lists that disagreed
+// would be two rows for one dentist appointment, two `block_time` calls, and
+// an 'already-blocked' refusal on the second that a coach reads as a failure.
+//
+// The read grant is `calendar.freebusy`, which cannot see a title — see
+// src/lib/calendarSync.ts. The write grant is asked for separately, only when
+// a coach turns writing on, and reaches only a calendar Repple itself made.
+import {
+  combineBusy, linkState, missingSourceNote, plannedSyncEvents, pushLabel, pushSummaryLine,
+  LINK_NOTES, NO_CALENDAR_LINK, REMOTE_SCOPE_NOTE, WRITE_PRIVACY_NOTE,
+  type BusySourceState, type CalendarLink, type SyncSource,
+} from '../../src/lib/calendarSync';
+import {
+  CALENDAR_SYNC_CONFIGURED, connectGoogleCalendar, disconnectGoogleCalendar,
+  pushAgainSoon, pushIsDue, pushSessions, readCalendarLink, readRemoteBusy,
+  setCalendarWrite, type RemoteBusyRead,
+} from '../../src/ui/calendarSync';
+import { BRAND } from '../../src/lib/brands';
+import { fmtDay } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -95,6 +147,17 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h);
 // picker that could offer one would be a control whose value the server throws
 // away. One list, stated once, and the three sheets below cannot drift from it.
 const MINUTES = SERIES_MINUTES;
+/**
+ * How far ahead Repple writes sessions into a coach's own calendar.
+ *
+ * Four weeks. It is a WINDOW rather than "everything", because a push is a
+ * reconciliation — anything of ours inside the window that is not in the list
+ * sent is removed, which is how a cancellation reaches Google — and a window
+ * bounds what a single bad read could undo. Four weeks is also what
+ * `generateSlots` fills, so the two halves of this screen agree about how far
+ * ahead a coach's week is a real thing rather than an intention.
+ */
+const PUSH_DAYS = 28;
 /** An hour of the day as a person says it, including the 24 that means the
  *  end of it. Written once because three places were saying it and only two
  *  of them knew about midnight. */
@@ -291,6 +354,46 @@ export default function TrainerSchedule() {
   // Both default to 1, which is exactly the behaviour that was there before.
   const [blkDays, setBlkDays] = useState(1);
   const [blkWeeks, setBlkWeeks] = useState(1);
+  // ── Blocking what the phone already knows ───────────────────────────────
+  //
+  // Everything above starts from the coach REMEMBERING. A coach whose Repple
+  // availability does not know about their dentist appointment double-books
+  // once, and after that they stop trusting the availability generator, which
+  // is the feature the whole booking side of this app rests on.
+  //
+  // `busyAsked` is not a spinner flag. Nothing is read, and no operating-system
+  // prompt is raised, until the coach has had the chance to read what will be
+  // taken off their calendar — which is a start and an end, and nothing else.
+  const [busyOpen, setBusyOpen] = useState(false);
+  const [busyAsked, setBusyAsked] = useState(false);
+  const [busyDays, setBusyDays] = useState(14);
+  const [busyRead, setBusyRead] = useState<DeviceBusyRead>({ status: 'loading', permission: 'unknown', candidates: [], spans: [] });
+  /** What the linked Google account said, kept apart from the phone's answer
+   *  all the way to `combineBusy`. Folding them together earlier would lose the
+   *  one fact the sheet has to keep: WHICH source failed. */
+  const [remoteRead, setRemoteRead] = useState<RemoteBusyRead>({ status: 'ready', spans: [] });
+  /** The one list on screen, built from both sources' spans at load time.
+   *  Held in state rather than recomputed in render because it belongs to the
+   *  window that was read, and the selected day moves under the sheet. */
+  const [busyCands, setBusyCands] = useState<BusyCandidate[]>([]);
+  /** The periods the coach has picked, by key. Empty on purpose and never
+   *  seeded: nothing found in somebody's diary is blocked unless they chose it
+   *  one row at a time. An all-day "Birthday" is not a reason to close a
+   *  Tuesday, and this app is not the judge of which entry is which. */
+  const [busyPicked, setBusyPicked] = useState<string[]>([]);
+  const [busyBusy, setBusyBusy] = useState(false);
+  /* ── The Google connection ──────────────────────────────────────────────
+   *
+   * `syncStatus` is 'error' when the link itself could not be read, and that
+   * is NOT the same as "not connected": offering a Connect button to a coach
+   * who is already connected would walk them through a consent screen for a
+   * grant they have, and the sheet says which of the two it is knowing.
+   */
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncLink, setSyncLink] = useState<CalendarLink>(NO_CALENDAR_LINK);
+  const [syncStatus, setSyncStatus] = useState<LoadStatus>('loading');
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
   const [avDow, setAvDow] = useState(1);
   const [avHour, setAvHour] = useState(9);
   const [avMinute, setAvMinute] = useState(0);
@@ -623,6 +726,17 @@ export default function TrainerSchedule() {
   const selDaySessions = (byDay.get(selKey) ?? []).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
   const [selY, selM, selD] = selKey.split('-').map(Number);
   const selDate = new Date(selY, selM, selD);
+  /**
+   * The selected day as a padded local `YYYY-MM-DD`.
+   *
+   * `selKey` is the GRID's key and is `${year}-${monthIndex}-${day}` with no
+   * padding — a different string that looks like this one. Passing it to
+   * anything that parses a date gives either nothing or a day in the wrong
+   * month, and both look like a broken screen rather than like a bug. It was
+   * written out by hand in four places; it is built once here so the fifth
+   * cannot come out differently.
+   */
+  const selDay = `${selY}-${String(selM + 1).padStart(2, '0')}-${String(selD).padStart(2, '0')}`;
 
   // Time the coach is NOT available. The database withdraws the open slots
   // inside the period as it writes the block, because an offer left standing
@@ -645,11 +759,7 @@ export default function TrainerSchedule() {
     // 86,400,000ms lands an hour out across a daylight-saving change: one day of
     // a fortnight's holiday silently missing and another blocked twice. See
     // src/lib/blockRange.ts, which is run under three time zones.
-    const dayList = blockDates({
-      from: `${selY}-${String(selM + 1).padStart(2, '0')}-${String(selD).padStart(2, '0')}`,
-      days: blkDays,
-      repeatWeeks: blkWeeks,
-    });
+    const dayList = blockDates({ from: selDay, days: blkDays, repeatWeeks: blkWeeks });
     if (dayList.length === 0) {
       Alert.alert('Nothing to block', 'That range does not cover any days. Pick a length between one day and two months.');
       return;
@@ -698,11 +808,337 @@ export default function TrainerSchedule() {
     );
   };
 
+  /* ── Blocking from the phone's own calendar ────────────────────────────
+   *
+   * The half of S6 that is not `doBlock`: instead of the coach remembering
+   * every absence and typing it in, the phone is asked when they are busy and
+   * they tick the ones that should stop clients booking.
+   *
+   * Four rules hold this together, and each of them is somewhere a well-meant
+   * shortcut would do real harm:
+   *
+   *   READ ONLY.  Nothing here writes to anybody's calendar — no event is
+   *   created, changed or deleted. The app takes a copy of when the coach is
+   *   busy and does its own blocking through `block_time`, which is the same
+   *   call the manual sheet above makes.
+   *
+   *   TIMES ONLY.  A coach's diary holds their medical appointments and other
+   *   people's names and addresses. `toBusySpan` in src/lib/deviceBusy.ts is
+   *   the only thing in this app that touches a calendar entry and it reads a
+   *   start and an end. Nothing on this screen has a title to draw because
+   *   nothing in the app ever held one.
+   *
+   *   NOTHING REACHES A CLIENT.  What comes out of all this is a block, which
+   *   is an ABSENCE on the coach's availability. It carries no reason and
+   *   nothing derived from the calendar, so there is nothing to leak.
+   *
+   *   THE COACH CHOOSES.  Never bulk-block what was found. `busyPicked` starts
+   *   empty and the button is disabled until something is in it.
+   */
+  /* ── and the same question asked of a calendar that is not on the phone ──
+   *
+   * S3 adds a second source and exactly one new way to be wrong, which is the
+   * way this whole feature exists to prevent: the phone answers, Google fails,
+   * the merged list is short, and a sheet built on `length === 0` tells a coach
+   * their fortnight is clear. `combineBusy` is what makes that unsayable — a
+   * source that did not answer is never counted as one that found nothing.
+   *
+   * The two reads run TOGETHER rather than one after the other. A Google round
+   * trip on a gym's wifi is seconds, and a coach watching a sheet is not going
+   * to wait through two of them in series.
+   *
+   * They are merged on SPANS and not on rows. A dentist appointment that is on
+   * the phone and on the synced account is one absence; merged after the fact
+   * it would be two rows, two `block_time` calls, and an 'already-blocked'
+   * refusal on the second that reads to a coach as a failure.
+   */
+  const loadBusy = async (days: number) => {
+    setBusyAsked(true);
+    setBusyRead({ status: 'loading', permission: 'unknown', candidates: [], spans: [] });
+    setRemoteRead({ status: 'loading', spans: [] });
+    setBusyCands([]);
+    setBusyPicked([]);
+    const win = busyWindow(selDay, days);
+    // Neither read ever throws — every failure comes back as a status the sheet
+    // puts into words. An empty list that cannot say WHY it is empty is the
+    // defect this feature would otherwise introduce, on a screen whose whole
+    // job is to stop a double booking.
+    const [device, remote] = await Promise.all([
+      readDeviceBusy(selDay, days),
+      syncLink.connected && win
+        ? readRemoteBusy(win.fromMs, win.toMs)
+        : Promise.resolve<RemoteBusyRead>({ status: 'ready', spans: [] }),
+    ]);
+    setBusyRead(device);
+    setRemoteRead(remote);
+    setBusyCands(busyCandidates([...device.spans, ...remote.spans], selDay, days));
+  };
+
+  /** The sources in play, and what each of them did. `active` is false for a
+   *  source that was never asked — no native calendar in this binary, or no
+   *  Google account linked — which is a different thing from one that failed
+   *  and must never be counted as one that answered. */
+  const busySources: BusySourceState[] = [
+    { kind: 'device', active: HAS_NATIVE_CALENDAR, status: busyRead.status, permission: busyRead.permission },
+    { kind: 'google', active: syncLink.connected, status: remoteRead.status },
+  ];
+  /** Whether there is anything to read at all. Not `HAS_NATIVE_CALENDAR`: a
+   *  coach on a build made before expo-calendar landed can still link a Google
+   *  account, because that half is JavaScript and reaches them over the air. */
+  const busyCanRead = HAS_NATIVE_CALENDAR || syncLink.connected;
+
+  const openBusySheet = () => {
+    setBusyAsked(false);
+    setBusyRead({ status: 'loading', permission: 'unknown', candidates: [], spans: [] });
+    setRemoteRead({ status: 'ready', spans: [] });
+    setBusyCands([]);
+    setBusyPicked([]);
+    setBusyOpen(true);
+  };
+
+  /* ── the link, and the direction that writes ────────────────────────────
+   *
+   * Everything below goes through src/ui/calendarSync.ts, which holds no token
+   * and never sees one: the code Google hands back is passed straight to the
+   * `calendar-sync` edge function, which does the exchange with the client
+   * secret and stores the refresh token in a table with no select policy
+   * (supabase/parts/360). Nothing token-shaped is ever on this handset.
+   */
+  const refreshLink = useCallback(async () => {
+    if (!CALENDAR_SYNC_CONFIGURED) { setSyncStatus('ready'); return; }
+    const res = await readCalendarLink();
+    setSyncStatus(res.status);
+    // Under 'error' the previous answer is kept rather than replaced with the
+    // disconnected default: "we could not ask" must not render as "you have
+    // not connected", which would offer a Connect button to somebody who is.
+    if (res.status !== 'error') setSyncLink(res.link);
+  }, []);
+
+  const doConnectCalendar = async () => {
+    setSyncBusy(true);
+    try {
+      await connectGoogleCalendar(false);
+      await refreshLink();
+    } catch (e) {
+      Alert.alert('Not connected', e instanceof Error ? e.message : 'Google could not be connected.');
+    }
+    setSyncBusy(false);
+  };
+
+  const doDisconnectCalendar = () => {
+    Alert.alert(
+      'Disconnect Google Calendar?',
+      'Repple stops reading when you are busy, and the calendar it made in your Google account is deleted along with every session it put there. Nothing you put in your own calendar is touched, and nothing in Repple changes.',
+      [
+        { text: 'Keep It' },
+        {
+          text: 'Disconnect', style: 'destructive', onPress: () => {
+            void (async () => {
+              setSyncBusy(true);
+              try {
+                await disconnectGoogleCalendar();
+                setSyncLink(NO_CALENDAR_LINK);
+                setRemoteRead({ status: 'ready', spans: [] });
+              } catch (e) {
+                Alert.alert('Still connected', e instanceof Error ? e.message : 'The connection could not be removed.');
+              }
+              setSyncBusy(false);
+              await refreshLink();
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  /**
+   * Turn writing on or off.
+   *
+   * Turning it ON runs a second Google consent, because the scope that lets
+   * Repple make a calendar is not the scope that lets it read free time and
+   * asking for both at sign-in would be requesting the power to write to
+   * somebody's diary in order to read it. The coach sees Google's own screen
+   * naming the new permission at the moment they ask for it.
+   */
+  const doSetWrite = async (enabled: boolean) => {
+    setSyncBusy(true);
+    try {
+      await setCalendarWrite(enabled, BRAND.label);
+      pushAgainSoon();
+      await refreshLink();
+    } catch (e) {
+      Alert.alert(enabled ? 'Not writing yet' : 'Still writing', e instanceof Error ? e.message : 'That could not be changed.');
+    }
+    setSyncBusy(false);
+  };
+
+  /** The sessions Repple would put in the coach's Google calendar: the booked
+   *  ones in the four weeks around today, and nothing else. An open slot is an
+   *  offer rather than a commitment, and a blocked period is Repple telling the
+   *  coach's calendar what the coach's calendar told Repple. */
+  const pushWindow = () => {
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const to = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    to.setDate(to.getDate() + PUSH_DAYS);
+    return { fromMs: from.getTime(), toMs: to.getTime() };
+  };
+  const plannedEvents = () => {
+    const w = pushWindow();
+    return plannedSyncEvents(sessions, w.fromMs, w.toMs);
+  };
+
+  /**
+   * Send the booked sessions.
+   *
+   * `isWhole(sessionsStatus)` is the guard that matters and it guards against
+   * DELETION. A push is a reconciliation: anything in Repple's calendar that is
+   * not in the list sent is removed, because that is how a cancellation reaches
+   * Google at all. Under 'error' the session list is empty for want of a read
+   * rather than for want of bookings, and under 'partial' it is a truncated
+   * fraction of the set (src/ui/loadStatus.ts) — so pushing either one would
+   * quietly clear a coach's whole week out of their Google calendar while every
+   * session was still in Repple, and the calendar would then be exactly as
+   * wrong as it can be: confidently empty.
+   *
+   * The same sentence the generate-slots path already refuses to say, on the
+   * other side of the wire.
+   */
+  const doPush = async (announce: boolean) => {
+    if (!isWhole(sessionsStatus)) {
+      if (announce) {
+        Alert.alert(
+          'Can’t send yet',
+          'Your Repple calendar could not be read in full, so Repple does not know what you have booked — and sending now would remove sessions from Google that are still here.\n\nNothing has been changed. Pull down to refresh and try again.',
+          [{ text: 'OK' }],
+        );
+      }
+      return;
+    }
+    const w = pushWindow();
+    const events = plannedSyncEvents(sessions, w.fromMs, w.toMs);
+    setPushBusy(true);
+    const out = await pushSessions(events, w.fromMs, w.toMs);
+    setPushBusy(false);
+    if (!announce) return;
+    if (!out.ok) Alert.alert('Not sent', out.reason);
+    else Alert.alert('Sent to Google', pushSummaryLine(out.result));
+  };
+
+  // The link is read on every visit to this tab, not once on mount. A coach who
+  // revoked Repple's access in their Google account this morning must not open
+  // this screen to a row that says Connected.
+  useFocusEffect(useCallback(() => { void refreshLink(); }, [refreshLink]));
+
+  /**
+   * The push nobody has to remember.
+   *
+   * A sync a coach has to press is a sync that goes stale, and a stale sync on
+   * this feature is the double booking the whole item exists to prevent. So
+   * when writing is on and the session list is WHOLE, the sessions go across on
+   * their own — at most once every fifteen minutes (`pushIsDue` holds that
+   * floor at module scope, so navigating away and back does not restart it).
+   *
+   * Silent on purpose: `announce` is false, so a coach who is doing something
+   * else is not interrupted by an alert about a background reconciliation. The
+   * button in the sheet is the same call with `announce` true, for when they
+   * want to watch it happen.
+   */
+  useEffect(() => {
+    if (!syncLink.connected || !syncLink.writeEnabled || !syncLink.hasWriteCalendar) return;
+    if (!isWhole(sessionsStatus)) return;
+    if (!pushIsDue()) return;
+    void doPush(false);
+    // `sessions` rather than a length: a session moved to another hour changes
+    // nothing about how many there are, and the whole point of writing is that
+    // the time in Google is the time in Repple.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, sessionsStatus, syncLink.connected, syncLink.writeEnabled, syncLink.hasWriteCalendar]);
+
+  const toggleBusyPick = (key: string) =>
+    setBusyPicked((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+
+  const doBlockFromCalendar = async () => {
+    const picked = busyCands.filter((c) => busyPicked.includes(c.key));
+    if (picked.length === 0) return;
+
+    setBusyBusy(true);
+    const results: BlockResult[] = [];
+    for (const c of picked) {
+      // Local, from the parts. `new Date('2026-09-08')` is UTC midnight and
+      // reads back as the 7th west of Greenwich — see src/lib/localDate.ts,
+      // which exists because this repo has shipped that bug twice.
+      const [dy, dm, dd] = c.day.split('-').map(Number);
+      const startsAt = new Date(dy, dm - 1, dd);
+      startsAt.setHours(Math.floor(c.startMin / 60), c.startMin % 60, 0, 0);
+      let outcome: BlockOutcome = 'failed';
+      let withdrawn = 0;
+      try {
+        const { data, error } = await supabase.rpc('block_time', {
+          p_starts_at: startsAt.toISOString(), p_duration_min: candidateMinutes(c),
+        });
+        const row = Array.isArray(data) ? data[0] : data;
+        // The same three answers `doBlock` reads, kept apart for the same
+        // reason: only 'failed' means the time may still be bookable.
+        if (error) outcome = 'failed';
+        else if (row?.ok) { outcome = 'blocked'; withdrawn = Number(row.withdrawn) || 0; }
+        else if (row?.reason === 'booked') outcome = 'booked';
+        else if (row?.reason === 'already-blocked') outcome = 'already-blocked';
+        else outcome = 'failed';
+      } catch { outcome = 'failed'; }
+      results.push({ day: c.day, outcome, withdrawn });
+    }
+    setBusyBusy(false);
+
+    // `foldByDay` first. A coach can pick two periods on one Tuesday, and
+    // `summariseBlocks` counts DAYS — unfolded, "2 days blocked" would be a
+    // sentence about a week with one day in it. The fold is deliberately
+    // pessimistic: a day where one period saved and one did not is reported as
+    // still bookable, which is true of the part that did not save.
+    const summary = summariseBlocks(foldByDay(results));
+    setBusyOpen(false);
+    await refresh();
+    Alert.alert(
+      summary.blocked === 0 ? 'Nothing blocked' : summary.needsAttention ? 'Partly blocked' : 'Time blocked',
+      blockSummaryLine(summary),
+      [{ text: 'Done' }],
+    );
+  };
+
   function shiftMonth(delta: number) {
     let m = viewMonth + delta, y = viewYear;
     if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
     setViewMonth(m); setViewYear(y);
   }
+
+  /* ── how far back this grid can honestly draw ─────────────────────────────
+   *
+   * The arrows go back without limit and the grid is drawn from ONE read: the
+   * provider's, newest-first and stopped at the row cap (src/lib/rowCap.ts). A
+   * coach with a long diary could therefore page back to March, see nothing
+   * under any date, and read it as a month they did not work — when the read
+   * stopped in June and March was never asked for. Under 'error' the grid is
+   * empty for a third reason again, and the banner at the top of this screen
+   * speaks about the counts rather than about the month being looked at.
+   *
+   * Only for a month that has already been: the boundary of a newest-first read
+   * is always behind the reader. And only when the read was actually short —
+   * `monthCoverageNote` returns null for a whole read, so a coach whose diary
+   * fits inside one read is told nothing.
+   */
+  const monthEdge = readBoundary(sessions, sessionsStatus === 'partial');
+  const viewingPastMonth = viewYear < now.getFullYear()
+    || (viewYear === now.getFullYear() && viewMonth < now.getMonth());
+  const monthNote = viewingPastMonth
+    ? monthCoverageNote(
+      monthCoverage(viewYear, viewMonth, monthEdge, sessionsStatus),
+      monthEdge,
+      (iso) => {
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
+      },
+    )
+    : null;
 
   async function handleAdd() {
     const d = new Date(selY, selM, selD); d.setHours(addHour, addMinute, 0, 0);
@@ -1104,6 +1540,11 @@ export default function TrainerSchedule() {
               <Text style={{ ...ty.caption, color: t.ink3 }}>Open</Text>
             </View>
           </View>
+
+          {/* A past month the read did not reach. Under the grid rather than
+              over it: some of the month may be drawn, and it is still worth
+              showing — but never without this. */}
+          {monthNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{monthNote}</Flag> : null}
         </Section>
 
         <Rule />
@@ -1134,6 +1575,34 @@ export default function TrainerSchedule() {
           <ListRow icon="clock" title="Block Out Time"
             note={`Mark ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)} as unavailable so nobody can book it`}
             onPress={() => setBlockOpen(true)} />
+          {/* The row is offered on every build, including the ones that cannot
+              do it. HAS_NATIVE_CALENDAR is false on every install made before
+              expo-calendar landed — the version was deliberately not moved, so
+              those installs receive this JavaScript and none of the native
+              half — and hiding the row there would leave a coach reading a
+              release note about a feature they cannot find. The note says what
+              is missing instead, and the sheet says it again in full. */}
+          <ListRow icon="calendar" title="Block Time From Your Calendar"
+            note={HAS_NATIVE_CALENDAR
+              ? 'Read when your phone says you are busy, times only, and pick what to block'
+              : 'Needs a newer build of the app. Blocking time by hand is unaffected'}
+            onPress={openBusySheet} />
+          {/* Offered on every build, and its note is the state rather than an
+              instruction. Three of the six states are NOT "the coach has not
+              connected": a build with no client id cannot offer this at all, a
+              link we could not read is unknown rather than absent, and a grant
+              with no refresh token is a connection that dies within the hour.
+              A row that said "Not connected" for any of them would send a
+              coach to sign in to something they are already signed in to. */}
+          <ListRow icon="calendar" title="Google Calendar"
+            note={!CALENDAR_SYNC_CONFIGURED
+              ? 'Not available in this version of Repple yet'
+              : syncStatus === 'error'
+                ? 'Your connection could not be read, so this is not "not connected"'
+                : syncStatus === 'loading'
+                  ? 'Checking your connection…'
+                  : LINK_NOTES[linkState({ configured: CALENDAR_SYNC_CONFIGURED, connecting: false, link: syncLink })]}
+            onPress={() => setSyncOpen(true)} />
           <ListRow icon="people" title="Group Classes" note="Schedule & fill classes across branches"
             onPress={() => router.push('/(trainer)/classes')} />
           {booked.length > 0 ? (
@@ -1480,14 +1949,13 @@ export default function TrainerSchedule() {
             </Text>
           </ScrollView>
           <View style={{ height: sp.md }} />
-          {/* `selKey` is the GRID's key and is `${year}-${monthIndex}-${day}`
-              with no padding — not a `YYYY-MM-DD`. Passing it here would make
-              `blockDates` return nothing and disable the button forever, which
-              is a bug that looks exactly like a broken screen. The padded form
-              is built once, next to the one `doBlock` builds. */}
+          {/* `selDay`, never `selKey`. `selKey` is the GRID's key and is
+              `${year}-${monthIndex}-${day}` with no padding — not a
+              `YYYY-MM-DD`. Passing it here would make `blockDates` return
+              nothing and disable the button forever, which is a bug that looks
+              exactly like a broken screen. */}
           <Cta wide disabled={blkBusy || blockPlanLabel({
-            from: `${selY}-${String(selM + 1).padStart(2, '0')}-${String(selD).padStart(2, '0')}`,
-            days: blkDays, repeatWeeks: blkWeeks,
+            from: selDay, days: blkDays, repeatWeeks: blkWeeks,
           }) === null}
             label={blkBusy
               ? 'Blocking…'
@@ -1496,14 +1964,247 @@ export default function TrainerSchedule() {
               // chips: a ten-day run repeated weekly overlaps itself and covers
               // seventeen days, not twenty, and a button promising twenty would
               // be wrong before it was pressed.
-              : (blockPlanLabel({
-                from: `${selY}-${String(selM + 1).padStart(2, '0')}-${String(selD).padStart(2, '0')}`,
-                days: blkDays, repeatWeeks: blkWeeks,
-              }) ?? 'Block This Day')
+              : (blockPlanLabel({ from: selDay, days: blkDays, repeatWeeks: blkWeeks }) ?? 'Block This Day')
                 + (blkAllDay ? '' : ` · ${hourLabel(blkFrom)} — ${hourLabel(blkTo)}`)}
             onPress={doBlock} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setBlockOpen(false)} />
+        </View>
+      </Modal>
+
+      {/* ── both calendars, one list ──────────────────────────────────────
+          Eight states now, and the two that both hold an empty list are still
+          the reason this sheet is built round `combineBusy` rather than round
+          `length === 0`. "Nothing in your diary" and "we were not allowed to
+          look" are opposite sentences, and saying the first to a coach iOS or
+          Google refused us is exactly the double booking this feature exists
+          to prevent.
+
+          S3 adds the way that gets subtle: the phone answers and finds nothing
+          while Google fails. Two sources, one short list, and a sheet that
+          counted rows would call the fortnight clear. `missing` is what keeps
+          a source that did not answer from being read as one that found
+          nothing — and it is shown whether the list is empty or not, because a
+          coach looking at three real periods will otherwise take them for the
+          whole week. */}
+      <Modal visible={busyOpen} animationType="slide" transparent onRequestClose={() => setBusyOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBusyOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Block Time From Your Calendar</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+            {`From ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}, for the next ${busyDays} days.`}
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {(() => {
+              const { view, missing } = combineBusy(busySources, busyAsked, busyCands.length);
+              if (view === 'unavailable') {
+                // No source at all: no native calendar in this binary and no
+                // Google account linked. The app's own sentence for the first
+                // half, not a second one written here — two sentences for one
+                // state is how they drift apart.
+                return (<>
+                  <Flag tone={t.warn}>{CALENDAR_UNAVAILABLE_NOTE}</Flag>
+                  {CALENDAR_SYNC_CONFIGURED ? (
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
+                      A Google calendar can be connected instead, and that needs no new build. Close this and open
+                      Google Calendar under Manage.
+                    </Text>
+                  ) : null}
+                </>);
+              }
+              const missNote = missingSourceNote(missing);
+              return (<>
+                {/* The promise, above the button that raises the system
+                    prompt — so a coach reads what will be taken off their
+                    calendar BEFORE deciding, rather than afterwards. The
+                    usage strings in app.json say the same thing to iOS. */}
+                <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{BUSY_PRIVACY_NOTE}</Text>
+                {/* And the same promise for the calendar that is not on the
+                    phone, said only when there is one. It names the limit as
+                    well as the guarantee: the permission Repple holds cannot
+                    read a title, and it cannot see a second calendar either. */}
+                {syncLink.connected ? (
+                  <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{REMOTE_SCOPE_NOTE}</Text>
+                ) : null}
+                {view === 'denied' || view === 'failed'
+                  ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{BUSY_NOTES[view]}</Flag>
+                  : <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{BUSY_NOTES[view]}</Text>}
+                {/* Shown under EVERY view, including 'list'. A short list with
+                    a calendar missing from it is the one that misleads. */}
+                {missNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{missNote}</Flag> : null}
+
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How far ahead</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                  {[7, 14, 30].map((d) => (
+                    <Chip key={'bz' + d} t={t} label={`${d} days`} on={busyDays === d}
+                      onPress={() => { setBusyDays(d); if (busyAsked) void loadBusy(d); }} />
+                  ))}
+                </ScrollView>
+
+                {busyCands.map((c, i) => {
+                  const on = busyPicked.includes(c.key);
+                  const opensDay = i === 0 || busyCands[i - 1].day !== c.day;
+                  return (
+                    <View key={c.key}>
+                      {opensDay ? (
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: i === 0 ? sp.sm : sp.md, marginBottom: sp.sm }}>
+                          {fmtDay(c.day)}
+                        </Text>
+                      ) : null}
+                      {!opensDay ? <Rule /> : null}
+                      {/* The row shows a time and a count of entries. There is
+                          nothing else to show: no title was ever read, from
+                          either calendar. It does not say WHICH calendar a
+                          period came from either — the two are merged before
+                          this point, so a period on both is one row and the
+                          question has no answer worth printing. */}
+                      <Pressable onPress={() => toggleBusyPick(c.key)}
+                        accessibilityRole="checkbox" accessibilityState={{ checked: on }}
+                        accessibilityLabel={`${fmtDay(c.day)}, ${candidateTimeLabel(c)}`}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                        <Icon name={on ? 'check' : 'plus'} size={16} color={on ? t.brand : t.ink3} />
+                        <Text style={{ ...ty.body, ...numeric, fontWeight: on ? '500' : '400', color: t.ink, flex: 1 }}>
+                          {candidateTimeLabel(c)}
+                        </Text>
+                        {c.entries > 1 ? (
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>{`${c.entries} entries`}</Text>
+                        ) : null}
+                      </Pressable>
+                    </View>
+                  );
+                })}
+
+                {view === 'list' ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.md, paddingBottom: sp.md }}>
+                    {/* This used to end "nothing is written back to your
+                        calendar", which was true of S6 and is not true of a
+                        coach who has turned writing on. A promise that goes
+                        stale the moment a switch is moved is worse than none,
+                        so the sentence now says what is actually happening on
+                        this account. */}
+                    {syncLink.writeEnabled && syncLink.hasWriteCalendar
+                      ? 'Each period is blocked on its own, so one with a session already booked in it is refused and the rest still go through. Your clients see only that you are unavailable, never the reason. Nothing here is written to your own calendar entries; Repple writes only into the separate calendar it made.'
+                      : 'Each period is blocked on its own, so one with a session already booked in it is refused and the rest still go through. Your clients see only that you are unavailable, never the reason, and nothing is written back to your calendar.'}
+                  </Text>
+                ) : null}
+              </>);
+            })()}
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          {/* Two buttons, never one that does both. Before anything is read the
+              only action is asking; after it, the only action is blocking what
+              the coach has actually ticked. The condition is "is there a source
+              at all", not "is there a native calendar" — a coach with no
+              expo-calendar in their binary and a linked Google account has a
+              calendar to read. */}
+          {busyCanRead && !busyAsked ? (
+            <Cta label="Read My Calendar" wide onPress={() => { void loadBusy(busyDays); }} />
+          ) : null}
+          {busyCanRead && busyAsked && busyRead.status !== 'loading' && remoteRead.status !== 'loading' && busyCands.length === 0 ? (
+            <Ghost label="Look Again" icon="swap" onPress={() => { void loadBusy(busyDays); }} />
+          ) : null}
+          {busyCands.length > 0 ? (
+            <Cta wide disabled={busyBusy || busyBlockLabel(busyPicked.length) === null}
+              label={busyBusy ? 'Blocking…' : (busyBlockLabel(busyPicked.length) ?? 'Block This Period')}
+              onPress={doBlockFromCalendar} />
+          ) : null}
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Done" onPress={() => setBusyOpen(false)} />
+        </View>
+      </Modal>
+
+      {/* ── Google Calendar ────────────────────────────────────────────────
+          Two decisions, asked separately, because they are not the same
+          decision. Reading when a coach is busy is a copy of a fact. Writing
+          into their diary is somebody else's calendar, and this is the first
+          thing this product has ever done to one.
+
+          Which is why the second one runs its OWN Google consent. The grant
+          that lets Repple make a calendar is not the grant that lets it read
+          free time, and bundling them at sign-in would be asking for the power
+          to write to somebody's diary in order to read it. The coach sees
+          Google's own screen naming the new permission at the moment they ask
+          for it, and not before. */}
+      <Modal visible={syncOpen} animationType="slide" transparent onRequestClose={() => setSyncOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSyncOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Google Calendar</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+            Keep your Repple availability and your own diary from disagreeing.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {(() => {
+              const state = linkState({ configured: CALENDAR_SYNC_CONFIGURED, connecting: syncBusy, link: syncLink });
+              const planned = syncLink.writeEnabled && syncLink.hasWriteCalendar ? plannedEvents().length : 0;
+              return (<>
+                {/* 'error' is its own sentence and comes first. Every state
+                    below it is a claim about the connection, and under 'error'
+                    we do not have one to make. */}
+                {syncStatus === 'error' ? (
+                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                    Your Google connection could not be read just now, so what follows may be out of date. This is not
+                    a statement that nothing is connected.
+                  </Flag>
+                ) : null}
+                {state === 'unconfigured' || state === 'needs-reconnect'
+                  ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{LINK_NOTES[state]}</Flag>
+                  : <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{LINK_NOTES[state]}</Text>}
+
+                <Rule />
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>What Repple reads</Text>
+                <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{REMOTE_SCOPE_NOTE}</Text>
+
+                <Rule />
+                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>What Repple writes</Text>
+                <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{WRITE_PRIVACY_NOTE}</Text>
+
+                {/* The toggle is only offered once there is a live connection
+                    to hang it on. A grant with no refresh token is not one:
+                    turning writing on would consent to a scope that stops
+                    working within the hour. */}
+                {state === 'connected' || state === 'two-way' ? (<>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                    <Chip t={t} label="Read only" on={!syncLink.writeEnabled}
+                      onPress={() => { if (syncLink.writeEnabled && !syncBusy) void doSetWrite(false); }} />
+                    <Chip t={t} label="Read and write" on={syncLink.writeEnabled}
+                      onPress={() => { if (!syncLink.writeEnabled && !syncBusy) void doSetWrite(true); }} />
+                  </ScrollView>
+                  {syncLink.writeEnabled && !syncLink.hasWriteCalendar ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                      Writing is turned on but the calendar Repple writes into has not been made yet, so nothing is
+                      being written. Choose read and write again to try.
+                    </Flag>
+                  ) : null}
+                  {state === 'two-way' ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                      {`Your booked sessions go across on their own while this screen is open, and there ${planned === 1 ? 'is 1 session' : `are ${planned} sessions`} in the next ${PUSH_DAYS} days to send. Open slots and blocked time are never written.`}
+                    </Text>
+                  ) : null}
+                </>) : null}
+              </>);
+            })()}
+          </ScrollView>
+          <View style={{ height: sp.md }} />
+          {/* One primary action at a time, and it names what it will do. */}
+          {CALENDAR_SYNC_CONFIGURED && !syncLink.connected ? (
+            <Cta wide disabled={syncBusy} label={syncBusy ? 'Connecting…' : 'Connect Google Calendar'}
+              onPress={() => { void doConnectCalendar(); }} />
+          ) : null}
+          {CALENDAR_SYNC_CONFIGURED && syncLink.connected && !syncLink.hasRefresh ? (
+            <Cta wide disabled={syncBusy} label={syncBusy ? 'Connecting…' : 'Connect Again'}
+              onPress={() => { void doConnectCalendar(); }} />
+          ) : null}
+          {syncLink.connected && syncLink.writeEnabled && syncLink.hasWriteCalendar ? (
+            <Cta wide disabled={pushBusy || pushLabel(plannedEvents().length) === null}
+              label={pushBusy ? 'Sending…' : (pushLabel(plannedEvents().length) ?? 'Send Sessions')}
+              onPress={() => { void doPush(true); }} />
+          ) : null}
+          {syncLink.connected ? (<>
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Disconnect Google" icon="lock" onPress={doDisconnectCalendar} />
+          </>) : null}
+          <View style={{ height: sp.sm }} />
+          <Ghost label="Done" onPress={() => setSyncOpen(false)} />
         </View>
       </Modal>
 

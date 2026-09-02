@@ -116,6 +116,8 @@ import {
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useCoachSetup } from '../../src/ui/coachSetup';
 import { coachSetupRows, coachSetupLeft, coachSetupNext, showCoachSetup } from '../../src/lib/coachFirstRun';
+import { useDeliveryFact } from '../../src/ui/coachDelivery';
+import { deliveryNote, showsInPerson, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
 import { EndReasonSheet, UnexplainedDepartures } from '../../src/ui/EndReasonSheet';
 import type { EndReason } from '../../src/lib/endCoaching';
 import { promptUnmarkedBacklog } from '../../src/ui/coachReminders';
@@ -242,10 +244,29 @@ function Bar({ t, pct, good }: { t: Theme; pct: number; good: boolean }) {
   );
 }
 
+/**
+ * The tools that are about being in a room with somebody.
+ *
+ * Split out of SHORTCUTS rather than removed from it: for a coach who has said
+ * they work online and has nobody on the book training in person, these move
+ * BELOW the rest under a line saying why. They are never deleted, never
+ * unsearchable — src/lib/features.ts still lists every one of them and Explore
+ * still finds them by name — and they come back on their own the moment an
+ * in-person client appears. See src/lib/coachDelivery.ts.
+ *
+ * Only Schedule qualifies today. It is written as a list anyway because the
+ * question "is this an in-person tool?" is the thing worth being able to answer
+ * once, and the next chip added here is a one-line decision rather than a
+ * rewrite of the branch below.
+ */
+const IN_PERSON_SHORTCUTS: [IconName, string, string][] = [
+  ['calendar', 'Schedule', '/(trainer)/calendar'],
+];
+
 const SHORTCUTS: [IconName, string, string][] = [
   ['bell', 'Broadcast', '/(trainer)/broadcast'],
   ['train', 'Programs', '/(trainer)/builder'],
-  ['calendar', 'Schedule', '/(trainer)/calendar'],
+  ...IN_PERSON_SHORTCUTS,
   ['video', 'Videos', '/(trainer)/videos'],
   ['chart', 'Analytics', '/(trainer)/analytics'],
   ['trophy', 'Leaderboard', '/(trainer)/leaderboard'],
@@ -328,6 +349,11 @@ export default function TrainerClients() {
   // refused read reached this screen as an empty list and was announced as
   // "No clients yet" — to a coach who has clients.
   const { roster, status: rosterStatus, addClient, removeClient, setClientMode } = useRoster();
+  // How this coach works: their own declared answer, widened by their roster.
+  // Only ever narrows the screen when the coach said "online" AND the roster
+  // came back WHOLE AND nobody on it trains in the room. Anything short of all
+  // three shows everything. See src/lib/coachDelivery.ts.
+  const delivery = useDeliveryFact();
   // Who is being removed, while the "why did they leave" sheet is open. Its own
   // flag rather than a field on `sel`: the client sheet is closed before this
   // one opens, because iOS will not stack two modals from the same parent and
@@ -1506,12 +1532,34 @@ export default function TrainerClients() {
               lays out on one unbounded axis, so this could not be fixed in
               place. `tone` keeps the coach's icons in brand, as they were.
               `key` is the route, so two chips sharing a word cannot collide. */}
+          {/* For a coach who works in the room, or one we do not know about,
+              this is the list it has always been. For a coach who has said they
+              work online and has nobody on the book training in person, the
+              in-person tools drop below the rest with the reason on them —
+              DE-EMPHASISED, never removed. `showsInPerson` resolves every
+              unknown to "show everything", so a roster that failed to load or a
+              question nobody answered hides nothing at all. */}
           <ChipGrid
             tone={t.brand}
-            items={SHORTCUTS.map(([ic, label, route]) => ({
-              icon: ic, label, key: route, onPress: () => router.push(route as any),
-            }))}
+            items={(showsInPerson(delivery) ? SHORTCUTS : SHORTCUTS.filter((sc) => !IN_PERSON_SHORTCUTS.includes(sc)))
+              .map(([ic, label, route]) => ({
+                icon: ic, label, key: route, onPress: () => router.push(route as any),
+              }))}
           />
+          {!showsInPerson(delivery) ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>In-person tools</Text>
+              <ChipGrid
+                tone={t.ink3}
+                items={IN_PERSON_SHORTCUTS.map(([ic, label, route]) => ({
+                  icon: ic, label, key: route, onPress: () => router.push(route as any),
+                }))}
+              />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {deliveryNote(delivery)} {HIDDEN_NOT_GONE}
+              </Text>
+            </View>
+          ) : null}
         </Section>
 
         {/* ── pending invites ────────────────────────────────────────────── */}
@@ -3129,8 +3177,14 @@ function CoachSetupRow() {
   const t = useTheme();
   const router = useRouter();
   const { facts, status } = useCoachSetup();
+  // The same fact app/(trainer)/getting-started.tsx uses, for the same reason
+  // and from the same place. This card names the NEXT outstanding step, and
+  // the two screens disagreeing about what is outstanding — this one sending a
+  // coach to publish hours that the list itself says do not apply to them — is
+  // the drift a second source always produces. One fact, both consumers.
+  const delivery = useDeliveryFact();
   if (status === 'loading') return null;
-  const rows = coachSetupRows(facts);
+  const rows = coachSetupRows(facts, delivery.shape);
   if (!showCoachSetup(rows)) return null;
   const left = coachSetupLeft(rows);
   const next = coachSetupNext(rows);

@@ -231,6 +231,25 @@ export interface SubscriptionPayment {
    *  which case the payment is real but belongs to no month we can name. */
   paid_at: string | null;
   created_at: string;
+  /** Minor units already given back on this renewal (part 192). ZERO, never
+   *  null, on one nobody has refunded — the column has a default and only
+   *  supabase/functions/connect-refund writes it, from Stripe's own answer.
+   *  Read as the CEILING on the next refund, so a second partial one is
+   *  bounded by what remains rather than by what was charged. */
+  refunded_cents?: number | null;
+  /** When the LAST refund on this renewal was made. Stripe holds the full
+   *  list; this app deliberately keeps no copy of it. */
+  refunded_at?: string | null;
+  /** The connected account this renewal was charged ON, or null for the
+   *  platform (part 310). A fact about THIS invoice rather than about the
+   *  coach's current setting: a coach who has since moved to direct charges
+   *  still has older renewals on the platform, and a refund issued in the
+   *  wrong context is answered with "No such charge". */
+  stripe_account_id?: string | null;
+  /** Who paid it, resolved from `profiles` by the coach-side read below.
+   *  Null when the name could not be read, which renders as a dash — the
+   *  renewal is still real and still refundable. */
+  client_name?: string | null;
 }
 
 /**
@@ -253,6 +272,13 @@ export interface SubscriptionPayment {
  * No policy was added for this: `client_sub_pay_read` in part 132 grants SELECT
  * where `trainer_id = auth.uid()` (and to the client who paid, and to the owner
  * of that coach's gym, through the tenant). Verified live.
+ *
+ * `select('*')` carries part 192's `refunded_cents` / `refunded_at` and part
+ * 310's `stripe_account_id` with it, which is what lets the Renewals Paid list
+ * on app/(trainer)/payments.tsx say how much of each renewal still stands and
+ * whose balance giving it back would leave. The client's NAME is a second read
+ * below, because these rows carry an id and a coach refunding "last month"
+ * cannot pick between three invoice ids.
  */
 export async function fetchMySubscriptionPayments(): Promise<{ rows: SubscriptionPayment[]; status: LoadStatus }> {
   try {
@@ -262,7 +288,26 @@ export async function fetchMySubscriptionPayments(): Promise<{ rows: Subscriptio
       .eq('trainer_id', uid).order('paid_at', { ascending: false }).limit(capLimit());
     if (error) { reportError('subscriptions.fetchMySubscriptionPayments', error); return { rows: [], status: 'error' }; }
     const page = capped((data as SubscriptionPayment[]) ?? []);
-    return { rows: page.rows, status: page.truncated ? 'partial' : 'ready' };
+
+    // Who paid it. Needed because a coach refunding "last month" has to be
+    // able to tell one renewal from another, and an invoice id is not a
+    // person. The same second read `fetchClientPurchases` makes, for the same
+    // reason and with the same failure: a name that will not read stays null
+    // and renders as a dash, which is a renewal whose client we could not
+    // name rather than a renewal that did not happen.
+    const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
+    const names = new Map<string, string>();
+    if (clientIds.length) {
+      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
+      // no-error-ok: a name we cannot read stays null and renders as a dash; the renewal it labels was still paid and can still be refunded
+      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
+      (profs ?? []).forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
+    }
+    const rows: SubscriptionPayment[] = page.rows.map((r) => ({
+      ...r,
+      client_name: (r.client_id && names.get(r.client_id)) || null,
+    }));
+    return { rows, status: page.truncated ? 'partial' : 'ready' };
   } catch (e) { reportError('subscriptions.fetchMySubscriptionPayments', e); return { rows: [], status: 'error' }; }
 }
 
@@ -322,6 +367,12 @@ export async function subscribeToPackage(packageId: string, code?: string): Prom
  * and refunding are separate acts and stay separate everywhere: cancelling
  * stops the next charge and returns nothing, refunding returns money and stops
  * nothing.
+ *
+ * That shape now has a screen on BOTH sides of it. A renewal is refunded from
+ * the Renewals Paid list on app/(trainer)/payments.tsx, which is a different
+ * section from the Subscribers list this function's buttons live in — far
+ * enough apart that stopping and refunding are never adjacent taps, which is
+ * the whole reason they were kept separate in the first place.
  *
  * The result is Stripe's answer, not ours. `ok: false` means it is still
  * running, which is exactly the case where a screen must not say "cancelled".

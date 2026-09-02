@@ -35,6 +35,7 @@ const sess = (over: Partial<PtSession> = {}): PtSession => ({
   startsAt: daysAgo(3), durationMin: 60,
   status: 'booked', outcome: null, outcomeAt: null,
   rateCents: null, settlementId: null,
+  packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null,
   ...over,
 });
 

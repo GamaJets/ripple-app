@@ -39,7 +39,7 @@
 //    the counts of unlabelled and unpriced rows ADD rather than being taken
 //    from whichever side had more, and neither subtotal is modified — the
 //    screen renders both of them beside the total.
-import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, type TakenRow, type PackRow } from './coachMoney';
+import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, feeMismatches, type TakenRow, type PackRow } from './coachMoney';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -267,6 +267,36 @@ ok(packRunOut(P({ sessions_used: 10 })), 'a paid pack with nothing left is the r
 ok(!packRunOut(P({})), 'a pack with credits left is not run out');
 ok(!packRunOut(P({ sessions_total: null })), 'a membership never runs out of credits it never had');
 ok(!packRunOut(P({ sessions_used: 10, status: 'refunded' })), 'an unpaid pack is not a client to chase');
+
+/* ── a fee taken from the wrong figure ──────────────────────────────────── */
+//
+// `client_purchases.fee_variance_cents` (part 311) is the only figure in this
+// app derived from a prediction rather than read back from Stripe. NULL, 0 and
+// a value are three different facts and collapsing any two of them either hides
+// the defect or reports it on every sale in the app.
+
+eq(feeMismatches([]).count, 0, 'no sales, nothing to reconcile');
+eq(feeMismatches([{ fee_variance_cents: null }, {}]).count, 0, 'a sale with no prediction on it is not a mismatch');
+eq(feeMismatches([{ fee_variance_cents: 0 }]).count, 0, 'and a prediction that was RIGHT is not one either');
+eq(feeMismatches([{ fee_variance_cents: 1 }]).count, 1, 'one minor unit out is out');
+eq(feeMismatches([{ fee_variance_cents: -1 }]).count, 1, 'and so is one minor unit the other way');
+
+// The column is a BIGINT, so PostgREST hands it back as a STRING. Read as one,
+// `"0" !== 0` and every correctly predicted sale in the app would carry a
+// warning about the coach's money.
+eq(feeMismatches([{ fee_variance_cents: '0' }]).count, 0, 'a bigint nought arriving as a string is still nought');
+eq(feeMismatches([{ fee_variance_cents: '-25' }]).count, 1, 'and a real one is still a real one');
+
+// A value that will not parse is a column we could not read, not a discrepancy
+// we invented from one.
+eq(feeMismatches([{ fee_variance_cents: 'x' }]).count, 0, 'an unreadable variance is not a mismatch');
+
+// The worst single gap, ignoring sign — a scale rather than a total, because
+// variances in different currencies are not summable any more than takings are.
+eq(feeMismatches([{ fee_variance_cents: 5 }, { fee_variance_cents: -40 }, { fee_variance_cents: 3 }]).worstCents, 40,
+  'the worst gap is the largest by size, whichever way it went');
+eq(feeMismatches([{ fee_variance_cents: 0 }]).worstCents, 0, 'and there is no worst gap where there are no gaps');
+
 
 if (errors.length) { console.error(`coachMoney: ${errors.length} failure(s)\n` + errors.map((e) => '  - ' + e).join('\n')); process.exit(1); }
 console.log('coachMoney ok — currencies stay apart, the two halves of a coach’s takings add without merging currencies, unlabelled amounts stay counted, memberships have no balance');

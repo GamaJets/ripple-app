@@ -61,6 +61,30 @@
 // So: `shareSessionNatively` hands over a clip and a caption, and
 // `sharePngAsset` hands over a composed graphic (`src/lib/shareAsset.ts` builds
 // what goes on it, `app/(trainer)/share-kit.tsx` draws it).
+//
+// ── One of those networks has since been built, and this still stands ───────
+//
+// `src/lib/instagramPublish.ts` and supabase/functions/instagram-publish do the
+// Instagram half of the paragraph above for real: an OAuth connection to a
+// Business account, a public object Meta fetches, and a report that
+// distinguishes a container that was created from a post that was published.
+// It is one network, it is honest about being unavailable when the credential
+// is missing or unapproved, and it took a bucket and an App Review submission
+// rather than an evening — the estimate above was right.
+//
+// NOTHING HERE WAS REPLACED BY IT, and two things in particular:
+//
+//   · there is still no platform picker, no connection dot beside a network
+//     nobody is connected to, and no promise about a network with no code
+//     behind it. The Instagram lane is a button that either posts or says why
+//     it cannot, and every other destination is the share sheet;
+//   · a card carrying a client's PHOTOGRAPH goes through this file and only
+//     through this file. Instagram fetches its image from a public URL, and a
+//     client's per-photo publish permission is permission for a post their
+//     coach makes rather than for a picture of their body sitting at an open
+//     address. `checkPublishable` refuses those cards by name, so the path they
+//     take is `sharePngAsset` below — the coach's own phone, the coach's own
+//     tap, and no public copy of anything.
 import { Share } from 'react-native';
 
 // Both are real dependencies and both are in ios/Podfile.lock — see the

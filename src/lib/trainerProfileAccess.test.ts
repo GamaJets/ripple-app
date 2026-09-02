@@ -33,6 +33,8 @@ const LOADED: TrainerProfileFields = {
   specialties: ['Mobility'],
   sessionFee: 75,
   listed: true,
+  publicHandle: 'jas-fitness',
+  publicPage: true,
 };
 
 const read = (o: Partial<Parameters<typeof resolveTrainerAccess>[0]> = {}) =>
@@ -110,6 +112,17 @@ ok(BLOCKED.every((a) => guardTrainerProfile(a, LOADED).sessionFee === null),
 ok(BLOCKED.every((a) => guardTrainerProfile(a, LOADED).sessionFee !== 0),
    'and it is never 0, which is a rate somebody could actually charge');
 ok(NO_TRAINER_PROFILE.sessionFee === null, 'the blank profile carries no fee at all');
+
+// The public page is withheld with everything else, and the reason is its own.
+// A screen on the wrong app that believed the reader had a page on the open web
+// would offer to take down somebody else's, and would print an address that
+// belongs to a coach the reader has never met.
+ok(BLOCKED.every((a) => guardTrainerProfile(a, LOADED).publicPage === false),
+  'a build that cannot read this profile is never told the reader has a public page');
+ok(BLOCKED.every((a) => guardTrainerProfile(a, LOADED).publicHandle === null),
+  'and never handed the address of one');
+ok(NO_TRAINER_PROFILE.publicPage === false && NO_TRAINER_PROFILE.publicHandle === null,
+  'the blank profile publishes nothing and has nowhere to publish it');
 
 // 0 has to survive as a real answer, or the null is pointless: a coach who
 // genuinely charges nothing must not be reported as having no rate set.

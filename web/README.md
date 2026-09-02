@@ -16,8 +16,21 @@ Review checks that both resolve. Until this is live, all three apps are blocked.
     signup.html           create an account from the web
     forgot-password.html  request a reset link
     reset-password.html   where the reset link lands; sets the new password
+    coach.html            one coach's own public page, at /coach?h=<handle>
     styles.css            shared styles, light and dark
     favicon.png
+
+`coach.html` is the only page here that has no content of its own. It reads
+`?h=` and asks the database for that coach through `public_coach_page`, which is
+one of the two things the publishable key may execute. It is static-and-fetching
+rather than server-rendered because this directory has no build step and the
+host serves no worker; the file's own header carries the whole argument,
+including the price — with scripting off there is no page at all.
+
+Every sentence on it is held against `src/lib/publicProfile.ts` by
+`src/lib/publicProfile.test.ts`, which also reads
+`supabase/parts/340-a-page-a-coach-can-put-in-their-bio.sql` and fails if a
+reviewer's name, a review body or an expired credential could reach it.
 
 Links between pages are written without the `.html` — `href="/support"`, not
 `href="support.html"`. Cloudflare Pages serves the extensionless form and

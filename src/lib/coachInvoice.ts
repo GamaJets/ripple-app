@@ -61,6 +61,10 @@ import type { LoadStatus } from '../ui/loadStatus';
 // does not print as ¥500. An invoice is the last place in this app that may
 // have a second opinion about how much money something is.
 import { minorMoney, sumTaken, ZERO_DECIMAL, type Taken, type TakenRow } from './coachMoney';
+// The coach's own mark. `logoImgHtml` returns the empty string for anything it
+// cannot validate, which is what makes "no logo" and "an unreadable logo"
+// produce the same document rather than a broken image on somebody's invoice.
+import { LOGO_CSS, logoImgHtml } from './coachLogo';
 
 /* ── what the caller hands over ───────────────────────────────────────────── */
 
@@ -146,6 +150,21 @@ export interface InvoiceIssuer {
   /** The white-label brand this copy of the app runs under. A customer's typed
    *  string — hence every value on this page goes through escapeHtml. */
   brand: string | null;
+  /**
+   * The coach's own logo as a data URI, or null.
+   *
+   * Theirs, on their own document, so there is no gate on it beyond being able
+   * to read it. Optional on the type so every existing construction of an
+   * issuer keeps compiling and keeps meaning what it meant.
+   *
+   * NOT put through `escapeHtml`: escaping base64 would break the picture. It
+   * goes through `safeLogoDataUri` in src/lib/coachLogo.ts instead, which
+   * admits nothing but base64 after one of two literal prefixes — so there is
+   * no value of this field that can end the attribute it is written into. Null,
+   * unreadable and invalid all produce the same document: the one this module
+   * produced before logos existed.
+   */
+  logoDataUri?: string | null;
 }
 
 export interface CoachInvoiceInput {
@@ -733,6 +752,11 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
   const T: string[] = [];
 
   /* ── heading ───────────────────────────────────────────────────────────── */
+  // The coach's mark goes ABOVE the heading block rather than inside it: `.h`
+  // is a dark panel, and a logo drawn with dark ink on a transparent ground —
+  // which is what most of them are — would disappear into it. On the page's own
+  // white it looks like the letterhead it is.
+  H.push(logoImgHtml(input.issuer.logoDataUri));
   H.push(`<div class="h"><h1>Invoice ${escapeHtml(no)}</h1><p>Issued ${escapeHtml(invoiceDayLabel(inv.issuedOn))}${brand ? ' · ' + escapeHtml(brand) : ''}</p></div>`);
   T.push(`INVOICE ${no}`);
   T.push(`Issued ${invoiceDayLabel(inv.issuedOn)}${brand ? ' · ' + brand : ''}`);
@@ -826,7 +850,7 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
   H.push(`<p class="foot">${escapeHtml(foot)}</p>`);
   T.push('', foot);
 
-  const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${STYLE}</style></head><body>${H.join('')}</body></html>`;
+  const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${STYLE}${LOGO_CSS}</style></head><body>${H.join('')}</body></html>`;
   return { html, text: T.join('\n'), complete, caveats };
 }
 

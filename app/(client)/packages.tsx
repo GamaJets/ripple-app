@@ -28,7 +28,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Meter, Ghost, Cta, Flag, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Meter, Ghost, Cta, Flag, ListRow, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/theme/scale';
 import { normaliseCode, checkoutCodeBlocker, type PromoTarget } from '../../src/lib/packagePromo';
 import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, openPurchasePortal, portalPurchase, type Purchase, type TrainerPackage } from '../../src/lib/connect';
@@ -203,7 +203,7 @@ export default function ClientPackages() {
 
   /** The package, in the shape the code rule reads. */
   const promoTargetOf = (p: TrainerPackage): PromoTarget =>
-    ({ id: p.id, name: p.name, billingInterval: p.billing_interval, active: p.active });
+    ({ id: p.id, name: p.name, billingInterval: p.billing_interval, active: p.active, priceCents: p.price_cents });
 
   /**
    * The code as it stands for one package, or the reason it cannot be sent.
@@ -222,11 +222,14 @@ export default function ClientPackages() {
     if (problem) { Alert.alert('That code cannot be used here', problem); return; }
     const typed = codeFor === p.id ? normaliseCode(code) : '';
     setBusy(p.id);
-    // A code only ever goes with a subscription. A one-off refuses one —
-    // Repple's cut there is an absolute fee that Stripe wants in the same call
-    // that works the discount out — so `buyPackage` takes none and the server
-    // refuses one on that branch whoever sends it.
-    const r = p.billing_interval ? await subscribeToPackage(p.id, typed) : await buyPackage(p.id);
+    // Both kinds take one now. On a subscription Repple's cut is a percentage
+    // and scales with the discount by itself; on a one-off it is an absolute
+    // figure Stripe wants in the same call it works the discount out in, so the
+    // server honours a code there only where the discounted total is knowable
+    // exactly first — and refuses every other shape before anything is charged.
+    // `oneOffDiscount` in src/lib/packagePromo.ts is that rule, and it can only
+    // run where the coupon is, which is the server.
+    const r = p.billing_interval ? await subscribeToPackage(p.id, typed) : await buyPackage(p.id, typed);
     setBusy(null);
     if (!r.ok) { Alert.alert('Could not start checkout', r.error || 'Try again in a moment.'); return; }
     // Cleared only once the payment page has actually opened, so a client whose
@@ -323,6 +326,15 @@ export default function ClientPackages() {
                 pack — buy another below, or arrange it with them directly.
               </Flag>
             ) : null}
+
+            {/* The balance answers "how many", and the next two questions a
+                person asks are "which ones used the rest" and "which of the
+                ones in my diary are going to use these". Both live on the
+                ledger, which reads a gym-sold PT pass and a coach-sold pack
+                the same way. */}
+            <ListRow icon="calendar" title="Session Credits"
+              note="Which sessions used a credit, and what your bookings are due to draw"
+              onPress={() => router.push('/(client)/session-credits')} />
 
             <Rule />
 
@@ -542,41 +554,43 @@ export default function ClientPackages() {
                       ? `Charged every ${p.billing_interval === 'month' ? 'month' : 'year'} until you cancel. Cancel any time.`
                       : p.sessions ? `${p.sessions} sessions · paid once` : 'Paid once'}
                   </Text>
-                  {/* ── a discount code, on the things one works on ────────
-                      Only on a subscription. A code cannot be attached to a
-                      one-off package at all (src/lib/packagePromo.ts has the
-                      reason), so a box here would be a box that can only ever
-                      say no — and the client would read the refusal as their
-                      coach having given them a code that does not work.
+                  {/* ── a discount code ───────────────────────────────────
+                      On both kinds now. It used to be offered on subscriptions
+                      only, because a one-off could not take a code at all: the
+                      platform's cut there is an absolute figure Stripe wants in
+                      the same call it works the discount out in. It can take
+                      one where the discounted total is knowable exactly
+                      beforehand — see `oneOffDiscount` in
+                      src/lib/packagePromo.ts — and where it is not, the server
+                      refuses before anything is charged and says the price
+                      shown is the price.
 
                       Behind a disclosure because most clients have none, and an
                       empty code box under every price reads as a price that is
                       negotiable. */}
-                  {p.billing_interval ? (
-                    codeFor === p.id ? (
-                      <View style={{ marginTop: sp.md }}>
-                        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Discount code</Text>
-                        {/* Normalised as it is typed, so what the client sees is
-                            what is actually sent — Stripe upper-cases these and
-                            drops everything that is not a letter or a digit, and
-                            a box that quietly disagreed with the code on the
-                            poster is a support message for the coach. */}
-                        <TextInput value={code} onChangeText={(v) => setCode(normaliseCode(v))}
-                          autoCapitalize="characters" autoCorrect={false}
-                          placeholder="The code your coach gave you" placeholderTextColor={t.ink3}
-                          accessibilityLabel="Discount code"
-                          style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
-                        {codeProblem(p) ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{codeProblem(p)}</Flag> : null}
-                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                          The discount is applied on the payment page, and what you see there is what you pay.
-                        </Text>
-                      </View>
-                    ) : (
-                      <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
-                        <Ghost label="Have A Code" onPress={() => { setCodeFor(p.id); setCode(''); }} />
-                      </View>
-                    )
-                  ) : null}
+                  {codeFor === p.id ? (
+                    <View style={{ marginTop: sp.md }}>
+                      <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Discount code</Text>
+                      {/* Normalised as it is typed, so what the client sees is
+                          what is actually sent — Stripe upper-cases these and
+                          drops everything that is not a letter or a digit, and
+                          a box that quietly disagreed with the code on the
+                          poster is a support message for the coach. */}
+                      <TextInput value={code} onChangeText={(v) => setCode(normaliseCode(v))}
+                        autoCapitalize="characters" autoCorrect={false}
+                        placeholder="The code your coach gave you" placeholderTextColor={t.ink3}
+                        accessibilityLabel="Discount code"
+                        style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+                      {codeProblem(p) ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{codeProblem(p)}</Flag> : null}
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                        The discount is applied on the payment page, and what you see there is what you pay.
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
+                      <Ghost label="Have A Code" onPress={() => { setCodeFor(p.id); setCode(''); }} />
+                    </View>
+                  )}
                   <View style={{ marginTop: sp.md }}>
                     <Cta label={busy === p.id ? 'Opening…' : p.billing_interval ? 'Subscribe' : 'Buy'} wide disabled={busy === p.id || !!codeProblem(p)} onPress={() => start(p)} />
                   </View>

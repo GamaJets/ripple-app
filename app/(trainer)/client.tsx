@@ -81,7 +81,7 @@ import { useTheme } from '../../src/ui/components';
 import { useGlucose } from '../../src/ui/glucoseData';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Flag, fig } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useSettings } from '../../src/ui/settings';
@@ -101,7 +101,17 @@ import {
   assessDrift, fetchClientActivity, DEFAULT_WINDOWS, DRIFT_LABEL,
   type Drift,
 } from '../../src/lib/clientDrift';
+import { appLocale } from '../../src/lib/locale';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
+// The credit rule, shared with the client's own ledger and with the booking
+// screen, so a coach and their client can never be shown different answers
+// about which pack paid for the same hour. See supabase/parts/370.
+import {
+  coachPackLines, gymPtLines, chooseRoute, creditsLeft, payingLines,
+  buildLedger, coachLedgerLine, shortfallLine,
+  type CreditRoute, type CreditSession, type Entitlement, type Ledger,
+} from '../../src/lib/sessionCredits';
+import { packBalance, type PackPurchase } from '../../src/lib/packDraw';
 import { readGoals, goalBoard, type GoalRow } from '../../src/lib/clientGoals';
 import { type GoalTarget } from '../../src/lib/goalTargets';
 import { fetchClientPlannedDays } from '../../src/lib/plannedDays';
@@ -167,6 +177,19 @@ const CONTACT_COLS = 'id, member_id, at, channel, by_id, by_name, outcome, note'
 // both policies on `member_interventions` are scoped `tenant_id = my_tenant()`.
 const CLIENT_TENANT_COLS = 'id, tenant_id';
 const ITEM_COLS = 'id, label, icon, active, created_at, updated_at';
+// What this client has paid for, and what each delivered hour actually came
+// off. Three literals for the same reason as the four above: check-schema.mjs
+// resolves a named select list only against constants declared in the file
+// that names it.
+//
+// `purch_read` (part 21) lets a coach read the purchases where they are the
+// trainer, and `gym_passes_staff_r` / `gym_pass_types_staff_r` (parts 31 and
+// 370) let a gym's trainer read a member's passes and what those passes cover.
+// So both halves of "who is paying for this hour" are readable from here
+// without a new policy and without an RPC.
+const CLIENT_PACK_COLS = 'id, package_id, sessions_total, sessions_used, status, created_at';
+const CLIENT_PASS_COLS = 'id, pass_type_id, expires_on, uses_total, uses_spent, gym_pass_types(name, covers)';
+const CLIENT_CREDIT_COLS = 'id, starts_at, status, outcome, series_id, pack_drawn_at, pack_drawn_kind, pack_drawn_purchase_id, pack_drawn_pass_id, pack_draw_shortfall_at, booking_drew_credit_at';
 
 /**
  * A selectable pill — the same one the Schedule and the roster sheet use, and
@@ -494,6 +517,110 @@ export default function ClientScreen() {
     })();
     return () => { live = false; };
   }, [canRead, id, uid, uidStatus]);
+
+  /* ── what pays for their sessions ───────────────────────────────────────── */
+
+  /**
+   * Three reads and one rule, and the rule is not this screen's to invent.
+   *
+   * `chooseRoute` is the same function the database's own trigger mirrors
+   * (supabase/parts/370): a pack the client bought FROM THIS COACH wins,
+   * because it names both people who were in the room; a gym-sold PT pass pays
+   * only when there is no coach pack at all. An EXHAUSTED coach pack still
+   * wins — falling through onto the gym's pass would spend a second business's
+   * money to hide the fact that this coach's pack has run out, which is the one
+   * conversation this section exists to start.
+   *
+   * Every read is three-state. `undefined` is still in flight, `null` is a read
+   * that did not land, and a value is an answer — so a coach whose read failed
+   * is shown a dash and a sentence, never "0 left" about a client holding ten.
+   */
+  const [packRows, setPackRows] = useState<PackPurchase[] | null | undefined>(undefined);
+  const [passRows, setPassRows] = useState<{ id: string; passTypeId: string | null; passTypeName: string | null; covers: string | null; expiresOn: string | null; usesTotal: number; usesSpent: number }[] | null | undefined>(undefined);
+  const [creditRows, setCreditRows] = useState<CreditSession[] | null | undefined>(undefined);
+  useEffect(() => {
+    if (!canRead || !id) return;
+    if (uidStatus === 'loading') { setPackRows(undefined); setPassRows(undefined); setCreditRows(undefined); return; }
+    let live = true;
+    setPackRows(undefined); setPassRows(undefined); setCreditRows(undefined);
+    (async () => {
+      const [packRes, passRes, sessRes] = await Promise.all([
+        uid
+          ? supabase.from('client_purchases').select(CLIENT_PACK_COLS)
+              .eq('client_id', id).eq('trainer_id', uid).eq('status', 'paid')
+              .not('sessions_total', 'is', null).limit(capLimit())
+          : Promise.resolve({ data: null, error: new Error('no coach id') } as any),
+        // Scoped to the gym this session belongs to, not to every gym the
+        // member has ever joined: `gym_passes_staff_r` is `tenant_id =
+        // my_tenant()`, so this returns the passes of the gym the coach works
+        // at and nothing else, which is exactly the set that can pay here.
+        supabase.from('gym_passes').select(CLIENT_PASS_COLS)
+          .eq('holder_id', id).limit(capLimit()),
+        supabase.from('sessions').select(CLIENT_CREDIT_COLS)
+          .eq('client_id', id).eq('trainer_id', uid ?? id)
+          .order('starts_at', { ascending: false }).limit(capLimit()),
+      ]);
+      if (!live) return;
+      if (packRes.error) { reportError('client.packs', packRes.error); setPackRows(null); }
+      else {
+        const page = capped((packRes.data ?? []) as unknown as PackPurchase[]);
+        // A balance over a partial set is not a smaller number, it is a wrong
+        // one, so a truncated read is reported as unread rather than counted.
+        setPackRows(page.truncated ? null : page.rows);
+      }
+      if (passRes.error) { reportError('client.passes', passRes.error); setPassRows(null); }
+      else {
+        const page = capped((passRes.data ?? []) as unknown as any[]);
+        setPassRows(page.truncated ? null : page.rows.map((r: any) => {
+          const ty2 = Array.isArray(r.gym_pass_types) ? r.gym_pass_types[0] : r.gym_pass_types;
+          return {
+            id: r.id, passTypeId: r.pass_type_id ?? null,
+            passTypeName: ty2?.name ?? null, covers: ty2?.covers ?? null,
+            expiresOn: r.expires_on ?? null,
+            usesTotal: r.uses_total ?? 0, usesSpent: r.uses_spent ?? 0,
+          };
+        }));
+      }
+      if (sessRes.error) { reportError('client.sessionCredits', sessRes.error); setCreditRows(null); }
+      else {
+        const page = capped((sessRes.data ?? []) as unknown as any[]);
+        setCreditRows(page.truncated ? null : page.rows.map((r: any): CreditSession => ({
+          id: r.id, startsAt: r.starts_at, status: r.status, outcome: r.outcome ?? null,
+          seriesId: r.series_id ?? null,
+          packDrawnAt: r.pack_drawn_at ?? null,
+          packDrawnKind: (r.pack_drawn_kind ?? null) as CreditSession['packDrawnKind'],
+          packDrawnPurchaseId: r.pack_drawn_purchase_id ?? null,
+          packDrawnPassId: r.pack_drawn_pass_id ?? null,
+          shortfallAt: r.pack_draw_shortfall_at ?? null,
+          bookingDrewCreditAt: r.booking_drew_credit_at ?? null,
+        })));
+      }
+    })();
+    return () => { live = false; };
+  }, [canRead, id, uid, uidStatus]);
+
+  // The gym pass has to be live on a DATE, and the date is local: a pass
+  // expires at the gym, not at an instant in UTC.
+  const creditToday = useMemo(() => {
+    const d = new Date(); const z = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+  }, []);
+  const coachPacks: Entitlement[] | null = useMemo(
+    () => (packRows === undefined ? null : coachPackLines(packBalance(packRows ?? null).lines)), [packRows]);
+  const gymPtPasses: Entitlement[] | null = useMemo(
+    () => (passRows === undefined ? null : gymPtLines(passRows, creditToday)), [passRows, creditToday]);
+  const creditRoute: CreditRoute = useMemo(
+    () => chooseRoute(packRows === undefined || packRows === null ? null : (coachPacks?.length ?? 0) > 0,
+                      passRows === undefined || passRows === null ? null : (gymPtPasses?.length ?? 0) > 0),
+    [packRows, passRows, coachPacks, gymPtPasses]);
+  const creditLines = useMemo(
+    () => payingLines(creditRoute, coachPacks, gymPtPasses), [creditRoute, coachPacks, gymPtPasses]);
+  const creditsRemaining = useMemo(() => creditsLeft(creditLines), [creditLines]);
+  const creditLedger: Ledger | null = useMemo(
+    () => (creditRows === undefined ? null : buildLedger(creditRows, creditRoute)), [creditRows, creditRoute]);
+  const creditShortfall = useMemo(() => shortfallLine(creditLedger), [creditLedger]);
+  const creditsLoading = packRows === undefined || passRows === undefined || creditRows === undefined;
+  const creditsUnread = !creditsLoading && (packRows === null || passRows === null || creditRows === null);
 
   /**
    * Days the client ticked ANYTHING, out of the window.
@@ -1302,6 +1429,72 @@ export default function ClientScreen() {
               ? 'Their ticks could not be read, so the days they were in the app are unknown rather than none.'
               : `Days out of the last ${seen.windowDays} they ticked something — evidence they stood in front of their list, not a score.`}
           </Text>
+        </Section>
+
+        <Rule />
+
+        {/* ── what pays for their sessions ─────────────────────────────────
+            The number a coach plans a renewal conversation around, and the one
+            line they have to act on. Both come from src/lib/sessionCredits.ts,
+            which is the same module the client's own ledger reads — so the two
+            of them cannot be shown different answers about the same hour, which
+            is exactly how a renewal conversation goes wrong.
+
+            An unread balance is a dash and a written reason. "0 left" about a
+            client holding ten is the sentence that has a coach chasing money
+            they have already been paid. */}
+        <Section>
+          <SectionHead title="Session Credits" />
+          {creditsLoading ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading what pays for their sessions…</Text>
+          ) : creditsUnread ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              We couldn’t read what pays for their sessions. This is our end, not a statement that they
+              have nothing left, so do not settle anything against it.
+            </Text>
+          ) : creditRoute === 'none' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {who} holds no pack from you and no PT pass from the gym. Their sessions are settled with
+              you directly, which is an ordinary arrangement and not something to chase.
+            </Text>
+          ) : (<>
+            <KpiRow items={[
+              { label: 'Sessions Left', value: fig(creditsRemaining) },
+              { label: 'Sold By', value: creditRoute === 'gym_pass' ? 'The gym' : 'You' },
+              { label: 'Booked Ahead', value: fig(creditLedger ? creditLedger.upcoming.length : null) },
+            ]} />
+            {(creditLines ?? []).map((l) => (
+              <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: sp.md }}>
+                <Text style={{ ...ty.label, color: t.ink2, flex: 1, paddingRight: sp.md }}>{l.label}</Text>
+                <Text style={{ ...ty.label, color: t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
+              </View>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {creditRoute === 'gym_pass'
+                ? 'The gym sold this pack and assigned you. One credit comes off it when you mark a session complete.'
+                : 'A session they booked themselves came off this pack at booking. One you booked for them comes off when you mark it complete.'}
+            </Text>
+            {creditShortfall ? (
+              <View style={{ marginTop: sp.md }}>
+                <Flag tone={t.warn}>{creditShortfall} You delivered those hours and nothing paid for them.</Flag>
+              </View>
+            ) : null}
+            {/* The most recent few, so the coach can see WHICH hour a credit
+                went on rather than only how many are gone. */}
+            {creditLedger && creditLedger.past.length > 0 ? (
+              <View style={{ marginTop: sp.md }}>
+                {creditLedger.past.slice(0, 5).map((r) => (
+                  <View key={r.sessionId} style={{ paddingVertical: sp.sm }}>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
+                      {new Date(r.startsAt).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short' })}
+                      {'  '}
+                      <Text style={{ color: t.ink3 }}>{coachLedgerLine(r)}</Text>
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </>)}
         </Section>
 
         <Rule />

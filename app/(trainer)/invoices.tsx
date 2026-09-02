@@ -61,6 +61,7 @@ import {
   fetchMyInvoices, fetchInvoiceIssuer, fetchInvoiceCurrency, issueInvoice, voidInvoice, remindInvoice,
   type InvoiceCurrency,
 } from '../../src/ui/coachInvoices';
+import { useMyCoachLogo } from '../../src/ui/coachLogo';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
 
@@ -78,6 +79,7 @@ export default function Invoices() {
   // the list, and a failed name must not be papered over with the platform's
   // own — that would put the wrong business on a financial document.
   const [issuer, setIssuer] = useState<{ name: string | null; status: LoadStatus }>({ name: null, status: 'loading' });
+  const logo = useMyCoachLogo();
   const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading' });
 
   const [open, setOpen] = useState(false);
@@ -182,7 +184,14 @@ export default function Invoices() {
   };
 
   const send = async (inv: CoachInvoice) => {
-    const doc = coachInvoiceDoc({ invoice: inv, issuer: { status: issuer.status, name: issuer.name, brand: appName } });
+    // The coach's own mark on the coach's own invoice. Null when they have set
+    // none and null when it could not be fetched, and the document is the same
+    // either way — src/lib/coachLogo.ts holds that fallback rather than this
+    // screen having an opinion about it.
+    const doc = coachInvoiceDoc({
+      invoice: inv,
+      issuer: { status: issuer.status, name: issuer.name, brand: appName, logoDataUri: logo.dataUri },
+    });
     Alert.alert(
       `Send invoice ${invoiceNumber(inv.seq)}`,
       invoiceShareBlurb(doc, inv) + '\n\n'

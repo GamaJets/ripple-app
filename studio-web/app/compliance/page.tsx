@@ -49,6 +49,7 @@ import {
   fetchAgreements, fetchSignatures, publishAgreement, recordSignature,
   agreementBlocker, signatureBlocker, nextVersion, outstandingFor,
   fetchDocuments, recordDocument, deleteDocument, documentBlocker, documentPath, expiring,
+  openDocument, discardUnfiledObject, documentAudience, AUDIENCE_LABEL,
   AGREEMENT_KINDS, AGREEMENT_LABEL, AGREEMENT_NOTE, DOCUMENT_KINDS, DOCUMENT_LABEL,
   type Agreement, type AgreementKind, type Signature, type GymDocument, type DocumentKind,
 } from '@lib/gymDocs';
@@ -499,13 +500,22 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
         upsert: false,
       });
       if (up.error) throw up.error;
-      await recordDocument(supabase, tenantId, {
-        kind, title, storagePath: path,
-        mime: file.type || null, sizeBytes: file.size,
-        memberId: memberId || null,
-        expiresOn: expiresOn || null,
-        uploadedBy: me.id,
-      });
+      try {
+        await recordDocument(supabase, tenantId, {
+          kind, title, storagePath: path,
+          mime: file.type || null, sizeBytes: file.size,
+          memberId: memberId || null,
+          expiresOn: expiresOn || null,
+          uploadedBy: me.id,
+        });
+      } catch (e) {
+        // The object landed and the row did not. Take the object back out:
+        // otherwise it sits in the bucket with nothing indexing it, which is
+        // the same invisible orphan the old Remove produced, arriving by the
+        // other door. Best effort — the sentence below is the same either way.
+        await discardUnfiledObject(supabase, path);
+        throw e;
+      }
       setTitle(''); setFile(null); setExpiresOn('');
       onChange();
     } catch (e: any) {
@@ -514,15 +524,18 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
   };
 
   const open = async (d: GymDocument) => {
-    // A signed URL, because the bucket is private. Sixty seconds is enough to
-    // open one and short enough that a link pasted into a chat is dead before
-    // anybody clicks it.
-    const { data, error } = await supabase.storage.from('gym-docs').createSignedUrl(d.storagePath, 60);
-    if (error || !data?.signedUrl) {
-      setErr(`That file could not be opened: ${error?.message ?? 'no link came back'}. The record of it is still here; the object may have been removed from storage.`);
-      return;
+    // A signed URL, because the bucket is private — and for a document about a
+    // member, a row in `gym_document_reads` FIRST. Nothing in the database can
+    // watch a signed URL being minted, so the console is the only party that
+    // can record it; and it records before it asks, so a read that cannot be
+    // recorded does not happen. See supabase/parts/390.
+    try {
+      const url = await openDocument(supabase, tenantId, d, me.id);
+      setErr(null);
+      window.open(url, '_blank', 'noopener');
+    } catch (e: any) {
+      setErr(e?.message ?? 'That file could not be opened.');
     }
-    window.open(data.signedUrl, '_blank', 'noopener');
   };
 
   const cols: Column<GymDocument>[] = [
@@ -535,6 +548,13 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
         : <span style={{ color: d.expiresOn <= today ? 'var(--crit)' : undefined }}>{d.expiresOn}</span> },
     { key: 'size', header: 'Size', value: (d) => d.sizeBytes, numeric: true,
       render: (d) => d.sizeBytes == null ? <span className="dash">—</span> : `${(d.sizeBytes / 1024).toFixed(0)} KB` },
+    // Who the DATABASE will let read this, not who this screen chooses to show
+    // it to. The rule is `gym_doc_readable()` in supabase/parts/390 and this
+    // column only reports it.
+    { key: 'seen', header: 'Readable by', value: (d) => AUDIENCE_LABEL[documentAudience(d)],
+      render: (d) => documentAudience(d) === 'owner'
+        ? <span style={{ color: 'var(--ink2)' }}>Owner only</span>
+        : <span style={{ color: 'var(--ink3)' }}>Staff</span> },
     { key: 'who', header: 'Filed by', value: (d) => d.uploadedByName },
     { key: 'when', header: 'Filed', value: (d) => d.uploadedAt,
       render: (d) => new Date(d.uploadedAt).toLocaleDateString() },
@@ -542,9 +562,13 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
       render: (d) => (
         <button
           style={{ ...linkBtn, color: 'var(--ink3)' }}
-          onClick={() => deleteDocument(supabase, d.id)
+          // The file goes with the entry. `deleteDocument` deletes the OBJECT
+          // first and refuses to report success unless it observed the bytes
+          // go — so the sentence below is whatever it says happened, not a
+          // guess that the document is still on file. It might not be.
+          onClick={() => deleteDocument(supabase, d)
             .then(() => { setErr(null); onChange(); })
-            .catch((e: any) => setErr(`That document was not removed: ${e?.message ?? 'the delete was refused'}. It is still on file.`))}
+            .catch((e: any) => { setErr(e?.message ?? 'That document was not removed.'); onChange(); })}
         >
           Remove
         </button>
@@ -556,7 +580,7 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
   return (
     <Section
       title="Documents"
-      sub="A signed contract, an insurance schedule, an engineer's report, a photograph of a broken machine. Private to this gym's staff; the file itself is opened through a link that expires in a minute."
+      sub="A signed contract, an insurance schedule, an engineer's report, a photograph of a broken machine. Anything filed against a member is yours alone to read; the building's service reports, photographs, certificates and insurance are readable by your staff. The file itself opens through a link that expires in a minute, and opening a member's document is recorded in the log below."
     >
       {documents.why ? <Banner tone="crit">{documents.why}</Banner> : null}
       {err ? <Banner tone="crit">{err}</Banner> : null}
@@ -654,7 +678,7 @@ function Feed({ feed }: { feed: Read<Activity> }) {
   return (
     <Section
       title="What has been done to this record"
-      sub={`The last ${FEED_DAYS} days. Written by the database as things happen, so nothing here was typed by anyone and nothing can be missed by a screen forgetting to record it.`}
+      sub={`The last ${FEED_DAYS} days. Written by the database as things happen, so nothing here was typed by anyone and nothing can be missed by a screen forgetting to record it — except the two kinds nothing in a database can watch: record-exported and document-opened. A download and a signed link both happen in the browser, so those two are stated by this console and then logged the same way as everything else.`}
     >
       {feed.why ? <Banner tone="crit">{feed.why}</Banner> : null}
       {kinds.length > 1 ? (

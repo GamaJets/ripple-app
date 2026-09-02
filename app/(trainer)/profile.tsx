@@ -23,10 +23,20 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { useDeliveryFact } from '../../src/ui/coachDelivery';
+import { DeliveryModeChoice } from '../../src/ui/DeliveryModeChoice';
+import { deliveryNote, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
 import { useMyCancellationPolicy } from '../../src/ui/sessions';
 import { feeAmountLine, noticeLabel } from '../../src/lib/booking';
 import { readNumber } from '../../src/lib/units';
 import { RepdbAttribution } from '../../src/ui/Attribution';
+import { HAS_NATIVE_CLIPBOARD, CLIPBOARD_UNAVAILABLE_NOTE, copyToClipboard } from '../../src/ui/nativeModules';
+import { BRAND } from '../../src/lib/brands';
+import {
+  normaliseHandle, handleProblem, handleProblemText, publicPageUrl,
+  publicPageState, publicPageStateNote, publishOutcome,
+  PUBLISHED_FIELDS, WITHHELD_FIELDS, HANDLE_MAX,
+} from '../../src/lib/publicProfile';
 
 function Field({ t, label, value: val, onChangeText, placeholder, multiline, keyboardType }: { t: Theme; label: string; value: string; onChangeText: (v: string) => void; placeholder?: string; multiline?: boolean; keyboardType?: 'default' | 'numeric' | 'decimal-pad' }) {
   return (
@@ -81,6 +91,10 @@ export default function CoachProfile() {
     ]);
   };
   const p = useMyTrainerProfile();
+  // Their own answer and their roster, reconciled. Read here so the section
+  // below can say what the answer is currently doing rather than only offering
+  // it — an answer with no visible effect is a switch nobody trusts.
+  const delivery = useDeliveryFact();
   // The late-cancellation policy is NOT part of `useMyTrainerProfile`. That
   // provider is the coach's public identity — what clients see — and this is a
   // rule about money that binds them. It also has a constraint behind it
@@ -106,6 +120,61 @@ export default function CoachProfile() {
    */
   const [feeDraft, setFeeDraft] = useState<string | null>(null);
   const [lcFeeDraft, setLcFeeDraft] = useState<string | null>(null);
+  /**
+   * The web address, held as text while it is being typed.
+   *
+   * Null means "not being edited" and the box shows the record, the same
+   * arrangement the two money boxes above use. It is NOT written on every
+   * keystroke like the rest of this screen: claiming an address can be refused
+   * — taken, reserved, or not in the directory — and each refusal is a sentence
+   * somebody has to read, so it goes through one deliberate press.
+   */
+  const [handleDraft, setHandleDraft] = useState<string | null>(null);
+  const [pageBusy, setPageBusy] = useState(false);
+  /** What the last press did, in the server's own words. Cleared on the next. */
+  const [pageSaid, setPageSaid] = useState<{ title: string; body: string } | null>(null);
+  const [pageOpen, setPageOpen] = useState(false);
+
+  const pageHandle = handleDraft ?? p.publicHandle ?? '';
+  const pageState = publicPageState({ listed: p.listed, handle: p.publicHandle, on: p.publicPage });
+  const pageUrl = publicPageUrl(BRAND.joinOrigin, p.publicHandle);
+  const draftProblem = handleProblem(normaliseHandle(pageHandle));
+
+  /**
+   * One press, one round trip, one sentence back.
+   *
+   * `on` is what the coach asked for and NOT what they get: the server refuses
+   * to publish a coach who is not in the directory, and refuses an address
+   * somebody else holds. The provider only moves its own state on the results
+   * that actually wrote, so what this screen shows afterwards is what the row
+   * says rather than what was asked for.
+   */
+  const savePage = async (on: boolean, address?: string) => {
+    if (pageBusy) return;
+    setPageBusy(true);
+    setPageSaid(null);
+    // `address` is passed explicitly by the two buttons that do not mean "what
+    // is in the box": releasing an address sends the empty string. It is a
+    // parameter rather than a setState followed by a read, because a state
+    // update does not land before the next line and this closure would send the
+    // old handle — which is the difference between giving an address back and
+    // silently keeping it.
+    const wanted = normaliseHandle(address ?? pageHandle);
+    const result = await p.publishPage(wanted, on);
+    const said = publishOutcome(result, wanted);
+    setPageSaid({ title: said.title, body: said.body });
+    if (said.changed) setHandleDraft(null);
+    setPageBusy(false);
+  };
+
+  const copyPageUrl = async () => {
+    if (!pageUrl) return;
+    if (!(await copyToClipboard(pageUrl))) {
+      Alert.alert('Not copied', `Your page address could not be copied. It is ${pageUrl} — write it down.`, [{ text: 'OK' }]);
+      return;
+    }
+    Alert.alert('Copied', `${pageUrl} is on your clipboard. Paste it into your bio.`, [{ text: 'OK' }]);
+  };
   const initials = p.name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
 
   const pickPhoto = async (fromCamera: boolean) => {
@@ -245,6 +314,37 @@ export default function CoachProfile() {
         <Section>
           <SectionHead title="What You Offer" note="Tap a chip to remove" />
           <ChipEditor t={t} items={p.offers} onAdd={addOffer} onRemove={(i) => p.setOffers(p.offers.filter((_, x) => x !== i))} value={newOffer} setValue={setNewOffer} placeholder="e.g. Nutrition coaching" />
+        </Section>
+
+        <Rule />
+
+        {/* ── how you coach ──────────────────────────────────────────────
+            The same three options, the same words and the same order as the
+            Getting Started list — one control, rendered in both places, so a
+            coach who reads one description at signup and another six months on
+            is reading the same sentence.
+
+            It sits directly above Session Rate because the two are the same
+            conversation: what you charge for, and whether it is an hour in a
+            room. A coach who realises their rate is beside the point is one tap
+            from saying so.
+
+            Nothing here can narrow the app on its own. The answer is a FLOOR
+            and the roster may only widen it, so a coach who says "online" and
+            then takes somebody on in person gets everything back without
+            returning to this screen. `deliveryNote` says which of those is
+            currently true. */}
+        <Section>
+          <SectionHead title="How You Coach" />
+          <DeliveryModeChoice />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {deliveryNote(delivery)}
+          </Text>
+          {delivery.shape === 'remote' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {HIDDEN_NOT_GONE}
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />
@@ -428,6 +528,114 @@ export default function CoachProfile() {
               <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: p.listed ? t.brandInk : t.ink3, alignSelf: p.listed ? 'flex-end' : 'flex-start' }} />
             </View>
           </Pressable>
+        </Section>
+
+        <Rule />
+
+        {/* ── the address a coach can put in a bio ────────────────────────── */}
+        {/* Directly under the directory switch, because it is the same profile
+            shown to a wider audience and the two decisions belong side by side.
+            It is a SECOND consent and not a consequence of the first: Find a
+            Trainer is a screen inside the client app behind a sign-in, and this
+            is the open web. src/lib/publicProfile.ts holds the rules and
+            supabase/parts/340 enforces them; a coach who leaves the directory
+            has their page taken down in the same statement, so the state below
+            can never claim a page that is not being served.
+
+            Nothing here is written on a keystroke. Every other field on this
+            screen goes through the provider's debounced fire-and-forget write,
+            which is right for a bio and wrong for an address that can be TAKEN:
+            a swallowed 23505 leaves a coach looking at a handle they do not
+            own. One press, one round trip, one sentence back. */}
+        <Section>
+          <SectionHead title="Your Page on the Web" />
+
+          <Card>
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>A link for your bio</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+              A page anybody can open, with your name, what you do, what you are qualified in and a
+              button that brings somebody into the app already attached to you.
+            </Text>
+            <Text style={{ ...ty.caption, color: pageState === 'live' ? t.brand : t.ink3, marginTop: sp.md }}>
+              {publicPageStateNote(pageState)}
+            </Text>
+          </Card>
+
+          {/* What is on it and what is never on it, before anything is
+              published. This IS the consent: a coach who cannot see what they
+              are handing to the open web has not agreed to anything. Folded by
+              default because it is long, and long is the point. */}
+          <Pressable onPress={() => setPageOpen(!pageOpen)} accessibilityRole="button"
+            accessibilityLabel={pageOpen ? 'Hide what is on your page' : 'Show what is on your page'}
+            style={{ marginTop: sp.md, paddingVertical: sp.sm }}>
+            <Text style={{ ...ty.label, color: t.brand }}>
+              {pageOpen ? 'Hide what goes on it' : 'What goes on it, and what never does'}
+            </Text>
+          </Pressable>
+          {pageOpen ? (
+            <Card style={{ marginTop: sp.sm }}>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>On the page</Text>
+              {PUBLISHED_FIELDS.map((f) => (
+                <Flag key={f} tone={t.brand} style={{ marginBottom: sp.sm }}>{f}</Flag>
+              ))}
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Never on it</Text>
+              {WITHHELD_FIELDS.map((f) => (
+                <Flag key={f} tone={t.ink3} style={{ marginBottom: sp.sm }}>{f}</Flag>
+              ))}
+            </Card>
+          ) : null}
+
+          {/* The address. Normalised as it is typed, so the coach can see what
+              they are actually claiming rather than being corrected after the
+              press: "Jas Fitness" becomes "jas-fitness" under their thumb. */}
+          <View style={{ marginTop: sp.lg }}>
+            <Field t={t} label="Your address" value={pageHandle}
+              onChangeText={(v) => setHandleDraft(normaliseHandle(v))}
+              placeholder="jas-fitness" />
+            {pageUrl ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.md }}>{pageUrl}</Text>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.md }}>
+                {`Up to ${HANDLE_MAX} characters. Letters, numbers and hyphens.`}
+              </Text>
+            )}
+            {draftProblem !== 'ok' && draftProblem !== 'empty' ? (
+              <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{handleProblemText(draftProblem)}</Flag>
+            ) : null}
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+              {/* Publishing an unlisted coach is refused by the server rather
+                  than corrected, so the button is offered and the refusal is
+                  read: a control that vanishes teaches nobody which switch to
+                  press. */}
+              <Cta label={p.publicPage ? 'Save Changes' : 'Publish My Page'}
+                a11yLabel={p.publicPage ? 'Save changes to your public page' : 'Publish your public page'}
+                disabled={pageBusy || draftProblem !== 'ok'}
+                onPress={() => savePage(true)} />
+              {/* Offered whenever an address is held, not only when the page
+                  is live: clearing the box and pressing Publish is refused (an
+                  empty address is not an address), so without this a coach who
+                  had switched their page off could never give the address back. */}
+              {p.publicHandle ? (
+                <Ghost label={p.publicPage ? 'Take It Down' : 'Release Address'} icon="minus"
+                  a11yLabel={p.publicPage ? 'Take your public page down' : 'Give up your page address'}
+                  onPress={() => savePage(false, p.publicPage ? p.publicHandle ?? '' : '')} />
+              ) : null}
+              {pageUrl && p.publicPage && HAS_NATIVE_CLIPBOARD ? (
+                <Ghost label="Copy Link" icon="plus" a11yLabel="Copy your page address" onPress={copyPageUrl} />
+              ) : null}
+            </View>
+            {pageUrl && p.publicPage && !HAS_NATIVE_CLIPBOARD ? (
+              <Flag tone={t.ink3} style={{ marginTop: sp.md }}>{CLIPBOARD_UNAVAILABLE_NOTE}</Flag>
+            ) : null}
+
+            {/* What the server did, in its own words. Shown until the next
+                press rather than flashed, because "that address is taken" is
+                the one a coach needs while they think of another. */}
+            {pageSaid ? (
+              <Notice kicker="Your page" title={pageSaid.title} note={pageSaid.body} />
+            ) : null}
+          </View>
         </Section>
 
         </>

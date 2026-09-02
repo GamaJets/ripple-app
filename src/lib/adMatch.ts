@@ -11,6 +11,21 @@
 // quietly wrong every day after, and being quietly wrong here means telling a
 // coach that the wrong channel is the one making them money.
 //
+// ── One matcher, three channels ──────────────────────────────────────────
+//
+// Meta, Google Ads and TikTok all answer the same two questions — what did this
+// ad cost, and where does it point — and all three are matched by the code in
+// the destination. So there is one matcher, not three: `matchAds` takes an
+// `AdInsight` a channel's sync has already reduced its own reply to, and
+// `codeFromUrl` reads the code out of a link whichever redirector mangled it.
+//
+// What is NOT the same between them is the unit the money arrives in, and that
+// is deliberately not in this file. `centsFromAmount` below takes a decimal in
+// MAJOR units, which is what Meta and TikTok report; Google reports micros and
+// `centsFromMicros` in src/lib/adChannels.ts converts them once, there, before
+// anything reaches here. A per-channel unit inside the matcher would be a
+// hundredfold error waiting for whichever channel was added next.
+//
 // ── Why this is a pure module ────────────────────────────────────────────
 //
 // Everything below is a decision about somebody's money and none of it needs a
@@ -134,9 +149,22 @@ function decode(s: string): string {
  *   · a link shim. Meta rewrites destinations through `l.facebook.com/l.php?u=
  *     <the real url, encoded>`, and the code is inside that inner URL. Without
  *     following it every ad on a page post would read as having no code.
+ *     Google's redirector is the same shape with a different parameter name:
+ *     `googleadservices.com/pagead/aclk?…&adurl=<the real url, encoded>`, and
+ *     `google.com/aclk` uses it too. `adurl` is therefore read exactly as `u`
+ *     is, by the same loop — a second parser for Google would be a second set
+ *     of rules to keep in step with this one, and the one that drifted would be
+ *     the one nobody had a test for.
  *   · tracking parameters after the code — `?c=K7M2QX&utm_source=ig` and
  *     `{{ad.id}}` macros appended by `url_tags` — which are ordinary query
- *     parameters and must not stop the code being found.
+ *     parameters and must not stop the code being found. Google appends
+ *     `gclid`, TikTok appends `ttclid`, and both also arrive unexpanded as the
+ *     literal macros `{gclid}` and `__CLICKID__` when the parameter is read off
+ *     the ad's own final URL rather than off a click. None of them is a join
+ *     code and none of them is read as one: a click id identifies the CLICK,
+ *     and treating one as a code would file a coach's money against a value
+ *     that changes on every impression. They matter here only in that they must
+ *     not hide the `?c=` sitting beside them, which is what the loop below is.
  *
  * The value is returned as it was written, uppercased and stripped of spacing
  * only. It is NOT normalised to six characters: `normaliseCode` truncates, and
@@ -169,8 +197,10 @@ export function codeFromUrl(url: string | null | undefined, depth = 0): string |
       if (code) return code;
     }
     // The shim's inner URL, kept for after the loop — a real `c` on the outer
-    // link is the more direct statement of intent and wins.
-    if (!nested && (key === 'u' || key === 'url' || key === 'q') && /^https?:\/\//i.test(val)) {
+    // link is the more direct statement of intent and wins. `u` is Meta's,
+    // `adurl` is Google's; the rest were already here for the hand-pasted
+    // redirectors that use them.
+    if (!nested && (key === 'u' || key === 'url' || key === 'q' || key === 'adurl') && /^https?:\/\//i.test(val)) {
       nested = val;
     }
   }
@@ -190,6 +220,13 @@ export function codeFromUrl(url: string | null | undefined, depth = 0): string |
  * cost of being broad is picking up an image URL or a tracking pixel, and that
  * costs nothing: a URL with no `?c=` in it contributes no code, and the ad is
  * only ever matched to a code some URL on it actually names.
+ *
+ * Being shapeless is why it took the other two channels without a line of
+ * change. Google hands back `ad_group_ad.ad.final_urls` (an array) alongside
+ * `final_mobile_urls` and, on some ad types, a `tracking_url_template`; TikTok
+ * hands back a single `landing_page_url` and, for a Spark ad, nothing but a
+ * post id. All three are objects with URLs somewhere in them, and the one that
+ * has no URL at all is honestly reported as 'no-link' rather than guessed at.
  */
 export function urlsFromCreative(creative: unknown, limit = 40): string[] {
   const out: string[] = [];

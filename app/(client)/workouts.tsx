@@ -56,6 +56,7 @@ import { useWearables } from '../../src/ui/wearables';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import type { WorkoutSample } from '../../src/lib/wearables/types';
 import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
+import { announcePersonalBest } from '../../src/lib/prNotifyStore';
 import { est1RM } from '../../src/lib/streaks';
 import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 // A hold is a set whose first number is seconds. The programme builder writes
@@ -2281,7 +2282,14 @@ export default function Train() {
       </Modal>
 
       <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
-        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
+        {/* `clientId` is null rather than 'unknown': that placeholder is what
+            this screen carries before the profile has resolved, and a
+            notification routed to `?clientId=unknown` opens a coach's screen at
+            nobody. `clientName` only under a READ profile — the cached name on
+            a shared handset can belong to whoever used it last, and a coach
+            congratulating the wrong person by name is worse than one told "a
+            client". */}
+        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -2839,7 +2847,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, injuries, videos, videoStatus, preferTrainerId, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
+function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, injuries, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   // A session can be put down and picked up.
@@ -3226,7 +3234,23 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
       ...done.map((s) => (s.kg && s.reps ? est1RM(s.kg, s.reps) : 0)),
       0,
     );
-    if (historyWhole && newE1 > 0 && newE1 > priorBest) { setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`); setConfetti(true); }
+    if (historyWhole && newE1 > 0 && newE1 > priorBest) {
+      setPrMsg(`New PR on ${name}! ${fig(liftLabel(wkg, unit))} × ${r}`);
+      setConfetti(true);
+      // The coach is told from INSIDE this branch, and that placement is the
+      // whole design. Every guard above — the whole history was read, not a
+      // bodyweight set, not a hold, this session's own sets cannot establish a
+      // lifetime best — is inherited by the notification for free. Anywhere
+      // else, in this file or in plpgsql, would be a second definition of a
+      // personal record. supabase/parts/202 says the same thing at length and
+      // is why the SQL half of this was withheld.
+      //
+      // `void`, never awaited, and every path inside swallows: a coach who is
+      // not told is a coach who is not told, and a set that fails to log
+      // because a push failed would be unforgivable. How often this actually
+      // fires is src/lib/prNotify.ts's problem, not this branch's.
+      void announcePersonalBest(preferTrainerId, clientId, { movement: name, kg: wkg, reps: r }, clientName);
+    }
     setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg, ...(bw ? { bw: true } : {}), ...(timedOn ? { timed: true } : {}) }); return n; });
     // Only after the first set of an exercise. By set three they have done the
     // movement three times and do not need it offered again.

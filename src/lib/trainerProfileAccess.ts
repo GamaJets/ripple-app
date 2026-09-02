@@ -126,6 +126,22 @@ export interface TrainerProfileFields {
   /** Dollars per session, or null when no rate is known. Never 0-as-unknown. */
   sessionFee: number | null;
   listed: boolean;
+  /**
+   * The coach's address on the marketing site, or null when they have not
+   * claimed one. See src/lib/publicProfile.ts.
+   */
+  publicHandle: string | null;
+  /**
+   * Whether a page is being served on the OPEN WEB at that address.
+   *
+   * A separate field from `listed` and never derived from it: the directory is
+   * a screen inside the app behind a sign-in, and a public page is not, so the
+   * two are two consents. It is in the guarded set below for the same reason
+   * `listed` is, and for one more of its own — a screen on the wrong app that
+   * believed the reader had a public page would offer to take down somebody
+   * else's.
+   */
+  publicPage: boolean;
 }
 
 /**
@@ -142,6 +158,8 @@ export const NO_TRAINER_PROFILE: TrainerProfileFields = Object.freeze({
   specialties: Object.freeze([]) as unknown as string[],
   sessionFee: null,
   listed: false,
+  publicHandle: null,
+  publicPage: false,
 });
 
 /**

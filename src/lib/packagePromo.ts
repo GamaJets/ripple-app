@@ -28,9 +28,9 @@
 // nothing useful without Stripe, so this changes nothing about its failure
 // modes.
 //
-// ── SUBSCRIPTION PACKAGES ONLY, AND THE REASON IS THE PLATFORM FEE ────────
+// ── THE PLATFORM FEE, WHICH IS WHY THE TWO KINDS OF PACKAGE DIFFER ────────
 //
-// This is the part worth reading before anybody widens it.
+// This is the part worth reading before anybody widens it further.
 //
 // A code is collected on the CLIENT'S OWN checkout screen — app/(client)/
 // packages.tsx — and travels with the request that creates the Checkout
@@ -43,45 +43,82 @@
 // On a SUBSCRIPTION, Repple's cut is `application_fee_percent`: a percentage,
 // so it scales with the discount automatically. A 20% off code means the client
 // pays 20% less and Repple takes its share of the smaller amount. Correct with
-// no arithmetic anywhere.
+// no arithmetic anywhere, whatever the price and whatever the discount.
 //
 // On a ONE-OFF, Repple's cut is `application_fee_amount`: an absolute figure in
-// minor units. Left as it was, it is computed from the LIST price, Stripe then
-// discounts the charge and does not touch the fee, and a coach running 30% off
-// a £100 pack receives £70 from the client and still pays a fee calculated on
-// £100 — eating the whole discount AND a fee on money they never got, with
-// nothing on any screen saying so. At a large enough discount the fee exceeds
-// the charge and Stripe refuses the payment outright, which the client meets as
-// a checkout that will not complete.
+// minor units, and Stripe requires it in the SAME call that creates the
+// session. Left computed from the LIST price it is straightforwardly wrong:
+// Stripe discounts the charge and does not touch the fee, so a coach running
+// 30% off a £100 pack receives £70 from the client and still pays a fee worked
+// out on £100 — eating the whole discount AND a fee on money they never got.
+// At a large enough discount the fee exceeds the charge and Stripe refuses the
+// payment outright, which the client meets as a checkout that will not
+// complete. Stripe's own wording, on the direct-charges page: the value "must
+// be positive and less than the amount of the charge".
 //
-// ── AND WHY HAVING THE CODE EARLIER DOES NOT FIX THE ONE-OFF ──────────────
+// ── WHAT WAS TRIED, AND WHY IT ONLY HALF WORKS ────────────────────────────
 //
-// This file used to say the fix was for the code to be supplied WHEN THE
-// SESSION IS CREATED, so the fee could be computed from the discounted total,
-// and that it only needed a field on the client's checkout flow. The field
-// exists now. It does not fix this, and the reason is an ORDERING that no field
-// can change.
+// The obvious fix is to know the coupon BEFORE the session is created — which
+// is possible, because `promotionCodes.list({ code })` is already called on the
+// coach's account to resolve what the client typed — and to derive the fee from
+// the discounted total rather than from the list price.
 //
-// `application_fee_amount` is an input to `checkout.sessions.create`. What the
-// discount actually comes to is an OUTPUT of that same call — Stripe applies
-// the coupon and works out the total inside it. So the fee can never be derived
-// from what Stripe charged; it can only be derived from a discounted total this
-// app predicted, and Stripe's own percentage rounding is not this app's to
-// reproduce. A prediction one minor unit out is a coach underpaid on every sale
-// of that package, quietly, forever. Nothing that can be sent in that call is
-// the figure Stripe is about to compute in it.
+// It runs into one wall, and the wall is not the ordering. `application_fee_
+// amount` is an input and `amount_total` is an output of the same call, so the
+// fee can only ever come from a total this app PREDICTED. The wall is that for
+// a PERCENTAGE discount the prediction needs Stripe's rounding rule, and
+// STRIPE DOES NOT DOCUMENT ONE. Not on the Coupon object, not on the Discount
+// object, not on either discounts guide, not on the Billing coupons page. The
+// only rounding Stripe writes down is for TAX (billing/taxes/tax-rates, "Round
+// at the invoice line item level…") and for its own processing fee, and neither
+// governs this. A rule learned by observation is a rule that can change in a
+// release note nobody here reads, and a prediction one minor unit out is a
+// coach underpaid on every sale of that package, quietly, forever.
 //
-// A second call is not an escape either: Stripe's Checkout owns the
-// PaymentIntent it creates and documents that changes made to it from outside
-// may be overwritten, so "create the session, read `amount_total`, then patch
-// the fee onto the PaymentIntent" is a fee that may or may not survive to the
-// charge — which is worse than a wrong one, because it is wrong intermittently.
+// A second call is not an escape either: Checkout owns the PaymentIntent it
+// creates, `checkout.sessions.update` accepts four parameters and none of them
+// is the fee, and patching the PaymentIntent from outside is undocumented
+// rather than permitted — a fee that may or may not survive to the charge is
+// worse than a wrong one, because it is wrong intermittently.
 //
-// So the refusal stands, and it is now enforced at the CHECKOUT as well as at
-// the coach's screen: `promoBlocker` refuses a one-off package by name when a
-// coach tries to attach a code to it, and `checkoutCodeBlocker` refuses one
-// against a one-off sale when a client types it. Both are run by their screen
-// and again by their edge function.
+// ── SO THE RULE IS EXACTNESS, NOT PREDICTION ──────────────────────────────
+//
+// A code works on a one-off exactly when the discount is a WHOLE NUMBER OF
+// MINOR UNITS with no rounding involved at all — in which case every rounding
+// rule agrees, including the undocumented one, and there is nothing left to
+// predict. `oneOffDiscount` below is that rule. Two shapes qualify:
+//
+//   · An `amount_off` coupon IN THE SESSION'S OWN CURRENCY. Stripe subtracts an
+//     integer from an integer. There is no rounding anywhere in it.
+//   · A `percent_off` coupon where `price × percent` divides by 100 exactly.
+//     30% of £100.00 is 3000 minor units on any arithmetic anybody could
+//     implement. 20% of £49.99 is 999.8, which is not a number of pennies, and
+//     is REFUSED — by name, with the reason, at the coach's screen when the
+//     code is created and again at the checkout in case the package has been
+//     repriced since.
+//
+// Everything else is refused too, and the list is deliberately long: a coupon
+// restricted to Stripe Products (this app's packages are inline `price_data`
+// with no stored Product, so `applies_to` cannot match one), a multi-currency
+// coupon, an `amount_off` in a currency the package is not sold in, a promotion
+// code carrying a minimum-spend or first-time-customer restriction, and any
+// coupon Stripe itself reports as no longer valid. Stripe does not document
+// what several of those do to a session that names them, and a refusal is a
+// good outcome where a wrong fee is not.
+//
+// ── AND THE PREDICTION IS STILL CHECKED AGAINST REALITY ───────────────────
+//
+// Exact arithmetic on this side is not proof about Stripe's side. The one-off
+// checkout stamps the total it expects onto the session's metadata, and the
+// stripe-webhook compares it with the `amount_total` Stripe actually charged
+// when the sale completes. A difference is recorded on the sale
+// (`client_purchases.fee_variance_cents`, part 311) and shown to the coach,
+// because a figure nobody reconciles is how a coach is underpaid by one minor
+// unit on every sale of a package for a year. It is a RECORDED DISCREPANCY
+// rather than a hard failure for one reason: by the time that event arrives the
+// card has been charged and Stripe has already taken the fee, so there is
+// nothing left to refuse, and refusing to write the row would leave a client
+// who has paid with no pack and no record of paying.
 //
 // Pure, framework-free and asserted against under plain `node`.
 
@@ -93,6 +130,19 @@ export interface PromoTarget {
   name: string;
   billingInterval: string | null;
   active: boolean;
+  /**
+   * The list price in minor units, which a ONE-OFF needs and a subscription
+   * does not.
+   *
+   * On a subscription the fee is a percentage and nothing about the price
+   * enters into whether a code may be attached. On a one-off the fee is an
+   * absolute figure derived from the discounted total, and whether that total
+   * can be known exactly depends on the price and the percentage together —
+   * see `oneOffDiscount`. So the price is part of the target rather than
+   * something the caller checks separately, because a caller that forgot to
+   * would be a caller quietly allowing a fee nobody can compute.
+   */
+  priceCents: number;
 }
 
 /** One code, as Stripe holds it. Nothing here is stored in this database. */
@@ -115,6 +165,196 @@ export interface PromoCode {
    *  coach's recurring packages. */
   packageId: string | null;
 }
+
+/* ── what actually comes off a ONE-OFF, and when nobody can say ──────────── */
+
+/**
+ * A percentage discount that lands on a whole number of minor units, or null
+ * when it does not.
+ *
+ * The single arithmetic fact the one-off feature rests on. `priceCents *
+ * percentOff` is divided by 100 only when it divides EXACTLY, so the answer is
+ * never a rounded one — and where it would be, this returns null and the caller
+ * refuses rather than picking a rounding rule on Stripe's behalf. Stripe does
+ * not document which one it uses; the header has the search.
+ *
+ * The multiplication is done before the division, on integers, so no float ever
+ * holds an intermediate: `4999 * 20` is 99,980 and `99980 % 100` is 80, which
+ * is the refusal. `(4999 * 20) / 100` as a float is 999.8000000000001 on some
+ * inputs, and a test for "is this a whole number" written that way passes and
+ * fails by accident. The largest product this can produce is a price under
+ * 100,000,000,000 minor units times 100, which is comfortably inside a safe
+ * integer.
+ */
+export function exactPercentOff(priceCents: number, percentOff: number): number | null {
+  if (!Number.isInteger(priceCents) || priceCents < 0) return null;
+  if (!Number.isInteger(percentOff) || percentOff <= 0 || percentOff > 100) return null;
+  const product = priceCents * percentOff;
+  if (!Number.isSafeInteger(product)) return null;
+  if (product % 100 !== 0) return null;
+  return product / 100;
+}
+
+/**
+ * One Stripe Coupon, reduced to everything that decides what comes off ONE line
+ * item priced in ONE currency.
+ *
+ * Every field here is a thing that, left unread, produces a fee computed from a
+ * total Stripe did not charge. They are read off the coupon the checkout
+ * already expands — see connect-checkout — rather than assumed from what this
+ * app would have created, because a coach can make a coupon in their own Stripe
+ * dashboard and `promotionCodes.list` finds it exactly like one of ours.
+ */
+export interface CouponShape {
+  /** 0–100, or null on an amount-off coupon. */
+  percentOff: number | null;
+  /** Minor units, or null on a percentage coupon. */
+  amountOff: number | null;
+  /** The currency `amountOff` is denominated in. Stripe sets this only when
+   *  `amount_off` is set. */
+  amountOffCurrency: string | null;
+  /** True when the coupon carries `currency_options` — per-currency amounts
+   *  off. Refused rather than read: which of them Stripe picks for a session is
+   *  a rule this app is not going to reimplement. */
+  multiCurrency: boolean;
+  /** True when the coupon has `applies_to`, which names Stripe PRODUCTS. This
+   *  app's packages are inline `price_data` with an ad-hoc product, so such a
+   *  coupon cannot be reasoned about here at all. */
+  appliesToProducts: boolean;
+  /** Stripe's own `valid` — expired, used up, or otherwise finished. */
+  valid: boolean;
+}
+
+/**
+ * A Promotion Code's redemption restrictions.
+ *
+ * All three are refused, and the reason is the same for all three: Stripe
+ * documents WHEN restrictions are checked ("at redemption time") and not what
+ * happens to a Checkout Session that names a code whose restriction is not met.
+ * For `first_time_transaction` there are at least documented error codes, so
+ * the outcome is a checkout that will not open. For `minimum_amount` there is
+ * no documented error and no documented fallback, which leaves "the session is
+ * created and the discount silently does not apply" on the table — and that is
+ * precisely a fee computed from a total nobody charged.
+ */
+export interface CodeRestrictions {
+  /** Minor units of minimum spend, or null for none. */
+  minimumAmount: number | null;
+  firstTimeTransaction: boolean;
+  /** `restrictions.currency_options` — per-currency minimums. */
+  multiCurrency: boolean;
+}
+
+/** What comes off a one-off sale, or the reason nobody can say. */
+export type DiscountPlan =
+  | { ok: true; discountCents: number; totalCents: number }
+  | { ok: false; why: string };
+
+/**
+ * What a code takes off ONE one-off package, exactly, or why it cannot.
+ *
+ * The whole of the one-off feature. It answers only where the answer is
+ * arithmetic rather than a guess about Stripe, and `why` is written for the
+ * SERVER LOG and for a coach reading it — the client is told
+ * `CODE_CANNOT_COME_OFF_THIS_ONE` instead, because a client is owed the price
+ * they are actually being asked for and not Repple's internal arithmetic.
+ *
+ * Order matters below. The shape checks come before the money, so a coupon that
+ * is both invalid and in the wrong currency is refused for the reason a coach
+ * can act on first.
+ */
+export function oneOffDiscount(
+  priceCents: number,
+  currency: string,
+  coupon: CouponShape,
+  restrictions: CodeRestrictions,
+): DiscountPlan {
+  const cur = String(currency ?? '').trim().toLowerCase();
+  if (!cur) return { ok: false, why: 'the package has no currency, so there is no money for a discount to be in' };
+  if (!Number.isInteger(priceCents) || priceCents <= 0) {
+    return { ok: false, why: `the package price ${priceCents} is not a whole number of minor units above nought` };
+  }
+
+  if (!coupon.valid) return { ok: false, why: 'Stripe reports the coupon behind that code as no longer valid' };
+  if (coupon.appliesToProducts) {
+    return { ok: false, why: 'the coupon is restricted to particular Stripe products, and this package is an inline price with no stored product for that restriction to match' };
+  }
+  if (coupon.multiCurrency) {
+    return { ok: false, why: 'the coupon carries per-currency amounts, and which one Stripe would apply to this session is not something this app will guess at' };
+  }
+  if (restrictions.multiCurrency) {
+    return { ok: false, why: 'the code carries per-currency minimums, and which one Stripe would enforce is not something this app will guess at' };
+  }
+  if (restrictions.minimumAmount != null) {
+    return { ok: false, why: 'the code carries a minimum spend, and Stripe does not document whether a session below it is refused or created with no discount at all' };
+  }
+  if (restrictions.firstTimeTransaction) {
+    return { ok: false, why: 'the code is restricted to first-time customers, which Stripe checks against a Customer this checkout does not have yet' };
+  }
+
+  const hasPct = coupon.percentOff != null && Number.isFinite(coupon.percentOff);
+  const hasAmt = coupon.amountOff != null && Number.isFinite(coupon.amountOff);
+  if (hasPct && hasAmt) {
+    return { ok: false, why: 'the coupon states both a percentage and an amount off, which is not a shape this app can resolve to one figure' };
+  }
+
+  if (hasAmt) {
+    const off = Number(coupon.amountOff);
+    const offCur = String(coupon.amountOffCurrency ?? '').trim().toLowerCase();
+    if (!offCur) return { ok: false, why: 'the coupon takes an amount off and names no currency for it' };
+    if (offCur !== cur) {
+      // The one thing Stripe genuinely does not document, and the one this app
+      // is least able to survive being wrong about. Repple is white-labelled: a
+      // coach in Dubai and a coach in London run the same code path, and a
+      // "£20 off" coupon meeting an AED package is either an error, a no-op or
+      // twenty dirhams off, and nothing in Stripe's reference says which.
+      return { ok: false, why: `the coupon takes ${off} ${offCur.toUpperCase()} off and this package is sold in ${cur.toUpperCase()}` };
+    }
+    if (!Number.isInteger(off) || off <= 0) {
+      return { ok: false, why: `the coupon's amount off, ${off}, is not a whole number of minor units above nought` };
+    }
+    // Clamped at the price, and this is Stripe's own behaviour rather than a
+    // decision: a coupon "for an amount equal to or exceeding the Checkout
+    // Session total" is documented as the way to make a session free. The
+    // clamp is here so the total below can never be negative.
+    const discountCents = Math.min(off, priceCents);
+    return { ok: true, discountCents, totalCents: priceCents - discountCents };
+  }
+
+  if (hasPct) {
+    const pct = Number(coupon.percentOff);
+    if (!Number.isInteger(pct) || pct <= 0 || pct > 100) {
+      // A fractional percentage is a real Stripe shape (`percent_off` is a
+      // decimal) and it is refused rather than handled, because 12.5% of an odd
+      // price is exactly the rounding this whole design exists to avoid.
+      return { ok: false, why: `the coupon takes ${pct}% off, which is not a whole percentage between 1 and 100` };
+    }
+    const discountCents = exactPercentOff(priceCents, pct);
+    if (discountCents == null) {
+      return {
+        ok: false,
+        why: `${pct}% of ${priceCents} minor units is ${(priceCents * pct) / 100}, which is not a whole number of them — and Stripe does not document how it rounds a percentage discount, so what it would actually charge cannot be known before the session is created`,
+      };
+    }
+    return { ok: true, discountCents, totalCents: priceCents - discountCents };
+  }
+
+  return { ok: false, why: 'the coupon states neither a percentage nor an amount off' };
+}
+
+/**
+ * What a CLIENT is told when their code cannot come off the one-off they are
+ * buying.
+ *
+ * One sentence for every refusal `oneOffDiscount` makes, on purpose. A client
+ * is not owed Repple's fee arithmetic, cannot act on "the coupon carries
+ * per-currency amounts", and would read any of the precise reasons as the app
+ * being broken. What they need is that the price shown is the price, and who to
+ * ask. The precise reason goes to the server log, where the coach's support
+ * question can be answered from it.
+ */
+export const CODE_CANNOT_COME_OFF_THIS_ONE =
+  'That code does not come off this one. Nothing has been charged — buy it at the price shown, or check with your coach which of the things they sell it is for.';
 
 /* ── the code itself ──────────────────────────────────────────────────────── */
 
@@ -162,9 +402,64 @@ export function promoBlocker(code: string, percentOff: number, target: PromoTarg
   } else if (!target.active) {
     out.push('That package is not on sale, so a code for it would do nothing.');
   } else if (!target.billingInterval) {
-    out.push(`“${target.name}” is a one-off sale rather than a subscription, and a code cannot be attached to one yet. Repple’s share of a one-off is worked out from the full price before your client types anything, so a discount would come entirely out of your end and you would still pay a fee on money you did not receive. On a subscription the share is a percentage and it comes down with the price, which is why those work.`);
+    // A one-off takes a code now, and only where the discount lands on a whole
+    // number of minor units. See `oneOffDiscount` and the header: Repple's cut
+    // on a one-off is an absolute figure that has to be sent in the same call
+    // that creates the session, so it is derived from the discounted total this
+    // app worked out — and that total may only ever be one nothing had to round
+    // to reach, because Stripe does not document how it rounds a percentage.
+    //
+    // Refused HERE rather than at the client's checkout wherever possible, so
+    // the coach finds out while they are making the code rather than when the
+    // first person tries to use it. The checkout runs the same arithmetic
+    // again, because a package can be repriced after a code is made and a
+    // ceiling checked once is a ceiling that stops being true.
+    if (!Number.isInteger(target.priceCents) || target.priceCents <= 0) {
+      out.push(`“${target.name}” has no usable price, so there is nothing for a percentage to come off.`);
+    } else if (Number.isInteger(percentOff) && percentOff >= 1 && percentOff <= MAX_PERCENT_OFF && exactPercentOff(target.priceCents, percentOff) == null) {
+      out.push(`${percentOff}% off “${target.name}” does not come to a whole number of the smallest unit of your currency, and on a one-off sale that matters: Repple’s share is an exact figure worked out from the discounted price, and Stripe does not say anywhere how it rounds a percentage. ${wholePercentsFor(target.priceCents)}`);
+    }
   }
   return out;
+}
+
+/**
+ * The percentages that DO come out whole on one price, as a sentence.
+ *
+ * The half of the refusal above that a coach can act on. "That does not divide"
+ * is a fact about arithmetic; "20, 40, 50, 60 and 80 do" is a thing to type.
+ * Capped at the first few so the sentence stays a sentence, and honest about
+ * there being none — which is what a price like 4999 gives, and the answer then
+ * is to price the pack at a round figure rather than to keep guessing.
+ */
+export function wholePercentsFor(priceCents: number): string {
+  const works: number[] = [];
+  for (let p = 1; p <= MAX_PERCENT_OFF; p += 1) {
+    if (exactPercentOff(priceCents, p) != null) works.push(p);
+  }
+  if (!works.length) {
+    // Currency-neutral on purpose. Repple is white-labelled and this sentence
+    // is read by a coach charging in dirhams as often as by one charging in
+    // sterling, so it describes the SHAPE of the price rather than naming a
+    // money: nothing after the decimal point, whatever the decimal point is
+    // worth. A yen has none at all, and the advice is silently correct there
+    // too, because every yen price already is a whole one.
+    return 'No whole percentage comes out exactly on this price. Give the package a price with nothing after the decimal point and every percentage works, or run the offer on a package that renews instead.';
+  }
+  if (works.length === MAX_PERCENT_OFF) {
+    // Every price that is a whole number of MAJOR units lands here, because it
+    // already divides by a hundred. Unreachable from the refusal above, which
+    // only fires on a percentage that did not work, and kept because a caller
+    // asking this question deserves the true answer rather than a list of the
+    // first eight of ninety.
+    return 'Any whole percentage comes out exactly on this price.';
+  }
+  const shown = works.slice(0, 8);
+  const list = shown.length === 1
+    ? `${shown[0]}%`
+    : `${shown.slice(0, -1).map((n) => n + '%').join(', ')} and ${shown[shown.length - 1]}%`;
+  const more = works.length > shown.length ? ', among others' : '';
+  return `On this price ${list}${more} come${shown.length === 1 && !more ? 's' : ''} out exactly.`;
 }
 
 /* ── the client's end of the same code ────────────────────────────────────── */
@@ -198,35 +493,29 @@ export function promoBlocker(code: string, percentOff: number, target: PromoTarg
  * screen as a convenience and by supabase/functions/connect-checkout as the
  * rule.
  *
- * ── And the one-off still refuses ─────────────────────────────────────────
+ * ── And what this can and cannot say about a ONE-OFF ──────────────────────
  *
- * The header of this file has the long form. The short one: on a one-off,
- * Repple's cut is an absolute `application_fee_amount` that has to be sent in
- * the same call that creates the session, and Stripe computes the discounted
- * total inside that call — so there is no ordering in which the fee is derived
- * from what Stripe actually charged. A fee predicted from a discount this app
- * calculated is not the same thing, and the difference is a coach underpaid or
- * a payment Stripe refuses outright. The refusal stands and is now enforced at
- * the checkout as well as at the coach's screen.
+ * It no longer refuses one outright. A one-off takes a code where the discount
+ * lands on a whole number of minor units — see `oneOffDiscount` and the header
+ * — and whether it does depends on the COUPON, which is a thing only the server
+ * holds: it is resolved by `promotionCodes.list` on the coach's own Stripe
+ * account, inside connect-checkout, after this function has run.
+ *
+ * So the division of labour changed rather than the rule. This still runs on
+ * both sides and still refuses a code that is not a code; the one-off's real
+ * test runs on the server only, with the coupon in hand, and a client whose
+ * code fails it is told `CODE_CANNOT_COME_OFF_THIS_ONE` while the precise
+ * reason goes to the log. That is the same shape as a code that does not exist
+ * or belongs to another package: this screen cannot know, the server can, and
+ * nothing is charged either way.
  */
 export function checkoutCodeBlocker(typed: string, target: PromoTarget | null): string | null {
   const c = normaliseCode(typed);
   if (!c) return 'Type the code your coach gave you. Letters and numbers only.';
   if (c.length < 3) return 'That code is too short. Check what your coach gave you.';
   if (!target) return 'That package could not be read, so a code cannot be checked against it.';
-  if (!target.billingInterval) return CODE_IS_NOT_FOR_A_ONE_OFF;
   return null;
 }
-
-/**
- * What a client is told when they type a code against a one-off pack.
- *
- * Not the fee explanation. A client is not owed Repple's internal arithmetic
- * and would not be helped by it; what they need is which of their coach's
- * things a code works on, and the price they are actually being asked for.
- */
-export const CODE_IS_NOT_FOR_A_ONE_OFF =
-  'Discount codes work on the memberships your coach charges for every month or year. This one is bought once, at the price shown.';
 
 /**
  * Whether a code created for one package may be used on another.
@@ -320,6 +609,14 @@ export function promoUseLine(p: PromoCode): string {
  * "£20 off" code, and a code created in one currency silently doing nothing in
  * another is the quiet failure this app spends its design budget avoiding. A
  * percentage is the same offer in every currency and needs no unit at all.
+ *
+ * This is about what Repple CREATES, and it is not a claim about what Stripe
+ * holds. A coach can make an amount-off coupon in their own Stripe dashboard
+ * and `promotionCodes.list` finds it exactly like one of ours, so
+ * `oneOffDiscount` reads that shape too — and accepts it only where the amount
+ * is in the very currency the package is sold in, which is the case this
+ * sentence's objection does not cover. In any other currency it is refused, for
+ * precisely the reason written above.
  */
 export const PROMO_IS_A_PERCENTAGE =
   'A code takes a percentage off, never a fixed amount. Repple is white-labelled, so a fixed amount would need a currency and would do nothing at all for a client paying in a different one — a percentage is the same offer whatever you charge in.';

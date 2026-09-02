@@ -24,6 +24,8 @@ import {
 } from '@lib/gymSessions';
 import { money } from '@lib/gymRecord';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
+// What became of a past session, in one vocabulary shared with both phone apps.
+import { pastSessions, pastVerdict, tallyPast, PAST_STATE_LABEL } from '@lib/sessionHistory';
 
 const DAY = 86400000;
 
@@ -220,6 +222,66 @@ export default function Sessions() {
       .filter((x) => x.rows.length > 0 || x.unmarked > 0);
   }, [sessions, policy, sessionFee, ccy]);
 
+  /* ── the record, one month at a time ──────────────────────────────────────
+   *
+   * Everything above this reads a fixed thirty days and there was no way to ask
+   * for the thirty before them. An owner settling October could not look at
+   * September; a dispute about a session in July had no screen anywhere in this
+   * console that could show it.
+   *
+   * It is a SEPARATE read from the payroll one, deliberately, and the payroll
+   * window is untouched. Widening the read that feeds "Payroll, 30 days",
+   * "Delivered", "Payable" and the Outstanding panel would move four money
+   * figures and leave three of the labels around them saying thirty days. A
+   * history that costs one extra read is a much smaller price than a settlement
+   * priced over a period nobody chose.
+   *
+   * A calendar month, not a rolling window, because a month is the period an
+   * owner reconciles in and the one `payroll_settlements` records against. The
+   * bounds are built with the local Date constructor: a month means the run of
+   * days the gym was actually open, not a UTC slice of them.
+   */
+  const [histOffset, setHistOffset] = useState(0);
+  const [hist, setHist] = useState<PtSession[] | null>(null);
+  // Its own error, so a month that could not be read cannot empty the payroll
+  // half of this page — and so that the sentence can name the month.
+  const [histErr, setHistErr] = useState<string | null>(null);
+  // Bumped when an outcome is recorded or undone, so the record and the queue
+  // cannot end the tap disagreeing about the same session.
+  const [histNonce, setHistNonce] = useState(0);
+
+  const histWindow = useMemo(() => {
+    const n = new Date();
+    const from = new Date(n.getFullYear(), n.getMonth() + histOffset, 1, 0, 0, 0, 0);
+    const to = new Date(n.getFullYear(), n.getMonth() + histOffset + 1, 1, 0, 0, 0, 0);
+    return { from, to };
+  }, [histOffset]);
+
+  const histTenant = me?.tenantId ?? null;
+  const histOwner = me?.role === 'owner';
+  useEffect(() => {
+    if (!histTenant || !histOwner) return;
+    let live = true;
+    setHist(null); setHistErr(null);
+    // `fetchSessions` bounds with `.lte`, which is inclusive, so the upper end
+    // is a millisecond before the next month begins. Passing the next month's
+    // first instant would count a 00:00 session in two months at once.
+    fetchSessions(
+      supabase, histTenant,
+      histWindow.from.toISOString(),
+      new Date(histWindow.to.getTime() - 1).toISOString(),
+    )
+      .then((rows) => { if (live) { setHist(rows); setHistErr(null); } })
+      .catch((e: any) => {
+        if (!live) return;
+        // Null, never []. An empty month is a claim about the gym's floor, and
+        // a read that failed has established nothing about the gym's floor.
+        setHist(null);
+        setHistErr(e?.message ?? 'That month could not be read.');
+      });
+    return () => { live = false; };
+  }, [histTenant, histOwner, histWindow, histNonce]);
+
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
 
@@ -284,6 +346,10 @@ export default function Sessions() {
       await markOutcome(supabase, s.id, outcome,
         s.rateCents ?? (gymError ? undefined : sessionFee == null ? null : Math.round(sessionFee * 100)));
       refresh();
+      // The record below is the same rows seen a second way. Leaving it stale
+      // would have the two halves of this page disagree about a session the
+      // owner has just resolved, in front of them.
+      setHistNonce((n) => n + 1);
     } catch (e: any) {
       setErr(e?.message ?? 'Could not record that outcome.');
     }
@@ -296,6 +362,7 @@ export default function Sessions() {
     try {
       await clearOutcome(supabase, id);
       refresh();
+      setHistNonce((n) => n + 1);
     } catch (e: any) {
       setErr(e?.message ?? 'Could not undo that outcome.');
     }
@@ -446,6 +513,10 @@ export default function Sessions() {
               method={method} onMethod={setMethod} ccy={ccy} />
       <Settled runs={settlements} error={settlementsError} />
       <Marked sessions={settled} unread={unread} onClear={undo} ccy={ccy} />
+      <History
+        rows={hist} error={histErr} from={histWindow.from} offset={histOffset}
+        onOffset={setHistOffset}
+      />
     </Shell>
   );
 }
@@ -732,6 +803,127 @@ function Marked({ sessions, unread, onClear, ccy }: {
   );
 }
 
+/* ── the record, one month at a time ───────────────────────────────────────── */
+
+/**
+ * Every one-to-one that has already happened in a chosen calendar month, with
+ * what became of each.
+ *
+ * Not a second copy of "Marked" above it. That table is the last thirty days
+ * and lists only rows that HAVE an outcome, because its purpose is the undo
+ * button. This is the record: it covers any month the owner picks, it keeps the
+ * unmarked ones — the state that blocks a settlement, and the one an owner most
+ * needs to see when reconciling an old month — and it keeps cancellations,
+ * which are the evidence that an hour was booked at all. supabase/parts/195
+ * makes that argument about classes and it holds one row down: a cancelled
+ * session dropped from the record improves the month's delivery rate without
+ * anybody deciding that it should.
+ *
+ * No money. Deliberately: the payroll figures on this page are computed over
+ * the thirty-day window and settled against it, and a per-month total sitting
+ * beside them would be a second, differently-scoped answer to "what does this
+ * gym owe" with nothing on screen to say which is which.
+ */
+function History({ rows, error, from, offset, onOffset }: {
+  rows: PtSession[] | null;
+  error: string | null;
+  from: Date;
+  offset: number;
+  onOffset: (fn: (n: number) => number) => void;
+}) {
+  const monthLabel = from.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  // Every row here is inside a month that is over, or inside this one up to
+  // now, so the tally is over a whole read — `fetchSessions` refuses a
+  // truncated one rather than handing back a prefix, which is what makes these
+  // counts safe to print at all.
+  const past = rows ? pastSessions(rows) : null;
+  const tally = rows ? tallyPast(rows) : null;
+
+  const cols: Column<PtSession>[] = [
+    { key: 'when', header: 'When', value: (s) => s.startsAt,
+      render: (s) => new Date(s.startsAt).toLocaleString(undefined, {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+      }) },
+    { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName ?? '',
+      render: (s) => s.trainerName ?? <span className="dash">—</span> },
+    { key: 'client', header: 'Client', value: (s) => s.clientName ?? '',
+      render: (s) => s.clientName ?? <span className="dash">—</span> },
+    { key: 'mins', header: 'Mins', value: (s) => s.durationMin, numeric: true },
+    { key: 'state', header: 'What became of it', value: (s) => pastVerdict(s).state,
+      render: (s) => {
+        const v = pastVerdict(s);
+        // The unmarked state is the one that changes what somebody does next,
+        // so it is the one that carries a colour. Everything else is a fact.
+        return v.state === 'unmarked'
+          ? <span style={{ color: 'var(--warn)' }}>{PAST_STATE_LABEL.unmarked}</span>
+          : <>{PAST_STATE_LABEL[v.state]}</>;
+      } },
+    { key: 'markedAt', header: 'Marked', value: (s) => pastVerdict(s).at ?? '',
+      render: (s) => {
+        const v = pastVerdict(s);
+        // A dash here means "nobody has said", which is exactly what the column
+        // beside it already says in words — the two agree rather than one of
+        // them implying the outcome was recorded at no particular time.
+        return v.at
+          ? new Date(v.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+          : <span className="dash">—</span>;
+      } },
+  ];
+
+  return (
+    <Section
+      title="Session history"
+      sub="Every one-to-one that has already happened, month by month, and what became of it. Cancellations stay on the record — a session that was booked and called off is a fact about the month, not an absence."
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12, flexWrap: 'wrap', padding: '10px 14px', borderBottom: '1px solid var(--ring)',
+      }}>
+        <strong style={{ color: 'var(--ink)' }}>{monthLabel}</strong>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={ghostBtn} onClick={() => onOffset((n) => n - 1)}>← Previous</button>
+          <button style={ghostBtn} onClick={() => onOffset(() => 0)} disabled={offset === 0}>This month</button>
+          {/* Stops at the current month rather than paging into the future.
+              This is a record of what happened; there is nothing ahead of now
+              for it to say, and an empty October read in September would be a
+              blank screen that looks like a failure. */}
+          <button style={ghostBtn} onClick={() => onOffset((n) => Math.min(0, n + 1))} disabled={offset >= 0}>Next →</button>
+        </div>
+      </div>
+
+      {error ? (
+        // Named as a read that failed, and named with the month, so an owner is
+        // never left reading a blank table as a month in which their gym did
+        // nothing. Going back another month still works: this one failing says
+        // nothing about the one before it.
+        <Unread what={`${monthLabel} could not be read, so what happened that month is not known here — this is not a month with no sessions in it. ${error}`} />
+      ) : rows === null || past === null || tally === null ? (
+        <Loading />
+      ) : (
+        <>
+          <div style={{ padding: '10px 14px', fontSize: 13, color: 'var(--ink2)' }}>
+            {tally.total === 0
+              ? 'No one-to-one had finished in this month when it was read.'
+              : (
+                <>
+                  {tally.total} finished · {tally.delivered} delivered · {tally.missed} no-show
+                  {' '}· {tally.late_cancelled} late cancel · {tally.cancelled} cancelled
+                  {tally.unmarked > 0
+                    ? <> · <span style={{ color: 'var(--warn)' }}>{tally.unmarked} still needing an outcome</span></>
+                    : ' · none unmarked'}
+                </>
+              )}
+          </div>
+          <DataTable
+            rows={past} columns={cols} rowKey={(s) => s.id}
+            empty="No one-to-one had finished in this month when it was read."
+          />
+        </>
+      )}
+    </Section>
+  );
+}
+
 /* ── shared bits (same shapes as the Money and Door screens) ───────────────── */
 
 // `Toggle` used to live here — two checkboxes that changed this page's payroll
@@ -743,6 +935,14 @@ function Marked({ sessions, unread, onClear, ccy }: {
 const linkBtn = {
   background: 'none', border: 'none', padding: 0, cursor: 'pointer',
   color: 'var(--brand)', fontSize: 13, fontFamily: 'var(--sans)',
+} as const;
+
+// Same shape as the one on /timetable, so the two boards that page through time
+// in this console have the same control under the reader's hand.
+const ghostBtn = {
+  background: 'var(--surface2)', color: 'var(--ink2)', border: '1px solid var(--ring)',
+  borderRadius: 0, padding: '6px 11px', fontSize: 12.5, cursor: 'pointer',
+  fontFamily: 'var(--sans)', whiteSpace: 'nowrap',
 } as const;
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {

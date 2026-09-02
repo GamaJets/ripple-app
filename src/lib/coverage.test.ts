@@ -345,7 +345,7 @@ ok(pct(null) === null, 'pct(null) stays null so a caller cannot render 0%');
 const pass = (o: Partial<GymPass>): GymPass => ({
   id: 'p', passTypeId: null, passTypeName: null, kind: 'drop_in', holderId: null,
   holderName: 'Walk-in', hostMemberId: null, issuedOn: '2026-08-01', expiresOn: null,
-  usesTotal: 1, usesSpent: 0, paidCents: 1500, currency: 'AED', note: null, ...o,
+  usesTotal: 1, usesSpent: 0, paidCents: 1500, currency: 'AED', note: null, covers: 'visit' as const, ...o,
 });
 
 ok(remainingUses({ usesTotal: 10, usesSpent: 3 }) === 7, 'remaining uses subtracts');
@@ -490,7 +490,7 @@ const NOW = Date.parse('2026-08-25T12:00:00Z');
 const sess = (o: Partial<PtSession>): PtSession => ({
   id: 's', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
   startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
-  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, ...o,
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
 });
 
 ok(isDelivered({ outcome: 'completed' }), 'completed is delivered');
@@ -976,7 +976,7 @@ const NOW2 = Date.parse('2026-08-25T12:00:00Z');
 const s2 = (o: Partial<PtSession>): PtSession => ({
   id: 'x', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
   startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
-  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, ...o,
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
 });
 
 const fresh = s2({ id: 'a' });
@@ -2040,9 +2040,9 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   const book = (bookingId: string, memberId: string, startsAt: string, attended: boolean, status = 'booked'): MemberBooking =>
     ({ bookingId, memberId, classId: 'c-' + bookingId, classTitle: 'Spin', startsAt, status, attendedAt: attended ? startsAt : null });
   const sess = (id: string, clientId: string, startsAt: string, outcome: PtSession['outcome']): PtSession =>
-    ({ id, trainerId: 't1', trainerName: 'Coach', clientId, clientName: null, startsAt, durationMin: 60, status: 'booked', outcome, outcomeAt: null, rateCents: 20000, settlementId: null });
+    ({ id, trainerId: 't1', trainerName: 'Coach', clientId, clientName: null, startsAt, durationMin: 60, status: 'booked', outcome, outcomeAt: null, rateCents: 20000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, });
   const pass = (id: string, holderId: string, total: number, spent: number): GymPass =>
-    ({ id, passTypeId: 'pt1', passTypeName: '10-pack', kind: 'pack', holderId, holderName: null, hostMemberId: null, issuedOn: '2026-08-01', expiresOn: null, usesTotal: total, usesSpent: spent, paidCents: null, currency: 'AED', note: null });
+    ({ id, passTypeId: 'pt1', passTypeName: '10-pack', kind: 'pack', covers: 'visit', holderId, holderName: null, hostMemberId: null, issuedOn: '2026-08-01', expiresOn: null, usesTotal: total, usesSpent: spent, paidCents: null, currency: 'AED', note: null });
 
   // FLOOR and GONE have byte-identical class histories. On the timetable they
   // are the same member. In the door log they could not be less alike.
@@ -2521,7 +2521,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     id, trainerId: 't1', trainerName: 'Alex', clientId: 'm1', clientName: 'Sara',
     startsAt: new Date(2026, 5, 10, 9, 0).toISOString(), durationMin: 60,
     status: 'booked', outcome, outcomeAt: outcome ? '2026-06-10T10:00:00.000Z' : null,
-    rateCents, settlementId: null,
+    rateCents, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
   });
   const rec = (over: Partial<CloseRecord> = {}): CloseRecord => ({
     payments: sliceReady([junePay('a', 30000), junePay('b', 20000)]),
@@ -2760,14 +2760,14 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     { bookingId: 'b2', memberId: 'u2', classId: 'c1', classTitle: 'Spin, 45min', startsAt: '2026-08-01T06:00:00.000Z', status: 'booked', attendedAt: null },
   ];
   const sessIn: PtSession[] = [
-    { id: 's1', trainerId: 't1', trainerName: 'Dana', clientId: 'u1', clientName: '"Bob" Smith', startsAt: '2026-08-03T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: '2026-08-03T11:00:00.000Z', rateCents: 20000, settlementId: null },
-    { id: 's2', trainerId: 't1', trainerName: 'Dana', clientId: 'u2', clientName: "O'Brien, Sean", startsAt: '2026-08-04T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: null, outcomeAt: null, rateCents: null, settlementId: null },
+    { id: 's1', trainerId: 't1', trainerName: 'Dana', clientId: 'u1', clientName: '"Bob" Smith', startsAt: '2026-08-03T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: '2026-08-03T11:00:00.000Z', rateCents: 20000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+    { id: 's2', trainerId: 't1', trainerName: 'Dana', clientId: 'u2', clientName: "O'Brien, Sean", startsAt: '2026-08-04T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: null, outcomeAt: null, rateCents: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
   ];
   const ptIn: PassType[] = [
-    { id: 'pt1', name: 'Guest pass', kind: 'guest', priceCents: 0, currency: 'AED', uses: 1, validDays: null, active: true },
+    { id: 'pt1', name: 'Guest pass', kind: 'guest', priceCents: 0, currency: 'AED', uses: 1, validDays: null, covers: 'visit', active: true },
   ];
   const passIn: GymPass[] = [
-    { id: 'gp1', passTypeId: 'pt1', passTypeName: 'Guest pass', kind: 'guest', holderId: null, holderName: 'Walk-in', hostMemberId: 'u1', issuedOn: '2026-08-01', expiresOn: null, usesTotal: 1, usesSpent: 0, paidCents: null, currency: 'AED', note: null },
+    { id: 'gp1', passTypeId: 'pt1', passTypeName: 'Guest pass', kind: 'guest', covers: 'visit', holderId: null, holderName: 'Walk-in', hostMemberId: 'u1', issuedOn: '2026-08-01', expiresOn: null, usesTotal: 1, usesSpent: 0, paidCents: null, currency: 'AED', note: null },
   ];
   const visIn: Visit[] = [
     { id: 'v1', memberId: 'u1', memberName: '"Bob" Smith', passId: null, classId: 'c1', enteredAt: '2026-08-01T05:52:00.000Z', exitedAt: null, source: 'door', note: 'tailgated; spoke to them' },
@@ -2992,7 +2992,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ): PtSession => ({
     id, trainerId, trainerName: trainerId, clientId: null, clientName: null,
     startsAt: at(daysAgo), durationMin: 60, status: 'booked',
-    outcome, outcomeAt: outcome ? at(daysAgo) : null, rateCents, settlementId,
+    outcome, outcomeAt: outcome ? at(daysAgo) : null, rateCents, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
   });
 
   const shift = (id: string, trainerId: string, daysAgo: number, hours: number, status: 'scheduled' | 'cancelled' = 'scheduled'): Shift => ({
@@ -3755,7 +3755,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     paid: number | null,
     currency = 'AED',
   ): GymPass => ({
-    id, passTypeId: 't1', passTypeName: kind, kind, holderId, holderName,
+    id, passTypeId: 't1', passTypeName: kind, kind, covers: 'visit', holderId, holderName,
     hostMemberId: host, issuedOn: issued, expiresOn: expires,
     usesTotal: kind === 'guest' && spent === 0 ? 3 : 1, usesSpent: spent,
     paidCents: paid, currency, note: null,
@@ -4500,7 +4500,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     id, trainerId: 't1', trainerName: 'Dana', clientId: null, clientName: null,
     startsAt: new Date(NOW - 5 * 86_400_000).toISOString(), durationMin: 60,
     status: 'booked', outcome: 'completed', outcomeAt: new Date(NOW - 5 * 86_400_000).toISOString(),
-    rateCents, settlementId,
+    rateCents, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
   });
   const owed = (rows: PtSession[], fee: number | null) =>
     payrollTotal(payrollByTrainer(rows, PAY_DELIVERED_ONLY, fee, NOW)).cents;

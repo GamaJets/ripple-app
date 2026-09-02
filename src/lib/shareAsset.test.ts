@@ -263,6 +263,52 @@ eq(cardSize('post').w, 1080, 'and the post is 1080 wide');
 // exports a 0×0 PNG, which every network accepts and nobody can see.
 ok(cardSize('nonsense' as never).w > 0, 'an unknown shape falls back to a real canvas, never a 0×0 one');
 
+/* ── 4. the two images, and whose say-so each one is on ───────────────────── */
+
+// The coach's own mark. No consent question arises: it is theirs, it identifies
+// nobody else, and the only thing that can keep it off a card is not being able
+// to read it.
+const withLogo = weekCard({ brand: 'Warehouse', spanLabel: 'Last 7 days', sessions: 9, minutes: 540, clients: 6, logo: 'data:image/png;base64,AAAA' });
+ok(withLogo.ok && withLogo.card.logo?.uri === 'data:image/png;base64,AAAA', 'a coach\u2019s logo goes on their own week card');
+ok(withLogo.ok && withLogo.card.logo?.source === 'coach-logo', 'labelled as the coach\u2019s rather than as an image of unknown provenance');
+const noLogo = weekCard({ brand: 'Warehouse', spanLabel: 'Last 7 days', sessions: 9, minutes: 540, clients: 6 });
+eq(noLogo.ok ? noLogo.card.logo : 'built nothing', null, 'a coach who has set none gets the card they got before, not a gap');
+const blankLogo = weekCard({ brand: 'Warehouse', spanLabel: 'Last 7 days', sessions: 9, minutes: 540, clients: 6, logo: '   ' });
+eq(blankLogo.ok ? blankLogo.card.logo : 'built nothing', null, 'and neither a blank string nor a failed read draws anything');
+
+// A week card is about the coach and has nobody else on it. The field is
+// explicitly null rather than absent, so a caller cannot fill it in later
+// without changing this module.
+eq(withLogo.ok ? withLogo.card.photo : 'built nothing', null, 'a week card never carries a client photo');
+
+// A client's photo is on the CLIENT's say-so and nothing else. The exhaustive
+// version of this, including a coach with both of their own ticks on, is in
+// src/lib/photoPublish.test.ts, which is where the consent type lives.
+const consented = resultCard(
+  { brand: 'W', clientName: 'Sarah Jones', spanLabel: '12 weeks in', figures: [{ label: 'Weight', value: '\u22128.4 kg' }], note: '',
+    photo: { uri: 'file:///p.jpg', photoId: 'p1', consent: 'granted' } },
+  { figures: true, name: false },
+);
+ok(consented.ok && consented.card.photo?.uri === 'file:///p.jpg', 'the client\u2019s own permission is what puts their photo on a card');
+const refused = resultCard(
+  { brand: 'W', clientName: 'Sarah Jones', spanLabel: '12 weeks in', figures: [{ label: 'Weight', value: '\u22128.4 kg' }], note: '',
+    photo: { uri: 'file:///p.jpg', photoId: 'p1', consent: 'absent' } },
+  { figures: true, name: true },
+);
+eq(refused.ok ? refused.card.photo : 'built nothing', null,
+  'and both of the coach\u2019s own ticks together do not substitute for it');
+
+// The headline is free text and is the largest thing on the card. Without name
+// consent it is scrubbed like the caption, which it was not before.
+const typedIntoHeadline = resultCard(
+  { brand: 'W', clientName: 'Sarah Jones', spanLabel: "Sarah's 12 weeks", figures: [{ label: 'Weight', value: '\u22128.4 kg' }], note: '' },
+  { figures: true, name: false },
+);
+ok(typedIntoHeadline.ok && !/Sarah/i.test(JSON.stringify(typedIntoHeadline.card)),
+  'a name typed into the period field does not reach the card either');
+ok(typedIntoHeadline.ok && typedIntoHeadline.card.headline === "My client's 12 weeks",
+  'the headline keeps its shape with the name replaced rather than being emptied');
+
 /* ── report ───────────────────────────────────────────────────────────────── */
 
 if (errors.length) {

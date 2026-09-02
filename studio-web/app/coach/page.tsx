@@ -112,7 +112,7 @@ function failure(res: PromiseSettledResult<unknown>, what: string): string | nul
 async function fetchMySessions(trainerId: string, sinceIso: string, untilIso: string): Promise<PtSession[]> {
   const { data, error } = await supabase
     .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id')
+    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
     .eq('trainer_id', trainerId)
     .gte('starts_at', sinceIso)
     .lte('starts_at', untilIso)
@@ -132,6 +132,12 @@ async function fetchMySessions(trainerId: string, sinceIso: string, untilIso: st
     outcomeAt: r.outcome_at ?? null,
     rateCents: r.rate_cents ?? null,
     settlementId: r.settlement_id ?? null,
+    // What the CLIENT paid with (supabase/parts/370), which is not the same
+    // question as the settlement beside it — that is what the gym paid the
+    // coach. A shortfall is the two disagreeing.
+    packDrawnKind: r.pack_drawn_kind ?? null,
+    packDrawnAt: r.pack_drawn_at ?? null,
+    packDrawShortfallAt: r.pack_draw_shortfall_at ?? null,
   }));
 }
 

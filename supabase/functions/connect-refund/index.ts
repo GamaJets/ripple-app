@@ -26,6 +26,14 @@
 //    so `optionsForObject` reads `stripe_account_id` off the SALE ROW, exactly
 //    as the cancel branch of connect-checkout reads it off the subscription.
 //
+//    On a RENEWAL that column did not exist until part 310. Part 161 put it on
+//    `client_purchases` and on `client_subscriptions` and not on
+//    `client_subscription_payments`, so the select below asked PostgREST for a
+//    column that was not there and every renewal refund failed on the read with
+//    42703 — not just the direct-charge ones, all of them. Nothing caught it
+//    because no screen called this branch at all until the Renewals Paid list
+//    on app/(trainer)/payments.tsx.
+//
 // 2. A REFUND THE APP BELIEVES IN AND STRIPE DID NOT MAKE. Stripe is called
 //    FIRST and the row is written only from its answer. A takings figure the
 //    app reduced for a refund that never happened is the worst kind of wrong,
@@ -64,7 +72,7 @@
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { optionsForObject } from '../../../src/lib/directCharges.ts';
-import { refundBlocker, refundableCents, refundAmountBlocker, type Refundable } from '../../../src/lib/refunds.ts';
+import { refundBlocker, refundableRow, refundableCents, refundAmountBlocker, type Refundable } from '../../../src/lib/refunds.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -92,14 +100,11 @@ interface SaleRow {
   stripe_invoice_id?: string | null;
 }
 
-/** PostgREST hands a bigint back as a STRING so a value above 2^53 can survive
- *  JSON. Left alone, `"48000"` fails every arithmetic check below and a real
- *  sale is refused as one with no amount on it. */
-const int = (v: unknown): number | null => {
-  if (v == null) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
+// The bigint-as-string coercion that used to live here — PostgREST hands a
+// bigint back as a STRING so a value above 2^53 can survive JSON, and left
+// alone `"48000"` fails every arithmetic check and a real sale is refused as
+// one with no amount on it — moved into `refundableRow` in
+// src/lib/refunds.ts, where it is asserted and where the screen gets it too.
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -170,16 +175,13 @@ Deno.serve(async (req) => {
   // The SAME rule the screen ran, run again here. The screen's copy is a
   // convenience so a coach is not sent to the server to be told no; this copy
   // is the rule. src/lib/refunds.ts is imported by both so they cannot drift.
-  const refundable: Refundable = {
-    kind: kind as 'purchase' | 'renewal',
-    amountCents: int(sale.amount_cents),
-    currency: sale.currency,
-    refundedCents: int(sale.refunded_cents) ?? 0,
-    stripeRef: paymentIntent,
-    // A renewal row exists only because Stripe reported the invoice PAID (part
-    // 132), so there is no status column on it to check and none is wanted.
-    paid: kind === 'renewal' ? true : String(sale.status ?? '') === 'paid',
-  };
+  // `refundableRow` is the mapping, and it is shared with the screen rather
+  // than written twice. It carries the two things this used to decide inline
+  // and that a second copy gets wrong: the bigint-as-string coercion
+  // `refunded_cents` needs, and the fact that a renewal row exists ONLY because
+  // Stripe reported the invoice paid — so there is no status column on that
+  // table to check and reaching for one would refuse every renewal refund.
+  const refundable: Refundable = refundableRow(kind, sale, paymentIntent);
   const blocked = refundBlocker(refundable);
   if (blocked) return json({ error: blocked }, 409);
 

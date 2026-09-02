@@ -53,6 +53,30 @@ eq(codeFromUrl('https://l.facebook.com/l.php?u=https%3A%2F%2Fx.com%2Fno-code&h=A
 eq(codeFromUrl('https://l.facebook.com/l.php?c=K7M2QX&u=https%3A%2F%2Fx.com%2Fjoin%3Fc%3DP4RSTV'), 'K7M2QX',
   'a code on the outer link wins over one inside a shim');
 
+// Google's redirector is the same shape with a different parameter name. An ad
+// clicked through googleadservices arrives with the real destination encoded in
+// `adurl`, and without following it every Google ad would read as "no code" and
+// the coach would be told their whole Google budget was unattributable.
+eq(codeFromUrl('https://www.googleadservices.com/pagead/aclk?sa=L&ai=abc&adurl=https%3A%2F%2Fwww.repplefitness.com%2Fjoin%3Fc%3DP4RSTV'),
+  'P4RSTV', 'the code inside Google’s redirector is found');
+eq(codeFromUrl('https://www.google.com/aclk?sa=l&adurl=https%3A%2F%2Fx.com%2Fno-code'), null,
+  'and a redirector around a link with no code is still no code');
+eq(codeFromUrl('https://www.googleadservices.com/pagead/aclk?c=K7M2QX&adurl=https%3A%2F%2Fx.com%2Fjoin%3Fc%3DP4RSTV'),
+  'K7M2QX', 'a code on the outer link wins there too');
+
+// A click id is not a join code and is never read as one: gclid and ttclid
+// identify the CLICK and change on every impression, so filing a coach's money
+// against one would produce a new channel per click. They matter only in that
+// they must not hide the code sitting beside them.
+eq(codeFromUrl('https://www.repplefitness.com/join?c=K7M2QX&gclid=EAIaIQobChMI'), 'K7M2QX',
+  'Google’s click id appended to the destination does not hide the code');
+eq(codeFromUrl('https://www.repplefitness.com/join?ttclid=E.C.P.abc&c=P4RSTV'), 'P4RSTV',
+  'nor does TikTok’s, before it');
+eq(codeFromUrl('https://www.repplefitness.com/join?c=K7M2QX&gclid={gclid}&ttclid=__CLICKID__'), 'K7M2QX',
+  'and neither do the macros, which is how they arrive when read off the ad rather than a click');
+eq(codeFromUrl('https://www.repplefitness.com/join?gclid=EAIaIQobChMI'), null,
+  'a destination carrying only a click id carries no code — that is "no-code", not a code');
+
 eq(codeFromUrl('https://www.repplefitness.com/join'), null, 'a link with no query carries no code');
 eq(codeFromUrl('https://www.repplefitness.com/join?c='), null, 'and an empty c= is not a code');
 eq(codeFromUrl(''), null, 'nor is nothing');

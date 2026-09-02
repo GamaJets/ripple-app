@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A coach on Repple</title>
+<meta name="description" content="A Repple coach's own page: what they do, what they are qualified in, and how to train with them.">
+<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="icon" href="favicon.png">
+<script>
+/* The phone header, identical to web/join.html. Links collapse behind one
+   button; without JavaScript they stay in the bar and wrap, which is why the
+   collapsed state is gated on the js-nav class rather than being the default. */
+document.documentElement.classList.add('js-nav');
+addEventListener('DOMContentLoaded', function () {
+  var nav = document.querySelector('nav.site');
+  var btn = nav && nav.querySelector('.nav-toggle');
+  if (!btn) return;
+  function shut() {
+    nav.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'Open menu');
+  }
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = nav.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  });
+  document.addEventListener('click', function (e) { if (!nav.contains(e.target)) shut(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });
+  addEventListener('resize', shut);
+});
+</script>
+</head>
+<body>
+
+<!--
+  ONE COACH'S PAGE ON THE OPEN WEB.
+  ═══════════════════════════════════════════════════════════════════════════
+
+  `trainers.listed` puts a coach in Find a Trainer, which is a screen inside the
+  client app behind a sign-in. The people most likely to become a coach's next
+  client are already following them somewhere else, and until this page there
+  was no address anywhere in the product they could be sent to. This is that
+  address: /coach?h=<their handle>.
+
+  supabase/parts/340 is the database half. src/lib/publicProfile.ts holds every
+  rule about what may appear here, and src/lib/publicProfile.test.ts reads THIS
+  FILE and fails if the sentences below have drifted from it.
+
+  ── HOW IT IS SERVED, AND WHY IT FETCHES ─────────────────────────────────
+
+  Static, and it asks the server for the coach when it opens. The decision was
+  between that and rendering per coach on a server, and there are three reasons
+  it went this way:
+
+    · `web/` has NO BUILD STEP. .github/workflows/deploy-web.yml copies this
+      directory to Cloudflare Pages verbatim; nothing transforms it, nothing
+      templates it, and Pages serves static files with no worker here. Rendering
+      per coach means inventing a server or a generator that only this page
+      uses, which is the step nobody runs and nobody maintains — the same
+      refusal web/join.html's own header makes about its brand table.
+
+    · The content changes whenever the coach edits their profile. A pre-rendered
+      file would need a rebuild and a deploy per edit, so a coach who fixed a
+      typo would watch the old one sit in their bio until somebody pushed.
+
+    · There is nothing to enumerate from. Nothing lists the coaches who have a
+      page, deliberately (part 340), so a generator would have no input.
+
+  THE PRICE, STATED PLAINLY. With scripting off there is no page at all, and a
+  crawler that does not run JavaScript sees only the fallback below. That is a
+  real cost to a coach who wanted to be found in a search result, and it is the
+  price of having no build step. It is written here rather than discovered.
+
+  ── ESCAPING ─────────────────────────────────────────────────────────────
+
+  Every value from the server is written with textContent, and every URL is
+  built with encodeURIComponent. Nothing on this page assigns innerHTML, and
+  the test asserts that by reading the file — a coach's bio is a field a person
+  types into, and it is drawn on a page we serve at our own origin.
+
+  ── THE FOUR THINGS THIS PAGE CAN BE ─────────────────────────────────────
+
+  Four, not two, and the difference between the last two is the whole point:
+
+    loading      the read is in flight
+    ready        a coach is published here
+    absent       nobody is publishing at this address. The server answers a
+                 handle nobody holds and a page that has been switched off with
+                 the same zero rows, on purpose. It says so plainly rather than
+                 falling through to the marketing site: somebody who followed a
+                 coach's link and landed on "Repple, the white-label fitness
+                 platform" has been told their coach does not exist by a page
+                 pretending nothing went wrong.
+    unreadable   the read FAILED. Not the same thing, and it says nothing at all
+                 about the coach — an empty profile under a failed read is
+                 somebody who looks like they have nothing, on the page they put
+                 in their own bio.
+-->
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <span class="mark" id="b-mark">
+        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+        </svg>
+      </span>
+      <span id="b-wordmark">Repple</span>
+    </a>
+    <nav class="site">
+      <div class="nav-links" id="site-menu">
+      <a href="/client">Members</a>
+      <a href="/trainer">Coaches</a>
+      <a href="/studio">Gyms</a>
+      <a href="/support">Support</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      </div>
+      <a class="cta" href="/signup">Create account</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+        <svg class="ico-open" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg class="ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap narrow page">
+
+    <!-- Shown until the read lands, and replaced by whichever of the four
+         outcomes happened. Never left blank: a page that is silent while it
+         waits reads as broken on a slow connection. -->
+    <div id="waiting">
+      <p class="eyebrow">Loading</p>
+      <h1 class="display">One moment</h1>
+      <p class="lede">Fetching this coach&rsquo;s page.</p>
+    </div>
+
+    <!-- absent / unreadable / no-address.
+         The six sentences live HERE, on the element, and not in a script.
+         Two things read them: the module below, and the watchdog beside it that
+         runs when the module never arrives at all. A string in one script that
+         the other has to repeat is a string the two of them will eventually
+         disagree about, and the pair a reader must not see confused is
+         "there is no coach here" and "we could not read it".
+
+         Each is byte-identical to its export in src/lib/publicProfile.ts, and
+         src/lib/publicProfile.test.ts parses these attributes and fails if they
+         are not. -->
+    <div id="nothing" hidden
+         data-absent-eyebrow="Nothing here"
+         data-absent-hd="There is no page at this address"
+         data-absent-note="Nobody is publishing a page here. If a coach gave you this link, check it against what they sent you, or ask them for it again."
+         data-unreadable-eyebrow="Our end"
+         data-unreadable-hd="We could not load this page"
+         data-unreadable-note="This is our end, not theirs. The coach&rsquo;s page may be perfectly fine and we could not read it, so try again in a moment."
+         data-noaddress-eyebrow="This link"
+         data-noaddress-hd="This address is a coach&rsquo;s page"
+         data-noaddress-note="A coach&rsquo;s link carries their own address on the end of it. This one does not, so there is nothing to show.">
+      <p class="eyebrow" id="nothing-eyebrow">Nothing here</p>
+      <h1 class="display" id="nothing-hd"></h1>
+      <p class="lede" id="nothing-note"></p>
+      <p class="btn-row"><a class="btn" href="/">What Repple is</a><a class="btn" href="/client">The member app</a></p>
+    </div>
+
+    <article id="profile" hidden>
+      <!-- The monogram. There is no coach photo and no logo here yet: whether
+           `profiles.avatar` is readable without a signed URL is a storage
+           question part 340 did not answer, and a logo is being added
+           elsewhere. This box is the slot it drops into — one element, the
+           coach's accent behind it, sized for a square mark. -->
+      <div id="mono" aria-hidden="true"></div>
+
+      <p class="eyebrow" id="p-eyebrow">Personal training</p>
+      <h1 class="display" id="p-name"></h1>
+      <p class="lede" id="p-tagline" hidden></p>
+
+      <p class="btn-row"><a class="btn primary" id="p-join" href="#" hidden>Train with them</a></p>
+      <p class="tiny" id="p-joinnote" hidden></p>
+
+      <div id="p-biobox" hidden>
+        <h2 class="hd" style="font-size:clamp(22px,2.7vw,30px);margin:44px 0 12px">About</h2>
+        <p class="lede" id="p-bio" style="white-space:pre-wrap"></p>
+      </div>
+
+      <div id="p-specbox" hidden>
+        <h2 class="hd" style="font-size:clamp(22px,2.7vw,30px);margin:44px 0 12px">Specialties</h2>
+        <div class="chips" id="p-specialties"></div>
+      </div>
+
+      <div id="p-offerbox" hidden>
+        <h2 class="hd" style="font-size:clamp(22px,2.7vw,30px);margin:44px 0 12px">What they offer</h2>
+        <div class="chips" id="p-offers"></div>
+      </div>
+
+      <div id="p-feebox" hidden>
+        <h2 class="hd" style="font-size:clamp(22px,2.7vw,30px);margin:44px 0 12px">Session rate</h2>
+        <p class="lede" id="p-fee"></p>
+      </div>
+
+      <!-- Qualifications and insurance. Everything here is the coach's own
+           statement and the note under the heading says so in those words;
+           expired rows never leave the database (part 340), so nothing in this
+           list can read as current when it is not. -->
+      <div id="p-credbox" hidden>
+        <h2 class="hd" style="font-size:clamp(22px,2.7vw,30px);margin:44px 0 12px">Qualifications</h2>
+        <div class="rows" id="p-creds"></div>
+        <p class="tiny" id="p-claimnote" style="margin-top:14px"></p>
+      </div>
+
+      <!-- The aggregate, and nothing else. No review text, no reviewer, no
+           reply, no dates. See src/lib/publicProfile.ts and part 340 for the
+           argument; the short version is that the reviewer never agreed to be
+           on the open web and is not the person who opted into this page. -->
+      <div id="p-ratebox" hidden>
+        <h2 class="hd" style="font-size:clamp(22px,2.7vw,30px);margin:44px 0 12px">Reviews</h2>
+        <p class="lede" id="p-rating"></p>
+        <p class="tiny" id="p-ratenote" style="margin-top:10px"></p>
+      </div>
+
+      <div class="callout" style="margin-top:48px">
+        <p id="p-madeby">Repple makes the app. The coaching is theirs, and everything on this page was written by them.</p>
+      </div>
+    </article>
+
+  </div>
+</main>
+
+<noscript>
+  <div class="wrap page">
+    <h1 class="display">This page needs JavaScript</h1>
+    <p class="lede">A coach&rsquo;s page is fetched when it opens, so there is nothing to show with
+       scripting turned off. Open the link in a browser that allows it, or ask the coach for their
+       join code and <a href="/download">get the app</a>.</p>
+  </div>
+</noscript>
+
+<style>
+  /* The monogram slot. A logo drops in here later without the layout moving. */
+  #mono {
+    width: 76px; height: 76px; border-radius: 18px; margin-bottom: 26px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-size: 36px; line-height: 1;
+    background: var(--accent); color: var(--brand-fill-ink);
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+  .chips .pill { font-size: 13.5px; padding: 6px 13px; }
+  #p-creds .row { grid-template-columns: 1fr auto; }
+  #p-creds .ttl { color: var(--ink); font-weight: 500; }
+  #p-creds .sub { color: var(--ink3); font-size: 13px; margin-top: 2px; }
+</style>
+
+<footer class="site">
+  <div class="wrap">
+    <span id="b-copy">© 2026 Repple</span>
+    <span>
+      <a href="/support">Support</a> ·
+      <a href="/privacy">Privacy</a> ·
+      <a href="/security">Security</a> ·
+      <a href="/terms">Terms</a>
+    </span>
+  </div>
+</footer>
+
+<!--
+  WHICH BRAND'S SITE THIS PAGE IS ON.
+
+  The same table and the same resolver as web/join.html, for the reason that
+  file's own header gives at length: a chain buying this platform gets their app
+  under their name, and a coach of theirs handing out a link to their own domain
+  must not land a reader on Repple's wordmark. The block below is a VERBATIM
+  copy of the one in web/join.html, and src/lib/publicProfile.test.ts asserts
+  that it is byte-identical to it — so the pair cannot drift, and joinPage.test.ts
+  goes on being the single place the table is held against src/lib/brands.ts.
+-->
+<script type="application/json" id="site-brands">
+{
+  "repple": {
+    "hosts": ["repplefitness.com", "www.repplefitness.com"],
+    "label": "Repple",
+    "clientApp": "Repple",
+    "clientScheme": "repple",
+    "androidPackage": "com.washateria.repple",
+    "appleAppId": "6790096518",
+    "supportEmail": "support@repplefitness.com"
+  },
+  "example": {
+    "hosts": ["example.com", "www.example.com"],
+    "label": "Example Fitness",
+    "clientApp": "Example Fitness",
+    "clientScheme": "examplefitness",
+    "androidPackage": "com.example.fitness",
+    "appleAppId": null,
+    "supportEmail": "support@example.com"
+  }
+}
+</script>
+
+<script>
+(function () {
+  // Resolved before anything else runs, exactly as on the join page: the
+  // fetch below builds the join link against this origin, and the footer is
+  // rewritten from it.
+  var BAKED = 'repple';
+  var table = {};
+  try {
+    table = JSON.parse(document.getElementById('site-brands').textContent) || {};
+  } catch (e) { table = {}; }
+
+  function resolve() {
+    var q = '';
+    try { q = (new URLSearchParams(location.search).get('b') || '').trim().toLowerCase(); } catch (e) { q = ''; }
+    if (q && Object.prototype.hasOwnProperty.call(table, q)) return q;
+    var host = (location.hostname || '').toLowerCase();
+    for (var k in table) {
+      if (!Object.prototype.hasOwnProperty.call(table, k)) continue;
+      var hosts = table[k].hosts || [];
+      for (var i = 0; i < hosts.length; i++) if (hosts[i] === host) return k;
+    }
+    return BAKED;
+  }
+
+  var id = resolve();
+  var b = table[id] || table[BAKED];
+  window.SITE_BRAND = b;
+  if (!b || id === BAKED) return;
+
+  // The ripple is Repple's own mark, drawn inline, and there is no asset
+  // pipeline here to put another brand's in its place. Removed rather than
+  // left: a chain's page carrying its supplier's mark is the one place the
+  // white-label proposition is visibly untrue.
+  var mark = document.getElementById('b-mark');
+  if (mark) mark.hidden = true;
+  var set = function (elId, text) { var el = document.getElementById(elId); if (el) el.textContent = text; };
+  set('b-wordmark', b.label);
+  set('b-copy', '© 2026 ' + b.label);
+  set('p-madeby', b.label + ' makes the app. The coaching is theirs, and everything on this page was written by them.');
+  document.title = 'A coach on ' + b.label;
+})();
+</script>
+
+<script type="module">
+/*
+  THE READ.
+
+  One RPC, `public_coach_page`, and it is the second thing in this database the
+  publishable key may execute, after `leave_my_details`. Read supabase/parts/340
+  before changing anything here. The properties it holds:
+
+    · it returns a row only for a coach who has BOTH opted into Find a Trainer
+      and asked for a public page. A coach who has done neither, or only one,
+      has no page and no trace of one;
+    · a handle nobody holds and a page that has been switched off are the SAME
+      zero rows, so this page cannot be used to find out which coaches exist;
+    · reviews come back as a COUNT and a SUM. No body, no reviewer, no gym, no
+      reply, no review id. Those columns are not in the function's return type
+      and there is nothing here that could ask for them;
+    · credentials come back already filtered: live, self-declared. Nothing that
+      has expired and nothing that would need the word "checked".
+*/
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const sb = createClient(
+  'https://phgfwzpkkwdysftlgkoq.supabase.co',
+  'sb_publishable_Td-L1IVNMzPpQsa30hUExQ_K--w76RZ',
+);
+
+/* Below this many reviews a count is shown and no average is computed. The
+   number, and the argument for it, are MIN_FOR_AVERAGE in src/lib/reviews.ts:
+   a single 5 is not "5.0 stars", it is one person's opinion, and a figure
+   invites a comparison against a coach with forty. The test asserts the two
+   agree. */
+const MIN_FOR_AVERAGE = 3;
+
+/* WCAG AA for body text — AA_TEXT in src/lib/a11y.ts. A coach's colour is
+   checked for this when they choose it, and it is checked AGAIN here: the
+   database validates the SHAPE of `brand_color` and deliberately not its
+   legibility, so a value that arrived by some other route still must not reach
+   a button. The test holds this against a11y.ts. */
+const AA_TEXT = 4.5;
+const INK_ON_LIGHT = '#111310';
+const INK_ON_DARK = '#ffffff';
+
+const $ = (id) => document.getElementById(id);
+const show = (el, on) => { if (el) el.hidden = !on; };
+
+/* ── the address ─────────────────────────────────────────────────────────── */
+
+let handle = '';
+try { handle = (new URLSearchParams(location.search).get('h') || '').trim().toLowerCase(); } catch (e) { handle = ''; }
+/* The same shape the column's CHECK constraint allows, and the same one
+   normaliseHandle produces in src/lib/publicProfile.ts. Anything else is not an
+   address and is never sent: a value that could not be stored has no coach
+   behind it, and asking about it would only widen what this page answers. */
+const VALID = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
+
+/* ── the four outcomes ───────────────────────────────────────────────────── */
+
+/* The three outcomes with nothing to draw. `which` is 'absent', 'unreadable'
+   or 'noaddress', and the words come off the element rather than out of this
+   file — see the comment on it. */
+function nothing(which) {
+  window.COACH_PAGE_SETTLED = true;
+  const box = $('nothing');
+  $('waiting').hidden = true;
+  $('profile').hidden = true;
+  $('nothing-eyebrow').textContent = box.dataset[which + 'Eyebrow'] || '';
+  $('nothing-hd').textContent = box.dataset[which + 'Hd'] || '';
+  $('nothing-note').textContent = box.dataset[which + 'Note'] || '';
+  box.hidden = false;
+}
+
+const CLAIM_NOTE = 'These are what the coach says about themselves. Repple has not seen the certificates and has not checked them with the awarding bodies, so ask to see them or look the registration number up yourself.';
+const REVIEW_NOTE = 'Reviews are written by this coach’s own clients inside the app. Repple does not publish what they wrote or who they are, so the number is all that appears here.';
+
+async function load(h) {
+  /* supabase-js resolves rather than rejecting on a database error, so `error`
+     is read on purpose. A throw from the network is caught too: both mean the
+     read did not answer, and neither means the coach has nothing. */
+  try {
+    const { data, error } = await sb.rpc('public_coach_page', { p_handle: h });
+    if (error) return { state: 'unreadable' };
+    const row = Array.isArray(data) ? data[0] : data;
+    return row ? { state: 'ready', row } : { state: 'absent' };
+  } catch (e) {
+    return { state: 'unreadable' };
+  }
+}
+
+/* ── the coach's colour ──────────────────────────────────────────────────── */
+
+function rgb(hex) {
+  const h = String(hex || '').trim().replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+function luminance(hex) {
+  const c = rgb(hex);
+  if (!c) return null;
+  const lin = c.map((v) => {
+    const s = v / 255;
+    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+function ratio(a, b) {
+  const la = luminance(a), lb = luminance(b);
+  if (la == null || lb == null) return null;
+  const [hi, lo] = la > lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+/* Six digits only, so '#0f0' is widened before it is measured rather than
+   failing to parse and falling back to white on bright green. expandHex in
+   src/lib/coachBrand.ts, for the same reason. */
+function expandHex(v) {
+  const s = String(v || '').trim().toLowerCase();
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/.exec(s);
+  if (!m) return null;
+  const d = m[1];
+  return '#' + (d.length === 3 ? d[0] + d[0] + d[1] + d[1] + d[2] + d[2] : d);
+}
+
+/* The accent is applied by overriding the stylesheet's own variables, so every
+   rule that already reads --accent follows without this page restyling
+   anything. A colour no label can be read on is REFUSED rather than
+   compensated for, and the page keeps its own colours, which is exactly what a
+   coach who chose none gets. */
+function applyAccent(hex) {
+  const six = expandHex(hex);
+  if (!six) return;
+  const onDark = ratio(INK_ON_DARK, six);
+  const onLight = ratio(INK_ON_LIGHT, six);
+  if (onDark == null || onLight == null) return;
+  const best = Math.max(onDark, onLight);
+  if (best < AA_TEXT) return;
+  const ink = onDark >= onLight ? INK_ON_DARK : INK_ON_LIGHT;
+  const root = document.documentElement.style;
+  root.setProperty('--accent', six);
+  root.setProperty('--brand-fill', six);
+  root.setProperty('--brand-fill-ink', ink);
+}
+
+/* ── drawing it ──────────────────────────────────────────────────────────── */
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/* "4 Mar 2027". Locale-free, matching dateWords in src/lib/coachCredentials.ts:
+   the same certificate must not read as two different dates on two phones. */
+function dateWords(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return null;
+  const mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return null;
+  return Number(m[3]) + ' ' + MONTHS[mo - 1] + ' ' + m[1];
+}
+
+function chips(host, items) {
+  const list = Array.isArray(items) ? items.filter((s) => String(s || '').trim()) : [];
+  for (const s of list) {
+    const el = document.createElement('span');
+    el.className = 'pill';
+    el.textContent = String(s).trim();
+    host.appendChild(el);
+  }
+  return list.length;
+}
+
+function render(result) {
+  if (result.state === 'unreadable') return nothing('unreadable');
+  if (result.state === 'absent') return nothing('absent');
+
+  const r = result.row;
+  const name = String(r.display_name || '').trim();
+
+  applyAccent(r.brand_color);
+
+  /* No name is not a page. `display_name` falls back from the trading name to
+     the coach's own, so an empty one means both are blank — and a heading with
+     nothing under it, at an address somebody was sent to, is worse than the
+     honest answer. */
+  if (!name) return nothing('absent');
+
+  $('p-name').textContent = name;
+  document.title = name + ' on ' + ((window.SITE_BRAND && window.SITE_BRAND.label) || 'Repple');
+  const desc = document.querySelector('meta[name=description]');
+  if (desc) desc.setAttribute('content', String(r.tagline || '').trim() || ('Train with ' + name + '.'));
+
+  /* The canonical is this coach's own address, built from the handle rather
+     than from location.search, so a link carrying extra parameters does not
+     mint a second address for the same page. */
+  const canon = document.createElement('link');
+  canon.setAttribute('rel', 'canonical');
+  canon.setAttribute('href', location.origin + '/coach?h=' + encodeURIComponent(handle));
+  document.head.appendChild(canon);
+
+  const mono = $('mono');
+  const initial = name.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 1).toUpperCase();
+  mono.textContent = initial || '·';
+
+  const tagline = String(r.tagline || '').trim();
+  if (tagline) { $('p-tagline').textContent = tagline; show($('p-tagline'), true); }
+
+  /* THE POINT OF THE PAGE. The join link carries the coach's own code, so
+     somebody arriving from their bio is attributed to them exactly as an ad
+     click is — see codeFromUrl in src/lib/adMatch.ts. With no code there is no
+     button: /join with nothing in it drops the arrival into the unattributed
+     bucket, which is the failure join codes exist to remove. */
+  const code = String(r.join_code || '').replace(/\s+/g, '').toUpperCase();
+  if (/^[A-Z0-9]{4,12}$/.test(code)) {
+    const join = $('p-join');
+    join.setAttribute('href', '/join?c=' + encodeURIComponent(code));
+    join.textContent = 'Train with ' + name;
+    show(join, true);
+    $('p-joinnote').textContent = 'That opens the joining page with their code already filled in. You will need the app, and they accept the request themselves.';
+    show($('p-joinnote'), true);
+  }
+
+  const bio = String(r.bio || '').trim();
+  if (bio) { $('p-bio').textContent = bio; show($('p-biobox'), true); }
+
+  if (chips($('p-specialties'), r.specialties) > 0) show($('p-specbox'), true);
+  if (chips($('p-offers'), r.offers) > 0) show($('p-offerbox'), true);
+
+  /* A price with no currency does not appear. Repple is white-labelled and
+     `tenants.currency` is nullable on purpose, so a bare figure would be read
+     in whatever money the reader happens to be thinking in. Zero is an unset
+     rate, not a coach who works for nothing — see part 340. */
+  const fee = Number(r.session_fee);
+  const currency = String(r.currency || '').trim().toUpperCase();
+  if (Number.isFinite(fee) && fee > 0 && /^[A-Z]{3}$/.test(currency)) {
+    let printed = null;
+    try {
+      printed = new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(fee);
+    } catch (e) { printed = null; }
+    if (printed) {
+      $('p-fee').textContent = printed + ' a session';
+      show($('p-feebox'), true);
+    }
+  }
+
+  /* Qualifications and insurance, already filtered server side to live,
+     self-declared rows. The note under them is the coach's statement said
+     plainly; nothing here may imply anybody checked it. */
+  const creds = Array.isArray(r.credentials) ? r.credentials : [];
+  if (creds.length) {
+    const host = $('p-creds');
+    for (const c of creds) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const left = document.createElement('div');
+      const ttl = document.createElement('div');
+      ttl.className = 'ttl';
+      ttl.textContent = String(c.title || '').trim() || 'Unnamed';
+      left.appendChild(ttl);
+      const bits = [];
+      if (String(c.issuer || '').trim()) bits.push(String(c.issuer).trim());
+      if (String(c.reference || '').trim()) bits.push(String(c.reference).trim());
+      if (c.kind === 'insurance') bits.unshift('Insurance');
+      if (bits.length) {
+        const sub = document.createElement('div');
+        sub.className = 'sub';
+        sub.textContent = bits.join(' · ');
+        left.appendChild(sub);
+      }
+      row.appendChild(left);
+      const when = document.createElement('span');
+      when.className = 'pill';
+      const words = dateWords(c.expires_on);
+      when.textContent = words ? 'Valid to ' + words : 'No expiry date given';
+      row.appendChild(when);
+      host.appendChild(row);
+    }
+    $('p-claimnote').textContent = CLAIM_NOTE;
+    show($('p-credbox'), true);
+  }
+
+  /* A count and a sum, and the rules ratingDisplay keeps in src/lib/reviews.ts
+     applied to them: below MIN_FOR_AVERAGE there is a count and no figure. The
+     server answered, so zero here is genuinely zero — the read either landed
+     or this page said 'unreadable' and never got here. */
+  const count = Number(r.rating_count);
+  const sum = Number(r.rating_sum);
+  if (Number.isFinite(count) && count > 0 && Number.isFinite(sum)) {
+    const line = count < MIN_FOR_AVERAGE
+      ? count + ' review' + (count === 1 ? '' : 's')
+      : (Math.round(Math.min(5, Math.max(1, sum / count)) * 10) / 10).toFixed(1) + ' from ' + count + ' reviews';
+    $('p-rating').textContent = line;
+    $('p-ratenote').textContent = REVIEW_NOTE;
+    show($('p-ratebox'), true);
+  }
+
+  window.COACH_PAGE_SETTLED = true;
+  $('waiting').hidden = true;
+  $('profile').hidden = false;
+}
+
+/* ── the entry point, at the BOTTOM of the module ────────────────────────── */
+/*
+  Not beside the address it reads, which is where it was and where it was
+  wrong. A `const` in a module is in its temporal dead zone until the line
+  declaring it has run, and function declarations hoist over that: `render()`
+  called from the middle of this file drew the name, the tagline, the join
+  button, the chips and the fee, and then threw on `MONTHS` — the first
+  constant declared BELOW the call — so the credentials and the rating were
+  silently missing and the loading block never came down. It looked like a page
+  that had half loaded, which is exactly the impression this whole file exists
+  to avoid.
+
+  Everything above is defined by the time this line is reached.
+*/
+if (!VALID.test(handle)) {
+  nothing('noaddress');
+} else {
+  render(await load(handle));
+}
+</script>
+
+<script>
+/*
+  THE WATCHDOG.
+
+  The module above is the whole page, and it is loaded from a CDN over the
+  network. If that import never resolves — the CDN blocked, a corporate proxy,
+  an offline phone — nothing above runs at all and the reader is left looking at
+  "One moment" for as long as they are willing to wait. A spinner that never
+  ends is the same lie as an empty profile: it says the coach is coming.
+
+  So this is deliberately NOT a module and imports nothing: it is the one script
+  on the page that cannot fail to load. It says the read failed, which is what
+  happened, and it reads its words off the same element the module does.
+
+  Ten seconds because it is a fallback and not a timeout on the request — the
+  request has its own, and a fetch that is merely slow should be allowed to
+  land rather than be overwritten by this.
+*/
+addEventListener('DOMContentLoaded', function () {
+  setTimeout(function () {
+    if (window.COACH_PAGE_SETTLED) return;
+    var box = document.getElementById('nothing');
+    var waiting = document.getElementById('waiting');
+    if (!box || !waiting) return;
+    window.COACH_PAGE_SETTLED = true;
+    waiting.hidden = true;
+    document.getElementById('nothing-eyebrow').textContent = box.dataset.unreadableEyebrow || '';
+    document.getElementById('nothing-hd').textContent = box.dataset.unreadableHd || '';
+    document.getElementById('nothing-note').textContent = box.dataset.unreadableNote || '';
+    box.hidden = false;
+  }, 10000);
+});
+</script>
+</body>
+</html>

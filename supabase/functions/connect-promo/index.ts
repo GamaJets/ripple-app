@@ -29,17 +29,25 @@
 // apply, which is worse than not offering the feature — a coach would print the
 // code on a poster and clients would type it into a page that shrugs.
 //
-// ── SUBSCRIPTION PACKAGES ONLY ────────────────────────────────────────────
+// ── WHICH PACKAGES TAKE A CODE ────────────────────────────────────────────
 //
-// Checked here as well as on the screen. connect-checkout applies a code only
-// on its subscription branch, because Repple's cut there is
-// `application_fee_percent` and scales with the discount — on a one-off it is
-// an absolute figure that Stripe wants in the SAME call in which it works the
-// discount out, so it can only ever be computed from the list price or from a
-// total this app guessed at. The coach would eat the whole discount AND pay a
-// fee on money they never received. A code created against a one-off package
-// would appear to work and would be refused at checkout, which is the failure
-// this refusal exists to prevent.
+// Every subscription, and a one-off only where the discount lands on a whole
+// number of minor units. `promoBlocker` decides, from the same module the
+// coach's screen runs it from, so the screen's answer and this one cannot
+// differ.
+//
+// The reason a one-off is conditional at all is the platform fee. On a
+// subscription Repple's cut is `application_fee_percent` and scales with the
+// discount by itself. On a one-off it is an absolute figure Stripe wants in the
+// SAME call in which it works the discount out, so it has to come off a total
+// connect-checkout computed — and that total is only trustworthy where nothing
+// had to be rounded to reach it, because Stripe documents no rounding rule for
+// a percentage discount anywhere. 30% of £100.00 is exact; 20% of £49.99 is
+// 999.8 minor units and is refused here, with the percentages that DO divide
+// that price named in the refusal so the coach has something to type.
+//
+// Checked again at the checkout, deliberately: a package can be repriced after
+// a code is made, and an exactness checked once is one that stops being true.
 //
 // ── Who may call it ───────────────────────────────────────────────────────
 //
@@ -169,7 +177,7 @@ Deno.serve(async (req) => {
   // of package may carry a code is run from the same module the screen runs it
   // from — so the screen's copy is a convenience and this copy is the rule.
   const { data: pkg, error: pkgErr } = await service.from('trainer_packages')
-    .select('id, name, billing_interval, active, trainer_id').eq('id', packageId).maybeSingle();
+    .select('id, name, billing_interval, active, trainer_id, price_cents').eq('id', packageId).maybeSingle();
   if (pkgErr) return json({ error: 'could not read that package: ' + pkgErr.message }, 500);
   // A stranger's package and a missing one get the same answer.
   if (!pkg || pkg.trainer_id !== uid) return json({ error: 'package not found' }, 404);
@@ -179,6 +187,13 @@ Deno.serve(async (req) => {
     name: pkg.name,
     billingInterval: pkg.billing_interval ?? null,
     active: !!pkg.active,
+    // The price, because on a ONE-OFF it is half of whether a code may exist at
+    // all: Repple's cut there is derived from the discounted total, and that
+    // total may only ever be one nothing had to round to reach. `promoBlocker`
+    // is where that is decided, from the same module the coach's screen runs it
+    // from. Read from the row rather than taken from the request, so a client
+    // of this function cannot claim a price.
+    priceCents: Number(pkg.price_cents),
   };
   const problems = promoBlocker(code, percentOff, target);
   if (problems.length) return json({ error: problems[0] }, 400);

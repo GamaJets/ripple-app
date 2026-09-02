@@ -233,7 +233,19 @@ export interface MemberDossier {
   unmarked: number | null;
 
   passes: GymPass[] | null;
+  /** Visits left on passes good for the DOOR AND CLASSES. Since
+   *  supabase/parts/370 a pass says what it covers, and adding a PT credit into
+   *  a figure headed "pass visits" told an owner the desk could let somebody
+   *  through a turnstile on a credit that only pays for an hour with a coach. */
   passVisitsLeft: number | null;
+  /** PT credits left on passes THIS GYM sold that pay for one-to-ones. Null
+   *  when the passes could not be read — never 0, which would read as a member
+   *  who has used everything they bought. */
+  ptCreditsLeft: number | null;
+  /** Delivered one-to-ones where the member held an entitlement and it was
+   *  empty. Not the same as a member paying cash: this is an hour the gym has
+   *  to pay a coach for and took nothing for. */
+  ptShortfalls: number | null;
 
   invites: MemberInvite[] | null;
 }
@@ -314,7 +326,12 @@ export function buildDossier(
     unmarked: sess ? sess.filter((s) => isAwaitingOutcome(s, now)).length : null,
 
     passes: pss,
-    passVisitsLeft: pss ? pss.reduce((a, p) => a + remainingUses(p), 0) : null,
+    // Split by what the pass is good for. Anything that is not explicitly a PT
+    // pass counts as a visit, which keeps this figure byte-identical for every
+    // pass sold before part 370 and moves only the new kind out of it.
+    passVisitsLeft: pss ? pss.filter((p) => p.covers !== 'pt').reduce((a, p) => a + remainingUses(p), 0) : null,
+    ptCreditsLeft: pss ? pss.filter((p) => p.covers === 'pt').reduce((a, p) => a + remainingUses(p), 0) : null,
+    ptShortfalls: sess ? sess.filter((s) => s.packDrawShortfallAt != null).length : null,
 
     invites: invs,
   };

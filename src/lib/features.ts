@@ -134,6 +134,10 @@ export const CLIENT_FEATURES: Feature[] = [
   // for a word must not be the same thing as being promised a feature.
   { key: 'social', label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social', icon: 'share', area: 'me', keywords: 'instagram tiktok share social post story sheet' },
   { key: 'packages', label: 'Memberships & Packs', note: 'What you have bought, and what is left', route: '/(client)/packages', icon: 'trophy', area: 'me', keywords: 'package packages pack sessions left remaining credits subscription membership purchase bought paid renew' },
+  // Listed separately from Memberships & Packs, because the two answer
+  // different questions: that screen says how many are left, this one says
+  // which hours used the rest and which booked hours are going to use these.
+  { key: 'session-credits', label: 'Session Credits', note: 'Which sessions used a credit, and when', route: '/(client)/session-credits', icon: 'calendar', area: 'me', keywords: 'credit credits session sessions pack pass drawn used left remaining balance ledger history gym pass pt entitlement covered' },
   { key: 'offers', label: 'Offers', note: 'Redeem a code from your gym', route: '/(client)/offers', icon: 'grid', area: 'me', keywords: 'offer offers code promo promotion discount voucher redeem coupon' },
   // The coach you HAVE, which Explore did not list at all while listing that
   // coach's DOCUMENTS one line down — so searching "coach" found the paperwork

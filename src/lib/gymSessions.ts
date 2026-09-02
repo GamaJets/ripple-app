@@ -66,6 +66,24 @@ export interface PtSession {
    *  which is what keeps a late-marked session out of an already-settled period
    *  and stops it being paid twice. */
   settlementId: string | null;
+  /**
+   * What the CLIENT paid with, from supabase/parts/370. This is a different
+   * question from `settlementId`, which is what the gym paid the TRAINER, and
+   * the two were being read as one: a session can be settled with the trainer
+   * and covered by nothing at all, which is the gym eating an hour.
+   *
+   * null means nothing was drawn, which includes a member paying cash.
+   */
+  packDrawnKind: 'coach_pack' | 'gym_pass' | null;
+  packDrawnAt: string | null;
+  /**
+   * Set when this session completed, the client HELD the entitlement that
+   * should have paid, and every one of them was used up or expired. The one
+   * signal that an hour was delivered against nothing — and it is deliberately
+   * NOT the same as `packDrawnAt == null`, which is the ordinary state of a
+   * member who pays another way.
+   */
+  packDrawShortfallAt: string | null;
 }
 
 /**
@@ -411,7 +429,7 @@ export async function fetchSessions(
 ): Promise<PtSession[]> {
   let q = sb
     .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id')
+    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
     .eq('tenant_id', tenantId)
     .gte('starts_at', sinceIso)
     .order('starts_at', { ascending: false });
@@ -442,6 +460,9 @@ function rowToSession(r: any, names: Map<string, string>): PtSession {
     outcomeAt: r.outcome_at ?? null,
     rateCents: r.rate_cents ?? null,
     settlementId: r.settlement_id ?? null,
+    packDrawnKind: (r.pack_drawn_kind ?? null) as PtSession['packDrawnKind'],
+    packDrawnAt: r.pack_drawn_at ?? null,
+    packDrawShortfallAt: r.pack_draw_shortfall_at ?? null,
   };
 }
 

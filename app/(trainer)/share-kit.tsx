@@ -25,21 +25,74 @@
 // by them, read here and counted. Nothing on it belongs to anybody else, so
 // there is no consent question and no gate.
 //
-// A CLIENT RESULT is deliberately NOT sourced from the database, and that is a
-// decision rather than a shortcut. This app holds no record of any client
-// having agreed to be posted about, and a coach is not entitled to consent on
-// their client's behalf. An app that offered "pick a client → here are their
-// scan figures → share" would be volunteering somebody's body composition for
-// publication on the strength of one tap by a person who is not the subject. So
-// the coach types the figures their client actually agreed to, ticks that they
-// agreed, and the gate in src/lib/shareAsset.ts refuses to build a card
-// otherwise. Progress photos never enter it at all: `ShareCard` has no image
-// field, so there is no shape here that could carry one.
+// A CLIENT RESULT's FIGURES are deliberately NOT sourced from the database, and
+// that is a decision rather than a shortcut. This app holds no record of any
+// client having agreed to have their numbers posted, and a coach is not
+// entitled to consent on their client's behalf. An app that offered "pick a
+// client → here are their scan figures → share" would be volunteering somebody's
+// body composition for publication on the strength of one tap by a person who is
+// not the subject. So the coach types the figures their client actually agreed
+// to, ticks that they agreed, and the gate in src/lib/shareAsset.ts refuses to
+// build a card otherwise.
 //
-// The subtle half is the caption. A coach writing about a client will type
+// The subtle half is the free text. A coach writing about a client will type
 // their name without thinking — so when the name has not been consented to,
-// `scrubName` takes it back out of what they wrote, which is the only place it
-// would realistically have escaped from.
+// `scrubName` takes it back out of what they wrote, in the caption AND in the
+// headline, which are the two places it would realistically have escaped from.
+//
+// ── the photograph, and why it works the other way round ────────────────────
+//
+// This screen used to say that progress photos never entered it at all, because
+// `ShareCard` had no image field. That was right while the only consent in the
+// building was a tick a COACH put in a box: a coach ticking a box about their
+// client's body is not that client agreeing to anything, and the app could not
+// tell the difference.
+//
+// It can now. supabase/parts/331 gives the client a per-photo permission to
+// PUBLISH — written by them, unwritable by the coach, and a child row of the
+// send grant so that taking the photo back takes it with it. So the photo half
+// of this screen is built the OPPOSITE way to the figures half:
+//
+//   · the figures are TYPED, because the app cannot verify what was agreed;
+//   · the photo is PICKED FROM A LIST THE DATABASE BUILT, because the app can.
+//
+// The picker is `publishablePhotos()` over the permissions read, so there is no
+// route from "this coach can see the photo" to "this photo is on the card". A
+// coach who can plainly see a photo in their inbox and cannot put it on a card
+// is told why, in `SEEING_IS_NOT_PUBLISHING`, rather than left to conclude the
+// screen is broken.
+//
+// And when there is no permission — or when the permissions read failed — the
+// card is drawn WITHOUT a photo and without a marker where one would have been.
+// A labelled gap would publish the fact that somebody was asked.
+//
+// The coach's OWN LOGO has none of this attached to it. It is theirs, it
+// identifies nobody else, and the only thing that keeps it off a card is not
+// being able to read it.
+//
+// ── the one network that is posted to directly, and the line it cannot cross ─
+//
+// There is now an Instagram lane beside the share sheet. It is not the old
+// `publishToSocials` coming back: it is one network, with a real OAuth
+// connection to a Business or Creator account, a card Meta fetches, and a
+// report of what Meta actually said — a container that was created and a post
+// that was published being two events, only the second of which is a post. When
+// there is no approved credential it says "not available" in those words. See
+// src/lib/instagramPublish.ts and supabase/functions/instagram-publish.
+//
+// AND IT NEVER TAKES A CARD WITH A CLIENT'S PHOTOGRAPH ON IT. Instagram does
+// not accept an image; it fetches one, from a public unauthenticated URL that
+// this product has to create for it. A client's per-photo publish permission
+// (supabase/parts/331) is permission for a post their coach makes, from their
+// coach's phone. It is not permission to put a picture of their body at an
+// address anybody on the internet can fetch. So a card carrying a photograph
+// keeps the share sheet — which posts to the same account, in two taps, with no
+// public copy of anything — and the screen says that in plain words rather than
+// hiding the button.
+//
+// The refusal is `checkPublishable`, which is the only thing that can produce
+// the value `publishCardToInstagram` accepts. There is no state on this screen
+// that could be got into where a photo card reaches the publish call.
 //
 // ── registration ────────────────────────────────────────────────────────────
 //
@@ -51,13 +104,16 @@
 // That file is owned by another change tonight, so the line is reported rather
 // than added.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, useWindowDimensions } from 'react-native';
+// React Native's own <Image>, which is in every binary ever built. The
+// thumbnails here are still photographs and nothing needs an animated format,
+// so this screen does not have to branch on HAS_NATIVE_IMAGE.
+import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, useWindowDimensions, Image as RnImage } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import Svg, { Rect, Text as SvgText, Line } from 'react-native-svg';
+import Svg, { Rect, Text as SvgText, Line, Image as SvgImage, Defs, ClipPath } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, Cta, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { useTenant } from '../../src/ui/tenant';
@@ -70,6 +126,22 @@ import {
   type CardShape, type ShareCard, type CardBuild, type Stat,
 } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
+import { useRoster } from '../../src/ui/roster';
+import { useMyCoachLogo } from '../../src/ui/coachLogo';
+import { fetchPhotosSharedWithMe, type SharedPhoto } from '../../src/lib/photoShare';
+import { photoDataUri, usePublishGrantsFrom } from '../../src/ui/photoPublish';
+import {
+  PICK_A_CLIENT_FIRST, SEEING_IS_NOT_PUBLISHING, publishConsentNote, publishConsentOf,
+  publishablePhotos, type PublishConsent,
+} from '../../src/lib/photoPublish';
+import type { LoadStatus } from '../../src/ui/loadStatus';
+import {
+  WHY_NO_PHOTOGRAPHS, checkPublishable, connectionNote, outcomeNote, reviewRefusalNote,
+} from '../../src/lib/instagramPublish';
+import {
+  chooseInstagramPage, connectInstagram, disconnectInstagram, publishCardToInstagram,
+  useMyInstagram, type PageChoice,
+} from '../../src/ui/instagram';
 
 /** How far back "my week" looks. Two spans, because a quiet week is a real
  *  thing and a coach should be able to widen the window rather than be told
@@ -114,6 +186,20 @@ export default function ShareKit() {
   const [sessionsPending, setSessionsPending] = useState(true);
   const [busy, setBusy] = useState(false);
 
+  // ── the Instagram lane ──────────────────────────────────────────────────
+  //
+  // `ig.state` is never 'connected' under a failed read — see connectionState
+  // in src/lib/instagramPublish.ts. A green dot that means nothing is the exact
+  // defect src/lib/social.ts was written to end, and this screen is the one it
+  // was written on.
+  const ig = useMyInstagram();
+  const [igBusy, setIgBusy] = useState(false);
+  /** The Pages a fresh connection turned up, when there was more than one with
+   *  an Instagram account on it. Null when there is nothing to choose. A coach
+   *  who also runs a client's gym Page must not have a card posted to the wrong
+   *  business's feed, and there is no undoing a post. */
+  const [pages, setPages] = useState<PageChoice[] | null>(null);
+
   // The client-result inputs. Nothing here is remembered between shares: a
   // consent tick is about one post, and a stored one would silently become a
   // standing permission the client never gave.
@@ -123,6 +209,79 @@ export default function ShareKit() {
   const [clientName, setClientName] = useState('');
   const [okFigures, setOkFigures] = useState(false);
   const [okName, setOkName] = useState(false);
+
+  /** The coach's own mark. No gate: it is theirs. A null `dataUri` is both "not
+   *  set" and "could not be fetched", and the card is the same either way. */
+  const logo = useMyCoachLogo();
+
+  // ── the photo half ──────────────────────────────────────────────────────
+  //
+  // Which client this card is about. Null until the coach says, and while it is
+  // null NOTHING is read: there is no list of everybody's photos anywhere in
+  // this screen, because a picker that showed one would be the wrong shape even
+  // with every permission in place.
+  const { roster, status: rosterStatus } = useRoster();
+  const [subject, setSubject] = useState<string | null>(null);
+  /** What that client has SENT this coach. Null is unknown, never "none". */
+  const [sent, setSent] = useState<SharedPhoto[] | null>(null);
+  const [sentStatus, setSentStatus] = useState<LoadStatus>('loading');
+  /** What they have separately agreed may be PUBLISHED. */
+  const grants = usePublishGrantsFrom(subject);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  /** The chosen photo as bytes. Fetched rather than linked, because the export
+   *  rasterises the SVG and a remote href is a race it loses silently. */
+  const [pickedUri, setPickedUri] = useState<string | null>(null);
+  const [photoPending, setPhotoPending] = useState(false);
+
+  // Changing the subject drops everything about the previous one. A photo id
+  // left over from another client is the one bug this whole feature cannot have.
+  useEffect(() => {
+    setPickedId(null);
+    setPickedUri(null);
+    if (!subject) { setSent(null); setSentStatus('loading'); return; }
+    let live = true;
+    setSent(null);
+    setSentStatus('loading');
+    (async () => {
+      try {
+        const rows = await fetchPhotosSharedWithMe(subject);
+        if (live) { setSent(rows); setSentStatus('ready'); }
+      } catch (e) {
+        reportError('shareKit.sharedPhotos', e);
+        // Null, not []. An empty list here would say this client has sent
+        // nothing, which is a claim about them.
+        if (live) { setSent(null); setSentStatus('error'); }
+      }
+    })();
+    return () => { live = false; };
+  }, [subject]);
+
+  /** The photos this coach may actually use: what they can see, narrowed by
+   *  what the client agreed to. Null while either read is unknown, and the
+   *  screen says which. */
+  const usable = useMemo(
+    () => publishablePhotos(sent, coachId, grants.grants, grants.status),
+    [sent, coachId, grants.grants, grants.status],
+  );
+
+  /** The client's own answer about the photo the coach has picked. Resolved
+   *  from the permissions read every time it is asked, so a read that failed
+   *  after the pick collapses back to 'unknown' rather than leaving a stale
+   *  yes. */
+  const photoConsent: PublishConsent = useMemo(
+    () => (pickedId && coachId ? publishConsentOf(pickedId, coachId, grants.grants, grants.status) : 'absent'),
+    [pickedId, coachId, grants.grants, grants.status],
+  );
+
+  const choosePhoto = async (p: SharedPhoto) => {
+    if (pickedId === p.id) { setPickedId(null); setPickedUri(null); return; }
+    setPickedId(p.id);
+    setPickedUri(null);
+    setPhotoPending(true);
+    const uri = await photoDataUri(p.url);
+    setPhotoPending(false);
+    setPickedUri(uri);
+  };
 
   useEffect(() => {
     // Still settling who is signed in. Nothing has been asked for yet, so the
@@ -172,12 +331,17 @@ export default function ShareKit() {
           spanLabel: spanText.trim(),
           figures: figures.filter((f) => f.value.trim()).map((f) => ({ label: f.label.trim() || 'Change', value: f.value.trim() })),
           note: note.trim(),
+          logo: logo.dataUri,
+          // The consent travels WITH the picture rather than beside it, so
+          // there is no arrangement of this screen's state that hands
+          // shareAsset.ts a photo and a yes that came from different photos.
+          photo: pickedId && pickedUri ? { uri: pickedUri, photoId: pickedId, consent: photoConsent } : null,
         },
         { figures: okFigures, name: okName },
       );
     }
 
-    if (rows === null) return weekCard({ brand, spanLabel: span.label, sessions: null, minutes: null, clients: null });
+    if (rows === null) return weekCard({ brand, spanLabel: span.label, sessions: null, minutes: null, clients: null, logo: logo.dataUri });
 
     const sinceMs = Date.now() - days * 86_400_000;
     const untilMs = Date.now();
@@ -196,8 +360,9 @@ export default function ShareKit() {
     const minutes = agrees ? delivered.reduce((a, s) => a + (s.durationMin || 0), 0) : null;
     const clients = agrees ? new Set(delivered.map((s) => s.clientId).filter(Boolean)).size : null;
 
-    return weekCard({ brand, spanLabel: span.label, sessions, minutes, clients });
-  }, [mode, rows, days, span.label, brand, clientName, spanText, figures, note, okFigures, okName]);
+    return weekCard({ brand, spanLabel: span.label, sessions, minutes, clients, logo: logo.dataUri });
+  }, [mode, rows, days, span.label, brand, clientName, spanText, figures, note, okFigures, okName,
+      logo.dataUri, pickedId, pickedUri, photoConsent]);
 
   const size = cardSize(shape);
   const svgRef = useRef<Svg>(null);
@@ -247,6 +412,90 @@ export default function ShareKit() {
       moduleReason
         ? `${moduleReason}\n\nYour caption has gone to the share sheet.`
         : 'Your phone could not turn the card into an image just now, so the caption has gone to the share sheet on its own. Nothing has been posted — you still choose where it goes.',
+    );
+  };
+
+  /**
+   * Whether THIS card may go to Instagram, and the sentence when it may not.
+   *
+   * Recomputed from the card and the export size every render rather than held
+   * in state, so there is no arrangement of taps that leaves a stale yes behind
+   * a card that has since grown a photograph or changed shape.
+   */
+  const igGate = useMemo(
+    () => checkPublishable(build.ok ? { ...build.card, width: size.w, height: size.h } : null),
+    [build, size.w, size.h],
+  );
+
+  const connect = async () => {
+    setIgBusy(true);
+    const r = await connectInstagram();
+    setIgBusy(false);
+    if (!r.ok) { Alert.alert('Not connected', r.reason); return; }
+    ig.reload();
+    if (r.chosen) {
+      setPages(null);
+      Alert.alert(
+        'Instagram connected',
+        `Cards will post to ${r.chosen.igUsername ? `@${r.chosen.igUsername}` : r.chosen.name}.${r.warning ? `\n\n${r.warning}` : ''}`,
+      );
+      return;
+    }
+    // Nothing was chosen for them. Either there are several Pages with an
+    // Instagram account on them, or there are none — and those are different
+    // sentences, because only one of them is a decision the coach can make.
+    const withIg = r.pages.filter((p) => p.hasInstagram);
+    setPages(withIg.length ? withIg : null);
+    Alert.alert(
+      withIg.length ? 'Choose the account' : 'Nothing to post to',
+      withIg.length
+        ? 'Your Meta login reaches more than one Instagram account. Pick the one you post from.'
+        : 'None of the Pages this login can see has an Instagram Business or Creator account linked to it, so there is nowhere for a post to go. Link one in Meta Business Suite and connect again.',
+    );
+  };
+
+  const choose = async (p: PageChoice) => {
+    setIgBusy(true);
+    const r = await chooseInstagramPage(p.id);
+    setIgBusy(false);
+    if (!r.ok) { Alert.alert('Not saved', r.reason); return; }
+    setPages(null);
+    ig.reload();
+  };
+
+  const disconnect = async () => {
+    setIgBusy(true);
+    const r = await disconnectInstagram();
+    setIgBusy(false);
+    if (!r.ok) { Alert.alert('Still connected', r.reason); return; }
+    setPages(null);
+    ig.reload();
+  };
+
+  const postToInstagram = async () => {
+    // The gate again at the moment of pressing, not only at the moment of
+    // drawing. Nothing between the two can have changed the card without this
+    // recomputing, and asking twice costs nothing.
+    if (!igGate.ok) { Alert.alert('Not posted', igGate.why); return; }
+    setIgBusy(true);
+    const png = await capture();
+    const r = await publishCardToInstagram(igGate.card, png ?? '', build.ok ? build.card.kind : 'week');
+    setIgBusy(false);
+
+    if (r.ok) {
+      Alert.alert(
+        'Posted to Instagram',
+        [outcomeNote('published'), r.permalink, r.warning].filter(Boolean).join('\n\n'),
+      );
+      return;
+    }
+    // Meta's own words, kept. A permissions refusal is almost always the App
+    // Review gate rather than anything wrong with the coach's account, and
+    // sending them to check their account is sending them nowhere.
+    const permission = /permission/i.test(r.reason);
+    Alert.alert(
+      r.containerCreated ? 'Not published' : 'Nothing was posted',
+      permission ? reviewRefusalNote(r.reason) : r.reason,
     );
   };
 
@@ -354,7 +603,91 @@ export default function ShareKit() {
                   : 'Tell Repple their name and it will strip it out of anything you typed above. Only the first name is ever printed, and only with the tick.'}
               </Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Progress photos are never included. There is no way to put one on a card.
+                These two are your word about what your client agreed. Repple cannot check them, which is why it asks you to look at what you wrote.
+              </Text>
+            </Section>
+
+            <Rule />
+
+            {/* ── the photograph, on the client's own say-so ───────────────
+                Built the opposite way round to the figures above: the coach
+                types those because the app cannot verify them, and picks this
+                from a list the database built because it can. */}
+            <Section>
+              <SectionHead title="A Photo" note="Their call" />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>{SEEING_IS_NOT_PUBLISHING}</Text>
+
+              {rosterStatus === 'error' ? (
+                <Notice kicker="Could not read your clients" title="No photos offered"
+                  note="Your book could not be read, so there is nobody to look up permissions for. This is not a coach with no clients." />
+              ) : (
+                <>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
+                    {roster.map((c) => {
+                      const on = c.id === subject;
+                      return (
+                        <Pressable key={c.id} onPress={() => setSubject(on ? null : c.id)}
+                          accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={c.name}
+                          style={{ paddingVertical: sp.sm, paddingHorizontal: sp.md, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2, borderWidth: hairline, borderColor: on ? t.brand : t.ring }}>
+                          <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink }}>{c.name}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+
+                  {!subject ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{PICK_A_CLIENT_FIRST}</Text>
+                  ) : sentStatus === 'error' ? (
+                    <Notice kicker="Could not read their photos" title="No photos offered"
+                      note="What this client has sent you could not be read, so nothing is offered. Nothing has been posted and this is not a client who sent none." />
+                  ) : grants.status === 'error' ? (
+                    // The distinction this whole item turns on. Their photos
+                    // read fine; what they AGREED to did not, and a card is not
+                    // made out of an unanswered question.
+                    <Notice kicker="Could not read their permissions" title="No photo on this card"
+                      note={publishConsentNote('unknown') ?? ''} />
+                  ) : usable === null ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Reading what they have agreed to…</Text>
+                  ) : usable.length === 0 ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      {publishConsentNote('absent')}
+                    </Text>
+                  ) : (
+                    <>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md, marginTop: sp.md }}>
+                        {usable.map((p) => {
+                          const on = p.id === pickedId;
+                          return (
+                            <Pressable key={p.id} onPress={() => { void choosePhoto(p); }}
+                              accessibilityRole="button" accessibilityState={{ selected: on }}
+                              accessibilityLabel={`Progress photo they agreed you can publish${on ? ', chosen' : ''}`}
+                              style={{ borderRadius: radius.md, borderWidth: on ? 2 : hairline, borderColor: on ? t.brand : t.ring, overflow: 'hidden' }}>
+                              {p.url ? (
+                                <RnImage source={{ uri: p.url }} style={{ width: 84, height: 112, backgroundColor: t.surface2 }} />
+                              ) : (
+                                // A permission whose file would not sign. Shown
+                                // as the gap it is rather than as a blank frame
+                                // that reads as a photograph.
+                                <View style={{ width: 84, height: 112, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', padding: sp.sm }}>
+                                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Would not open</Text>
+                                </View>
+                              )}
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                        {photoPending ? 'Preparing that photo…'
+                          : pickedId && !pickedUri ? 'That photo could not be prepared, so the card is made without it. Nothing about their permission has changed.'
+                          : pickedId ? 'On the card. Tap it again to take it off.'
+                          : 'Tap one to put it on the card. Only the photos this client has agreed you can publish are here.'}
+                      </Text>
+                    </>
+                  )}
+                </>
+              )}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                A photo with a first name beside it identifies somebody, so without the naming tick above their name comes off the card and out of everything you typed.
               </Text>
             </Section>
           </>
@@ -427,6 +760,67 @@ export default function ShareKit() {
           </Text>
         </Section>
 
+        <Rule />
+
+        {/* ── the one network posted to directly ──────────────────────────
+            Everything above stays exactly as it was. This is one network
+            beside it, and the sentence about photographs is on the screen
+            rather than in a comment, because it is the reason the thing is
+            safe rather than an apology for a missing feature. */}
+        <Section>
+          <SectionHead title="Post to Instagram" note={ig.account?.username ? `@${ig.account.username}` : undefined} />
+
+          {ig.state === 'connected' && pages?.length ? (
+            <>
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Your Meta login reaches more than one Instagram account. Pick the one you post from.
+              </Text>
+              {pages.map((p) => (
+                <Pressable key={p.id} onPress={() => { void choose(p); }} disabled={igBusy}
+                  accessibilityRole="button" accessibilityLabel={`Post to ${p.igUsername ? `@${p.igUsername}` : p.name}`}
+                  style={{ paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{p.igUsername ? `@${p.igUsername}` : p.name}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.name}</Text>
+                </Pressable>
+              ))}
+            </>
+          ) : ig.state === 'connected' ? (
+            <>
+              {igGate.ok ? (
+                <>
+                  <Cta label={igBusy ? 'Posting…' : 'Post to Instagram'} wide disabled={igBusy || !build.ok}
+                    a11yLabel="Post this card to Instagram" onPress={() => { void postToInstagram(); }} />
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {WHY_NO_PHOTOGRAPHS}
+                  </Text>
+                </>
+              ) : (
+                // The refusal, said as the reason it is safe. A card with a
+                // client's photo on it has no button here and does not need
+                // one: the share sheet above posts it to the same account.
+                <Flag tone={t.warn}>{igGate.why}</Flag>
+              )}
+              {ig.account?.expiresSoon ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+                  This connection expires within the week. Connect again before it does and posting keeps working.
+                </Flag>
+              ) : null}
+              <Ghost label="Disconnect Instagram" onPress={() => { void disconnect(); }} />
+            </>
+          ) : ig.state === 'not-connected' ? (
+            <>
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{connectionNote('not-connected')}</Text>
+              <Cta label={igBusy ? 'Connecting…' : 'Connect Instagram'} wide disabled={igBusy}
+                a11yLabel="Connect your Instagram account" onPress={() => { void connect(); }} />
+            </>
+          ) : (
+            // 'unknown' and 'unconfigured'. Neither is a dead button and
+            // neither is a dot that means nothing: both say what is true and
+            // leave the share sheet above doing the job today.
+            <Flag tone={t.warn}>{connectionNote(ig.state)}</Flag>
+          )}
+        </Section>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -463,6 +857,15 @@ function CardArt({ card, w, h, accent, ref }: {
   const contentW = w - pad * 2;
   const footerY = h - pad;
 
+  // The coach's mark, top right, opposite the accent bar. A BOX rather than a
+  // size: `preserveAspectRatio="xMaxYMin meet"` fits the image inside it
+  // whatever shape it is, so a wide wordmark and a square badge both land on
+  // the same line and neither is stretched. A logo that stretched would be
+  // worse than no logo, because it is the one thing on the card its owner will
+  // recognise as wrong.
+  const logoBoxW = Math.round(w * 0.24);
+  const logoBoxH = Math.round(w * 0.075);
+
   const kickerSize = Math.round(w * 0.032);
   const headSize = Math.round(w * (card.headline.length > 22 ? 0.072 : 0.088));
   const headLead = Math.round(headSize * 1.14);
@@ -485,6 +888,24 @@ function CardArt({ card, w, h, accent, ref }: {
 
   const footLines = wrapLines(card.footer, charsPerLine(contentW * 0.7, Math.round(w * 0.03)), 1);
 
+  // The client's photograph, between the headline and the figures. It is the
+  // only element on this card whose height is computed from what is left rather
+  // than chosen: the figures stay anchored to the bottom (a card whose baseline
+  // moves looks like a different template every time) and the headline can be
+  // three lines, so the band takes the gap between them.
+  //
+  // `slice` fills the band and crops, rather than letter-boxing a portrait
+  // photograph into a landscape hole and leaving two black bars on a graphic
+  // somebody is about to post.
+  const photoTop = headTop + headLead * Math.max(0, headLines.length - 1) + Math.round(h * 0.045);
+  const photoBottom = statsTop - statSize - Math.round(h * 0.035);
+  const photoH = photoBottom - photoTop;
+  // Below this it is a strip rather than a picture of a person. There is room
+  // on both canvases for the normal case; this is the guard for a three-line
+  // headline and three figures on the shorter one, and it drops the photo
+  // rather than drawing something unrecognisable.
+  const photoFits = !!card.photo && photoH >= Math.round(w * 0.28);
+
   return (
     <Svg ref={ref} width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
       <Rect x={0} y={0} width={w} height={h} fill={GROUND} />
@@ -492,6 +913,28 @@ function CardArt({ card, w, h, accent, ref }: {
           kicker and the tick beside the footer. The instrument-panel rule from
           src/ui/kit — colour marks the live thing, not the chrome. */}
       <Rect x={pad} y={pad} width={Math.round(w * 0.075)} height={Math.round(h * 0.006)} fill={accent} rx={Math.round(h * 0.003)} />
+
+      {/* The coach's own mark. Drawn from bytes already in memory — a remote
+          href would be a race `toDataURL` resolves by capturing nothing. */}
+      {card.logo ? (
+        <SvgImage href={{ uri: card.logo.uri }} x={w - pad - logoBoxW} y={pad - Math.round(logoBoxH * 0.25)}
+          width={logoBoxW} height={logoBoxH} preserveAspectRatio="xMaxYMin meet" />
+      ) : null}
+
+      {/* The client's photograph. It is here because `resultCard` put it here,
+          and `resultCard` put it here because that client's own permission row
+          said so. There is no branch in this component that could add one. */}
+      {card.photo && photoFits ? (
+        <>
+          <Defs>
+            <ClipPath id="cardPhoto">
+              <Rect x={pad} y={photoTop} width={contentW} height={photoH} rx={Math.round(w * 0.02)} />
+            </ClipPath>
+          </Defs>
+          <SvgImage href={{ uri: card.photo.uri }} x={pad} y={photoTop} width={contentW} height={photoH}
+            preserveAspectRatio="xMidYMid slice" clipPath="url(#cardPhoto)" />
+        </>
+      ) : null}
 
       {kickerLines.map((l, i) => (
         <SvgText key={`k${i}`} x={pad} y={kickerY} fill={MUTED} fontSize={kickerSize} fontWeight="600" letterSpacing={kickerSize * 0.12}>

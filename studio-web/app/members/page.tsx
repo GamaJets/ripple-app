@@ -631,7 +631,20 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
         <Kpi
           label="Pass visits left"
           text={d.passVisitsLeft == null ? null : String(d.passVisitsLeft)}
-          note={rec.passes.state === 'failed' ? 'passes not read' : undefined}
+          note={rec.passes.state === 'failed' ? 'passes not read' : 'door and classes only'}
+        />
+        {/* Counted apart from pass visits, because they buy different things: a
+            PT credit pays for an hour with a coach and opens no turnstile. The
+            note names the hour this gym delivered and took nothing for, which
+            is the one line on this record somebody has to act on. */}
+        <Kpi
+          label="PT credits left"
+          text={d.ptCreditsLeft == null ? null : String(d.ptCreditsLeft)}
+          note={
+            rec.passes.state === 'failed' ? 'passes not read'
+              : rec.sessions.state === 'failed' ? 'one-to-ones not read'
+              : d.ptShortfalls ? `${d.ptShortfalls} delivered with nothing to draw` : undefined
+          }
         />
       </div>
 
@@ -758,6 +771,18 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
                 render: (s: PtSession) => s.rateCents == null
                   ? <span className="dash">—</span>
                   : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+              // What the MEMBER paid with, which is a different question from
+              // the Rate beside it: that is what the gym owes the coach. A
+              // shortfall is the two of them disagreeing — an hour costed,
+              // delivered, and covered by nothing.
+              { key: 'paid', header: 'Covered by', value: (s: PtSession) => s.packDrawnKind ?? (s.packDrawShortfallAt ? 'zz' : ''),
+                render: (s: PtSession) => s.packDrawShortfallAt
+                  ? <span style={{ color: 'var(--warn)' }}>nothing left to draw</span>
+                  : s.packDrawnKind === 'gym_pass' ? 'a gym PT pass'
+                  : s.packDrawnKind === 'coach_pack' ? 'their coach’s pack'
+                  : s.outcome === 'completed'
+                    ? <span className="dash">settled directly</span>
+                    : <span className="dash">nothing drawn yet</span> },
             ]}
             rowKey={(s: PtSession) => s.id}
             empty={`No one-to-one in the last ${WINDOW_DAYS} days.`}
@@ -774,6 +799,12 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
               { key: 'from', header: 'Issued', value: (p: GymPass) => p.issuedOn },
               { key: 'left', header: 'Left', value: (p: GymPass) => remainingUses(p), numeric: true,
                 render: (p: GymPass) => `${remainingUses(p)} / ${p.usesTotal}` },
+              // Two passes with the same name and the same count buy different
+              // things. Without this column the desk cannot tell which.
+              { key: 'covers', header: 'Good for', value: (p: GymPass) => p.covers,
+                render: (p: GymPass) => p.covers === 'pt' ? 'personal training'
+                  : p.covers === 'visit' ? 'door and classes'
+                  : <span className="dash">the pass type could not be read</span> },
               { key: 'paid', header: 'Paid', value: (p: GymPass) => p.paidCents ?? null, numeric: true,
                 render: (p: GymPass) => p.paidCents == null
                   ? <span className="dash">not recorded</span>

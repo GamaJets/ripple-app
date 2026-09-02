@@ -36,14 +36,33 @@
 //    them is the coach's fault.
 //
 // 2. NOTHING IDENTIFYING A CLIENT LEAVES WITHOUT AN IN-THE-MOMENT CHOICE.
-//    A coach is not entitled to consent on their client's behalf, and this app
-//    holds no record of a client having agreed to be posted about. So a result
+//    A coach is not entitled to consent on their client's behalf. So a result
 //    card carries no name unless the coach affirms, at the moment of sharing,
 //    that this particular client agreed — and `scrubName` below takes the name
-//    back out of the coach's own typed caption when they have not, because the
-//    caption is where it will actually slip through. A structural point as
-//    well: `ShareCard` has no image field at all. Progress photos are private
-//    by design and there is deliberately no shape here that could carry one.
+//    back out of the coach's own typed caption AND out of their typed headline
+//    when they have not, because free text is where it actually slips through.
+//
+//    This module used to say a second thing here: that `ShareCard` had no image
+//    field at all, and that there was "deliberately no shape here that could
+//    carry one". That was the right answer while the only consent this app held
+//    was a tick a COACH put in a box, because a coach ticking a box about their
+//    client's body is not that client agreeing to anything. It is no longer the
+//    only consent there is. supabase/parts/331 gives the client a per-photo
+//    permission to PUBLISH, written by them, unwritable by the coach, and dying
+//    with the photo and with the coaching relationship — so the card can now
+//    carry an image on a permission that came from the person in it.
+//
+//    The shape below therefore admits an image, and admits it only through
+//    `PublishConsent`. Read `src/lib/photoPublish.ts` before touching it: a
+//    coach being able to SEE a progress photo is not permission to post it, the
+//    two grants are separate rows for that reason, and 'unknown' — a consent
+//    read that failed — is not consent. A card with no photo on it looks exactly
+//    like a card that was never going to have one; there is deliberately no
+//    placeholder, because a gap captioned "a photo was withheld" is itself a
+//    statement about a client made without asking them.
+//
+//    The COACH'S OWN LOGO is the easy case and is handled beside it. It is
+//    theirs, it identifies nobody else, and it needs no permission from anyone.
 //
 // 3. TEXT THAT WILL NOT FIT IS WRAPPED HERE, NOT DISCOVERED ON THE CARD.
 //    SVG has no line box. `<Text>` in react-native-svg draws one line and lets
@@ -51,6 +70,8 @@
 //    the one artefact nobody looks at again before it is posted. `wrapLines`
 //    is therefore not a nicety; it is the only thing standing between a long
 //    gym name and a graphic with half a word hanging off it.
+
+import { mayPublishPhoto, type PublishConsent } from './photoPublish';
 
 /* ── canvas sizes ──────────────────────────────────────────────────────────── */
 
@@ -84,12 +105,30 @@ export type CardKind = 'week' | 'result';
 export interface Stat { label: string; value: string }
 
 /**
- * Everything the renderer needs, and nothing it could leak.
+ * Something for the renderer to draw, and whose it is.
  *
- * Note what is absent: no image, no uri, no client id, no photo. A shareable
- * asset in this app is text on a coloured ground, and the type says so, so that
- * "could we put their before-and-after on it" is a change somebody has to make
- * deliberately rather than a field that was already sitting there.
+ * `source` is not decoration. It is the difference between a mark a coach owns
+ * outright and a picture of somebody else's body, and it travels with the uri
+ * so that a renderer, a test or a reader can tell which is which without
+ * knowing which field it came out of.
+ */
+export type CardImageSource = 'coach-logo' | 'client-photo';
+
+export interface CardImage {
+  /** A data: URI or a local file URI. Never a remote one: the export has to
+   *  succeed offline and a network fetch mid-render is a blank rectangle in the
+   *  PNG that nobody looks at again before posting. */
+  uri: string;
+  source: CardImageSource;
+}
+
+/**
+ * Everything the renderer needs.
+ *
+ * Note what is still absent: no client id, no path, no storage key. The two
+ * image fields carry pixels that have already been resolved and permitted, and
+ * they are separate fields rather than one polymorphic slot because the rules
+ * about them have nothing in common — see the header, rule 2.
  */
 export interface ShareCard {
   kind: CardKind;
@@ -104,6 +143,19 @@ export interface ShareCard {
   caption: string;
   /** Filename for the PNG. Safe on every filesystem the share sheet touches. */
   filename: string;
+  /**
+   * The coach's own mark, beside the footer. Absent when they have set none or
+   * when it could not be read — and those two are the same to this module,
+   * because the card that comes out is the card that came out yesterday either
+   * way. src/lib/coachLogo.ts holds the difference and the sentence for it.
+   */
+  logo?: CardImage | null;
+  /**
+   * A client's progress photo. Present ONLY when that client's own published-use
+   * permission was read and granted; see `resultCard`. Never on a week card,
+   * which is about the coach and has nobody else's anything on it.
+   */
+  photo?: CardImage | null;
 }
 
 /**
@@ -316,6 +368,25 @@ export interface WeekInput {
   minutes: number | null;
   /** Distinct clients seen. NULL means the read did not land. */
   clients: number | null;
+  /**
+   * The coach's own logo as a data URI, or null.
+   *
+   * No consent question and no gate: it is theirs. Null is both "they have set
+   * none" and "it could not be read", because the card is identical in both
+   * cases — which is the fallback rule stated as a type rather than as care.
+   */
+  logo?: string | null;
+}
+
+/**
+ * A logo string turned into something the card can carry, or null.
+ *
+ * One place, so a blank string, a whitespace string and a null cannot each
+ * produce a different-shaped card.
+ */
+function logoImage(uri: string | null | undefined): CardImage | null {
+  const s = String(uri ?? '').trim();
+  return s ? { uri: s, source: 'coach-logo' } : null;
 }
 
 /**
@@ -388,6 +459,11 @@ export function weekCard(input: WeekInput): CardBuild {
       footer: brand,
       caption,
       filename: assetFilename('week'),
+      logo: logoImage(input.logo),
+      // Stated rather than left undefined. A week card is about the coach's own
+      // delivered sessions and there is nobody else on it; a field that could
+      // be filled in later by a caller who did not read rule 2 is closed here.
+      photo: null,
     },
   };
 }
@@ -413,6 +489,29 @@ export interface ResultConsent {
   name: boolean;
 }
 
+/**
+ * The one photo the coach has picked, and what the CLIENT said about it.
+ *
+ * `consent` is not a boolean and is not something the coach can set. It is
+ * `PublishConsent` from src/lib/photoPublish.ts, which is resolved from a row
+ * the client wrote and the coach cannot write (supabase/parts/331) — so the two
+ * ticks above and this field are answers from two different people, and the
+ * type is what keeps them from being confused for one another.
+ *
+ * A coach ticking "they agreed" about somebody's numbers is the honest limit of
+ * what a tick can do: this app cannot verify it, and the screen says so. A body
+ * is a different order of thing, and here the app CAN verify it, so it does.
+ */
+export interface ClientPhotoPick {
+  /** A data: or file: URI the renderer can draw. */
+  uri: string;
+  /** Which photo, so the caller cannot resolve consent for one and pass another. */
+  photoId: string;
+  /** What the client's own permission row says. 'unknown' is a read that did
+   *  not land and behaves exactly like 'absent'. */
+  consent: PublishConsent;
+}
+
 export interface ResultInput {
   brand: string;
   /** The client's name as the app holds it. Used to REMOVE it as often as to
@@ -424,6 +523,10 @@ export interface ResultInput {
   figures: Stat[];
   /** The coach's own sentence. Free text, and therefore the leak. */
   note: string;
+  /** The coach's own logo. Theirs, so no gate. */
+  logo?: string | null;
+  /** The client's photo and the client's own permission for it, or nothing. */
+  photo?: ClientPhotoPick | null;
 }
 
 /**
@@ -465,17 +568,27 @@ export function resultCard(input: ResultInput, consent: ResultConsent): CardBuil
   // just asked for.
   const note = named ? String(input.note ?? '').trim() : scrubName(input.note, input.clientName);
 
+  // The SPAN LABEL is free text too, and it was not being scrubbed.
+  //
+  // It is the biggest type on the card and the first clause of the caption, and
+  // a coach typing "Sarah's twelve weeks" into a box labelled "the period, in
+  // your words" is not doing anything strange. Every argument `scrubName` makes
+  // about the note applies to it more strongly, and the arrival of a photograph
+  // beside it is what makes the omission unarguable: a picture of somebody with
+  // a first name over it is an identification whatever the box was called.
+  const span = named ? String(input.spanLabel ?? '').trim() : scrubName(input.spanLabel, input.clientName);
+
   // The name — when there is one to print — is the kicker, and the coach's own
   // words for the period are the headline. The other way round ("Sarah's 12
   // weeks in") reads as a caption rather than a card, and it puts the name in
   // the largest type on the graphic, which is the last place it belongs even
   // when it is allowed to be there at all.
   const who = named && first ? first : 'a client I coach';
-  const headline = String(input.spanLabel ?? '').trim() || 'Client result';
+  const headline = span.trim() || 'Client result';
   const brand = String(input.brand ?? '').trim() || 'Repple';
 
   const caption = [
-    `${capitalise(who)} — ${lower(input.spanLabel)}.`,
+    `${capitalise(who)} — ${lower(span)}.`,
     figures.map((f) => `${f.label}: ${f.value}`).join(' · '),
     note,
   ].filter(Boolean).join('\n');
@@ -490,6 +603,20 @@ export function resultCard(input: ResultInput, consent: ResultConsent): CardBuil
       footer: brand,
       caption,
       filename: assetFilename('result'),
+      logo: logoImage(input.logo),
+      // THE gate, and it is one expression on purpose. `mayPublishPhoto` is the
+      // only thing in this app that decides whether somebody's body goes on a
+      // public card, it takes a value the coach cannot author, and everything
+      // else about this card — the two ticks, the figures, the name — has no
+      // vote in it.
+      //
+      // When it says no the field is null and the card is drawn exactly as a
+      // card with no photo. There is no placeholder and no marker: a labelled
+      // gap would publish the fact that a client was asked, which is a
+      // statement about them made without asking them.
+      photo: input.photo && mayPublishPhoto(input.photo.consent) && String(input.photo.uri ?? '').trim()
+        ? { uri: input.photo.uri.trim(), source: 'client-photo' }
+        : null,
     },
   };
 }
