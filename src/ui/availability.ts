@@ -25,6 +25,25 @@ import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { shapeSeries, type RecurringSeries, type RawSeries } from '../lib/recurring';
 
+/**
+ * The IANA zone this handset is in, or null when the runtime cannot say.
+ *
+ * Null rather than a fallback: `run_open_slot_extension` (part 650) skips a row
+ * with no zone and counts it, which is recoverable and visible. A guessed zone
+ * is neither — it puts a coach's 07:00 slot at some other hour, and the first
+ * anybody knows is a client arriving to an empty gym.
+ *
+ * The `/` test is deliberate. A runtime without full ICU answers `UTC`, which
+ * is a real zone name and almost never the coach's; every zone that names a
+ * place has a region in it.
+ */
+function deviceZone(): string | null {
+  try {
+    const z = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof z === 'string' && z.includes('/') ? z : null;
+  } catch { return null; }
+}
+
 export interface AvailSlot { id: string; dow: number; hour: number; minute: number; dur: number }
 
 /** The outcome of `addSlot`. See the note on it for why this is not a boolean. */
@@ -171,7 +190,15 @@ export function useAvailability() {
     persist([...slots, { id: localId, dow, hour, minute, dur }]);
     if (!USE_SUPABASE || !uid) return 'local';
     try {
-      const { data, error } = await supabase.from('trainer_availability').insert({ trainer_id: uid, dow, hour, minute, dur }).select('id').single();
+      // The zone goes with the hour, because 07:00 is not an instant. Until
+      // part 650 nothing needed it: the app built every slot's timestamp on
+      // this handset, in this handset's zone, by construction. The nightly
+      // extension has no handset, so a row with no zone is one it skips rather
+      // than guesses at — and a slot generated in the wrong zone is worse than
+      // no slot, because a client books it.
+      const { data, error } = await supabase.from('trainer_availability')
+        .insert({ trainer_id: uid, dow, hour, minute, dur, tz: deviceZone() })
+        .select('id').single();
       const sid = data?.id;
       if (error || !sid) return 'local';
       setSlots((p) => p.map((sl) => (sl.id === localId ? { ...sl, id: String(sid) } : sl)));

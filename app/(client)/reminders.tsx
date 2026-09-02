@@ -42,6 +42,7 @@ import {
   plannedReminders, savedFromStored,
   type CustomReminder, type FixedKind, type FixedReminder, type SavedReminders, type Weekday,
 } from '../../src/lib/reminderPlan';
+import { jsDayForIndex } from '../../src/lib/weekStart';
 
 const two = (n: number) => String(n).padStart(2, '0');
 const fmt = (h: number, m: number) => `${two(((h + 11) % 12) + 1)}:${two(m)} ${h < 12 ? 'AM' : 'PM'}`;
@@ -107,10 +108,11 @@ export default function Reminders() {
    *  different things in four places. */
   const DayPicker = ({ days, onToggle, label }: { days: readonly Weekday[]; onToggle: (d: Weekday) => void; label: string }) => (
     <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
-      {/* Monday first. The underlying numbering starts at Sunday because that
-          is what expo-notifications wants, and that is not the member's
-          problem — see reminderPlan.ts. */}
-      {([2, 3, 4, 5, 6, 7, 1] as Weekday[]).map((d) => {
+      {/* Drawn in the order src/lib/weekStart.ts opens a week. The underlying
+          numbering starts at Sunday because that is what expo-notifications
+          wants, and that is not the member's problem — see reminderPlan.ts,
+          whose `daysLabel` reads the same order back. */}
+      {(Array.from({ length: 7 }, (_, i) => (jsDayForIndex(i) + 1) as Weekday)).map((d) => {
         const on = days.includes(d);
         return (
           <Pressable key={d} onPress={() => onToggle(d)}

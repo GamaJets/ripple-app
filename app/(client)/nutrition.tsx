@@ -14,7 +14,7 @@
 // number up.
 import { useState, useEffect, useMemo } from 'react';
 import { num } from '../../src/lib/format';
-import { planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
+import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
@@ -445,7 +445,11 @@ export default function Nutrition() {
     });
     await shareDoc(html, lines.join('\n'), 'Grocery List');
   };
-  const WEEKD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  // The labels for the seven rows below are the plan's OWN day order, not a
+  // second week written out here: `weekPlans[d]` is `planDayOverride(plan, d)`,
+  // so a strip that disagreed by one would name every day of a coach's written
+  // week wrongly. See PLAN_WEEKDAYS, which src/lib/weekStart.ts decides.
+  const WEEKD = PLAN_WEEKDAYS;
   const sharePlan = async () => {
     const rows = plan.map((m) => ({ slot: m.slot, name: m.n, K: m.K, P: m.P, C: m.C, F: m.F }));
     const labels = c.avoid.map((a) => (ALLERGENS.find((x) => x.id === a)?.label ?? a));

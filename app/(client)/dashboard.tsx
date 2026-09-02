@@ -13,6 +13,7 @@ import { offlineBanner } from '../../src/lib/reachability';
 import { useOutbox } from '../../src/ui/outbox';
 import { OUTBOX_KINDS, lapsedNote, outboxNote } from '../../src/lib/outbox';
 import { BRAND } from '../../src/lib/brands';
+import { weekIndexOf } from '../../src/lib/weekStart';
 import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -223,8 +224,16 @@ export default function Home() {
   // than all three naming week one.
   const blk = useClientWeek(program, c.id);
   const planDays = blk.days;
-  const jsToMon = (new Date().getDay() + 6) % 7;
-  const workout = planDays[jsToMon % (planDays.length || 1)] || planDays[0] || { focus: 'Rest Day', exercises: [] };
+  // A POSITIONAL pick, on purpose, and the one place in the app that is still
+  // allowed to be: this card always names something to train because its
+  // headline is "Ready to Train", and src/lib/checklist.ts sets out why the
+  // exact `scheduledDay` match belongs on the checklist and the week strip
+  // rather than here. The index is the day's column in the week, which
+  // src/lib/weekStart.ts owns — it was a hand-rolled Monday offset, and this
+  // screen deciding for itself which day opens a week is how the three screens
+  // that name today's session came to disagree about it.
+  const todayIdx = weekIndexOf(new Date());
+  const workout = planDays[todayIdx % (planDays.length || 1)] || planDays[0] || { focus: 'Rest Day', exercises: [] };
 
   const freezes = freezeBudget(log);
   const frz = currentStreakFrozen(log, freezes);

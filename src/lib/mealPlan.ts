@@ -53,20 +53,30 @@
 import type { Diet } from './types';
 import { buildPlan, catalogSize, mealAt, slotsFor, type Allergen, type PlanInput, type Slot } from './meals';
 import { weekdayOfIso } from './dayPlan';
+import { WEEK_DAYS, dayIndexInWeek, jsDayForIndex } from './weekStart';
 import type { LoadStatus } from '../ui/loadStatus';
 
 /** Bumped only when a stored plan's shape changes in a way a reader must know
  *  about. `parsePlan` refuses anything it does not recognise rather than
  *  guessing, because a half-understood plan reaching a client is worse than
- *  none. */
-export const PLAN_VERSION = 1;
+ *  none.
+ *
+ *  2 — `days` is ordered from the day src/lib/weekStart.ts opens a week on.
+ *  1 — `days` was Monday-first, always and only. Migrated on read; see
+ *      `parsePlan`. */
+export const PLAN_VERSION = 2;
+
+/** The version before the week moved. `days[0]` in a plan stamped with this is
+ *  Monday, whatever the product draws first today. */
+const PLAN_VERSION_MONDAY_FIRST = 1;
 
 /** A plan is a week. Not a month, and not a single day. */
 export const PLAN_DAYS = 7;
 
-/** Monday first, matching the week strip the client's Meals tab already draws.
- *  Deliberately NOT `Date.getDay()`'s Sunday-first order — see planDayIndex. */
-export const PLAN_WEEKDAYS: readonly string[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** The week strip the client's Meals tab draws, in the order it draws it.
+ *  Which day comes first is src/lib/weekStart.ts's decision — see planDayIndex,
+ *  which is the other half of the same answer and must never disagree. */
+export const PLAN_WEEKDAYS: readonly string[] = WEEK_DAYS;
 
 /**
  * One chosen meal: the index that names it, and the meal that index resolved
@@ -105,17 +115,18 @@ export interface CoachMealPlan {
 }
 
 /**
- * Monday-first day index for a calendar day, or null when the date is
+ * Which slot of the stored week a calendar day is, or null when the date is
  * unreadable.
  *
  * `weekdayOfIso` answers 0 Sun … 6 Sat because that is what `Date.getDay()`
- * gives and what `scheduledFocus` wants. The client's Meals tab lays its week
- * out Mon…Sun, so a plan stored in getDay() order would hand a client Sunday's
- * dinners on a Monday — off by one, every week, in the direction nobody checks.
+ * gives and what `scheduledFocus` wants. A plan is stored in the order the week
+ * is DRAWN, so the two have to be converted between — a plan read in getDay()
+ * order when the week does not open on Sunday would hand a client the wrong
+ * day's dinners, every week, in the direction nobody checks.
  */
 export function planDayIndex(dateISO: string): number | null {
   const w = weekdayOfIso(dateISO);
-  return w == null ? null : (w + 6) % 7;
+  return w == null ? null : dayIndexInWeek(w);
 }
 
 /** Decode an index and snapshot what it resolved to. */
@@ -169,7 +180,8 @@ const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number
 export function parsePlan(raw: unknown): CoachMealPlan | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  if (o.v !== PLAN_VERSION) return null;
+  const mondayFirst = o.v === PLAN_VERSION_MONDAY_FIRST;
+  if (o.v !== PLAN_VERSION && !mondayFirst) return null;
   if (typeof o.diet !== 'string' || !DIETS.includes(o.diet as Diet)) return null;
   const mpd = o.mealsPerDay;
   if (mpd !== 3 && mpd !== 4 && mpd !== 5) return null;
@@ -201,7 +213,36 @@ export function parsePlan(raw: unknown): CoachMealPlan | null {
     days.push({ meals });
   }
   const writtenAt = typeof o.writtenAt === 'string' ? o.writtenAt : '';
-  return { v: PLAN_VERSION, diet: o.diet as Diet, avoid, mealsPerDay: mpd, days, writtenAt };
+  return {
+    v: PLAN_VERSION,
+    diet: o.diet as Diet,
+    avoid,
+    mealsPerDay: mpd,
+    days: mondayFirst ? mondayFirstToWeekOrder(days) : days,
+    writtenAt,
+  };
+}
+
+/**
+ * A v1 plan's seven days, re-ordered into the week this build draws.
+ *
+ * THE DAYS THEMSELVES DO NOT MOVE. A coach wrote a Thursday and their client
+ * eats it on a Thursday; only the position in the array changes, because the
+ * array's meaning changed underneath it. Rotating is the whole migration —
+ * there is no other difference between v1 and v2 — and it is done on READ so
+ * that a plan written before the week moved needs nothing done to it in the
+ * database.
+ *
+ * Refusing v1 outright was the alternative, and it is worse: every client whose
+ * coach wrote them a week would silently have no plan, on a screen whose null
+ * means "your coach has not written one".
+ *
+ * `(js + 6) % 7` is v1's own arithmetic, kept here and ONLY here — it is the
+ * definition of the old format rather than a live convention, so it does not go
+ * through weekStart.ts and must not be "tidied" into it.
+ */
+function mondayFirstToWeekOrder(days: PlanDay[]): PlanDay[] {
+  return Array.from({ length: PLAN_DAYS }, (_, i) => days[(jsDayForIndex(i) + 6) % 7]);
 }
 
 /**

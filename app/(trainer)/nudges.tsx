@@ -309,7 +309,7 @@ export default function Nudges() {
                 their own rate — and `watch` is where a word still costs
                 nothing. So the band is surfaced as a DIGEST: one section, once a
                 week, no draft, no Set Aside, and no per-client prompt. Closing
-                it puts it away until the following Monday (`weekKey`); the
+                it puts it away until the week turns over (`weekKey`); the
                 rows are still reachable by opening the section, which is the
                 coach asking rather than the app telling.
 
@@ -349,7 +349,7 @@ export default function Nudges() {
                         <View style={{ marginTop: sp.lg }}>
                           <Ghost label="Read for This Week" onPress={n.dismissWatchDigest} />
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                            This closes until Monday. Nobody here is removed from your book and nothing changes for
+                            This closes until next week. Nobody here is removed from your book and nothing changes for
                             them — it is this section that goes quiet, not them.
                           </Text>
                         </View>

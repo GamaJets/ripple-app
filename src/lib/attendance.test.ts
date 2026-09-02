@@ -61,10 +61,10 @@ eq(daysBetween('', '2026-11-01'), null, 'an empty date is no distance, not zero 
 eq(addDays('2026-03-28', 7), '2026-04-04', 'adding a week crosses the spring change intact');
 eq(addDays('bad', 1), null, 'a malformed day shifts to nothing');
 
-// 2026-08-31 is a Monday.
-eq(weekStart('2026-08-31'), '2026-08-31', 'a Monday is its own week start');
-eq(weekStart('2026-09-06'), '2026-08-31', 'a Sunday belongs to the week that began the Monday before');
-eq(weekStart('2026-09-07'), '2026-09-07', 'the next Monday starts the next week');
+// 2026-09-06 is a Sunday, which is the day a week opens on — src/lib/weekStart.ts.
+eq(weekStart('2026-09-06'), '2026-09-06', 'the opening day is its own week start');
+eq(weekStart('2026-09-12'), '2026-09-06', 'a Saturday belongs to the week that began the Sunday before');
+eq(weekStart('2026-09-13'), '2026-09-13', 'and the next Sunday starts the next week');
 
 /* ── UNMARKED · rule 1: an unticked register is not an absence ─────────────── */
 
@@ -205,19 +205,19 @@ eqJson(attendedDays(future.events), [], 'a class they have booked for next week 
 
 /* ── RHYTHM · rule 4: no rate from a partial record ───────────────────────── */
 
-// Four finished weeks and the current one. 2026-08-31 is a Monday, and `now`
-// above is Thursday 2026-09-10, so the week of 09-07 is still running.
-const days = ['2026-08-10', '2026-08-12', '2026-08-17', '2026-08-25', '2026-08-31', '2026-09-02', '2026-09-08'];
+// Four finished weeks and the current one. Weeks open on Sunday, and `now`
+// above is Thursday 2026-09-10, so the week of 09-06 is still running.
+const days = ['2026-08-09', '2026-08-12', '2026-08-17', '2026-08-25', '2026-08-31', '2026-09-02', '2026-09-08'];
 const r = rhythm(days, '2026-09-10', 6, true);
 
 eq(r.weeks.length, 6, 'six weeks are laid out even where nothing happened in one');
-eq(r.weeks[0].start, '2026-09-07', 'the newest week is first');
+eq(r.weeks[0].start, '2026-09-06', 'the newest week is first');
 eq(r.weeks[0].complete, false, 'the week we are standing in has not finished');
-eq(r.weeks[1].start, '2026-08-31', 'and the one before it is the week before');
-eq(r.weeks[1].days, 2, 'two days in the week of the 31st');
-eq(r.firstDay, '2026-08-10', 'the record starts on the earliest day in it');
+eq(r.weeks[1].start, '2026-08-30', 'and the one before it is the week before');
+eq(r.weeks[1].days, 2, 'two days in the week of the 30th');
+eq(r.firstDay, '2026-08-09', 'the record starts on the earliest day in it');
 
-// Weeks of 08-10, 08-17, 08-24, 08-31 are complete and covered: 2 + 1 + 1 + 2 = 6.
+// Weeks of 08-09, 08-16, 08-23, 08-30 are complete and covered: 2 + 1 + 1 + 2 = 6.
 eq(r.countedWeeks, 4, 'four finished weeks lie wholly inside the record');
 eq(r.perWeek, 1.5, 'and the mean is over exactly those');
 
@@ -228,7 +228,7 @@ eq(partial.countedWeeks, 4, 'and the count of what would have been averaged is u
 
 // A member whose record starts three weeks ago, averaged over twelve, must not
 // read as somebody who trains once a fortnight.
-const recent = rhythm(['2026-08-31', '2026-09-01', '2026-09-03'], '2026-09-10', 12, true);
+const recent = rhythm(['2026-08-30', '2026-09-01', '2026-09-03'], '2026-09-10', 12, true);
 eq(recent.countedWeeks, 1, 'only the one finished week that is inside the record counts');
 eq(recent.perWeek, 3, 'so the mean is three, not three-over-twelve');
 ok(recent.weeks.filter((w) => !w.covered).length > 0,

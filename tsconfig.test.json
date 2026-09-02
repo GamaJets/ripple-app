@@ -40,6 +40,8 @@
     "src/lib/packExpiry.test.ts",
     "src/lib/disputes.ts",
     "src/lib/disputes.test.ts",
+    "src/lib/weekStart.ts",
+    "src/lib/weekStart.test.ts",
     "src/lib/coachDelivery.ts",
     "src/lib/coachDelivery.test.ts",
     "src/lib/coachRevenue.ts",

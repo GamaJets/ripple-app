@@ -77,7 +77,10 @@
 --                              "n": "…", "k": 0, "p": 0, "c": 0, "f": 0 } ] } ],
 --     "writtenAt": "2026-08-31T09:00:00.000Z" }
 --
--- Seven days, Monday first. `idx` is an index into the procedural catalogue in
+-- Seven days. `days[0]` was Monday when this part was written; part 640 moved
+-- every calendar in the product to Sunday and bumped `v` to 2 so the two orders
+-- can be told apart — read that part before writing anything against `days`.
+-- `idx` is an index into the procedural catalogue in
 -- src/lib/meals.ts, which is the same value `meal_override` already stores, so
 -- the plan reaches the client down the path that already exists rather than a
 -- second one drawn beside it.

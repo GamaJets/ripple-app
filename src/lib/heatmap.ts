@@ -7,7 +7,7 @@
 //     {col.map((d, di) => <View key={di} style={[{ width: 14, height: 14 }, cell(d)]} />)}
 //
 // — eighty-four `View`s with no `accessibilityLabel`, no text and no date on
-// any of them, under a column axis that did not exist. Only the Mon–Sun
+// any of them, under a column axis that did not exist. Only the weekday
 // initials down the left-hand side were readable at all.
 //
 // A sighted member could see a gap in their training and had no way to tell

@@ -25,10 +25,12 @@ import { scheduledDay } from '../../src/lib/checklist';
 import { useClientWeek } from '../../src/ui/clientWeek';
 import { clientWeekLine } from '../../src/lib/clientBlock';
 import { weekLabel } from '../../src/lib/programBlock';
+import { WEEK_DAYS, jsDayForIndex, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 
-const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-/** WEEK is Monday-first; `Date.getDay()` is Sunday-first. */
-const jsWeekday = (i: number) => (i + 1) % 7;
+/** The seven rows, in the order src/lib/weekStart.ts draws a week. `WEEK[i]`
+ *  and `jsDayForIndex(i)` are the label and the weekday of the same row, which
+ *  is the pairing this screen used to keep by hand and got wrong once. */
+const WEEK = WEEK_DAYS;
 
 export default function ThisWeek() {
   const t = useTheme();
@@ -61,8 +63,8 @@ export default function ThisWeek() {
   const blockLine = clientWeekLine(blk.week, blk.week.index);
   const thisWeek = blk.weeks[blk.week.index] ?? null;
 
-  const jsToMon = (new Date().getDay() + 6) % 7;
-  const monday = new Date(); monday.setDate(monday.getDate() - jsToMon); monday.setHours(0, 0, 0, 0);
+  const todayIdx = weekIndexOf(new Date());
+  const weekOpened = startOfWeek();
   const pad = (n: number) => String(n).padStart(2, '0');
   const dstr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const logged = new Set(log.map((l) => dstr(new Date(l.t))));
@@ -81,7 +83,7 @@ export default function ThisWeek() {
   // for the daily checklist, for the reason written on it there: a plan day
   // that lands nowhere near the real day is a line telling somebody they owe a
   // leg session on a day their plan gives them off.
-  const rows = WEEK.map((label, i) => ({ label, i, day: scheduledDay(blk.days, jsWeekday(i)) }));
+  const rows = WEEK.map((label, i) => ({ label, i, day: scheduledDay(blk.days, jsDayForIndex(i)) }));
   // The number of days the member will actually see a session on — not
   // `program.days.length`, which counts days the plan names but this week does
   // not place (a coach program whose day fell outside Mon–Sun would be counted
@@ -143,8 +145,8 @@ export default function ThisWeek() {
           ) : null}
 
           {rows.map(({ label, i, day: workout }) => {
-            const date = new Date(monday); date.setDate(monday.getDate() + i);
-            const isToday = i === jsToMon;
+            const date = new Date(weekOpened); date.setDate(weekOpened.getDate() + i);
+            const isToday = i === todayIdx;
             const done = logged.has(dstr(date));
             // A rest day says so and stays tappable — somebody who trains on a
             // day off still wants Train, and the log below still marks it.

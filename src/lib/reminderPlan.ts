@@ -21,6 +21,7 @@
 // scheduling different reminders — the shape this codebase keeps re-finding.
 //
 // Pure: no notifications module, no storage, no React.
+import { jsDayForIndex } from './weekStart';
 
 /**
  * Weekdays as expo-notifications counts them: 1 = Sunday … 7 = Saturday.
@@ -275,8 +276,10 @@ export function daysLabel(days: readonly Weekday[]): string {
   const set = new Set(days);
   if (set.size === 5 && WEEKDAYS_ONLY.every((d) => set.has(d))) return 'Weekdays';
   if (set.size === 2 && set.has(1) && set.has(7)) return 'Weekends';
-  // Monday first, because a week that starts on Sunday reads as a bug to most
-  // of the world and the underlying numbering is not the member's problem.
-  const order: Weekday[] = [2, 3, 4, 5, 6, 7, 1];
+  // Read in the order the product draws a week — src/lib/weekStart.ts decides,
+  // and "Sun, Mon, Wed" against a Sunday-first strip on the screen above it is
+  // the kind of disagreement a member reads as a bug. The +1 is the conversion
+  // from `Date.getDay()` to the 1 = Sunday numbering this file works in.
+  const order = Array.from({ length: 7 }, (_, i) => (jsDayForIndex(i) + 1) as Weekday);
   return order.filter((d) => set.has(d)).map((d) => DAY_LABEL[d]).join(', ');
 }

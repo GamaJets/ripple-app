@@ -103,8 +103,12 @@ import {
 import { seedDecision, stillListed, pruneSelection, assignCtaLabel } from '../../src/lib/assignPicker';
 import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDays';
 import { notifySuccess } from '../../src/ui/haptics';
+import { WEEK_DAYS } from '../../src/lib/weekStart';
 
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** The week, in the order src/lib/weekStart.ts draws one. This is the order a
+ *  new day is offered in and the order Cycle Day walks, so the builder and the
+ *  client's own week strip read the same way round. */
+const DAYS = WEEK_DAYS;
 /** One week of a block, as this screen edits it. The mirror of `ProgramWeek`
  *  in src/lib/programs.ts over the builder's own `BDay`, which carries a draft
  *  key and a unit the coach typed in that no stored programme needs. */
@@ -1039,7 +1043,7 @@ export default function Builder() {
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: d.exercises.map((e) => (e.key === key ? { ...e, ...patch } : e)) } : d)));
   const addDay = () => setDays((ds) => {
     const used = new Set(ds.map((d) => d.day));
-    const free = DAYS.find((d) => !used.has(d)) ?? 'Mon';
+    const free = DAYS.find((d) => !used.has(d)) ?? DAYS[0];
     return [...ds, { day: free, focus: 'Training', exercises: [] }];
   });
   const cycleDay = (di: number) => setDays((ds) => ds.map((d, i) => {

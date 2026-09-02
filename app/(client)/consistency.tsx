@@ -17,9 +17,11 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { currentStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
 import { heatmapDayLabel, heatmapColumnLabel, heatmapSummary } from '../../src/lib/heatmap';
+import { WEEK_DAYS, startOfWeek } from '../../src/lib/weekStart';
 
 const WEEKS = 12;
-const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** The grid's rows, in the order src/lib/weekStart.ts draws a week. */
+const DOW = WEEK_DAYS;
 
 export default function Consistency() {
   const t = useTheme();
@@ -64,13 +66,13 @@ export default function Consistency() {
   const counts: Record<string, number> = {};
   for (const l of log) { const k = key(new Date(l.t)); counts[k] = (counts[k] || 0) + 1; }
 
-  // Build a grid: columns = weeks (oldest→newest), rows = Mon..Sun.
+  // Build a grid: columns = weeks (oldest→newest), rows = the seven days of a
+  // week in DOW's order.
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const jsToMon = (today.getDay() + 6) % 7;
-  const thisMonday = new Date(today); thisMonday.setDate(today.getDate() - jsToMon);
+  const thisWeek = startOfWeek(today);
   const cols: Date[][] = [];
   for (let w = WEEKS - 1; w >= 0; w--) {
-    const colStart = new Date(thisMonday); colStart.setDate(thisMonday.getDate() - w * 7);
+    const colStart = new Date(thisWeek); colStart.setDate(thisWeek.getDate() - w * 7);
     const col: Date[] = [];
     for (let d = 0; d < 7; d++) { const day = new Date(colStart); day.setDate(colStart.getDate() + d); col.push(day); }
     cols.push(col);

@@ -132,12 +132,13 @@ export interface BlockPosition {
  * week its `days` describe, and a zero here would make every block read 'after'
  * on the day it started.
  *
- * The week runs from the START DATE, not from Monday. A block that begins on a
- * Wednesday has its week one running Wednesday to Tuesday, and that is right:
- * the coach chose the day, and re-anchoring to the calendar week would put the
- * client in week two after five days. `app/(client)/week.tsx` renders a
- * Monday-first calendar and is a different question — what is on each named
- * day — which is unaffected either way.
+ * The week runs from the START DATE, not from the day the calendar week opens.
+ * A block that begins on a Wednesday has its week one running Wednesday to
+ * Tuesday, and that is right: the coach chose the day, and re-anchoring to the
+ * calendar week would put the client in week two after five days.
+ * `app/(client)/week.tsx` renders a calendar week — src/lib/weekStart.ts says
+ * which day opens it — and is a different question, what is on each named day,
+ * which is unaffected either way.
  */
 export function blockPosition(
   startsOn: string | null | undefined,

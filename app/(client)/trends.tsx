@@ -26,10 +26,10 @@ import { useClientData } from '../../src/ui/clientData';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { startOfWeek } from '../../src/lib/weekStart';
 
 const WEEKS = 10;
 
-function mondayOf(d: Date): Date { const x = new Date(d); x.setHours(0, 0, 0, 0); const back = (x.getDay() + 6) % 7; x.setDate(x.getDate() - back); return x; }
 // Tonnage and best estimated max now go through src/lib/bodyweightSets.ts,
 // which is what lets a pull-up onto these charts. Both used to read a set's
 // second number as the load, and on a bodyweight set that number is zero — so
@@ -71,15 +71,15 @@ export default function Trends() {
 
   // Weekly training volume (last 10 weeks, oldest → newest).
   const weeks = useMemo(() => {
-    const thisMon = mondayOf(new Date());
+    const weekOpened = startOfWeek();
     const out: { label: string; iso: string; vol: number; unpriced: number; sessions: number }[] = [];
     for (let w = WEEKS - 1; w >= 0; w--) {
-      const start = new Date(thisMon); start.setDate(thisMon.getDate() - w * 7);
+      const start = new Date(weekOpened); start.setDate(weekOpened.getDate() - w * 7);
       const end = new Date(start); end.setDate(start.getDate() + 7);
       const inWk = log.filter((e) => { const d = new Date(e.t); return d >= start && d < end; });
       const days = new Set(inWk.map((e) => new Date(e.t).toDateString()));
       // `label` is the terse "12/8" the Best Week chip has always shown;
-      // `iso` is the same Monday as data, for the chart axis to format. Built
+      // `iso` is that same opening day as data, for the chart axis to format. Built
       // from local getters, never from a string, so the week a member is
       // standing in is the week they are shown — see src/lib/localDate.ts.
       const iso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
@@ -157,7 +157,7 @@ export default function Trends() {
           unit={logKnown ? wu : undefined}
           note={logStatus === 'loading' ? 'Reading your training log…' : logStatus === 'partial' ? 'More logged than this screen can read at once, so the weekly figures would be short.' : !logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
             : thisWeek.sessions
-            ? `${thisWeek.sessions} training day${thisWeek.sessions === 1 ? '' : 's'} since Monday`
+            ? `${thisWeek.sessions} training day${thisWeek.sessions === 1 ? '' : 's'} this week`
             : 'No sessions logged this week yet.'}
         />
 

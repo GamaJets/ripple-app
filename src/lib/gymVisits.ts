@@ -13,6 +13,7 @@
 import { assertWhole, capLimit, readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
 import type { MembershipStatus } from './gymRecord';
+import { WEEK_DAYS, weekIndexOf } from './weekStart';
 
 type Queryable = { from: (table: string) => any };
 
@@ -173,11 +174,13 @@ export function peakHour(visits: Pick<Visit, 'enteredAt'>[]): { hour: number; vi
   return best.visits === 0 ? null : best;
 }
 
-/** Days of the week, Monday first — the week a rota is written in. */
-export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+/** Days of the week in the order the product draws one. The order itself is
+ *  src/lib/weekStart.ts's decision — a busiest-days strip and the rota beside
+ *  it reading two different weeks is the failure this re-export prevents. */
+export const WEEKDAYS: readonly string[] = WEEK_DAYS;
 
 /**
- * Visit counts by day of the week, Monday first, every day present.
+ * Visit counts by day of the week, in `WEEKDAYS` order, every day present.
  *
  * Every day is included at zero for the same reason `visitsByHour` includes
  * every hour: the shape of the week is the answer. A gym that is dead on
@@ -189,15 +192,14 @@ export function visitsByWeekday(visits: Pick<Visit, 'enteredAt'>[]): { day: stri
   for (const v of visits) {
     const d = new Date(v.enteredAt);
     if (Number.isNaN(d.getTime())) continue;
-    // getDay is 0 = Sunday; the rota's week opens on Monday.
-    out[(d.getDay() + 6) % 7].visits += 1;
+    out[weekIndexOf(d)].visits += 1;
   }
   return out;
 }
 
 /** One weekday-and-hour slot of the week, with how many came through it. */
 export interface BusySlot {
-  /** 0 = Monday, matching WEEKDAYS. */
+  /** The day's column in the week, 0 first — index it into WEEKDAYS. */
   weekday: number;
   hour: number;
   visits: number;
@@ -230,7 +232,7 @@ export function busiestSlots(
   for (const v of visits) {
     const d = new Date(v.enteredAt);
     if (Number.isNaN(d.getTime())) continue;
-    const weekday = (d.getDay() + 6) % 7;
+    const weekday = weekIndexOf(d);
     const hour = d.getHours();
     const key = `${weekday}:${hour}`;
     let cell = counts.get(key);

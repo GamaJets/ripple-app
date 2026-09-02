@@ -125,8 +125,12 @@ import { dayKeyOf, instantForDay, readWorkoutEdit, type WorkoutDraftSet } from '
 import { useSettings } from '../../src/ui/settings';
 import { WeightUnitToggle } from '../../src/ui/WeightUnitToggle';
 import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, readNumber, type WeightUnit } from '../../src/lib/units';
+import { WEEK_DAYS, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 
-const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** The day strip and the month sheet's column heads, in the order
+ *  src/lib/weekStart.ts draws a week. Both are on this screen, and before this
+ *  they were the same array by luck rather than by construction. */
+const WEEK = WEEK_DAYS;
 
 /** Where the guided runner's sets live between the moment they are typed and
  *  the moment the server takes them. One key, not one per day: only one guided
@@ -339,12 +343,12 @@ export default function Train() {
   const viewWeek = weekPick != null && weekPick >= 0 && weekPick < blk.weeks.length ? weekPick : blk.week.index;
   const weekOnScreen = blk.weeks[viewWeek] ?? null;
   const blockLine = clientWeekLine(blk.week, viewWeek);
-  const jsToMon = (new Date().getDay() + 6) % 7;
-  const [dayIdx, setDayIdx] = useState(jsToMon);
+  const todayIdx = weekIndexOf(new Date());
+  const [dayIdx, setDayIdx] = useState(todayIdx);
   // Which week the strip is on, counted back from this one. 0 is this week; -1
   // is last week.
   //
-  // There was no such state. `monday0` was derived from today and nothing else,
+  // There was no such state. `week0` was derived from today and nothing else,
   // so the seven days on screen were always the seven days of the current week
   // and the Month Calendar sheet inherited the same fixed month. A member who
   // missed Saturday and remembered on Monday had nowhere to put it: the day was
@@ -602,14 +606,14 @@ export default function Train() {
   // hotel gym is plated in whatever that gym uses, not in what the member reads.
   const [cxUnit, setCxUnit] = useState<WeightUnit>(wu);
   const today0 = new Date();
-  const monday0 = new Date(today0); monday0.setDate(today0.getDate() - jsToMon + weekOffset * 7); monday0.setHours(0, 0, 0, 0);
+  const week0 = startOfWeek(today0); week0.setDate(week0.getDate() + weekOffset * 7);
   // `setDate` past the end of a month rolls into the next one, so this arithmetic
   // survives a week that straddles a month or a year boundary without any help.
-  const sunday0 = new Date(monday0); sunday0.setDate(monday0.getDate() + 6);
+  const weekEnd0 = new Date(week0); weekEnd0.setDate(week0.getDate() + 6);
   const weekLabel = weekOffset === 0 ? 'This week'
     : weekOffset === -1 ? 'Last week'
-    : `${monday0.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${sunday0.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
-  const dateFor = (i: number) => { const d = new Date(monday0); d.setDate(monday0.getDate() + i); return d; };
+    : `${week0.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${weekEnd0.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
+  const dateFor = (i: number) => { const d = new Date(week0); d.setDate(week0.getDate() + i); return d; };
   const pad2 = (n: number) => String(n).padStart(2, '0');
   const dstr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
@@ -663,16 +667,20 @@ export default function Train() {
     .map((l) => ({ type: l.exercise, mins: l.cardio!.mins, dist: l.cardio!.dist, unit: l.cardio!.unit, watts: l.cardio!.watts ?? 0, kcal: l.kcal ?? null }));
   // The month the sheet is showing, as an offset from the month the strip is on.
   //
-  // `calMonth` and `calYear` were consts off `monday0` with no setter anywhere,
+  // `calMonth` and `calYear` were consts off `week0` with no setter anywhere,
   // so the sheet opened on the current month and stayed there — the same defect
   // as the day strip, one screen deeper. A member could see thirty-one days and
   // reach none of the ones before them.
   //
   // Reset when the sheet is opened, so it always opens on the week you are
   // looking at rather than wherever it was left three days ago.
-  const calBase = new Date(monday0.getFullYear(), monday0.getMonth() + calShift, 1);
+  const calBase = new Date(week0.getFullYear(), week0.getMonth() + calShift, 1);
   const calMonth = calBase.getMonth(), calYear = calBase.getFullYear();
-  const firstDow = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
+  // How many blank cells the month grid opens with. Through weekStart.ts, so
+  // this sheet and the day strip above it and the Calendar tab all agree — this
+  // one was Monday-first while app/(client)/calendar.tsx drew the same month
+  // Sunday-first, two screens one tap apart with the columns a day out.
+  const firstDow = weekIndexOf(new Date(calYear, calMonth, 1));
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const monthLabel = calBase.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   // Not past the month we are in. Every day beyond today is a day with nothing
@@ -1303,7 +1311,7 @@ export default function Train() {
         </View>
         <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
           {WEEK.map((d, i) => {
-            const on = i === dayIdx; const today = i === jsToMon && weekOffset === 0; const dnum = dateFor(i).getDate(); const worked = workedDates.has(dstr(dateFor(i)));
+            const on = i === dayIdx; const today = i === todayIdx && weekOffset === 0; const dnum = dateFor(i).getDate(); const worked = workedDates.has(dstr(dateFor(i)));
             return (
               <Pressable key={d} onPress={() => setDayIdx(i)}
                 accessibilityRole="button"
@@ -1321,7 +1329,7 @@ export default function Train() {
             March is the kind of thing people simply do not do. */}
         {weekOffset !== 0 ? (
           <View style={{ alignItems: 'center', marginTop: sp.sm }}>
-            <Ghost label="Back to This Week" onPress={() => { setWeekOffset(0); setDayIdx(jsToMon); tapLight(); }} />
+            <Ghost label="Back to This Week" onPress={() => { setWeekOffset(0); setDayIdx(todayIdx); tapLight(); }} />
           </View>
         ) : null}
 
@@ -1396,7 +1404,7 @@ export default function Train() {
           /* The DAY the strip is on, not the word "Today". It said "Today" for
              whichever day was selected, which was already wrong for a Thursday
              looked at on Tuesday and is now wrong for a whole week at a time. */
-          label={`${weekOffset === 0 && dayIdx === jsToMon ? 'Today' : dateFor(dayIdx).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })} · ${workout.focus}`}
+          label={`${weekOffset === 0 && dayIdx === todayIdx ? 'Today' : dateFor(dayIdx).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })} · ${workout.focus}`}
           figure={fig(exercises.length)}
           unit={exercises.length === 1 ? 'exercise' : 'exercises'}
           note={heroNote}

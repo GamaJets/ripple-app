@@ -52,6 +52,7 @@
 //    weeks that had not happened yet, and it is exactly what this codebase means
 //    by inventing a figure.
 import { capLimit, capped } from './rowCap';
+import { dayIndexInWeek } from './weekStart';
 
 type Queryable = { from: (table: string) => any };
 
@@ -136,13 +137,15 @@ export function addDays(day: string, n: number): string | null {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
-/** The Monday of the week `day` falls in. Monday because a gym's week is a
- *  training week, and nobody plans "three sessions, Sunday to Saturday". */
+/** The first day of the week `day` falls in — a Sunday, per src/lib/weekStart.ts,
+ *  which is the one place in this product that decides. */
 export function weekStart(day: string): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day).trim());
   if (!m) return null;
-  // getUTCDay: 0 Sunday … 6 Saturday. Monday is 0 days back, Sunday is 6.
-  const back = (new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay() + 6) % 7;
+  // UTC arithmetic on a bare date, like `addDays` above and for the same reason:
+  // these strings are calendar days with no instant in them, and reading them
+  // through a local zone would move half of them.
+  const back = dayIndexInWeek(new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay());
   return addDays(day, -back);
 }
 
@@ -320,7 +323,7 @@ export function attendedDays(events: AttendanceEvent[]): string[] {
 }
 
 export interface RhythmWeek {
-  /** Monday, as a bare ISO date. */
+  /** The day the week opened, as a bare ISO date. See src/lib/weekStart.ts. */
   start: string;
   /** True once the week has finished, so it can be compared with the others. */
   complete: boolean;

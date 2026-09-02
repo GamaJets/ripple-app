@@ -1,0 +1,46 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The week a stored meal plan is written in.
+--
+-- Every calendar in this product now opens on SUNDAY — three apps and the
+-- console, decided in one place, `src/lib/weekStart.ts`. Almost all of that is
+-- arithmetic and label order and changes nothing that is stored.
+--
+-- `coach_nutrition.plan` is the exception, and it is the only one in the schema.
+-- Its `days` array is SEVEN POSITIONS WITH NO DAY NAMES IN THEM. Position 0 is
+-- whatever the app of the day says position 0 is, and part 133's own comment
+-- said, in as many words, "Seven days, Monday first". Change what the app draws
+-- first and every stored plan silently shifts by a day: a coach's Thursday
+-- becomes their client's Wednesday, on a screen that gives no sign anything has
+-- moved and for a client who may have disclosed an allergy.
+--
+-- ── What was done about it, and where ────────────────────────────────────
+--
+-- Nothing to the rows. The plan carries a version — `v` — and it is now 2:
+--
+--     v = 1   days[0] is Monday. Always. Whatever the app draws.
+--     v = 2   days[0] is the day the week opens on, per weekStart.ts.
+--
+-- `parsePlan` in src/lib/mealPlan.ts reads BOTH and rotates a v1 plan into the
+-- current order as it loads it, so a plan written before the week moved reaches
+-- its client on the same days it always did, with no write, no backfill and no
+-- window during which a plan means two things at once. The next time a coach
+-- saves that client's week it is stored as v2 and the rotation stops applying
+-- to it.
+--
+-- Rejecting v1 was the alternative and it is worse: `parsePlan` returning null
+-- is how the app says "this client has no plan", so every client whose coach
+-- had written them a week would have quietly had it taken away.
+--
+-- ── Why this part exists at all ──────────────────────────────────────────
+--
+-- The column comment is the only description of this shape a person reading the
+-- database will find, and it pointed at a file that no longer agrees with it.
+-- A comment that is wrong about which day is position 0 is not a documentation
+-- problem — it is the next person writing a migration against it.
+--
+-- No data is read, written or moved by this part. It changes one comment.
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+comment on column public.coach_nutrition.plan is
+  'The week of meals this client''s coach composed. {v, diet, avoid, mealsPerDay, days[7].meals[], writtenAt} — see src/lib/mealPlan.ts. `days` is SEVEN POSITIONS AND NO DAY NAMES: at v=2 position 0 is the day the week opens on (src/lib/weekStart.ts, Sunday), at v=1 it is Monday, and parsePlan() rotates a v1 plan on read rather than rewriting it. Carries no calorie or macro TARGET: those are derived live by macrosFor() plus the deltas on this same row, so there is only ever one of them.';

@@ -885,7 +885,7 @@ ok(!queue.some((q) => q.item.status === 'retired'), 'retired kit never appears i
 
 // ── weekly attendance series (the chart the site draws) ──
 {
-const NOW = Date.parse('2026-08-25T12:00:00Z');   // a Tuesday; its Monday is the 24th
+const NOW = Date.parse('2026-08-25T12:00:00Z');   // a Tuesday; its week opened Sunday the 23rd
 const gc = (startsAt: string, capacity: number, booked: number, attended: number): GymClass => ({
   id: startsAt + capacity, title: 'Conditioning', room: null, instructor: null, trainerId: null,
   startsAt, durationMin: 45, capacity, booked, attended, waitlisted: 0, waitlistAttended: 0,
@@ -893,14 +893,14 @@ const gc = (startsAt: string, capacity: number, booked: number, attended: number
 
 const w3 = weeklyAttendance([
   gc('2026-08-24T07:00:00Z', 20, 15, 12),   // this week
-  gc('2026-08-23T09:00:00Z', 10, 10, 9),    // SUNDAY — belongs to the week of the 17th
+  gc('2026-08-22T09:00:00Z', 10, 10, 9),    // SATURDAY — closes the week of the 16th
   gc('2026-07-01T07:00:00Z', 20, 20, 20),   // far outside the window
 ], 3, NOW);
 
 ok(w3.length === 3, 'weeklyAttendance returns exactly the weeks asked for');
-ok(w3[0].weekOf === '2026-08-10' && w3[2].weekOf === '2026-08-24', 'series runs oldest to newest');
+ok(w3[0].weekOf === '2026-08-09' && w3[2].weekOf === '2026-08-23', 'series runs oldest to newest');
 ok(w3[2].classes === 1 && w3[2].booked === 15 && w3[2].attended === 12, 'this week totals');
-ok(w3[1].weekOf === '2026-08-17' && w3[1].classes === 1, 'a Sunday class counts to the Monday that opened its week');
+ok(w3[1].weekOf === '2026-08-16' && w3[1].classes === 1, 'a Saturday class counts to the Sunday that opened its week');
 ok(w3.reduce((a, x) => a + x.classes, 0) === 2, 'classes outside the window are dropped, not clamped into the edge week');
 
 // A quiet week is a gap in the chart, not a missing point.
@@ -1442,11 +1442,15 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 //
 // Every instant is built with `new Date(y, m, d, h)` and converted to ISO, so
 // the wall-clock times below mean the same thing in whatever timezone this
-// runs, which is exactly what the module buckets by. 7 Sept 2026 is a Monday.
+// runs, which is exactly what the module buckets by. 6 Sept 2026 is a Sunday
+// and opens the week; 7 Sept is the Monday inside it.
 {
   const at = (day: number, h: number, min = 0) => new Date(2026, 8, day, h, min, 0, 0).toISOString();
+  /** The day the week opens on — a Sunday, per src/lib/weekStart.ts. */
+  const OPENS = '2026-09-06';
+  /** A date inside that week, used where the argument is just "some day". */
   const MON = '2026-09-07';
-  const days = weekDays(MON);
+  const days = weekDays(OPENS);
 
   const shift = (id: string, trainerId: string, day: number, from: number, to: number,
                  over: Partial<Shift> = {}): Shift => ({
@@ -1459,12 +1463,12 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ({ kind: 'pt', label: 'One-to-one', startsAt: at(day, h), durationMin, trainerId });
 
   // The week the screen pages through.
-  ok(weekStartOf(new Date(2026, 8, 9)) === MON, 'midweek resolves to its Monday');
-  ok(weekStartOf(new Date(2026, 8, 7)) === MON, 'Monday is its own week start');
-  ok(weekStartOf(new Date(2026, 8, 13)) === MON, 'Sunday belongs to the week that began Monday');
-  ok(weekStartOf(new Date(2026, 8, 14)) === '2026-09-14', 'the next Monday opens the next week');
-  ok(days.length === 7 && days[0] === MON && days[6] === '2026-09-13', 'seven days, Monday to Sunday');
-  ok(shiftWeek(MON, -1) === '2026-08-31', 'paging back crosses the month');
+  ok(weekStartOf(new Date(2026, 8, 9)) === OPENS, 'midweek resolves to the day its week opened');
+  ok(weekStartOf(new Date(2026, 8, 6)) === OPENS, 'the opening day is its own week start');
+  ok(weekStartOf(new Date(2026, 8, 12)) === OPENS, 'Saturday belongs to the week that began the Sunday before');
+  ok(weekStartOf(new Date(2026, 8, 13)) === '2026-09-13', 'and the next Sunday opens the next week');
+  ok(days.length === 7 && days[0] === OPENS && days[6] === '2026-09-12', 'seven days, Sunday to Saturday');
+  ok(shiftWeek(OPENS, -1) === '2026-08-30', 'paging back crosses the month');
   ok(hourLabel(6) === '06:00' && hourLabel(18) === '18:00', 'hours read as a wall clock');
 
   // A block occupies every hour it touches — a 17:30 class needs somebody on
@@ -1551,8 +1555,9 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   const byDay = shiftsByDay(days, [shift('b', 't1', 7, 14, 18), shift('a', 't2', 7, 6, 14)]);
   ok(byDay.length === 7, 'every day of the week comes back, including the empty ones');
-  ok(byDay[0].shifts.length === 2 && byDay[0].shifts[0].id === 'a', 'Monday sorted by start time');
-  ok(byDay[1].shifts.length === 0, 'Tuesday is empty, and says so by being empty');
+  ok(byDay[0].shifts.length === 0, 'Sunday opens the week, and it is empty');
+  ok(byDay[1].shifts.length === 2 && byDay[1].shifts[0].id === 'a', 'Monday sorted by start time');
+  ok(byDay[2].shifts.length === 0, 'Tuesday is empty, and says so by being empty');
 
   // Building a shift from what the form collects.
   ok(shiftFromHours('t1', MON, 6, 14)?.startsAt === at(7, 6), 'a 6-14 shift starts at 06:00 local');

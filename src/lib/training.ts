@@ -2,6 +2,7 @@
 // working weight and the workout log so they unit-test cleanly and drive both
 // the guided session (warm-ups) and the Train tab (deload nudge).
 import type { WorkoutEntry } from './mockData';
+import { weekStartIso } from './weekStart';
 
 const DAY = 86_400_000;
 
@@ -18,13 +19,16 @@ export function warmupSets(workingKg: number): WarmSet[] {
   ];
 }
 
-// ISO-ish week key (year + week index) for grouping training weeks.
+// A key for grouping training weeks: the local date the week opened on, which
+// is what src/lib/weekStart.ts decides. Never displayed — it is compared with
+// itself — so all it has to do is change exactly once a week.
+//
+// It was `year + Math.floor(weekStart / 7 days)`, and that only counts weeks if
+// every week is exactly 604,800,000 ms long. Two of them a year are not, so on
+// a clocks-change week the floor could land on the neighbouring bucket and fold
+// two weeks of training into one — which reads as a deload nobody took.
 function weekKey(ts: number): string {
-  const d = new Date(ts);
-  const day = (d.getDay() + 6) % 7;           // Mon=0
-  const monday = ts - day * DAY;
-  const m = new Date(monday); m.setHours(0, 0, 0, 0);
-  return m.getFullYear() + '-' + Math.floor(m.getTime() / (7 * DAY));
+  return weekStartIso(ts);
 }
 
 export interface DeloadInfo { due: boolean; hardWeeks: number; reason: string }

@@ -173,13 +173,13 @@ const visit = (iso: string, over: Partial<Visit> = {}): Visit => ({
 
   const week = visitsByWeekday([...sat(9, 8), ...tue(9, 2)]);
   eq(week.length, 7, 'every weekday is present, including the quiet ones');
-  eq(week[0].day, 'Mon', 'the week opens on Monday, like the rota');
-  eq(week[5].visits, 8, 'Saturday carries its eight');
-  eq(week[1].visits, 2, 'and Tuesday its two');
-  eq(week[3].visits, 0, 'a day with nothing is present at zero rather than missing');
+  eq(week[0].day, 'Sun', 'the week opens on Sunday, like the rota — src/lib/weekStart.ts');
+  eq(week[6].visits, 8, 'Saturday, which now closes the week, carries its eight');
+  eq(week[2].visits, 2, 'and Tuesday its two');
+  eq(week[4].visits, 0, 'a day with nothing is present at zero rather than missing');
 
   const slots = busiestSlots([...sat(9, 8), ...tue(9, 2)], 5);
-  eq(slots[0].weekday, 5, 'the busiest slot is Saturday, not "09:00" — which is the staffing answer');
+  eq(slots[0].weekday, 6, 'the busiest slot is Saturday, not "09:00" — which is the staffing answer');
   eq(slots[0].hour, 9, 'at nine');
   eq(slots[0].visits, 8, 'with eight through it');
   eq(slots[0].days, 1, 'across one calendar day, so an average can be stated honestly');
@@ -188,7 +188,7 @@ const visit = (iso: string, over: Partial<Visit> = {}): Visit => ({
 
   // Ties break toward the earlier slot in the week.
   const tie = busiestSlots([...sat(7, 3), ...tue(7, 3)], 5);
-  eq(tie[0].weekday, 1, 'an exact tie points at the slot you reach first in the week');
+  eq(tie[0].weekday, 2, 'an exact tie points at the slot you reach first in the week');
 }
 
 {

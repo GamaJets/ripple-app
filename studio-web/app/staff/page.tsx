@@ -680,7 +680,9 @@ function Rota({ tenantId, trainers, ccy }: {
   trainers: Slice<StaffTrainer>;
   ccy: TenantCurrency;
 }) {
-  const [monday, setMonday] = useState(() => weekStartOf());
+  // The week on screen, as the ISO date it opened on. Which day that is comes
+  // from src/lib/weekStart.ts via `weekStartOf` — this screen does not decide.
+  const [week, setWeek] = useState(() => weekStartOf());
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [readErr, setReadErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -696,7 +698,7 @@ function Rota({ tenantId, trainers, ccy }: {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const w = weekWindow(monday);
+    const w = weekWindow(week);
     if (!w) { setShifts(null); setReadErr('That week could not be read as a date range.'); return; }
     try {
       setShifts(await fetchShifts(supabase, tenantId, w.fromISO, w.toISO));
@@ -708,13 +710,13 @@ function Rota({ tenantId, trainers, ccy }: {
       setShifts(null);
       setReadErr(e?.message ?? 'The rota could not be read.');
     }
-  }, [tenantId, monday]);
+  }, [tenantId, week]);
 
   useEffect(() => { load(); }, [load]);
   // The day picker follows the week, or it silently offers last week's dates.
-  useEffect(() => { setDay(weekDays(monday)[0]); }, [monday]);
+  useEffect(() => { setDay(weekDays(week)[0]); }, [week]);
 
-  const days = weekDays(monday);
+  const days = weekDays(week);
   const cost = shifts ? rotaCost(shifts) : null;
   const summary = shifts ? summariseRota(shifts) : null;
 
@@ -827,11 +829,11 @@ function Rota({ tenantId, trainers, ccy }: {
       sub="Who is on the floor this week, and what it costs. A pulled shift is kept rather than deleted: an hour somebody dropped out of and an hour nobody was booked for make the same hole in the cover and are different problems."
     >
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '12px 14px', flexWrap: 'wrap' }}>
-        <button style={ghostBtn} onClick={() => setMonday(shiftWeek(monday, -1))}>← Previous</button>
-        <button style={ghostBtn} onClick={() => setMonday(weekStartOf())} disabled={monday === weekStartOf()}>This week</button>
-        <button style={ghostBtn} onClick={() => setMonday(shiftWeek(monday, 1))}>Next →</button>
+        <button style={ghostBtn} onClick={() => setWeek((w) => shiftWeek(w, -1))}>← Previous</button>
+        <button style={ghostBtn} onClick={() => setWeek(weekStartOf())} disabled={week === weekStartOf()}>This week</button>
+        <button style={ghostBtn} onClick={() => setWeek((w) => shiftWeek(w, 1))}>Next →</button>
         <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
-          week of {new Date(`${monday}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}
+          week of {new Date(`${week}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}
         </span>
       </div>
 

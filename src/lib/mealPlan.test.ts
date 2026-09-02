@@ -12,6 +12,7 @@ import {
   type CoachMealPlan,
 } from './mealPlan';
 import { buildPlan, catalogSize, mealAt, slotsFor, type Allergen, type PlanInput } from './meals';
+import { WEEK_DAYS, jsDayForIndex } from './weekStart';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -29,17 +30,20 @@ const WRITTEN = '2026-08-31T09:00:00.000Z';
 /* ── the week, and which day is which ──────────────────────────────────── */
 
 eq(PLAN_WEEKDAYS.length, PLAN_DAYS, 'the labels and the days are the same week');
-eq(PLAN_WEEKDAYS[0], 'Mon', 'the week starts on Monday, as the client Meals tab draws it');
+eq(PLAN_WEEKDAYS[0], WEEK_DAYS[0], 'the plan is stored in the order the app draws a week');
+eq(PLAN_WEEKDAYS[0], 'Sun', 'which is Sunday first — src/lib/weekStart.ts');
 
-// 2026-08-31 is a Monday. Date.getDay() calls that 1; a plan stored in that
-// order would hand a client Sunday's dinners on a Monday, every week.
-eq(planDayIndex('2026-08-31'), 0, 'Monday is day 0');
-eq(planDayIndex('2026-09-06'), 6, 'Sunday is day 6, not day 0');
-eq(planDayIndex('2026-09-03'), 3, 'Thursday is day 3');
-eq(planDayIndex('not-a-date'), null, 'an unreadable date has no day, and must not default to Monday');
-// Every day of one real week, in order. This is the assertion that fails if
-// the +6 %7 is ever "simplified" back to getDay().
-const WEEK = ['2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-06'];
+// 2026-09-06 is a Sunday and opens the week. The stored order and getDay() are
+// only the same while the week opens on Sunday, and `planDayIndex` is the
+// conversion — a plan read in the wrong one hands a client the wrong day's
+// dinners, every week.
+eq(planDayIndex('2026-09-06'), 0, 'Sunday is day 0');
+eq(planDayIndex('2026-09-12'), 6, 'Saturday is day 6, not day 0');
+eq(planDayIndex('2026-09-03'), 4, 'Thursday is day 4');
+eq(planDayIndex('not-a-date'), null, 'an unreadable date has no day, and must not default to the first one');
+// Every day of one real week, in order. This is the assertion that fails if the
+// stored order and the drawn order are ever allowed to disagree.
+const WEEK = ['2026-09-06', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-12'];
 WEEK.forEach((iso, d) => eq(planDayIndex(iso), d, `${PLAN_WEEKDAYS[d]} ${iso} is day ${d}`));
 
 /* ── a seeded plan is the week the client can already see ──────────────── */
@@ -139,6 +143,48 @@ eq(parsePlan(badIdx), null, 'a negative index is refused');
 // a coach's plan away from a client for a typo.
 const oddAvoid = parsePlan({ ...JSON.parse(JSON.stringify(seeded)), avoid: ['nuts', 'pineapple'] });
 eq(JSON.stringify(oddAvoid?.avoid), JSON.stringify(['nuts']), 'an unrecognised allergen is dropped, the plan is kept');
+
+/* ── a plan written before the week moved ──────────────────────────────── */
+
+// v1 stored `days` Monday-first, unconditionally. The product now opens its
+// week on Sunday (src/lib/weekStart.ts), so position 0 means a different day
+// than it did — and there are real v1 rows in `coach_nutrition.plan`. See
+// supabase/parts/640.
+//
+// THE DAYS THEMSELVES MUST NOT MOVE. A coach wrote a Thursday; their client
+// eats it on a Thursday. Only the position changes.
+{
+  // A v1 plan whose days are distinguishable: day d's first meal carries idx d,
+  // so where each one lands after the rotation can be read off directly.
+  const v1 = JSON.parse(JSON.stringify(seeded)) as CoachMealPlan & { v: number };
+  v1.v = 1;
+  for (let d = 0; d < PLAN_DAYS; d++) v1.days[d].meals[0].idx = d;
+
+  const read = parsePlan(v1);
+  ok(read !== null, 'a plan written before the week moved is still a plan — not silently no plan');
+  eq(read!.v, PLAN_VERSION, 'and it is handed back at the current version');
+
+  // Position i now holds the day whose Monday-first position was (jsDay + 6) % 7.
+  for (let i = 0; i < PLAN_DAYS; i++) {
+    eq(read!.days[i].meals[0].idx, (jsDayForIndex(i) + 6) % 7,
+       `${PLAN_WEEKDAYS[i]} still carries the meals the coach wrote for it`);
+  }
+  // Said again in the concrete, because the loop above would also pass if both
+  // sides were wrong in the same way.
+  eq(read!.days[0].meals[0].idx, 6, 'v1 position 6 was Sunday, and Sunday now opens the week');
+  eq(read!.days[1].meals[0].idx, 0, 'v1 position 0 was Monday, which is now the second column');
+
+  // Nothing is lost or duplicated: seven days in, the same seven out.
+  eq(new Set(read!.days.map((d) => d.meals[0].idx)).size, PLAN_DAYS,
+     'the rotation moves the days, it does not drop or repeat one');
+
+  // A v1 plan is still checked as hard as a v2 one — the version is not a
+  // trapdoor past the validation.
+  const badV1 = JSON.parse(JSON.stringify(v1)) as CoachMealPlan;
+  badV1.days[2].meals[0].n = '';
+  eq(parsePlan(badV1), null, 'a v1 plan with a meal missing its snapshot is refused like any other');
+  eq(parsePlan({ ...v1, days: v1.days.slice(0, 5) }), null, 'and a v1 part-week is still a part-week');
+}
 
 /* ── the allergen check, which is what this is for ─────────────────────── */
 

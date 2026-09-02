@@ -33,9 +33,10 @@ import {
   type PtSlot, type TimetableEntry, type FloorSlice,
 } from '@lib/gymPtSchedule';
 import { fetchMemberships, type Membership } from '@lib/gymRecord';
+import { WEEK_DAYS, startOfWeek } from '@lib/weekStart';
 
 const DAY = 86400000;
-const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAY_NAMES = WEEK_DAYS;
 const FIRST_HOUR = 6;
 const LAST_HOUR = 22;
 
@@ -68,35 +69,36 @@ export default function Timetable() {
   /**
    * The week this board is showing, in the gym's own calendar.
    *
-   * ── Why the end is not `monday + 7 days` ────────────────────────────────
+   * Which day opens it is src/lib/weekStart.ts's decision and not this
+   * screen's — a timetable and the rota beside it must be the same seven days.
    *
-   * It was `new Date(monday.getTime() + 7 * DAY - 1)`, and that adds a fixed
+   * ── Why the end is not `weekOpened + 7 days` ────────────────────────────
+   *
+   * It was `new Date(start.getTime() + 7 * DAY - 1)`, and that adds a fixed
    * 604,799,999 milliseconds to a moment built from LOCAL calendar parts. Six
-   * days in seven that is the same thing as the following Monday's midnight.
+   * days in seven that is the same thing as the next week's opening midnight.
    * On a clocks-change weekend it is not:
    *
-   *   · spring forward, and the week closes at Sunday 22:59:59 local. A Sunday
-   *     23:00 class is outside the `.lte('starts_at', to)` bound, so it
-   *     disappears from the timetable, from the double-booking check and from
-   *     floor cover — on a week where an hour of the rota has already moved;
-   *   · autumn back, and the following Monday's midnight hour leaks in and is
-   *     counted as this week's, in the fill rate and in the class pay.
+   *   · spring forward, and the week closes an hour early. A class in that last
+   *     hour is outside the `.lte('starts_at', to)` bound, so it disappears
+   *     from the timetable, from the double-booking check and from floor cover
+   *     — on a week where an hour of the rota has already moved;
+   *   · autumn back, and the next week's opening hour leaks in and is counted
+   *     as this week's, in the fill rate and in the class pay.
    *
-   * So the end is the next Monday's midnight, built the same way the start is —
-   * `setDate(+7)` then `setHours(0,0,0,0)`, which is arithmetic on the calendar
-   * rather than on the clock — minus a millisecond. Both bounds are then the
-   * gym's own midnights whatever its offset did that weekend.
+   * So the end is the NEXT week's opening midnight, built the same way the
+   * start is — `setDate(+7)` then `setHours(0,0,0,0)`, which is arithmetic on
+   * the calendar rather than on the clock — minus a millisecond. Both bounds
+   * are then the gym's own midnights whatever its offset did that weekend.
    */
   const range = useCallback(() => {
-    const now = new Date();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7) + weekOffset * 7);
-    monday.setHours(0, 0, 0, 0);
-    const nextMonday = new Date(monday);
-    nextMonday.setDate(monday.getDate() + 7);
-    nextMonday.setHours(0, 0, 0, 0);
-    const sunday = new Date(nextMonday.getTime() - 1);
-    return { from: monday.toISOString(), to: sunday.toISOString(), monday };
+    const weekOpened = startOfWeek();
+    weekOpened.setDate(weekOpened.getDate() + weekOffset * 7);
+    const nextWeek = new Date(weekOpened);
+    nextWeek.setDate(weekOpened.getDate() + 7);
+    nextWeek.setHours(0, 0, 0, 0);
+    const lastMoment = new Date(nextWeek.getTime() - 1);
+    return { from: weekOpened.toISOString(), to: lastMoment.toISOString(), weekOpened };
   }, [weekOffset]);
 
   const load = useCallback(async (tenantId: string) => {
@@ -225,14 +227,14 @@ export default function Timetable() {
 
   const tenantId = me.tenantId!;
   const refresh = () => load(tenantId);
-  const { monday } = range();
+  const { weekOpened } = range();
   // The same calendar arithmetic as `range` above, for the same reason: on a
-  // clocks-change week `monday + 6 * DAY` lands at 23:00 on Saturday or 01:00
-  // on Sunday, and the label would name the wrong last day of the week it is
+  // clocks-change week `weekOpened + 6 * DAY` lands an hour either side of
+  // midnight, and the label would name the wrong last day of the week it is
   // showing.
-  const sundayLabel = new Date(monday);
-  sundayLabel.setDate(monday.getDate() + 6);
-  const weekLabel = `${monday.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${sundayLabel.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
+  const lastDayLabel = new Date(weekOpened);
+  lastDayLabel.setDate(weekOpened.getDate() + 6);
+  const weekLabel = `${weekOpened.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${lastDayLabel.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
 
   const classFor = (id: string) => raw?.classes.find((x) => x.id === id) ?? null;
 
@@ -448,7 +450,7 @@ export default function Timetable() {
 
       {conflicts.length ? <Clashes rows={conflicts} /> : null}
 
-      <FloorCover board={board} monday={monday} />
+      <FloorCover board={board} weekOpened={weekOpened} />
 
       {owner ? (
         <div style={{ display: 'grid', gap: 22, gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', marginBottom: 22 }}>
@@ -738,7 +740,7 @@ function stateLabel(e: TimetableEntry): string {
 
 /* ── is the floor covered at six? ──────────────────────────────────────────── */
 
-function FloorCover({ board, monday }: { board: TimetableEntry[] | null; monday: Date }) {
+function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; weekOpened: Date }) {
   // Default to today when the shown week contains it, so the first thing an
   // owner sees is the day they are standing in.
   const todayIdx = useMemo(() => {
@@ -748,10 +750,10 @@ function FloorCover({ board, monday }: { board: TimetableEntry[] | null; monday:
     // is standing in.
     const now = new Date();
     const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfWeek = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate()).getTime();
-    const i = Math.round((midnight - startOfWeek) / DAY);
+    const opened = new Date(weekOpened.getFullYear(), weekOpened.getMonth(), weekOpened.getDate()).getTime();
+    const i = Math.round((midnight - opened) / DAY);
     return i >= 0 && i < 7 ? i : 0;
-  }, [monday]);
+  }, [weekOpened]);
   const [dayIdx, setDayIdx] = useState(todayIdx);
   const [hour, setHour] = useState(18);
   useEffect(() => { setDayIdx(todayIdx); }, [todayIdx]);
@@ -759,8 +761,8 @@ function FloorCover({ board, monday }: { board: TimetableEntry[] | null; monday:
   // Local midnight built from parts rather than by adding 86_400_000, so a
   // clock change does not shift the whole strip by an hour.
   const dayStart = useMemo(
-    () => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + dayIdx),
-    [monday, dayIdx],
+    () => new Date(weekOpened.getFullYear(), weekOpened.getMonth(), weekOpened.getDate() + dayIdx),
+    [weekOpened, dayIdx],
   );
 
   const hours = useMemo(

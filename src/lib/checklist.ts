@@ -124,7 +124,8 @@ const DAY_TO_WEEKDAY: Record<string, number> = {
  * The focus of the plan day that falls on `weekday` (0 Sun … 6 Sat), or null.
  *
  * Deliberately an exact match. The home screen picks today's session with
- * `days[mondayIndex % days.length]` and programs.todayIndex picks the NEAREST
+ * `days[todayIdx % days.length]` — the day's column in the week, whichever day
+ * opens it — and programs.todayIndex picks the NEAREST
  * day, both of which always return something — so a three-day Mon/Wed/Fri plan
  * yields a "session for today" on all seven days of the week. That is tolerable
  * on a screen that is showing you what is coming up; it is not tolerable on a

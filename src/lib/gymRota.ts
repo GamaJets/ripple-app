@@ -38,6 +38,7 @@
 
 import { assertWhole, capLimit } from './rowCap';
 import { assertWrote } from './wroteRows';
+import { startOfWeek } from './weekStart';
 
 type Queryable = { from: (table: string) => any };
 
@@ -174,24 +175,24 @@ export function isLive(s: Pick<Shift, 'status'>): boolean {
 }
 
 /**
- * The Monday that opens the week containing `at`, as a local ISO date.
+ * The day that opens the week containing `at`, as a local ISO date.
  *
- * Local, unlike the private `mondayOf` in gymSchedule, which buckets attendance
- * in UTC. A rota is read against the gym's wall clock.
+ * WHICH day is src/lib/weekStart.ts's decision, not this file's — a rota week
+ * and a member's training week are the same week, and they were only ever the
+ * same by two files agreeing about a `% 7`.
+ *
+ * Local, unlike the private `weekOpenedOn` in gymSchedule, which buckets
+ * attendance in UTC. A rota is read against the gym's wall clock.
  */
 export function weekStartOf(at: number | Date = Date.now()): string {
-  const d = at instanceof Date ? new Date(at.getTime()) : new Date(at);
-  d.setHours(0, 0, 0, 0);
-  // getDay: 0 = Sunday, so Sunday belongs to the week that began six days ago.
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return localDate(d);
+  return localDate(startOfWeek(at));
 }
 
-/** The seven local dates of the week opening on `mondayIso`. */
-export function weekDays(mondayIso: string): string[] {
+/** The seven local dates of the week opening on `weekIso`. */
+export function weekDays(weekIso: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < 7; i++) {
-    const d = dayStart(mondayIso);
+    const d = dayStart(weekIso);
     if (!d) return out;
     d.setDate(d.getDate() + i);
     out.push(localDate(d));
@@ -200,20 +201,21 @@ export function weekDays(mondayIso: string): string[] {
 }
 
 /** Shift a week ISO date by whole weeks — the screen's back/forward control. */
-export function shiftWeek(mondayIso: string, weeks: number): string {
-  const d = dayStart(mondayIso);
-  if (!d) return mondayIso;
+export function shiftWeek(weekIso: string, weeks: number): string {
+  const d = dayStart(weekIso);
+  if (!d) return weekIso;
   d.setDate(d.getDate() + weeks * 7);
   return localDate(d);
 }
 
 /**
  * The query window for a week, as instants. Half-open at the end: `toISO` is
- * local midnight opening the *next* Monday, so a Sunday 23:30 class is inside
- * and a Monday 00:00 one is not counted twice.
+ * local midnight opening the *next* week, so a class in the last half-hour of
+ * the final day is inside and the next week's first midnight is not counted
+ * twice.
  */
-export function weekWindow(mondayIso: string): { fromISO: string; toISO: string } | null {
-  const from = dayStart(mondayIso);
+export function weekWindow(weekIso: string): { fromISO: string; toISO: string } | null {
+  const from = dayStart(weekIso);
   if (!from) return null;
   const to = new Date(from.getTime());
   to.setDate(to.getDate() + 7);

@@ -10,6 +10,7 @@
 
 import { assertWhole, capLimit, readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
+import { startOfWeekUTC } from './weekStart';
 
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
 
@@ -918,7 +919,7 @@ export function summariseAttendance(all: GymClass[]): AttendanceSummary {
 }
 
 export interface AttendanceWeek {
-  /** ISO date of the Monday that opens the week. */
+  /** ISO date of the day that opens the week — see src/lib/weekStart.ts. */
   weekOf: string;
   classes: number;
   capacity: number;
@@ -930,13 +931,13 @@ export interface AttendanceWeek {
   showRate: number | null;
 }
 
-/** The Monday that opens the week containing `d`, as an ISO date. */
-function mondayOf(d: Date): string {
-  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  // getUTCDay: 0 = Sunday, so Sunday belongs to the week that began 6 days ago.
-  const back = (x.getUTCDay() + 6) % 7;
-  x.setUTCDate(x.getUTCDate() - back);
-  return x.toISOString().slice(0, 10);
+/** The day that opens the week containing `d`, as an ISO date.
+ *
+ *  UTC, unlike `weekStartOf` in gymRota, which reads a rota against the gym's
+ *  wall clock. Which DAY opens a week is neither file's decision — both ask
+ *  src/lib/weekStart.ts, so the two can no longer drift apart. */
+function weekOpenedOn(d: Date): string {
+  return startOfWeekUTC(d).toISOString().slice(0, 10);
 }
 
 /**
@@ -959,13 +960,13 @@ export function weeklyAttendance(
   // class puts its capacity into the week's denominator and nothing into the
   // numerator, so a week the gym closed would read as a week nobody came.
   const classes = classesThatRan(all);
-  const thisMonday = mondayOf(new Date(now));
+  const thisWeekOpened = weekOpenedOn(new Date(now));
 
   // Seed every week first, so quiet weeks survive into the series.
   const out: AttendanceWeek[] = [];
   const index = new Map<string, AttendanceWeek>();
   for (let i = weeks - 1; i >= 0; i--) {
-    const d = new Date(`${thisMonday}T00:00:00Z`);
+    const d = new Date(`${thisWeekOpened}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() - i * 7);
     const weekOf = d.toISOString().slice(0, 10);
     const w: AttendanceWeek = {
@@ -979,7 +980,7 @@ export function weeklyAttendance(
   for (const c of classes) {
     const t = Date.parse(c.startsAt);
     if (Number.isNaN(t)) continue;
-    const w = index.get(mondayOf(new Date(t)));
+    const w = index.get(weekOpenedOn(new Date(t)));
     if (!w) continue; // outside the window
     w.classes += 1;
     w.capacity += c.capacity || 0;

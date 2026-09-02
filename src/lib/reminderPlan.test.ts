@@ -139,9 +139,12 @@ const saved = (over: Partial<SavedReminders> = {}): SavedReminders => ({ ...EMPT
   eq(daysLabel([...EVERY_DAY]), 'Every day', 'all seven is not a list of seven abbreviations');
   eq(daysLabel([...WEEKDAYS_ONLY]), 'Weekdays', 'Monday to Friday has a name');
   eq(daysLabel([1, 7]), 'Weekends', 'and so does Saturday and Sunday');
-  // Monday first. A week starting on Sunday reads as a bug to most of the
-  // world, and the 1 = Sunday numbering underneath is not the member's problem.
-  eq(daysLabel([1, 2, 4]), 'Mon, Wed, Sun', 'anything else lists the days, MONDAY FIRST');
+  // In the order the app draws a week, which src/lib/weekStart.ts owns. The
+  // 1 = Sunday numbering underneath is expo's and is not the member's problem;
+  // what a member does notice is a label that reads in a different order from
+  // the day picker directly above it.
+  eq(daysLabel([1, 2, 4]), 'Sun, Mon, Wed', 'anything else lists the days in the order the week is drawn');
+  eq(daysLabel([4, 1, 2]), 'Sun, Mon, Wed', 'whatever order they were toggled on in');
 }
 
 if (errors.length) {

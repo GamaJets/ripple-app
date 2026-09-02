@@ -74,6 +74,7 @@ import {
 import { paceOf, type Pace, type PaceBounds } from './interventions';
 import { dateParts } from './localDate';
 import { fmtPointDay } from './format';
+import { weekStartIso } from './weekStart';
 
 const DAY = 86_400_000;
 
@@ -726,29 +727,36 @@ export function buildNudgeBoard(
 /* ── the watch band, once a week ───────────────────────────────────────────── */
 
 /**
- * The week a moment falls in, as `YYYY-Www`, on a LOCAL Monday boundary.
+ * The week a moment falls in, on a LOCAL week boundary.
  *
  * Local rather than UTC for the same reason `localDayKey` is: a coach in
- * Auckland opening the app on Monday morning is in a new week, and a UTC key
- * would keep them in the old one until lunchtime. Monday rather than Sunday
- * because a coach's week starts on Monday everywhere this app ships.
+ * Auckland opening the app as their week turns over is in a new week, and a UTC
+ * key would keep them in the old one until lunchtime. WHICH day opens the week
+ * is src/lib/weekStart.ts's decision and not this file's.
  *
  * The exact ISO-8601 week number is deliberately NOT computed. This string is
  * compared against itself and never displayed or parsed, so the only property
  * it needs is that it changes exactly once per week — and the year-boundary
  * arithmetic real ISO weeks require is a well-known source of off-by-one bugs
- * for a value nobody reads. It is the Monday's own date instead, which has the
- * property and cannot be wrong.
+ * for a value nobody reads. It is the opening day's own date instead, which has
+ * the property and cannot be wrong.
+ *
+ * ── Keys written by an older build ────────────────────────────────────────
+ *
+ * Two AsyncStorage keys hold a value this function produced —
+ * `repple.watchDigest.week` (src/ui/nudges.ts) and `repple.coachBacklog.week`
+ * (src/lib/coachReminders.ts). Every value written before the week moved is a
+ * Monday's date; every value written after is a Sunday's, so the two sets can
+ * never collide. Both readers ask `!== weekKey(now)`, so a stored Monday reads
+ * as "a different week" and the digest or the prompt appears ONCE more than it
+ * strictly owed, then stores a new key and is correct for ever after. The
+ * failure direction is showing a coach something twice, never suppressing it —
+ * which is why the keys are not moved. Do not "tidy" this into an ordering
+ * comparison: an older Monday key would then read as the current week and
+ * silently swallow the first digest after the change.
  */
 export function weekKey(now: number = Date.now()): string {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  // getDay(): 0 = Sunday. Sunday belongs to the week that started six days ago,
-  // not to the one starting tomorrow — a coach's Sunday is the end of their
-  // week, and moving them forward would show the digest twice in two days.
-  const back = (d.getDay() + 6) % 7;
-  d.setDate(d.getDate() - back);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return weekStartIso(now);
 }
 
 /**
