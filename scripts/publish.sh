@@ -136,6 +136,7 @@ make_pubtree
 # An empty environment is how a whole evening of updates shipped, crashed on
 # launch with "supabaseUrl is required" and rolled back while the publisher
 # reported success. Both channel families talk to the same backend.
+PUBFAILED=()
 for ch in "${CHANNELS[@]}"; do
   case "$ch" in
     production|preview)             V=client  ;;
@@ -147,11 +148,37 @@ for ch in "${CHANNELS[@]}"; do
   # Run FROM the worktree. Nothing an agent does to the working tree between
   # these three publishes can change what is bundled, so all three channels get
   # the same commit — which is the property that failed the first time.
-  ( cd "$PUBTREE" && EXPO_PUBLIC_APP_VARIANT="$V" npx eas-cli update \
+  #
+  # The output is CAPTURED rather than piped straight into grep. Piping made the
+  # pipeline's status grep's, and the subshell's status was never read at all —
+  # so a channel that failed to publish printed its name, printed nothing after
+  # it, and the script went on to report success. On 2 Sep `owner-preview` did
+  # exactly that twice in a row, and the only reason it was caught is that
+  # somebody read the channel back afterwards. A publisher that cannot fail is
+  # worse than no publisher: this script exists because a green check that ran
+  # against something else is not a check, and the same is true of a publish.
+  OUT="$( cd "$PUBTREE" && EXPO_PUBLIC_APP_VARIANT="$V" npx eas-cli update \
       --branch "$ch" --message "$MSG" \
-      --environment production --non-interactive 2>&1 \
-      | grep -oE 'Update group ID +[0-9a-f-]+' | head -1 )
+      --environment production --non-interactive 2>&1 )"
+  RC=$?
+  ID="$(printf '%s' "$OUT" | grep -oE 'Update group ID +[0-9a-f-]+' | head -1)"
+  if [ $RC -ne 0 ] || [ -z "$ID" ]; then
+    echo "PUBLISH FAILED"
+    printf '%s\n' "$OUT" | tail -25
+    echo
+    echo "  $ch was NOT updated. It is still serving whatever it served before."
+    PUBFAILED+=("$ch")
+  else
+    echo "$ID"
+  fi
 done
+
+if [ ${#PUBFAILED[@]} -gt 0 ]; then
+  echo
+  echo "FAILED TO PUBLISH: ${PUBFAILED[*]}"
+  echo "Those channels are unchanged. Read the error above before retrying."
+  exit 1
+fi
 
 echo
 echo "published from $(git rev-parse --short HEAD) — and that commit is what the gates ran against."
