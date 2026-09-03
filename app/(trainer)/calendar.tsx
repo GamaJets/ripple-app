@@ -2465,72 +2465,72 @@ export default function TrainerSchedule() {
              * caveat (its own line says it) and the second does, so the two
              * tests together put the mark in exactly one place. */
             const planLineWarns = plan != null && dayPlanUnread(plan) && planCaveat == null;
+            const unnamedNote = s.status === 'booked'
+              ? unnamedSlotNote(s.clientId, roster, rosterStatus) : null;
             /* The identity of the row — the time, who is in it, and everything
              * that qualifies that. Lifted out so the same block can be drawn
              * bare or inside a Pressable; there is one copy of it either way. */
-            const unnamedNote = s.status === 'booked'
-              ? unnamedSlotNote(s.clientId, roster, rosterStatus) : null;
             const identity = (
               <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? slotOf(s.clientId) : s.status === 'blocked' ? 'Unavailable · nobody can book this' : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
-                    {/* A booked hour whose client this screen cannot name. Said
-                        in a sentence and not left to an odd-looking label,
-                        because the coach's next decision is whether to hand the
-                        hour to somebody else. Null for every ordinary row. */}
-                    {unnamedNote ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 3 }}>
-                        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.warn, marginTop: 5 }} />
-                        <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
-                          {unnamedNote}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {/* And the half of it that is about the TAP. Deliberately
-                        short and deliberately under the line above, indented to
-                        sit with it: the two read as one thought — this hour is
-                        spoken for, and here is why their record will not open —
-                        rather than as the same warning said twice. It carries
-                        no mark of its own for the same reason, and stands
-                        unindented on the one row that has no line above it, a
-                        booked hour with nobody in it. */}
-                    {tap && !tap.can && tap.why ? (
-                      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3, marginStart: unnamedNote ? 11 : 0 }}>
-                        {tap.why}
-                      </Text>
-                    ) : null}
-                    {/* Who is behind this hour. It changes what cancelling
-                        means — the slot is handed straight over rather than
-                        thrown open — so it is said on the row, next to the
-                        button that does it. A count off a truncated read is a
-                        wrong count, so 'partial' shows a dash like every other
-                        figure in this app. */}
-                    {s.status === 'booked' && (waitStatus === 'error' || waitStatus === 'partial' || (waitCounts.get(s.id) ?? 0) > 0) ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.warn }} />
-                        <Text style={{ ...ty.caption, color: t.ink3 }}>
-                          {waitStatus === 'error'
-                            ? 'Waitlist not read'
-                            : waitStatus === 'partial'
-                              // Not `${fig(null)} waiting`: a dash standing where the
-                              // count goes rendered "— waiting — only part of the list
-                              // loaded", which reads as a line that lost its first word
-                              // rather than as a number nobody has. The count is left out
-                              // of the sentence instead of drawn as a dash inside it.
-                              ? 'Only part of the waitlist loaded, so the number waiting is not known'
-                              : `${waitCounts.get(s.id)} waiting — cancelling hands it to whoever is first`}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {s.approvedAt ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.good }} />
-                        <Text style={{ ...ty.caption, color: t.ink3 }}>Confirmed by client</Text>
-                      </View>
-                    ) : null}
-                    {s.approvalNote ? (
-                      <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>“{s.approvalNote}”</Text>
-                    ) : null}
+                <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? slotOf(s.clientId) : s.status === 'blocked' ? 'Unavailable · nobody can book this' : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
+                {/* A booked hour whose client this screen cannot name. Said
+                    in a sentence and not left to an odd-looking label,
+                    because the coach's next decision is whether to hand the
+                    hour to somebody else. Null for every ordinary row. */}
+                {unnamedNote ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 3 }}>
+                    <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.warn, marginTop: 5 }} />
+                    <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+                      {unnamedNote}
+                    </Text>
+                  </View>
+                ) : null}
+                {/* And the half of it that is about the TAP. Deliberately
+                    short and deliberately under the line above, indented to
+                    sit with it: the two read as one thought — this hour is
+                    spoken for, and here is why their record will not open —
+                    rather than as the same warning said twice. It carries
+                    no mark of its own for the same reason, and stands
+                    unindented on the one row that has no line above it, a
+                    booked hour with nobody in it. */}
+                {tap && !tap.can && tap.why ? (
+                  <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3, marginStart: unnamedNote ? 11 : 0 }}>
+                    {tap.why}
+                  </Text>
+                ) : null}
+                {/* Who is behind this hour. It changes what cancelling
+                    means — the slot is handed straight over rather than
+                    thrown open — so it is said on the row, next to the
+                    button that does it. A count off a truncated read is a
+                    wrong count, so 'partial' shows a dash like every other
+                    figure in this app. */}
+                {s.status === 'booked' && (waitStatus === 'error' || waitStatus === 'partial' || (waitCounts.get(s.id) ?? 0) > 0) ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                    <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.warn }} />
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      {waitStatus === 'error'
+                        ? 'Waitlist not read'
+                        : waitStatus === 'partial'
+                          // Not `${fig(null)} waiting`: a dash standing where the
+                          // count goes rendered "— waiting — only part of the list
+                          // loaded", which reads as a line that lost its first word
+                          // rather than as a number nobody has. The count is left out
+                          // of the sentence instead of drawn as a dash inside it.
+                          ? 'Only part of the waitlist loaded, so the number waiting is not known'
+                          : `${waitCounts.get(s.id)} waiting — cancelling hands it to whoever is first`}
+                    </Text>
+                  </View>
+                ) : null}
+                {s.approvedAt ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                    <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.good }} />
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>Confirmed by client</Text>
+                  </View>
+                ) : null}
+                {s.approvalNote ? (
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>“{s.approvalNote}”</Text>
+                ) : null}
               </View>
             );
             return (
@@ -2553,7 +2553,12 @@ export default function TrainerSchedule() {
                       onPress={() => openClient(tap)}
                       accessibilityRole="button"
                       accessibilityLabel={`${timeLabel(s.startsAt)} · ${slotOf(s.clientId)}. ${clientTapLabel(tap)}`}
-                      hitSlop={hitSlopFor(MIN_TARGET)}
+                      // Reached by size rather than by slop. The block is two
+                      // lines of type and already clears 44pt; `MIN_TARGET` is
+                      // stated as a floor so a later row that is one line does
+                      // not quietly fall under it. `hitSlopFor` is the tool for
+                      // a control whose drawn size is deliberately smaller, and
+                      // would return zero here.
                       style={{ flex: 1, flexDirection: 'row', minHeight: MIN_TARGET, alignItems: 'center' }}
                     >
                       {identity}
