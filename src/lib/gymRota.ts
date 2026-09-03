@@ -29,17 +29,38 @@
 // register. Telling an owner "37 uncovered hours" on the strength of a form
 // they have never filled in is a lie with a number attached.
 //
-// ── Local time, deliberately ────────────────────────────────────────────────
+// ── The gym's clock, and not the reader's ───────────────────────────────────
 //
-// The grid is bucketed by the device's local hour, matching
-// `gymVisits.visitsByHour`. "Who was on at 6pm" is a question about the gym's
-// wall clock; storage is timestamptz precisely so this conversion happens once,
-// here, rather than in every screen.
+// "Who was on at 6pm" is a question about the GYM's wall clock. This module
+// used to answer it with the device's — `localDate` off `getFullYear()`,
+// `hoursSpanned` off `getHours()`, `shiftFromHours` off `setHours` — and the
+// header said so as though it were the same thing. It is the same thing only
+// while the reader is standing in the gym.
+//
+// It is not the same thing for a chain owner rostering a Dubai gym from London,
+// and the way it failed was silent in both directions: the shift was STORED at
+// the reader's hour, and `studio-web/app/staff` — which renders through
+// `gymWhen` with `timeZone: zone` and has been right all along — then printed a
+// different hour for the same row. Two screens, one database, two answers, and
+// the only person who found out was the coach who turned up.
+//
+// So every day and every hour in this file now goes through
+// `src/lib/rotaClock.ts`, which is the gym's clock where `tenants.timezone` is
+// set and the reader's — SAID OUT LOUD, via `whoseClockNote` — where it is not.
+// The `zone` argument is optional on every function purely so a test can build
+// a grid without one; a SCREEN that omits it is drawing the reader's week and
+// owes the reader that sentence.
+//
+// The label and the bucket move together. Fixing only the times would file a
+// 23:00 gym-time shift under the next day's column with "23:00" beside it,
+// which is worse than consistently wrong because it looks like a bug in the
+// grid rather than a question about a zone.
 
 import { assertWhole, capLimit } from './rowCap';
 import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
-import { startOfWeek } from './weekStart';
+import { dayIndexInWeek } from './weekStart';
+import { rotaDay, rotaCell, rotaInstant, rotaToday, addCalendarDays, calendarWeekday } from './rotaClock';
 // One reader for a typed money box: it asks the currency how many decimal
 // places it has, and refuses `1,234` rather than guessing which reading was
 // meant. The same function /costs and the equipment log read their boxes with.
@@ -111,7 +132,14 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
-/** The local calendar date of an instant, as yyyy-mm-dd. */
+/**
+ * The READER's calendar date of an instant, as yyyy-mm-dd.
+ *
+ * Kept, named for whose day it actually is, and no longer what the grid buckets
+ * by — `rotaDay(at, zone)` is. It survives because it is exactly the fallback
+ * `rotaClock` uses when a gym has no zone, and having the two spellings agree by
+ * being the same three getters is cheaper than having them agree by accident.
+ */
 export function localDate(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
@@ -127,40 +155,54 @@ export function hourLabel(hour: number): string {
 }
 
 export interface HourCell {
-  /** Local calendar date, yyyy-mm-dd. */
+  /** Calendar date on the rota's clock, yyyy-mm-dd. */
   date: string;
-  /** Local hour, 0..23. */
+  /** Hour on the rota's clock, 0..23. */
   hour: number;
 }
 
 /**
- * Every local hour a span touches, from the hour it starts in to the hour it
- * ends in. A 17:30–18:15 class occupies 17 and 18 — it needs somebody on the
- * floor for both, so both count.
+ * Every hour a span touches ON THE ROTA'S CLOCK, from the hour it starts in to
+ * the hour it ends in. A 17:30–18:15 class occupies 17 and 18 — it needs
+ * somebody on the floor for both, so both count.
  *
- * Steps with `setHours(+1)` rather than adding 3,600,000ms so that a clock
- * change adds or drops the right hour instead of shifting the rest of the day.
+ * The walk starts from the TOP of the hour the span opens in, found by asking
+ * `rotaInstant` for the instant that hour names rather than by calling
+ * `setMinutes(0)` — which is the reader's hour and, for a gym on a half-hour
+ * offset, not the top of anything. From there it steps a plain hour at a time
+ * and re-reads the day and hour at each step, so a clock change adds or drops
+ * exactly the hour it should: a spring-forward morning reports 01, 03, 04, and
+ * a fall-back morning reports 01 twice, which the grid folds into one cell
+ * because one cell is what it is.
  */
-export function hoursSpanned(startIso: string, endIso: string): HourCell[] {
+export function hoursSpanned(startIso: string, endIso: string, zone?: string | null): HourCell[] {
   const start = Date.parse(startIso);
   const end = Date.parse(endIso);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
 
-  const cur = new Date(start);
-  cur.setMinutes(0, 0, 0);
+  const first = rotaCell(start, zone);
+  if (!first) return [];
+  const topIso = rotaInstant(first.date, first.hour, zone);
+  const top = topIso == null ? NaN : Date.parse(topIso);
+  // A wall-clock hour the zone skipped — the one that does not exist on a
+  // spring-forward morning. The span itself is still real, so it is walked from
+  // where it actually starts rather than dropped.
+  let at = Number.isFinite(top) && top <= start ? top : start;
+
   const out: HourCell[] = [];
-  while (cur.getTime() < end && out.length < MAX_SPAN_HOURS) {
-    out.push({ date: localDate(cur), hour: cur.getHours() });
-    cur.setHours(cur.getHours() + 1);
+  while (at < end && out.length < MAX_SPAN_HOURS) {
+    const c = rotaCell(at, zone);
+    if (c) out.push(c);
+    at += HOUR_MS;
   }
   return out;
 }
 
 /** The hours a demand block occupies, from its start and duration. */
-export function demandHoursSpanned(d: DemandBlock): HourCell[] {
+export function demandHoursSpanned(d: DemandBlock, zone?: string | null): HourCell[] {
   const start = Date.parse(d.startsAt);
   if (!Number.isFinite(start) || !(d.durationMin > 0)) return [];
-  return hoursSpanned(d.startsAt, new Date(start + d.durationMin * 60_000).toISOString());
+  return hoursSpanned(d.startsAt, new Date(start + d.durationMin * 60_000).toISOString(), zone);
 }
 
 /**
@@ -180,58 +222,76 @@ export function isLive(s: Pick<Shift, 'status'>): boolean {
 }
 
 /**
- * The day that opens the week containing `at`, as a local ISO date.
+ * The day that opens the week containing `at`, as an ISO date on the rota's
+ * clock.
  *
  * WHICH day is src/lib/weekStart.ts's decision, not this file's — a rota week
  * and a member's training week are the same week, and they were only ever the
  * same by two files agreeing about a `% 7`.
  *
- * Local, unlike the private `weekOpenedOn` in gymSchedule, which buckets
- * attendance in UTC. A rota is read against the gym's wall clock.
+ * The GYM's week where the gym has a zone. An owner in London opening a Sydney
+ * gym's rota at nine on a Saturday evening is looking at a gym where it is
+ * already Sunday, and `startOfWeek` on the reader's clock would open last week
+ * for them and this week for the front desk — the same disagreement this file
+ * exists to end, one level up.
  */
-export function weekStartOf(at: number | Date = Date.now()): string {
-  return localDate(startOfWeek(at));
+export function weekStartOf(at: number | Date = Date.now(), zone?: string | null): string {
+  const today = rotaToday(zone, at);
+  if (today == null) return localDate(at instanceof Date ? at : new Date(at));
+  return weekOpeningOn(today) ?? today;
 }
 
-/** The seven local dates of the week opening on `weekIso`. */
+/** The day that opens the week a bare calendar date falls in. Pure calendar
+ *  arithmetic: a date has no zone, so neither does its week. */
+function weekOpeningOn(dateIso: string): string | null {
+  const jsDay = calendarWeekday(dateIso);
+  if (jsDay == null) return null;
+  return addCalendarDays(dateIso, -dayIndexInWeek(jsDay));
+}
+
+/**
+ * The seven dates of the week opening on `weekIso`.
+ *
+ * Calendar arithmetic on the date string rather than seven local midnights.
+ * A local midnight is a thing some zones do not have — Brazil used to skip it
+ * outright on the spring-forward Sunday — and `new Date(y, m, d)` then hands
+ * back 01:00, which `localDate` reads correctly and `setDate` walks from
+ * unpredictably. The days of a week are three integers plus one, and this does
+ * that.
+ */
 export function weekDays(weekIso: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < 7; i++) {
-    const d = dayStart(weekIso);
-    if (!d) return out;
-    d.setDate(d.getDate() + i);
-    out.push(localDate(d));
+    const d = addCalendarDays(weekIso, i);
+    if (d == null) return out;
+    out.push(d);
   }
   return out;
 }
 
 /** Shift a week ISO date by whole weeks — the screen's back/forward control. */
 export function shiftWeek(weekIso: string, weeks: number): string {
-  const d = dayStart(weekIso);
-  if (!d) return weekIso;
-  d.setDate(d.getDate() + weeks * 7);
-  return localDate(d);
+  return addCalendarDays(weekIso, weeks * 7) ?? weekIso;
 }
 
 /**
  * The query window for a week, as instants. Half-open at the end: `toISO` is
- * local midnight opening the *next* week, so a class in the last half-hour of
- * the final day is inside and the next week's first midnight is not counted
- * twice.
+ * the midnight opening the *next* week, so a class in the last half-hour of the
+ * final day is inside and the next week's first midnight is not counted twice.
+ *
+ * The gym's midnights where the gym has a zone. This is the bound the database
+ * is asked for, so a window built on the reader's midnight reads six hours of
+ * the wrong days for a gym six hours away — the grid would then be missing an
+ * evening at one end and carrying somebody else's at the other, and `coverage`
+ * would report the hole as uncovered.
  */
-export function weekWindow(weekIso: string): { fromISO: string; toISO: string } | null {
-  const from = dayStart(weekIso);
-  if (!from) return null;
-  const to = new Date(from.getTime());
-  to.setDate(to.getDate() + 7);
-  return { fromISO: from.toISOString(), toISO: to.toISOString() };
-}
-
-function dayStart(dateIso: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateIso);
-  if (!m) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0);
-  return Number.isNaN(d.getTime()) ? null : d;
+export function weekWindow(weekIso: string, zone?: string | null): { fromISO: string; toISO: string } | null {
+  const next = addCalendarDays(weekIso, 7);
+  if (next == null) return null;
+  const fromISO = rotaInstant(weekIso, 0, zone);
+  const toISO = rotaInstant(next, 0, zone);
+  if (fromISO == null || toISO == null) return null;
+  return { fromISO, toISO };
 }
 
 /* ── the grid ──────────────────────────────────────────────────────────────── */
@@ -261,7 +321,7 @@ export interface RotaHour {
  * of a fact, not a fact, and 168 mostly-blank rows per week would bury the ones
  * that matter. Sorted by date then hour.
  */
-export function buildRota(days: string[], shifts: Shift[], demand: DemandBlock[]): RotaHour[] {
+export function buildRota(days: string[], shifts: Shift[], demand: DemandBlock[], zone?: string | null): RotaHour[] {
   const wanted = new Set(days);
   const cells = new Map<string, RotaHour>();
 
@@ -277,7 +337,7 @@ export function buildRota(days: string[], shifts: Shift[], demand: DemandBlock[]
   };
 
   for (const s of shifts) {
-    for (const c of hoursSpanned(s.startsAt, s.endsAt)) {
+    for (const c of hoursSpanned(s.startsAt, s.endsAt, zone)) {
       const r = cell(c);
       if (!r) continue;
       const bucket = isLive(s) ? r.rostered : r.cancelled;
@@ -286,7 +346,7 @@ export function buildRota(days: string[], shifts: Shift[], demand: DemandBlock[]
   }
 
   for (const d of demand) {
-    for (const c of demandHoursSpanned(d)) {
+    for (const c of demandHoursSpanned(d, zone)) {
       const r = cell(c);
       if (!r) continue;
       if (d.kind === 'class') r.classes += 1;
@@ -344,8 +404,8 @@ export interface CoverageReport {
  * hour where nothing at all is booked counts as idle, which is the
  * conservative reading and the one an owner can act on without arguing.
  */
-export function coverage(days: string[], shifts: Shift[], demand: DemandBlock[]): CoverageReport {
-  const hours = buildRota(days, shifts, demand);
+export function coverage(days: string[], shifts: Shift[], demand: DemandBlock[], zone?: string | null): CoverageReport {
+  const hours = buildRota(days, shifts, demand, zone);
 
   const live = shifts.filter(isLive);
   const rosteredHours = live.reduce<number | null>((total, s) => {
@@ -423,13 +483,22 @@ export interface RotaDay {
   shifts: Shift[];
 }
 
-/** Shifts grouped by the local day they start on, in the order `days` gives. */
-export function shiftsByDay(days: string[], shifts: Shift[]): RotaDay[] {
+/**
+ * Shifts grouped by the day they start on ON THE ROTA'S CLOCK, in the order
+ * `days` gives.
+ *
+ * The same clock `hoursSpanned` walks and the same clock the times are labelled
+ * on. That is not a tidiness point: a 23:00 gym-time shift bucketed on a
+ * reader's day sits under tomorrow's heading with "23:00" printed beside it,
+ * which is the visibly-inconsistent state that made fixing the labels alone
+ * worse than leaving them.
+ */
+export function shiftsByDay(days: string[], shifts: Shift[], zone?: string | null): RotaDay[] {
   const index = new Map<string, Shift[]>(days.map((d) => [d, []]));
   for (const s of shifts) {
-    const t = Date.parse(s.startsAt);
-    if (!Number.isFinite(t)) continue;
-    index.get(localDate(new Date(t)))?.push(s);
+    const day = rotaDay(s.startsAt, zone);
+    if (day == null) continue;
+    index.get(day)?.push(s);
   }
   for (const list of index.values()) list.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   return days.map((date) => ({ date, shifts: index.get(date) ?? [] }));
@@ -779,25 +848,43 @@ export function shiftRate(
 }
 
 /**
- * Build a shift from a local date and two wall-clock hours — the shape the
- * screen collects. Returns null rather than a guess when the hours do not make
- * a span, which the caller renders as a disabled button rather than saving a
- * shift that covers nothing.
+ * Build a shift from a date and two wall-clock hours — the shape both screens
+ * collect. Returns null rather than a guess when the hours do not make a span,
+ * which the caller renders as a disabled button rather than saving a shift that
+ * covers nothing.
+ *
+ * ── The hours are the GYM's ────────────────────────────────────────────────
+ *
+ * This is the write half of the defect, and it is the half that moves somebody.
+ * It was `setHours` on the reader's device: an owner in London rostering a
+ * Dubai gym for "06 to 14" wrote 10:00–18:00 gym time, and `studio-web/app/staff`
+ * — which has always rendered in `timeZone: zone` — then displayed 10:00 beside
+ * a form that had just been told 06. The coach was rostered four hours late and
+ * neither screen was lying about what it held.
+ *
+ * `rotaInstant` solves the offset at the instant being named, so a shift typed
+ * across a clock change is the hours that were typed rather than the hours plus
+ * one. With no zone on the gym it is the reader's own clock, unchanged, and the
+ * screen says so.
  */
 export function shiftFromHours(
   trainerId: string, dateIso: string, startHour: number, endHour: number, role: ShiftRole = 'floor',
+  zone?: string | null,
 ): NewShift | null {
-  const day = dayStart(dateIso);
-  if (!day || !trainerId) return null;
+  if (!trainerId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateIso ?? '').trim())) return null;
   if (!Number.isInteger(startHour) || !Number.isInteger(endHour)) return null;
   if (startHour < 0 || startHour > 23 || endHour < 1 || endHour > 24) return null;
   if (endHour <= startHour) return null;
 
-  const start = new Date(day.getTime());
-  start.setHours(startHour, 0, 0, 0);
-  const end = new Date(day.getTime());
-  end.setHours(endHour, 0, 0, 0);
-  return { trainerId, startsAt: start.toISOString(), endsAt: end.toISOString(), role };
+  const startsAt = rotaInstant(dateIso, startHour, zone);
+  const endsAt = rotaInstant(dateIso, endHour, zone);
+  if (startsAt == null || endsAt == null) return null;
+  // A shift that ends no later than it starts. Unreachable through the hour
+  // guards above on an ordinary day, and reachable on a fall-back morning where
+  // the same wall clock names two instants — refused rather than stored as a
+  // span the grid would read as covering nothing.
+  if (Date.parse(endsAt) <= Date.parse(startsAt)) return null;
+  return { trainerId, startsAt, endsAt, role };
 }
 
 export async function addShift(sb: Queryable, tenantId: string, s: NewShift): Promise<void> {

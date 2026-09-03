@@ -255,6 +255,23 @@ async function run() {
     await refreshStale('manual', base);
     eq(reads, 0, 'an unmounted provider is not asked to set state on a tree that is gone');
   }
+  {
+    // The harder half: unmounted DURING the pass. The batch is a snapshot taken
+    // before the first refetch, so a screen that navigates away mid-recovery —
+    // which is the ordinary thing to do when a screen has been failing — leaves
+    // a dead entry in that snapshot. Calling it sets state on a tree that is
+    // gone, which is a warning in dev and a leak in production.
+    resetRefreshers();
+    let laterRan = false;
+    let offLater: () => void = () => { /* replaced */ };
+    registerRefresh('first', {
+      status: () => 'error',
+      refetch: () => { offLater(); },
+    });
+    offLater = registerRefresh('later', provider(() => 'error', () => { laterRan = true; }));
+    await refreshStale('manual', base);
+    eq(laterRan, false, 'a provider that unmounted while the pass was running is not called from the snapshot');
+  }
 
   /* ── noteEdge on its own, for the sign-out path ──────────────────────── */
   {

@@ -9,7 +9,22 @@
 // auto program and presented it as their plan, so a client on a bespoke program
 // trained the wrong session and had no way to tell. `status` separates "your
 // coach has not assigned you a program" from "we could not find out".
+//
+// ── And a copy on the phone, for the room it is trained in ─────────────────
+//
+// src/lib/readCache.ts opens on the member in the basement weights room with no
+// signal and lists the seven reads given a copy on the device for them. This
+// was not one of them, and it is the one they came to that room to do: with no
+// copy, a cold launch on no signal left `programs` empty, and
+// app/(client)/week.tsx told them their plan could not be read — correct, and
+// useless, with the bar already loaded.
+//
+// The judgements about what may be written and when it may be shown are in
+// src/lib/programCache.ts with a test. The two that shape this file: the copy
+// is layered UNDER a live read rather than merged into `programs`, and the
+// SERVER's answer is what gets written, including when that answer is empty.
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -18,8 +33,22 @@ import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 import { writeFailure } from '../lib/wroteRows';
 import { reportError } from '../lib/reportError';
+import {
+  mayCache, mayServeCached, packPrograms, programCacheKey, readPrograms,
+  type CachedPrograms,
+} from '../lib/programCache';
+import { useRecoverRead } from './readRefresh';
 
 interface AssignedProgramsValue {
+  /**
+   * What this session knows: the server's answer, plus this device's own
+   * unconfirmed writes.
+   *
+   * Deliberately NOT the device's cached copy — that is served through
+   * `getProgram` and only while no read has landed. A caller reading this map
+   * directly gets the stricter answer, which is the right default for anything
+   * counting rather than drawing.
+   */
   programs: Record<string, Program>;
   getProgram: (clientId: string) => Program | null;
   /** Whether `programs` is what the server holds. Under 'error' a null from
@@ -86,6 +115,24 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   // Bumped by `reload`. Beside `authRev` in the read's dependency array so a
   // refresh runs the one read this provider has.
   const [nonce, setNonce] = useState(0);
+  /**
+   * The last thing the server said, kept on this phone, and whether a read has
+   * landed in THIS session.
+   *
+   * Two pieces of state rather than one map, because the whole guarantee is
+   * that the copy never beats a live read — see `mayServeCached` in
+   * src/lib/programCache.ts. Merging the device's copy into `programs` would
+   * make that a rule somebody has to remember; keeping it in its own slot,
+   * consulted only through `getProgram` when `live` is false, makes it a shape.
+   *
+   * It also keeps the removal case honest. A coach who takes somebody off a
+   * block produces a read of zero rows; because the cache is layered UNDER a
+   * live read rather than merged into it, `live` turning true is enough for
+   * that removal to be respected on screen the moment it is read, with no
+   * unpicking of a seeded map.
+   */
+  const [cached, setCached] = useState<CachedPrograms | null>(null);
+  const [live, setLive] = useState(!USE_SUPABASE);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -107,6 +154,25 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         // than unknown.
         if (!id) { setStatus('ready'); return; }
         setUid(id);
+        // ── The device's copy, read before the network is asked ────────────
+        //
+        // AFTER the account is known and never before it: the key is scoped by
+        // uid (src/lib/readCache.ts) and reading it any earlier would mean
+        // guessing whose phone this is. Two members share a phone.
+        //
+        // Read first rather than only on failure, because "on failure" is
+        // thirty seconds away now that requests have a ceiling
+        // (src/lib/requestTimeout.ts). A member standing at the rack does not
+        // have thirty seconds of blank screen to give; the copy goes up
+        // immediately and the live read replaces it when it lands. It cannot
+        // overwrite anything, because `live` is still false and nothing has
+        // been merged into `programs`.
+        try {
+          const raw = await AsyncStorage.getItem(programCacheKey(id));
+          if (cancelled) return;
+          const copy = readPrograms(raw);
+          if (copy.found) setCached(copy);
+        } catch { /* no copy is the ordinary case; the read below is the answer */ }
         // `error` was previously discarded entirely: `const { data } = await …`.
         // A refused read handed back data === null, which read as "no
         // assignments" at every call site.
@@ -138,7 +204,25 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         }
         if (Object.keys(m).length) setPrograms((prev) => ({ ...prev, ...m }));
         if (Object.keys(d).length) setStartsOn((prev) => ({ ...prev, ...d }));
+        // The server has answered, so the device's copy stops being consulted
+        // from here — including when this answer is EMPTY, which is what a
+        // coach taking somebody off a block looks like.
+        setLive(true);
         setStatus(page.truncated ? 'partial' : 'ready');
+        // ── and what is kept for the next basement ─────────────────────────
+        //
+        // The SERVER's maps, not the merged state. `programs` also holds
+        // optimistic writes that have not been confirmed, and a cache written
+        // from it would hand a coach back their own guess on the next launch as
+        // though the server had agreed to it.
+        //
+        // Not written at all when the page was truncated: a prefix kept as the
+        // answer is a member whose row was past the cap being told by their own
+        // phone that they have no programme. src/lib/programCache.ts · mayCache.
+        if (mayCache(page.truncated)) {
+          AsyncStorage.setItem(programCacheKey(id), packPrograms(m, d))
+            .catch(() => { /* the programme is right this session either way */ });
+        }
       } catch { setStatus('error'); /* stay in-memory, but say the read failed */ }
     })();
     return () => { cancelled = true; };
@@ -159,7 +243,27 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     setNonce((n) => n + 1);
   }, []);
 
-  const getProgram = (clientId: string) => programs[clientId] ?? null;
+  /**
+   * The programme for one person, or null.
+   *
+   * The device's copy is consulted LAST and only while no read has landed this
+   * session. So the order of preference is: what the server said this session,
+   * then what this device optimistically wrote, then what the server said the
+   * last time it could be asked — and never the last of those over either of
+   * the first two.
+   *
+   * `status` is untouched by any of this. A cached programme is served under
+   * 'error', which src/ui/loadStatus.ts already defines as "whatever we had
+   * before the failure … not confirmed current". Nothing here makes anything
+   * 'ready', and app/(client)/week.tsx's `programUnknown` still reads a null
+   * under a non-'ready' status as "we could not find out".
+   */
+  const getProgram = (clientId: string): Program | null => {
+    const held = programs[clientId];
+    if (held) return held;
+    if (cached && mayServeCached(live, cached.found)) return cached.programs[clientId] ?? null;
+    return null;
+  };
   /**
    * Put a programme on one client, and say what happened.
    *
@@ -335,8 +439,24 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   const clearProgram = async (clientId: string): Promise<boolean> =>
     (await clearProgramFrom(clientId)).ok;
 
+  // When the signal comes back, this read is run again without anybody having
+  // to ask. Until this existed, the ONLY things that called `reload` were
+  // app/(client)/week.tsx's pull-to-refresh gesture and the coach screens'
+  // Refresh link — both of which need a member who knows the app is stuck and
+  // thinks to ask. Somebody walking out of a basement onto the street has no
+  // reason to: the phone shows bars. src/lib/readRefresh.ts.
+  useRecoverRead('assignedPrograms', status, reload);
+
+  // The start dates the device remembers, under the ones this session read, on
+  // the same terms as `getProgram`: a block served from the copy has to carry
+  // its start date or `clientWeekLine` puts a member on week one of a block
+  // they are four weeks into.
+  const startsOnOut = cached && mayServeCached(live, cached.found)
+    ? { ...cached.startsOn, ...startsOn }
+    : startsOn;
+
   return (
-    <Ctx.Provider value={{ programs, getProgram, status, startsOn, assignProgram, assignProgramTo, clearProgram, clearProgramFrom, reload }}>
+    <Ctx.Provider value={{ programs, getProgram, status, startsOn: startsOnOut, assignProgram, assignProgramTo, clearProgram, clearProgramFrom, reload }}>
       {children}
     </Ctx.Provider>
   );

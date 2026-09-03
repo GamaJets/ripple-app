@@ -269,8 +269,30 @@ export default function OwnerBrand() {
               commercial promise in the owner's own settings, phrased as a
               statement of fact, that support would have to walk back. What this
               screen actually does is the two controls above it. */}
+          {/* The name and the colour do NOT travel the same distance, and this
+              sentence used to say they did — "in the apps your members and
+              coaches use", of both of them.
+
+              The name does travel: `my_gym_name()` (supabase/parts/962) is
+              called by <BrandProvider> in src/ui/brand.tsx, which is mounted in
+              every variant, so a member and a coach both see their app called
+              by this gym's name.
+
+              The colour does not. `setAccent` has exactly two callers in the
+              whole repo and both are on THIS screen (lines 98 and 125). No
+              client screen and no trainer screen calls it, and nothing outside
+              app/(owner) reads `tenants.brand_color` at all — a coach's app
+              draws `trainers.brand_color`, which is the coach's own, and a
+              member's app draws the build's accent. The web console reads it
+              (studio-web/app/Console.tsx writes it into `--brand`), so the true
+              list is this app and that console.
+
+              Saying otherwise is not a small overstatement: it is the entire
+              reason an owner picks a colour. One who reads this, picks their
+              green, and then opens the member app expecting to see it has been
+              told a false thing by the screen that sold them the feature. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-            The name and the colour are the whole of the branding today. They apply to this gym everywhere it appears — on every device any owner signs in on, and in the apps your members and coaches use.
+            The name and the colour are the whole of the branding today, and they do not reach the same places. The name is the gym’s everywhere — every owner’s device, and what your members and coaches see their app called. The colour is drawn by this app and by the web console only; a member’s app and a coach’s app keep their own accent.
           </Text>
         </Section>
       </ScrollView>

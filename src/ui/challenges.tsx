@@ -42,6 +42,7 @@ import {
   boardTruncated, shapeBoard, shapeChallenges, type BoardRow, type ChallengeRow,
   type RawBoardRow, type RawChallenge,
 } from '../lib/challenges';
+import { useRecoverRead } from './readRefresh';
 
 export type { BoardRow, ChallengeRow } from '../lib/challenges';
 
@@ -185,6 +186,9 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
     [challenges, status, reload, join, leave, board],
   );
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('challenges', status, reload);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

@@ -47,6 +47,7 @@ import { coachPackLines, gymPtLines, chooseRoute, routeReason, creditsLeft, payi
   type CreditRoute, type CreditSession, type Entitlement, type Ledger, type LedgerRow } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
+import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
 import { useToday } from '../../src/ui/today';
 
 // The day used to judge whether a gym pass is still live was a private copy of
@@ -138,6 +139,40 @@ export default function SessionCredits() {
   const expected = useMemo(() => expectedDraws(ledger), [ledger]);
   const shortfalls = useMemo(() => shortfallLine(ledger), [ledger]);
 
+  // ── whether a closing window is actually going to cost this member ─────
+  //
+  // The list below already prints "Expires 12 Sep" under a pack, which is the
+  // fact. The question a member has when they read it is not when it ends but
+  // whether they are going to lose any of it, and that needs their diary as
+  // well as the date — both of which this screen is already holding and neither
+  // of which anything was putting together. src/lib/packDeadline.ts is the
+  // arithmetic, and packExpiry's own header is the argument for doing it: a
+  // pack that lapses with sessions on it is "a conversation, not a zero", and
+  // the coach's half of that conversation was the only half that existed.
+  //
+  // `bookedByThen` is null unless there is exactly ONE pack with a window. An
+  // upcoming booking is not attributed to a pack until it actually draws —
+  // `LedgerRow.entitlementId` is null for everything that has not moved — so
+  // with two windows in play there is no honest way to say which pack a
+  // Thursday session is going to spend, and "all of them are booked" is the one
+  // sentence here that could talk somebody out of acting. Null there produces
+  // the deadline without the coverage claim.
+  const windowed = useMemo(() => (lines ?? []).filter((l) => l.expiresOn), [lines]);
+  const soleWindow = windowed.length === 1 ? windowed[0] : null;
+  const deadline = useMemo(() => {
+    if (!soleWindow) return null;
+    // The diary must have been READ to be counted. `ledger` is null for a read
+    // that did not land, and counting zero bookings out of that would report
+    // the worst case as a fact.
+    const booked = ledger ? bookedBy(ledger.upcoming, soleWindow.expiresOn) : null;
+    return packDeadline({
+      left: soleWindow.left,
+      expiresOn: soleWindow.expiresOn,
+      today,
+      bookedByThen: booked,
+    });
+  }, [soleWindow, ledger, today]);
+
   const loading = packs === undefined || passes === undefined || sessions === undefined;
   // Named separately from `loading`, because "still reading" and "we asked and
   // could not get an answer" are different sentences and only one of them is
@@ -204,6 +239,30 @@ export default function SessionCredits() {
         {shortfalls ? (
           <View style={{ marginTop: sp.lg }}>
             <Flag tone={t.warn}>{shortfalls} Your coach delivered those hours and nothing paid for them.</Flag>
+          </View>
+        ) : null}
+
+        {/* Above the list rather than under the row it is about, because it is
+            the thing to act on and the list is the working behind it. A
+            'covered' deadline is the reassuring answer and is drawn quietly;
+            everything else is the member's own money about to go unused. */}
+        {deadline && deadline.text ? (
+          <View style={{ marginTop: sp.lg }}>
+            {deadline.urgent ? (
+              <Flag tone={t.warn}>{deadline.text}</Flag>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{deadline.text}</Text>
+            )}
+            {deadline.kind === 'toBook' || deadline.kind === 'tight' ? (
+              <View style={{ marginTop: sp.md, flexDirection: 'row' }}>
+                {/* 'tight' points at the coach and 'toBook' at the calendar,
+                    because at more sessions than days a booking screen is not
+                    the thing that helps. */}
+                {deadline.kind === 'tight'
+                  ? <Ghost label="Message Your Coach" onPress={() => router.push('/(client)/messages')} />
+                  : <Ghost label="Book a Session" onPress={() => router.push('/(client)/calendar')} />}
+              </View>
+            ) : null}
           </View>
         ) : null}
 

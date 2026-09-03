@@ -27,6 +27,7 @@ import { capLimit, capped } from '../lib/rowCap';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
 import { useLive } from './realtime';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 /**
  * How stale a cached timetable may be before it stops being worth showing.
@@ -420,6 +421,9 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
   // the rest of the time the screen is open.
   const cachedNote = cachedAtLine(cachedAt);
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('classes', status, () => { void load(); });
   return <Ctx.Provider value={{ classes, myStatus, book, cancel, addClass, refresh: load, ready, status, countsKnown, cachedNote }}>{children}</Ctx.Provider>;
 }
 

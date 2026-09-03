@@ -23,6 +23,7 @@ import { settleOptimistic } from '../lib/optimisticList';
 import { useOutbox } from './outbox';
 import { useAuthRevision } from './authRevision';
 import { dateParts } from '../lib/localDate';
+import { useRecoverRead } from './readRefresh';
 
 export interface MeasureEntry {
   id: string; at: string;
@@ -408,6 +409,9 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
   const updateMetric = (at: string, key: MetricKey, cm: number) => writeMetric(at, key, cm);
   const removeMetric = (at: string, key: MetricKey) => writeMetric(at, key, null);
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('measurements', status, reload);
   return <Ctx.Provider value={{ entries, status, addEntry, updateMetric, removeMetric, reload }}>{children}</Ctx.Provider>;
 }
 

@@ -523,13 +523,26 @@ export default function Settings() {
             ) : null}
           </Field>
 
+          {/* Two surfaces, not four. Both of these sentences used to name the
+              coach app and the member app as well, and neither of them draws
+              this colour.
+
+              `setAccent` — the only thing in the mobile tree that repaints an
+              app — has two call sites and both are in app/(owner)/brand.tsx.
+              Nothing under app/(client) or app/(trainer) reads
+              `tenants.brand_color`; a coach's app draws `trainers.brand_color`
+              (src/ui/coachBrand.ts), which is that coach's own and has nothing
+              to do with this field. So the true reach is the OWNER app and this
+              console, and this console is the surface an owner is looking at
+              while they read the sentence — which is exactly why nobody
+              noticed. */}
           <Field
             label="Brand colour"
             note={
               gym?.brandColor
-                ? 'The accent this console and the gym’s apps are drawn in — every link, button, focus ring and active nav pill. It is the gym’s, not one person’s: changing it changes what every owner, coach and member sees, on every device.'
+                ? 'The accent this console and the owner app are drawn in — every link, button, focus ring and active nav pill. It is the gym’s, not one person’s: every owner sees it, on every device they sign in on. It does not reach the coach app or the member app; those draw their own.'
                 : unread('this gym’s brand colour')
-                  ?? 'Not set — this gym has not chosen a colour, so every surface draws its own. Set one and this console, the owner app and the coach app all follow it. Clear it again to go back.'
+                  ?? 'Not set — this gym has not chosen a colour, so every surface draws its own. Set one and this console and the owner app follow it; the coach app and the member app keep their own accent either way. Clear it again to go back.'
             }
           >
             <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -567,8 +580,9 @@ export default function Settings() {
             {gym?.brandColor && parseBrandColor(gym.brandColor).kind !== 'color' ? (
               <Bad>
                 The stored colour is <span className="mono">{gym.brandColor}</span>, which is not a
-                hex code, so nothing is drawn in it — this console and the apps are showing their
-                own accent instead. Type one above to replace it, or empty the field to clear it.
+                hex code, so nothing is drawn in it — this console and the owner app are showing
+                their own accent instead. Type one above to replace it, or empty the field to clear
+                it.
               </Bad>
             ) : null}
           </Field>
@@ -630,8 +644,10 @@ export default function Settings() {
             <a href="/sessions" style={{ color: 'var(--brand)' }}>Sessions</a>,{' '}
             <a href="/staff" style={{ color: 'var(--brand)' }}>Staff</a> and{' '}
             <a href="/close" style={{ color: 'var(--brand)' }}>Close</a>. The brand colour is what
-            every screen in this console, and both phone apps, draw their accent in — it takes
-            effect here as soon as it saves, and everywhere else on the next load.
+            every screen in this console, and the owner app, draw their accent in — it takes effect
+            here as soon as it saves, and in the owner app on its next load. The coach app and the
+            member app are unaffected by it; what those two do take from this gym is its{' '}
+            <em>name</em>.
           </p>
 
           {/* Said plainly rather than implied by the field above it. The column

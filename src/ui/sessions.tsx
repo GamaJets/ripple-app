@@ -58,6 +58,7 @@ import { IDLE_SAVE, markPending, afterWrite, type SaveStatus } from '../lib/prof
 import { writeFailure } from '../lib/wroteRows';
 import { useOutbox } from './outbox';
 import { useLive } from './realtime';
+import { useRecoverRead } from './readRefresh';
 
 /** Where this device keeps the calendar. */
 const SESSIONS_SCOPE = 'sessions';
@@ -745,6 +746,10 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   // Computed per render rather than stored: the sentence says how long ago, and
   // a stored one would go on saying "4 minutes ago" while the screen stays open.
   const cachedNote = cachedAtLine(cachedAt);
+
+  // Re-run this read when the signal comes back, without the member having to
+  // know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('sessions', status, () => { void hydrate(); });
 
   return <Ctx.Provider value={{ sessions, status, cachedNote, refresh: () => hydrate(), addSession, bookSession, releaseSession, cancelMyBooking, removeSession, approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession }}>{children}</Ctx.Provider>;
 }

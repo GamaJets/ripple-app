@@ -45,6 +45,7 @@ import { capLimit, capped } from '../lib/rowCap';
 import { adoptServerId, isPending, localId, mergeLog } from '../lib/wellnessSync';
 import { classifyWrite, registerFlush, serverRows, type WriteOutcome } from '../lib/offlineQueue';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 export interface CheckIn {
   id: string; at: string;
@@ -285,6 +286,9 @@ export function CheckInsProvider({ children }: { children: ReactNode }) {
   // this is the first entry that is not still waiting.
   const latestSent = useMemo(() => checkins.find((c) => !isPending(c.id)) ?? null, [checkins]);
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('checkins', status, reload);
   return <Ctx.Provider value={{ checkins, latest: checkins[0] ?? null, latestSent, status, addCheckIn, sendCheckIn, unsent, reload }}>{children}</Ctx.Provider>;
 }
 

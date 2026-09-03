@@ -13,6 +13,7 @@
 // what else the app can do, which is not an offer. It points here now.
 import { useCallback, useEffect, useState } from 'react';
 import { BRAND } from '../../src/lib/brands';
+import { appLocale } from '../../src/lib/locale';
 import { View, Text, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -124,13 +125,24 @@ export default function Offers() {
       'Code redeemed',
       pct == null
         ? `${res.code ?? c} is recorded against your account and your gym has been told. We couldn’t read how much it takes off — your gym applies it to your billing and can tell you.`
-        : `${res.code} · ${pct}% off is recorded against your account and your gym has been told. They apply the discount to your billing.`,
+        // `res.code ?? c`, like the branch above it. The RPC is not obliged to
+        // echo the code back, and one of these two lines defended against that
+        // while the other did not — so the same response produced "undefined ·
+        // 20% off is recorded against your account", about somebody's billing,
+        // in a confirmation they are meant to trust. `c` is what they typed and
+        // is the right thing to name when the server does not name it.
+        : `${res.code ?? c} · ${pct}% off is recorded against your account and your gym has been told. They apply the discount to your billing.`,
     );
   };
 
   const when = (iso: string) => {
     const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    // `appLocale()`, never `undefined`. `undefined` is the DEVICE's locale, and
+    // this app is white-label: the same binary runs in Dubai, London and Tokyo,
+    // and app/(client)/membership.tsx records fixing this exact pattern as a
+    // defect — "two dates on one screen were written two different ways". Every
+    // sibling screen (receipts, membership) already reads through it.
+    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
   return (

@@ -42,6 +42,7 @@ import { useReadDeadline } from './readDeadline';
 import { capLimit, capped } from '../lib/rowCap';
 import { registerFlush } from '../lib/offlineQueue';
 import { writeFailure } from '../lib/wroteRows';
+import { useRecoverRead } from './readRefresh';
 
 // Declared in src/lib/types.ts alongside the labels and the two predicates the
 // screens branch on; re-exported because every client screen imports it from
@@ -825,6 +826,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     // over an unknown fraction of the record.
     status: worstStatus(publishedProfileStatus, publishedScansStatus),
   };
+  // Re-run these reads when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('clientData', value.status, reload);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

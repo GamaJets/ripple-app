@@ -17,6 +17,8 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { shownStreak, longestStreak, freezeBudget } from '../../src/lib/streaks';
 import { heatmapDayLabel, heatmapColumnLabel, heatmapSummary } from '../../src/lib/heatmap';
+import { readBoundary, rangeCoverage } from '../../src/lib/sessionHistory';
+import { fmtFullDay } from '../../src/lib/format';
 import { WEEK_DAYS, startOfWeek } from '../../src/lib/weekStart';
 import { Icon } from '../../src/ui/Icon';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
@@ -102,6 +104,32 @@ export default function Consistency() {
     for (let d = 0; d < 7; d++) { const day = new Date(colStart); day.setDate(colStart.getDate() + d); col.push(day); }
     cols.push(col);
   }
+
+  // ── how far back the grid is actually complete ─────────────────────────
+  //
+  // The claim under the totals — "The grid below is your recent weeks and is
+  // complete" — was true of a whole read and only ASSUMED of a truncated one.
+  // The argument for admitting 'partial' here is sound as far as it goes: the
+  // provider orders `performed_at` descending before it caps, so what came back
+  // is the recent end. What it does not establish is that the recent end
+  // reaches twelve weeks, and src/ui/workoutLog.tsx says plainly that it may
+  // not: "One row per set, not per session, so this is the fastest-growing read
+  // a single client has: four sessions a week at twenty sets apiece passes a
+  // thousand rows inside three months." Three months IS twelve weeks, so the
+  // heaviest loggers — the ones with the most to lose from being told their
+  // weeks were empty — are exactly the members whose oldest columns fall off
+  // the read. Blank squares, under a sentence promising the grid is complete.
+  //
+  // `readBoundary`/`rangeCoverage` are the tested pair app/(client)/calendar.tsx
+  // already asks this question with, so the two screens cannot answer it
+  // differently about the same log.
+  const gridBoundary = readBoundary(log.map((l) => ({ startsAt: l.t })), logStatus === 'partial');
+  const gridFromMs = cols[0]?.[0]?.getTime() ?? today.getTime();
+  const gridCoverage = rangeCoverage(gridFromMs, today.getTime() + 86_400_000, gridBoundary, logStatus);
+  /** The day the grid is complete FROM, when it is not complete throughout. */
+  const gridCompleteFrom = gridCoverage === 'covered' || gridBoundary.oldestISO == null
+    ? null
+    : new Date(gridBoundary.oldestISO);
 
   const totalSessions = Object.values(counts).reduce((a, n) => a + n, 0);
   const trainedDays = Object.keys(counts).length;
@@ -192,8 +220,17 @@ export default function Consistency() {
           {known && !countable && logStatus === 'partial' ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               You have trained more times than this screen can read in one go, so these three are
-              left blank rather than added up short. The grid below is your recent weeks and is
-              complete.
+              left blank rather than added up short.
+              {' '}
+              {/* Only claimed where it is true. The whole point of the gate
+                  above is that a figure computed from a prefix is not stated as
+                  a fact, and a sentence promising a complete grid is that same
+                  kind of claim about the picture underneath it. */}
+              {gridCoverage === 'covered'
+                ? 'The grid below is your recent weeks and is complete.'
+                : gridCompleteFrom
+                  ? `The grid below is complete from ${fmtFullDay(gridCompleteFrom.toISOString())} onwards — the weeks before that are older than this screen could read, so their empty squares are not days you missed.`
+                  : 'The grid below may not reach all twelve weeks, so an empty square in the earliest ones is not necessarily a day you missed.'}
             </Text>
           ) : null}
         </Section>

@@ -60,6 +60,7 @@ import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import { isFilableNight } from '../lib/sleepEntry';
+import { useRecoverRead } from './readRefresh';
 
 export interface SleepEntry { id: string; at: string; hours: number; quality: number }
 
@@ -378,6 +379,9 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
 
   const unsent = useMemo(() => sleep.filter((e) => isPending(e.id)).length, [sleep]);
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('wellness', status, reload);
   return <Ctx.Provider value={{ sleep, addSleep, removeSleep, status, unsent, reload }}>{children}</Ctx.Provider>;
 }
 export function useWellness(): WellnessValue { const v = useContext(Ctx); if (!v) throw new Error('useWellness must be used inside <WellnessProvider>'); return v; }

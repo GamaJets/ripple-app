@@ -114,6 +114,17 @@ export default function Staff() {
    * they were the gym's — which is the whole of item J1 in one paragraph.
    */
   const [zone, setZone] = useState<string | null>(null);
+  /**
+   * Whether the question has been ASKED yet, as opposed to answered with a null.
+   *
+   * The third state, and the rota below needs it rather than the page: the week
+   * window it sends to the database is built from the gym's own midnight, so a
+   * read issued before the zone lands asks for the reader's seven days and the
+   * grid then draws the gym's. Missing an evening at one end and carrying
+   * somebody else's at the other is exactly the shape `coverage` reports as an
+   * uncovered hour.
+   */
+  const [zoneRead, setZoneRead] = useState(false);
   const [rec, setRec] = useState<StaffRecord>(EMPTY);
   const [sel, setSel] = useState<string | null>(null);
   // No console page had a search input. A gym with thirty coaches reads this
@@ -201,6 +212,7 @@ export default function Staff() {
       {
         const tz = (((t as any)?.timezone ?? '') as string).trim();
         setZone(tErr || !tz || !isZone(tz) ? null : tz);
+        setZoneRead(true);
       }
       setFeeRead(tErr ? 'failed' : 'ok');
       await load(who.tenantId);
@@ -383,7 +395,7 @@ export default function Staff() {
         onChanged={() => load(me.tenantId!)}
       />
 
-      <Rota tenantId={me.tenantId!} trainers={rec.trainers} ccy={ccy} zone={zone} />
+      <Rota tenantId={me.tenantId!} trainers={rec.trainers} ccy={ccy} zone={zone} zoneRead={zoneRead} />
 
       <OffRoster view={view} ccy={ccy} />
     </Shell>
@@ -1076,16 +1088,24 @@ const ROLES: ShiftRole[] = ['floor', 'classes', 'pt', 'desk', 'admin'];
  * for two different questions is cheaper than one read that answers neither
  * well.
  */
-function Rota({ tenantId, trainers, ccy, zone }: {
+function Rota({ tenantId, trainers, ccy, zone, zoneRead }: {
   tenantId: string;
   trainers: Slice<StaffTrainer>;
   ccy: TenantCurrency;
   /** The gym's own IANA zone, or null because it has not set one. Never the
    *  reader's — see the note on `zone` at the top of this file. */
   zone: string | null;
+  /** Whether that question has been answered yet. A null zone that has not been
+   *  asked about and a gym that genuinely has none are the same value and
+   *  different facts; the read below waits for the first and proceeds on the
+   *  second. */
+  zoneRead: boolean;
 }) {
   // The week on screen, as the ISO date it opened on. Which day that is comes
   // from src/lib/weekStart.ts via `weekStartOf` — this screen does not decide.
+  // WHOSE week is the gym's, where it has a zone: a bookkeeper in London opening
+  // a Sydney gym's rota on a Saturday evening is looking at a gym where it is
+  // already Sunday, and the two would otherwise open different weeks.
   const [week, setWeek] = useState(() => weekStartOf());
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [readErr, setReadErr] = useState<string | null>(null);
@@ -1102,7 +1122,10 @@ function Rota({ tenantId, trainers, ccy, zone }: {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const w = weekWindow(week);
+    // Not before the gym's clock is known — see `zoneRead`. This leaves the
+    // section on 'Loading…', which is the honest state: nothing has been read.
+    if (!zoneRead) { setShifts(null); setReadErr(null); return; }
+    const w = weekWindow(week, zone);
     if (!w) { setShifts(null); setReadErr('That week could not be read as a date range.'); return; }
     try {
       setShifts(await fetchShifts(supabase, tenantId, w.fromISO, w.toISO));
@@ -1114,11 +1137,19 @@ function Rota({ tenantId, trainers, ccy, zone }: {
       setShifts(null);
       setReadErr(e?.message ?? 'The rota could not be read.');
     }
-  }, [tenantId, week]);
+  }, [tenantId, week, zone, zoneRead]);
 
   useEffect(() => { load(); }, [load]);
   // The day picker follows the week, or it silently offers last week's dates.
   useEffect(() => { setDay(weekDays(week)[0]); }, [week]);
+  // And the week follows the gym's clock once it lands. The initialiser above
+  // ran on whatever clock was in force at mount, which for the first paint is
+  // the reader's; re-asking only while the reader is still on "this week" leaves
+  // a week they have paged to alone.
+  useEffect(() => {
+    if (!zoneRead || !zone) return;
+    setWeek((w) => (w === weekStartOf() ? weekStartOf(Date.now(), zone) : w));
+  }, [zone, zoneRead]);
 
   const days = weekDays(week);
   const cost = shifts ? rotaCost(shifts) : null;
@@ -1130,7 +1161,11 @@ function Rota({ tenantId, trainers, ccy, zone }: {
   // guessed at.
   const canPrice = !!ccy;
 
-  const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role);
+  // The hours typed are the GYM's. They used to be the browser's, so "06 to 14"
+  // typed in London for a Dubai gym was written as 10:00–18:00 at the gym — and
+  // the table below, which has always rendered in `timeZone: zone`, then showed
+  // 10:00 back to somebody who had just typed 06.
+  const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role, zone);
   // Read by `shiftRate`, not by `parseFloat(rate) || 0`. That expression turned
   // "1,234" into 1 and "abc" into 0, and the Costs column drew that 0.00
   // exactly like a shift genuinely covered for free — so there was nothing on
@@ -1150,7 +1185,7 @@ function Rota({ tenantId, trainers, ccy, zone }: {
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    const d = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role);
+    const d = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role, zone);
     const stop = shiftBlocker({
       trainerId: who, startsAt: d?.startsAt ?? null, endsAt: d?.endsAt ?? null,
       rateCents: cents, currency: cents == null ? null : ccy,
@@ -1248,7 +1283,8 @@ function Rota({ tenantId, trainers, ccy, zone }: {
       <Announce say={sayText(msg)} tone={sayTone(msg)} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '12px 14px', flexWrap: 'wrap' }}>
         <button style={ghostBtn} onClick={() => setWeek((w) => shiftWeek(w, -1))}>← Previous</button>
-        <button style={ghostBtn} onClick={() => setWeek(weekStartOf())} disabled={week === weekStartOf()}>This week</button>
+        <button style={ghostBtn} onClick={() => setWeek(weekStartOf(Date.now(), zone))}
+                disabled={week === weekStartOf(Date.now(), zone)}>This week</button>
         <button style={ghostBtn} onClick={() => setWeek((w) => shiftWeek(w, 1))}>Next →</button>
         <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
           week of {calendarDateText(week, { day: 'numeric', month: 'long' }) ?? '—'}

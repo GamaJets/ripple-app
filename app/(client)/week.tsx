@@ -10,6 +10,7 @@ import { BRAND } from '../../src/lib/brands';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, type as ty, value } from '../../src/theme/scale';
@@ -72,8 +73,25 @@ export default function ThisWeek() {
   const blockLine = clientWeekLine(blk.week, blk.week.index);
   const thisWeek = blk.weeks[blk.week.index] ?? null;
 
-  const todayIdx = weekIndexOf(new Date());
-  const weekOpened = startOfWeek();
+  // ── the day, kept current ──────────────────────────────────────────────
+  //
+  // These two were `new Date()` and `startOfWeek()` in the render body, which
+  // src/ui/today.ts rules on directly: "A bare todayKey() in the render body is
+  // correct and does not re-render: it is only right at the moment something
+  // else happens to redraw. A screen sitting untouched at 23:59 is exactly the
+  // case that matters." Nothing on this screen redraws at midnight — it imports
+  // no focus effect and the pull only fires on a pull — and expo-router mounts
+  // these once and never tears them down.
+  //
+  // So on a phone left open across a Saturday night, a screen titled "This
+  // Week" went on marking Saturday as "Today", drew last week's seven dates,
+  // and judged what had been logged against a week that had ended. `useNow`
+  // re-reads at the next local midnight, whenever the app comes back to the
+  // foreground, and on every focus — which are the three moments this screen is
+  // actually being looked at.
+  const now = useNow();
+  const todayIdx = weekIndexOf(now);
+  const weekOpened = startOfWeek(now);
   const pad = (n: number) => String(n).padStart(2, '0');
   const dstr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const logged = new Set(log.map((l) => dstr(new Date(l.t))));

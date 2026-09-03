@@ -390,7 +390,36 @@ export default function StatementOfRecord() {
               region, the gym's currency or the device timezone to guess a tax
               year: every one of those is a proxy, and the coach who has moved
               country is exactly the person it would be wrong about. */}
-          {span !== 'custom' ? (
+          {/* ── which month ──────────────────────────────────────────────
+              Twelve pills in the reader's own language, from the same
+              `monthNamesShort` the year-start picker uses. The year pills above
+              still choose the year, so August of two years ago is two taps.
+
+              The coach's own year start is deliberately NOT offered here and
+              does not apply: a month is a calendar month wherever somebody's
+              financial year begins, because the bank statement it is being
+              reconciled against is a calendar month. */}
+          {span === 'month' ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
+                One calendar month, whichever day your own year starts on.
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                  {MONTH_NAMES.map((m, i) => (
+                    <Pressable key={m} onPress={() => setMonth(i + 1)}
+                      accessibilityRole="button" accessibilityLabel={`Show ${m} ${year}`}
+                      accessibilityState={{ selected: month === i + 1 }}
+                      style={pill(month === i + 1)}>
+                      <Text style={{ ...ty.label, color: month === i + 1 ? '#fff' : t.ink2 }}>{m}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {span !== 'custom' && span !== 'month' ? (
             <View style={{ marginTop: sp.lg }}>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
                 {isCalendarStart(start)
@@ -434,7 +463,14 @@ export default function StatementOfRecord() {
               </View>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{YEAR_START_IS_YOURS}</Text>
             </View>
-          ) : (
+          ) : null}
+
+          {/* Its own condition rather than the `else` of the year-start block.
+              It used to be one — everything that was not Any Dates showed the
+              year start, and Any Dates showed these two boxes — and a third
+              span turns an `else` into "every span that is not the first one",
+              which would have drawn two date boxes under One Month. */}
+          {span === 'custom' ? (
             <View style={{ marginTop: sp.lg }}>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
                 Any two dates, for a period neither a calendar year nor your own year covers.
@@ -471,7 +507,7 @@ export default function StatementOfRecord() {
                   anybody notices. */}
               {rangeProblem ? <Flag style={{ marginTop: sp.sm }}>{rangeProblem}</Flag> : null}
             </View>
-          )}
+          ) : null}
 
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PERIOD_IS_YOURS}</Text>
         </Section>

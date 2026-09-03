@@ -14,6 +14,7 @@ import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useNow } from '../../src/ui/today';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -75,9 +76,26 @@ export default function Trends() {
   // gate loadStatus.ts asks for and is false for 'partial' and 'loading' both.
   const logKnown = isWhole(logStatus);
 
+  // ── the ten weeks are anchored to today, and today moves ───────────────
+  //
+  // `startOfWeek()` defaults to `Date.now()`, and it used to be read inside a
+  // memo keyed on `[log, weightSeries]` — the two READS. So the bucket
+  // boundaries were pinned to whenever those last changed, which on a screen
+  // nobody is touching is whenever it first mounted. src/ui/today.ts: "Nothing
+  // in these apps unmounts a screen when the phone is pocketed … backgrounding
+  // the app does not tear them down at all."
+  //
+  // A phone left open across a Saturday night therefore showed last week's
+  // tonnage under the words "Lifted This Week", nominated a "Best Week" out of
+  // a ten-week window that had stopped moving, and left a Sunday session logged
+  // on another device outside every bucket. app/(client)/consistency.tsx solved
+  // exactly this with `useNow` and wrote down why; this screen was not given
+  // the same treatment.
+  const now = useNow();
+
   // Weekly training volume (last 10 weeks, oldest → newest).
   const weeks = useMemo(() => {
-    const weekOpened = startOfWeek();
+    const weekOpened = startOfWeek(now);
     const out: { label: string; iso: string; vol: number; unpriced: number; sessions: number }[] = [];
     for (let w = WEEKS - 1; w >= 0; w--) {
       const start = new Date(weekOpened); start.setDate(weekOpened.getDate() - w * 7);
@@ -105,7 +123,9 @@ export default function Trends() {
       out.push({ label: fmtAxisDay(start.getFullYear(), start.getMonth(), start.getDate()), iso, vol: t.kg, unpriced: t.unknownSets, sessions: days.size });
     }
     return out;
-  }, [log, weightSeries]);
+    // `now` is a dependency, not a value read past the memo: without it the
+    // recomputation that a new day asks for never happens.
+  }, [log, weightSeries, now]);
   const maxVol = Math.max(1, ...weeks.map((w) => w.vol));
 
   // Exercises that have logged sets (skip pure cardio) → trend of best est-1RM.

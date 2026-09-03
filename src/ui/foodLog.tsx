@@ -53,6 +53,7 @@ import { capLimit, capped } from '../lib/rowCap';
 import { isPending, localId, mergeLog } from '../lib/wellnessSync';
 import { classifyWrite, forDay, registerFlush, serverRows, staleForDay, todayKey, type WriteOutcome } from '../lib/offlineQueue';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 export type LogVia = 'search' | 'barcode' | 'photo' | 'manual';
 /** `at` is when it was eaten, and it is on the entry rather than implied by the
@@ -437,6 +438,9 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
     [entries, owedCount],
   );
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('foodLog', status, reload);
   return <Ctx.Provider value={{ entries, consumed, status, addFood, logFood, removeFood, updateFood, unsent, reload }}>{children}</Ctx.Provider>;
 }
 

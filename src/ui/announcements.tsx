@@ -112,6 +112,7 @@ import { NOTICE_ROUTE, noticeNotification, type DeliveryReport, type NoticeKind 
 import { recordInbox, sendPushChecked } from './pushNotifications';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 export interface Announcement {
   id: string;
@@ -493,6 +494,9 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const latestGym = useMemo(() => announcements.find((a) => a.kind === 'gym' && !a.mine) ?? null, [announcements]);
   const mine = useMemo(() => announcements.filter((a) => a.mine), [announcements]);
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('announcements', status, reload);
   return (
     <Ctx.Provider value={{ announcements, latest, latestGym, mine, addAnnouncement, addGymAnnouncement, status, unsent, reload }}>
       {children}

@@ -55,6 +55,7 @@ import { sortGoals, type GoalKind, type GoalTarget, type MeasuredKind } from '..
 import { isPending } from '../lib/wellnessSync';
 import { useOutbox } from './outbox';
 import { useRecordOutboxHandlers } from './recordOutbox';
+import { useRecoverRead } from './readRefresh';
 
 const LEGACY_KEY = 'repple.goalTarget';
 const MIGRATED_KEY = 'repple.goalTarget.migrated';
@@ -377,6 +378,9 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     } catch (e) { reportError('goalTracker.setAchieved', e); return false; }
   };
 
+  // Re-run this read when the signal comes back, without the member having
+  // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
+  useRecoverRead('goalTracker', status, reload);
   return (
     <Ctx.Provider value={{ goals, status, setMeasuredGoal, addCustomGoal, removeGoal, setAchieved, reload }}>
       {children}

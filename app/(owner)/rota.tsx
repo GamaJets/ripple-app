@@ -37,6 +37,12 @@ import {
   rosterByTrainer, summariseRota, hourLabel,
   type Shift, type ShiftRole, type DemandBlock, type RotaGap,
 } from '../../src/lib/gymRota';
+// Whose clock this whole screen is on. The gym's where `tenants.timezone` is
+// set, the reader's where it is not — and `note` is the sentence that says which,
+// printed rather than implied. See src/lib/rotaClock.ts.
+import { rotaClock, rotaTimeLabel } from '../../src/lib/rotaClock';
+import { fetchGymZone } from '../../src/lib/gymZone';
+import { calendarDateText } from '../../src/lib/gymWhen';
 import { FORWARD_ICON } from '../../src/ui/direction';
 
 const ROLES: { key: ShiftRole; label: string }[] = [
@@ -51,13 +57,20 @@ const ROLE_LABEL: Record<ShiftRole, string> = {
   floor: 'Floor', classes: 'Classes', pt: 'PT', desk: 'Desk', admin: 'Admin',
 };
 
-/** A local ISO date rendered as "Mon 7 Sep". */
+/**
+ * A calendar date rendered as "Mon 7 Sep".
+ *
+ * Through `calendarDateText`, which is the one tool for a date that is ALREADY
+ * a day: "the 7th of September" is not an instant and asking which day it falls
+ * on has no content. The old body parsed `${dateIso}T00:00:00`, the reader's own
+ * midnight — an hour some zones do not have — and then asked the reader's
+ * calendar which day that was. It gave the right answer almost everywhere,
+ * which is what kept it.
+ */
 function dayLabel(dateIso: string, long = false): string {
-  const d = new Date(`${dateIso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return dateIso;
-  return d.toLocaleDateString(undefined, long
+  return calendarDateText(dateIso, long
     ? { weekday: 'long', day: 'numeric', month: 'short' }
-    : { weekday: 'short', day: 'numeric', month: 'short' });
+    : { weekday: 'short', day: 'numeric', month: 'short' }) ?? dateIso;
 }
 
 /** Hours as a figure a human reads — 7.5 stays 7.5, 8 does not become 8.0. */
@@ -66,13 +79,20 @@ function hrs(n: number | null): string | null {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
-/** A stored instant as the gym's wall clock. An unreadable one is a dash, not
- *  a plausible-looking midnight. */
-function timeOf(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/**
+ * A stored instant as the rota's wall clock. An unreadable one is a dash, not a
+ * plausible-looking midnight.
+ *
+ * This function's doc comment used to say "the gym's wall clock" over a body
+ * that read `d.getHours()` — the READER's. A shift rostered from a phone in
+ * Sydney for a gym in Dubai was drawn six hours from where it runs, and
+ * `studio-web/app/staff`, which formats the same instant with `timeZone: zone`,
+ * printed a different time for the same row. `rotaTimeLabel` is now the only
+ * implementation of the sentence, and rotaClock.test.ts asserts it agrees with
+ * what the console draws.
+ */
+function timeOf(iso: string, zone: string | null): string {
+  return rotaTimeLabel(iso, zone) ?? '—';
 }
 
 function Chip({ label, on, onPress, tone }: { label: string; on: boolean; onPress: () => void; tone: string }) {
@@ -93,6 +113,22 @@ export default function OwnerRota() {
   const t = useTheme();
   const router = useRouter();
   const { tenant } = useTenant();
+
+  /**
+   * The gym's own IANA zone, or null because it has not set one.
+   *
+   * THREE states, and the third is why this is two pieces of state rather than
+   * one string. `zoneRead` false means the question has not been answered yet —
+   * a week bucketed on the reader's clock and then re-bucketed a moment later
+   * would redraw the grid under the owner, so the screen waits. `zoneErr` means
+   * we could not ask, which is NOT "the gym has not set one": that sentence is
+   * an instruction to go and set a setting that may already be correct.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneRead, setZoneRead] = useState(false);
+  const [zoneErr, setZoneErr] = useState<string | null>(null);
+  /** Whose clock, and the sentence owed to the reader when it is not the gym's. */
+  const clock = rotaClock(zone);
 
   const [week, setWeek] = useState<string>(() => weekStartOf());
   // null = not loaded yet. [] = loaded, and genuinely empty.
@@ -133,11 +169,46 @@ export default function OwnerRota() {
   const [to, setTo] = useState('14');
   const [role, setRole] = useState<ShiftRole>('floor');
 
+  // The gym's zone, before anything is bucketed by it. One narrow read —
+  // `fetchGymZone` exists so a rota does not have to pull the gym's pay policy
+  // and brand colour to find out what time it is.
+  useEffect(() => {
+    if (!tenant?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { zone: z, error } = await fetchGymZone(supabase, tenant.id);
+        if (cancelled) return;
+        setZone(z);
+        setZoneErr(error);
+        setZoneRead(true);
+        // The week on screen was opened on whatever clock was in force when this
+        // screen mounted. Once the gym's own is known, the current week is
+        // re-asked — an owner in London opening a Sydney gym's rota late on a
+        // Saturday is looking at a gym where it is already Sunday.
+        if (z) setWeek((w) => (w === weekStartOf() ? weekStartOf(Date.now(), z) : w));
+      } catch (e) {
+        reportError('rota.zone', e);
+        if (cancelled) return;
+        setZone(null);
+        setZoneErr('The gym’s timezone could not be read.');
+        setZoneRead(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tenant?.id]);
+
   const days = useMemo(() => weekDays(week), [week]);
 
   const load = useCallback(async () => {
     if (!tenant?.id) return;
-    const win = weekWindow(week);
+    // Not before the zone is known. The window bound sent to the database IS the
+    // gym's midnight, so a read issued on the reader's midnight and a grid drawn
+    // on the gym's would disagree by exactly the offset — the screen would be
+    // missing an evening at one end and carrying somebody else's at the other,
+    // and `coverage` would report the hole as uncovered.
+    if (!zoneRead) return;
+    const win = weekWindow(week, zone);
     if (!win) return;
     setShifts(null);
     setDemand(null);
@@ -161,7 +232,7 @@ export default function OwnerRota() {
       setDemand(null);
       setFailed(true);
     }
-  }, [tenant?.id, week]);
+  }, [tenant?.id, week, zone, zoneRead]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -190,9 +261,9 @@ export default function OwnerRota() {
   const pull = usePullToRefresh(refreshAll);
 
   const loaded = shifts !== null && demand !== null;
-  const cov = loaded ? coverage(days, shifts!, demand!) : null;
+  const cov = loaded ? coverage(days, shifts!, demand!, zone) : null;
   const sum = loaded ? summariseRota(shifts!) : null;
-  const byDay = loaded ? shiftsByDay(days, shifts!) : [];
+  const byDay = loaded ? shiftsByDay(days, shifts!, zone) : [];
   const roster = loaded ? rosterByTrainer(shifts!) : [];
 
   const nameOf = useCallback((id: string, fallback: string | null): string => {
@@ -205,7 +276,10 @@ export default function OwnerRota() {
 
   const commitAdd = async () => {
     if (!tenant?.id || !who) return;
-    const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role);
+    // The hours typed are the GYM's. Before the zone reached here they were the
+    // device's, so "06 to 14" typed in London for a Dubai gym was stored as
+    // 10:00–18:00 at the gym and the coach was rostered four hours late.
+    const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role, zone);
     if (!draft) {
       Alert.alert('That is not a shift', 'The finish time has to be after the start time.');
       return;
@@ -245,12 +319,13 @@ export default function OwnerRota() {
     ]);
   };
 
-  const thisWeek = weekStartOf();
+  const thisWeek = weekStartOf(Date.now(), zone);
   const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12 } as const;
   const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
 
   const heroNote = (): string => {
     if (failed) return 'This week could not be read, so cover is not known — that is a failed read, not a covered week.';
+    if (!zoneRead) return 'Checking what time it is at the gym, before the week is bucketed by it.';
     if (!loaded) return 'Reading the rota…';
     if (cov?.blocker) return cov.blocker;
     const u = cov?.uncovered?.length ?? 0;
@@ -294,6 +369,22 @@ export default function OwnerRota() {
           {week !== thisWeek ? <Ghost label="Today" onPress={() => setWeek(thisWeek)} /> : null}
           <Ghost icon="chevron" a11yLabel="Next week" onPress={() => setWeek((w) => shiftWeek(w, 1))} />
         </View>
+
+        {/* Whose clock every time and every column on this screen is drawn on.
+            Stated always, in both states, because the failure it closes is
+            invisible: a shift at the wrong hour renders exactly as neatly as one
+            at the right hour, and the only reader who finds out is the coach who
+            turns up. studio-web/app/staff prints the same sentence over the same
+            rota — that agreement is the point. */}
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+          {!zoneRead
+            ? 'Checking what time it is at the gym…'
+            : zoneErr
+            ? `The gym’s timezone could not be read, so the times below are this device’s. That is a failed read, not a gym without a timezone — ${zoneErr}`
+            : clock.atGym
+            ? `Times are ${clock.zone}, this gym’s own clock, and the hours you type are read as the gym’s too.`
+            : `Times are this device’s, not the gym’s — ${clock.note}. Set the gym’s timezone and this screen becomes the gym’s clock.`}
+        </Text>
 
         <Hero
           label="Uncovered Hours"
@@ -419,10 +510,10 @@ export default function OwnerRota() {
                 return (
                   <Pressable key={s.id} onPress={() => togglePulled(s)}
                     accessibilityRole="button"
-                    accessibilityLabel={`${pulled ? 'Put back' : 'Pull'} ${nameOf(s.trainerId, s.trainerName)}, ${timeOf(s.startsAt)} to ${timeOf(s.endsAt)}`}
+                    accessibilityLabel={`${pulled ? 'Put back' : 'Pull'} ${nameOf(s.trainerId, s.trainerName)}, ${timeOf(s.startsAt, zone)} to ${timeOf(s.endsAt, zone)}`}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, opacity: pulled ? 0.5 : 1 }}>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 92 }}>
-                      {timeOf(s.startsAt)}–{timeOf(s.endsAt)}
+                      {timeOf(s.startsAt, zone)}–{timeOf(s.endsAt, zone)}
                     </Text>
                     <Text style={{ ...ty.body, color: t.ink, flex: 1, textDecorationLine: pulled ? 'line-through' : 'none' }} numberOfLines={1}>
                       {nameOf(s.trainerId, s.trainerName)}
@@ -519,6 +610,12 @@ export default function OwnerRota() {
                   style={inp} accessibilityLabel="Finish hour" />
               </View>
             </View>
+
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {clock.atGym
+                ? `Those hours are ${clock.zone}, the gym’s own clock — wherever you are typing them.`
+                : `Those hours are this device’s, not the gym’s — ${clock.note}.`}
+            </Text>
 
             <Text style={{ ...lab, marginTop: sp.lg }}>On for</Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.lg }}>

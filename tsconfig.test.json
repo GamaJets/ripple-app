@@ -30,6 +30,8 @@
   "files": [
     "src/lib/requestTimeout.ts",
     "src/lib/requestTimeout.test.ts",
+    "src/lib/failedWrite.ts",
+    "src/lib/failedWrite.test.ts",
     "src/lib/monthEnd.ts",
     "src/lib/staffView.ts",
     "src/lib/submitOnce.ts",
@@ -360,6 +362,8 @@
     "src/lib/exportWindow.test.ts",
     "src/lib/gymZone.ts",
     "src/lib/gymZone.test.ts",
+    "src/lib/rotaClock.ts",
+    "src/lib/rotaClock.test.ts",
     "src/lib/gymToday.ts",
     "src/lib/gymToday.test.ts",
     "src/lib/staffRoles.ts",
@@ -439,6 +443,12 @@
     "src/lib/templateUsage.ts",
     "src/lib/templateUsage.test.ts",
     "src/lib/chaseList.ts",
-    "src/lib/chaseList.test.ts"
+    "src/lib/chaseList.test.ts",
+    "src/lib/readRefresh.ts",
+    "src/lib/readRefresh.test.ts",
+    "src/lib/programCache.ts",
+    "src/lib/programCache.test.ts",
+    "src/lib/closeCosts.ts",
+    "src/lib/closeCosts.test.ts"
   ]
 }

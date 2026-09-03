@@ -83,6 +83,7 @@ import {
   readQueue, serverId, sessionKey, toQueueRows, withoutStored,
 } from '../lib/workoutQueue';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 interface WorkoutLogValue {
   log: WorkoutEntry[];
@@ -645,6 +646,12 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   // a tab, so that is until it is killed. src/lib/readDeadline.ts is the whole
   // argument; the read itself is untouched and a late answer still lands.
   const status = useReadDeadline(worstStatus(serverStatus, queueStatus));
+
+  // Re-run this read when the signal comes back, without the member having to
+  // know the app is stuck and think to pull down. The queued sets go up first
+  // — see the ordering note in src/lib/readRefresh.ts — so the rows that come
+  // back already contain the session they just logged in the basement.
+  useRecoverRead('workoutLog', status, reload);
 
   return (
     <Ctx.Provider value={{

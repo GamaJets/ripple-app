@@ -27,6 +27,7 @@ import { wholeMoney } from '../lib/coachMoney';
 import type { LoadStatus } from './loadStatus';
 import { classifySetCurrencyError, isCurrencyCode, readSetCurrency, type SetCurrencyOutcome, type SetCurrencyReply } from '../lib/coachCurrency';
 import { useAuthRevision } from './authRevision';
+import { useRecoverRead } from './readRefresh';
 
 /**
  * What the EXISTING rows in the gym operating record were recorded as — and
@@ -364,6 +365,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       return 'unsent';
     }
   }, [refresh]);
+
+  // Re-run this read when the signal comes back. Everything white-label hangs
+  // off this one — the gym's name, its logo, its CURRENCY — so a failure here
+  // is felt on every screen at once. src/lib/readRefresh.ts.
+  useRecoverRead('tenant', status, () => { void refresh(); });
 
   return (
     <Ctx.Provider value={{ tenant, role, loading, status, brandMismatch, refresh, updateTenant, setOwnCurrency }}>{children}</Ctx.Provider>

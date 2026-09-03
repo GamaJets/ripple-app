@@ -265,24 +265,44 @@ export default function Membership() {
 
           {mStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your membership…</Text>
-          ) : mStatus === 'error' ? (
-            <View style={{ gap: sp.md }}>
-              <Flag tone={t.crit}>
-                We couldn’t read your membership. That is a read that failed, not an answer — it does not mean your gym has no record of you.
-              </Flag>
-              {/* …and when there IS something below, say where it came from and
-                  how old it is. A member reading a cached membership as a live
-                  one goes to reception believing they are in good standing. */}
-              {mCachedAt && mships.length ? <Flag tone={t.warn}>{cachedAtLine(mCachedAt)}</Flag> : null}
-              <View style={{ flexDirection: 'row' }}>
-                <Ghost label="Try Again" onPress={() => { void loadMembership(); }} />
+          ) : (<>
+            {/* ── the failure, said ABOVE what it qualifies ────────────────
+                This used to be an exclusive branch, and that quietly threw away
+                the whole point of the cache read forty lines up. The device's
+                copy was loaded into `mships` and then never drawn, because the
+                'error' arm returned instead of falling through to the plan, the
+                standing and the dates — so a member standing inside the
+                building their membership is for saw two banners and nothing
+                else, one of which said "Saved on this phone 3 days ago" about
+                data that was not on the screen. The cache's own note names the
+                case it was written for: "on a cold launch in a basement there
+                was nothing on screen to keep."
+                The banners lead, so the qualification arrives before the thing
+                it qualifies rather than after it. */}
+            {mStatus === 'error' ? (
+              <View style={{ gap: sp.md, marginBottom: sp.md }}>
+                <Flag tone={t.crit}>
+                  We couldn’t read your membership. That is a read that failed, not an answer — it does not mean your gym has no record of you.
+                </Flag>
+                {/* …and when there IS something below, say where it came from and
+                    how old it is. A member reading a cached membership as a live
+                    one goes to reception believing they are in good standing. */}
+                {mCachedAt && mships.length ? <Flag tone={t.warn}>{cachedAtLine(mCachedAt)}</Flag> : null}
+                <View style={{ flexDirection: 'row' }}>
+                  <Ghost label="Try Again" onPress={() => { void loadMembership(); }} />
+                </View>
               </View>
-            </View>
-          ) : !primary || !standing || !planState ? (
+            ) : null}
+            {!primary || !standing || !planState ? (
+            // Under 'error' with nothing cached, the banner above has already
+            // said what happened. "Your gym has not recorded a membership" is a
+            // claim about somebody's standing at their own gym and may only be
+            // made about a read that landed.
+            mStatus === 'error' ? null : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Your gym has not recorded a membership against your account. Plenty of gyms run on day passes and packs instead — if you believe you are on a plan, reception can add it.
             </Text>
-          ) : (
+            )) : (
             <>
               {/* Plan. Three sentences for three states, never one blank. */}
               {planState.kind === 'plan' ? (
@@ -340,6 +360,7 @@ export default function Membership() {
               ) : null}
             </>
           )}
+          </>)}
         </Section>
 
         <Rule />
