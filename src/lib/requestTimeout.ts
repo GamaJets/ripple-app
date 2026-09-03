@@ -229,7 +229,13 @@ export const DEFAULT_CEILINGS: Ceilings = { call: CALL_CEILING_MS, transfer: TRA
  * connection, a cell-to-wifi handoff that strands a socket mid-request. A fresh
  * connection frequently gets through where the stranded one never will.
  *
- * ONCE, not until it works. Thirty seconds of silence is not a dropped packet —
+ * ONCE, not until it works — AND ONLY BECAUSE THE ERROR IS LABELLED. This file
+ * is not the only thing retrying: postgrest-js wraps the fetch it is given in a
+ * retry loop of its own for exactly these methods, so "once" is a statement
+ * about the app rather than about this function only while the timeout carries
+ * the marker that stops it. See `requestTimeoutError` · `code`.
+ *
+ * Thirty seconds of silence is not a dropped packet —
  * TCP has already retransmitted throughout it — so the odds fall off a cliff
  * after the first retry while the cost keeps climbing linearly. A second retry
  * would buy almost nothing and spend another half-minute of somebody's evening.
@@ -257,6 +263,16 @@ export interface RequestTimeout extends Error {
   requestTimedOut: true;
   /** What we allowed it, so a log says which ceiling was in force. */
   ceilingMs: number;
+  /**
+   * The marker the layer ABOVE this one reads. See `requestTimeoutError`.
+   *
+   * Not a claim that a person cancelled anything — `isRequestTimeout` is the
+   * only thing this codebase asks that question of, and it is unchanged. This
+   * is the standard code for "the request was deliberately cut off", and it is
+   * what stops a transport that retries by itself from treating our ceiling as
+   * a flaky socket worth trying three more times.
+   */
+  code: 'ABORT_ERR';
 }
 
 /**
@@ -271,6 +287,43 @@ export interface RequestTimeout extends Error {
  * `name` is 'TimeoutError' to match what a platform AbortSignal.timeout()
  * produces, so anything that sniffs names rather than using `isRequestTimeout`
  * still lands somewhere sensible.
+ *
+ * ── And `code` is 'ABORT_ERR', because something above us retries ─────────
+ *
+ * `retryOnTimeout` says a timed-out GET may be sent once more and argues the
+ * number: "ONCE, not until it works … the odds fall off a cliff after the first
+ * retry while the cost keeps climbing linearly." That was true of the layer
+ * this file owns and false of the app, because this file is not the only thing
+ * retrying.
+ *
+ * postgrest-js — every `.select()` in the client and the console goes through
+ * it — has its own retry loop around the fetch it is handed. It retries GET,
+ * HEAD and OPTIONS on a THROWN error three times with 1s/2s/4s backoff, and the
+ * only thing that makes it rethrow immediately instead is a value whose `name`
+ * is 'AbortError' or whose `code` is 'ABORT_ERR'. A `name` of 'TimeoutError'
+ * and no code is neither. So one `.select()` on a dead network made FOUR trips
+ * through this wrapper, and `observedFetch` doubled each of them: eight fetches
+ * and, at the real 30s ceiling, about four minutes for a single read to give up
+ * — measured against the real library, not inferred.
+ *
+ * What that costs somebody: not the offline banner, which still lands at thirty
+ * seconds because `noteThrown` files a verdict per attempt. It costs the phone.
+ * The display deadline (src/lib/deadline.ts) has already told the member the
+ * read failed at 25s, `useRecoverRead` asks again on the next edge, and the
+ * abandoned read is still working through its remaining six attempts underneath
+ * — so the reads stack up on the one connection that cannot carry them, which
+ * is the exact thing `PAUSE_BETWEEN_MS` and the serial flush exist to prevent.
+ *
+ * 'ABORT_ERR' rather than renaming to 'AbortError' because the name is load
+ * bearing in the other direction: `isTransportFailure` reads
+ * `isRequestTimeout` FIRST and would still count it, but a human reading a
+ * crash report should see the honest word. The code is the machine-readable
+ * half and says the true thing — we cut this request off on purpose.
+ *
+ * Nothing in this app classifies by this field. `isRequestTimeout` is the
+ * marker every caller here uses, and `isRefusal` in src/lib/offlineQueue.ts
+ * reads an unrecognised code shape as no evidence of a refusal, which is
+ * exactly right: a timed-out write stays 'unsent' and stays queued.
  */
 export function requestTimeoutError(url: string, method: string, ceilingMs: number): RequestTimeout {
   const err = new Error(
@@ -279,6 +332,7 @@ export function requestTimeoutError(url: string, method: string, ceilingMs: numb
   err.name = 'TimeoutError';
   err.requestTimedOut = true;
   err.ceilingMs = ceilingMs;
+  err.code = 'ABORT_ERR';
   return err;
 }
 

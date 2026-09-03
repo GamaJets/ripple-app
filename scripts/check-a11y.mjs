@@ -69,9 +69,9 @@
 //
 // ── The standing list, and why it does not have to count down ─────────────
 //
-// The offences below were all present when this file was written and all of them
-// are in screens under app/, which this lane does not own. The list may not
-// GROW: a new one fails the build. It is deliberately not required to SHRINK,
+// The offences below were all present when this file was written and every one of
+// them is in a screen under app/. The list may not GROW: a new one fails the
+// build. It is deliberately not required to SHRINK,
 // unlike the ratchet in check-contrast.mjs, because several people are editing
 // these files and a gate that goes red because somebody FIXED something is a
 // gate that gets deleted. Prune it when you fix one; nothing breaks if you
@@ -88,34 +88,22 @@ const ROOTS = ['app', 'src'];
  * red because a comment was added two hundred lines up is noise.
  */
 const KNOWN = new Set([
-  // Rule 1 — silent full-screen dismiss surfaces, one per bottom sheet.
-  // Every one of these is `<Pressable style={scrim} onPress={close} />`.
-  'app/(client)/bookings.tsx|scrim',
-  'app/(client)/calendar.tsx|scrim',
-  'app/(client)/challenges.tsx|scrim',
-  'app/(client)/devices.tsx|scrim',
-  'app/(client)/injuries.tsx|scrim',
-  'app/(client)/messages.tsx|scrim',
-  'app/(client)/nutrition.tsx|scrim',
-  'app/(client)/profile.tsx|scrim',
-  'app/(client)/pt-sessions.tsx|scrim',
-  'app/(client)/restaurant.tsx|scrim',
-  'app/(client)/scans.tsx|scrim',
-  'app/(client)/settings.tsx|scrim',
-  'app/(client)/standing.tsx|scrim',
-  'app/(client)/trainers.tsx|scrim',
-  'app/(client)/workouts.tsx|scrim',
+  'app/(client)/agreements.tsx|lineHeight',
+  'app/(client)/consistency.tsx|lineHeight',
+  'app/(client)/my-coach.tsx|lineHeight',
   'app/(owner)/dashboard.tsx|scrim',
   'app/(owner)/equipment.tsx|scrim',
   'app/(owner)/members.tsx|scrim',
   'app/(owner)/rota.tsx|scrim',
   'app/(trainer)/analytics.tsx|scrim',
+  'app/(trainer)/builder.tsx|lineHeight',
   'app/(trainer)/builder.tsx|scrim',
   'app/(trainer)/calendar.tsx|scrim',
   'app/(trainer)/chat.tsx|scrim',
   'app/(trainer)/classes.tsx|scrim',
   'app/(trainer)/client.tsx|scrim',
   'app/(trainer)/credentials.tsx|scrim',
+  'app/(trainer)/dashboard.tsx|lineHeight',
   'app/(trainer)/dashboard.tsx|scrim',
   'app/(trainer)/group.tsx|scrim',
   'app/(trainer)/log-session.tsx|scrim',
@@ -123,12 +111,6 @@ const KNOWN = new Set([
   'app/(trainer)/settings.tsx|scrim',
   'app/(trainer)/templates-messages.tsx|scrim',
   'app/(trainer)/templates.tsx|scrim',
-  // Rule 2 — pinned line heights.
-  'app/(trainer)/dashboard.tsx|lineHeight',
-  'app/(trainer)/builder.tsx|lineHeight',
-  'app/(client)/my-coach.tsx|lineHeight',
-  'app/(client)/agreements.tsx|lineHeight',
-  'app/(client)/consistency.tsx|lineHeight',
 ]);
 
 /* ── walking ──────────────────────────────────────────────────────────────── */

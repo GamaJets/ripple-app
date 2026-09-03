@@ -510,6 +510,7 @@
     "src/lib/redirectTarget.test.ts",
     "src/lib/pickerMonth.ts",
     "src/lib/pickerMonth.test.ts",
-    "src/lib/lastActiveLine.test.ts"
+    "src/lib/lastActiveLine.test.ts",
+    "src/lib/zoneInk.test.ts"
   ]
 }

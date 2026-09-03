@@ -30,6 +30,7 @@ import {
 } from './requestTimeout';
 import type { Ceilings } from './requestTimeout';
 import { MAX_SPIN_MS } from './pullRefresh';
+import { classifyWrite } from './offlineQueue';
 import {
   currentReach, isTransportFailure, observedFetch, reachState, resetReach, retryLine,
 } from './reachability';
@@ -189,6 +190,28 @@ const REST = 'https://p.supabase.co/rest/v1/workouts?select=*&client_id=eq.abc';
   ok(e.message.includes('/rest/v1/workouts'), 'and which endpoint, which is the diagnostic value');
   ok(!e.message.includes('client_id'), 'but not the query string: an error message ends up in a crash report');
   eq(e.ceilingMs, CALL_CEILING_MS, 'and it records which ceiling was in force');
+
+  // ── the marker the layer ABOVE this one reads ─────────────────────────
+  //
+  // `retryOnTimeout` argues the number: a timed-out GET goes ONCE more, "not
+  // until it works". That was true of this file and false of the app. Every
+  // `.select()` goes through postgrest-js, which has its own retry loop around
+  // the fetch it is handed: on a THROWN error it retries GET/HEAD/OPTIONS three
+  // times with 1s/2s/4s backoff, and the only thing that makes it rethrow at
+  // once is `name === 'AbortError'` or `code === 'ABORT_ERR'`. A 'TimeoutError'
+  // with no code was neither — so one read on a dead network made four trips
+  // through this wrapper and `observedFetch` doubled each of them: eight
+  // fetches, and at the real ceiling about four minutes for one read to give
+  // up. Measured against the installed library, not inferred.
+  //
+  // The name stays honest for the human reading a crash report; the code is the
+  // machine-readable half and says the true thing — we cut this off on purpose.
+  eq((e as unknown as { code: string }).code, 'ABORT_ERR',
+    'a transport that retries by itself must read our ceiling as a deliberate cancel, not a flaky socket');
+  ok(isRequestTimeout(e), 'and the code does not displace the marker every caller in this app actually uses');
+  ok(isTransportFailure(e), 'nor does it make reachability discard the one abort that IS evidence');
+  eq(classifyWrite({ code: 'ABORT_ERR', status: null, message: e.message }, null), 'unsent',
+    'and a write cut off by the ceiling is still kept, not read as a refusal by the server');
 }
 
 /* ── 3 · readers ───────────────────────────────────────────────────────── */

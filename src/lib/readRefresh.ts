@@ -41,7 +41,7 @@
 // in src/ui/readRefresh.tsx, the same split src/ui/offlineFlush.tsx uses.
 
 import type { LoadStatus } from '../ui/loadStatus';
-import { flushAll } from './offlineQueue';
+import { flushAllOrJoin } from './offlineQueue';
 import { currentReach } from './reachability';
 
 /**
@@ -75,6 +75,46 @@ export interface Refreshable {
  *  'manual'     — a person asked. Never rate-limited and never given up on.
  */
 export type RefreshTrigger = 'reconnect' | 'foreground' | 'manual';
+
+/**
+ * Which of two triggers a pass that is being asked for twice must be run as.
+ *
+ * ── The thing that was being thrown away ──────────────────────────────────
+ *
+ * A call made while a pass is in flight is COALESCED into it: `askedAgain` is
+ * set and one more pass runs. What was not carried across was WHICH trigger
+ * asked, and the three are not interchangeable — the docstrings above say so at
+ * length, and the extra pass simply reran under whatever trigger happened to
+ * start the flight.
+ *
+ * Both directions of that cost somebody something real:
+ *
+ *   · A RECONNECT SWALLOWED BY A FOREGROUND PASS. Taking the phone out of a
+ *     pocket and the signal coming back are the same thirty seconds — this file
+ *     says so twice — and a pass is not short: it flushes the write queue over
+ *     the network before it re-reads anything, then pauses a quarter of a second
+ *     per provider. So the edge landing mid-pass is ordinary rather than
+ *     unlucky. `noteEdge` never ran, so a provider that had used up its three
+ *     attempts in the basement stayed given up, and the member walked upstairs
+ *     with bars on the screen and the sentence "your plan could not be read"
+ *     still in front of them. That sentence is the one this whole file was
+ *     written to stop.
+ *
+ *   · A MANUAL TAP SWALLOWED BY EITHER. 'manual' is defined here as the trigger
+ *     that is "never rate-limited and never given up on". Inherited into a
+ *     foreground pass it acquires a ceiling, so the person who reads the failure
+ *     and taps Refresh is told nothing and shown nothing, for no reason they can
+ *     see.
+ *
+ * So the strongest pending trigger wins: manual over reconnect over foreground.
+ * Manual first because it is the only one with a person waiting on it, and
+ * reconnect over foreground because it is the only one carrying news about the
+ * world.
+ */
+export function strongerTrigger(a: RefreshTrigger, b: RefreshTrigger): RefreshTrigger {
+  const rank = (t: RefreshTrigger): number => (t === 'manual' ? 2 : t === 'reconnect' ? 1 : 0);
+  return rank(b) > rank(a) ? b : a;
+}
 
 /**
  * Which statuses are worth asking again.
@@ -182,6 +222,21 @@ export const MAX_ATTEMPTS = 3;
  */
 export const PAUSE_BETWEEN_MS = 250;
 
+/**
+ * How many passes one flight may make, however many times it is asked again.
+ *
+ * The same bound, for the same reason, as `MAX_FLUSH_PASSES` in
+ * src/lib/offlineQueue.ts — and it became load-bearing here the moment a
+ * coalesced 'reconnect' started clearing the give-up counters (see
+ * `strongerTrigger`). Without it: a refetch produces a request, the request
+ * succeeds, `noteReached` raises the reconnect edge, the edge calls back into
+ * `refreshStale`, that ask clears the counters, and the pass runs again with a
+ * full ceiling — for ever, on a connection that keeps flipping. The ceiling
+ * used to be what stopped that only because the swallowed edge was not clearing
+ * anything, which is the defect, not the guard.
+ */
+export const MAX_PASSES = 3;
+
 /* ── the registry ──────────────────────────────────────────────────────── */
 
 const refreshers = new Map<string, Refreshable>();
@@ -234,6 +289,7 @@ export function resetRefreshers(): void {
   attempts.clear();
   running = null;
   askedAgain = false;
+  pendingTrigger = null;
   lastRun = 0;
 }
 
@@ -263,17 +319,21 @@ export interface RefreshDeps {
   now?: () => number;
   /** Defaults to `currentReach() !== 'offline'`. */
   canRead?: () => boolean;
-  /** Defaults to `flushAll`. See the ordering note in `refreshStale`. */
+  /** Defaults to `flushAllOrJoin`. See the ordering note in `refreshStale`. */
   flushFirst?: () => Promise<unknown> | unknown;
   /** Defaults to a real timer. */
   pause?: (ms: number) => Promise<void>;
   gapMs?: number;
   maxAttempts?: number;
   pauseMs?: number;
+  maxPasses?: number;
 }
 
 let running: Promise<RefreshPass> | null = null;
 let askedAgain = false;
+/** The strongest trigger that asked while a pass was in flight, or null. See
+ *  `strongerTrigger` for what was being lost by not keeping it. */
+let pendingTrigger: RefreshTrigger | null = null;
 let lastRun = 0;
 
 const realPause = (ms: number) => new Promise<void>((res) => { setTimeout(res, ms); });
@@ -293,8 +353,14 @@ const realPause = (ms: number) => new Promise<void>((res) => { setTimeout(res, m
  * was never true either way. Sending first means the read that follows returns
  * the rows the member can already see.
  *
- * `flushAll` is single-flight itself and rejects nothing, so this costs nothing
- * when there is no queue and cannot fail the pass.
+ * It is `flushAllOrJoin` and not `flushAll`, which is the difference between
+ * sequencing behind the queue and claiming to be news. Both this file and
+ * src/ui/offlineFlush.tsx are subscribed to the reconnect edge and to AppState,
+ * so a plain `flushAll` here meant every one of those events ran every
+ * provider's queue twice, back to back, on the connection least able to afford
+ * it — and offering an ambiguous write twice is how one logged session becomes
+ * two. Joining rejects nothing and costs nothing when there is no queue, so it
+ * cannot fail the pass either.
  *
  * ── Single flight ────────────────────────────────────────────────────────
  *
@@ -315,12 +381,25 @@ const realPause = (ms: number) => new Promise<void>((res) => { setTimeout(res, m
 export function refreshStale(trigger: RefreshTrigger = 'manual', deps: RefreshDeps = {}): Promise<RefreshPass> {
   const now = deps.now ?? Date.now;
   const canRead = deps.canRead ?? (() => currentReach() !== 'offline');
-  const flushFirst = deps.flushFirst ?? flushAll;
+  const flushFirst = deps.flushFirst ?? flushAllOrJoin;
   const pause = deps.pause ?? realPause;
   const pauseMs = deps.pauseMs ?? PAUSE_BETWEEN_MS;
   const max = deps.maxAttempts ?? MAX_ATTEMPTS;
+  const maxPasses = deps.maxPasses ?? MAX_PASSES;
 
-  if (running) { askedAgain = true; return running; }
+  if (running) {
+    askedAgain = true;
+    // WHICH trigger asked is kept, not just THAT one did. See `strongerTrigger`:
+    // an edge that landed mid-pass used to be re-run as whatever started the
+    // flight, so a member who walked upstairs was left in front of the failure
+    // this file exists to clear.
+    pendingTrigger = pendingTrigger === null ? trigger : strongerTrigger(pendingTrigger, trigger);
+    // And the counters come back NOW rather than at the top of the extra pass,
+    // because the edge is news about the world whether or not this happens to be
+    // mid-pass — including for the providers this pass has not reached yet.
+    if (trigger === 'reconnect') noteEdge();
+    return running;
+  }
   if (!mayRunNow(trigger, lastRun, now(), deps.gapMs)) return Promise.resolve(emptyPass(true));
   if (!canRead()) return Promise.resolve(emptyPass(true));
 
@@ -341,8 +420,17 @@ export function refreshStale(trigger: RefreshTrigger = 'manual', deps: RefreshDe
 
   void (async () => {
     const out: RefreshPass = emptyPass(false);
+    // The trigger this pass is being run AS. It only ever gets stronger: once a
+    // person has asked, the rest of the flight is theirs.
+    let active: RefreshTrigger = trigger;
+    let passes = 0;
     do {
       askedAgain = false;
+      passes += 1;
+      if (pendingTrigger !== null) {
+        active = strongerTrigger(active, pendingTrigger);
+        pendingTrigger = null;
+      }
       try { await flushFirst(); } catch { /* a queue that will not send must not stop a read that would */ }
       // A snapshot, so a provider registering mid-pass is picked up by the next
       // one rather than being called while this list is walked.
@@ -362,7 +450,7 @@ export function refreshStale(trigger: RefreshTrigger = 'manual', deps: RefreshDe
           continue;
         }
         const tried = attempts.get(key) ?? 0;
-        if (!attemptsAllow(trigger, tried, max)) {
+        if (!attemptsAllow(active, tried, max)) {
           if (!out.givenUp.includes(key)) out.givenUp.push(key);
           continue;
         }
@@ -375,8 +463,15 @@ export function refreshStale(trigger: RefreshTrigger = 'manual', deps: RefreshDe
         first = false;
         try { await r.refetch(); } catch { /* this provider keeps its own state; the rest still get asked */ }
         if (!out.ran.includes(key)) out.ran.push(key);
+        // A key given up in an earlier pass and asked again in this one was not
+        // given up: a coalesced reconnect gives its attempts back mid-flight,
+        // and a report that says both is a report nobody can read.
+        if (out.givenUp.includes(key)) out.givenUp = out.givenUp.filter((k) => k !== key);
       }
-    } while (askedAgain);
+      // Bounded, for the reason MAX_PASSES gives: a refetch raises requests, a
+      // request that lands raises the reconnect edge, and the edge asks again.
+    } while (askedAgain && passes < maxPasses);
+    pendingTrigger = null;
     if (running === pass) running = null;
     settle(out);
   })();

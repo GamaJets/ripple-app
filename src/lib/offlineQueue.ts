@@ -402,6 +402,10 @@ export function flushAllOrJoin(): Promise<number> {
  * one finishes, because the state that prompted it may have arrived after that
  * provider had already read its queue.
  *
+ * BOUNDED at `MAX_FLUSH_PASSES`, because "one more pass" composes into a loop
+ * with no exit — see that constant. A caller that is only sequencing itself
+ * behind the queue rather than reporting news should use `flushAllOrJoin`.
+ *
  * Resolves with the number of flushers that were run in the final pass.
  */
 export function flushAll(): Promise<number> {
@@ -431,7 +435,10 @@ export function flushAll(): Promise<number> {
         // going back into the queue they came from.
         try { await fn(); } catch { /* this provider keeps its own rows; the rest still go */ }
       }
-    } while (askedAgain);
+      // Bounded. See MAX_FLUSH_PASSES: a flusher's own successful write raises
+      // the reconnect edge, which asks again, which is a loop with no exit on a
+      // connection that keeps flipping.
+    } while (askedAgain && passes < MAX_FLUSH_PASSES);
     // Cleared before the promise resolves, so a caller that chains another
     // flush onto this one gets a fresh pass rather than this same settled
     // promise handed straight back.

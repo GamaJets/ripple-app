@@ -33,11 +33,16 @@
 //      has just been restored is how half of them time out, and each timeout is
 //      thirty seconds (src/lib/requestTimeout.ts) before anything is on screen.
 import {
-  FOREGROUND_GAP_MS, MAX_ATTEMPTS, attemptsAllow, attemptsFor, mayRunNow, needsRefetch,
-  noteEdge, refreshStale, refresherCount, registerRefresh, resetRefreshers,
+  FOREGROUND_GAP_MS, MAX_ATTEMPTS, MAX_PASSES, attemptsAllow, attemptsFor, mayRunNow, needsRefetch,
+  noteEdge, refreshStale, refresherCount, registerRefresh, resetRefreshers, strongerTrigger,
   type RefreshPass,
 } from './readRefresh';
 import type { LoadStatus } from '../ui/loadStatus';
+
+// Failed until it is proved otherwise. Half the assertions below are about a
+// pass that may never settle, and a suite that starts at 0 reports a hang as a
+// pass — node exits quietly with nothing printed. Cleared on the last line.
+process.exitCode = 1;
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -234,6 +239,99 @@ async function run() {
     eq(reads, 2, 'and is not dropped either: one more pass runs, because a provider may have failed after this one read its status');
   }
 
+  /* ── the trigger of a coalesced ask is not thrown away ───────────────── *
+   *
+   * A pass is not short — it flushes the write queue over the network before it
+   * re-reads anything, then pauses a quarter of a second per provider — and the
+   * two triggers arrive together constantly, which is stated twice in the file
+   * itself. So an ask landing mid-pass is ordinary. It was coalesced by SETTING
+   * A FLAG, and the flag did not carry which trigger asked: `noteEdge` never
+   * ran and the extra pass reran under whatever started the flight.
+   *
+   * What that looked like on a phone: a member's plan screen fails three times
+   * in the basement and is given up on. They take the phone out of their pocket
+   * (foreground pass starts), walk up the stairs, the signal comes back — and
+   * the screen still says their plan could not be read, with full bars, until
+   * something else happens to ask. That sentence is what this file exists to
+   * clear.                                                                   */
+  {
+    const tick = () => new Promise<void>((r) => { setTimeout(r, 0); });
+
+    /* the reconnect swallowed by a foreground pass */
+    resetRefreshers();
+    let planReads = 0;
+    registerRefresh('plan', provider(() => 'error', () => { planReads += 1; }));
+    for (let i = 1; i <= MAX_ATTEMPTS; i++) {
+      await refreshStale('foreground', { ...base, now: () => i * FOREGROUND_GAP_MS * 2 });
+    }
+    eq(planReads, MAX_ATTEMPTS, 'the plan read is given up on after its three attempts in the basement');
+
+    // A provider that mounted since holds the next pass open, exactly as a real
+    // read on a slow connection does.
+    let release: () => void = () => { /* replaced */ };
+    const gate = new Promise<void>((r) => { release = r; });
+    registerRefresh('sessions', { status: () => 'error', refetch: async () => { await gate; } });
+
+    const inflight = refreshStale('foreground', { ...base, now: () => 9_000_000 });
+    await tick();
+    const edge = refreshStale('reconnect', { ...base, now: () => 9_000_001 });
+    eq(edge === inflight, true, 'the edge joins the pass in flight rather than starting a second');
+    release();
+    await inflight;
+    eq(planReads, MAX_ATTEMPTS + 1,
+      'the signal coming back gives a given-up read its attempts back even when it lands mid-pass');
+
+    /* the manual tap swallowed by a foreground pass */
+    resetRefreshers();
+    let taps = 0;
+    registerRefresh('plan', provider(() => 'error', () => { taps += 1; }));
+    for (let i = 1; i <= MAX_ATTEMPTS; i++) {
+      await refreshStale('foreground', { ...base, now: () => i * FOREGROUND_GAP_MS * 2 });
+    }
+    let release2: () => void = () => { /* replaced */ };
+    const gate2 = new Promise<void>((r) => { release2 = r; });
+    registerRefresh('sessions', { status: () => 'error', refetch: async () => { await gate2; } });
+    const busy = refreshStale('foreground', { ...base, now: () => 9_000_000 });
+    await tick();
+    void refreshStale('manual', { ...base, now: () => 9_000_002 });
+    release2();
+    await busy;
+    eq(taps, MAX_ATTEMPTS + 1,
+      'a person tapping Refresh is never given up on, even when a pass happens to be running');
+  }
+
+  /* ── and the coalescing itself is bounded ────────────────────────────── *
+   *
+   * The moment a coalesced reconnect started clearing the give-up counters, the
+   * ceiling stopped being what ended a self-feeding pass — and there is a path
+   * straight back in: a refetch makes a request, the request lands,
+   * `noteReached` raises the reconnect edge, the edge asks again, and the ask
+   * clears the counters. On a connection that keeps flipping that is a phone
+   * re-reading every failed provider for as long as it is held.              */
+  {
+    resetRefreshers();
+    let reads = 0;
+    registerRefresh('plan', {
+      status: () => 'error',
+      refetch: () => {
+        reads += 1;
+        // The reconnect edge, raised by this refetch's own successful request.
+        if (reads < 50) void refreshStale('reconnect', base);
+      },
+    });
+    await refreshStale('reconnect', base);
+    eq(reads, MAX_PASSES, 'a read that asks for itself cannot make the pass run for ever');
+  }
+
+  /* ── which trigger wins when two are pending ─────────────────────────── */
+  {
+    eq(strongerTrigger('foreground', 'reconnect'), 'reconnect', 'news about the world outranks somebody looking at the screen');
+    eq(strongerTrigger('reconnect', 'foreground'), 'reconnect', 'in either order');
+    eq(strongerTrigger('reconnect', 'manual'), 'manual', 'and a person waiting outranks both');
+    eq(strongerTrigger('manual', 'foreground'), 'manual', 'in either order');
+    eq(strongerTrigger('foreground', 'foreground'), 'foreground', 'two of the same is that one');
+  }
+
   /* ── registration, the four hazards the write side already states ───── */
   {
     resetRefreshers();
@@ -291,6 +389,7 @@ async function run() {
     process.exit(1);
   }
   console.log('readRefresh: ok');
+  process.exitCode = 0;
 }
 
 void run();
