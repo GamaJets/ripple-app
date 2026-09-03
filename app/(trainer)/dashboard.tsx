@@ -61,6 +61,7 @@ import { CoachRequests } from '../../src/ui/CoachRequests';
 import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, booksInPerson, type CoachedMode } from '../../src/lib/types';
+import { lastActiveLine } from '../../src/lib/lastActiveLine';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askAboutClient } from '../../src/lib/coach';
@@ -2613,8 +2614,16 @@ export default function TrainerClients() {
                     anything but an em dash. The client's own page answers it
                     properly — src/lib/nextUp.ts, from the bookings that screen
                     already reads. */}
+                {/* `lastActive` is a display PHRASE with five shapes and this
+                    line used to glue "Last active " to the front of whichever
+                    one arrived. Seen on an iPhone 17 Pro on a client added
+                    today: "Last active no activity yet." The dash case was the
+                    expensive one — "Last active —." reads as a client who has
+                    gone quiet, and a dash here means the stats page came back
+                    truncated. src/lib/lastActiveLine.ts writes the sentence
+                    from the value instead, and tells the four facts apart. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                  Last active {sel.lastActive}. What they have actually trained is under What They've Actually Done on their profile.
+                  {lastActiveLine(sel.lastActive)} What they have actually trained is under What They've Actually Done on their profile.
                 </Text>
               </View>
 
