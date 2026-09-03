@@ -53,6 +53,13 @@
 // ./bodyweightSets.ts: the honest record of work that cannot be priced is the
 // work, stated in its own units.
 import type { WorkoutEntry } from './mockData';
+// The other flag that changes what `sets[i][1]` MEANS. Consulted rather than
+// re-implemented: a bodyweight set's second number is what was ADDED to the
+// body, and two files deciding separately how to print that is how the saved
+// chips came to disagree with the draft chips they sit six inches from. Both
+// modules only reach into the other from inside a function body, so the cycle
+// resolves at call time and neither is half-built when it is read.
+import { bodyweightSetLabel, isBodyweightSet } from './bodyweightSets';
 
 /** True when the person said this set was held for a time rather than
  *  repeated. `sets[i][0]` is then SECONDS. */
@@ -196,7 +203,7 @@ export function timedSetLabel(secs: number, loadLabel: string | null, bodyweight
  * carries no load, so the caller's own em-dash convention is what shows.
  */
 export function setChipLabel(
-  e: Pick<WorkoutEntry, 'sets' | 'timed'>,
+  e: Pick<WorkoutEntry, 'sets' | 'timed' | 'bw'>,
   i: number,
   loadLabel: (kg: number | null) => string,
   unit: string,
@@ -204,11 +211,28 @@ export function setChipLabel(
   const set = e.sets?.[i];
   const first = Number(set?.[0]) || 0;
   const load = Number(set?.[1]) || 0;
+  const bw = isBodyweightSet(e, i);
+  const added = load > 0 ? `${loadLabel(load)} ${unit}` : null;
   if (isTimedSet(e, i)) {
     // The seconds are the measurement. The load, when there is one, is what was
     // held ON TOP of the member — "45 s × 10 kg" — and never a multiplicand.
-    return load > 0 ? `${holdLabel(first)} × ${loadLabel(load)} ${unit}` : holdLabel(first);
+    //
+    // On a hold the person SAID was their own bodyweight, "45 s × 10 kg" is
+    // the second half of the same mistake: it presents the ten as the whole of
+    // the load when it is a plate on somebody's back. `HoldRecord.bodyweight`
+    // has carried that distinction since it was written, and its own comment
+    // asks for exactly this phrasing.
+    if (bw && added) return `${holdLabel(first)} at bodyweight +${added}`;
+    return added ? `${holdLabel(first)} × ${added}` : holdLabel(first);
   }
+  // A set whose load was the person. `bw[i] === true` is testimony — see
+  // ./bodyweightSets.ts — and printing it as `8×— kg` states two false things
+  // at once: that a bar was involved, and that nobody recorded what was on it.
+  // A pull-up is not an unrecorded bench press. The draft chips in
+  // app/(client)/workouts.tsx have always got this right and the SAVED chips
+  // beside them did not, which is the same split `setChipLabel` was written to
+  // close for holds.
+  if (bw) return bodyweightSetLabel(first, load, added);
   return `${first}×${loadLabel(load > 0 ? load : null)} ${unit}`;
 }
 
@@ -217,9 +241,14 @@ export function setChipLabel(
  *
  * The unit is stated once at the end and only when something on the line is a
  * load, so an all-holds entry does not read "1:00  45 s kg".
+ *
+ * A bodyweight set carries its own unit inside its own phrase — the added
+ * kilograms are a clause, not the line's subject — so it does not put the unit
+ * on the end either. Without that a member's page of pull-ups read "8 reps at
+ * bodyweight  8 reps at bodyweight kg".
  */
 export function setListLabel(
-  e: Pick<WorkoutEntry, 'sets' | 'timed'>,
+  e: Pick<WorkoutEntry, 'sets' | 'timed' | 'bw'>,
   loadLabel: (kg: number | null) => string,
   unit: string,
 ): string {
@@ -229,9 +258,17 @@ export function setListLabel(
   for (let i = 0; i < rows.length; i++) {
     const first = Number(rows[i]?.[0]) || 0;
     const load = Number(rows[i]?.[1]) || 0;
+    const bw = isBodyweightSet(e, i);
+    const added = load > 0 ? `${loadLabel(load)} ${unit}` : null;
     if (isTimedSet(e, i)) {
-      parts.push(load > 0 ? `${holdLabel(first)} × ${loadLabel(load)}` : holdLabel(first));
-      if (load > 0) anyLoaded = true;
+      if (bw && added) parts.push(`${holdLabel(first)} at bodyweight +${added}`);
+      else if (added) { parts.push(`${holdLabel(first)} × ${loadLabel(load)}`); anyLoaded = true; }
+      else parts.push(holdLabel(first));
+    } else if (bw) {
+      // Never `8×— kg`. See setChipLabel above: the dash is the right answer
+      // for an ordinary set nobody described, and the wrong one for a set the
+      // person told us was their own body.
+      parts.push(bodyweightSetLabel(first, load, added));
     } else {
       parts.push(`${first}×${loadLabel(load > 0 ? load : null)}`);
       anyLoaded = true;

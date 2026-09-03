@@ -93,10 +93,14 @@ ok(byTitle('The slot you were waiting for is yours').length === 2,
 // halves of an answered coaching request, for the sharper version of the same
 // reason: a declined client has no screen anywhere that would ever show them
 // the answer.
+// The four added when the catalogue was read against the tree — 'A session
+// request', its two answers, and a session that MOVED — are all recorded, by
+// the default and correctly: nothing else tells either party any of them
+// happened, and a moved appointment is the one a missed banner costs most.
 eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 10,
-  'ten of the twenty-five pushes are deliberately not recorded');
-eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 15,
-  'the other fifteen are');
+  'ten of the twenty-nine pushes are deliberately not recorded');
+eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 19,
+  'the other nineteen are');
 
 /* ── the rule that actually matters: chat is decided by route ──────────── */
 
@@ -172,6 +176,31 @@ const DRAWABLE: InboxIcon[] = ['bell', 'calendar', 'message', 'sparkle', 'heart'
 for (const p of KNOWN_PUSHES) {
   ok(DRAWABLE.includes(inboxIcon(p.route)), `${p.where} yields a drawable icon`);
 }
+
+// ── and the bell is not a drawable icon, it is the absence of one ────────
+//
+// The loop above passed on 'A session request' for a year. The bell IS
+// drawable, so "yields a drawable icon" is true of a route nobody has ever put
+// in the table — and this file says in four separate comments that the bell
+// means "we have no idea what this is". So the assertion that catches a missing
+// entry has to be about the bell specifically, and it has to be an EQUALITY:
+// `every belled row is deliberate` is unfalsifiable if the list is derived from
+// the same table it is checking.
+//
+// Routeless rows are excluded rather than listed. A row with nowhere to go is
+// what the bell is for, and three server-written kinds are routeless for
+// reasons their own parts argue at length (parts 146 and 159).
+//
+// One ROUTED kind is left, and it is the only one: '/(trainer)/nudges' is
+// 'bell' in TRAINER_NAV and 'bell' in the table above, deliberately and with
+// its own note. Anything else appearing here is a route somebody added and
+// nobody gave a shape to.
+const BELLED_ROUTES = [...new Set([
+  ...KNOWN_PUSHES.filter((p) => p.route && inboxDecision(p.title, p.body, p.route).record && inboxIcon(p.route) === 'bell').map((p) => p.route!),
+  ...SERVER_WRITTEN.filter((s) => s.route && inboxIcon(s.route) === 'bell').map((s) => s.route!),
+])].sort();
+eq(BELLED_ROUTES.join(' | '), '/(trainer)/nudges',
+  'the only routed notification drawn with the generic bell is the one the icon table names on purpose');
 
 /* ── where a stored row may send you ───────────────────────────────────── */
 

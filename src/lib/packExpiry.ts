@@ -270,13 +270,46 @@ export function expiryLine(p: PackExpiry, left: number | null, today: string): s
       // Still spendable until the nightly pass runs, and saying otherwise would
       // be a claim the database has not made yet.
       return day ? `This pack ran out on ${day}. Anything still on it is being closed off.` : null;
-    case 'closed':
+    case 'closed': {
+      // ── two different things can be sitting on a closed pack ──────────
+      //
+      // `lost` is what `run_pack_expiry()` took OFF at the moment the window
+      // shut: sessions the member paid for and did not take.
+      //
+      // `left` is what is on the pack NOW, and on a closed pack that should be
+      // nought — the nightly pass reduces `sessions_total` to `sessions_used`
+      // precisely so every draw site in the database stops. There is one way
+      // it is not nought, and `packBalance` in ./packDraw.ts names it:
+      // `refund_pack_session` (supabase/parts/123) decrements `sessions_used`
+      // on the newest pack WITH USAGE and does not ask whether that pack's
+      // window has closed. So a member whose session is refunded after their
+      // pack ran out gets a credit back that nothing in the database will ever
+      // let them draw, and their balance goes up by one on a pack that is over.
+      //
+      // `packBalance.left` correctly leaves it out of the hero — a figure
+      // somebody books against must not include a credit that cannot be
+      // booked — and counts it in `onClosedPacks` so that it can be talked
+      // about. Nothing talked about it. Worse, this branch fell through to
+      // "Everything on it had been used", which is a confident false sentence
+      // about somebody's money: it had not been used, it had been given back,
+      // and it is stuck.
+      //
+      // Both facts print when both are true. They are separate events on
+      // separate days and merging them would lose one.
+      const back = left != null && left > 0 ? left : 0;
+      const parts: string[] = [];
       if (lost > 0) {
-        return day
+        parts.push(day
           ? `${lost} session${lost === 1 ? '' : 's'} were still on this pack when it ran out on ${day}, and they can no longer be booked.`
-          : `${lost} session${lost === 1 ? '' : 's'} were still on this pack when it ran out, and they can no longer be booked.`;
+          : `${lost} session${lost === 1 ? '' : 's'} were still on this pack when it ran out, and they can no longer be booked.`);
       }
+      if (back > 0) {
+        parts.push(`${back} session${back === 1 ? '' : 's'} went back on to this pack after it had already run out, so ${back === 1 ? 'it cannot' : 'they cannot'} be booked either. Ask your coach to put ${back === 1 ? 'it' : 'them'} on a new pack.`);
+      }
+      if (parts.length) return parts.join(' ');
+      // Only now, and only because both counts were read and both were nought.
       return day ? `This pack ran out on ${day}. Everything on it had been used.` : null;
+    }
   }
 }
 

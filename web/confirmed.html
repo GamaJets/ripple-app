@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -41,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -82,8 +100,20 @@ addEventListener('DOMContentLoaded', function () {
 <main id="main" tabindex="-1">
   <div class="wrap page" style="max-width:620px">
     <p class="eyebrow">Repple</p>
-    <h1 class="display" id="head">Confirming your email…</h1>
-    <p class="lede" id="body">One moment.</p>
+    <!-- The heading and the lede are the whole content of this page: which of
+         the six outcomes happened. Both were rewritten by script with nothing
+         announcing it, so a screen reader read "Confirming your email… One
+         moment." on load and was never told the answer arrived. Wrapping the
+         pair in a polite status region means every one of the six — expired,
+         already confirmed, failed, press-to-confirm, confirmed, nothing to
+         confirm — is spoken when it is written. `aria-atomic` because the
+         heading and the sentence under it are one message; announcing the
+         changed half alone would say "That link has expired" without the
+         remedy, or the remedy without what went wrong. -->
+    <div id="report" role="status" aria-live="polite" aria-atomic="true">
+      <h1 class="display" id="head" tabindex="-1">Confirming your email…</h1>
+      <p class="lede" id="body">One moment.</p>
+    </div>
 
     <div id="actions" hidden>
       <p class="btn-row">
@@ -125,9 +155,18 @@ addEventListener('DOMContentLoaded', function () {
   const panels = { actions: $('actions'), retry: $('retry'), confirm: $('confirm') };
   const go = $('go');
 
-  const say = (h, b, panel) => {
+  /* `focus` is passed only when say() is answering something the reader just
+     did. Pressing "Confirm my email" HIDES the panel that button lives in, so
+     without this focus falls to <body> at the exact moment the page finally
+     has something to say, and the two links that replace the button are only
+     reachable by tabbing from the top of the document. Focus moves to the
+     heading BEFORE the panel is hidden, so it is never taken off an element
+     that is being removed. On first load nothing is passed: focus stays where
+     the browser put it and the status region above does the talking. */
+  const say = (h, b, panel, focus) => {
     head.textContent = h;
     body.innerHTML = b;
+    if (focus) head.focus();
     for (const [k, el] of Object.entries(panels)) el.hidden = k !== panel;
   };
 
@@ -172,19 +211,28 @@ addEventListener('DOMContentLoaded', function () {
     say('Confirm your email',
         'One press and your Repple account is ready to sign in to.', 'confirm');
 
+    /* `disabled` rather than aria-disabled would drop focus to <body> the
+       instant it is set, for the whole length of a network call, and then
+       hand it back to an element the reader is no longer standing on. The
+       button stays focusable and says it is busy; `busy` is what actually
+       stops a second press. */
+    let busy = false;
     go.addEventListener('click', async () => {
-      go.disabled = true;
+      if (busy) return;
+      busy = true;
+      go.setAttribute('aria-disabled', 'true');
       go.textContent = 'Confirming\u2026';
       const { error } = await sb.auth.verifyOtp({ type: linkType, token_hash: tokenHash });
       if (error) {
-        go.disabled = false;
+        busy = false;
+        go.removeAttribute('aria-disabled');
         go.textContent = 'Confirm my email';
         say('That link did not work',
-            `${error.message}. Confirmation links can be used once and they expire, so this one has most likely already been used or has run out &mdash; sign up again with the same address for a fresh one.`, 'retry');
+            `${error.message}. Confirmation links can be used once and they expire, so this one has most likely already been used or has run out &mdash; sign up again with the same address for a fresh one.`, 'retry', true);
         return;
       }
       say('Email confirmed',
-          'Your address is confirmed and your account is ready. Sign in from the app with the email and password you chose.', 'actions');
+          'Your address is confirmed and your account is ready. Sign in from the app with the email and password you chose.', 'actions', true);
     });
 
   } else if (hash.get('access_token')) {

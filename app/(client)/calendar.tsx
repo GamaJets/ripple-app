@@ -80,6 +80,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, type WeightUnit } from '../../src/lib/units';
+import { setChipLabel } from '../../src/lib/timedSets';
 import type { TrainingSession } from '../../src/lib/types';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { workoutKind, KIND_LABEL, WORKOUT_KINDS, type WorkoutKind } from '../../src/lib/workoutKind';
@@ -199,12 +200,23 @@ const KIND_ICON: Record<WorkoutKind, IconName> = {
 // gave. Same rule as app/(client)/activity.tsx, which this is built to agree
 // with word for word.
 function logDetail(e: WorkoutEntry, wu: WeightUnit): string {
-  // `|| null` and then fig(): a set tuple that came back without its load put
-  // the four-letter word "null" between the reps and the separator — bare
-  // interpolation does not reach fig(), which is the whole reason fig() exists.
-  // A set stored at 0 is a bodyweight set, and units.ts is explicit that a
-  // screen shows that as a dash rather than as "0 kg".
-  if (e.sets && e.sets.length) return e.sets.map((x) => `${x[0]}×${fig(liftLabel(x[1] || null, wu))}`).join(' · ');
+  // Through `setChipLabel`, which is the one place that knows what the second
+  // number in a set tuple MEANS.
+  //
+  // The line this replaces reasoned that "a set stored at 0 is a bodyweight
+  // set, and units.ts is explicit that a screen shows that as a dash". That was
+  // true when there was nothing else to go on, and `bw` (src/lib/bodyweightSets.ts)
+  // made it false: a stored 0 is ambiguous — the person hung off a bar, or the
+  // load box was left empty by accident — and `bw[i] === true` is the testimony
+  // that settles it. So a pull-up rendered here as "8×—": a bar that was not
+  // there, carrying a weight nobody wrote down. The dash is still the right
+  // answer to the OTHER zero, and `setChipLabel` still gives it.
+  //
+  // It also fixes a hold: a plank read "45×—" on this screen, forty-five
+  // repetitions of nothing.
+  if (e.sets && e.sets.length) {
+    return e.sets.map((_x, i) => setChipLabel(e, i, (kg) => fig(liftLabel(kg, wu)), wu)).join(' · ');
+  }
   if (e.cardio) {
     const c = e.cardio;
     return [

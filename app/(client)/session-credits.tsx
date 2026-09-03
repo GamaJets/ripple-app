@@ -42,9 +42,9 @@ import { sp, layout, type as ty } from '../../src/theme/scale';
 import { appLocale } from '../../src/lib/locale';
 import { fmtFullDay } from '../../src/lib/format';
 import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
-import { coachPackLines, gymPtLines, chooseRoute, routeReason, creditsLeft, payingLines,
+import { bookableCredits, creditsHeroNote, routeReason,
   buildLedger, expectedDraws, clientLedgerLine, shortfallLine,
-  type CreditRoute, type CreditSession, type Entitlement, type Ledger, type LedgerRow } from '../../src/lib/sessionCredits';
+  type CreditRoute, type CreditSession, type Ledger, type LedgerRow } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
 import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
@@ -119,21 +119,22 @@ export default function SessionCredits() {
 
   const today = useToday();
 
-  const coachLines: Entitlement[] | null = useMemo(
-    () => (packs === undefined ? null : coachPackLines(packs?.lines ?? null)), [packs]);
-  const gymLines: Entitlement[] | null = useMemo(
-    () => (passes === undefined ? null : gymPtLines(passes, today)), [passes, today]);
-
-  // The choice, made once, by the same rule the database makes it: an
-  // entitlement that names both parties wins, and an EMPTY coach pack still
-  // beats a live gym pass rather than quietly spending the gym's money.
-  const route: CreditRoute = useMemo(
-    () => chooseRoute(coachLines == null ? null : coachLines.length > 0,
-                      gymLines == null ? null : gymLines.length > 0),
-    [coachLines, gymLines]);
-
-  const lines = useMemo(() => payingLines(route, coachLines, gymLines), [route, coachLines, gymLines]);
-  const left = useMemo(() => creditsLeft(lines), [lines]);
+  // The choice and the count, made once, by the same rule the database makes
+  // it: an entitlement that names both parties wins, and an EMPTY coach pack
+  // still beats a live gym pass rather than quietly spending the gym's money.
+  //
+  // This composition used to live here and only here, spelled out in four
+  // `useMemo`s — which is exactly why `packages.tsx` and `pt-sessions.tsx`,
+  // which had no reason to know it existed, each read `client_purchases` alone
+  // and told a gym-pass member they had nothing. It is `bookableCredits` now,
+  // and all three call it.
+  const book = useMemo(
+    () => bookableCredits(packs === undefined ? null : (packs?.lines ?? null),
+                          passes === undefined ? null : passes, today),
+    [packs, passes, today]);
+  const route: CreditRoute = book.route;
+  const lines = book.lines;
+  const left = book.left;
   const ledger: Ledger | null = useMemo(
     () => (sessions === undefined ? null : buildLedger(sessions, route)), [sessions, route]);
   const expected = useMemo(() => expectedDraws(ledger), [ledger]);
@@ -177,7 +178,19 @@ export default function SessionCredits() {
   // Named separately from `loading`, because "still reading" and "we asked and
   // could not get an answer" are different sentences and only one of them is
   // about somebody's money.
-  const unread = !loading && (packs === null || passes === null || sessions === null);
+  //
+  // ── two failures, two sentences ───────────────────────────────────────
+  //
+  // This was one flag over all three reads, and the banner it raised said
+  // "Nothing below is a figure you should plan against until it loads." Two of
+  // the reads are the BALANCE and one is the DIARY, and they fail
+  // independently: a member whose session history would not load, holding a
+  // perfectly readable four sessions, was told not to trust the four. That is
+  // the same collapse `PartialRead` exists to stop, pointed at a figure instead
+  // of a list — and being wrong in the cautious direction is still being wrong
+  // about somebody's money, because the member's next move is to not book.
+  const balanceUnread = !loading && (packs === null || passes === null);
+  const historyUnread = !loading && sessions === null;
 
   const labelFor = (row: LedgerRow): string | null => {
     if (!row.entitlementId || !lines) return null;
@@ -204,22 +217,33 @@ export default function SessionCredits() {
             null for an unread balance, and a hero reading 0 would tell a client
             holding ten that they have none. */}
         {!loading && left != null && lines && lines.length > 0 ? (
-          <Hero label="Sessions Remaining" figure={fig(left)}
-            note={expected == null
-              ? `Across ${lines.length} pack${lines.length === 1 ? '' : 's'}`
-              : expected === 0
-                ? `Across ${lines.length} pack${lines.length === 1 ? '' : 's'} · nothing booked is due to draw one`
-                : `Across ${lines.length} pack${lines.length === 1 ? '' : 's'} · ${expected} booked session${expected === 1 ? '' : 's'} still to draw`} />
+          /* The note through `creditsHeroNote`, which the other two screens
+             also use. It called every entitlement a "pack", including a gym
+             PT pass — a pass is not a pack and the gym did not sell them one —
+             and the wording now names the business whose credit it is. */
+          <Hero label="Sessions Remaining" figure={fig(left)} note={creditsHeroNote(book, expected) ?? ''} />
         ) : null}
 
-        {unread ? (
+        {balanceUnread ? (
           <Notice tone={t.warn} kicker="Not read" title="We could not read your credits"
-            note="This is our end, not a statement about what you have bought. Nothing below is a figure you should plan against until it loads.">
+            note="This is our end, not a statement about what you have bought. There is no balance above to plan against until it loads.">
             <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={load} /></View>
           </Notice>
         ) : null}
 
-        {!loading && !unread && route === 'none' ? (
+        {/* The diary, separately, and only when the balance is fine — with both
+            gone the banner above already covers it and two panels stacked say
+            less than one. The lists below are absent rather than empty in this
+            state, which is the point: an empty ledger under a failed read reads
+            as "you have never used a session" to somebody who has used nine. */}
+        {historyUnread && !balanceUnread ? (
+          <Notice tone={t.warn} kicker="Not read" title="We could not read your session history"
+            note="Your balance above did load and is current. What is missing is the list of which sessions used a credit and which of your bookings are due to draw one.">
+            <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={load} /></View>
+          </Notice>
+        ) : null}
+
+        {!loading && !balanceUnread && route === 'none' ? (
           <Card style={{ marginTop: sp.lg }}>
             <Text style={{ ...ty.label, color: t.ink }}>You are not on a session pack.</Text>
             <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
@@ -229,7 +253,7 @@ export default function SessionCredits() {
           </Card>
         ) : null}
 
-        {!loading && !unread && route !== 'none' ? (
+        {!loading && !balanceUnread && route !== 'none' ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{routeReason(route)}</Text>
         ) : null}
 

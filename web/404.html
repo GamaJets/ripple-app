@@ -28,7 +28,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -40,10 +40,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -72,7 +90,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
-      Repple
+      Repple<span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -135,7 +153,7 @@ addEventListener('DOMContentLoaded', function () {
       <div class="tile">
         <div class="cap">If you train</div>
         <h3>The member app</h3>
-        <ul class="plain">
+        <ul class="plain" role="list">
           <li><a href="/client">What Repple holds for you</a></li>
           <li><a href="/download">Get the app</a></li>
           <li><a href="/signup">Create an account</a></li>
@@ -146,7 +164,7 @@ addEventListener('DOMContentLoaded', function () {
       <div class="tile">
         <div class="cap">If you coach</div>
         <h3>The coach app</h3>
-        <ul class="plain">
+        <ul class="plain" role="list">
           <li><a href="/trainer">What Repple Coach does</a></li>
           <li><a href="/pricing">What it costs</a></li>
           <li><a href="/download">Get the app</a></li>
@@ -157,7 +175,7 @@ addEventListener('DOMContentLoaded', function () {
       <div class="tile">
         <div class="cap">If you run a gym</div>
         <h3>The console</h3>
-        <ul class="plain">
+        <ul class="plain" role="list">
           <li><a href="/studio">What Repple Studio runs</a></li>
           <li><a href="/how-it-works">The setup, in order</a></li>
           <li><a href="/pricing">What it costs</a></li>
@@ -171,7 +189,7 @@ addEventListener('DOMContentLoaded', function () {
       <div class="tile">
         <div class="cap">Whoever you are</div>
         <h3>Legal and data</h3>
-        <ul class="plain">
+        <ul class="plain" role="list">
           <li><a href="/privacy">Privacy — what is collected and who receives it</a></li>
           <li><a href="/terms">Terms of use</a></li>
           <li><a href="/security">How one gym is kept out of another gym's records</a></li>
@@ -181,7 +199,7 @@ addEventListener('DOMContentLoaded', function () {
       <div class="tile">
         <div class="cap">Getting in</div>
         <h3>Your account</h3>
-        <ul class="plain">
+        <ul class="plain" role="list">
           <li><a href="/signup">Create an account</a></li>
           <li><a href="/forgot-password">Send a password reset link</a></li>
           <li><a href="/support">The email never arrived</a></li>
@@ -205,49 +223,50 @@ addEventListener('DOMContentLoaded', function () {
          convention this site does not follow. Here are the ones worth answering rather than
          leaving you to try another.</p>
     </div>
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-guesses">
       <table class="data">
+        <caption class="vh" id="tbl-guesses">Addresses people try, and where each one actually is</caption>
         <thead>
           <tr><th scope="col">You tried</th><th scope="col">Where it actually is</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>/login</strong>, /signin, /sign-in</td>
+            <th scope="row"><strong>/login</strong>, /signin, /sign-in</th>
             <td>There is no web sign-in. You sign in inside whichever app your role calls for.
                 The only account jobs this site does are
                 <a href="/signup">creating an account</a> and
                 <a href="/forgot-password">resetting a password</a>.</td>
           </tr>
           <tr>
-            <td><strong>/app</strong>, /apps, /ios, /android</td>
+            <th scope="row"><strong>/app</strong>, /apps, /ios, /android</th>
             <td><a href="/download">/download</a> — all three apps, and which one matches what you do.</td>
           </tr>
           <tr>
-            <td><strong>/help</strong>, /faq</td>
+            <th scope="row"><strong>/help</strong>, /faq</th>
             <td><a href="/support">/support</a> — sorted by what has gone wrong rather than by feature.</td>
           </tr>
           <tr>
-            <td><strong>/contact</strong></td>
+            <th scope="row"><strong>/contact</strong></th>
             <td>There is no contact form. One address reads everything:
                 <a href="mailto:support@repplefitness.com">support@repplefitness.com</a>.</td>
           </tr>
           <tr>
-            <td><strong>/about</strong></td>
+            <th scope="row"><strong>/about</strong></th>
             <td>The home page carries it — <a href="/#why">why Repple exists</a>, written by the person
                 the software kept failing.</td>
           </tr>
           <tr>
-            <td><strong>/privacy-policy</strong>, /terms-of-service</td>
+            <th scope="row"><strong>/privacy-policy</strong>, /terms-of-service</th>
             <td><a href="/privacy">/privacy</a> and <a href="/terms">/terms</a>.</td>
           </tr>
           <tr>
-            <td><strong>/coach</strong> with nothing after it</td>
+            <th scope="row"><strong>/coach</strong> with nothing after it</th>
             <td>That address does resolve — a coach's page carries their own handle on the end of it,
                 and <a href="/coach">/coach</a> says so when the handle is missing. Ask the coach for
                 the link again rather than typing it.</td>
           </tr>
           <tr>
-            <td><strong>/blog</strong>, /news, /careers, /press</td>
+            <th scope="row"><strong>/blog</strong>, /news, /careers, /press</th>
             <td>None of these exist. Repple has not launched publicly and there is nothing behind
                 them to show you.</td>
           </tr>
@@ -274,15 +293,15 @@ addEventListener('DOMContentLoaded', function () {
               <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
             </svg>
           </span>
-          Repple
-        </a>
+          Repple<span class="vh"> home</span>
+    </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
         <h2 class="fh">Apps</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
@@ -290,7 +309,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Getting started</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
@@ -300,7 +319,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Legal &amp; data</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>

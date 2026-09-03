@@ -45,6 +45,11 @@ const FLOORS = {
   'supabase/functions': 12,         // 25
   'supabase/parts': 130,            // 276
   'scripts': 20,                    // 52
+  // Not source files: web/ is the static site, and the count is its *.html
+  // pages. It is here rather than in a guard of its own because the failure is
+  // identical — a gate that walked the wrong directory reporting the whole site
+  // correct — and one floor per root beats a second convention.
+  'web': 10,                        // 21
 };
 
 /**

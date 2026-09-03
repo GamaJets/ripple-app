@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -41,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -73,7 +91,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
-      Repple
+      Repple<span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -106,7 +124,7 @@ addEventListener('DOMContentLoaded', function () {
         when you share that one photo, and what deletion actually removes. The policy version of the same ground is in
         <a href="/privacy">Privacy</a>.
       </p>
-      <ul class="jump">
+      <ul class="jump" role="list">
         <li><a href="#who">Who can read what</a></li>
         <li><a href="#photos">Progress photos</a></li>
         <li><a href="#fence">How the fence holds</a></li>
@@ -123,6 +141,11 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="split">
       <div class="principle">
+<!-- This band had no heading of any level and no eyebrow either, so it was
+           absent from the outline entirely — a reader moving by heading went from
+           "Three parties, and one of them is you" to whatever follows, and never
+           met the paragraph the whole page is built on. -->
+        <h2 class="vh">The rule we build to</h2>
         <p class="q">A screen that decides what to show you is a preference. A row your account cannot read is a fact.</p>
         <p class="lede after-sm">
           Hidden buttons and filtered lists are how most software describes its permissions. They
@@ -132,7 +155,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
       </div>
       <div>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>The rules live under the data, not over it.</strong> A read that a policy forbids returns nothing, whichever app asked and however the request was made.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -159,56 +182,57 @@ addEventListener('DOMContentLoaded', function () {
         two lists are genuinely different, and neither of them is everything.
       </p>
     </div>
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-whocan">
       <table class="data">
+        <caption class="vh" id="tbl-whocan">What is recorded, and which of the three parties can read it</caption>
         <thead>
           <tr><th scope="col">What is recorded</th><th scope="col">You</th><th scope="col">Your coach, if you linked one</th><th scope="col">Your gym, if you are a member of one</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Sessions, sets, cardio</strong></td>
+            <th scope="row"><strong>Sessions, sets, cardio</strong></th>
             <td>Read and write</td>
             <td>Read only</td>
             <td>No</td>
           </tr>
           <tr>
-            <td><strong>Meals and food log</strong></td>
+            <th scope="row"><strong>Meals and food log</strong></th>
             <td>Read and write</td>
             <td>Read only</td>
             <td>No</td>
           </tr>
           <tr>
-            <td><strong>Scans, measurements, check-ins, habits</strong></td>
+            <th scope="row"><strong>Scans, measurements, check-ins, habits</strong></th>
             <td>Read and write</td>
             <td>Read only</td>
             <td>No</td>
           </tr>
           <tr>
-            <td><strong>Progress photos</strong></td>
+            <th scope="row"><strong>Progress photos</strong></th>
             <td>Read and write</td>
             <td><strong>No</strong>, unless you share one &mdash; per photo, withdrawable, at both layers</td>
             <td><strong>No</strong></td>
           </tr>
           <tr>
-            <td><strong>Messages with your coach</strong></td>
+            <th scope="row"><strong>Messages with your coach</strong></th>
             <td>Read and write your own</td>
             <td>Read and write their own</td>
             <td>No &mdash; an owner has no access to these</td>
           </tr>
           <tr>
-            <td><strong>Membership, payments, invoices</strong></td>
+            <th scope="row"><strong>Membership, payments, invoices</strong></th>
             <td>Read your own</td>
             <td>No</td>
             <td>The owner, for the gym they own</td>
           </tr>
           <tr>
-            <td><strong>Door visits</strong></td>
+            <th scope="row"><strong>Door visits</strong></th>
             <td>Read your own</td>
             <td>No, not as your coach</td>
             <td>The owner, and staff working the desk</td>
           </tr>
           <tr>
-            <td><strong>Class roster</strong></td>
+            <th scope="row"><strong>Class roster</strong></th>
             <td>Your own bookings</td>
             <td>The trainer taking that class</td>
             <td>The owner of that class's gym</td>
@@ -230,27 +254,16 @@ addEventListener('DOMContentLoaded', function () {
 <!-- ── progress photos ────────────────────────────────────────────────── -->
 <section class="band" id="photos">
   <div class="wrap">
-    <div class="split flip">
-      <div class="assure">
-        <div class="pair">
-          <div class="card">
-            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
-            <h3>A private bucket</h3>
-            <p>The store your photos go into is not public. Access is keyed to a folder named after your own account, and nothing else can write into it or read out of it.</p>
-          </div>
-          <div class="card">
-            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg></div>
-            <h3>Links that expire</h3>
-            <p>A photo is fetched through a temporary signed link that you mint by asking for it. There is no permanent address that would keep working if it leaked.</p>
-          </div>
-        </div>
-        <div class="card">
-          <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c5 0 9 4.5 9 7a11 11 0 0 1-2.2 3.4M6.5 6.6C4.2 8.1 3 10.3 3 12c0 2.5 4 7 9 7a9.6 9.6 0 0 0 3.9-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></div>
-          <h3>No coach access by default, and a grant you make per photo</h3>
-          <p>A blanket read permission for the linked coach existed and was taken out. Nothing replaced it with another blanket rule: a coach sees a photo only where you have granted that specific photo, and the reasoning against re-adding a standing permission is written into the schema so nobody restores it by copying the pattern from the tables either side of it.</p>
-        </div>
-      </div>
-
+    <!-- The two columns are in the order they are READ, and the class is no
+         longer `flip`. `.split.flip > :first-child { order: 2 }` put the three
+         h3 cards first in the DOM and last on the screen, so a reader moving
+         by heading met "A private bucket", "Links that expire" and "No coach
+         access by default" parented to the PREVIOUS section's h2 — three h3s
+         under a heading about who can read what — and only then reached the h2
+         they belong to. Below 900px the override is reset and the fault
+         vanishes, which is why it was only ever wrong on a desktop. Swapping
+         the source is the fix; the rendered order is unchanged. -->
+    <div class="split">
       <div>
         <div class="eyebrow">Progress photos</div>
         <h2 class="hd">A photograph is not<br><span class="serif">another number.</span></h2>
@@ -260,7 +273,7 @@ addEventListener('DOMContentLoaded', function () {
           A coach seeing your body-fat percentage is the product working; a coach seeing that
           photograph without you choosing it is a different act entirely.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>The consent step now exists, and it is per photo.</strong> Nothing is shared because of who your coach is. You grant one photograph at a time, you can see which ones you have granted, and you can withdraw a grant.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -279,6 +292,26 @@ addEventListener('DOMContentLoaded', function () {
             One thing to know before you share: the grant is for the photo&rsquo;s whole record, so the
             weight and body-fat figure stored alongside that photograph go with it.
           </p>
+        </div>
+      </div>
+
+      <div class="assure">
+        <div class="pair">
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+            <h3>A private bucket</h3>
+            <p>The store your photos go into is not public. Access is keyed to a folder named after your own account, and nothing else can write into it or read out of it.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg></div>
+            <h3>Links that expire</h3>
+            <p>A photo is fetched through a temporary signed link that you mint by asking for it. There is no permanent address that would keep working if it leaked.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c5 0 9 4.5 9 7a11 11 0 0 1-2.2 3.4M6.5 6.6C4.2 8.1 3 10.3 3 12c0 2.5 4 7 9 7a9.6 9.6 0 0 0 3.9-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></div>
+          <h3>No coach access by default, and a grant you make per photo</h3>
+          <p>A blanket read permission for the linked coach existed and was taken out. Nothing replaced it with another blanket rule: a coach sees a photo only where you have granted that specific photo, and the reasoning against re-adding a standing permission is written into the schema so nobody restores it by copying the pattern from the tables either side of it.</p>
         </div>
       </div>
     </div>
@@ -364,11 +397,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Counted from the live catalogue, 3 September 2026</span>
-          <h3>What deleting an account reaches</h3>
+          <h3 id="chart-what-deleting-an-account-reaches">What deleting an account reaches</h3>
         </div>
       </div>
-      <div class="chart-scroll">
-        <svg viewBox="0 0 740 214" width="740" height="214" role="img" aria-label="Horizontal bar chart of how far account deletion reaches in the database. 66 tables are deleted along with the person, across 74 columns. 50 tables keep their rows with the person detached from them, across 69 columns. Following the cascade all the way down, 106 tables are reached in total.">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-what-deleting-an-account-reaches">
+        <svg viewBox="0 0 760 214" width="760" height="214" role="img" aria-label="Horizontal bar chart of how far account deletion reaches in the database. 66 tables are deleted along with the person, across 74 columns. 50 tables keep their rows with the person detached from them, across 69 columns. Following the cascade all the way down, 106 tables are reached in total.">
           <line class="cx-grid" x1="372.8" y1="34" x2="372.8" y2="176"/>
           <line class="cx-grid" x1="485.6" y1="34" x2="485.6" y2="176"/>
           <line class="cx-grid" x1="598.4" y1="34" x2="598.4" y2="176"/>
@@ -388,7 +421,12 @@ addEventListener('DOMContentLoaded', function () {
           <text class="cx-lab" x="250" y="152" text-anchor="end">Reached in total</text>
           <text class="cx-ax" x="250" y="168" text-anchor="end">following the chain down</text>
           <rect class="ch-c" x="260" y="136" width="398.6" height="26" rx="3"/>
-          <text class="cx-val" x="648.6" y="154" text-anchor="end">106 tables</text>
+          <!-- Outside the bar, like the two above it. This one was drawn back
+               INTO its own fill with text-anchor="end", so the only value label on
+               the chart sitting on tinted accent was this one — inconsistent to
+               look at and the only one whose contrast depended on the tint. The
+               viewBox is 20 units wider than it was to make room for it. -->
+          <text class="cx-val" x="668.6" y="154">106 tables</text>
 
           <line class="cx-base" x1="260" y1="176" x2="711.2" y2="176"/>
           <g class="cx-ax">
@@ -413,7 +451,7 @@ addEventListener('DOMContentLoaded', function () {
       </figcaption>
     </figure>
 
-    <ol class="steps after">
+    <ol class="steps after" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -485,24 +523,29 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Where it is held</div>
       <h2 class="hd">One database,<br><span class="serif">one file store.</span></h2>
     </div>
-    <div class="strip">
+    <!-- A description list, not a row of divs. The big word and the paragraph
+         under it are a term and its description — that pairing is what the
+         panel means — and as two sibling divs it existed only in the layout:
+         a screen reader read "10%" as a loose fragment and then an unrelated
+         sentence, with nothing saying the second explains the first. -->
+    <dl class="strip">
       <div>
-        <div class="stat-n">Supabase</div>
-        <div class="lbl"><strong>Database, sign-in and files.</strong> Managed Postgres, which is where the row-level rules on this page live. It may be processed outside your country; where data leaves the UK or EEA it moves under the safeguards those rules require.</div>
+        <dt class="stat-n">Supabase</dt>
+        <dd class="lbl"><strong>Database, sign-in and files.</strong> Managed Postgres, which is where the row-level rules on this page live. It may be processed outside your country; where data leaves the UK or EEA it moves under the safeguards those rules require.</dd>
       </div>
       <div>
-        <div class="stat-n">TLS</div>
-        <div class="lbl"><strong>Encrypted in transit, and at rest by the platform.</strong> Every connection to the database and the file store is over TLS. Encryption at rest is Supabase&rsquo;s disk encryption underneath both &mdash; it is real, and it is theirs rather than something Repple adds on top. No individual column is separately encrypted by this application, so anyone holding a valid database credential reads plain values; what stands between an account and somebody else&rsquo;s row is the row-level rules on this page, not a second key.</div>
+        <dt class="stat-n">TLS</dt>
+        <dd class="lbl"><strong>Encrypted in transit, and at rest by the platform.</strong> Every connection to the database and the file store is over TLS. Encryption at rest is Supabase&rsquo;s disk encryption underneath both &mdash; it is real, and it is theirs rather than something Repple adds on top. No individual column is separately encrypted by this application, so anyone holding a valid database credential reads plain values; what stands between an account and somebody else&rsquo;s row is the row-level rules on this page, not a second key.</dd>
       </div>
       <div>
-        <div class="stat-n">Stripe</div>
-        <div class="lbl"><strong>Card details never reach us.</strong> Where a gym or trainer takes a payment, Stripe handles the card directly. We do not receive or store card numbers.</div>
+        <dt class="stat-n">Stripe</dt>
+        <dd class="lbl"><strong>Card details never reach us.</strong> Where a gym or trainer takes a payment, Stripe handles the card directly. We do not receive or store card numbers.</dd>
       </div>
       <div>
-        <div class="stat-n">Export</div>
-        <div class="lbl"><strong>Yours to take out.</strong> Anyone with an account can export their record from Settings as a JSON file, without asking a person for it &mdash; forty-odd tables including the gym-side ones, plus a list of every file held for them, which you then save one at a time. Where a table could not be read, the export says so in place of the rows rather than writing an empty list. A gym can ask us to export everything held for the gym.</div>
+        <dt class="stat-n">Export</dt>
+        <dd class="lbl"><strong>Yours to take out.</strong> Anyone with an account can export their record from Settings as a JSON file, without asking a person for it &mdash; forty-odd tables including the gym-side ones, plus a list of every file held for them, which you then save one at a time. Where a table could not be read, the export says so in place of the rows rather than writing an empty list. A gym can ask us to export everything held for the gym.</dd>
       </div>
-    </div>
+    </dl>
     <p class="tiny after-sm">
       The full list of the services that process data on our behalf, and what each one is for, is
       in <a href="/privacy">Privacy</a>.
@@ -617,15 +660,15 @@ addEventListener('DOMContentLoaded', function () {
               <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
             </svg>
           </span>
-          Repple
-        </a>
+          Repple<span class="vh"> home</span>
+    </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
         <h2 class="fh">Apps</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
@@ -633,7 +676,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Getting started</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
@@ -643,7 +686,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Legal &amp; data</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>

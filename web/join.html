@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -41,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -105,7 +123,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
-      <span id="b-wordmark">Repple</span>
+      <span id="b-wordmark">Repple</span><span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -136,7 +154,10 @@ addEventListener('DOMContentLoaded', function () {
       <p class="eyebrow">Their code</p>
       <p class="mono" id="code" style="font-size:30px;letter-spacing:.14em;margin:6px 0 10px"></p>
       <button class="btn" type="button" id="copy">Copy code</button>
-      <p class="compare-note" id="copied" hidden>Copied.</p>
+      <!-- role="status": pressing Copy changed nothing a screen reader could
+           perceive — the button's own label does not change and this line was
+           simply unhidden. -->
+      <p class="compare-note" id="copied" role="status" hidden>Copied.</p>
       <!-- The handoff. With Repple installed this opens it on the join route
            with the code already carried, so nobody has to memorise six
            characters across an App Store visit — which is where most of the
@@ -201,8 +222,18 @@ addEventListener('DOMContentLoaded', function () {
           <textarea id="asknote" name="note" maxlength="500" rows="3"></textarea>
         </p>
         <p style="margin:14px 0 0"><button class="btn" type="submit" id="asksend">Send it to them</button></p>
-        <p class="compare-note bad" id="askerr" hidden></p>
-        <p class="compare-note" id="askdone" hidden></p>
+        <!-- Five different refusals were written into this paragraph and none of
+             them was ever announced: no live region, no aria-describedby from
+             either field, no aria-invalid, and no focus moved. Somebody who
+             cannot see the form pressed Send, heard nothing at all, and had no
+             way to learn which of the three fields was wrong — on the only form
+             on this site, whose entire purpose is to reach a coach who would
+             otherwise never hear from them.
+             `role="alert"` because a refusal must interrupt; the success note
+             below is `role="status"`, which waits its turn, because nothing is
+             lost by hearing it a moment later. -->
+        <p class="compare-note bad" id="askerr" role="alert" hidden></p>
+        <p class="compare-note" id="askdone" role="status" hidden></p>
         <p class="compare-note" style="margin-top:10px" id="b-noemail">Repple does not email you. Your coach reads this
            and replies themselves, in their own time. If the code above is not exactly the one they sent
            you, there is no coach to pass this to and nobody will see it.</p>
@@ -221,8 +252,8 @@ addEventListener('DOMContentLoaded', function () {
 
     <h2 class="hd" id="storehd">Get Repple</h2>
     <div class="btn-row" id="stores">
-      <a class="store" id="ios" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40"></a>
-      <a class="store" id="android" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250"></a>
+      <a class="store" id="ios" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40"><span class="vh"> &mdash; Repple</span></a>
+      <a class="store" id="android" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250"><span class="vh"> &mdash; Repple</span></a>
     </div>
     <p class="compare-note" id="other"></p>
 
@@ -644,17 +675,47 @@ form.addEventListener('submit', async (e) => {
   const contact = document.getElementById('askcontact').value.trim();
   const note = document.getElementById('asknote').value.trim();
 
-  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+  /* Every refusal here is about ONE field, so the field is named in the call
+     and gets three things: aria-invalid, so its state is announced wherever the
+     reader meets it; aria-describedby pointing at the message, so the reason
+     travels with the field rather than living in a paragraph further down; and
+     focus, so the reader is standing on the box they have to change. Without
+     the focus move, "Put in a name" is announced into the air and the reader
+     has to go and find which of three boxes it meant. */
+  const fields = [document.getElementById('askname'), document.getElementById('askcontact')];
+  const clearInvalid = () => fields.forEach((el) => {
+    el.removeAttribute('aria-invalid');
+    el.removeAttribute('aria-describedby');
+  });
+  const fail = (msg, field) => {
+    clearInvalid();
+    err.textContent = msg;
+    err.hidden = false;
+    if (field) {
+      field.setAttribute('aria-invalid', 'true');
+      field.setAttribute('aria-describedby', 'askerr');
+      field.focus();
+    }
+  };
+  clearInvalid();
 
-  if (!name) return fail('Put in a name, so the coach knows who is asking.');
-  if (name.length > MAX_NAME) return fail('Keep the name to ' + MAX_NAME + ' characters or fewer.');
-  if (!contact) return fail('Put in an email address or a phone number, or the coach has no way to answer.');
-  if (contact.length > MAX_CONTACT) return fail('Keep that to ' + MAX_CONTACT + ' characters or fewer.');
+  const nameEl = fields[0], contactEl = fields[1];
+  if (!name) return fail('Put in a name, so the coach knows who is asking.', nameEl);
+  if (name.length > MAX_NAME) return fail('Keep the name to ' + MAX_NAME + ' characters or fewer.', nameEl);
+  if (!contact) return fail('Put in an email address or a phone number, or the coach has no way to answer.', contactEl);
+  if (contact.length > MAX_CONTACT) return fail('Keep that to ' + MAX_CONTACT + ' characters or fewer.', contactEl);
   if (!looksLikeEmail(contact) && !looksLikePhone(contact)) {
-    return fail('That does not look like an email address or a phone number. The coach will reply to whatever you put here, so it has to be something they can reach you on.');
+    return fail('That does not look like an email address or a phone number. The coach will reply to whatever you put here, so it has to be something they can reach you on.', contactEl);
   }
 
-  send.disabled = true;
+  /* aria-disabled and a re-entry guard rather than `disabled`: disabling the
+     button the reader has just pressed takes focus off it, to <body>, for the
+     length of the round trip, and then gives it back to an element they are no
+     longer on. The changed label says it is working; `busy` is what actually
+     prevents a second send. */
+  if (send.dataset.busy === '1') return;
+  send.dataset.busy = '1';
+  send.setAttribute('aria-disabled', 'true');
   send.textContent = 'Sending…';
   const { error } = await sb.rpc('leave_my_details', {
     p_code: code,
@@ -662,7 +723,8 @@ form.addEventListener('submit', async (e) => {
     p_contact: contact,
     p_note: note.slice(0, MAX_NOTE),
   });
-  send.disabled = false;
+  delete send.dataset.busy;
+  send.removeAttribute('aria-disabled');
   send.textContent = 'Send it to them';
 
   /* The only failure this can report is a failure to REACH the server — the
@@ -670,6 +732,8 @@ form.addEventListener('submit', async (e) => {
      happen, which is the one thing an error here actually establishes. */
   if (error) {
     const support = (window.SITE_BRAND && window.SITE_BRAND.supportEmail) || 'support@repplefitness.com';
+    /* No field is at fault here, so none is marked and focus stays on the
+       button they pressed — which is the control they will press again. */
     return fail('That did not send — your details have not gone anywhere. Check your connection and try again, or email ' + support + ' with the code above.');
   }
 

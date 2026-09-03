@@ -519,3 +519,122 @@ export function bookingCreditNote(route: CreditRoute, left: number | null): stri
       return null;
   }
 }
+
+/* ── the one answer, for the screens that all had their own ────────────────── */
+
+/**
+ * "How many sessions can I book?" — composed once, so three screens cannot
+ * answer it three ways.
+ *
+ * ── What was actually on the three screens ────────────────────────────────
+ *
+ * `app/(client)/session-credits.tsx` read both systems and routed between them,
+ * which is this function inlined. The other two read `client_purchases` alone:
+ *
+ *   packages.tsx      `packBalance(rows).left` — coach packs, no gym pass
+ *   pt-sessions.tsx   `sessionPacks()?.left`   — coach packs, no gym pass
+ *
+ * A member whose gym sold them a PT pass and assigned them a coach therefore
+ * held a real, spendable balance that two of the three screens could not see.
+ * `packBalance` returns a REAL 0 for a history that was read and came back
+ * empty — correctly, that is what it is for — so pt-sessions.tsx put the
+ * figure 0 under "Sessions Remaining" and wrote **"You have not bought a
+ * session pack"** beneath it. Both halves were true of `client_purchases` and
+ * both were false of the member: they had bought a pass, and they had eight
+ * sessions on it. packages.tsx drew no hero at all, which is quieter and is
+ * the same omission.
+ *
+ * ── Why the answer is one number and not two ──────────────────────────────
+ *
+ * The temptation is to add the two balances together. That is the one answer
+ * that is wrong in the case that matters: an EXHAUSTED coach pack still beats
+ * a live gym pass — `chooseRoute` says so and part 370 does it in SQL — so a
+ * member holding a spent 10-pack and an 8-use gym pass can book NOTHING
+ * against an entitlement, and a hero reading "8" would send them to fill a
+ * week that ends in eight shortfalls on their coach's unpaid hours.
+ *
+ * So: one figure, and it is the balance on the route that will actually pay.
+ * The sentence under it is what differs between the two routes, because the
+ * money belongs to two different businesses and the member is owed the name of
+ * the one whose credit is about to move.
+ *
+ * Every argument is three-state and stays three-state. An unread half makes
+ * the route 'unknown' and the figure null, never 'none' and never 0.
+ */
+export interface Bookable {
+  route: CreditRoute;
+  /** The entitlements that will actually be spent, in the order they are
+   *  spent. Null for a read that did not land; `[]` for a member who holds
+   *  nothing, which is an ordinary answer. */
+  lines: Entitlement[] | null;
+  /** How many sessions can be booked against an entitlement. Null is "we could
+   *  not read it" and is never rendered as a figure. */
+  left: number | null;
+}
+
+export function bookableCredits(
+  packLines: Parameters<typeof coachPackLines>[0],
+  passes: Parameters<typeof gymPtLines>[0],
+  todayISO: string,
+): Bookable {
+  const coach = coachPackLines(packLines);
+  const gym = gymPtLines(passes, todayISO);
+  const route = chooseRoute(
+    coach == null ? null : coach.length > 0,
+    gym == null ? null : gym.length > 0,
+  );
+  const lines = payingLines(route, coach, gym);
+  return { route, lines, left: creditsLeft(lines) };
+}
+
+/**
+ * The line under the "Sessions Remaining" figure, naming the business whose
+ * credit it is.
+ *
+ * Null when there is no figure for it to sit under — an unread balance or a
+ * member who holds nothing — because a note with no number over it is a
+ * caption for something that is not there.
+ *
+ * `expected` is how many booked sessions are still due to draw, from
+ * `expectedDraws`. Only the ledger screen reads a diary, so it is optional:
+ * `undefined` means nobody asked, which is not the same as `null` (asked, and
+ * the diary would not read) and neither may be printed as "nothing booked".
+ */
+export function creditsHeroNote(b: Bookable, expected?: number | null): string | null {
+  if (b.left == null || b.lines == null || b.lines.length === 0) return null;
+  const n = b.lines.length;
+  const holding = b.route === 'gym_pass'
+    ? (n === 1 ? 'On the PT pass your gym sold you' : `Across ${n} PT passes your gym sold you`)
+    : (n === 1 ? 'On the pack you bought from your coach' : `Across ${n} packs you bought from your coach`);
+  if (expected == null) return holding;
+  return expected === 0
+    ? `${holding} · nothing booked is due to draw one`
+    : `${holding} · ${expected} booked session${expected === 1 ? '' : 's'} still to draw`;
+}
+
+/**
+ * What to say INSTEAD of a figure, and it is four different sentences.
+ *
+ * This is the function the defect was in. pt-sessions.tsx had two branches
+ * where there are four, and it picked between them on `hasPacks` — a fact
+ * about `client_purchases` alone — so "you have not bought a session pack" was
+ * printed to somebody holding a gym pass and to somebody whose gym-pass read
+ * had failed, indiscriminately.
+ *
+ * Null when there IS a figure, so a caller can render the hero and this and
+ * never both.
+ */
+export function creditsEmptyLine(b: Bookable): string | null {
+  if (b.route === 'unknown' || b.left == null) {
+    return 'We could not read what pays for your sessions. This is our end, and it is not a statement that you have none — anything you have paid for is still yours.';
+  }
+  if (b.route === 'none') {
+    return 'You are not on a session pack or a gym PT pass. You settle sessions with your coach or your gym directly, which is an ordinary way to pay and not something to fix.';
+  }
+  if (b.left === 0) {
+    return b.route === 'gym_pass'
+      ? 'You have no PT credits left on your gym pass. Your next session with your coach is not covered by one — ask your gym about another pass, or arrange it with your coach directly.'
+      : 'You have no sessions left on your pack. Your next session with your coach is not covered by one — buy another from them, or arrange it with them directly.';
+  }
+  return null;
+}

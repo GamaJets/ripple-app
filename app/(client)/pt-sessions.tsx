@@ -61,7 +61,15 @@ import {
 } from '../../src/lib/sessionDispute';
 import { useSessions } from '../../src/ui/sessions';
 import { useClientData } from '../../src/ui/clientData';
-import { sessionPacks } from '../../src/lib/connect';
+import { sessionPacks, myPtPasses, type PtPassRow } from '../../src/lib/connect';
+import type { PackBalance } from '../../src/lib/packDraw';
+import { withDeadline } from '../../src/lib/readDeadline';
+import { useToday } from '../../src/ui/today';
+// The routed balance, shared with app/(client)/session-credits.tsx and
+// app/(client)/packages.tsx so the three screens cannot answer "how many
+// sessions can I book" three ways. See its header for what they each used to
+// read.
+import { bookableCredits, creditsHeroNote, creditsEmptyLine } from '../../src/lib/sessionCredits';
 // The record of what became of each session, as opposed to what the member said
 // about it. See the note on the "What Already Happened" section below for why
 // those are two different lists and not one.
@@ -157,20 +165,69 @@ export default function PtSessions() {
   //   number     the database's count. 0 is real and is stated plainly.
   //   null       we could not read it. A dash, and a sentence saying so, so a
   //              client holding ten credits is never shown a zero.
-  const [left, setLeft] = useState<number | null>(null);
-  // Whether any session pack has EVER been bought, which is a different
-  // question from how many sessions are left on one and was being answered with
-  // the same number. `packBalance` returns a real 0 for a member with no
-  // purchases at all, so this screen greeted everybody — including somebody
-  // with no coach — with "0 · Nothing left on a pack" and an amber "Buy
-  // another". Both sentences describe a pack that never existed.
-  const [hasPacks, setHasPacks] = useState(false);
-  const [leftRead, setLeftRead] = useState(false);
+  //
+  // ── The read that was missing, and the sentence it produced ───────────
+  //
+  // This screen read `sessionPacks()` and nothing else. That is
+  // `client_purchases` — the packs a COACH sold — and it is only one of the two
+  // places a PT credit can come from. A gym sells a PT pass out of `gym_passes`
+  // (supabase/parts/370), assigns the member a coach, and the member arrives
+  // here holding eight sessions.
+  //
+  // `packBalance` correctly returns a real 0 for a purchase history that was
+  // read and came back empty, so this screen put **0** under "Sessions
+  // Remaining" and wrote **"You have not bought a session pack"** underneath
+  // it. Both statements were true of `client_purchases` and both were false of
+  // the member. `app/(client)/session-credits.tsx` — reading both tables —
+  // showed the same person 8 at the same moment.
+  //
+  // So the balance now comes from `bookableCredits`, which is the composition
+  // that screen was already doing inline: route by `chooseRoute` first, then
+  // count only what will actually be spent. NOT the sum of the two — an
+  // exhausted coach pack still beats a live gym pass, so somebody holding a
+  // spent 10-pack and an 8-use gym pass can book nothing, and a hero reading 8
+  // would send them to fill a week that ends in eight unpaid hours.
+  const [packs, setPacks] = useState<PackBalance | null | undefined>(undefined);
+  const [passes, setPasses] = useState<PtPassRow[] | null | undefined>(undefined);
   const loadLeft = useCallback(async () => {
-    const b = await sessionPacks();
-    setLeft(b?.left ?? null); setHasPacks((b?.lines.length ?? 0) > 0); setLeftRead(true);
+    // One deadline over both, for the reason src/lib/readDeadline.ts gives:
+    // neither of these rejects on a socket that is accepted and never answers,
+    // so without one a member on gym wifi behind a captive portal waits for
+    // ever on a balance they are about to book against.
+    const got = await withDeadline(Promise.all([sessionPacks(), myPtPasses()]));
+    if (!got.answered) {
+      // Only where there was nothing to lose. A pull-to-refresh that stalls
+      // over a balance already on screen must not blank it — this is money, and
+      // an unread refresh does not mean the credits stopped existing.
+      setPacks((v) => (v === undefined ? null : v));
+      setPasses((v) => (v === undefined ? null : v));
+      return;
+    }
+    const [p, g] = got.value;
+    setPacks(p); setPasses(g);
   }, []);
   useEffect(() => { loadLeft(); }, [loadLeft]);
+
+  // The day a gym pass is judged live against. `useToday`, never a `todayIso`
+  // computed once per render: a pass that ran out at midnight decides WHOSE
+  // MONEY pays for the next session, and a stale day goes on offering one the
+  // gym will refuse at the door.
+  const today = useToday();
+  // `undefined` is still loading and `null` is a read that did not land, and
+  // `bookableCredits` must be given null for both — 'unknown' is its answer to
+  // an unread half, and 'unknown' is never a figure.
+  const book = useMemo(
+    () => bookableCredits(
+      packs === undefined ? null : (packs?.lines ?? null),
+      passes === undefined ? null : passes,
+      today),
+    [packs, passes, today]);
+  // Three states, not two, and they are three different sentences: nothing has
+  // landed yet, we asked and could not get an answer, and here is the number.
+  const leftRead = packs !== undefined && passes !== undefined;
+  const left = book.left;
+  const heroNote = creditsHeroNote(book);
+  const emptyLine = creditsEmptyLine(book);
 
   // Two reads: the sessions themselves — including which of them a coach has
   // marked and this member has yet to approve — and the pack balance above
@@ -290,34 +347,43 @@ export default function PtSessions() {
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
 
-        {/* ── what is left on the pack ────────────────────────────────────
-            A figure only when one was actually read. `fig` prints a dash for
-            null, so a refused count renders as a dash beside a sentence saying
-            we could not read it — never as "0 sessions remaining" to somebody
-            who has paid for ten. */}
-        {leftRead ? (
+        {/* ── what is left, and where it comes from ───────────────────────
+            Loading, unread, empty and a real figure are four states and four
+            sentences. They used to be two, decided on whether
+            `client_purchases` came back empty — which is how somebody holding a
+            gym PT pass was shown a nought and told they had never bought a
+            pack. */}
+        {!leftRead ? (
+          <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Reading what pays for your sessions…</Text>
+        ) : (
           <>
-            <Hero label="Sessions Remaining" figure={fig(left)}
-              note={left == null ? 'We could not read your balance'
-                : left === 0 ? (hasPacks ? 'Nothing left on a pack' : 'You have not bought a session pack')
-                : 'Across your active session packs'} />
-            {left == null ? (
-              <Flag tone={t.crit}>
-                We couldn&apos;t read how many sessions you have left. This is not a statement that you
-                have none — anything you have paid for is still yours.
-              </Flag>
-            ) : left === 0 && hasPacks ? (
-              // Only somebody who HAS bought a pack can be told to buy another
-              // one. Shown to everybody, this warned members with no coach that
-              // a session they had not booked was not covered by a pack they
-              // had never had.
-              <Flag tone={t.warn}>
-                Your next session is not covered by a pack. Buy another from your coach, or arrange it
-                with them directly.
-              </Flag>
+            {/* A figure only over a balance that was read, and it is the balance
+                on the route that will actually pay — not the sum of the two,
+                and no longer `client_purchases` alone. The note names the
+                business whose credit it is, because a coach's pack and a gym's
+                PT pass are two different businesses' money and the member is
+                owed the name of the one about to be spent. */}
+            {left != null && heroNote ? (
+              <Hero label="Sessions Remaining" figure={fig(left)} note={heroNote} />
+            ) : null}
+            {/* Four sentences where this screen had two, and it picked between
+                those two on whether `client_purchases` was empty — which is how
+                "You have not bought a session pack" came to be printed to
+                somebody holding a gym PT pass. `creditsEmptyLine` decides on
+                the ROUTE, so an unread half says so, a member who holds nothing
+                is told that plainly and without alarm, and an empty
+                entitlement names which one is empty. */}
+            {emptyLine ? (
+              book.route === 'unknown' || left == null ? (
+                <Flag tone={t.crit}>{emptyLine}</Flag>
+              ) : book.route === 'none' ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>{emptyLine}</Text>
+              ) : (
+                <Flag tone={t.warn}>{emptyLine}</Flag>
+              )
             ) : null}
           </>
-        ) : null}
+        )}
 
         {/* The balance says how many. Which hours used the rest, and which of
             the booked ones are due to draw, are the next two questions and

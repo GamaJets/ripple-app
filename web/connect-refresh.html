@@ -27,15 +27,21 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
 <body>
 
+<!-- No skip link here, and that is deliberate rather than an omission. Every
+     other page has a sticky header carrying six links and a menu button before
+     the content starts, which is what there is to skip. This page has none: it
+     is the main landmark and nothing else, so a skip link would be the first
+     tab stop on the page, it would announce "Skip to content", and it would
+     move focus to the element focus was already about to reach. -->
+
 <!-- The header carries six links before the content starts. Without this a
      keyboard or switch user tabs all six on every page of the site. -->
-<a class="skip" href="#main">Skip to content</a>
 
 <!--
   WHERE STRIPE SENDS A COACH WHEN THE ONBOARDING LINK IS NO LONGER USABLE.
@@ -85,7 +91,41 @@
 </main>
 
 <script>
-  try { location.href = document.getElementById('open').href; } catch (e) { /* the button is the fallback */ }
+  /* Deferred, once, and cancellable — the same three guards join.html uses on
+     its own bounce, and for the same reason plus one.
+
+     This fired at parse time. On a phone with the app installed the OS takes
+     the click and the tab goes away before a screen reader has read the heading
+     or the sentence under it, so the one page whose whole job is to explain
+     what just happened at Stripe explains it to nobody. It also cannot be
+     stopped: somebody who reached for "Get the app" instead was taken to the
+     scheme anyway.
+
+     900ms is long enough for the heading and the first line to be spoken and
+     short enough that a reader who wants the app is not left waiting. Any
+     pointer, key or touch cancels it, because somebody reaching for this page
+     is not somebody who wants to be taken off it. The session mark stops a
+     Back navigation bouncing straight out again. A desktop browser has no
+     handler for the scheme, so nothing happens there either way — the button
+     was always the real route and still is. */
+  (function () {
+    var KEY = 'repple.connect.bounced';
+    var gone = false;
+    try { gone = sessionStorage.getItem(KEY) === '1'; } catch (e) { gone = false; }
+    if (gone) return;
+    var cancelled = false;
+    var stop = function () { cancelled = true; };
+    ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach(function (ev) {
+      addEventListener(ev, stop, { once: true, passive: true });
+    });
+    setTimeout(function () {
+      if (cancelled) return;
+      var a = document.getElementById('open');
+      if (!a) return;
+      try { sessionStorage.setItem(KEY, '1'); } catch (e) { /* private mode */ }
+      try { location.href = a.href; } catch (e) { /* the button is the fallback */ }
+    }, 900);
+  }());
 </script>
 
 </body>

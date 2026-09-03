@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -41,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -73,7 +91,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
-      Repple
+      Repple<span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -148,7 +166,7 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <ol class="steps">
+    <ol class="steps" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -227,10 +245,10 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Setup</span>
-          <h3>What has to exist before each figure does</h3>
+          <h3 id="chart-what-has-to-exist-before">What has to exist before each figure does</h3>
         </div>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-what-has-to-exist-before">
         <svg viewBox="0 0 740 392" width="740" height="392" role="img" aria-label="A map of six dependencies in Repple Studio. A price book and the memberships on it produce recurring revenue. Payments recorded or imported produce money taken in the last thirty days. A capacity recorded against each class produces a class fill rate. Check-outs as well as check-ins produce an average time in the building. A session fee plus an outcome marked on every session produces a payroll total that can be called final. The door log running produces attendance that is not only bookings.">
           <text class="cx-cap" x="16" y="30">YOU RECORD</text>
           <text class="cx-cap" x="452" y="30">STUDIO CAN THEN SHOW</text>
@@ -287,49 +305,50 @@ addEventListener('DOMContentLoaded', function () {
       </figcaption>
     </figure>
 
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-figures">
       <table class="data">
+        <caption class="vh" id="tbl-figures">Each figure, what it needs, and what you see until then</caption>
         <thead>
           <tr><th scope="col">Figure</th><th scope="col">What it needs</th><th scope="col">What you see until then</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Recurring revenue</strong></td>
+            <th scope="row"><strong>Recurring revenue</strong></th>
             <td>Active memberships sitting on a plan that has a price.</td>
             <td>A dash, and which memberships have no priced plan behind them.</td>
           </tr>
           <tr>
-            <td><strong>Money taken</strong></td>
+            <th scope="row"><strong>Money taken</strong></th>
             <td>Payments recorded at the desk or brought in from a spreadsheet.</td>
             <td>A dash. An empty payment record is not the same fact as a month of nothing, and it is not drawn as one.</td>
           </tr>
           <tr>
-            <td><strong>Class fill</strong></td>
+            <th scope="row"><strong>Class fill</strong></th>
             <td>A capacity recorded against the classes being measured.</td>
             <td>A dash and &ldquo;no capacity recorded&rdquo;, rather than a percentage of an invented denominator.</td>
           </tr>
           <tr>
-            <td><strong>Average stay</strong></td>
+            <th scope="row"><strong>Average stay</strong></th>
             <td>Exits logged as well as entries.</td>
             <td>A dash. Entries alone give you a visit count, which is a different question.</td>
           </tr>
           <tr>
-            <td><strong>Payroll total</strong></td>
+            <th scope="row"><strong>Payroll total</strong></th>
             <td>A session fee set for the gym, and an outcome marked on every session in the period.</td>
             <td>A figure that refuses to call itself final, and a count of how many sessions are still unmarked.</td>
           </tr>
           <tr>
-            <td><strong>Retention</strong></td>
+            <th scope="row"><strong>Retention</strong></th>
             <td>The door log running alongside the class bookings.</td>
             <td>A reading taken from bookings only, with a note when the door log and the class record disagree.</td>
           </tr>
           <tr>
-            <td><strong>Cash position</strong></td>
+            <th scope="row"><strong>Cash position</strong></th>
             <td>An accounting connection, which is not built.</td>
             <td>A permanent dash with &ldquo;connect accounting&rdquo; under it. It is on the roadmap, not in the product.</td>
           </tr>
           <tr>
-            <td><strong>Lifetime value</strong></td>
+            <th scope="row"><strong>Lifetime value</strong></th>
             <td>A measured membership lifespan, which needs time nobody has had yet.</td>
             <td>Nothing. Studio does not print an invented multiplier and call it analysis.</td>
           </tr>
@@ -357,7 +376,7 @@ addEventListener('DOMContentLoaded', function () {
           importer never guesses at an ambiguous value &mdash; it hands the row back with a reason
           and lets somebody decide.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>It reads the whole date column first.</strong> One unambiguous value settles the file: if any row says 25/12, every 03/04 in it can be read with confidence and you are never asked. A file containing both 25/12 and 12/25 is internally inconsistent, and that is said rather than resolved.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -410,19 +429,20 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Where the work happens</div>
       <h2 class="hd">Seven pages, and the<br><span class="serif">first job on each.</span></h2>
     </div>
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-console">
       <table class="data">
+        <caption class="vh" id="tbl-console">The seven console pages, and the first job on each</caption>
         <thead>
           <tr><th scope="col">Console page</th><th scope="col">What you do there first</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>Import</strong></td><td>Paste the price list, read the dry run, then do the same with the payments.</td></tr>
-          <tr><td><strong>Money</strong></td><td>Check the imported price book, open memberships against it, and record what comes in at the desk.</td></tr>
-          <tr><td><strong>Timetable</strong></td><td>Build the week &mdash; classes, weekly series and one-to-ones on one board &mdash; with a capacity recorded on each.</td></tr>
-          <tr><td><strong>Door</strong></td><td>Start checking people in and out, and sell or redeem a drop-in, a guest pass or a class pack.</td></tr>
-          <tr><td><strong>Sessions</strong></td><td>Clear anything sitting unmarked, then run payroll once nothing is outstanding.</td></tr>
-          <tr><td><strong>Members</strong></td><td>Open one person and see the whole of what the gym knows about them &mdash; membership, payments, visits, classes, one-to-ones and passes on one screen.</td></tr>
-          <tr><td><strong>Overview</strong></td><td>Nothing, at first. It is the last screen to become useful, because it reads back everything the other six record.</td></tr>
+          <tr><th scope="row"><strong>Import</strong></th><td>Paste the price list, read the dry run, then do the same with the payments.</td></tr>
+          <tr><th scope="row"><strong>Money</strong></th><td>Check the imported price book, open memberships against it, and record what comes in at the desk.</td></tr>
+          <tr><th scope="row"><strong>Timetable</strong></th><td>Build the week &mdash; classes, weekly series and one-to-ones on one board &mdash; with a capacity recorded on each.</td></tr>
+          <tr><th scope="row"><strong>Door</strong></th><td>Start checking people in and out, and sell or redeem a drop-in, a guest pass or a class pack.</td></tr>
+          <tr><th scope="row"><strong>Sessions</strong></th><td>Clear anything sitting unmarked, then run payroll once nothing is outstanding.</td></tr>
+          <tr><th scope="row"><strong>Members</strong></th><td>Open one person and see the whole of what the gym knows about them &mdash; membership, payments, visits, classes, one-to-ones and passes on one screen.</td></tr>
+          <tr><th scope="row"><strong>Overview</strong></th><td>Nothing, at first. It is the last screen to become useful, because it reads back everything the other six record.</td></tr>
         </tbody>
       </table>
     </div>
@@ -547,15 +567,15 @@ addEventListener('DOMContentLoaded', function () {
               <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
             </svg>
           </span>
-          Repple
-        </a>
+          Repple<span class="vh"> home</span>
+    </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
         <h2 class="fh">Apps</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
@@ -563,7 +583,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Getting started</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
@@ -573,7 +593,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Legal &amp; data</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>

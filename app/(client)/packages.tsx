@@ -31,7 +31,12 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Meter, Ghost, Cta, Flag, ListRow, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/theme/scale';
 import { normaliseCode, checkoutCodeBlocker, type PromoTarget } from '../../src/lib/packagePromo';
-import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, openPurchasePortal, portalPurchase, type Purchase, type TrainerPackage } from '../../src/lib/connect';
+import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, openPurchasePortal, portalPurchase, myPtPasses, type Purchase, type TrainerPackage, type PtPassRow } from '../../src/lib/connect';
+// The routed balance, shared with app/(client)/pt-sessions.tsx and
+// app/(client)/session-credits.tsx so the three screens cannot answer "how many
+// sessions can I book" three ways. See its header for what they each read.
+import { bookableCredits, creditsHeroNote, creditsEmptyLine } from '../../src/lib/sessionCredits';
+import { useToday } from '../../src/ui/today';
 import { packBalance, type PackPurchase } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
 // What a validity window means on the client's own side of the sale: the day it
@@ -65,6 +70,24 @@ export default function ClientPackages() {
   // The same distinction again, for the thing that charges again next month.
   const [subs, setSubs] = useState<ClientSubscription[] | null>(null);
   const [offers, setOffers] = useState<TrainerPackage[] | null>(null);
+  // ── the other place a PT credit comes from ────────────────────────────
+  //
+  // This screen is headed "what you've bought from your coach", and that is why
+  // it read `client_purchases` and stopped. But its hero is "Sessions
+  // Remaining", which is not a question about `client_purchases` — it is the
+  // question a member asks before they book, and a gym can sell the answer out
+  // of `gym_passes` (supabase/parts/370). A member whose gym sold them a PT
+  // pass and assigned them a coach got NO hero here at all, while
+  // app/(client)/pt-sessions.tsx told them 0 and
+  // app/(client)/session-credits.tsx told them 8. Three screens, three answers,
+  // one balance.
+  //
+  // `undefined` is still loading, `null` is a read that did not land. Not
+  // cached: a pack somebody bought does not change in a basement, which is the
+  // argument for the cache below, and a PASS balance changes every time a
+  // session is marked. The rest of this screen may be a week old and say so;
+  // the figure somebody is about to book against may not.
+  const [passes, setPasses] = useState<PtPassRow[] | null | undefined>(undefined);
   const [coachId, setCoachId] = useState<string | null>(null);
   const [coachErr, setCoachErr] = useState<string | null>(null);
   // Name AND currency, from the package row — the two things a purchase does
@@ -156,17 +179,24 @@ export default function ClientPackages() {
     // A stall is reported as the failure it is: the rows already on screen stay
     // (src/lib/staleRead.ts — a read that did not land is not a purchase that
     // stopped existing), and the banners this screen already has say so.
-    const first = await withDeadline(Promise.all([fetchMyPurchases(), fetchMySubscriptions(), myCoachId()]));
+    const first = await withDeadline(Promise.all([fetchMyPurchases(), fetchMySubscriptions(), myCoachId(), myPtPasses()]));
     if (!first.answered) {
       setFailed(true);
       setSubsFailed(true);
+      // A stall over a balance is a failed read of it, not an empty pass list.
+      setPasses((v) => (v === undefined ? null : v));
       // Any non-null string raises the flag; the sentence itself is in the
       // render. Not knowing who coaches you is exactly what this is.
       setCoachErr('The server did not answer.');
       setLoading(false);
       return;
     }
-    const [p, s, c] = first.value;
+    const [p, s, c, g] = first.value;
+    // Assigned straight through, null included. Unlike the purchases above
+    // there is no cached copy to protect, and null is this screen's word for
+    // "we could not read it" — which `bookableCredits` turns into 'unknown' and
+    // never into a nought.
+    setPasses(g);
     // `p === null` is a failed read. Assigning it would wipe the cached list
     // above — replacing what somebody bought with the fact that we could not
     // ask, which is the exact substitution this screen's own header warns
@@ -257,6 +287,30 @@ export default function ClientPackages() {
   // gesture people already try; see src/ui/pullToRefresh.tsx.
   const pull = usePullToRefresh(useCallback(() => load(), [load]));
   const remaining = balance.left;
+  // The day a gym pass is judged live against — `useToday`, which re-reads at
+  // the next local midnight and on every return to the foreground, because a
+  // pass that lapsed overnight decides whose money pays for the next session.
+  const today = useToday();
+  // The bookable figure, by the same composition the other two screens use.
+  // `remaining` above is still the coach-pack half and is still what the pack
+  // LIST below is about; `book.left` is what a member can actually book, which
+  // is the coach's pack when they hold one at all — empty included, because an
+  // exhausted coach pack still beats a live gym pass — and the gym's pass
+  // otherwise.
+  //
+  // `rows == null` and NOT `balance.lines`. `packBalance(null)` returns
+  // `{ lines: [], left: null }` — the null is carried on the figure, correctly,
+  // and the LIST is an empty array either way. Handing that empty array to
+  // `bookableCredits` tells it "this member holds no coach pack", which is the
+  // one fabrication `chooseRoute` exists to refuse: it would fall straight
+  // through to the gym's pass and print the gym's balance to somebody whose
+  // coach pack simply could not be read — and the coach pack is what the
+  // database would actually have drawn from. Three screens got this right by
+  // holding a `PackBalance | null`; this one holds the rows, so the null has to
+  // be re-derived here.
+  const book = useMemo(
+    () => bookableCredits(rows == null ? null : balance.lines, passes === undefined ? null : passes, today),
+    [rows, balance, passes, today]);
   const packLines = useMemo(() => new Map(balance.lines.map((l) => [l.id, l])), [balance]);
   // `balance.lines` is oldest first, the order redeem_pack_session spends them
   // in, so the first one with anything left is the one the next booking draws
@@ -437,7 +491,22 @@ export default function ClientPackages() {
                 null for a refused read, and a hero reading "0" would tell a
                 client holding ten that they have none. The failure panel below
                 says what actually happened. */}
-            {balance.lines.length > 0 && remaining != null ? (
+            {book.route === 'gym_pass' && book.left != null ? (
+              /* ── the balance this screen could not see ──────────────────
+                 No coach pack, and a live PT pass the gym sold them. The hero
+                 was gated on `balance.lines.length > 0` — coach packs only —
+                 so this member got no figure here at all while the other two
+                 screens gave them two different ones. The note names the gym,
+                 so a figure on a screen headed "bought from your coach" is not
+                 mistaken for something they bought from their coach; the pack
+                 list below still, correctly, shows nothing. */
+              <>
+                <Hero label="Sessions Remaining" figure={fig(book.left)} note={creditsHeroNote(book) ?? ''} />
+                <ListRow icon="calendar" title="Your Gym PT Pass"
+                  note="Which sessions used a credit, and what your bookings are due to draw"
+                  onPress={() => router.push('/(client)/session-credits')} />
+              </>
+            ) : balance.lines.length > 0 && remaining != null ? (
               <Hero label="Sessions Remaining" figure={fig(remaining)}
                 note={balance.live > 0
                   ? `Across ${balance.live} active pack${balance.live === 1 ? '' : 's'}${balance.exhausted ? ` · ${balance.exhausted} used up` : ''}${balance.stranded ? ` · ${balance.stranded} ran out of time` : ''}`
@@ -453,10 +522,16 @@ export default function ClientPackages() {
             {/* Their next booking is not covered by anything they have paid
                 for. Said plainly rather than left to be inferred from a meter
                 sitting at zero. */}
-            {remaining === 0 && balance.lines.length > 0 ? (
-              <Flag tone={t.warn}>
-                You have no sessions left. Your next booking with your coach is not covered by a
-                pack — buy another below, or arrange it with them directly.
+            {/* An empty entitlement, named. Through `creditsEmptyLine` rather
+                than a local `remaining === 0`, because the sentence has to say
+                WHICH thing is empty: a member holding a spent gym pass was
+                being told to buy another pack from a coach who never sold them
+                one. Null when there is a balance to book against, and null for
+                'none' here — a member who holds nothing at all needs no warning
+                on the screen that sells them their first pack. */}
+            {book.route !== 'none' && creditsEmptyLine(book) ? (
+              <Flag tone={book.route === 'unknown' || book.left == null ? t.crit : t.warn}>
+                {creditsEmptyLine(book)}
               </Flag>
             ) : null}
 
@@ -654,7 +729,20 @@ export default function ClientPackages() {
                                 // money and the start of a conversation with
                                 // the coach rather than the end of one.
                                 ? `${line.sessionsExpired} of ${line.sessions_total} ran out of time`
-                                : `All ${line.sessions_total} used before it ran out`)
+                                // A credit that came BACK after the window
+                                // shut. `refund_pack_session` (part 123)
+                                // decrements `sessions_used` on the newest pack
+                                // with usage without asking whether its window
+                                // has closed, so a refund after expiry leaves a
+                                // credit here that nothing will let the member
+                                // draw. This row said "All 10 used before it
+                                // ran out" while its own meter drew one
+                                // remaining underneath — a sentence and a bar
+                                // contradicting each other about somebody's
+                                // money. The line below says what to do.
+                                : line.left > 0
+                                  ? `${line.left} of ${line.sessions_total} came back after it ran out`
+                                  : `All ${line.sessions_total} used before it ran out`)
                               : line.exhausted ? `None left of ${line.sessions_total}` : `${line.left} of ${line.sessions_total} left`}
                               val={line.left} target={line.sessions_total} unit="" />
                             {/* The date, because "ran out of time" without one

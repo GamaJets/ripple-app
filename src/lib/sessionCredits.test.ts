@@ -42,6 +42,7 @@ import {
   chooseRoute, routeReason, creditsLeft, payingLines, passLiveOn, gymPtLines,
   coachPackLines, ledgerStateOf, buildLedger, expectedDraws,
   clientLedgerLine, coachLedgerLine, shortfallLine, bookingCreditNote,
+  bookableCredits, creditsHeroNote, creditsEmptyLine,
   type CreditSession, type Entitlement, type LedgerState,
 } from './sessionCredits';
 
@@ -285,6 +286,96 @@ ok((bookingCreditNote('gym_pass', 3) || '').includes('marks this complete'),
 ok(!(bookingCreditNote('gym_pass', 3) || '').includes('the moment you book'),
   'and never claims a credit is spent at booking when the design spends it at delivery');
 eq(bookingCreditNote('none', 0), null, 'somebody who holds nothing is told nothing about packs at all');
+
+
+/* ── 7 · the one answer the three screens now share ───────────────────────── */
+//
+// The defect this section exists for: `app/(client)/pt-sessions.tsx` and
+// `app/(client)/packages.tsx` both read `client_purchases` alone, so a member
+// whose GYM sold them a PT pass was told "Sessions Remaining 0 · You have not
+// bought a session pack" on one and shown no balance at all on the other,
+// while `app/(client)/session-credits.tsx` — the only screen reading both —
+// showed the eight sessions they actually held.
+
+const DAY = '2026-09-01';
+const pack = (p: Partial<{ id: string; label: string; left: number; sessions_total: number; expiresOn: string | null; expired: boolean }> = {}) =>
+  ({ id: 'p1', label: '10-session pack', left: 4, sessions_total: 10, ...p });
+const ptPass = (p: Partial<{ id: string; passTypeId: string | null; passTypeName: string | null; covers: string | null; expiresOn: string | null; usesTotal: number; usesSpent: number }> = {}) =>
+  ({ id: 'g1', passTypeId: 't1', passTypeName: 'PT 8-pack', covers: 'pt', expiresOn: null, usesTotal: 8, usesSpent: 0, ...p });
+
+// The member the bug was about: a gym PT pass and no coach pack at all.
+const gymOnly = bookableCredits([], [ptPass()], DAY);
+eq(gymOnly.route, 'gym_pass', 'no coach pack and a live PT pass: the gym pass is what pays');
+eq(gymOnly.left, 8, 'and the figure is the eight sessions they are actually holding, not the nought client_purchases reports');
+ok((creditsHeroNote(gymOnly) || '').includes('gym'),
+  'the note names the business whose credit it is, because two businesses are involved and only one of them is being spent');
+eq(creditsEmptyLine(gymOnly), null,
+  'somebody with eight credits is never told they have not bought a pack — the exact sentence pt-sessions.tsx printed');
+
+// The case that makes summing the two balances wrong.
+const spentPackLivePass = bookableCredits([pack({ left: 0 })], [ptPass()], DAY);
+eq(spentPackLivePass.route, 'coach_pack',
+  'an exhausted coach pack still beats a live gym pass, exactly as chooseRoute and part 370 have it');
+eq(spentPackLivePass.left, 0,
+  'so the bookable figure is 0 — a sum would print 8 and send them to book a week of shortfalls on their coach’s unpaid hours');
+ok((creditsEmptyLine(spentPackLivePass) || '').includes('pack'),
+  'and the empty line points at the pack that is empty, not at the pass that is not being spent');
+ok(!(creditsEmptyLine(spentPackLivePass) || '').includes('not bought'),
+  'never “you have not bought a session pack” to somebody who bought one and used it');
+
+// Both held, both with credit: still one number, and it is the coach's.
+const both = bookableCredits([pack({ left: 3 })], [ptPass()], DAY);
+eq(both.left, 3, 'holding both, the figure is the route that pays and never the total of the two');
+
+// Holding nothing at all — an ordinary answer, and the only case where the old
+// sentence was true.
+const neither = bookableCredits([], [], DAY);
+eq(neither.route, 'none', 'holding neither is ordinary');
+eq(neither.left, 0, 'and it is a real nought, because both halves were read');
+eq(creditsHeroNote(neither), null, 'with no entitlement there is no figure for a note to sit under');
+ok((creditsEmptyLine(neither) || '').includes('gym PT pass'),
+  'and the sentence names BOTH systems, so it is a statement about everything that was checked');
+
+// Unread, in each half, is never a nought.
+const packsUnread = bookableCredits(null, [ptPass()], DAY);
+eq(packsUnread.route, 'unknown', 'an unread purchase history makes the route unknown even with a live pass beside it');
+eq(packsUnread.left, null, 'and the figure is null, never 0');
+eq(creditsHeroNote(packsUnread), null, 'no note over a figure that does not exist');
+ok((creditsEmptyLine(packsUnread) || '').includes('could not'),
+  'the unread sentence says it is our end, not a statement about what they hold');
+
+const passesUnread = bookableCredits([], null, DAY);
+eq(passesUnread.route, 'unknown',
+  'an unread pass list is unknown too, once it is the half that decides — this is the read pt-sessions.tsx never made');
+eq(passesUnread.left, null, 'and it is null rather than the 0 client_purchases would have supplied');
+
+// A coach pack read that answers the question on its own survives a failed pass
+// read: the coach pack wins whatever the pass list says, so there is nothing
+// unknown about it.
+const packReadPassFailed = bookableCredits([pack({ left: 5 })], null, DAY);
+eq(packReadPassFailed.route, 'coach_pack', 'a coach pack answers the route on its own');
+eq(packReadPassFailed.left, 5, 'so a failed pass read does not blank a balance it could not have changed');
+
+// A class pass is not a PT pass.
+const classOnly = bookableCredits([], [ptPass({ covers: 'visit' })], DAY);
+eq(classOnly.route, 'none', 'a ten-CLASS pack never pays for an hour of one-to-one');
+
+// An expired pass is not a balance.
+const lapsed = bookableCredits([], [ptPass({ expiresOn: '2026-08-31' })], DAY);
+eq(lapsed.route, 'none', 'a pass whose last day has passed is not something to book against');
+
+// The note's plurals and the diary clause.
+eq(creditsHeroNote(bookableCredits([pack({ left: 4 })], [], DAY)), 'On the pack you bought from your coach',
+  'one pack is singular and says who sold it');
+eq(creditsHeroNote(bookableCredits([pack({ id: 'a', left: 2 }), pack({ id: 'b', left: 2 })], [], DAY)),
+  'Across 2 packs you bought from your coach', 'two are counted');
+ok((creditsHeroNote(gymOnly, 3) || '').includes('3 booked sessions still to draw'),
+  'a diary that was read adds what it is due to take');
+ok((creditsHeroNote(gymOnly, 0) || '').includes('nothing booked'),
+  'a read diary with nothing in it says so');
+eq(creditsHeroNote(gymOnly, null), creditsHeroNote(gymOnly),
+  'a diary that would not read adds nothing, rather than claiming nothing is booked');
+
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('sessionCredits: ok (an empty coach pack still beats a gym pass, unread is never nought, a shortfall is not cash)');

@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -41,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -73,7 +91,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
-      Repple
+      Repple<span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -111,7 +129,12 @@ addEventListener('DOMContentLoaded', function () {
     <h2 class="vh">Get Repple</h2>
     <div class="getbar" style="grid-template-columns:1fr;max-width:640px">
       <div class="app">
-        <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple app icon" focusable="false">
+        <!-- The icon is decorative: the app it belongs to is named in the heading
+             directly beneath it, so `role="img"` with "Repple Coach app icon" made
+             a screen reader say the name twice, once as an image and once as a
+             heading. An icon whose meaning is repeated in the text beside it is a
+             picture, not information. -->
+        <svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false">
           <defs><linearGradient id="tile-client-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs>
           <rect width="1024" height="1024" rx="220" fill="url(#tile-client-top)"/>
           <g stroke="#fff" fill="#fff">
@@ -125,8 +148,8 @@ addEventListener('DOMContentLoaded', function () {
           <h3>Repple</h3>
           <p class="role">For the person training</p>
           <div class="stores">
-            <a class="store" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+            <a class="store" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple</span></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple</span></a>
           </div>
           <p class="tiny" style="margin:10px 0 0;color:var(--ink3)">
             Being released now &mdash; if a button does not open a listing yet, that app has not
@@ -166,7 +189,7 @@ addEventListener('DOMContentLoaded', function () {
         </div>
       </div>
     </div>
-      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)">
+      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)" role="list">
       <li><a href="#tabs">The app</a></li>
       <li><a href="#log">The log</a></li>
       <li><a href="#volume">Volume</a></li>
@@ -188,34 +211,35 @@ addEventListener('DOMContentLoaded', function () {
       These are the same words the app uses on its own guide screen. A page that describes a
       different product to the one you install is only a longer way of getting it wrong.
     </p>
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-tabs">
       <table class="data">
+        <caption class="vh" id="tbl-tabs">The five tabs in Repple, and what each one is for</caption>
         <thead>
           <tr><th scope="col">Tab</th><th scope="col">What it is for</th><th scope="col">What you do there</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Home</strong></td>
+            <th scope="row"><strong>Home</strong></th>
             <td>Where your day starts — how recovered you are and what is next.</td>
             <td>Readiness, which needs a night of sleep logged before it shows anything. Weight, body fat and muscle from your most recent scan, with the change since the one before it. A weight line built from your check-ins, so it only moves when you log one.</td>
           </tr>
           <tr>
-            <td><strong>Train</strong></td>
+            <th scope="row"><strong>Train</strong></th>
             <td>Your program, session by session.</td>
             <td>Tap a day to see that session; Start workout walks you through it exercise by exercise. Log each set as you go — reps and weight. Book a session in your coach's open slots, or open the month calendar. Cardio, HIIT and mobility sit alongside the main program.</td>
           </tr>
           <tr>
-            <td><strong>Meals</strong></td>
+            <th scope="row"><strong>Meals</strong></th>
             <td>Your calorie and macro targets, and what you actually ate.</td>
             <td>Log food three ways — photograph it, scan a barcode, or describe it in words. Mark the day training, standard or rest and the targets move with it.</td>
           </tr>
           <tr>
-            <td><strong>Progress</strong></td>
+            <th scope="row"><strong>Progress</strong></th>
             <td>The long view — scans, measurements and photos.</td>
             <td>Add an InBody scan; the body fat and muscle on Home come from here. Keep the tape numbers between scans. Save progress photos and compare two of them side by side.</td>
           </tr>
           <tr>
-            <td><strong>Me</strong></td>
+            <th scope="row"><strong>Me</strong></th>
             <td>Your account, your coach and your settings.</td>
             <td>Connect a wearable to bring heart rate and sleep in automatically. Find a coach from the trainers who have opted in, and send them a request. Everything you log belongs to your account and follows you across devices.</td>
           </tr>
@@ -239,7 +263,7 @@ addEventListener('DOMContentLoaded', function () {
           Log a lift in a few taps, or let your watch fill it in. Either way it lands in the same
           place, in a form you can still read in two years.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Sets, reps, load and effort</strong> — with personal records surfaced as you pass them, not buried in a menu.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -320,7 +344,7 @@ addEventListener('DOMContentLoaded', function () {
           Tonnage is the least glamorous number in training and the most honest one. Every set's
           load multiplied by its reps, added up, week by week, for the last ten weeks.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Ten weeks at a time</strong> — long enough to see a block of training, short enough that this week still means something.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -409,7 +433,7 @@ addEventListener('DOMContentLoaded', function () {
           produced it is kept with it — the weight, the reps and the date. Nothing is entered by
           hand into the record board; it is read back out of your log.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>The full board</strong> — the dashboard shows your top three; the records screen shows every lift, sorted, with the set behind each one.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -429,10 +453,21 @@ addEventListener('DOMContentLoaded', function () {
           <span class="ttl">personal records · illustrative</span>
         </div>
         <div class="rows">
-          <div class="row"><span class="nm">Deadlift</span><span class="mt">180 kg × 3</span><span class="pill ok">198 est 1RM</span></div>
+          <!-- These five pills were two greens and three neutrals, and nothing on
+               this page, in the caption under it or in the copy beside it says what
+               the green means. It is not the top three (164 is neutral and 102 is
+               green), and two identical values carry different colours. An unexplained
+               colour in a mock-up of a real screen reads as data — a reader assumes
+               they have missed a rule — and it is a distinction no screen reader and
+               nobody with a red-green deficiency can perceive at all. Every row here is
+               the same kind of thing: a best estimated one-rep max and the set that
+               produced it. So they all look the same. If the green was meant to say
+               "set recently" or "a new record", the mock-up needs a word for it, not a
+               hue. -->
+          <div class="row"><span class="nm">Deadlift</span><span class="mt">180 kg × 3</span><span class="pill">198 est 1RM</span></div>
           <div class="row"><span class="nm">Back squat</span><span class="mt">145 kg × 4</span><span class="pill">164 est 1RM</span></div>
           <div class="row"><span class="nm">Barbell row</span><span class="mt">85 kg × 6</span><span class="pill">102 est 1RM</span></div>
-          <div class="row"><span class="nm">Bench press</span><span class="mt">92.5 kg × 3</span><span class="pill ok">102 est 1RM</span></div>
+          <div class="row"><span class="nm">Bench press</span><span class="mt">92.5 kg × 3</span><span class="pill">102 est 1RM</span></div>
           <div class="row"><span class="nm">Overhead press</span><span class="mt">60 kg × 5</span><span class="pill">70 est 1RM</span></div>
         </div>
         <div class="surface-body">
@@ -457,7 +492,7 @@ addEventListener('DOMContentLoaded', function () {
           there are workouts sitting in Health that aren't in your log yet, and offer to bring
           them across. Finished sessions can be written back, so your rings stay accurate.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Apple Health, in and out</strong> — heart rate, active energy, steps, resting HR and workouts, only with your permission, revocable any time.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -507,7 +542,7 @@ addEventListener('DOMContentLoaded', function () {
           same grey–blue–green–orange–red language you have already seen on a studio wall. A whole
           minute at zone 4 or above earns a splat point. Partial minutes earn nothing.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Live, during the session</strong> — the zone you are in right now, with time banked into each zone a second at a time as you train.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -572,17 +607,18 @@ addEventListener('DOMContentLoaded', function () {
       </div>
     </div>
 
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-zones">
       <table class="data">
+        <caption class="vh" id="tbl-zones">The five heart-rate zones, and what each one is</caption>
         <thead>
           <tr><th scope="col">Zone</th><th scope="col">% of max HR</th><th scope="col">Colour</th><th scope="col">What it is</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>1 · Very light</strong></td><td>50–60%</td><td>Grey</td><td>Warming up, barely working.</td></tr>
-          <tr><td><strong>2 · Light</strong></td><td>61–70%</td><td>Blue</td><td>Comfortable — you could hold a conversation.</td></tr>
-          <tr><td><strong>3 · Base</strong></td><td>71–83%</td><td>Green</td><td>Steady, sustainable effort.</td></tr>
-          <tr><td><strong>4 · Push</strong></td><td>84–91%</td><td>Orange</td><td>Uncomfortable. This is where splat points come from.</td></tr>
-          <tr><td><strong>5 · All out</strong></td><td>92–100%</td><td>Red</td><td>Cannot be held for long.</td></tr>
+          <tr><th scope="row"><strong>1 · Very light</strong></th><td>50–60%</td><td>Grey</td><td>Warming up, barely working.</td></tr>
+          <tr><th scope="row"><strong>2 · Light</strong></th><td>61–70%</td><td>Blue</td><td>Comfortable — you could hold a conversation.</td></tr>
+          <tr><th scope="row"><strong>3 · Base</strong></th><td>71–83%</td><td>Green</td><td>Steady, sustainable effort.</td></tr>
+          <tr><th scope="row"><strong>4 · Push</strong></th><td>84–91%</td><td>Orange</td><td>Uncomfortable. This is where splat points come from.</td></tr>
+          <tr><th scope="row"><strong>5 · All out</strong></th><td>92–100%</td><td>Red</td><td>Cannot be held for long.</td></tr>
         </tbody>
       </table>
     </div>
@@ -631,9 +667,9 @@ addEventListener('DOMContentLoaded', function () {
           scan or a check-in to work from. Until there is one, the Meals tab asks for your
           measurements instead of inventing a target and calling it yours.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Three ways to log</strong> — photograph the meal, scan the barcode, or just describe it. Barcodes are looked up in the Open Food Facts database. Photographing a meal and describing one both send what you gave to a model outside the app to be read; <a href="/privacy#ai">Privacy</a> sets out exactly what goes and where.</span></li>
+            <span><strong>Three ways to log</strong> — photograph the meal, scan the barcode, or just describe it. Barcodes are looked up in the Open Food Facts database. Photographing a meal and describing one both send what you gave to a model outside the app to be read; <a href="/privacy#ai">Privacy<span class="vh">, the section on services outside the app</span></a> sets out exactly what goes and where.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Training, standard or rest</strong> — mark the day and the targets move with it, rather than holding one number across a week that is not one kind of week.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -688,7 +724,7 @@ addEventListener('DOMContentLoaded', function () {
           wrong. Two scans in, the chart tells you whether the weight coming off is the weight you
           wanted to lose.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>A newer scan re-tunes the plan</strong> — calorie and protein targets adjust, and the app tells you by how much and why.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -782,7 +818,7 @@ addEventListener('DOMContentLoaded', function () {
           the fastest way to see the shape of a training habit — including the fortnight you
           quietly stopped, which is exactly the part worth seeing.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>A weekly check-in</strong> — energy, sleep, mood and adherence, plus a weight if you have one. The ratings start unset, so an untouched form cannot file an answer you never gave.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -926,7 +962,14 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="split">
       <div class="principle">
-        <div class="eyebrow" style="margin-bottom:18px">Your coach, in the same app</div>
+<!-- The eyebrow-and-pull-quote sections carry a title the eye reads as one and
+           the outline never had. A reader navigating by heading went straight past
+           this band; on trainer.html the site's own jump list LINKS to one of them,
+           so following that link landed on a section whose title did not exist. The
+           heading is the one the design already implies: the eyebrow, which is the
+           section's name, kept out of sight because the design already shows it. -->
+        <h2 class="vh">Your coach, in the same app</h2>
+        <div class="eyebrow" style="margin-bottom:18px" aria-hidden="true">Your coach, in the same app</div>
         <p class="q">No more screenshotting<br>your own workouts.</p>
         <p class="lede" style="margin-top:22px;font-size:17px">
           Accept a coaching link and your trainer can see the training, the nutrition and the
@@ -934,7 +977,7 @@ addEventListener('DOMContentLoaded', function () {
           in one thread instead of scattered across WhatsApp. End the link whenever you like — it
           is your record, and it stays yours.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>One thread</strong> — messages with your coach, in the app, updating as they are sent.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -1089,7 +1132,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Can I fix something I logged wrong?</summary>
-        <div class="a"><p>Yes. Any past entry can be edited — the exercise, the sets, the cardio figures, the calories — without deleting the session and starting again. Scan fields read from a photographed report can be corrected before you save them, which is worth doing: reading a printout is done by services outside the app, they misread a digit occasionally, and the figures are yours to correct. <a href="/privacy#ai">Privacy</a> says which services and what is sent.</p></div>
+        <div class="a"><p>Yes. Any past entry can be edited — the exercise, the sets, the cardio figures, the calories — without deleting the session and starting again. Scan fields read from a photographed report can be corrected before you save them, which is worth doing: reading a printout is done by services outside the app, they misread a digit occasionally, and the figures are yours to correct. <a href="/privacy#ai">Privacy<span class="vh">, the section on services outside the app</span></a> says which services and what is sent.</p></div>
       </details>
       <!-- The single most common real condition in a gym — no usable signal in
            the weights room — and the site had never once said what happens. -->
@@ -1099,7 +1142,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Who can see my data?</summary>
-        <div class="a"><p>You, always. A coach you have deliberately linked to. And your gym, for the membership and attendance information needed to run the place — not your private messages. No one else is shown your record, and none of it is used for advertising. The one thing worth knowing beyond that: some features work by sending what you gave them to a service outside the app to be read — a meal photo, an InBody sheet, an injury document, or a question you ask the in-app coach. <a href="/privacy#ai">Privacy</a> names each service and lists exactly what reaches it; what a coach can and cannot read, line by line, is in <a href="/security">Security &amp; data</a>.</p></div>
+        <div class="a"><p>You, always. A coach you have deliberately linked to. And your gym, for the membership and attendance information needed to run the place — not your private messages. No one else is shown your record, and none of it is used for advertising. The one thing worth knowing beyond that: some features work by sending what you gave them to a service outside the app to be read — a meal photo, an InBody sheet, an injury document, or a question you ask the in-app coach. <a href="/privacy#ai">Privacy<span class="vh">, the section on services outside the app</span></a> names each service and lists exactly what reaches it; what a coach can and cannot read, line by line, is in <a href="/security">Security &amp; data</a>.</p></div>
       </details>
       <details>
         <summary>Can I get everything back out?</summary>
@@ -1123,8 +1166,8 @@ addEventListener('DOMContentLoaded', function () {
       <a class="btn primary" href="/signup">Create an account</a>
       <a class="btn" href="/support">Questions first</a>
     
-        <a class="store" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+        <a class="store" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple</span></a>
+        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple</span></a>
         <a class="btn" href="/download">All three apps</a>
       </div>
   </div>
@@ -1143,15 +1186,15 @@ addEventListener('DOMContentLoaded', function () {
               <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
             </svg>
           </span>
-          Repple
-        </a>
+          Repple<span class="vh"> home</span>
+    </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
         <h2 class="fh">Apps</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
@@ -1159,7 +1202,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Getting started</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
@@ -1169,7 +1212,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Legal &amp; data</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>

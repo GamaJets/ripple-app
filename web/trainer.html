@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -41,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -73,7 +91,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#0d0a26"/>
         </svg>
       </span>
-      Repple
+      Repple<span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -112,7 +130,12 @@ addEventListener('DOMContentLoaded', function () {
     <h2 class="vh">Get Repple Coach</h2>
     <div class="getbar" style="grid-template-columns:1fr;max-width:640px">
       <div class="app">
-        <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple Coach app icon" focusable="false">
+        <!-- The icon is decorative: the app it belongs to is named in the heading
+             directly beneath it, so `role="img"` with "Repple Coach app icon" made
+             a screen reader say the name twice, once as an image and once as a
+             heading. An icon whose meaning is repeated in the text beside it is a
+             picture, not information. -->
+        <svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false">
           <defs><linearGradient id="tile-coach-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#4338ca"/></linearGradient></defs>
           <rect width="1024" height="1024" rx="220" fill="url(#tile-coach-top)"/>
           <g stroke="#fff" fill="#fff">
@@ -126,8 +149,8 @@ addEventListener('DOMContentLoaded', function () {
           <h3>Repple Coach</h3>
           <p class="role">For personal trainers and coaches</p>
           <div class="stores">
-            <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+            <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
           </div>
           <p class="tiny" style="margin:10px 0 0;color:var(--ink3)">
             Being released now &mdash; if a button does not open a listing yet, that app has not
@@ -170,7 +193,7 @@ addEventListener('DOMContentLoaded', function () {
         </div>
       </div>
     </div>
-      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)">
+      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)" role="list">
       <li><a href="#tabs">The app</a></li>
       <li><a href="#the-roster">The roster</a></li>
       <li><a href="#one-client">One client</a></li>
@@ -195,39 +218,40 @@ addEventListener('DOMContentLoaded', function () {
         longer way of getting it wrong.
       </p>
     </div>
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-ctabs">
       <table class="data">
+        <caption class="vh" id="tbl-ctabs">The six tabs in Repple Coach, and what each one is for</caption>
         <thead>
           <tr><th scope="col">Tab</th><th scope="col">What it is for</th><th scope="col">What you do there</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Clients</strong></td>
+            <th scope="row"><strong>Clients</strong></th>
             <td>Your roster, and who needs you today.</td>
             <td>Add client enters someone by hand. Invite by email records an invitation they pick up when they sign in. Segments split the roster by at-risk, online, in-person and any tag you have made. Suggested check-ins surfaces the clients who have gone quiet.</td>
           </tr>
           <tr>
-            <td><strong>Programs</strong></td>
+            <th scope="row"><strong>Programs</strong></th>
             <td>Build a week of training and assign it.</td>
             <td>Start from a template, or add training days and build from scratch. Assign to client pushes the programme into that client's Train tab. Save any programme you like as a template to reuse — and revert a client to their auto-generated plan whenever you want.</td>
           </tr>
           <tr>
-            <td><strong>Schedule</strong></td>
+            <th scope="row"><strong>Schedule</strong></th>
             <td>Your coaching week.</td>
             <td>Add a session books a client, or opens a slot they can book themselves. Weekly availability sets the times you offer and generates open slots four weeks ahead. Group classes schedules classes across your branches and checks members in.</td>
           </tr>
           <tr>
-            <td><strong>Videos</strong></td>
+            <th scope="row"><strong>Videos</strong></th>
             <td>The clips your clients see inside their programme.</td>
             <td>Record a clip on the phone, upload one, or paste a hosted link. Each clip carries an exercise name, and it plays against that movement for every client who has it — in the session, not in a folder somewhere.</td>
           </tr>
           <tr>
-            <td><strong>Analytics</strong></td>
+            <th scope="row"><strong>Analytics</strong></th>
             <td>How the coaching business is actually going.</td>
             <td>Sessions run this month, valued at the rate on your profile. Roster health split into on track, watch and at risk. Your own revenue and client targets. Figures stay empty until there is real activity behind them.</td>
           </tr>
           <tr>
-            <td><strong>Profile</strong></td>
+            <th scope="row"><strong>Profile</strong></th>
             <td>How clients see you.</td>
             <td>Photo, tagline, bio, specialties, what you offer and your session rate, with a live preview of the card a client reads. One switch lists you in Find a Trainer; it is off until you turn it on.</td>
           </tr>
@@ -254,7 +278,7 @@ addEventListener('DOMContentLoaded', function () {
           adherence drops below 80 per cent, or when nothing at all has been logged for two days —
           and it says which of the two it is, so you open the conversation knowing what to ask.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Adherence, from their own check-in</strong> — the weekly rating they gave, turned into a percentage. A client who has never checked in has no adherence at all, and is not quietly counted as perfect.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -298,7 +322,7 @@ addEventListener('DOMContentLoaded', function () {
             <text class="cx-lab" x="0" y="210">No check-ins yet</text>
             <text class="cx-ax" x="560" y="210" text-anchor="end">in none of the three</text>
           </svg>
-          <ul class="legend">
+          <ul class="legend" role="list">
             <li><span class="sw f-hi"></span>On track <span class="n">9</span></li>
             <li><span class="sw f-mid"></span>Watch <span class="n">4</span></li>
             <li><span class="sw f-lo"></span>At risk <span class="n">3</span></li>
@@ -328,7 +352,7 @@ addEventListener('DOMContentLoaded', function () {
           logged sessions, their loads, their scans, their measurements, their meals if they share
           them — and the notes and feedback you have already given them, on the same timeline.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Body composition, segment by segment</strong> — fat and lean mass, body water, protein and minerals, and lean mass in each arm, the trunk and each leg, read from their InBody scans.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -470,7 +494,7 @@ addEventListener('DOMContentLoaded', function () {
           One-to-ones and group classes on a single timetable, with the month in view and the day
           you tapped underneath it. Tap a booking and you are already in that client's record.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Book them, or let them book you</strong> — add a session against a client, or open a slot they can take. Weekly availability generates those open slots four weeks ahead in one go.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -532,11 +556,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Twelve weeks</span>
-          <h3>Booked against marked as gone ahead</h3>
+          <h3 id="chart-booked-against-marked-as-gone">Booked against marked as gone ahead</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-booked-against-marked-as-gone">
         <svg viewBox="0 0 740 300" width="740" height="300" role="img" aria-label="Grouped bar chart comparing sessions booked with sessions marked as gone ahead across twelve weeks. Booked runs between seventeen and twenty-six a week, and the marked bar trails it by two or three every week. Across the twelve weeks 261 sessions were booked and 231 were marked as gone ahead.">
           <line class="cx-base" x1="56" y1="232" x2="716" y2="232"/>
           <line class="cx-grid" x1="56" y1="180" x2="716" y2="180"/>
@@ -588,7 +612,7 @@ addEventListener('DOMContentLoaded', function () {
           <text class="cx-lab" x="70" y="285">261 booked · 231 marked as gone ahead · 30 no-shows, cancellations and sessions nobody has marked</text>
         </svg>
       </div>
-      <ul class="legend">
+      <ul class="legend" role="list">
         <li><span class="sw s-book"></span>Booked <span class="n">261</span></li>
         <li><span class="sw s-att"></span>Marked as gone ahead <span class="n">231</span></li>
       </ul>
@@ -599,7 +623,7 @@ addEventListener('DOMContentLoaded', function () {
       </figcaption>
     </figure>
 
-    <ol class="steps after">
+    <ol class="steps after" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -697,7 +721,14 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="split">
       <div class="principle">
-        <div class="eyebrow">One account, whatever you are</div>
+<!-- The eyebrow-and-pull-quote sections carry a title the eye reads as one and
+           the outline never had. A reader navigating by heading went straight past
+           this band; on trainer.html the site's own jump list LINKS to one of them,
+           so following that link landed on a section whose title did not exist. The
+           heading is the one the design already implies: the eyebrow, which is the
+           section's name, kept out of sight because the design already shows it. -->
+        <h2 class="vh">One account, whatever you are</h2>
+        <div class="eyebrow" aria-hidden="true">One account, whatever you are</div>
         <p class="q">Coach at a gym on Tuesday,<br>train on your own on Thursday.</p>
         <p class="lede after-sm">
           The same login opens Repple Coach for your client book and Repple for your own training.
@@ -821,8 +852,8 @@ addEventListener('DOMContentLoaded', function () {
       <a class="btn primary" href="/signup">Create an account</a>
       <a class="btn" href="mailto:support@repplefitness.com?subject=Repple%20Coach">Ask a question</a>
     
-        <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+        <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
+        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
         <a class="btn" href="/download">All three apps</a>
       </div>
   </div>
@@ -841,15 +872,15 @@ addEventListener('DOMContentLoaded', function () {
               <circle cx="50" cy="50" r="8.5" fill="#0d0a26"/>
             </svg>
           </span>
-          Repple
-        </a>
+          Repple<span class="vh"> home</span>
+    </a>
         <p class="tiny">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
         <h2 class="fh">Apps</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
@@ -857,7 +888,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Getting started</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
@@ -867,7 +898,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Legal &amp; data</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>

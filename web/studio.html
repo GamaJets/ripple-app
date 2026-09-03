@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -41,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -73,7 +91,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#2a1704"/>
         </svg>
       </span>
-      Repple
+      Repple<span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -112,7 +130,12 @@ addEventListener('DOMContentLoaded', function () {
     <h2 class="vh">Get Repple Studio</h2>
     <div class="getbar" style="grid-template-columns:1fr;max-width:640px">
       <div class="app">
-        <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple Studio app icon" focusable="false">
+        <!-- The icon is decorative: the app it belongs to is named in the heading
+             directly beneath it, so `role="img"` with "Repple Coach app icon" made
+             a screen reader say the name twice, once as an image and once as a
+             heading. An icon whose meaning is repeated in the text beside it is a
+             picture, not information. -->
+        <svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false">
           <defs><linearGradient id="tile-studio-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fbbf24"/><stop offset="1" stop-color="#b45309"/></linearGradient></defs>
           <rect width="1024" height="1024" rx="220" fill="url(#tile-studio-top)"/>
           <g stroke="#fff" fill="#fff">
@@ -126,8 +149,8 @@ addEventListener('DOMContentLoaded', function () {
           <h3>Repple Studio</h3>
           <p class="role">For gym owners and managers</p>
           <div class="stores">
-            <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+            <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
           </div>
           <p class="tiny" style="margin:10px 0 0;color:var(--ink3)">
             Being released now &mdash; if a button does not open a listing yet, that app has not
@@ -170,7 +193,7 @@ addEventListener('DOMContentLoaded', function () {
         </div>
       </div>
     </div>
-      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)">
+      <ul class="jump" style="margin-top:clamp(34px,5vw,52px)" role="list">
       <li><a href="#board">Why one board</a></li>
       <li><a href="#payroll">Payroll</a></li>
       <li><a href="#timetable">Timetable</a></li>
@@ -256,11 +279,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Last 30 days</span>
-          <h3>What happened to 115 booked sessions</h3>
+          <h3 id="chart-what-happened-to-115-booked">What happened to 115 booked sessions</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-what-happened-to-115-booked">
         <svg viewBox="0 0 740 250" width="740" height="250" role="img" aria-label="Horizontal bar chart of the outcomes recorded against 115 booked personal-training sessions in thirty days: 84 went ahead, 6 did not turn up, 4 cancelled late, 9 cancelled in time, and 12 that nobody has marked yet.">
           <line class="cx-grid" x1="281.9" y1="30" x2="281.9" y2="212"/>
           <line class="cx-grid" x1="393.8" y1="30" x2="393.8" y2="212"/>
@@ -308,11 +331,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Last 30 days</span>
-          <h3>Payroll by trainer</h3>
+          <h3 id="chart-payroll-by-trainer">Payroll by trainer</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-payroll-by-trainer">
         <svg viewBox="0 0 740 300" width="740" height="300" role="img" aria-label="Horizontal bar chart of payroll by trainer over thirty days. Trainer A delivered 31 sessions with 2 unmarked, worth 4,650 dirhams; Trainer B delivered 24 with none unmarked, worth 3,600; Trainer C delivered 18 with 6 unmarked, worth 2,700; Trainer D delivered 11 with 4 unmarked, worth 1,650. The total of 12,600 dirhams cannot be settled while 12 sessions remain unmarked.">
           <line class="cx-grid" x1="333.3" y1="26" x2="333.3" y2="252"/>
           <line class="cx-grid" x1="466.7" y1="26" x2="466.7" y2="252"/>
@@ -354,7 +377,7 @@ addEventListener('DOMContentLoaded', function () {
           <text class="cx-lab" x="212" y="293">AED 12,600 across 84 delivered sessions — 12 still need an outcome.</text>
         </svg>
       </div>
-      <ul class="legend">
+      <ul class="legend" role="list">
         <li><span class="sw f-hi"></span>Delivered <span class="n">84</span></li>
         <li><span class="sw s-book"></span>Awaiting an outcome <span class="n">12</span></li>
       </ul>
@@ -365,7 +388,7 @@ addEventListener('DOMContentLoaded', function () {
       </figcaption>
     </figure>
 
-    <ol class="steps after">
+    <ol class="steps after" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -423,11 +446,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Twelve weeks</span>
-          <h3>Capacity, booked and turned up</h3>
+          <h3 id="chart-capacity-booked-and-turned-up">Capacity, booked and turned up</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-capacity-booked-and-turned-up">
         <svg viewBox="0 0 740 300" width="740" height="300" role="img" aria-label="Grouped bar chart of group-class attendance across twelve weeks. Each week shows three bars: places on the timetable, places booked and people who turned up. Capacity holds at 168 places a week except week six, which had fewer classes. Bookings climb from 121 to a peak of 163 in week eleven. Across the twelve weeks 1,668 of 2,002 places were booked and 1,433 people turned up.">
           <line class="cx-base" x1="56" y1="232" x2="716" y2="232"/>
           <line class="cx-grid" x1="56" y1="180" x2="716" y2="180"/>
@@ -493,7 +516,7 @@ addEventListener('DOMContentLoaded', function () {
           <text class="cx-lab" x="70" y="285">1,668 of 2,002 places booked — 83% fill · 1,433 of those turned up — 86% show</text>
         </svg>
       </div>
-      <ul class="legend">
+      <ul class="legend" role="list">
         <li><span class="sw s-book"></span>Places on the timetable <span class="n">2,002</span></li>
         <li><span class="sw s-class"></span>Booked <span class="n">1,668</span></li>
         <li><span class="sw s-att"></span>Turned up <span class="n">1,433</span></li>
@@ -507,7 +530,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="split after">
       <div>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>A series is real rows, not a rule</strong> — build twelve weeks in one action and then move one week to a different room, or drop the week of a public holiday, without unpicking a recurrence pattern.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -529,10 +552,10 @@ addEventListener('DOMContentLoaded', function () {
         </div>
         <div class="rows">
           <div class="row"><span class="nm">Mon 06:00 · Strength</span><span class="mt">14 / 14 · 13 in</span><span class="pill ok">full</span></div>
-          <div class="row"><span class="nm">Mon 18:00 · Conditioning</span><span class="mt">13 / 14 · 11 in</span><span class="pill ok">93% fill</span></div>
-          <div class="row"><span class="nm">Tue 18:00 · Conditioning</span><span class="mt">5 / 14 · 5 in</span><span class="pill crit">36% fill</span></div>
-          <div class="row"><span class="nm">Wed 06:00 · Strength</span><span class="mt">12 / 14 · 9 in</span><span class="pill warn">75% show</span></div>
-          <div class="row"><span class="nm">Thu 18:00 · Yoga Flow</span><span class="mt">8 / 14 · 8 in</span><span class="pill warn">57% fill</span></div>
+          <div class="row"><span class="nm">Mon 18:00 · Conditioning</span><span class="mt">13 / 14 · 11 in</span><span class="pill ok">93% fill<span class="vh"> — healthy</span></span></div>
+          <div class="row"><span class="nm">Tue 18:00 · Conditioning</span><span class="mt">5 / 14 · 5 in</span><span class="pill crit">36% fill<span class="vh"> — needs attention</span></span></div>
+          <div class="row"><span class="nm">Wed 06:00 · Strength</span><span class="mt">12 / 14 · 9 in</span><span class="pill warn">75% show<span class="vh"> — worth watching</span></span></div>
+          <div class="row"><span class="nm">Thu 18:00 · Yoga Flow</span><span class="mt">8 / 14 · 8 in</span><span class="pill warn">57% fill<span class="vh"> — worth watching</span></span></div>
           <div class="row"><span class="nm">Sat 09:00 · Cycle</span><span class="mt">18 / 18 · —</span><span class="pill">not yet run</span></div>
         </div>
         <div class="surface-body">
@@ -565,11 +588,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Recurring revenue</span>
-          <h3>Where the monthly figure comes from</h3>
+          <h3 id="chart-where-the-monthly-figure-comes">Where the monthly figure comes from</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-where-the-monthly-figure-comes">
         <svg viewBox="0 0 740 320" width="740" height="320" role="img" aria-label="Horizontal bar chart of monthly recurring revenue by membership type. Full monthly contributes 35,400 dirhams from 118 members, off-peak monthly 12,960 from 72, annual memberships spread over twelve months contribute 8,528 from 41, and corporate monthly 3,120 from 12. Day passes and session packs contribute nothing because they are one-off. The total is 60,008 dirhams a month.">
           <line class="cx-grid" x1="326.7" y1="26" x2="326.7" y2="266"/>
           <line class="cx-grid" x1="443.3" y1="26" x2="443.3" y2="266"/>
@@ -620,7 +643,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="split after">
       <div>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>A price book you can audit</strong> — retire a plan rather than deleting it, so the memberships sold on it keep pointing somewhere and the history has no holes in it.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -681,11 +704,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">One day</span>
-          <h3>Arrivals by hour</h3>
+          <h3 id="chart-arrivals-by-hour">Arrivals by hour</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-arrivals-by-hour">
         <svg viewBox="0 0 740 280" width="740" height="280" role="img" aria-label="Bar chart of gym arrivals by hour across one day, 435 visits in total. A morning peak of 41 at eight o'clock, a quiet middle of the day around thirteen an hour, and the day's busiest hour at six in the evening with 52 arrivals. Nothing at all between eleven at night and five in the morning.">
           <line class="cx-base" x1="56" y1="212" x2="716" y2="212"/>
           <line class="cx-grid" x1="56" y1="149.3" x2="716" y2="149.3"/>
@@ -792,7 +815,7 @@ addEventListener('DOMContentLoaded', function () {
           inventory that the timetable actually reads: put a class on at a capacity the kit cannot
           support and Studio says so while you are still typing it.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>It names the number it can actually seat</strong> — "six of eighteen bikes out of action, this class seats twelve, not twenty" — and lets you add the class anyway, because a stale inventory should not stop a class reaching the timetable.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -816,7 +839,7 @@ addEventListener('DOMContentLoaded', function () {
           <div class="kpi"><div class="k">Out of service</div><div class="v">9</div></div>
         </div>
         <div class="rows">
-          <div class="row"><span class="nm">Spin bike · 18</span><span class="mt">6 out of action</span><span class="pill crit">seats 12</span></div>
+          <div class="row"><span class="nm">Spin bike · 18</span><span class="mt">6 out of action</span><span class="pill crit">seats 12<span class="vh"> — below the twenty it is advertised at</span></span></div>
           <div class="row"><span class="nm">Rower · 12</span><span class="mt">3 out of action</span><span class="pill warn">service due</span></div>
           <div class="row"><span class="nm">Treadmill · 10</span><span class="mt">every 90 days</span><span class="pill crit">overdue</span></div>
           <div class="row"><span class="nm">Squat rack · 6</span><span class="mt">every 180 days</span><span class="pill warn">never serviced</span></div>
@@ -832,17 +855,18 @@ addEventListener('DOMContentLoaded', function () {
       </div>
     </div>
 
-    <div class="scroll after">
+    <div class="scroll after" tabindex="0" role="region" aria-labelledby="tbl-svcstate">
       <table class="data">
+        <caption class="vh" id="tbl-svcstate">Equipment service states, and what each one means</caption>
         <thead>
           <tr><th scope="col">Service state</th><th scope="col">What it means</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>No schedule</strong></td><td>You decided this kit needs no service interval. A decision, recorded as one.</td></tr>
-          <tr><td><strong>Never serviced</strong></td><td>An interval was set and no service has ever been logged against it. Deliberately not the same state as the one above — collapsing them would hide the one that matters.</td></tr>
-          <tr><td><strong>In date</strong></td><td>Serviced, and the next one is more than a week away.</td></tr>
-          <tr><td><strong>Due</strong></td><td>Owed within the next seven days — the grace window, so you can book an engineer before the machine is overdue rather than after.</td></tr>
-          <tr><td><strong>Overdue</strong></td><td>The date derived from the last recorded service has passed. Sorted to the top of the maintenance list.</td></tr>
+          <tr><th scope="row"><strong>No schedule</strong></th><td>You decided this kit needs no service interval. A decision, recorded as one.</td></tr>
+          <tr><th scope="row"><strong>Never serviced</strong></th><td>An interval was set and no service has ever been logged against it. Deliberately not the same state as the one above — collapsing them would hide the one that matters.</td></tr>
+          <tr><th scope="row"><strong>In date</strong></th><td>Serviced, and the next one is more than a week away.</td></tr>
+          <tr><th scope="row"><strong>Due</strong></th><td>Owed within the next seven days — the grace window, so you can book an engineer before the machine is overdue rather than after.</td></tr>
+          <tr><th scope="row"><strong>Overdue</strong></th><td>The date derived from the last recorded service has passed. Sorted to the top of the maintenance list.</td></tr>
         </tbody>
       </table>
     </div>
@@ -874,7 +898,7 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <ol class="steps">
+    <ol class="steps" role="list">
       <li>
         <span class="no">1</span>
         <div>
@@ -911,42 +935,43 @@ addEventListener('DOMContentLoaded', function () {
       </li>
     </ol>
 
-    <div class="scroll after">
+    <div class="scroll after" tabindex="0" role="region" aria-labelledby="tbl-import">
       <table class="data">
+        <caption class="vh" id="tbl-import">What the importer does with each kind of row, and why</caption>
         <thead>
           <tr><th scope="col">What the sheet says</th><th scope="col">What the importer does, and why</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>A quarterly plan</strong></td>
+            <th scope="row"><strong>A quarterly plan</strong></th>
             <td>Refused with a reason. A price book holds monthly, yearly and one-off, and there is nowhere truthful to put a quarter. Calling it monthly would divide your recurring revenue by three; calling it yearly would multiply it by four.</td>
           </tr>
           <tr>
-            <td><strong>A plan with a blank price</strong></td>
+            <th scope="row"><strong>A plan with a blank price</strong></th>
             <td>Refused. A blank price is an unfinished row, not a free plan. A deliberate zero is accepted, because a complimentary or staff membership is a real thing a gym sells at nothing on purpose.</td>
           </tr>
           <tr>
-            <td><strong>A status it does not recognise</strong></td>
+            <th scope="row"><strong>A status it does not recognise</strong></th>
             <td>Refused rather than defaulted to active. A cancelled member imported as active gets chased for money.</td>
           </tr>
           <tr>
-            <td><strong>An amount with four decimal places</strong></td>
+            <th scope="row"><strong>An amount with four decimal places</strong></th>
             <td>Refused rather than rounded. A column of four-decimal figures is a unit price or an exchange rate, and rounding it silently turns a data problem into a money problem.</td>
           </tr>
           <tr>
-            <td><strong>A negative payment</strong></td>
+            <th scope="row"><strong>A negative payment</strong></th>
             <td>Refused — that is a refund, and this is not the tool for one. A zero is accepted, because a comped month and a correction both really happen.</td>
           </tr>
           <tr>
-            <td><strong>The same email twice</strong></td>
+            <th scope="row"><strong>The same email twice</strong></th>
             <td>The first row keeps its place and the second is flagged against the line number of the first. Two members for one person is not a thing you want to discover later.</td>
           </tr>
           <tr>
-            <td><strong>A membership ending before it starts</strong></td>
+            <th scope="row"><strong>A membership ending before it starts</strong></th>
             <td>Refused. So is the thirty-first of February, which a date library would otherwise roll helpfully forward into March.</td>
           </tr>
           <tr>
-            <td><strong>A payment with no name and no email</strong></td>
+            <th scope="row"><strong>A payment with no name and no email</strong></th>
             <td>Refused — it cannot be attributed to anybody. A payment whose member simply cannot be matched is still recorded, as unattributed, because that is true and dropping it would lose money you actually took.</td>
           </tr>
         </tbody>
@@ -973,7 +998,7 @@ addEventListener('DOMContentLoaded', function () {
           The clock starts the moment they tap it in the app, not when you next open the console —
           so the queue exists, it counts down, and it goes red when a request is past the promise.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Two confirmations, and both say what goes</strong> — the profile, the workouts, the logs, the scans, the messages and the bookings, across every table that holds them. Their invoices and memberships go too.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -998,8 +1023,8 @@ addEventListener('DOMContentLoaded', function () {
         </div>
         <div class="rows">
           <div class="row"><span class="nm">Member · asked 24 Jul</span><span class="mt">33 days ago</span><span class="pill crit">overdue</span></div>
-          <div class="row"><span class="nm">Member · asked 22 Aug</span><span class="mt">4 days ago</span><span class="pill warn">4d left</span></div>
-          <div class="row"><span class="nm">Trainer · asked 19 Aug</span><span class="mt">7 days ago</span><span class="pill warn">7d left</span></div>
+          <div class="row"><span class="nm">Member · asked 22 Aug</span><span class="mt">4 days ago</span><span class="pill warn">4d left<span class="vh"> — due soon</span></span></div>
+          <div class="row"><span class="nm">Trainer · asked 19 Aug</span><span class="mt">7 days ago</span><span class="pill warn">7d left<span class="vh"> — due soon</span></span></div>
         </div>
         <div class="surface-body">
           <p class="tiny">
@@ -1026,44 +1051,45 @@ addEventListener('DOMContentLoaded', function () {
         version of the truth.
       </p>
     </div>
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-pages">
       <table class="data">
+        <caption class="vh" id="tbl-pages">The console pages, who can open each and what it is for</caption>
         <thead>
           <tr><th scope="col">Page</th><th scope="col">Who can open it</th><th scope="col">What it is for</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Overview</strong></td>
+            <th scope="row"><strong>Overview</strong></th>
             <td>Owner</td>
             <td>Money taken, recurring revenue, active members, class fill, who is in the building, sessions awaiting an outcome and the trainer roster. Each department is read separately, so one failing read shows a dash instead of blanking the page.</td>
           </tr>
           <tr>
-            <td><strong>Members</strong></td>
+            <th scope="row"><strong>Members</strong></th>
             <td>Owner</td>
             <td>One member, everything the gym knows: membership and plan, what they have paid, when they were last actually in the building, classes booked against attended, one-to-ones and their outcomes, passes. It separates a member who moved from classes to the gym floor from one who stopped coming &mdash; on the timetable alone those two look identical.</td>
           </tr>
           <tr>
-            <td><strong>Timetable</strong></td>
+            <th scope="row"><strong>Timetable</strong></th>
             <td>Owner</td>
             <td>Build a class or a weekly series with skip dates, check the capacity against the equipment register as you type, and open a class's roster to mark people present.</td>
           </tr>
           <tr>
-            <td><strong>Sessions</strong></td>
+            <th scope="row"><strong>Sessions</strong></th>
             <td>Owner</td>
             <td>The personal-training payroll: outcomes waiting to be marked, payroll by trainer, what is outstanding, what has already been settled, and an undo on anything marked wrongly.</td>
           </tr>
           <tr>
-            <td><strong>Money</strong></td>
+            <th scope="row"><strong>Money</strong></th>
             <td>Owner</td>
             <td>The price book, the memberships on it, and every payment recorded in the last thirty days.</td>
           </tr>
           <tr>
-            <td><strong>Door</strong></td>
+            <th scope="row"><strong>Door</strong></th>
             <td>Owner, staff</td>
             <td>Check people in and out, see who is inside, and sell or redeem a drop-in, a guest pass or a class pack at the desk.</td>
           </tr>
           <tr>
-            <td><strong>Import</strong></td>
+            <th scope="row"><strong>Import</strong></th>
             <td>Owner</td>
             <td>Paste a spreadsheet, see exactly what would be written, then decide.</td>
           </tr>
@@ -1090,7 +1116,7 @@ addEventListener('DOMContentLoaded', function () {
           and how many sessions they actually delivered — and it says which of the two is the
           problem in a sentence.
         </p>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Client load and delivery weigh the same</strong> — a full book is a dozen clients and twenty sessions a month, not a ceiling on how good anybody is.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -1133,7 +1159,14 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="split">
       <div class="principle">
-        <div class="eyebrow">Your figures against your records</div>
+<!-- The eyebrow-and-pull-quote sections carry a title the eye reads as one and
+           the outline never had. A reader navigating by heading went straight past
+           this band; on trainer.html the site's own jump list LINKS to one of them,
+           so following that link landed on a section whose title did not exist. The
+           heading is the one the design already implies: the eyebrow, which is the
+           section's name, kept out of sight because the design already shows it. -->
+        <h2 class="vh">Your figures against your records</h2>
+        <div class="eyebrow" aria-hidden="true">Your figures against your records</div>
         <p class="q">Two sources for one number,<br>and nothing comparing them.</p>
         <p class="lede after-sm">
           The financial-health review works from figures you type — revenue, expenses, members,
@@ -1237,24 +1270,29 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Control</div>
       <h2 class="hd">Your gym's data,<br><span class="serif">fenced off properly.</span></h2>
     </div>
-    <div class="strip">
+    <!-- A description list, not a row of divs. The big word and the paragraph
+         under it are a term and its description — that pairing is what the
+         panel means — and as two sibling divs it existed only in the layout:
+         a screen reader read "10%" as a loose fragment and then an unrelated
+         sentence, with nothing saying the second explains the first. -->
+    <dl class="strip">
       <div>
-        <div class="stat-n">Rows</div>
-        <div class="lbl"><strong>Isolated at the database.</strong> Every table carries row-level rules keyed to your gym. Another gym's account cannot reach your rows even if its app asked for them.</div>
+        <dt class="stat-n">Rows</dt>
+        <dd class="lbl"><strong>Isolated at the database.</strong> Every table carries row-level rules keyed to your gym. Another gym's account cannot reach your rows even if its app asked for them.</dd>
       </div>
       <div>
-        <div class="stat-n">Roles</div>
-        <div class="lbl"><strong>Owner, trainer, member.</strong> Staff see their own clients and rota; owners see the business; nobody sees private coaching messages. The console enforces it page by page.</div>
+        <dt class="stat-n">Roles</dt>
+        <dd class="lbl"><strong>Owner, trainer, member.</strong> Staff see their own clients and rota; owners see the business; nobody sees private coaching messages. The console enforces it page by page.</dd>
       </div>
       <div>
-        <div class="stat-n">Export</div>
-        <div class="lbl"><strong>Yours to take.</strong> Anyone with an account can export everything Repple holds about them as a file, from Settings, without asking a person for it.</div>
+        <dt class="stat-n">Export</dt>
+        <dd class="lbl"><strong>Yours to take.</strong> Anyone with an account can export everything Repple holds about them as a file, from Settings, without asking a person for it.</dd>
       </div>
       <div>
-        <div class="stat-n">Brand</div>
-        <div class="lbl"><strong>Your colours.</strong> Set the name and the palette and it carries through what your members and coaches see, with a live preview before you commit to it.</div>
+        <dt class="stat-n">Brand</dt>
+        <dd class="lbl"><strong>Your colours.</strong> Set the name and the palette and it carries through what your members and coaches see, with a live preview before you commit to it.</dd>
       </div>
-    </div>
+    </dl>
     <p class="tiny after-sm">
       <a href="/security">Security &amp; data</a> is the long version: what a coach can and cannot
       read, why the test is &ldquo;the owner of this gym&rdquo; rather than &ldquo;an owner&rdquo;,
@@ -1322,8 +1360,8 @@ addEventListener('DOMContentLoaded', function () {
       <a class="btn primary" href="mailto:support@repplefitness.com?subject=Repple%20Studio%20for%20my%20gym">Talk to us about your gym</a>
       <a class="btn" href="/trainer">See the coach's side</a>
     
-        <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+        <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
+        <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
         <a class="btn" href="/download">All three apps</a>
       </div>
   </div>
@@ -1342,15 +1380,15 @@ addEventListener('DOMContentLoaded', function () {
               <circle cx="50" cy="50" r="8.5" fill="#2a1704"/>
             </svg>
           </span>
-          Repple
-        </a>
+          Repple<span class="vh"> home</span>
+    </a>
         <p class="tiny">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
         <h2 class="fh">Apps</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
@@ -1358,7 +1396,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Getting started</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
@@ -1368,7 +1406,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Legal &amp; data</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>

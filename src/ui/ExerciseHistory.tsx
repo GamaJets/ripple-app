@@ -47,6 +47,8 @@ import { Icon } from './Icon';
 import { Rule, Section, SectionHead, KpiRow, Flag } from './kit';
 import { sp, radius, hairline, type as ty, numeric } from '../theme/scale';
 import { type LoadStatus } from './loadStatus';
+import { Fetched } from './fetched';
+import { useReadStamp } from './readStamp';
 import type { WorkoutEntry } from '../lib/mockData';
 import { setsSummary } from '../lib/ownTraining';
 import { dayLabel } from '../lib/adherence';
@@ -408,7 +410,7 @@ export function ExerciseTrail({ summary, log, status, unit, voice, history = [] 
   );
 }
 
-export function ExerciseHistoryPanel({ log, status, unit, voice, history = [] }: {
+export function ExerciseHistoryPanel({ log, status, unit, voice, history = [], onRefresh }: {
   /** Everything read, in any order. Null means the read did not land, and is
    *  the ONLY thing that produces "could not be read" — an empty array that
    *  arrived from a successful read means they have not done this, which is a
@@ -420,10 +422,26 @@ export function ExerciseHistoryPanel({ log, status, unit, voice, history = [] }:
   /** The member's own weight over time. Optional, and absent means a
    *  bodyweight set has no load rather than an invented one. */
   history?: BodyweightHistory;
+  /**
+   * Read this again. Optional, and the line below still says WHEN without it —
+   * but a stamp with no way to act on it is half an answer, so a screen that
+   * has a `reload` should pass it.
+   *
+   * See src/lib/readStamp.ts for why this panel is the first thing outside
+   * `app/(owner)/**` to carry a read stamp at all: all eighteen `<Fetched>`
+   * call sites were owner screens, and the argument for the line — a figure
+   * with nothing on the page saying when it was fetched is read as current —
+   * was never an argument about owners.
+   */
+  onRefresh?: () => void;
 }) {
   const t = useTheme();
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<string | null>(null);
+  // Before the early returns below, because hooks are not conditional. `log` is
+  // the token: this panel is handed a new array whenever the read behind it
+  // lands, including a re-read that never announced itself as 'loading'.
+  const read = useReadStamp(status, log);
 
   const index = useMemo(() => (log ? exerciseIndex(log, history) : []), [log, history]);
   const matches = useMemo(() => matchExercises(index, q), [index, q]);
@@ -532,6 +550,19 @@ export function ExerciseHistoryPanel({ log, status, unit, voice, history = [] }:
           <ExerciseTrail summary={chosen} log={log} status={status} unit={unit} voice={voice} history={history} />
         </View>
       ) : null}
+
+      {/* ── and when this was read ───────────────────────────────────────────
+          Drawn only here, in the branch that actually shows the record. Under
+          'error' this panel returns the "could not be read" flag above and puts
+          no figures on screen, so a "read 20 minutes ago" there would be an age
+          for something nobody is looking at.
+
+          It is worth having on this panel in particular because the providers
+          behind it now repair themselves on reconnect (src/lib/readRefresh.ts),
+          silently — so "this landed a second ago" and "this landed before you
+          came downstairs" look identical, and a lifter checking what they did
+          last week is deciding what to load onto a bar from it. */}
+      <Fetched at={read.at} onRefresh={onRefresh} busy={read.busy} />
     </Section>
   );
 }

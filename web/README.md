@@ -125,9 +125,16 @@ bytes. Cloudflare serves `styles.css` with `max-age=14400` and the HTML with
 up to four hours old — which on 26 Aug 2026 rendered every chart on the site
 solid black. It is idempotent and a no-op when the CSS has not moved.
 
-It is **not** wired into `check:all`, `preflight` or `scripts/publish.sh`, and it
-has no entry in `package.json`. Nothing catches a forgotten stamp, so it is a
-line in this file and a habit, which is the weakest kind of gate this repo has.
+You no longer have to remember. `npm run check:css-stamp` — which is
+`scripts/stamp-css.mjs --check` — recomputes the hash, writes nothing, and fails
+naming every page whose link disagrees with it and the one command that fixes
+them. It is in `check:all`, so `preflight`, `scripts/publish.sh` and CI all run
+it, and a stale stamp cannot reach a commit that anything calls green.
+
+It refuses rather than quietly rewriting on purpose. A gate that repaired the
+tree would pass in CI on a checkout that is then thrown away, leaving the stale
+stamp in `main` with a tick over it — the same habit, automated, and harder to
+see. The script's own header carries the rest of the argument.
 
 Any static host works. Point it at this folder; there is nothing to compile.
 

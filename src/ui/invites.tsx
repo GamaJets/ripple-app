@@ -413,10 +413,11 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
    * waste; combined with `reload` being a new arrow each time it was the render
    * loop described beside the dismiss read above.
    *
-   * The memo is only worth having because the five functions in it are stable —
-   * `useCallback` with no dependencies, reading what they need through the refs
-   * declared at the top. What is left in the dependency list is exactly the set
-   * a screen would want to re-render for.
+   * The memo is only worth having because the five functions in it are stable.
+   * Three take no dependencies at all and read what they need through the refs
+   * declared at the top; the two that accept or decline depend on
+   * `markDismissed`, which itself takes none. What is left in the dependency
+   * list is exactly the set a screen would want to re-render for.
    */
   const value = useMemo<InvitesValue>(() => ({
     sent, received, status, acceptFailed, reload,

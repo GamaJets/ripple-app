@@ -179,7 +179,16 @@ main:focus, main:focus-visible { outline: none; }
    meant the Coach and Studio columns of the three-app comparison did not exist
    for anyone not using a pointer. tabindex="0" on the container is the fix; the
    outline below is the global focus ring, kept close in so it traces the box
-   rather than the page. */
+   rather than the page.
+
+   Focusable was only half of it. All sixteen were tab stops that announced
+   nothing — "blank", then a table — which is its own kind of trap: the user has
+   been stopped somewhere and told neither where they are nor why they should
+   care. Each is now `role="region"` with `aria-labelledby` pointing at the
+   table's own `<caption class="vh">`, so the name is written once, names the
+   region and the table together, and is the same words either way. Two of the
+   sixteen (`.scroll.after` in studio.html) had no tabindex at all and were
+   simply unreachable. */
 .scroll:focus-visible { outline-offset: -2px; }
 
 .vh {
@@ -335,6 +344,14 @@ h3.sub { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -0.02em; }
 }
 .btn:hover { text-decoration: none; background: var(--hair); border-color: var(--line); }
 .btn:active { transform: translateY(1px); }
+/* A control that is busy is marked aria-disabled and NOT disabled, because a
+   real `disabled` drops focus to <body> the moment it is set — for the whole
+   length of a network call — and then hands it back to an element the reader
+   has already left. The browser dims a `disabled` button for free; this is the
+   same signal for the one that is only reported as disabled. */
+[aria-disabled="true"] { opacity: .62; }
+button[aria-disabled="true"]:active { transform: none; }
+button[aria-disabled="true"]:hover { filter: none; }
 .btn.primary { background: var(--brand-fill); color: var(--brand-fill-ink); border-color: transparent; }
 .btn.primary:hover { filter: brightness(1.09); background: var(--brand-fill); }
 .btn-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
@@ -366,12 +383,19 @@ h3.sub { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -0.02em; }
 .rail:first-child { border-left: none; }
 @media (max-width: 900px) { .rail { border-left: none; border-top: var(--rule); } .rail:first-child { border-top: none; } }
 .rail::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--c); }
-.rail:hover { background: var(--panel2); text-decoration: none; }
+/* `a.rail`, not `.rail`. The same class is used twice: as a link on the home
+   page, and as a plain content card on /client, /trainer and /support, where
+   there is no href, no handler and no arrow. The hover lift was on both, so
+   three cards that cannot be clicked lit up under the pointer and invited a
+   click that does nothing — and a keyboard user, who gets no hover at all,
+   could not reach them to discover that either way. A hover state is a promise
+   about what happens next; only the ones that are links make it. */
+a.rail:hover { background: var(--panel2); text-decoration: none; }
 .rail .who { font-family: var(--mono); font-size: 11px; letter-spacing: .15em; text-transform: uppercase; color: var(--c); }
 .rail h3 { font-size: 25px; margin: 12px 0 10px; color: var(--ink); letter-spacing: -0.025em; }
 .rail p { margin: 0; color: var(--ink2); font-size: 15.5px; line-height: 1.55; }
 .rail .go { margin-top: 20px; font-size: 14.5px; font-weight: 600; color: var(--c); display: inline-flex; gap: 7px; align-items: center; }
-.rail:hover .go .arw { transform: translateX(4px); }
+a.rail:hover .go .arw { transform: translateX(4px); }
 .arw { transition: transform .18s ease; }
 
 /* ── product surfaces (the fake-but-honest UI panels) ──────────────────── */
@@ -453,6 +477,8 @@ h3.sub { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -0.02em; }
 .node p { margin: 0; font-size: 14.5px; color: var(--ink2); line-height: 1.5; }
 
 /* ── stats strip ───────────────────────────────────────────────────────── */
+dl.strip { margin: 0; }
+.strip dd { margin: 0; }
 .strip { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 1px; background: var(--line); border: var(--rule); border-radius: 12px; overflow: hidden; }
 .strip > div { background: var(--panel); padding: 26px 24px; }
 .stat-n { font-size: clamp(30px,4vw,42px); letter-spacing: -0.03em; line-height: 1; }
@@ -545,7 +571,43 @@ table.data th {
 }
 table.data td { padding: 13px 15px; border-bottom: var(--hair); color: var(--ink2); vertical-align: top; line-height: 1.5; font-family: var(--sans); }
 table.data tr:last-child td { border-bottom: none; }
-table.data td strong { color: var(--ink); }
+table.data td strong, table.data tbody th strong { color: var(--ink); }
+
+/* ── the first column of every table here is a ROW HEADER ──────────────────
+   Every table on this site is a lookup keyed by its first column: "Zone",
+   "Console page", "What we collect", "The job". Read down, that column is the
+   question; read across, the rest of the row is the answer. Marked as <td> it
+   was neither — a screen reader moving sideways through "Ticked off at the
+   desk, plus a door log…" announced the cell and nothing about which of the
+   nine jobs it answered, so the one piece of context the table exists to
+   supply was the one piece it never said.
+
+   With <th scope="row"> in place, the same cell announces "Paying a coach,
+   Repple, Counted from sessions marked delivered." That is the whole table in
+   one sentence, and it is available from any cell, in any order.
+
+   It stayed a <td> for a styling reason, not a semantic one: `table.data th`
+   is written for a COLUMN header — sunk background, 11px uppercase mono,
+   letter-spaced, nowrap, ink3 — and all of that is wrong beside a row. So the
+   markup is now right and this block puts the appearance back, one property at
+   a time, to whatever `table.data td` above would have given it. Restricted to
+   `tbody` so the column headers in `thead` are untouched. */
+table.data tbody th {
+  padding: 13px 15px;
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.5;
+  font-family: var(--sans);
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  color: var(--ink2);
+  background: none;
+  border-bottom: var(--hair);
+}
+table.data tbody tr:last-child th { border-bottom: none; }
 
 /* ── the app comparison ────────────────────────────────────────────────────
    Built on table.data so it inherits the scroll container, the header
@@ -577,8 +639,14 @@ table.data.compare td:nth-child(3), table.data.compare th:nth-child(3) { --c: va
 table.data.compare td:nth-child(4), table.data.compare th:nth-child(4) { --c: var(--studio); }
 table.data.compare td { border-left: var(--hair); font-size: 13.5px; }
 table.data.compare td:first-child { border-left: none; }
-table.data.compare td .lbl { display: block; color: var(--ink); font-weight: 500; font-size: 15px; }
-table.data.compare td .hint { display: block; color: var(--ink3); font-size: 13px; margin-top: 2px; }
+
+/* Row headers are general (see `table.data tbody th`); the comparison only
+   differs in that its cells are a size down and it draws no rule to the left
+   of the first column. */
+table.data.compare tbody th { font-size: 13.5px; border-left: none; }
+
+table.data.compare td .lbl, table.data.compare th .lbl { display: block; color: var(--ink); font-weight: 500; font-size: 15px; }
+table.data.compare td .hint, table.data.compare th .hint { display: block; color: var(--ink3); font-size: 13px; margin-top: 2px; }
 table.data.compare td.yes { color: var(--ink2); }
 /* One definition rather than the same inline SVG repeated in fourteen cells.
    Masked, so the glyph takes the page background and the disc takes the app's
@@ -869,9 +937,9 @@ figcaption.chart-note strong { color: var(--ink2); font-weight: 600; }
 /* ── the spreadsheet comparison ────────────────────────────────────────────
    Built on table.data so it inherits the scroll box and header treatment. */
 table.data.vs { min-width: 660px; }
-table.data.vs th:first-child, table.data.vs td:first-child { width: 26%; }
-table.data.vs td + td { border-left: var(--hair); width: 37%; }
-table.data.vs td .job { display: block; color: var(--ink); font-weight: 500; font-size: 15px; }
+table.data.vs tr > :first-child { width: 26%; }
+table.data.vs th + td, table.data.vs td + td { border-left: var(--hair); width: 37%; }
+table.data.vs th .job { display: block; color: var(--ink); font-weight: 500; font-size: 15px; }
 
 /* ══════════════════════════════════════════════════════════════════════════
    GET THE APPS — icons and the download call to action.

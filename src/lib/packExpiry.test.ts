@@ -148,6 +148,42 @@ const closedClean = expiryLine(
 ok(/used/i.test(closedClean), 'a pack that ran out having been fully used says exactly that');
 ok(closedClean !== closedWithLoss, 'the two are different sentences, which is the whole point of the column');
 
+// ── a credit that came BACK on to a pack that was already over ────────────
+//
+// `refund_pack_session` (supabase/parts/123) decrements `sessions_used` on the
+// newest pack with usage and does not ask whether that pack's window has
+// closed. So a member whose session is refunded after their pack ran out holds
+// a credit nothing in the database will let them draw. `packBalance` keeps it
+// out of the hero — correct, a figure somebody books against must not contain a
+// credit that cannot be booked — and counts it in `onClosedPacks` so it can be
+// talked about. Nothing talked about it, and this line said the opposite.
+const refundedOntoClosed = expiryLine(
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, 1, '2026-09-01') ?? '';
+ok(!/had been used/i.test(refundedOntoClosed),
+  'a pack holding a refunded credit is never described as one where everything had been used — it had not, it was given back');
+ok(refundedOntoClosed.includes('1'), 'the credit is counted out loud rather than quietly dropped');
+ok(/cannot be booked/i.test(refundedOntoClosed),
+  'and the member is told it cannot be spent, which is the fact they would otherwise discover at the door');
+ok(/coach/i.test(refundedOntoClosed),
+  'with the one person who can do anything about it named');
+
+// Both things at once are two separate events and both are said.
+const lostAndBack = expiryLine(
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 6 }, 2, '2026-09-01') ?? '';
+ok(lostAndBack.includes('6') && lostAndBack.includes('2'),
+  'six stranded at expiry and two refunded afterwards are different facts on different days, and neither hides the other');
+
+// The clean sentence survives, and only where it is true: both counts read,
+// both nought.
+ok(/used/i.test(expiryLine(
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, 0, '2026-09-01') ?? ''),
+  'a genuinely emptied pack still says so');
+// An unread balance is not a nought here either: `left` null must not be read
+// as "nothing came back".
+ok(!/went back/i.test(expiryLine(
+  { expiresOn: '2026-08-31', expiredAt: '2026-09-01T07:33:00.000Z', sessionsExpired: 0 }, null, '2026-09-01') ?? ''),
+  'and an unread balance claims no refund it did not read');
+
 /* ── 6. the coach's side of it ────────────────────────────────────────────── */
 
 // Only ever about a pack that actually lost somebody something. A note about a

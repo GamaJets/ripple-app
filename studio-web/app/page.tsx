@@ -28,6 +28,13 @@ import { gymTodayWindow, inWindow } from '@lib/gymToday';
 import { fetchOwnerMetrics, type OwnerMetrics } from '@/lib/ownerMetrics';
 import { fetchOwnedSites } from '@/lib/sites';
 import { siteNotice, type SiteScope } from '@lib/ownedSites';
+// What this gym has not set yet, and what is broken while it has not. Every
+// input below is already read by this page, so the panel costs no query — see
+// the header of src/lib/gymSetup.ts for the counts that made it worth drawing.
+import {
+  assessGymSetup, setupLine, needsSetup,
+  type SetupItem, type SetupKey,
+} from '@lib/gymSetup';
 
 interface Gym {
   id: string;
@@ -119,6 +126,23 @@ export default function Overview() {
     recordRead: boolean;
     classesRead: boolean;
     doorRead: boolean;
+
+    /* ── what the gym has not set up yet ──────────────────────────────────
+     *
+     * Two counts rather than the arrays, and NULL rather than 0 when the read
+     * did not come back whole. `fetchPlans` and `fetchMemberships` both throw
+     * on a truncated read (src/lib/rowCap.ts), so a non-null array here is the
+     * whole set and its length is a count the server confirmed. A null is a
+     * price book nobody counted, which is a different fact from a price book
+     * with nothing in it — the first must not send an owner off to write a
+     * plan they already have.
+     *
+     * `activeMembers` above cannot stand in for `memberCount`: it is null when
+     * ANY of three reads failed, and it counts only memberships whose status
+     * is active — so a gym whose whole roster is frozen for the summer would
+     * be told to go and get some members in. */
+    planCount: number | null;
+    memberCount: number | null;
   } | null>(null);
   // Kept apart from `error`, which belongs to the roster read: these are the
   // five hub reads, and a failure in one of them must be SAID rather than
@@ -274,6 +298,8 @@ export default function Overview() {
         recordRead: memberships !== null && payments !== null && plans !== null,
         classesRead: classes !== null,
         doorRead: visits !== null,
+        planCount: plans === null ? null : plans.length,
+        memberCount: memberships === null ? null : memberships.length,
       });
     })();
     return () => { live = false; };
@@ -353,6 +379,22 @@ export default function Overview() {
   // `amount()` withhold rather than pick whichever row happened to be first.
   const takenCcy: TenantCurrency = hub == null || hub.revenueRows === 0 ? ccy : hub.revenueCurrency;
   const mrrCcy: TenantCurrency = hub == null || hub.mrrCents == null ? ccy : hub.mrrCurrency;
+
+  /**
+   * The six settings a gym is computed from, and which of them are not set.
+   *
+   * `gym` is null both while the tenants read is in flight and after it has
+   * been refused, and `assessGymSetup` answers 'unknown' to both — which is
+   * why this can be computed unconditionally on every render without the panel
+   * ever flashing up at a gym that finished setting itself up in March.
+   */
+  const setup: SetupItem[] = assessGymSetup({
+    tenant: gym
+      ? { name: gym.name, currency: gym.currency, timezone: gym.timezone, sessionFee: gym.sessionFee }
+      : null,
+    plans: hub?.planCount ?? null,
+    members: hub?.memberCount ?? null,
+  });
 
   const cols: Column<GymTrainer>[] = [
     { key: 'name', header: 'Trainer', value: (t) => t.name },
@@ -437,6 +479,16 @@ export default function Overview() {
         </Notice>
       ) : null}
 
+
+      {/* ── what this gym has not set up yet ─────────────────────────────
+          Above the tiles, because for a gym in this state the tiles are six
+          dashes and this is the reason for all six. It draws nothing at all
+          for a gym that has finished — and nothing while the reads are still
+          in flight, since an unsettled read makes every item 'unknown' rather
+          than outstanding, which is what stops a set-up gym being told it has
+          set nothing up for the second and a half its own record takes to
+          load. */}
+      {me.tenantId ? <SetUp items={setup} /> : null}
 
       {/* The morning glance — the whole operation on one line, so departments
           can be read against each other rather than one screen at a time.
@@ -676,6 +728,101 @@ function Notice({ children, tone, live = true }: { children: React.ReactNode; to
     <SharedBanner tone={tone} live={live} style={{ margin: '18px 0 0', maxWidth: '72ch' }}>
       {children}
     </SharedBanner>
+  );
+}
+
+/* ── the first five minutes ─────────────────────────────────────────────────
+ *
+ * WHERE each of the six is set, in THIS console. The list itself is in
+ * src/lib/gymSetup.ts and holds no routes on purpose: the owner app answers
+ * the same six questions from different screens — the gym's name is on Brand
+ * there, the currency and the session fee are on Ops — so a route baked into
+ * the module would be right on one surface and wrong on the other.
+ *
+ * A Record keyed by SetupKey rather than a lookup with a fallback: adding a
+ * seventh item to the module then fails to compile here, which is the only
+ * mechanism that stops a new row rendering with nowhere to go.
+ */
+const SETUP_WHERE: Record<SetupKey, { href: string; label: string }> = {
+  currency: { href: '/settings', label: 'Gym settings' },
+  timezone: { href: '/settings', label: 'Gym settings' },
+  name: { href: '/settings', label: 'Gym settings' },
+  // Where a plan is priced. /money is the console's one writer of the price
+  // book, and it refuses until the currency above is set — which is why
+  // currency is first in SETUP_ORDER rather than merely listed.
+  plan: { href: '/money', label: 'Plans & payments' },
+  // Members are INVITED, not inserted: `memberships.member_id` references
+  // `profiles`, so a membership needs a real account behind it. /import issues
+  // the same invitations two hundred at a time off the old system's export,
+  // and is named in the row rather than linked so the primary action stays one.
+  member: { href: '/invites', label: 'Invites' },
+  fee: { href: '/settings', label: 'Gym settings' },
+};
+
+/**
+ * What is not set up yet, or nothing at all.
+ *
+ * Renders only when something is genuinely outstanding — `needsSetup` is false
+ * for a list of unknowns, so a refused read cannot put a setup checklist in
+ * front of a gym that finished setting up months ago. Done rows are not drawn:
+ * this is a list of what is left, not a scoreboard.
+ */
+function SetUp({ items }: { items: SetupItem[] }) {
+  if (!needsSetup(items)) return null;
+  const line = setupLine(items);
+  const left = items.filter((i) => i.state !== 'done');
+
+  return (
+    <section style={{ border: '1px solid var(--ring)', background: 'var(--surface)', margin: '18px 0 0', maxWidth: '78ch' }}>
+      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
+        <h2>Set this gym up</h2>
+        <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '4px 0 0' }}>
+          {line} Each one says what is broken until it is done. Nothing here is cosmetic.
+        </p>
+      </div>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {left.map((i) => (
+          <li key={i.key} style={{ padding: '12px 14px', borderTop: '1px solid var(--ring)' }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--ink)', fontWeight: 600, fontSize: 13.5 }}>{i.title}</span>
+              {i.onlyIf ? (
+                <span style={{ color: 'var(--ink3)', fontSize: 12 }}>{i.onlyIf}</span>
+              ) : null}
+            </div>
+
+            {i.state === 'unknown' ? (
+              /* No link and no instruction. This row is a statement about a
+                 read, and telling somebody to go and set a value that may
+                 already be set is how a list like this loses its authority. */
+              <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '5px 0 0' }}>{i.unknownWhy}</p>
+            ) : (
+              <>
+                <p style={{ color: 'var(--ink2)', fontSize: 12.5, margin: '5px 0 0' }}>{i.breaks}</p>
+                {/* The gym's own name, as a value in a slot rather than the
+                    subject of a sentence — an owner who reads their real gym
+                    name here knows to ignore the row. */}
+                {i.key === 'name' && i.found ? (
+                  <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '4px 0 0' }}>
+                    Called <strong style={{ color: 'var(--ink2)' }}>{i.found}</strong> at the moment.
+                  </p>
+                ) : null}
+                <p style={{ fontSize: 12.5, margin: '6px 0 0' }}>
+                  <a href={SETUP_WHERE[i.key].href} style={{ color: 'var(--brand)' }}>
+                    {SETUP_WHERE[i.key].label}
+                  </a>
+                  {i.key === 'member' ? (
+                    <span style={{ color: 'var(--ink3)' }}>
+                      {' '}&mdash; or <a href="/import" style={{ color: 'var(--brand)' }}>Import</a> to
+                      invite everyone on the old system&rsquo;s export in one go.
+                    </span>
+                  ) : null}
+                </p>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

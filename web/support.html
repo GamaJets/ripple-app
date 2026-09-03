@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -41,10 +41,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -73,7 +91,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
-      Repple
+      Repple<span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -134,7 +152,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
     </div>
 
-    <ul class="jump" style="margin-top:clamp(34px,5vw,52px)">
+    <ul class="jump" style="margin-top:clamp(34px,5vw,52px)" role="list">
       <li><a href="#apps">Which app</a></li>
       <li><a href="#signing-in">Signing in</a></li>
       <li><a href="#email">Emails that never arrive</a></li>
@@ -237,7 +255,7 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <ol class="steps">
+    <ol class="steps" role="list">
       <li>
         <span class="no">01</span>
         <div>
@@ -347,7 +365,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="split">
       <div>
-        <ul class="ticks">
+        <ul class="ticks" role="list">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Give it a few minutes.</strong> It is normally quick, but not always instant. Do not request three more in the meantime — each new link invalidates the one before it, and it is easy to end up clicking a dead one.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -483,44 +501,45 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-services">
       <table class="data">
+        <caption class="vh" id="tbl-services">Connected services, what each brings in and how it connects</caption>
         <thead>
           <tr><th scope="col">Service</th><th scope="col">What it brings in</th><th scope="col">How it connects</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Apple Watch</strong><br>via Apple Health</td>
+            <th scope="row"><strong>Apple Watch</strong><br>via Apple Health</th>
             <td>Heart rate, resting heart rate, active energy, steps and recorded workouts. The only source that can produce a per-session heart-rate zone breakdown.</td>
             <td>Tap Connect and grant the Health permission. iPhone only. Revoke in iOS Settings, not in Repple.</td>
           </tr>
           <tr>
-            <td><strong>WHOOP</strong></td>
+            <th scope="row"><strong>WHOOP</strong></th>
             <td>Strain, recovery, heart rate and calories, plus workouts you can import into your log.</td>
             <td>Tap Connect. WHOOP's own sign-in page opens in a browser sheet; approve it there and you are returned to the app.</td>
           </tr>
           <tr>
-            <td><strong>Oura Ring</strong></td>
+            <th scope="row"><strong>Oura Ring</strong></th>
             <td>Readiness, HRV, sleep and resting heart rate.</td>
             <td>Same — Oura's own sign-in page, then back to the app.</td>
           </tr>
           <tr>
-            <td><strong>Fitbit</strong></td>
+            <th scope="row"><strong>Fitbit</strong></th>
             <td>Nothing yet.</td>
             <td>The Repple side is written, but we have not finished registering the app with Fitbit, so there is nothing for you to sign in to and the row says so. Nothing is wrong with your Fitbit account. A Fitbit that already writes into Apple Health or Health Connect reaches Repple by that route in the meantime.</td>
           </tr>
           <tr>
-            <td><strong>Garmin</strong></td>
+            <th scope="row"><strong>Garmin</strong></th>
             <td>Nothing yet.</td>
             <td>Garmin's Health API is not self-serve — it needs an approved partnership, which is why the row stays unavailable and says so. A Garmin watch that already writes into Apple Health reaches Repple by that route in the meantime.</td>
           </tr>
           <tr>
-            <td><strong>Google&nbsp;Fit / Health&nbsp;Connect</strong></td>
+            <th scope="row"><strong>Google&nbsp;Fit / Health&nbsp;Connect</strong></th>
             <td>Steps, heart rate, calories, workouts and sleep — Android's own health store, which is where a Garmin, a Fitbit, a Polar or a phone writes on that platform. Blood sugar is asked for separately, on the Blood Sugar screen.</td>
             <td>Android only. Tap Connect and grant the Health Connect permission. It also needs an Android build that declares those permissions, which not every build does — where yours cannot ask, Connect fails with a sentence naming both reasons rather than a blank screen. On anything other than Android the row tells you it is Android-only.</td>
           </tr>
           <tr>
-            <td><strong>Spotify</strong></td>
+            <th scope="row"><strong>Spotify</strong></th>
             <td>Nothing about your training. It goes the other way: Repple builds a playlist to match the session.</td>
             <td><span class="path">Me → Music &amp; Playlists</span>. Connect Spotify and the playlist can be created in your own Spotify account.</td>
           </tr>
@@ -962,15 +981,15 @@ addEventListener('DOMContentLoaded', function () {
               <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
             </svg>
           </span>
-          Repple
-        </a>
+          Repple<span class="vh"> home</span>
+    </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
         <h2 class="fh">Apps</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
@@ -978,7 +997,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Getting started</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
@@ -988,7 +1007,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Legal &amp; data</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>

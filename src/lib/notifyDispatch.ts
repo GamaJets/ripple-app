@@ -137,6 +137,16 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   ['/(client)/pt-sessions', 'bookings'],
   ['/(client)/classes', 'bookings'],
   ['/(client)/request-session', 'bookings'],
+  // Mark What Happened, which is where app/(client)/request-session.tsx sends
+  // 'A session request' — the coach's half of the line above. That call site
+  // passes 'bookings' to send-push itself, so the push is already filtered and
+  // this entry changes nothing about what arrives today; what it changes is the
+  // `channel` COLUMN, which was null on every one of those rows. A null channel
+  // is this dispatcher's refusal to guess, and a row that a handset happens to
+  // push is not a row anybody has classified — the moment part 740's answer
+  // moves server-side, as parts 202, 471 and 613 moved their own, an
+  // unclassified route is a kind that silently never pushes.
+  ['/(trainer)/sessions', 'bookings'],
 
   // ── money ───────────────────────────────────────────────────────────────
   // Payments & Packages is where parts 158, 159, 163, 611 and 612 send a coach:
@@ -184,6 +194,16 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   // The client's half of the intake — a form to fill in. Handset-pushed today
   // (src/ui/intake.ts).
   ['/(client)/intake', 'admin'],
+  // The client's injuries, which is the same shape as the line above and was
+  // the only push route in KNOWN_PUSHES with no channel that plainly had one.
+  // src/ui/injuryAsk.ts sends 'Your coach asked about an injury' and
+  // src/ui/injuryAcks.tsx sends the read receipt; both are a coach and a client
+  // settling a form the coach needs before they may write a programme —
+  // injuryAcks' own body says so — which is what this switch's label means by
+  // paperwork. Handset-pushed today, so the classification is inert at runtime
+  // and is here for the reason '/(client)/explore' is: a null column on a row
+  // somebody later moves server-side is a kind that silently never pushes.
+  ['/(client)/injuries', 'admin'],
 
   // ── book ────────────────────────────────────────────────────────────────
   // The coach's own book, and the three routes here are named almost word for
@@ -205,6 +225,25 @@ const CHANNEL_BY_ROUTE: ReadonlyArray<readonly [string, CoachChannel]> = [
   // it is the coach's own programme going stale, and what a coach does about it
   // is write the next block.
   ['/(trainer)/builder', 'book'],
+
+  // ── and the one route that is deliberately left unclassified ────────────
+  //
+  // '/(client)/notices'. src/ui/announcements.tsx writes it for every member of
+  // a gym or every client of a coach, and there is no honest entry for it: all
+  // six switches are things a COACH RECEIVES, and a notice is the only kind in
+  // the product that nobody ever receives on a switch — the coach and the owner
+  // are the senders, and the recipient is a member, who has no switches at all.
+  //
+  // Picking one anyway would be the mistake the 'Joining And Leaving' label
+  // made in src/lib/coachNotify.ts: a name that covers the thing badly is worse
+  // than a gap, because the gap can be seen. Left null, which means no server
+  // dispatch — and today that costs nothing, because the row is written with
+  // `push_by = 'caller'` and the handset does its own send (or deliberately
+  // does not, when the author did not ask for one).
+  //
+  // What it WOULD cost is the day notices move server-side, and that is what
+  // notifyDispatch.test.ts names this route for: it is an assertion about a
+  // decision, not an oversight nobody wrote down.
 ];
 
 /**

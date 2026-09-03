@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1608314385">
+<link rel="stylesheet" href="styles.css?v=d84a82bb66">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <!-- Structured data, deliberately kept to the two things nothing in the product
@@ -73,10 +73,28 @@ addEventListener('DOMContentLoaded', function () {
   var nav = document.querySelector('nav.site');
   var btn = nav && nav.querySelector('.nav-toggle');
   if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
   function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
     nav.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
     btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
   }
   btn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -105,7 +123,7 @@ addEventListener('DOMContentLoaded', function () {
           <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
         </svg>
       </span>
-      Repple
+      Repple<span class="vh"> home</span>
     </a>
     <nav class="site">
       <div class="nav-links" id="site-menu">
@@ -205,7 +223,12 @@ addEventListener('DOMContentLoaded', function () {
     <h2 class="vh">Get the apps</h2>
     <div class="getbar">
       <div class="app">
-        <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple app icon" focusable="false">
+        <!-- The icon is decorative: the app it belongs to is named in the heading
+             directly beneath it, so `role="img"` with "Repple Coach app icon" made
+             a screen reader say the name twice, once as an image and once as a
+             heading. An icon whose meaning is repeated in the text beside it is a
+             picture, not information. -->
+        <svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false">
           <defs><linearGradient id="tile-client" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs>
           <rect width="1024" height="1024" rx="220" fill="url(#tile-client)"/>
           <g stroke="#fff" fill="#fff">
@@ -219,13 +242,13 @@ addEventListener('DOMContentLoaded', function () {
           <h3>Repple</h3>
           <p class="role">For the person training</p>
           <div class="stores">
-            <a class="store" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+            <a class="store" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple</span></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple</span></a>
           </div>
         </div>
       </div>
       <div class="app">
-        <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple Coach app icon" focusable="false">
+        <svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false">
           <defs><linearGradient id="tile-coach" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#818cf8"/><stop offset="1" stop-color="#4338ca"/></linearGradient></defs>
           <rect width="1024" height="1024" rx="220" fill="url(#tile-coach)"/>
           <g stroke="#fff" fill="#fff">
@@ -239,13 +262,13 @@ addEventListener('DOMContentLoaded', function () {
           <h3>Repple Coach</h3>
           <p class="role">For personal trainers and coaches</p>
           <div class="stores">
-            <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+            <a class="store" href="https://apps.apple.com/app/id6804358275"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.coach"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Coach</span></a>
           </div>
         </div>
       </div>
       <div class="app">
-        <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple Studio app icon" focusable="false">
+        <svg class="appicon" viewBox="0 0 1024 1024" aria-hidden="true" focusable="false">
           <defs><linearGradient id="tile-studio" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fbbf24"/><stop offset="1" stop-color="#b45309"/></linearGradient></defs>
           <rect width="1024" height="1024" rx="220" fill="url(#tile-studio)"/>
           <g stroke="#fff" fill="#fff">
@@ -259,8 +282,8 @@ addEventListener('DOMContentLoaded', function () {
           <h3>Repple Studio</h3>
           <p class="role">For gym owners and managers</p>
           <div class="stores">
-            <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
-            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
+            <a class="store" href="https://apps.apple.com/app/id6804417240"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
+            <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple.studio"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"><span class="vh"> &mdash; Repple Studio</span></a>
           </div>
         </div>
       </div>
@@ -378,11 +401,11 @@ addEventListener('DOMContentLoaded', function () {
       <div class="chart-hd">
         <div>
           <span class="chart-k">Data lineage</span>
-          <h3>What each app takes from the same session row</h3>
+          <h3 id="chart-what-each-app-takes-from">What each app takes from the same session row</h3>
         </div>
         <span class="sample">Illustrative</span>
       </div>
-      <div class="chart-scroll">
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-what-each-app-takes-from">
         <svg viewBox="0 0 940 400" width="940" height="400" role="img" aria-label="Diagram. A single sessions row holds member, trainer, start time, outcome and the sets logged. Three arrows lead from it. Repple, for the member, reads the sets to give volume, personal records and streak. Repple Coach reads the member and the outcome to give sessions delivered and adherence against the assigned programme. Repple Studio reads the trainer, the start time and the outcome to give one payroll line and one attended place against the room's capacity.">
           <rect class="cx-box" x="16" y="108" width="252" height="176" rx="10"/>
           <text class="cx-cap" x="34" y="134">ONE ROW</text>
@@ -471,26 +494,27 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <div class="scroll" tabindex="0" style="margin-bottom:22px">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-compare" style="margin-bottom:22px">
       <table class="data compare">
+        <caption class="vh" id="tbl-compare">Which of the three apps does each job</caption>
         <thead>
           <tr>
-            <th scope="col"></th>
+            <th scope="col"><span class="vh">The job</span></th>
             <th scope="col" class="app c-client"><span class="kick">Repple</span><span class="nm">For members</span><span class="who">You train.</span></th>
             <th scope="col" class="app c-coach"><span class="kick">Repple Coach</span><span class="nm">For coaches</span><span class="who">You have clients.</span></th>
             <th scope="col" class="app c-studio"><span class="kick">Repple Studio</span><span class="nm">For gyms</span><span class="who">You run the place.</span></th>
           </tr>
         </thead>
         <tbody>
-          <tr><td><span class="lbl">Log your own training</span><span class="hint">Sets, reps, load, cardio, effort.</span></td><td class="yes"><span class="tick"></span>Your full history</td><td class="yes"><span class="tick"></span>Your own sessions too</td><td class="no">—</td></tr>
-          <tr><td><span class="lbl">Apple Health &amp; watches</span><span class="hint">Import what you already recorded.</span></td><td class="yes"><span class="tick"></span>In and out</td><td class="no">—</td><td class="no">—</td></tr>
-          <tr><td><span class="lbl">Someone else&rsquo;s training</span><span class="hint">Reading a person you work with.</span></td><td class="yes"><span class="tick"></span>Only if you link a coach</td><td class="yes"><span class="tick"></span>Every client who linked you</td><td class="yes"><span class="tick"></span>Attendance, not their lifts</td></tr>
-          <tr><td><span class="lbl">Programmes</span><span class="hint">Written once, assigned out.</span></td><td class="yes"><span class="tick"></span>Receive them</td><td class="yes"><span class="tick"></span>Write and assign</td><td class="no">—</td></tr>
-          <tr><td><span class="lbl">Timetable &amp; classes</span><span class="hint">Bookings, capacity, attendance.</span></td><td class="yes"><span class="tick"></span>Book a place</td><td class="yes"><span class="tick"></span>Your own week</td><td class="yes"><span class="tick"></span>The whole gym&rsquo;s</td></tr>
-          <tr><td><span class="lbl">Memberships &amp; payments</span><span class="hint">What is sold and what was taken.</span></td><td class="yes"><span class="tick"></span>Your own</td><td class="no">—</td><td class="yes"><span class="tick"></span>Everyone&rsquo;s</td></tr>
-          <tr><td><span class="lbl">Staff &amp; payroll</span><span class="hint">Delivered sessions, priced.</span></td><td class="no">—</td><td class="yes"><span class="tick"></span>What you delivered</td><td class="yes"><span class="tick"></span>What the gym owes</td></tr>
-          <tr><td><span class="lbl">The door</span><span class="hint">Who is in the building right now.</span></td><td class="no">—</td><td class="yes"><span class="tick"></span>Working the desk</td><td class="yes"><span class="tick"></span>The whole log</td></tr>
-          <tr><td><span class="lbl">The business picture</span><span class="hint">Retention, revenue, capacity.</span></td><td class="no">—</td><td class="no">—</td><td class="yes"><span class="tick"></span>On phone and on the web</td></tr>
+          <tr><th scope="row"><span class="lbl">Log your own training</span><span class="hint">Sets, reps, load, cardio, effort.</span></th><td class="yes"><span class="tick"></span>Your full history</td><td class="yes"><span class="tick"></span>Your own sessions too</td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td></tr>
+          <tr><th scope="row"><span class="lbl">Apple Health &amp; watches</span><span class="hint">Import what you already recorded.</span></th><td class="yes"><span class="tick"></span>In and out</td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td></tr>
+          <tr><th scope="row"><span class="lbl">Someone else&rsquo;s training</span><span class="hint">Reading a person you work with.</span></th><td class="yes"><span class="tick"></span>Only if you link a coach</td><td class="yes"><span class="tick"></span>Every client who linked you</td><td class="yes"><span class="tick"></span>Attendance, not their lifts</td></tr>
+          <tr><th scope="row"><span class="lbl">Programmes</span><span class="hint">Written once, assigned out.</span></th><td class="yes"><span class="tick"></span>Receive them</td><td class="yes"><span class="tick"></span>Write and assign</td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td></tr>
+          <tr><th scope="row"><span class="lbl">Timetable &amp; classes</span><span class="hint">Bookings, capacity, attendance.</span></th><td class="yes"><span class="tick"></span>Book a place</td><td class="yes"><span class="tick"></span>Your own week</td><td class="yes"><span class="tick"></span>The whole gym&rsquo;s</td></tr>
+          <tr><th scope="row"><span class="lbl">Memberships &amp; payments</span><span class="hint">What is sold and what was taken.</span></th><td class="yes"><span class="tick"></span>Your own</td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>Everyone&rsquo;s</td></tr>
+          <tr><th scope="row"><span class="lbl">Staff &amp; payroll</span><span class="hint">Delivered sessions, priced.</span></th><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>What you delivered</td><td class="yes"><span class="tick"></span>What the gym owes</td></tr>
+          <tr><th scope="row"><span class="lbl">The door</span><span class="hint">Who is in the building right now.</span></th><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>Working the desk</td><td class="yes"><span class="tick"></span>The whole log</td></tr>
+          <tr><th scope="row"><span class="lbl">The business picture</span><span class="hint">Retention, revenue, capacity.</span></th><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>On phone and on the web</td></tr>
         </tbody>
       </table>
     </div>
@@ -550,7 +574,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="after">
       <h3 class="sub">One Tuesday, followed all the way through</h3>
-      <ol class="steps after-sm">
+      <ol class="steps after-sm" role="list">
         <li>
           <span class="no">1</span>
           <div>
@@ -603,7 +627,14 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="split">
       <div class="principle">
-        <div class="eyebrow" style="margin-bottom:18px">The rule we build to</div>
+<!-- The eyebrow-and-pull-quote sections carry a title the eye reads as one and
+           the outline never had. A reader navigating by heading went straight past
+           this band; on trainer.html the site's own jump list LINKS to one of them,
+           so following that link landed on a section whose title did not exist. The
+           heading is the one the design already implies: the eyebrow, which is the
+           section's name, kept out of sight because the design already shows it. -->
+        <h2 class="vh">The rule we build to</h2>
+        <div class="eyebrow" style="margin-bottom:18px" aria-hidden="true">The rule we build to</div>
         <p class="q">If we don't know the number,<br>you get a dash — never a guess.</p>
         <p class="lede" style="margin-top:24px;font-size:17px">
           Plenty of software fills a gap with a plausible figure. We think that is worse than
@@ -654,44 +685,45 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <div class="scroll" tabindex="0">
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-vs">
       <table class="data vs">
+        <caption class="vh" id="tbl-vs">The same jobs, done the usual way and done in Repple</caption>
         <thead>
           <tr><th scope="col">The job</th><th scope="col">Spreadsheet, printout, group chat</th><th scope="col">Repple</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><span class="job">Taking a booking</span></td>
+            <th scope="row"><span class="job">Taking a booking</span></th>
             <td>A message in a chat, a name written on a printout, and a capacity nobody can check until the room fills up.</td>
             <td>A place taken against a class with a stated capacity. Fill rate stops being an impression and becomes a number.</td>
           </tr>
           <tr>
-            <td><span class="job">Marking who turned up</span></td>
+            <th scope="row"><span class="job">Marking who turned up</span></th>
             <td>Often not done at all. Attendance is remembered rather than recorded, and only for the classes somebody thought to count.</td>
             <td>Ticked off at the desk, plus a door log for everyone who walked in without booking. It is the row a drifting member shows up in first.</td>
           </tr>
           <tr>
-            <td><span class="job">Paying a coach</span></td>
+            <th scope="row"><span class="job">Paying a coach</span></th>
             <td>Sessions counted back out of a diary at the end of the month, with a conversation about the ones nobody wrote down.</td>
             <td>Counted from sessions marked delivered. Anything still unmarked stops the total and names itself, rather than being rounded into it.</td>
           </tr>
           <tr>
-            <td><span class="job">Spotting who is drifting</span></td>
+            <th scope="row"><span class="job">Spotting who is drifting</span></th>
             <td>Somebody notices, or nobody does. Usually the cancellation is the first hard evidence.</td>
             <td>Days since each member was last seen, read from the class register and the door log together.</td>
           </tr>
           <tr>
-            <td><span class="job">Knowing what a room holds</span></td>
+            <th scope="row"><span class="job">Knowing what a room holds</span></th>
             <td>A number written on a laminated sheet some years ago, which nobody revisits when kit breaks.</td>
             <td>Checked against the equipment register, so kit out of service changes the capacity the gym measures itself against.</td>
           </tr>
           <tr>
-            <td><span class="job">Finding last year's figures</span></td>
+            <th scope="row"><span class="job">Finding last year's figures</span></th>
             <td>A spreadsheet somebody has since renamed, on a laptop that belonged to a manager who left.</td>
             <td>In the same record as this year, because it was imported at the start rather than typed forward a month at a time.</td>
           </tr>
           <tr>
-            <td><span class="job">A member's own training</span></td>
+            <th scope="row"><span class="job">A member's own training</span></th>
             <td>In a different app entirely, or in a notebook. Not the gym's problem and not visible to the coach either.</td>
             <td>Theirs in Repple, readable by a coach they chose to link, and never the gym's to read set by set.</td>
           </tr>
@@ -713,24 +745,29 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Underneath all three</div>
       <h2 class="hd">The parts you only notice<br><span class="serif">when they're missing.</span></h2>
     </div>
-    <div class="strip">
+    <!-- A description list, not a row of divs. The big word and the paragraph
+         under it are a term and its description — that pairing is what the
+         panel means — and as two sibling divs it existed only in the layout:
+         a screen reader read "10%" as a loose fragment and then an unrelated
+         sentence, with nothing saying the second explains the first. -->
+    <dl class="strip">
       <div>
-        <div class="stat-n">1</div>
-        <div class="lbl"><strong style="color:var(--ink)">One account.</strong> The same email and password signs you into whichever app your role calls for.</div>
+        <dt class="stat-n">1</dt>
+        <dd class="lbl"><strong style="color:var(--ink)">One account.</strong> The same email and password signs you into whichever app your role calls for.</dd>
       </div>
       <div>
-        <div class="stat-n">RLS</div>
-        <div class="lbl"><strong style="color:var(--ink)">Enforced at the database.</strong> Row-level rules mean one gym's data is unreachable from another account, even if the app asked. <a href="/security">How that is enforced</a>.</div>
+        <dt class="stat-n">RLS</dt>
+        <dd class="lbl"><strong style="color:var(--ink)">Enforced at the database.</strong> Row-level rules mean one gym's data is unreachable from another account, even if the app asked. <a href="/security">How that is enforced</a>.</dd>
       </div>
       <div>
-        <div class="stat-n">↔</div>
-        <div class="lbl"><strong style="color:var(--ink)">Apple Health, both ways.</strong> Pull workouts off the watch; write finished sessions back so the rings stay honest.</div>
+        <dt class="stat-n">↔</dt>
+        <dd class="lbl"><strong style="color:var(--ink)">Apple Health, both ways.</strong> Pull workouts off the watch; write finished sessions back so the rings stay honest.</dd>
       </div>
       <div>
-        <div class="stat-n">0</div>
-        <div class="lbl"><strong style="color:var(--ink)">Ads, trackers, resale.</strong> Health data is used to show you your training. Nothing else.</div>
+        <dt class="stat-n">0</dt>
+        <dd class="lbl"><strong style="color:var(--ink)">Ads, trackers, resale.</strong> Health data is used to show you your training. Nothing else.</dd>
       </div>
-    </div>
+    </dl>
 
     <div class="tiles two after">
       <div class="tile">
@@ -791,7 +828,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Who can see a member's data?</summary>
-        <div class="a"><p>The member, always. A coach they have deliberately linked to. And their gym, for the membership and attendance information needed to run the place — not private messages, and not their training set by set. No one else is shown their record, and none of it is used for advertising. Separately from who is shown what: some features send material to a service outside the app to be read — a meal photo, an InBody sheet, an injury document, a question asked of the in-app coach. <a href="/privacy#ai">Privacy</a> names each one and lists what reaches it, and <a href="/security">Security &amp; data</a> is the mechanism that enforces the rest.</p></div>
+        <div class="a"><p>The member, always. A coach they have deliberately linked to. And their gym, for the membership and attendance information needed to run the place — not private messages, and not their training set by set. No one else is shown their record, and none of it is used for advertising. Separately from who is shown what: some features send material to a service outside the app to be read — a meal photo, an InBody sheet, an injury document, a question asked of the in-app coach. <a href="/privacy#ai">Privacy<span class="vh">, the section on services outside the app</span></a> names each one and lists what reaches it, and <a href="/security">Security &amp; data</a> is the mechanism that enforces the rest.</p></div>
       </details>
       <details>
         <summary>Can a gym export its own data?</summary>
@@ -838,15 +875,15 @@ addEventListener('DOMContentLoaded', function () {
               <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
             </svg>
           </span>
-          Repple
-        </a>
+          Repple<span class="vh"> home</span>
+    </a>
         <p class="tiny" style="margin-top:14px;max-width:34ch">
           The operating record for gyms, the coaches who work in them, and the people they train.
         </p>
       </div>
       <div>
         <h2 class="fh">Apps</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
           <li><a href="/studio">Repple Studio</a></li>
@@ -854,7 +891,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Getting started</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
@@ -864,7 +901,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <h2 class="fh">Legal &amp; data</h2>
-        <ul>
+        <ul role="list">
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>
           <li><a href="/security">Security &amp; data</a></li>

@@ -168,6 +168,22 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // entry it fell to the generic bell — the icon that means "we have no idea
   // what this is" — over a yes or a no about a specific time.
   ['/(client)/request-session', 'calendar'],
+  // ── the coach's half of that same conversation ───────────────────────────
+  //
+  // Mark What Happened, which is also where app/(client)/request-session.tsx
+  // sends 'A session request' — a client asking for an hour the coach never
+  // opened. The client's half above has been drawn as a calendar since it was
+  // added and the coach's half was not in this table at all, so the one
+  // notification in a coach's inbox that is somebody asking for a specific time
+  // arrived wearing the generic bell: the icon this list uses to say "we have
+  // no idea what this is", on the row that decays fastest in the whole product.
+  //
+  // TRAINER_NAV gives this screen 'check' (src/lib/features.ts) and `InboxIcon`
+  // has no 'check' — it is a deliberately short list. 'calendar' rather than
+  // widening it, because the two halves of one conversation about one hour must
+  // not be two different shapes in two inboxes, and that is the shape the other
+  // half already has.
+  ['/(trainer)/sessions', 'calendar'],
   // ── the two an answered coaching request opens ───────────────────────────
   //
   // 'people' is the shape this table already gives '/(trainer)/dashboard', the
@@ -376,7 +392,14 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   { where: 'app/(trainer)/calendar.tsx', title: 'Session booked', body: 'Your session on Tue at 6:30 PM is confirmed.', route: '/(client)/calendar' },
   { where: 'app/(trainer)/calendar.tsx', title: 'Session cancelled', body: 'Your 6:30 PM session on Tue was cancelled.', route: '/(client)/calendar' },
   { where: 'app/(trainer)/calendar.tsx', title: 'A slot just opened', body: '6:30 PM on Tue is available — first to book it gets it.', route: '/(client)/calendar' },
-  { where: 'app/(trainer)/broadcast.tsx', title: 'Message from your coach', body: 'Session times move next week.', route: '/(client)/messages' },
+  // The broadcast. `app/(trainer)/broadcast.tsx` composes it; the send is
+  // src/ui/messaging.ts's `deliverMessage` fan-out, which writes a `messages`
+  // row per client and pushes with the ordinary chat title — so the string this
+  // entry named ('Message from your coach') is sent by nothing any more. The
+  // ROUTE is what classifies it and the route has not changed, so the answer
+  // was right for the wrong words; the words are corrected here so that reading
+  // this catalogue does not send somebody looking for a literal that is gone.
+  { where: 'app/(trainer)/broadcast.tsx → src/ui/messaging.ts', title: 'New message from your coach', body: 'Session times move next week.', route: '/(client)/messages' },
   { where: 'app/(owner)/promotions.tsx', title: 'A new offer', body: '20% off with code SPRING', route: '/(client)/explore' },
   { where: 'app/(client)/calendar.tsx', title: 'New booking', body: 'A client booked Tue 6:30 PM.', route: '/(trainer)/calendar' },
   { where: 'src/ui/messaging.ts', title: 'New message from your coach', body: 'See you Tuesday.', route: '/(client)/messages' },
@@ -408,6 +431,29 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   { where: 'app/(trainer)/classes.tsx', title: 'A class you booked is not running', body: '\u201cSpin\u201d has been called off: the instructor is off sick. Your booking is kept on the record.', route: '/(client)/classes' },
   { where: 'app/(trainer)/classes.tsx', title: 'Classes you booked are not running', body: '3 of your \u201cSpin\u201d classes have been called off: the room is being re-floored.', route: '/(client)/classes' },
   { where: 'src/ui/intake.ts', title: 'Your coach asked for your intake', body: 'They need your intake form before your first session.', route: '/(client)/intake' },
+  // ── the three this catalogue had never heard of ──────────────────────────
+  //
+  // Every one of them is sent today and none was listed, which is the drift
+  // this snapshot exists to make visible and had stopped making visible. All
+  // three fall to the DEFAULT — recorded — and the default is right for all
+  // three: nothing else tells the recipient any of them happened. What was
+  // actually wrong was the icon on the third, and it was wrong precisely
+  // BECAUSE nothing here named the route (see '/(trainer)/sessions' above).
+  //
+  // A client asking their coach for an hour the coach never opened. It decays
+  // faster than anything else in this list — the hour it is about may be
+  // tomorrow — and it is the coach's half of 'Your session is on' below.
+  { where: 'app/(client)/request-session.tsx', title: 'A session request', body: 'A client asked about Tue 6:30 PM.', route: '/(trainer)/sessions' },
+  // The answer to it, either way. Part 740's pair, and the declining half
+  // matters most: a request that is refused has no surface at all on the
+  // client's side once it leaves 'pending'.
+  { where: 'app/(trainer)/sessions.tsx', title: 'Your session is on', body: 'Your coach said yes to Tue 6:30 PM.', route: '/(client)/request-session' },
+  { where: 'app/(trainer)/sessions.tsx', title: 'About that time', body: 'Your coach can’t do Tue 6:30 PM.', route: '/(client)/request-session' },
+  // A session the coach MOVED. Not a cancellation and not a booking — the one
+  // push in this list that reports a change to an appointment the client
+  // already had in their diary, which is why it is the one they most need a
+  // durable row for when the banner is missed.
+  { where: 'app/(trainer)/calendar.tsx', title: 'Your session has moved', body: 'Tue 6:30 PM moved to Wed 7:30 AM. Nothing is charged and your session is still paid for.', route: '/(client)/calendar' },
   // The coach's check-in nudge. It does NOT go through sendPush() — it invokes
   // the send-push function directly — so recordInbox() never sees it, and it is
   // listed here so that reading this catalogue does not leave somebody

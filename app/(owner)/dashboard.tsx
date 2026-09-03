@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Icon } from '../../src/ui/Icon';
+import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, fig } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
@@ -31,6 +31,16 @@ import { cohorts } from '../../src/lib/ownerAnalytics';
 import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
 import { Linking } from 'react-native';
+import { supabase } from '../../src/lib/supabase';
+// The six settings a gym is computed from, and which of them nobody has set.
+// Shared with the console's Overview, which draws the same six from its own
+// screens — see the header of src/lib/gymSetup.ts for the counts against the
+// live database that made this worth drawing at all, and for why the list
+// holds no routes.
+import {
+  assessGymSetup, setupLine, needsSetup,
+  type SetupFacts, type SetupItem, type SetupKey, type TenantSettings,
+} from '../../src/lib/gymSetup';
 
 // Labels come from the one settled scale now — see src/lib/status.ts for why
 // "Not delivering" is gone and what "Idle" does and does not mean.
@@ -112,8 +122,58 @@ export default function OwnerOverview() {
   // not: the ScrollView had no RefreshControl and the gesture the card names did
   // nothing. Both of this screen's reads are asked again, because both of them
   // are on it.
-  const refreshAll = useCallback(() => { refresh(); refreshTenant(); }, [refresh, refreshTenant]);
+  /* ── what this gym has not set up yet ────────────────────────────────────
+   *
+   * Three reads of its own, and not one of them is a row this screen already
+   * holds. `useTenant` carries the name, the currency and the session fee and
+   * has never carried the TIMEZONE — which is the setting every gym on the
+   * platform is missing — and nothing in the owner app has ever counted the
+   * price book or the register.
+   *
+   * The counts are `head: true, count: 'exact'`: the server does the counting
+   * and sends no rows back, so there is no thousand-row ceiling to fall off
+   * and no `isWhole` question to get wrong. A count that arrives is one the
+   * server confirmed; a count that does not arrive stays null, and null is a
+   * question nobody answered rather than a price book with nothing in it.
+   *
+   * The tenants row is read here rather than taken from `useTenant` for the
+   * same reason: four settings from one query settle together, so a single
+   * refusal makes all four unknown at once instead of leaving three of them
+   * looking established by a read that never happened.
+   */
+  const [setupTenant, setSetupTenant] = useState<TenantSettings | null>(null);
+  const [setupPlans, setSetupPlans] = useState<number | null>(null);
+  const [setupMembers, setSetupMembers] = useState<number | null>(null);
+  const tenantId = tenant?.id ?? null;
+  const loadSetup = useCallback(async () => {
+    if (!tenantId) return;
+    const [gymRes, planRes, memberRes] = await Promise.allSettled([
+      supabase.from('tenants').select('name, currency, session_fee, timezone').eq('id', tenantId).single(),
+      supabase.from('membership_plans').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+      supabase.from('memberships').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+    ]);
+    // Each one is set back to null on failure rather than left at its last
+    // value. A stale tick is worse than a blank here: it is the one state that
+    // says "nothing to do" about a setting nobody has just checked.
+    const row = gymRes.status === 'fulfilled' && !gymRes.value.error
+      ? (gymRes.value.data as { name: string | null; currency: string | null; session_fee: number | null; timezone: string | null } | null)
+      : null;
+    setSetupTenant(row
+      ? { name: row.name, currency: row.currency, timezone: row.timezone, sessionFee: row.session_fee }
+      : null);
+    setSetupPlans(planRes.status === 'fulfilled' && !planRes.value.error ? planRes.value.count ?? null : null);
+    setSetupMembers(memberRes.status === 'fulfilled' && !memberRes.value.error ? memberRes.value.count ?? null : null);
+    if (gymRes.status === 'rejected') reportError(gymRes.reason, 'owner.dashboard.setup');
+  }, [tenantId]);
+  useEffect(() => { void loadSetup(); }, [loadSetup]);
+
+  const refreshAll = useCallback(() => { refresh(); refreshTenant(); void loadSetup(); }, [refresh, refreshTenant, loadSetup]);
   const pull = usePullToRefresh(refreshAll);
+  const setup: SetupItem[] = assessGymSetup({
+    tenant: setupTenant,
+    plans: setupPlans,
+    members: setupMembers,
+  } satisfies SetupFacts);
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   // This hook PERSISTS what it is handed, so a figure we are unsure of is not
   // wrong for a second — it is saved as this month's history and nothing later
@@ -236,6 +296,13 @@ export default function OwnerOverview() {
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
+          {/* First, because for a gym in this state everything under it is a
+              dash and this is the reason for all of them. Draws nothing at all
+              once the six are set — and nothing while the reads are in flight,
+              since an unsettled read leaves every item 'unknown' rather than
+              outstanding. */}
+          <SetUp items={setup} onGo={(r) => router.push(r as never)} />
+
           {roll.atRiskCount > 0 ? (
             <Notice tone={t.warn} kicker="Needs a look"
               title={`${roll.atRiskCount} trainer${roll.atRiskCount > 1 ? 's' : ''} flagged`}
@@ -447,5 +514,93 @@ export default function OwnerOverview() {
         </View>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/* ── the first five minutes, on the phone ───────────────────────────────────
+ *
+ * WHERE each of the six is set, in THIS app. The list itself is in
+ * src/lib/gymSetup.ts and deliberately holds no routes, because the two
+ * surfaces answer the same six questions from different screens: the gym's
+ * name is on Brand here and on Gym settings in the console, the currency and
+ * the session fee are on Ops here and on the same console screen there.
+ *
+ * Two of the six have NO phone screen at all, and that is a fact about this
+ * app rather than a gap in the list:
+ *
+ *   · the timezone — `updateTenant` in src/ui/tenant.tsx does not admit the
+ *     column and no owner screen offers it, so the console is the only writer;
+ *   · the price book — nothing in `app/(owner)/**` writes `membership_plans`.
+ *
+ * A null here is therefore an honest "not from this app", and the card says so
+ * in one line rather than routing somebody to a screen that cannot do it. A
+ * Record keyed by SetupKey rather than a lookup with a fallback: a seventh item
+ * added to the module fails to compile here instead of rendering with nowhere
+ * to go.
+ */
+const PHONE_WHERE: Record<SetupKey, { route: string; label: string; icon: IconName } | null> = {
+  currency: { route: '/(owner)/ops', label: 'Ops', icon: 'wrench' },
+  timezone: null,
+  name: { route: '/(owner)/brand', label: 'Brand', icon: 'palette' },
+  plan: null,
+  // Members opens a membership against an account that already exists. It
+  // cannot invite — `memberships.member_id` references `profiles`, so somebody
+  // who has never used the app has to be invited first, and that flow is in the
+  // console. The item's own `breaks` copy says so; this only says where to go.
+  member: { route: '/(owner)/members', label: 'Members', icon: 'me' },
+  fee: { route: '/(owner)/ops', label: 'Ops', icon: 'wrench' },
+};
+
+/**
+ * What this gym has not set up yet, or nothing at all.
+ *
+ * Renders only when something is genuinely outstanding — `needsSetup` is false
+ * for a list of unknowns, so a refused read cannot put a setup card in front of
+ * a gym that finished setting up months ago, and an in-flight read cannot
+ * either. Done rows are not drawn: this is what is left, not a scoreboard.
+ */
+function SetUp({ items, onGo }: { items: SetupItem[]; onGo: (route: string) => void }) {
+  const t = useTheme();
+  if (!needsSetup(items)) return null;
+  const line = setupLine(items);
+  const left = items.filter((i) => i.state !== 'done');
+  const here = left.filter((i) => i.state === 'todo' && PHONE_WHERE[i.key] !== null);
+  const elsewhere = left.filter((i) => i.state === 'todo' && PHONE_WHERE[i.key] === null);
+  const unread = left.filter((i) => i.state === 'unknown');
+
+  return (
+    <Notice kicker="Set up" title={line ?? 'Some settings are not set yet'}
+      note="Each of these breaks something until it is done. Nothing here is cosmetic.">
+      <View style={{ marginTop: sp.sm }}>
+        {here.map((i) => {
+          const w = PHONE_WHERE[i.key];
+          if (!w) return null;
+          return (
+            <View key={i.key}>
+              <Rule />
+              <ListRow icon={w.icon} title={i.title} note={i.breaks} onPress={() => onGo(w.route)} />
+            </View>
+          );
+        })}
+
+        {/* The two this app cannot do, named rather than routed. Saying "open
+            the web console" is true; drawing a tappable row that lands on a
+            screen with no such control is not. */}
+        {elsewhere.length > 0 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {elsewhere.map((i) => i.title.toLowerCase()).join(', ')} — in the Repple Studio web
+            console. Neither is settable from this app.
+          </Text>
+        ) : null}
+
+        {/* Not folded into the count above, and not drawn as a row to act on:
+            an item nobody managed to check is a statement about a read. */}
+        {unread.map((i) => (
+          <Text key={i.key} style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {i.unknownWhy}
+          </Text>
+        ))}
+      </View>
+    </Notice>
   );
 }

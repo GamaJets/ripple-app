@@ -18,7 +18,7 @@ import {
   channelForRoute, channelForTitle, notificationChannel, dispatchDecision,
   PUSHED_BY_ITS_WRITER,
 } from './notifyDispatch';
-import { SERVER_WRITTEN } from './notifyInbox';
+import { KNOWN_PUSHES, SERVER_WRITTEN } from './notifyInbox';
 import { COACH_CHANNELS, channelDef, type CoachChannel } from './coachNotify';
 
 const errors: string[] = [];
@@ -169,6 +169,33 @@ for (const s of SERVER_WRITTEN) {
       `${s.title} is sent on a switch the coach actually has`);
   }
 }
+
+/* ── the half of the table nothing was checking ────────────────────────── */
+//
+// The loop above walks SERVER_WRITTEN, which is exactly the set this file was
+// written for, and it therefore says nothing at all about a route only a
+// HANDSET pushes. That is not a small remainder: KNOWN_PUSHES holds routes
+// SERVER_WRITTEN does not, and '/(trainer)/sessions' — a client asking their
+// coach for an hour the coach never opened — sat with a null `channel` on every
+// row for as long as it has existed, invisible to every assertion in this file.
+//
+// A null channel costs nothing while a handset is doing the sending, and that
+// is precisely why it can sit there: the day the kind moves server-side, as
+// parts 202, 471 and 613 moved theirs, it becomes a kind that silently never
+// pushes. So the catalogue of pushes is checked too.
+//
+// '/(client)/notices' is the single exception and it is named rather than
+// tolerated — see the note at the end of CHANNEL_BY_ROUTE. Anything else
+// appearing here is a route somebody added without deciding which switch turns
+// it off.
+const UNCLASSIFIED_ON_PURPOSE = ['/(client)/notices'];
+const pushRoutesWithoutChannel = [...new Set(
+  KNOWN_PUSHES
+    .filter((p) => p.route && notificationChannel(p.route, p.title) == null)
+    .map((p) => p.route as string),
+)].sort();
+eq(pushRoutesWithoutChannel.join(' | '), UNCLASSIFIED_ON_PURPOSE.join(' | '),
+  'every route this repo pushes answers to one of the coach’s switches, bar the one that deliberately does not');
 
 // A dispatched row ALWAYS carries a channel. This is the invariant send-push
 // depends on: it drops muted recipients only when one is passed, so a dispatch

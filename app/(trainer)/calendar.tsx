@@ -91,6 +91,32 @@ import { appLocale } from '../../src/lib/locale';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useCoachReminders } from '../../src/ui/coachReminders';
 import { coachMoveRefusalLine, coachMovedLine } from '../../src/lib/reschedule';
+// Where a session can be moved TO when the coach has not already opened the
+// hour. The Move sheet offered pre-existing open slots and nothing else, so
+// "shift Tuesday 7am to 8am" — the single most ordinary thing that happens to a
+// diary — was answered with "open one from Weekly Availability first", and the
+// coach's real alternative was Cancel. supabase/parts/461 lists what Cancel
+// does to a move: the hour goes to a waitlist before the client has been put
+// anywhere, the client is told they were cancelled, and re-booking them draws a
+// SECOND pack credit. supabase/parts/1830 is the atomic version that takes a
+// TIME rather than a destination row; src/lib/moveTimes.ts decides which times
+// may honestly be offered and what may be claimed about them.
+import {
+  workWindows, moveTimes, groupMoveTimes, moveTimesCaveat, emptyMoveTimesLine,
+  moveAtRefusalLine, moveAtConfirmBody, type MoveBlocker, type MoveTime,
+} from '../../src/lib/moveTimes';
+import { moveSessionToTime } from '../../src/ui/coachMoveAt';
+// The two things a calendar cannot draw, because both of them are absences: an
+// hour with nothing in it that no client can book, and a client who stopped
+// appearing. See the headers of both modules — neither is src/lib/clientDrift.ts
+// and neither pretends to be.
+import {
+  dayGaps, sellableGaps, gapsAreKnown, gapsUnknownNote, gapLengthLabel, gapNote, gapsHeading,
+} from '../../src/lib/dayGaps';
+import {
+  unrebooked, rebookingListable, rebookCoverageNote, unrebookedHeading, unrebookedNote,
+  noUnrebookedLine, REBOOK_CANCELLED_GAP_NOTE,
+} from '../../src/lib/rebooking';
 import {
   blockDates, summariseBlocks, blockSummaryLine, blockPlanLabel,
   cancelAndBlockBody, cancelAndBlockLabel, sessionsBlocking,
@@ -1237,6 +1263,61 @@ export default function TrainerSchedule() {
   const selDayClasses = classesOnDay(gymClasses, selDate, coachId);
   const classCaveat = classDayCaveat(classStatus);
 
+  /* ── what is NOT on this day ────────────────────────────────────────────
+   *
+   * Everything above draws rows that exist. The two findings below are
+   * absences, which is why neither of them has ever appeared on this screen:
+   *
+   *   · an hour with nothing in it that NO CLIENT CAN BOOK. Not "a free hour"
+   *     — a coach knows where those are. In this product a client books a
+   *     `sessions` row with `status = 'available'`, so a free hour with no such
+   *     row across it is unreachable however free the coach is, and part 731
+   *     made that a routine state rather than an exotic one.
+   *   · a client who had an appointment and has none.
+   *
+   * Both are computed from what this screen already holds and neither adds a
+   * read. `useNow()` rather than a mounted clock: this is a tab, it stays
+   * mounted for days, and a frozen `Date.now()` would report this morning's
+   * holes all afternoon.
+   */
+  const selDayWork = workWindows(availSlots, selDate.getDay());
+  /** Everything of this coach's that occupies time. The three obstacles the
+   *  server itself checks — `answer_session_request`, supabase/parts/740 — in
+   *  the same order and with the same exclusions. `selDayClasses` has already
+   *  dropped cancelled classes and colleagues' ones. */
+  const selDayBlockers: MoveBlocker[] = [
+    ...sessions
+      .filter((s) => s.status === 'booked' || s.status === 'blocked')
+      .map((s): MoveBlocker => ({
+        id: s.id, startsAt: s.startsAt, durationMin: s.durationMin,
+        kind: s.status === 'blocked' ? 'blocked' : 'booked',
+      })),
+    ...selDayClasses.map((c): MoveBlocker => ({
+      id: null, startsAt: c.startsAt, durationMin: c.durationMin, kind: 'class',
+    })),
+  ];
+  const openSlots = sessions.filter((s) => s.status === 'available');
+  /** Whether the selected day still has any of itself left. A day that is over
+   *  has no sellable time in it by definition, and a section reporting what a
+   *  coach could have sold last Tuesday is a reproach rather than a tool. */
+  const selDayAhead = new Date(selY, selM, selD + 1).getTime() > now.getTime();
+  const gapsKnown = gapsAreKnown(sessionsStatus, classStatus, availStatus);
+  const selDayGaps = gapsKnown && selDayAhead
+    ? sellableGaps(dayGaps({
+      year: selY, monthIndex: selM, day: selD,
+      work: selDayWork, blockers: selDayBlockers, open: openSlots, nowMs: now.getTime(),
+    }))
+    : [];
+  const gapsNote = selDayAhead ? gapsUnknownNote(sessionsStatus, classStatus, availStatus) : null;
+
+  /* Who had an appointment and has none. 'partial' is admitted here on
+   * purpose and src/lib/rebooking.ts holds the argument: the sessions read is
+   * newest-first, so the cut is at the OLD end and nothing BOOKED AHEAD can be
+   * missing from it. What a truncated read costs is rows that should be on the
+   * list, and `rebookCoverageNote` says so rather than letting a short list
+   * read as a clean book. */
+  const quiet = rebookingListable(sessionsStatus) ? unrebooked(sessions, now.getTime()) : [];
+
   // Time the coach is NOT available. The database withdraws the open slots
   // inside the period as it writes the block, because an offer left standing
   // that the server will then refuse is the app advertising something it will
@@ -1729,6 +1810,13 @@ export default function TrainerSchedule() {
    * fits inside one read is told nothing.
    */
   const monthEdge = readBoundary(sessions, sessionsStatus === 'partial');
+  /* The same boundary, asked a different question: does the read reach back
+   * over the four weeks "has not rebooked" is a claim about? A short list under
+   * a read that stopped last week is not a clean book, and this is the sentence
+   * that stops it being read as one. */
+  const quietCoverage = rebookingListable(sessionsStatus)
+    ? rebookCoverageNote(monthEdge, sessionsStatus, now.getTime(), dateLabel)
+    : null;
   const viewingPastMonth = viewYear < now.getFullYear()
     || (viewYear === now.getFullYear() && viewMonth < now.getMonth());
   const monthNote = viewingPastMonth
@@ -1997,19 +2085,57 @@ export default function TrainerSchedule() {
   const [moveFrom, setMoveFrom] = useState<TrainingSession | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
 
-  /**
-   * Where a session could go: this coach's own open hours, still ahead of now,
-   * soonest first.
+  /* ── where a session could go ────────────────────────────────────────────
    *
-   * Read off the same list the grid draws, so what is offered here is what the
-   * screen believes. Under 'error' that list is empty for want of a read rather
-   * than for want of slots, and the sheet says so instead of showing a coach
-   * with a full week "no open slots".
+   * This was `sessions.filter((x) => x.status === 'available')` and nothing
+   * else, and the sheet's own comment stated the consequence: "Nothing here
+   * creates an hour: a move goes into a slot that already exists." A coach
+   * whose client asks for 8am was therefore sent to Weekly Availability to
+   * publish 8am to the whole roster, come back, and hope nobody took it.
+   *
+   * Now the sheet offers a DAY and the times on it, and an open slot is one
+   * kind of time rather than the only kind. Which of the two server functions
+   * runs is a fact about the diary and not a preference: `MoveTime.slotId`
+   * non-null is an exact open hour and goes through part 461 unchanged;
+   * null goes through part 1830, which creates the booking and frees the old
+   * hour in one transaction.
+   *
+   * The day defaults to the day the session is already on, because "an hour
+   * later, same day" is the commonest move there is.
    */
-  const moveTargets = useMemo(() => sessions
-    .filter((x) => x.status === 'available' && Date.parse(x.startsAt) > Date.now())
-    .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))
-    .slice(0, 40), [sessions]);
+  const [moveDayKey, setMoveDayKey] = useState<string | null>(null);
+  const openMove = (s: TrainingSession) => { setMoveDayKey(dayKey(s.startsAt)); setMoveFrom(s); };
+  const closeMove = () => { setMoveFrom(null); setMoveDayKey(null); };
+  /** The fourteen days the sheet offers, from today. Built from local parts, so
+   *  "tomorrow" is tomorrow on the coach's own clock across a clock change. */
+  const moveDays = Array.from({ length: 14 }, (_, i) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + i));
+  const moveDay = (() => {
+    const key = moveDayKey ?? (moveFrom ? dayKey(moveFrom.startsAt) : null);
+    if (!key) return null;
+    const [y, m, d] = key.split('-').map(Number);
+    return new Date(y, m, d);
+  })();
+  const moveWork = moveDay ? workWindows(availSlots, moveDay.getDay()) : [];
+  const moveBlockers: MoveBlocker[] = moveDay ? [
+    ...sessions
+      .filter((s) => s.status === 'booked' || s.status === 'blocked')
+      .map((s): MoveBlocker => ({
+        id: s.id, startsAt: s.startsAt, durationMin: s.durationMin,
+        kind: s.status === 'blocked' ? 'blocked' : 'booked',
+      })),
+    ...classesOnDay(gymClasses, moveDay, coachId).map((c): MoveBlocker => ({
+      id: null, startsAt: c.startsAt, durationMin: c.durationMin, kind: 'class',
+    })),
+  ] : [];
+  const moveOptions = moveFrom && moveDay
+    ? moveTimes({
+      year: moveDay.getFullYear(), monthIndex: moveDay.getMonth(), day: moveDay.getDate(),
+      durationMin: moveFrom.durationMin, movingId: moveFrom.id,
+      blockers: moveBlockers, open: openSlots, work: moveWork, nowMs: now.getTime(),
+    })
+    : [];
+  const moveGroups = groupMoveTimes(moveOptions);
+  const moveCaveat = moveTimesCaveat(sessionsStatus, classStatus);
 
   /**
    * The confirm in front of the move.
@@ -2063,7 +2189,7 @@ export default function TrainerSchedule() {
         Alert.alert('Not moved', coachMoveRefusalLine(r, who, fromLabel), [{ text: 'OK' }]);
         return;
       }
-      setMoveFrom(null);
+      closeMove();
       // Told AFTER the server has moved it, and only the one person whose hour
       // changed — the client id comes back from the function rather than from
       // this screen's copy of the row, which the move has just made stale.
@@ -2074,6 +2200,74 @@ export default function TrainerSchedule() {
         : { ok: false };
       await reloadWaits();
       Alert.alert('Session moved', coachMovedLine(r, who, fromLabel, toLabel, told.ok), [{ text: 'Done' }]);
+    } finally { setMoveBusy(false); }
+  }
+
+  /**
+   * The confirm in front of a move to an hour the coach had not opened.
+   *
+   * A separate confirm from `confirmMove` and not a flag on it, because the act
+   * is different in one way the coach has to be told: it PUTS A NEW HOUR IN THE
+   * DIARY. `moveAtConfirmBody` is that sentence and the two money facts beside
+   * it, and it lives in src/lib/moveTimes.ts with the rest of this vocabulary
+   * rather than being written out here.
+   */
+  function confirmMoveAt(from: TrainingSession, to: MoveTime) {
+    const who = nameOf(from.clientId);
+    const fromLabel = `${dateLabel(from.startsAt)} at ${timeLabel(from.startsAt)}`;
+    const toLabel = `${dateLabel(to.startsAt)} at ${timeLabel(to.startsAt)}`;
+    Alert.alert(
+      'Move this session?',
+      moveAtConfirmBody(who, fromLabel, toLabel, to.inHours),
+      [
+        { text: 'Leave it', style: 'cancel' },
+        { text: 'Move', onPress: () => { void doMoveAt(from, to); } },
+      ],
+    );
+  }
+
+  /**
+   * The move itself, when the destination is a time rather than a row.
+   *
+   * Two writes reach two different people and they are counted separately, the
+   * same way `doMove` counts them: the SERVER's report says whether the session
+   * moved, and `sendPushChecked` says whether the client heard. A coach must
+   * never read "moved" over one that landed and one that did not, so the push
+   * result is carried into the sentence rather than assumed, and the move is
+   * announced only on the server's own `moved`.
+   *
+   * `refresh()` is called here and not by a provider: this path goes straight
+   * to the RPC (src/ui/coachMoveAt.ts) rather than through the shared session
+   * store, so two rows on this device are wrong until the diary is re-read —
+   * the hour that was freed may already belong to whoever was first in line.
+   */
+  async function doMoveAt(from: TrainingSession, to: MoveTime) {
+    if (moveBusy) return;
+    const who = nameOf(from.clientId);
+    const fromLabel = `${DOW[new Date(from.startsAt).getDay()]} ${timeLabel(from.startsAt)}`;
+    const toLabel = `${DOW[new Date(to.startsAt).getDay()]} ${timeLabel(to.startsAt)}`;
+    setMoveBusy(true);
+    try {
+      const r = await moveSessionToTime(from.id, to.startsAt);
+      if (!r.moved) {
+        Alert.alert('Not moved', moveAtRefusalLine(r, who, fromLabel, toLabel), [{ text: 'OK' }]);
+        return;
+      }
+      closeMove();
+      await refresh();
+      const told = r.clientId
+        ? await sendPushChecked([r.clientId], 'Your session has moved',
+          `${fromLabel} moved to ${toLabel}. Nothing is charged and your session is still paid for.`,
+          { route: '/(client)/calendar' })
+        : { ok: false };
+      await reloadWaits();
+      // The coach's own sentence for a move that worked, shared with the
+      // open-slot path so one act is never described two ways. It reads
+      // `promoted` and `waiting`, which part 1830 reports exactly as part 461
+      // does.
+      Alert.alert('Session moved', coachMovedLine(
+        { moved: true, reason: null, clientId: r.clientId, promoted: r.promoted, waiting: r.waiting },
+        who, fromLabel, toLabel, told.ok), [{ text: 'Done' }]);
     } finally { setMoveBusy(false); }
   }
 
@@ -2809,7 +3003,7 @@ export default function TrainerSchedule() {
                         is the commonest thing that happens to a diary and the
                         coach's only route to it was Cancel, which gave the hour
                         away and told the client they had been cancelled. */}
-                    <View style={{ flex: 1 }}><Ghost label="Move" onPress={() => setMoveFrom(s)} /></View>
+                    <View style={{ flex: 1 }}><Ghost label="Move" onPress={() => openMove(s)} /></View>
                     <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => confirmCancel(s)} /></View>
                   </>) : s.status === 'blocked' ? (
                     <View style={{ flex: 1 }}><Ghost label="Free This Time Up" onPress={() => removeOpen(s)} /></View>
@@ -2858,6 +3052,41 @@ export default function TrainerSchedule() {
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>{classCaveat}</Flag>
           ) : null}
 
+          {/* ── the hours in this day that nobody can book ───────────────
+              Everything above is a row that exists. This is the opposite: a
+              stretch inside the coach's own working hours with nothing of
+              theirs in it AND no open slot across it, which means no client can
+              take it however free the coach is. See src/lib/dayGaps.ts.
+
+              Drawn only for a day that still has some of itself left, and only
+              when all three reads behind the word "free" came back whole — an
+              hour claimed as free out of a truncated diary is the hour the
+              missing row was in. */}
+          {selDayAhead && gapsKnown && gapsHeading(selDayGaps.length) ? (
+            <>
+              <Rule />
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
+                {gapsHeading(selDayGaps.length)}
+              </Text>
+              {selDayGaps.map((g) => (
+                <View key={g.startMs} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, marginTop: 6 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>
+                      {timeLabel(g.startsAt)} · {gapLengthLabel(g.minutes)}
+                    </Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{gapNote(g)}</Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          ) : null}
+          {/* And the three states in which no such claim may be made at all.
+              Never "you have no free hours" over a read that did not finish. */}
+          {gapsNote ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{gapsNote}</Text>
+          ) : null}
+
           {/* What this phone is still carrying, which now includes check-ins
               made on this screen. Drawn even when the last one went through:
               the count is about the morning, not about the tap. A queue that
@@ -2881,6 +3110,88 @@ export default function TrainerSchedule() {
         </Section>
 
         <Rule />
+
+        {/* ── who had an appointment and has none ────────────────────────
+            The other absence. A calendar draws days and a client who stopped
+            appearing is not on one, so the diary quietly looks tidier for
+            having lost them.
+
+            NOT src/lib/clientDrift.ts and it says so in words below: drift
+            measures a change in somebody's training rate against a fifty-six
+            day baseline built from check-ins, workouts, sessions and door
+            swipes, and lives on the Clients and Analytics screens where those
+            reads are made. This is the diary's own narrower question — had an
+            appointment, has none — answered from rows this screen already
+            holds, with no extra read.
+
+            Shown under 'partial' on purpose, with the shortfall stated: the
+            sessions read is newest-first, so nothing BOOKED AHEAD can have
+            fallen off the end of it. See src/lib/rebooking.ts.
+
+            Withheld entirely from a coach with no appointments on file at all.
+            "Everybody who has trained with you has something booked" is true of
+            an empty book and says nothing about it, and a section that appears
+            before the first client is a section a coach learns to scroll past
+            before it has ever had anything to tell them. */}
+        {rebookingListable(sessionsStatus) && sessions.some((s) => s.status === 'booked' || !!s.outcome) ? (
+          <>
+            <Section>
+              <SectionHead title="Not Rebooked"
+                note={sessionsStatus === 'partial' ? 'Part of the list' : undefined} />
+              {unrebookedHeading(quiet.length) ? (
+                <>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                    {unrebookedHeading(quiet.length)} — they trained with you recently and have nothing in your diary.
+                  </Text>
+                  {quiet.map((u, i) => {
+                    const tap = tapOf(u.clientId);
+                    return (
+                      <View key={u.clientId}>
+                        {i > 0 ? <Rule /> : null}
+                        <Pressable disabled={!tap.can} onPress={() => openClient(tap)}
+                          accessibilityRole={tap.can ? 'button' : undefined}
+                          accessibilityLabel={`${slotWhoName(u.clientId, roster, rosterStatus)}. ${unrebookedNote(u, dateLabel)}${tap.can ? '' : ` ${clientTapLabel(tap)}`}`}
+                          hitSlop={hitSlopFor(MIN_TARGET)}
+                          style={{ minHeight: MIN_TARGET, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: u.lastMissed ? t.warn : t.brand }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                              {slotWhoName(u.clientId, roster, rosterStatus)}
+                            </Text>
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                              {unrebookedNote(u, dateLabel)}
+                            </Text>
+                            {/* A tap this screen will refuse is refused in
+                                words, on the row, rather than doing nothing. */}
+                            {!tap.can && tap.why ? (
+                              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{tap.why}</Text>
+                            ) : null}
+                          </View>
+                          {tap.can ? <Icon name="chevron" size={16} color={t.ink3} /> : null}
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </>
+              ) : (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{noUnrebookedLine()}</Text>
+              )}
+              {/* How far back the read actually reached. A short list under a
+                  diary loaded only to last week is not a clean book. */}
+              {quietCoverage ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>{quietCoverage}</Flag>
+              ) : null}
+              {/* The gap no read can close, stated rather than worked around:
+                  a client who cancelled their own last session left no row that
+                  is still theirs. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {REBOOK_CANCELLED_GAP_NOTE}
+              </Text>
+            </Section>
+
+            <Rule />
+          </>
+        ) : null}
 
         {/* ── late-cancellation fees ─────────────────────────────────────
             The record. `charges` has been in this schema since the first
@@ -3528,62 +3839,116 @@ export default function TrainerSchedule() {
 
       {/* ── add-session sheet ─────────────────────────────────────────────── */}
       {/* ── move a booked session ────────────────────────────────────────
-          Open slots only, this coach's own, still ahead of now. Nothing here
-          creates an hour: a move goes into a slot that already exists, which
-          is what makes it one write rather than a cancellation and a booking
-          with a gap in the middle. */}
-      <Modal visible={!!moveFrom} animationType="slide" transparent onRequestClose={() => setMoveFrom(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMoveFrom(null)} />
-        <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, maxHeight: '80%', ...elevation.e2 }}>
-          {moveFrom ? (
+          A DAY and the times on it, rather than a list of already-published
+          open slots. An open slot is one kind of time here and no longer the
+          only kind: `MoveTime.slotId` decides which of the two server functions
+          runs, and a coach asked for 8am is given 8am instead of being sent to
+          Weekly Availability to publish it to their whole roster first.
+
+          Every time listed makes exactly one claim — nothing of this coach's is
+          in it — checked against the same three obstacles the server checks.
+          See src/lib/moveTimes.ts. */}
+      <Modal visible={!!moveFrom} animationType="slide" transparent onRequestClose={closeMove}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={closeMove} />
+        <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, maxHeight: '85%', ...elevation.e2 }}>
+          {moveFrom && moveDay ? (
             <>
               <Text style={{ ...ty.head, color: t.ink }}>Move Session</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
                 {slotOf(moveFrom.clientId)} · {DOW[new Date(moveFrom.startsAt).getDay()]} {timeLabel(moveFrom.startsAt)}
               </Text>
               <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.md }}>
-                Pick one of your open slots. The session moves in one go, nothing is charged, and the credit already on it moves with it. The hour you are leaving goes to whoever is first on its waitlist, once your client is in their new one.
+                Pick a day and a time. The session moves in one go, nothing is charged, and the credit already on it moves with it. The hour you are leaving goes to whoever is first on its waitlist, once your client is in their new one.
               </Text>
+
+              {/* The day. Fourteen of them from today, because a move is nearly
+                  always this week and a month picker in a sheet is a second
+                  calendar to get wrong. */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {moveDays.map((d) => (
+                  <Chip key={dayKey(d.toISOString())} t={t} label={dateOfLabel(d)}
+                    on={dayKey(d.toISOString()) === dayKey(moveDay.toISOString())}
+                    onPress={() => setMoveDayKey(dayKey(d.toISOString()))} />
+                ))}
+              </ScrollView>
+
               {/* An unread calendar is not a coach with no free hours, and this
                   is the sheet where believing that would send them back to
                   Cancel. */}
               {!known ? (
                 <Flag tone={t.warn}>Your calendar could not be read, so the hours you have free are not known. Nothing is listed below because nothing came back. Pull down to refresh and try again.</Flag>
-              ) : moveTargets.length === 0 ? (
-                // Three states, not one. "You have no open slots" is a claim
-                // about the coach's own week and may only be made when the
-                // week was read whole: under 'loading' the list is empty
-                // because nothing has arrived yet, and under 'partial' it
-                // stopped at the row cap, so an hour that IS free can be
-                // missing from it. Both used to be stated as a coach with
-                // nowhere to put their client, which sends them back to
-                // Cancel — the exact outcome the move path exists to prevent.
+              ) : moveOptions.length === 0 ? (
+                // Four states, not one. Three of them are reads that have not
+                // finished or have failed, and only the fourth is a claim about
+                // the coach's day. `emptyMoveTimesLine` holds all four and this
+                // screen decides none of them.
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  {sessionsStatus === 'loading'
-                    ? 'Looking through your calendar for open hours…'
-                    : sessionsStatus === 'partial'
-                      ? 'Only part of your calendar came back, so the open hours in it are not all of them. Nothing is listed here yet — pull down to refresh and open this again.'
-                      : 'You have no open slots ahead of now, so there is nowhere to move this to. Open one from Weekly Availability or Add a Session first.'}
+                  {emptyMoveTimesLine(sessionsStatus, dateOfLabel(moveDay), moveWork.length > 0)}
                 </Text>
               ) : (
-                <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
-                  {moveTargets.map((o) => (
-                    <Pressable key={o.id} disabled={moveBusy} onPress={() => confirmMove(moveFrom, o)}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: moveBusy, busy: moveBusy }}
-                      accessibilityLabel={`Move to ${DOW[new Date(o.startsAt).getDay()]} ${new Date(o.startsAt).getDate()} ${MON_SHORT[new Date(o.startsAt).getMonth()]} at ${timeLabel(o.startsAt)}`}
-                      style={{ paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                      <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>
-                        {DOW[new Date(o.startsAt).getDay()]} {new Date(o.startsAt).getDate()} {MON_SHORT[new Date(o.startsAt).getMonth()]}
-                      </Text>
-                      <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(o.startsAt)}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>{o.durationMin}min</Text>
-                    </Pressable>
+                <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+                  {([
+                    ['', moveGroups.inHours],
+                    // Offered, and offered second. A coach who wants 5am can
+                    // have it; a coach looking for 8am should not have to read
+                    // past it. The heading is withheld when the coach has set
+                    // no hours for the day, because there is nothing to be
+                    // outside of and the sentence would be about a working day
+                    // this screen invented.
+                    [moveWork.length ? 'Outside your working hours' : '', moveGroups.outside],
+                  ] as const).map(([heading, list], gi) => (
+                    list.length === 0 ? null : (
+                      <View key={`g${gi}`}>
+                        {heading ? (
+                          <Text style={{ ...ty.micro, color: t.ink3, marginTop: gi > 0 ? sp.lg : 0, marginBottom: sp.sm }}>
+                            {heading}
+                          </Text>
+                        ) : null}
+                        {list.map((o) => (
+                          <Pressable key={o.startMs} disabled={moveBusy}
+                            onPress={() => {
+                              const slot = o.slotId ? openSlots.find((x) => x.id === o.slotId) : null;
+                              // The proven path when the hour is genuinely one
+                              // the coach published, and part 1830 otherwise.
+                              // A slot that has vanished from this device's copy
+                              // between the list and the tap falls through to
+                              // the time-based move, which is correct: the coach
+                              // asked for that hour either way.
+                              if (slot) confirmMove(moveFrom, slot);
+                              else confirmMoveAt(moveFrom, o);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityState={{ disabled: moveBusy, busy: moveBusy }}
+                            hitSlop={hitSlopFor(MIN_TARGET)}
+                            accessibilityLabel={`Move to ${dateOfLabel(moveDay)} at ${timeLabel(o.startsAt)}${o.slotId ? ', an hour you have already opened' : ''}`}
+                            style={{ minHeight: MIN_TARGET, paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                            <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink, flex: 1 }}>
+                              {timeLabel(o.startsAt)}
+                            </Text>
+                            {/* Said rather than left to be inferred: this hour
+                                is already published, so moving into it takes a
+                                slot off the coach's booking screen instead of
+                                putting a new one in the diary. */}
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              {o.slotId ? 'Already open' : `${moveFrom.durationMin}min`}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )
                   ))}
                 </ScrollView>
               )}
+
+              {/* What the list above cannot promise. Withheld entirely when
+                  both reads were whole, because a caveat on every sheet is a
+                  caveat nobody reads. */}
+              {known && moveOptions.length > 0 && moveCaveat ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>{moveCaveat}</Flag>
+              ) : null}
               <View style={{ height: sp.lg }} />
-              <Ghost label="Cancel" onPress={() => setMoveFrom(null)} />
+              <Ghost label="Cancel" onPress={closeMove} />
             </>
           ) : null}
         </View>

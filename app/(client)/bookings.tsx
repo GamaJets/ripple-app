@@ -35,7 +35,7 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/
 // is made in one place, so this screen and the ledger cannot describe the same
 // credit two ways.
 import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
-import { coachPackLines, gymPtLines, chooseRoute, creditsLeft, payingLines, ledgerStateOf,
+import { bookableCredits, ledgerStateOf,
   clientLedgerLine, bookingCreditNote, type CreditSession } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
@@ -265,14 +265,17 @@ export default function Bookings() {
    * grain this needs.
    */
   const nowMs = useNow().getTime();
-  const coachLines = useMemo(() => (packs === undefined ? null : coachPackLines(packs?.lines ?? null)), [packs]);
-  const gymLines = useMemo(() => (ptPasses === undefined ? null : gymPtLines(ptPasses, todayISO)), [ptPasses, todayISO]);
-  const creditRoute = useMemo(
-    () => chooseRoute(coachLines == null ? null : coachLines.length > 0,
-                      gymLines == null ? null : gymLines.length > 0),
-    [coachLines, gymLines]);
-  const creditsRemaining = useMemo(
-    () => creditsLeft(payingLines(creditRoute, coachLines, gymLines)), [creditRoute, coachLines, gymLines]);
+  // The route and the balance, through `bookableCredits` — the same call
+  // app/(client)/session-credits.tsx, packages.tsx and pt-sessions.tsx make.
+  // This screen had the composition right and had it written out longhand,
+  // which is a fifth copy of a rule that had already been got wrong on two of
+  // the five. The rule lives in src/lib/sessionCredits.ts now and nowhere else.
+  const book = useMemo(
+    () => bookableCredits(packs === undefined ? null : (packs?.lines ?? null),
+                          ptPasses === undefined ? null : ptPasses, todayISO),
+    [packs, ptPasses, todayISO]);
+  const creditRoute = book.route;
+  const creditsRemaining = book.left;
   const creditNote = useMemo(() => bookingCreditNote(creditRoute, creditsRemaining), [creditRoute, creditsRemaining]);
 
   // ── a pack with a closing window, and whether this diary covers it ─────
@@ -286,8 +289,7 @@ export default function Bookings() {
   // `bookedByThen` is null unless exactly ONE pack has a window — an upcoming
   // session is not attributed to a pack until it draws, so with two windows in
   // play no honest attribution exists. See src/lib/packDeadline.ts.
-  const payingEntitlements = useMemo(
-    () => payingLines(creditRoute, coachLines, gymLines), [creditRoute, coachLines, gymLines]);
+  const payingEntitlements = book.lines;
   const soleWindow = useMemo(() => {
     const w = (payingEntitlements ?? []).filter((l) => l.expiresOn);
     return w.length === 1 ? w[0] : null;

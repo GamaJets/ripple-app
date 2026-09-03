@@ -47,6 +47,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
+import { useRecoverRead } from './readRefresh';
 
 /** How far back to read. A week is enough for a readiness average and short
  *  enough that a provider outage does not dominate it. */
@@ -181,9 +182,40 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [uid, status, fresh]);
 
-  return (
-    <Ctx.Provider value={{ reads, nights, status, refresh: load }}>{children}</Ctx.Provider>
+  // ── When the signal comes back, this read is run again ───────────────────
+  //
+  // This provider was one of the ones `src/lib/readRefresh.ts` had not reached,
+  // and it is a worse omission here than most because of what sits downstream:
+  // `src/ui/readiness.ts` feeds the client's home screen, and it correctly
+  // refuses to score a night nobody measured. So one failed walk over the
+  // devices — a phone with no signal on the way in, a WHOOP call that did not
+  // come back — turns readiness into a dash, and NOTHING re-runs it. `refresh`
+  // existed and had exactly one caller: the pull-to-refresh on
+  // app/(client)/recovery.tsx. Home has no such gesture, so a member looking at
+  // the dash on the screen they actually open had no way to clear it short of
+  // killing the app.
+  //
+  // The file's own header records this being reported in almost those words —
+  // "whoop is connected and sleep is also there. its not updating the repple
+  // app" — and again as "Reconnected whoop and it says need to connect whoop."
+  // Both were fixed by making the effect re-run on a change nobody had to
+  // notice. This is the third of those changes: coming back into signal.
+  useRecoverRead('deviceSleep', status, () => { void load(); });
+
+  /**
+   * Memoised, because an object literal here republished the context on every
+   * render of this provider — and `wear.states` is replaced on every
+   * sixty-second wearable sync, so that is not a rare event. Every consumer of
+   * `useDeviceSleep` re-rendered on each of them whether or not a night had
+   * changed. `load` is already a `useCallback`, so it is stable for as long as
+   * the connected devices are.
+   */
+  const value = useMemo(
+    () => ({ reads, nights, status, refresh: load }),
+    [reads, nights, status, load],
   );
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useDeviceSleep(): DeviceSleepValue {

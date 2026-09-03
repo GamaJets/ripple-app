@@ -241,8 +241,20 @@ const HISTORY: BodyweightHistory = [{ t: at('2026-01-10'), v: 80 }];
 
   const lift: WorkoutEntry = { t: '2026-03-01T09:00:00.000Z', exercise: 'Bench', sets: [[8, 60]] };
   eq(setChipLabel(lift, 0, lbl, 'kg'), '8×60 kg', 'a lift is unchanged');
+  // This assertion used to read `'8×— kg'`, "a set with no load still shows the
+  // dash it always did" — over a fixture named `bwLift`, of a PULL-UP, carrying
+  // `bw: [true]`. The dash is the right answer to a set nobody described, and
+  // this is not one: the member said the load was their own body, which is a
+  // recorded load and not a missing one. The old line pinned the defect it was
+  // describing, and the two functions below it had no `bw` to consult even had
+  // they wanted to.
   const bwLift: WorkoutEntry = { t: '2026-03-01T09:00:00.000Z', exercise: 'Pull-up', sets: [[8, 0]], bw: [true] };
-  eq(setChipLabel(bwLift, 0, lbl, 'kg'), '8×— kg', 'and a set with no load still shows the dash it always did');
+  eq(setChipLabel(bwLift, 0, lbl, 'kg'), '8 reps at bodyweight',
+    'a pull-up is a pull-up, not a bar with a weight nobody wrote down');
+  // The dash survives where it is still true: the same two numbers with nobody
+  // having said what they mean.
+  const unsaid: WorkoutEntry = { t: '2026-03-01T09:00:00.000Z', exercise: 'Bench', sets: [[8, 0]] };
+  eq(setChipLabel(unsaid, 0, lbl, 'kg'), '8×— kg', 'and a set with no load still shows the dash it always did');
 
   // The strip: unit once, and only when something on the line is a load.
   const mixed: WorkoutEntry = {
@@ -265,6 +277,71 @@ const HISTORY: BodyweightHistory = [{ t: at('2026-01-10'), v: 80 }];
     }
   }
 }
+
+
+/* ── a bodyweight set is never a bar figure ───────────────────────────────── */
+{
+const lbl = (kg: number | null) => (kg == null ? '—' : String(kg));
+//
+// The same split this file already closed for holds, one flag over. The DRAFT
+// chips in app/(client)/workouts.tsx branch on `s.bw` and print "8 reps at
+// bodyweight"; the two functions above rendering a SAVED entry took only
+// `sets` and `timed`, so the moment a pull-up was saved it came back as
+// "8×— kg" — a bar that was not there, carrying a load nobody recorded, six
+// inches from the draft chip that had said it correctly. `lastTime` escapes it
+// by going through `bestSetLabel`, which has taken `bodyweight` all along.
+
+const pullUp = { sets: [[8, 0]] as [number, number][], bw: [true] };
+const belted = { sets: [[8, 20]] as [number, number][], bw: [true] };
+
+eq(setChipLabel(pullUp, 0, lbl, 'kg'), '8 reps at bodyweight',
+  'a set the person said was their own body is not a bar with a missing weight on it');
+ok(!setChipLabel(pullUp, 0, lbl, 'kg').includes('—'),
+  'and carries no dash, which would claim nobody recorded the load');
+ok(!setChipLabel(pullUp, 0, lbl, 'kg').includes('×'),
+  'nor a multiplication sign, which is what makes it read as a bar figure');
+ok(!setChipLabel(pullUp, 0, lbl, 'kg').endsWith('kg'),
+  'and no trailing unit over a set with no kilograms in it');
+eq(setChipLabel(belted, 0, lbl, 'kg'), '8 reps at bodyweight +20 kg',
+  'a belt is what was ADDED to the body, never presented as the whole of the load');
+
+// The ordinary set with an empty load box is untouched, and must be: a stored
+// 0 with no `bw` beside it is genuinely ambiguous — the person hung off a bar,
+// or the box was left empty by accident — and the dash is the honest answer to
+// that. This is the line the fix must not cross.
+eq(setChipLabel({ sets: [[8, 0]] as [number, number][] }, 0, lbl, 'kg'), '8×— kg',
+  'without the flag the dash stays, because an unrecorded load is not a claim about anybody’s body');
+
+// A hold the person said was at bodyweight, with a plate on their back.
+const weightedPlank = { sets: [[45, 10]] as [number, number][], timed: [true], bw: [true] };
+eq(setChipLabel(weightedPlank, 0, lbl, 'kg'), '45 s at bodyweight +10 kg',
+  'ten kilos on somebody’s back is a clause, not the load — HoldRecord.bodyweight asks for exactly this');
+ok(!setChipLabel(weightedPlank, 0, lbl, 'kg').includes('×'),
+  'and never "45 s × 10 kg", which prices the plate as the whole of it');
+
+// The strip, where the unit is stated once at the end.
+eq(setListLabel({ sets: [[8, 0], [8, 0]] as [number, number][], bw: [true, true] }, lbl, 'kg'),
+  '8 reps at bodyweight  8 reps at bodyweight',
+  'an all-bodyweight line carries no trailing unit — there are no kilograms on it to name');
+ok(!setListLabel({ sets: [[8, 0]] as [number, number][], bw: [true] }, lbl, 'kg').includes('—'),
+  'and no dash anywhere on it');
+eq(setListLabel({ sets: [[8, 60], [8, 0]] as [number, number][], bw: [false, true] }, lbl, 'kg'),
+  '8×60  8 reps at bodyweight kg',
+  'a mixed line still names the unit once, for the barbell set that has one');
+eq(setListLabel({ sets: [[8, 20]] as [number, number][], bw: [true] }, lbl, 'kg'),
+  '8 reps at bodyweight +20 kg',
+  'the added load brings its own unit with it rather than collecting one at the end');
+
+// The sweep at the bottom of this file checks no hold starts "45×". The same
+// sweep, for the other flag: no bodyweight set may start with a bar figure.
+for (const e of [pullUp, belted, weightedPlank]) {
+  for (let i = 0; i < e.sets.length; i++) {
+    ok(!/×—/.test(setChipLabel(e, i, lbl, 'kg')),
+      'no bodyweight set is ever printed with a bar and a missing weight');
+  }
+}
+}
+
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('timedSets.test.ts ok');

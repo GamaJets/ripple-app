@@ -471,6 +471,15 @@
     "src/lib/replyWait.ts",
     "src/lib/replyWait.test.ts",
     "src/lib/dismissedSet.ts",
-    "src/lib/dismissedSet.test.ts"
+    "src/lib/dismissedSet.test.ts",
+    "src/lib/readStamp.ts",
+    "src/lib/readStamp.test.ts",
+    "src/lib/moveTimes.test.ts",
+    "src/lib/dayGaps.test.ts",
+    "src/lib/rebooking.test.ts",
+    "src/lib/gymSetup.ts",
+    "src/lib/gymSetup.test.ts",
+    "src/lib/zonePicker.ts",
+    "src/lib/zonePicker.test.ts"
   ]
 }

@@ -204,8 +204,15 @@ export interface MoveTimesInput {
 export function moveTimes(input: MoveTimesInput): MoveTime[] {
   const step = Math.max(5, input.stepMin ?? MOVE_STEP_MIN);
   const dur = Math.max(1, input.durationMin);
+  const isSelf = (b: MoveBlocker) => b.kind !== 'class' && b.id != null && b.id === input.movingId;
+  // The hour it is already in. Not an obstacle — the server frees it before it
+  // books the new one, so 7:00–8:00 may move to 7:30 — but not an offer either:
+  // part 1830 answers 'same-time' to a move that changes nothing, and a row a
+  // coach can tap for no effect is a row that should not be there.
+  const selfStart = input.blockers.filter(isSelf)
+    .map((b) => Date.parse(b.startsAt)).find((n) => Number.isFinite(n)) ?? null;
   const busy = input.blockers
-    .filter((b) => !(b.kind !== 'class' && b.id != null && b.id === input.movingId))
+    .filter((b) => !isSelf(b))
     .map((b) => ({ s: Date.parse(b.startsAt), e: Date.parse(b.startsAt) + Math.max(0, b.durationMin) * MIN }))
     .filter((b) => Number.isFinite(b.s));
   const openAt = new Map<number, string>();
@@ -243,9 +250,14 @@ export function moveTimes(input: MoveTimesInput): MoveTime[] {
     if (!Number.isFinite(ms) || seen.has(ms)) continue;
     seen.add(ms);
     if (ms <= input.nowMs) continue;
+    if (selfStart != null && ms === selfStart) continue;
     const end = ms + dur * MIN;
     if (busy.some((b) => ms < b.e && b.s < end)) continue;
-    const inHours = windows.some((w) => m >= w.startMin && m + dur <= w.endMin);
+    // False for every time on a day the coach has stated no hours for. The
+    // fallback window is a presentation bound, not a claim about their working
+    // life, and dressing it up as one would put "inside your working hours"
+    // under a day they never opened.
+    const inHours = stated && windows.some((w) => m >= w.startMin && m + dur <= w.endMin);
     out.push({ startsAt: d.toISOString(), startMs: ms, slotId: openAt.get(ms) ?? null, inHours });
   }
   return out;
@@ -352,6 +364,8 @@ export type MoveAtRefusal =
   /** The exclusion constraint caught something that landed mid-flight, and this
    *  branch genuinely does not know which of the three it was. */
   | 'clash'
+  /** The time asked for is the hour it is already in. Nothing was written. */
+  | 'same-time'
   /** Not a time the server would accept — malformed, or a length it refuses. */
   | 'bad-time'
   /** The call itself did not land. The only one where nobody knows whether
@@ -415,6 +429,8 @@ export function moveAtRefusalLine(
     case 'not-yours':
       return `${still} It may have been cancelled or moved from the client's own phone since this screen loaded. `
         + 'Pull down to refresh and look again.';
+    case 'same-time':
+      return `${still} That is the hour it is already in.`;
     case 'bad-time':
       return `${target}was not a time the server would accept, so nothing was changed. ${still} Pick another time.`;
     case 'unreachable':
