@@ -86,8 +86,17 @@ import { peerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { fmtRelativeDay } from '../../src/lib/format';
 import { attachmentNoun } from '../../src/lib/messageAttachments';
-import { atBottom } from '../../src/lib/readReceipt';
+import { atBottom, isLocalId } from '../../src/lib/readReceipt';
 import { useReadReceipt } from '../../src/ui/readReceipts';
+// How long this member has been waiting, when they have been waiting at all.
+// The coach's app has filed them under "Waiting on a Reply" since
+// src/lib/awaitingReply.ts landed; this is the sentence on their own side of
+// that. See src/lib/replyWait.ts for why it never predicts a reply.
+import { replyWait } from '../../src/lib/replyWait';
+// The clock the wait is measured against. A thread is a screen somebody leaves
+// open, so a `Date.now()` taken at mount would freeze the wait at whatever it
+// was when they opened it.
+import { useNow } from '../../src/ui/today';
 import {
   blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
   reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
@@ -237,6 +246,34 @@ export default function Messages() {
    * The other person's bubbles keep their bare time.
    */
   const receipt = useReadReceipt({ threadId, role: 'client', messages: msgs, unsent, atEnd, them: OTHER });
+  /**
+   * How long this member has been waiting, when they have been waiting at all.
+   *
+   * `receipt.peerReadAt` has been exposed by that hook since it was written,
+   * with a docstring saying it is there "for a screen that wants to say
+   * something once rather than per bubble", and nothing ever said anything.
+   * This is that sentence.
+   *
+   * `delivered` is derived exactly as `deliveryOf` derives its own states — in
+   * flight, marked unsent, or carrying an id no server has issued — so a
+   * message sitting in the outbox can never be counted as a wait. The three
+   * tests are duplicated rather than shared because `Bubble` is the receipt
+   * module's shape and this needs three booleans out of it; what must not
+   * diverge is the RULE, and the rule is one line in both places.
+   */
+  const now = useNow();
+  const waiting = replyWait({
+    messages: msgs.map((m) => ({
+      mine: m.sender === 'client',
+      createdAt: m.createdAt,
+      delivered: !m.sending && !unsent[m.id] && !isLocalId(m.id),
+    })),
+    status,
+    peerReadAt: receipt.peerReadAt,
+    now: now.getTime(),
+    canSend,
+    them: OTHER,
+  });
 
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
@@ -513,6 +550,25 @@ export default function Messages() {
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xxl }}>
               {status === 'error' ? 'We could not load this conversation, so we cannot say whether there are messages in it.' : 'No messages yet. Say hello.'}
             </Text>
+          ) : null}
+          {/* ── the silence, when it has lasted ─────────────────────────────
+              Under the last bubble, because that bubble is what the silence is
+              about, and never above the thread where it would be the first
+              thing a member reads on opening it.
+
+              Silent for the first day and silent whenever the read cannot
+              support the claim — see src/lib/replyWait.ts. The header of this
+              screen records the fabricated "usually replies within a few
+              hours" being deleted rather than replaced; nothing here replaces
+              it. There is no estimate, no promise, and no suggestion that a
+              reply is owed. What there is, is how long it has been, whether
+              their coach's app has recorded opening it, and the fact that a
+              conversation this old is at the top of that app's messages
+              list. */}
+          {waiting.kind !== 'silent' ? (
+            <View style={{ marginTop: sp.xl, paddingHorizontal: sp.md }}>
+              <Text style={{ ...ty.caption, color: t.ink2, textAlign: 'center' }}>{waiting.note}</Text>
+            </View>
           ) : null}
         </ScrollView>
         <Rule />

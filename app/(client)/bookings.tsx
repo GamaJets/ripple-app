@@ -43,7 +43,12 @@ import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 // One definition of "today, locally", shared with the membership screen and
 // with the pass code itself — see the note on `todayISO` below.
-import { useToday } from '../../src/ui/today';
+import { useToday, useNow } from '../../src/ui/today';
+// When the free window on a booking closes, and what changes when it does.
+// The notice period existed only inside the Cancel confirmation, and the Move
+// control simply disappeared at the boundary with nothing saying why. See
+// src/lib/cancelDeadline.ts.
+import { cancelDeadline, freeUntil } from '../../src/lib/cancelDeadline';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 // A class the gym called off. This screen listed one under Upcoming as a
@@ -127,7 +132,12 @@ export default function Bookings() {
   // once already — see the long note above `Item` — and a hardcoded 24 hours in
   // one of them was how a coach's 48-hour policy would have gone unmentioned
   // here and mentioned there.
-  const { policy: cancelPolicy, reload: reloadPolicy } = useCancellationPolicy();
+  // `status` is taken as well as the policy now, and the two say different
+  // things. A failed reload leaves whatever was already there in `policy`, so
+  // the object in hand under 'error' is a figure from before the failure and is
+  // not evidence of anybody's current terms — `cancelDeadline` refuses to quote
+  // it, and says so, rather than printing a fee it cannot confirm.
+  const { policy: cancelPolicy, status: policyStatus, reload: reloadPolicy } = useCancellationPolicy();
   // What this member is waiting for. `session_waitlist_client_r` shows them
   // their own row and nobody else's, so a position can only come from the
   // server: read from the app the queue is a set of one and everybody is first.
@@ -245,6 +255,16 @@ export default function Bookings() {
   // a day that has actually changed causes the render that this line was
   // already written to be correct in.
   const todayISO = useToday();
+  /**
+   * The clock the notice window is measured against.
+   *
+   * `useToday` is a calendar day and cannot answer this: a deadline is an hour,
+   * and a member sitting on this screen at 06:55 the morning before a 07:00
+   * session watches a window close. `useNow` re-reads on the next local
+   * midnight and on every foreground, which is the same guarantee, at the
+   * grain this needs.
+   */
+  const nowMs = useNow().getTime();
   const coachLines = useMemo(() => (packs === undefined ? null : coachPackLines(packs?.lines ?? null)), [packs]);
   const gymLines = useMemo(() => (ptPasses === undefined ? null : gymPtLines(ptPasses, todayISO)), [ptPasses, todayISO]);
   const creditRoute = useMemo(
@@ -674,6 +694,40 @@ export default function Bookings() {
                   {it.kind === 'pt' && creditLineFor(it.pt?.id ?? null) ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{creditLineFor(it.pt?.id ?? null)}</Text>
                   ) : null}
+                  {/* ── when this stops being free to change ────────────────
+                      The notice period lived in exactly one place, and that
+                      place was the Alert raised by the Cancel button — so the
+                      member read it after they had decided rather than while
+                      they were deciding. And below, `canOfferMove` removes the
+                      Move control at the boundary with nothing anywhere saying
+                      why it went.
+
+                      PT only. A class belongs to the gym's own timetable, its
+                      cancellation terms are the gym's and this app does not
+                      hold them (see `CLASS_POLICY_UNKNOWN_NOTE`), and a coach's
+                      notice period has nothing to do with it.
+
+                      The deadline instant comes from `freeUntil` and is
+                      formatted here, by the same two helpers every other time
+                      on this screen goes through, so it is in the member's own
+                      locale and timezone. */}
+                  {it.pt && !it.cancelled ? (() => {
+                    const until = freeUntil(it.startsAt, cancelPolicy);
+                    const d = cancelDeadline({
+                      startsAt: it.startsAt,
+                      policy: cancelPolicy,
+                      policyStatus,
+                      now: nowMs,
+                      when: until ? `${dayLabel(until)} at ${timeLabel(until)}` : null,
+                    });
+                    if (d.kind === 'silent') return null;
+                    // Marked, never coloured: a status hue as text ink does not
+                    // clear the 4.5:1 that words need, and the sentence already
+                    // carries the meaning on its own.
+                    return d.kind === 'closed' || (d.kind === 'open' && d.closingSoon)
+                      ? <Flag tone={t.warn} style={{ marginTop: 6 }}>{d.note}</Flag>
+                      : <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{d.note}</Text>;
+                  })() : null}
                 </View>
                 {/* "Cancel, button" told a screen reader nothing about WHICH
                     booking, on a screen that is a list of them. The visible

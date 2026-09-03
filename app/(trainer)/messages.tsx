@@ -336,6 +336,7 @@ export default function Messages() {
    * already in memory.
    */
   const waiting = waitingOn(conversations, now, status);
+  const waitNote = waitingNote(waiting);
   const G = layout.gutter;
 
   return (
@@ -480,8 +481,8 @@ export default function Messages() {
                 where there is neither, it says what this list is and is not,
                 because a coach who reads it as a list of their own failures
                 stops opening it the first time a "thanks" lands on it. */}
-            {waitingNote(waiting) ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{waitingNote(waiting)}</Text>
+            {waitNote ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{waitNote}</Text>
             ) : null}
           </Section>
         ) : null}

@@ -20,7 +20,7 @@
 //
 // The reads had the ordinary version: `sent` and `received` each swallowed their
 // query, so "no pending invitations" and "we could not check" looked the same.
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -28,6 +28,7 @@ import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
 import { writeFailure } from '../lib/wroteRows';
+import { nextDismissed, packDismissed, parseDismissed, withDismissed } from '../lib/dismissedSet';
 
 /** Alias kept because half the app imports the invite's mode from here. The
  *  vocabulary itself is in src/lib/types.ts — an invite's delivery and a
@@ -103,11 +104,44 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [acceptFailed, setAcceptFailed] = useState<string[]>([]);
 
-  const persistDismissed = (next: Set<string>) => {
+  /**
+   * The things the callbacks below need at the moment they are CALLED, held as
+   * refs beside the state they mirror.
+   *
+   * The context value this provider publishes is memoised, and a memo is only
+   * worth the line if the functions in it are stable. A handler that closed
+   * over `uid`, `myName`, `received` or `dismissed` as values would be rebuilt
+   * on every change to any of them, rebuilding the value, re-rendering every
+   * consumer — and, as the loop below records, doing considerably worse than
+   * that.
+   */
+  const uidRef = useRef<string | null>(uid);
+  uidRef.current = uid;
+  const myNameRef = useRef<string | null>(myName);
+  myNameRef.current = myName;
+  const receivedRef = useRef<Invite[]>(received);
+  receivedRef.current = received;
+  const dismissedRef = useRef<Set<string>>(dismissed);
+  dismissedRef.current = dismissed;
+
+  /**
+   * Record one invitation as handled, on the device.
+   *
+   * Written through `withDismissed`, which returns the set already held when
+   * the id is already in it — so declining the same invitation twice, which the
+   * screen allows because a failed write puts the row back, does not produce a
+   * second render carrying an identical set.
+   *
+   * The ref is moved BEFORE the setter so two marks in the same tick do not
+   * lose one: `dismissed` will not have updated by the time the second runs.
+   */
+  const markDismissed = useCallback((id: string) => {
+    const next = withDismissed(dismissedRef.current, id);
+    if (next === dismissedRef.current) return;
+    dismissedRef.current = next;
     setDismissed(next);
-    AsyncStorage.setItem(DISMISS_KEY, JSON.stringify([...next])).catch(() => {});
-  };
-  const markDismissed = (id: string) => { const next = new Set(dismissed); next.add(id); persistDismissed(next); };
+    AsyncStorage.setItem(DISMISS_KEY, packDismissed(next)).catch(() => {});
+  }, []);
 
   // ── Why this listens to auth instead of running once ──────────────────
   //
@@ -137,9 +171,43 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
       const mine = ++gen;
       const cancelled = () => dead || mine !== gen;
       // What the user already handled (accepted/declined) — never show it again.
-      let skip = new Set<string>();
-      try { const raw = await AsyncStorage.getItem(DISMISS_KEY); if (raw) skip = new Set<string>(JSON.parse(raw)); } catch { /* ignore */ }
-      if (!cancelled()) setDismissed(skip);
+      //
+      // ── This line spun the coach app ──────────────────────────────────────
+      //
+      // It was `setDismissed(skip)` over a freshly allocated Set, on every run,
+      // whether or not one id had changed. React compares state by identity, so
+      // that was a state change every time; the provider re-rendered; the
+      // context value below — then an object literal carrying
+      // `reload: () => runRef.current()` — was a new object with a new `reload`
+      // every time.
+      //
+      // `app/(trainer)/dashboard.tsx` collects fourteen such reloads into one
+      // `reloadEverything` (a useCallback listing them all) and hands it to
+      // `useRefreshOnFocus`, which re-runs whenever its callback's identity
+      // changes — its own doc comment warns that an unstable callback "is an
+      // unbounded read loop". It was: focus → reloadEverything → this reload →
+      // this line → new `reload` identity → new `reloadEverything` → focus
+      // effect again, without end.
+      //
+      // Measured on a booted simulator on 2026-09-04: React's "Maximum update
+      // depth exceeded" fired continuously from launch, and ten consecutive
+      // captured stacks all named this line. It also explains why the loop made
+      // so few requests — every run but the newest aborts at the cancellation
+      // check between `getSession` (local) and `getUser` (network), so the app
+      // burnt about seventeen renders a second while issuing about six requests
+      // a minute.
+      //
+      // `nextDismissed` returns the set already held when nothing changed, and
+      // an identical object is not a state change. src/lib/dismissedSet.ts.
+      let skip = dismissedRef.current;
+      try {
+        const stored = parseDismissed(await AsyncStorage.getItem(DISMISS_KEY));
+        if (!cancelled()) {
+          const next = nextDismissed(dismissedRef.current, stored);
+          skip = next;
+          if (next !== dismissedRef.current) { dismissedRef.current = next; setDismissed(next); }
+        }
+      } catch { /* the stored set is a convenience; the read below is the answer */ }
 
       // No backend connected: there is nowhere an invitation could have come
       // from, so an empty list is the true answer rather than a failed read.
@@ -219,19 +287,34 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
     return () => { dead = true; sub?.subscription?.unsubscribe(); };
   }, []);
 
-  const sendInvite: InvitesValue['sendInvite'] = async (rawEmail, mode) => {
+  /**
+   * Ask the server again.
+   *
+   * `useCallback` with no dependencies, and that is load-bearing rather than
+   * tidy: `app/(trainer)/dashboard.tsx` lists this function in the dependency
+   * array of the `reloadEverything` it hands to `useRefreshOnFocus`, and
+   * `useRefreshOnFocus` re-runs whenever its callback's identity changes. A new
+   * arrow on every render made that a loop — see the note beside the dismiss
+   * read above. The indirection through `runRef` is what lets this be stable
+   * while the run it starts is always the current one.
+   */
+  const reload = useCallback(() => { runRef.current(); }, []);
+
+  const sendInvite: InvitesValue['sendInvite'] = useCallback(async (rawEmail, mode) => {
     const e = (rawEmail || '').trim().toLowerCase();
     if (!e) return false;
+    const me = uidRef.current;
+    const myNameNow = myNameRef.current;
     const optimistic: Invite = {
-      id: `local-${SEQ++}`, coachId: uid ?? 'me', coachName: myName,
+      id: `local-${SEQ++}`, coachId: me ?? 'me', coachName: myNameNow,
       email: e, mode, status: 'pending', createdAt: new Date().toISOString(),
     };
     setSent((p) => [optimistic, ...p.filter((i) => i.email.toLowerCase() !== e)]);
-    if (!USE_SUPABASE || !uid) return false;
+    if (!USE_SUPABASE || !me) return false;
     try {
       const { data, error } = await supabase
         .from('coach_invites')
-        .upsert({ coach_id: uid, coach_name: myName, email: e, mode, status: 'pending' }, { onConflict: 'coach_id,email' })
+        .upsert({ coach_id: me, coach_name: myNameNow, email: e, mode, status: 'pending' }, { onConflict: 'coach_id,email' })
         .select()
         .single();
       // An invitation that was refused still appeared in the coach's sent list
@@ -240,7 +323,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
       setSent((p) => [rowToInvite(data), ...p.filter((i) => i.id !== optimistic.id && i.email.toLowerCase() !== e)]);
       return true;
     } catch { return false; }
-  };
+  }, []);
 
   /**
    * Withdraw an invitation, and take the row off the list only once the server
@@ -260,7 +343,7 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
    * one sent to the wrong address has no second place to check, because the
    * list the row was in is the list that was just filtered.
    */
-  const revokeInvite: InvitesValue['revokeInvite'] = async (id) => {
+  const revokeInvite: InvitesValue['revokeInvite'] = useCallback(async (id) => {
     // A local id never reached the server; dropping it here is the whole revoke.
     if (!USE_SUPABASE || id.startsWith('local-')) {
       setSent((p) => p.filter((i) => i.id !== id));
@@ -276,10 +359,10 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
       setSent((p) => p.filter((i) => i.id !== id));
       return true;
     } catch { return false; }
-  };
+  }, []);
 
-  const acceptInvite: InvitesValue['acceptInvite'] = async (id) => {
-    const inv = received.find((i) => i.id === id);
+  const acceptInvite: InvitesValue['acceptInvite'] = useCallback(async (id) => {
+    const inv = receivedRef.current.find((i) => i.id === id);
     const mode: InviteMode = inv?.mode ?? 'online';
     setReceived((p) => p.filter((i) => i.id !== id));
     if (!USE_SUPABASE || !inv) { markDismissed(id); return { mode, ok: true }; }
@@ -299,10 +382,10 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
       setAcceptFailed((p) => (p.includes(id) ? p : [...p, id]));
     }
     return { mode, ok: linked };
-  };
+  }, [markDismissed]);
 
-  const declineInvite: InvitesValue['declineInvite'] = async (id) => {
-    const inv = received.find((i) => i.id === id);
+  const declineInvite: InvitesValue['declineInvite'] = useCallback(async (id) => {
+    const inv = receivedRef.current.find((i) => i.id === id);
     setReceived((p) => p.filter((i) => i.id !== id));
     // Declining is safe to dismiss locally either way: the worst case is an
     // invitation the coach still sees as pending, not a link the client thinks
@@ -320,13 +403,28 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
         .update({ status: 'revoked' }, { count: 'exact' }).eq('id', id);
       return !writeFailure('That invitation', upd);
     } catch { return false; }
-  };
+  }, [markDismissed]);
 
-  return (
-    <Ctx.Provider value={{ sent, received, status, acceptFailed, reload: () => runRef.current(), sendInvite, revokeInvite, acceptInvite, declineInvite }}>
-      {children}
-    </Ctx.Provider>
-  );
+  /**
+   * ── Why this is memoised ──────────────────────────────────────────────────
+   *
+   * It was an object literal, so every render of this provider published a new
+   * context value and re-rendered every consumer of it. On its own that is
+   * waste; combined with `reload` being a new arrow each time it was the render
+   * loop described beside the dismiss read above.
+   *
+   * The memo is only worth having because the five functions in it are stable —
+   * `useCallback` with no dependencies, reading what they need through the refs
+   * declared at the top. What is left in the dependency list is exactly the set
+   * a screen would want to re-render for.
+   */
+  const value = useMemo<InvitesValue>(() => ({
+    sent, received, status, acceptFailed, reload,
+    sendInvite, revokeInvite, acceptInvite, declineInvite,
+  }), [sent, received, status, acceptFailed, reload,
+    sendInvite, revokeInvite, acceptInvite, declineInvite]);
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useInvites(): InvitesValue {

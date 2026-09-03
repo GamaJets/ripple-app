@@ -99,7 +99,7 @@ import { intakeLine, intakePrompt } from '../../src/lib/intake';
 // "Has this person signed it" — the coach's half of the question the client
 // portal has been able to answer since part 135.
 import { useClientPaperwork } from '../../src/ui/clientPaperwork';
-import { useToday } from '../../src/ui/today';
+import { useNow, useToday } from '../../src/ui/today';
 import { paperworkLine, paperworkItemLine, paperworkOutstanding } from '../../src/lib/clientPaperwork';
 import { fmtDay } from '../../src/lib/format';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
@@ -110,6 +110,7 @@ import {
   type ActivityEvent, type Drift,
 } from '../../src/lib/clientDrift';
 import { appLocale } from '../../src/lib/locale';
+import { nextUp, nextUpLine, nextUpUrgent } from '../../src/lib/nextUp';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 // The credit rule, shared with the client's own ledger and with the booking
 // screen, so a coach and their client can never be shown different answers
@@ -763,8 +764,20 @@ export default function ClientScreen() {
   const creditLines = useMemo(
     () => payingLines(creditRoute, coachPacks, gymPtPasses), [creditRoute, coachPacks, gymPtPasses]);
   const creditsRemaining = useMemo(() => creditsLeft(creditLines), [creditLines]);
+  /**
+   * `useNow()`, not `buildLedger`'s default argument.
+   *
+   * The default is `Date.now()` READ WHEN THE MEMO RUNS, and the deps were the
+   * rows and the route — neither of which changes as time passes. So the split
+   * between `past` and `upcoming` was frozen at whatever moment the sessions
+   * landed, for as long as the screen stayed mounted. A coach who opened this
+   * client at eight and looked again at ten was still being told that the nine
+   * o'clock they had just taught was the next one coming. src/ui/today.ts.
+   */
+  const creditNow = useNow();
   const creditLedger: Ledger | null = useMemo(
-    () => (creditRows === undefined ? null : buildLedger(creditRows, creditRoute)), [creditRows, creditRoute]);
+    () => (creditRows === undefined ? null : buildLedger(creditRows, creditRoute, creditNow.getTime())),
+    [creditRows, creditRoute, creditNow]);
   const creditShortfall = useMemo(() => shortfallLine(creditLedger), [creditLedger]);
   const creditsLoading = packRows === undefined || passRows === undefined || creditRows === undefined;
   const creditsUnread = !creditsLoading && (packRows === null || passRows === null || creditRows === null);
@@ -1166,6 +1179,23 @@ export default function ClientScreen() {
   const unasked = !id
     ? 'No client was named in the link that opened this screen, so nothing was read.'
     : unaskedNote(USE_SUPABASE, queryable, who);
+  /**
+   * When this person is next in the diary — src/lib/nextUp.ts.
+   *
+   * The header of this screen has printed `next {client.next}` since it shipped,
+   * and `RosterClient.next` is the literal string '—' in all three places
+   * src/ui/roster.tsx builds a client. Nothing has ever computed it. Meanwhile
+   * `creditLedger.upcoming` — every booked session this client has ahead of
+   * them, whatever pays for it — was already in this component and was spent on
+   * one figure, "Booked Ahead 3", with no date on it anywhere.
+   *
+   * `unasked` is passed as a boolean rather than as its sentence: a client with
+   * no account has no diary to read, which is a different thing from an empty
+   * one, and the module keeps that apart from a read that failed.
+   */
+  const diary = useMemo(() => nextUp({
+    ledger: creditLedger, loading: creditsLoading, unread: creditsUnread, unasked: !!unasked,
+  }), [creditLedger, creditsLoading, creditsUnread, unasked]);
   /** Whether the gym's shared contact log is about this person at all. */
   const cScope = contactScope({
     coachTenantId: tenant?.id ?? null,
@@ -1405,11 +1435,21 @@ export default function ClientScreen() {
           </View>
         </View>
 
-        {/* The row's own facts, which the roster already holds. `lastActive`
-            and `next` are the roster's strings and are printed as they are. */}
+        {/* The row's own facts, which the roster already holds. `lastActive` is
+            the roster's string and is printed as it is.
+
+            `next` is NOT here any more, and its absence is the point.
+            `RosterClient.next` is set to the literal '—' in all three places
+            src/ui/roster.tsx constructs a client and is computed nowhere, so
+            this line ended in the words "next —" for every client this app has
+            ever had: a labelled field that reads as a value we tried to load
+            and could not, on the screen a coach opens before a session, about
+            the one thing they came to find out. The real answer is a section of
+            its own below — src/lib/nextUp.ts — because it is worth more than
+            the tail of a summary line. */}
         {client ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-            {client.goal} · {COACHED_MODE_SHORT[client.mode]} · last active {client.lastActive} · next {client.next}
+            {client.goal} · {COACHED_MODE_SHORT[client.mode]} · last active {client.lastActive}
           </Text>
         ) : null}
 
@@ -1452,6 +1492,40 @@ export default function ClientScreen() {
             open their page; these are. */}
         {id ? (
           <Section>
+            {/* ── when you are seeing them next ─────────────────────────────
+                Above the button that books one, because it is the fact that
+                decides whether to press it. Every state is src/lib/nextUp.ts's
+                — and the one it exists to prevent is an empty `upcoming` list
+                under a failed read being drawn as "nothing booked", which is
+                what a coach reads before deciding not to ring somebody.
+
+                The DATE is rendered here rather than in the module: it is the
+                reader's language and the reader's order, and a month name
+                written into a lib would be in that file's. */}
+            <View style={{ marginBottom: sp.md }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>NEXT SESSION</Text>
+              {diary.startsAt ? (
+                <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: 2 }}>
+                  {new Date(diary.startsAt).toLocaleString(appLocale(), {
+                    weekday: 'short', day: 'numeric', month: 'short',
+                    hour: 'numeric', minute: '2-digit',
+                  })}
+                </Text>
+              ) : null}
+              {/* The sentence carries the warning where there is one, and the
+                  mark is a mark rather than coloured words — `nextUpUrgent` is
+                  true for exactly one case, and it is hours somebody has paid
+                  for and is not using. */}
+              {nextUpUrgent(diary, creditsRemaining) ? (
+                <View style={{ marginTop: 3 }}>
+                  <Flag tone={t.warn}>{nextUpLine(diary, creditsRemaining, who)}</Flag>
+                </View>
+              ) : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  {nextUpLine(diary, creditsRemaining, who)}
+                </Text>
+              )}
+            </View>
             <Cta label={`Book ${who} a Session`} wide onPress={go('/(trainer)/calendar')} />
             <View style={{ marginTop: sp.md }}>
               <ListRow icon="grid" title={programme ? 'Their Program' : `Build ${who} a Program`}

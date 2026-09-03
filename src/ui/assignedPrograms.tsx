@@ -38,6 +38,7 @@ import {
   type CachedPrograms,
 } from '../lib/programCache';
 import { mergeAssignments, mergeStartsOn } from '../lib/assignmentMerge';
+import { cachedAtLine } from '../lib/readCache';
 import { useRecoverRead } from './readRefresh';
 
 interface AssignedProgramsValue {
@@ -103,6 +104,17 @@ interface AssignedProgramsValue {
    *  which of them it worked for, by name — the same rule the assign side
    *  already follows. See src/lib/bulkActions.ts. */
   clearProgramFrom: (clientId: string) => Promise<{ ok: boolean; why: string | null }>;
+  /**
+   * The sentence saying this programme came off the phone and how old it is, or
+   * null when it did not.
+   *
+   * Non-null ONLY while the device's copy is what `getProgram` is serving, so a
+   * screen may render it beside the block without checking anything else. It
+   * does not replace `status`: the status still says the read failed, and this
+   * says what the member is looking at instead. Five different sentences —
+   * loading, failed, empty, truncated, stale — and this is the fifth.
+   */
+  cachedNote: string | null;
 }
 
 const Ctx = createContext<AssignedProgramsValue | null>(null);
@@ -344,7 +356,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * The local map is still written FIRST, because the screen has to respond to
    * the tap — and it is put back if the write does not land. See below.
    */
-  const assignProgramTo = async (clientId: string, program: Program, when?: string | null): Promise<{ ok: boolean; why: string | null }> => {
+  const assignProgramTo = useCallback(async (clientId: string, program: Program, when?: string | null): Promise<{ ok: boolean; why: string | null }> => {
     // ── and why a failed write is PUT BACK ───────────────────────────────
     //
     // The optimistic entry is written first so the screen responds to the tap,
@@ -355,14 +367,15 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     // write in the map and the retry's confirmation says "9 of these 12 are on
     // a programme now" about people whose programme never landed, which is the
     // screen reading its own guess back to the coach as a fact.
-    const previous = programs[clientId] ?? null;
+    const previous = programsRef.current[clientId] ?? null;
     const putBack = () => setPrograms((p) => {
       const n = { ...p };
       if (previous) n[clientId] = previous; else delete n[clientId];
       return n;
     });
     setPrograms((p) => ({ ...p, [clientId]: program }));
-    if (!USE_SUPABASE || !uid) {
+    const me = uidRef.current;
+    if (!USE_SUPABASE || !me) {
       putBack();
       return { ok: false, why: 'This programme was not saved — the app could not confirm who you are signed in as, so nothing was sent to the server.' };
     }
@@ -379,7 +392,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       // clear the one a coach set from a screen that does. Passing an explicit
       // `null` is how a caller says "take the date off", which is a different
       // intent and is spelled differently.
-      const row: Record<string, unknown> = { client_id: clientId, coach_id: uid, program };
+      const row: Record<string, unknown> = { client_id: clientId, coach_id: me, program };
       if (when !== undefined) row.starts_on = when;
       const r = await supabase.from('assigned_programs')
         .upsert(row, { onConflict: 'client_id', count: 'exact' });
@@ -415,9 +428,12 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     } finally {
       writing.current = Math.max(0, writing.current - 1);
     }
-  };
-  const assignProgram = async (clientId: string, program: Program): Promise<boolean> =>
-    (await assignProgramTo(clientId, program)).ok;
+    // No dependencies at all, and that is the point: every value this reads is
+    // read through a ref or a setter's updater, so the handler a screen holds
+    // is the same function for the life of the provider.
+  }, []);
+  const assignProgram = useCallback(async (clientId: string, program: Program): Promise<boolean> =>
+    (await assignProgramTo(clientId, program)).ok, [assignProgramTo]);
   /**
    * Take a client off their coach-assigned programme.
    *
@@ -462,13 +478,13 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * nothing else, and re-assigning the same template later needs nothing
    * special to "add the history back": it was never gone.
    */
-  const clearProgramFrom = async (clientId: string): Promise<{ ok: boolean; why: string | null }> => {
+  const clearProgramFrom = useCallback(async (clientId: string): Promise<{ ok: boolean; why: string | null }> => {
     // Put back on failure, for the reason `assignProgramTo` gives above: the
     // local map is what the overwrite confirmation counts, and a client left
     // out of it because a delete was refused makes the next dialog say they are
     // on nothing while they are still training it.
-    const previous = programs[clientId] ?? null;
-    const previousStart = startsOn[clientId] ?? null;
+    const previous = programsRef.current[clientId] ?? null;
+    const previousStart = startsOnRef.current[clientId] ?? null;
     const putBack = () => {
       setPrograms((p) => (previous ? { ...p, [clientId]: previous } : p));
       if (previousStart) setStartsOn((p) => ({ ...p, [clientId]: previousStart }));
@@ -478,7 +494,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     // on no block, and a start date left behind would have the next screen say
     // "week 3 of 8" about nothing.
     setStartsOn((p) => { const n = { ...p }; delete n[clientId]; return n; });
-    if (!USE_SUPABASE || !uid) {
+    if (!USE_SUPABASE || !uidRef.current) {
       putBack();
       return { ok: false, why: 'The app could not confirm who you are signed in as, so nothing was sent to the server.' };
     }
@@ -501,9 +517,9 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     } finally {
       writing.current = Math.max(0, writing.current - 1);
     }
-  };
-  const clearProgram = async (clientId: string): Promise<boolean> =>
-    (await clearProgramFrom(clientId)).ok;
+  }, []);
+  const clearProgram = useCallback(async (clientId: string): Promise<boolean> =>
+    (await clearProgramFrom(clientId)).ok, [clearProgramFrom]);
 
   // When the signal comes back, this read is run again without anybody having
   // to ask. Until this existed, the ONLY things that called `reload` were
@@ -517,15 +533,58 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   // the same terms as `getProgram`: a block served from the copy has to carry
   // its start date or `clientWeekLine` puts a member on week one of a block
   // they are four weeks into.
-  const startsOnOut = cached && mayServeCached(live, cached.found)
-    ? { ...cached.startsOn, ...startsOn }
-    : startsOn;
-
-  return (
-    <Ctx.Provider value={{ programs, getProgram, status, startsOn: startsOnOut, assignProgram, assignProgramTo, clearProgram, clearProgramFrom, reload }}>
-      {children}
-    </Ctx.Provider>
+  const startsOnOut = useMemo(
+    () => (cached && mayServeCached(live, cached.found) ? { ...cached.startsOn, ...startsOn } : startsOn),
+    [cached, live, startsOn],
   );
+
+  /**
+   * How old the programme on screen is, when it is the phone's copy.
+   *
+   * Non-null for exactly as long as `getProgram` is serving the device's copy —
+   * the same `mayServeCached` gate, so the sentence and the rows can never
+   * disagree about which of them is on screen. The moment a read lands, `live`
+   * turns true, this turns null, and there is nothing to label.
+   *
+   * The gap it closes: `programCache.ts` deliberately lets a copy stand for
+   * THIRTY DAYS, and that number is only defensible if the member can see it.
+   * Without a label, a block their coach replaced three weeks ago renders
+   * identically to one confirmed a second ago — and the member trains the wrong
+   * session with nothing on the screen to make them doubt it. That is rule 2 of
+   * src/lib/readCache.ts, which this read was the one exception to.
+   *
+   * Computed per render rather than stored, for the reason src/ui/classes.tsx
+   * gives beside the same line: the sentence says how long ago, and a stored
+   * string goes on saying "4 minutes ago" for the rest of the session.
+   */
+  const cachedNote = cachedAtLine(cached && mayServeCached(live, cached.found) ? cached.at : null);
+
+  /**
+   * ── Why this is memoised ──────────────────────────────────────────────────
+   *
+   * A fresh object literal here is a new context value on EVERY render of this
+   * provider, and React re-renders every consumer of a context whose value is
+   * not identical. This provider sits high in all three apps' trees, so a
+   * render caused by anything above it — a theme change, a navigation, the
+   * parent's own state — fanned out to every screen reading `useAssignedPrograms`
+   * even though not one byte of what they read had changed.
+   *
+   * A memo is only worth the line if everything in it is stable, which is why
+   * the four write functions above read `uid`, `programs` and `startsOn`
+   * through refs: had they closed over those as values, the value would still
+   * have been rebuilt on every assignment and the memo would have bought
+   * nothing. What is left in the dependency list is exactly the set a consumer
+   * would want to re-render for.
+   */
+  const value = useMemo<AssignedProgramsValue>(() => ({
+    programs, getProgram, status, startsOn: startsOnOut, cachedNote,
+    assignProgram, assignProgramTo, clearProgram, clearProgramFrom, reload,
+  }), [
+    programs, getProgram, status, startsOnOut, cachedNote,
+    assignProgram, assignProgramTo, clearProgram, clearProgramFrom, reload,
+  ]);
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useAssignedPrograms(): AssignedProgramsValue {

@@ -1987,12 +1987,31 @@ export default function TrainerClients() {
             // What replaces it is a count of sessions with a RECORDED outcome
             // of 'completed' in the last month — real work, really marked,
             // needing no currency to state. A dash until the read lands.
-            { label: 'Delivered', value: fig(delivered), unit: delivered == null ? undefined : `/${DELIVERED_WINDOW_DAYS}d` },
-            { label: 'Unread', value: fig(unread) },
+            // ── and each of the three now goes somewhere ────────────────
+            //
+            // `KpiRow` has taken an `onPress` and `KpiItem` a `route` since it
+            // was written, and this row passed neither — so all three tiles
+            // were inert. The Unread one is the reason that mattered: the
+            // comment beside `unread` above says a coach "reads that tile to
+            // decide whether anybody is waiting on them", and there was no
+            // route to /(trainer)/messages ANYWHERE on this screen. The tile
+            // that answers the question and the screen that acts on it were on
+            // the same phone with nothing between them.
+            //
+            // A tile with no `route` stays disabled and keeps no button role,
+            // so the row can be part live and stay honest to a screen reader.
+            { label: 'Delivered', value: fig(delivered), unit: delivered == null ? undefined : `/${DELIVERED_WINDOW_DAYS}d`, route: '/(trainer)/sessions' },
+            { label: 'Unread', value: fig(unread), route: '/(trainer)/messages' },
             // Null until the record has been read: an em-dash, never a zero
-            // that would tell a coach nobody needs them this week.
-            { label: 'To Contact', value: fig(toContact) },
-          ]} />
+            // that would tell a coach nobody needs them this week. Still
+            // tappable on a dash: a coach whose count could not be read is
+            // exactly the one who should go and look.
+            //
+            // Quiet Clients, which is what `toContact` counts — drifting plus
+            // nothing-recorded — and the same screen `bookAlert`'s drift banner
+            // now opens, so the two agree about where this fact is dealt with.
+            { label: 'To Contact', value: fig(toContact), route: '/(trainer)/nudges' },
+          ]} onPress={(k) => { if (k.route) router.push(k.route as never); }} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {sessionsUnread
               ? 'Your sessions could not be read, so this is not a count of none.'
@@ -2353,10 +2372,22 @@ export default function TrainerClients() {
                   </View>
                   {/* Days a week, against what this person's own weeks used to
                       look like. An em-dash where there is no baseline — never
-                      a rate invented out of an empty window. */}
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, ...numeric }}>
-                    {d ? `${fig(d.recentPerWeek)} / wk · was ${fig(d.baselinePerWeek)}` : `Next: ${c.next}`}
-                  </Text>
+                      a rate invented out of an empty window.
+
+                      The fallback used to be `Next: ${c.next}`, and
+                      `RosterClient.next` is the literal string '—' in all three
+                      places src/ui/roster.tsx builds a client: it is computed
+                      nowhere and never has been. So every roster row without a
+                      drift reading carried a field called "Next" with a dash
+                      after it — a value the app looked as though it had tried
+                      and failed to read. Nothing is drawn there instead; why a
+                      client has no reading is already said once, above the
+                      list, by the drift notices this screen carries. */}
+                  {d ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, ...numeric }}>
+                      {`${fig(d.recentPerWeek)} / wk · was ${fig(d.baselinePerWeek)}`}
+                    </Text>
+                  ) : null}
                 </View>
               </View>
 
@@ -2586,8 +2617,13 @@ export default function TrainerClients() {
                     ? `Assigned program: ${selProgram.title} · ${selProgram.days.length} day${selProgram.days.length === 1 ? '' : 's'} a week.`
                     : 'No program assigned yet.'}
                 </Text>
+                {/* "next session {sel.next}" is gone from this line for the
+                    reason the roster row above gives: that field has never held
+                    anything but an em dash. The client's own page answers it
+                    properly — src/lib/nextUp.ts, from the bookings that screen
+                    already reads. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                  Last active {sel.lastActive} · next session {sel.next}. What they have actually trained is under What They've Actually Done on their profile.
+                  Last active {sel.lastActive}. What they have actually trained is under What They've Actually Done on their profile.
                 </Text>
               </View>
 

@@ -444,6 +444,8 @@
     "src/lib/awaitingReply.test.ts",
     "src/lib/homeMoney.ts",
     "src/lib/homeMoney.test.ts",
+    "src/lib/nextUp.ts",
+    "src/lib/nextUp.test.ts",
     "src/lib/blockPlan.ts",
     "src/lib/blockPlan.test.ts",
     "src/lib/templateUsage.ts",
@@ -461,6 +463,14 @@
     "src/lib/memberLookup.ts",
     "src/lib/memberLookup.test.ts",
     "src/lib/lastTime.ts",
-    "src/lib/lastTime.test.ts"
+    "src/lib/lastTime.test.ts",
+    "src/lib/myPlanWeek.ts",
+    "src/lib/myPlanWeek.test.ts",
+    "src/lib/cancelDeadline.ts",
+    "src/lib/cancelDeadline.test.ts",
+    "src/lib/replyWait.ts",
+    "src/lib/replyWait.test.ts",
+    "src/lib/dismissedSet.ts",
+    "src/lib/dismissedSet.test.ts"
   ]
 }
