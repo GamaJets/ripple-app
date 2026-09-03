@@ -41,6 +41,13 @@ import {
   closeBlocker, reopenBlocker, driftSince,
   type MonthCloseRow,
 } from '@lib/gymClose';
+// `tenants.session_fee` is stored in WHOLE units and every `*_cents` column is
+// in minor units, and the factor between them is not a hundred — it is a
+// hundred in most of the world, one in Japan and Korea, and a thousand in
+// Kuwait and Bahrain. `minorFromWhole` asks `currencyDecimals` rather than
+// assuming; see the note on it in src/lib/coachMoney.ts.
+import { minorFromWhole } from '@lib/coachMoney';
+import { gymLink, noGymNote } from '@lib/gymLink';
 import { toCsv } from '@lib/gymExport';
 import { saveText } from '@/lib/save';
 import { Banner } from '@/components/Banner';
@@ -148,18 +155,15 @@ export default function Close() {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
-      if (!who?.tenantId) {
-        setLoaded({
-          key,
-          rec: {
-            payments: sliceReady([]), invoices: sliceReady([]), sessions: sliceReady([]),
-            memberships: sliceReady([]), passes: sliceReady([]),
-          },
-        });
-        return;
-      }
+      // `sliceReady([])` is the gym saying it has none. An account with no gym
+      // on it was written as five of them, so this screen closed a month over a
+      // record it never read: no payments, no invoices, no sessions, nothing
+      // blocking, and a verdict at the top of the page saying so. The render
+      // below stops before any of that.
+      const link = gymLink(who?.tenantId, 'payments, invoices or one-to-ones');
+      if (!link.linked) return;
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', link.tenantId).single();
       if (!live) return;
       // Checked, not assumed. A null session fee from a failed read would price
       // every unrated session at nothing and quietly shrink payroll; the two
@@ -169,7 +173,7 @@ export default function Close() {
       setSessionFee(tErr ? null : t?.session_fee ?? null);
       setPolicyCode(tErr ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
       setFeeRead(tErr ? 'failed' : 'ok');
-      if (w) await load(who.tenantId, w);
+      if (w) await load(link.tenantId, w);
     })();
     return () => { live = false; };
   }, [load, w, key]);
@@ -191,15 +195,33 @@ export default function Close() {
   const stated = payPolicyOf(policyCode);
   const policy: PayPolicy = stated ?? PAY_DELIVERED_ONLY;
 
+  /**
+   * The gym's standard session fee in minor units, or null when it cannot be
+   * stated in them.
+   *
+   * It was `Math.round(sessionFee * 100)`. A ¥6,000 fee became 600,000 minor
+   * units and every session the register never marked was priced at ¥600,000 on
+   * the sheet handed to an accountant; a Kuwaiti gym's came out at a tenth of
+   * the truth. `minorFromWhole` asks the currency how many places it has.
+   *
+   * `gymCcy` and NOT `currency`. `currency` is what the month's rows happened to
+   * agree on; the fee is `tenants.session_fee` and the only currency it is ever
+   * denominated in is `tenants.currency`. Pricing a stored fee by the scale of
+   * whatever the card machine took that month is the same bug wearing a hat.
+   *
+   * Null when the gym has no currency, and that is not zero: an unpriced session
+   * stays unpriced, exactly as it does when no fee is set at all.
+   */
+  const feeCents = useMemo(() => minorFromWhole(sessionFee, gymCcy), [sessionFee, gymCcy]);
+
   const close: MonthClose | null = useMemo(() => {
     if (!w) return null;
     return buildClose(rec, w, {
       policy,
-      // The gym's fee is in major units; everything downstream is minor units.
-      fallbackRateCents: sessionFee == null ? null : Math.round(sessionFee * 100),
+      fallbackRateCents: feeCents,
       fmt: (c) => money(c, currency) ?? '—',
     });
-  }, [rec, w, policy, sessionFee, currency]);
+  }, [rec, w, policy, feeCents, currency]);
 
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
@@ -224,6 +246,20 @@ export default function Close() {
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           A month-end close carries every payment and every payroll figure the
           gym holds, so it is owner-only.
+        </p>
+      </Shell>
+    );
+  }
+
+  // Before any verdict. A close is the one screen in this console whose whole
+  // job is to refuse, and refusing over an unread record is the one refusal it
+  // must not turn into a clean bill of health.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} current="/close">
+        <h1>Month-End Close</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('payments, invoices or one-to-ones')}
         </p>
       </Shell>
     );
@@ -276,7 +312,7 @@ export default function Close() {
         <Banner tone="crit">{key} is not a month this console can open.</Banner>
       ) : (
         <CloseView
-          c={close} rec={rec} currency={currency} feeRead={feeRead} sessionFee={sessionFee}
+          c={close} rec={rec} currency={currency} feeRead={feeRead} sessionFee={sessionFee} feeCents={feeCents}
           gymName={gymName} monthKey={key} tenantId={me.tenantId!} me={me}
           closes={closes} closesErr={closesErr}
           onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }}
@@ -288,12 +324,16 @@ export default function Close() {
 
 /* ── the close itself ──────────────────────────────────────────────────────── */
 
-function CloseView({ c, rec, currency, feeRead, sessionFee, gymName, monthKey, tenantId, me, closes, closesErr, onChange }: {
+function CloseView({ c, rec, currency, feeRead, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, onChange }: {
   c: MonthClose;
   rec: CloseRecord;
   currency: TenantCurrency;
   feeRead: 'ok' | 'failed';
   sessionFee: number | null;
+  /** The same fee in MINOR units, or null when it cannot be stated in them.
+   *  Two values rather than one because the sentences differ: a gym with no fee
+   *  set and a gym whose currency would not read are told different things. */
+  feeCents: number | null;
   gymName: string | null;
   monthKey: string;
   tenantId: string;
@@ -377,7 +417,7 @@ function CloseView({ c, rec, currency, feeRead, sessionFee, gymName, monthKey, t
       <Income c={c} rec={rec} currency={currency} />
       <Owed c={c} rec={rec} currency={currency} />
       <Reconciliation c={c} rec={rec} />
-      <Payroll c={c} rec={rec} currency={currency} sessionFee={sessionFee} />
+      <Payroll c={c} rec={rec} currency={currency} sessionFee={sessionFee} feeCents={feeCents} />
       <Passes c={c} rec={rec} currency={currency} />
     </>
   );
@@ -916,8 +956,8 @@ const RECON_LABEL: Record<string, string> = {
 
 /* ── what is unmarked, and therefore blocking payroll ──────────────────────── */
 
-function Payroll({ c, rec, currency, sessionFee }: {
-  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; sessionFee: number | null;
+function Payroll({ c, rec, currency, sessionFee, feeCents }: {
+  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; sessionFee: number | null; feeCents: number | null;
 }) {
   const unmarked = useMemo(
     () => (rec.sessions.state === 'ready' ? rec.sessions.rows : [])
@@ -976,7 +1016,11 @@ function Payroll({ c, rec, currency, sessionFee }: {
               {c.payroll.blocker
                 ? <><strong>Not safe to settle.</strong> {c.payroll.blocker}</>
                 : <>Every session in {c.window.label} is marked and priced. {c.payroll.total.payable} payable session{c.payroll.total.payable === 1 ? '' : 's'}{payrollTotal ? <>, {payrollTotal} in all</> : null}.{payrollTotal ? null : ` What they come to cannot be stated because ${NO_CURRENCY_NOTE}.`}</>}
-              {sessionFee == null ? ' No standard session fee is set, so a session with no snapshotted rate stays unpriced rather than free.' : null}
+              {sessionFee == null
+                ? ' No standard session fee is set, so a session with no snapshotted rate stays unpriced rather than free.'
+                : feeCents == null
+                  ? ' This gym has not said what money it charges in, so its standard session fee cannot be stated as an amount and a session with no snapshotted rate stays unpriced rather than free.'
+                  : null}
             </p>
           ) : null}
           <DataTable

@@ -15,7 +15,7 @@ import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } fro
 import { sp, layout, hairline, grown, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
-import { currentStreak, longestStreak, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
+import { shownStreak, longestStreak, freezeBudget } from '../../src/lib/streaks';
 import { heatmapDayLabel, heatmapColumnLabel, heatmapSummary } from '../../src/lib/heatmap';
 import { WEEK_DAYS, startOfWeek } from '../../src/lib/weekStart';
 
@@ -81,7 +81,10 @@ export default function Consistency() {
   const totalSessions = Object.values(counts).reduce((a, n) => a + n, 0);
   const trainedDays = Object.keys(counts).length;
   const freezes = freezeBudget(log);
-  const streak = currentStreakFrozen(log, freezes).streak;
+  // Composed here before; it agreed with Home by coincidence rather than by
+  // construction. `shownStreak` derives the budget itself, so there is one
+  // place where the number is decided.
+  const streak = shownStreak(log);
   const best = longestStreak(log);
 
   // Which square the reader tapped, so the date under the grid is the one they

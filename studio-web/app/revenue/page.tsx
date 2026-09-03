@@ -41,7 +41,8 @@ import {
   fetchPlans, fetchMemberships, money, sharedCurrency,
   type MembershipPlan, type Membership, type PlanInterval, type PaymentKind,
 } from '@lib/gymRecord';
-import { assertWhole, capLimit } from '@lib/rowCap';
+import { assertWhole, capLimit, readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 // The PT ledger is added up by the same code the coach's own earnings screen
 // uses. Two implementations of "what has this coach been paid" is how the gym
 // and the coach come to disagree about the same money, and `sumTaken` already
@@ -1087,25 +1088,35 @@ function Promos({ rows, state }: { rows: Promo[] | null; state: Unread }) {
  * printing a confident forecast beside it.
  */
 async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[]> {
-  const { data, error } = await supabase
-    .from('gym_payments')
-    .select('id, member_id, membership_id, amount_cents, currency, method, taken_at, kind, reverses_payment_id')
-    .eq('tenant_id', tenantId)
-    .gte('taken_at', sinceIso)
-    .order('taken_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  // Capped and REFUSING, which these three reads were not. They were the only
-  // uncapped money reads left in the console: no `capLimit()` and no
-  // `assertWhole`, so PostgREST's silent 1000-row ceiling applied to the
-  // quarter's till. A busy gym taking twelve payments a day crosses it inside
-  // three months, and what falls away is the OLDEST — so the trend on this
-  // screen would have flattened from the left, every figure would still have
-  // rendered confidently, and nothing anywhere would have said the set was a
-  // prefix. src/lib/rowCap.ts exists because that "succeeds, quietly, with the
-  // wrong number".
-  assertWhole(data, 'the payments in this window');
-  return (data ?? []).map((r: any) => ({
+  // Paged, having been capped-and-refusing, having before that been uncapped.
+  //
+  // The comment this replaces did the arithmetic on itself: "a busy gym taking
+  // twelve payments a day crosses it inside three months", over a window that
+  // is ninety days. So `assertWhole` turned the till, the method split and the
+  // whole attribution table into a permanent error at exactly the gym size that
+  // has revenue worth looking at — on the screen whose only job is to show it.
+  //
+  // Refusing was right when the alternative was a silent prefix; it is not
+  // right when the alternative is finishing the read. This window is bounded by
+  // construction, /analytics reads the same table with `readAll` and
+  // `gymRecord.fetchPayments` pages too, so this was the strictest of three
+  // readers sitting on the shortest window. `PAGE_CEILING` still refuses past
+  // fifty thousand payments in ninety days.
+  //
+  // `taken_at` ties on a batch recorded in one sitting at the desk, so `id`
+  // closes the total order `readAll` requires.
+  const data = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_payments')
+      .select('id, member_id, membership_id, amount_cents, currency, method, taken_at, kind, reverses_payment_id')
+      .eq('tenant_id', tenantId)
+      .gte('taken_at', sinceIso)
+      .order('taken_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the payments in this window',
+  );
+  return data.map((r: any) => ({
     id: r.id,
     memberId: r.member_id ?? null,
     membershipId: r.membership_id ?? null,
@@ -1137,12 +1148,15 @@ async function fetchTakings(tenantId: string, sinceIso: string): Promise<Taking[
  * revenue while the other is a query nobody may draw a conclusion from.
  */
 async function fetchPacks(tenantId: string, sinceIso: string): Promise<PtLedger> {
-  const { data: trs, error: trErr } = await supabase
-    .from('trainers').select('id').eq('tenant_id', tenantId).limit(capLimit());
-  if (trErr) throw trErr;
-  assertWhole(trs, "this gym's trainers");
+  const trs = await readAll<any>(
+    (from, to) => supabase
+      .from('trainers').select('id').eq('tenant_id', tenantId)
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's trainers",
+  );
 
-  const ids: string[] = (trs ?? []).map((r: any) => r.id);
+  const ids: string[] = trs.map((r: any) => r.id);
   if (!ids.length) return { packs: [], renewals: [] };
 
   // Two reads, not one, and they can never be one query: `client_purchases` is
@@ -1156,34 +1170,44 @@ async function fetchPacks(tenantId: string, sinceIso: string): Promise<PtLedger>
   // was missing from what this page reports as PT income. A client paying AED
   // 600 a month for a year appeared once, as the first purchase, and eleven
   // renewals were invisible.
-  const [pkRes, subRes] = await Promise.all([
-    supabase
-      .from('client_purchases')
-      // `currency` was added by supabase/parts/132 and this select did not name
-      // it, so the screen printed "the purchase record carries no currency"
-      // about a column that has existed since. The amount was rendered as bare
-      // minor units — a figure read in whatever money the reader is thinking in.
-      .select('id, amount_cents, currency, sessions_total, sessions_used, status, created_at')
-      .in('trainer_id', ids)
-      .gte('created_at', sinceIso)
-      .order('created_at', { ascending: false })
-      .limit(capLimit()),
-    supabase
-      .from('client_subscription_payments')
-      .select('id, amount_cents, currency, paid_at')
-      .in('trainer_id', ids)
-      .gte('paid_at', sinceIso)
-      .order('paid_at', { ascending: false })
-      .limit(capLimit()),
+  // `readByIds` rather than one `.in()`: the roster above pages now, so the id
+  // list is no longer held under a thousand by a refusal, and `trainer_id` is a
+  // FOREIGN key — one coach answers with many purchases, so a chunk of 150 ids
+  // legitimately returns far more than 150 rows and each chunk has to be
+  // finished rather than assumed to fit.
+  const [packRows, renewalRows] = await Promise.all([
+    readByIds<any>(
+      ids,
+      (chunk, from, to) => supabase
+        .from('client_purchases')
+        // `currency` was added by supabase/parts/132 and this select did not name
+        // it, so the screen printed "the purchase record carries no currency"
+        // about a column that has existed since. The amount was rendered as bare
+        // minor units — a figure read in whatever money the reader is thinking in.
+        .select('id, amount_cents, currency, sessions_total, sessions_used, status, created_at')
+        .in('trainer_id', chunk)
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to),
+      'the PT packs bought in this window',
+    ),
+    readByIds<any>(
+      ids,
+      (chunk, from, to) => supabase
+        .from('client_subscription_payments')
+        .select('id, amount_cents, currency, paid_at')
+        .in('trainer_id', chunk)
+        .gte('paid_at', sinceIso)
+        .order('paid_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to),
+      'the PT renewals paid in this window',
+    ),
   ]);
-  if (pkRes.error) throw pkRes.error;
-  if (subRes.error) throw subRes.error;
-
-  assertWhole(pkRes.data, 'the PT packs bought in this window');
-  assertWhole(subRes.data, 'the PT renewals paid in this window');
 
   return {
-    packs: (pkRes.data ?? []).map((r: any) => ({
+    packs: packRows.map((r: any) => ({
       id: r.id,
       amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
       // Null where Stripe stated none and the package it was sold from is gone
@@ -1196,7 +1220,7 @@ async function fetchPacks(tenantId: string, sinceIso: string): Promise<PtLedger>
       status: r.status ?? 'paid',
       createdAt: r.created_at,
     })),
-    renewals: (subRes.data ?? []).map((r: any) => ({
+    renewals: renewalRows.map((r: any) => ({
       id: r.id,
       amountCents: Number.isFinite(r.amount_cents) ? r.amount_cents : null,
       currency: r.currency ?? null,

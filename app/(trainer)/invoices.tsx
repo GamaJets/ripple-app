@@ -67,6 +67,7 @@ import { useMyCoachLogo } from '../../src/ui/coachLogo';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
+import { myCurrencyLine } from '../../src/lib/currencySource';
 
 const DASH = '—';
 
@@ -83,7 +84,7 @@ export default function Invoices() {
   // own — that would put the wrong business on a financial document.
   const [issuer, setIssuer] = useState<{ name: string | null; status: LoadStatus }>({ name: null, status: 'loading' });
   const logo = useMyCoachLogo();
-  const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading' });
+  const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading', gap: null });
 
   const [open, setOpen] = useState(false);
   const [billTo, setBillTo] = useState('');
@@ -499,10 +500,20 @@ export default function Invoices() {
   // is already set, and neither of them learns anything. The amounts were
   // always correctly withheld; only this sentence was wrong.
   // src/lib/currencyGap.ts holds the four and their wording.
+  //
+  // And 'unset' is itself two facts since part 940. It used to be one, because
+  // a gym was the only place a currency could live, so "no currency has been
+  // set for you" could safely end by naming a gym owner. A coach with no gym
+  // has no owner to name, and that sentence sent them to look for a person who
+  // does not exist. `ccy.gap` carries which of the four it is — the gym has
+  // set none, they have chosen none, there is no coach record, or part 940 is
+  // not applied — and only the first names an owner.
   const curGap = currencyGapOfStatus({ currency: ccy.currency, status: ccy.status });
   const currencyBlocker = curGap
     ? curGap === 'unset'
-      ? 'No currency has been set for you. Repple is white-labelled, so there is no default that would be right for every gym — and an invoice with the wrong currency on it is worse than no invoice. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
+      ? ccy.gap && ccy.gap !== 'gym-unset'
+        ? myCurrencyLine(ccy.gap, 'nothing can be issued')
+        : 'No currency has been set for you. Repple is white-labelled, so there is no default that would be right for every gym — and an invoice with the wrong currency on it is worse than no invoice. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
       : currencyGapLine(curGap, 'nothing can be issued')
     : null;
 

@@ -170,10 +170,19 @@ export default function Messages() {
   const [filter, setFilter] = useState<ThreadFilter>(NO_THREAD_FILTER);
   const narrowed = threadFilterActive(filter);
 
-  // Opening a thread is what marks it read (`mark_thread_read`, called by
-  // useThread), and the coach comes straight back here. Without this the badge
-  // they just cleared is still on the row and the screen is asserting something
-  // the server stopped agreeing with a second ago.
+  // READING a thread is what marks it read, and the coach comes straight back
+  // here. Without this the badge they just cleared is still on the row and the
+  // screen is asserting something the server stopped agreeing with a second
+  // ago.
+  //
+  // "Reading" is no longer "opening": the write is `mark_thread_read_at`,
+  // called by `useReadReceipt` (src/ui/readReceipts.ts) from the chat screen
+  // only while the end of the thread is on screen, focused and in the
+  // foreground — because the same watermark is now shown to the OTHER person as
+  // a read receipt, and a thread opened and left at the top had not been read.
+  // So a coach who opens a thread, does not scroll to the bottom of it and
+  // comes back finds the badge still up, which is now the truth rather than a
+  // stale count.
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
   // The same read focus runs. Threads are written by the OTHER side — a
   // client replying is the only thing that changes this list — so a coach
@@ -256,7 +265,15 @@ export default function Messages() {
       </View>
       <Rule />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: sp.xxl }} refreshControl={pull}>
+      {/* The name search sits at the top of this list and the keyboard has never been on
+          top of it. `automaticallyAdjustKeyboardInsets` is here for what is UNDER it: with
+          the keyboard up, the last threads in the list stopped behind it and could not be
+          scrolled into view. The padding is deliberately left alone — this field is nowhere
+          near the end of the screen, and a keyboard's height of dead space under a list of
+          conversations would be scrolling into nothing. */}
+      <ScrollView contentContainerStyle={{ paddingBottom: sp.xxl }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" refreshControl={pull}>
         {status === 'loading' ? (
           <View style={{ paddingTop: sp.xxl, alignItems: 'center' }}>
             <ActivityIndicator size="small" color={t.ink3} />

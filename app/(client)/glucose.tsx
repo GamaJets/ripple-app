@@ -94,6 +94,35 @@ export default function Glucose() {
   // button below is for the person who does not.
   const pull = usePullToRefresh(useCallback(() => { void g.refresh(); }, [g]));
 
+  /**
+   * Take one reading back off the record.
+   *
+   * Asked first, because a reading is a measurement and there is no undo on the
+   * other side of this. Reported afterwards on the delete's OWN answer:
+   * `remove` resolves false for a refusal AND for a delete that matched no rows
+   * — PostgREST calls neither an error — so "removed" is said only when the
+   * server confirmed a row went.
+   */
+  const confirmRemove = (id: string, valueLabel: string, whenLabel: string) => {
+    Alert.alert(
+      'Remove this reading?',
+      `${valueLabel} from ${whenLabel} would be taken off your record, and off your average, your highest and your in-range figure with it. Your coach would stop seeing it too. This cannot be undone.`,
+      [
+        { text: 'Keep It', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const gone = await g.remove(id);
+            if (!gone) {
+              Alert.alert('It is still there', 'That reading could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   // A band is a position on a scale, not a verdict, so the colours stay the
   // theme's neutral accents rather than a green/amber/red that reads as marking.
   const bandColor = (b: GlucoseBand) => (b === 'unknown' ? t.ink3 : b === 'typical' ? t.ink : t.s3);
@@ -356,12 +385,28 @@ export default function Glucose() {
             </Text>
           ) : (
             g.readings.slice(0, 60).map((r, i) => (
-              <View key={`${r.at}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+              <View key={`${r.id ?? r.at}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <Text style={{ ...ty.body, color: bandColor(band(r.mmol)), width: 64 }}>{formatGlucose(r.mmol, unit)}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.caption, color: t.ink2 }}>{when(r.at)}</Text>
                   <Text style={{ ...ty.micro, color: t.ink3 }}>{bandWord(band(r.mmol))}{r.sourceName ? ` · ${r.sourceName}` : ''}</Text>
                 </View>
+                {/* The way back out. `useGlucose().remove` was written when the
+                    table landed, is documented as "only the owner can, and the
+                    database agrees", and had no caller anywhere — so a 15.5
+                    typed for 5.5 stayed in the fortnight average, the highest,
+                    the in-range percentage and the coach's copy for good, while
+                    every sibling record in this app can be taken back.
+
+                    A visible control rather than a long press: this app has
+                    already written down (src/ui/messages.tsx) that a gesture
+                    nothing announces is not a way in. `Ghost icon="minus"`
+                    speaks as "Remove" and the label below names the reading, so
+                    sixty of these do not all announce the same thing. */}
+                {!g.readOnly && r.id ? (
+                  <Ghost icon="minus" a11yLabel={`Remove the ${formatGlucose(r.mmol, unit)} reading from ${when(r.at)}`}
+                    onPress={() => confirmRemove(r.id!, formatGlucose(r.mmol, unit), when(r.at))} />
+                ) : null}
               </View>
             ))
           )}

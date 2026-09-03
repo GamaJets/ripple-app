@@ -62,6 +62,10 @@
 import type { LoadStatus } from '../ui/loadStatus';
 import { monthWindow, monthKeyOf, type MonthKey, type MonthWindow } from './monthEnd';
 import { assertWrote } from './wroteRows';
+// The gym's own clock. `cutAtGym` turns a window's calendar days into the
+// instants they actually span at the gym, clock changes included, and hands
+// back the caption that says whose clock it used.
+import { cutAtGym, type WindowBasis } from './gymWindow';
 
 type Queryable = { from: (table: string) => any };
 
@@ -198,6 +202,63 @@ export function taxPeriod(key: TaxPeriodKey): TaxPeriod | null {
     fromIso: w.fromIso,
     toIso: w.toIso,
   };
+}
+
+/* ── whose clock the quarter is cut on ────────────────────────────────────── */
+
+/** Which clock a period's instants were built on. Re-exported from
+ *  src/lib/gymWindow.ts so a screen holding a period does not have to import
+ *  two modules to describe one of them. */
+export type PeriodBasis = WindowBasis;
+
+export interface PeriodAtZone {
+  period: TaxPeriod;
+  basis: PeriodBasis;
+  /** The caption to print under the figures. Never a claim the basis does not
+   *  support — that was the whole defect. */
+  note: string;
+}
+
+/**
+ * A period cut on the GYM'S clock, or the same period cut on the reader's with
+ * a caption that says so.
+ *
+ * ── What was wrong ─────────────────────────────────────────────────────────
+ *
+ * /tax printed "{firstDay} to {lastDay}, in the gym’s own timezone." and got
+ * its bounds from `taxPeriod`, which is `monthWindow`, which is
+ * `new Date(y, mo - 1, 1)` — the reader's device. Those instants are then the
+ * filter on the takings: `fetchPayments(sb, tenantId, period.fromIso,
+ * period.toIso)`.
+ *
+ * So the payments taken in the first hours of 1 October at a Gulf gym fall into
+ * Q3 read from London and into Q4 read at the desk. Two people export two
+ * different quarters out of one database, on the screen whose entire purpose is
+ * a filing deadline, under a caption asserting the opposite. /accounting
+ * carries the identical sentence over the identical helper.
+ *
+ * ── Why this returns a note rather than null ───────────────────────────────
+ *
+ * A gym that has not set a timezone still has to be able to look at its own
+ * quarter, and refusing the whole screen over an unset setting would be a worse
+ * answer than the one it replaces. What must not survive is the CAPTION: the
+ * device's bounds are fine as long as nothing tells an accountant they are the
+ * gym's. So the basis and the sentence travel together, out of one function, and
+ * a caller cannot render the confident wording over the fallback without going
+ * out of its way.
+ *
+ * `zone` null covers both an unset timezone and one this runtime cannot
+ * resolve. It does NOT cover a failed tenant read — that is a third thing, the
+ * caller holds the error, and `fetchGymZone` exists to keep the two apart.
+ */
+export function taxPeriodAt(key: TaxPeriodKey, zone: string | null | undefined): PeriodAtZone | null {
+  const base = taxPeriod(key);
+  if (!base) return null;
+  // One implementation, shared with /accounting's month. Two screens wording
+  // the same caption two ways is how they came to disagree about what it meant
+  // in the first place.
+  const at = cutAtGym(base, zone);
+  return { period: at.window, basis: at.basis, note: at.note };
 }
 
 /** The quarter a month falls in. */

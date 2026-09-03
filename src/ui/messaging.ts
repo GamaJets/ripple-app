@@ -616,13 +616,25 @@ export function useThread(clientId: string | null, role: ChatRole) {
         }
       } catch { if (!cancelled) setStatus('error'); }
       if (!cancelled) setReady(true);
-      // Opening the thread is what marks it read, for whichever side opened it.
-      // The side is inferred server-side from who is calling, so this cannot
-      // clear the other person's unread count. Failing costs an unread badge
-      // that stays up, which is the harmless direction — it never hides a
-      // message, it only keeps claiming one is waiting.
-      // no-error-ok: an unmarked thread keeps showing as unread, which overstates rather than hides
-      try { await supabase.rpc('mark_thread_read', { p_client: cid }); } catch { /* the badge stays up */ }
+      // Marking the thread read used to happen HERE, unconditionally, the
+      // instant this read settled. It has moved to `useReadReceipt`
+      // (src/ui/readReceipts.ts), and the move is the fix rather than a
+      // refactor of it:
+      //
+      //   · opening a thread is not reading it. `mark_thread_read` writes
+      //     `now()`, so a thread left at the top — or, on the coach's side, a
+      //     chat screen still mounted behind whatever they opened next, which
+      //     it always is — cleared every unread message in it. That overstated
+      //     to the badge's own owner, and now that the other person is shown
+      //     the word "Read" it would overstate to somebody else.
+      //   · this hook is mounted for `send` alone by app/(trainer)/nudges.tsx
+      //     and app/(trainer)/credentials.tsx. Opening either of those sheets
+      //     marked a client's thread read without a word of it being drawn.
+      //
+      // The two screens that actually draw the conversation mount the hook, and
+      // it writes the newest SERVER-CONFIRMED message's own timestamp — the
+      // same column `coach_unread_counts()` compares against — only while the
+      // end of the list is on screen, focused and in the foreground.
       try {
         channel = supabase
           .channel('msg:' + cid)
@@ -954,6 +966,11 @@ export function useThread(clientId: string | null, role: ChatRole) {
     ready,
     status,
     unsent: shownUnsent,
+    /** The thread key this hook settled on — the `clientId` it was given, or
+     *  the signed-in member's own id when it was given none. Null until it is
+     *  resolved, and null again for a screen opened without one. `useReadReceipt`
+     *  needs it and the client's screen has no other way to know it. */
+    threadId,
     /** The sentence for a thread read off this device rather than the server,
      *  or null when it was confirmed. Goes with `status === 'error'`. */
     cachedNote: cachedAtLine(cachedAt),

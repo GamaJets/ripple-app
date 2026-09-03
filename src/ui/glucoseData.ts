@@ -102,6 +102,7 @@ interface Row {
 
 function toReading(r: Row): GlucoseReading {
   return {
+    id: r.id,
     at: r.taken_at,
     mmol: Number(r.mmol_l),
     externalId: r.external_id,

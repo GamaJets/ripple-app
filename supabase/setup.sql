@@ -48134,3 +48134,914 @@ comment on function public.notifications_dispatch_push() is
 -- A `channel` of null with `push_by = 'server'` is a kind nobody has classified
 -- and nobody is being told about. That is the number this part exists to drive
 -- to zero, and src/lib/notifyDispatch.test.ts is what stops it climbing again.
+
+-- ▶ a-coach-with-no-gym-had-no-currency-at-all.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A coach with no gym had no currency at all, and no way to name one.
+--
+-- ── The hole ──────────────────────────────────────────────────────────────
+--
+-- `tenants.currency` (part 99) is the ONLY currency the coach app has ever
+-- had. Part 164 gave the sole occupant of a tenant a way to set it, which
+-- covers every coach who signed up and landed in the personal tenant
+-- `provision_profile()` makes for them. It covers nobody whose
+-- `profiles.tenant_id` is NULL, because it has nothing to write to:
+-- `set_my_tenant_currency()` answers 'no_tenant' and stops.
+--
+-- Everything downstream then withholds, correctly and permanently:
+--
+--   · `myTenantCurrency()` (src/lib/subscriptions.ts) resolves
+--     `profiles.tenant_id`, finds none, and returns `{ currency: null,
+--     error: null }` — "no gym is not a failure, and it is not a currency
+--     either". True, and there was no second place to look.
+--   · app/(trainer)/settings.tsx draws no picker at all in that state. It
+--     says "This account is not attached to a gym, so there is nothing here
+--     to price", which is a dead end rather than an instruction.
+--   · `createPackage` refuses to insert without an explicit currency, so Add
+--     Package is disabled — and the sentence beside it asks a gym owner who
+--     does not exist to go and fix a setting.
+--   · every session that coach delivers is filed with `rate_cents` null,
+--     because `minorFromWhole(fee, null)` is null and must be.
+--
+-- ── It is reachable, and the product itself produces it ───────────────────
+--
+-- `revoke_staff_role()` (part 711) is the coach who has gone independent:
+--
+--     update public.profiles set tenant_id = null where id = p_subject;
+--
+-- and — deliberately, and correctly — it KEEPS the `trainers` row, because
+-- deleting it would strand every per-coach figure that joins on it. So a coach
+-- taken off a gym's staff lands in exactly this state: no tenant on the
+-- profile, a roster row still pointing at the gym they left, and no currency.
+--
+-- Worse than nothing, that stranded roster row is already ANSWERING. It is
+-- what `trainers.tenant_id` means to `fetchInvoiceCurrency` in
+-- src/ui/coachInvoices.ts and to `issue_coach_invoice()` in part 138: both
+-- read `trainers → tenants.currency`, so an independent coach's invoices are
+-- still being denominated in the currency of a gym they have left, while every
+-- other screen in the app shows them a dash. Two answers, disagreeing, today.
+-- Part 941 is the other half of this change and settles that.
+--
+-- ── Measured, so nobody reads more into this than is there ────────────────
+--
+-- Counted live on 3 Sep 2026: 20 profiles, 7 coaches, 8 `trainers` rows, 54
+-- tenants, 35 of them with `currency` null. ZERO coaches currently have
+-- `profiles.tenant_id` null, and every one of the 7 sits alone in a personal
+-- tenant, so part 164's route works for all of them today and one of them has
+-- a currency to set through it.
+--
+-- This part is therefore closing a hole rather than emptying a queue. The hole
+-- is the one above: the moment a gym uses the staff screen the product already
+-- ships, the coach on the other end of it cannot price anything, and nothing
+-- in the app would say why.
+--
+-- ── WHERE IT LIVES, AND WHY `trainers` ───────────────────────────────────
+--
+-- `trainers.currency`. The alternatives and why they lose:
+--
+--   · `profiles.currency` — `profiles` is the account, and it is shared by
+--     owners, members and receptionists, none of whom price anything. A
+--     column three of the four roles must never read is a column somebody
+--     eventually reads.
+--   · a new `coach_settings` table — one nullable column does not earn a
+--     table, an RLS policy and a grant list, and part 153 already refused the
+--     same widening for a coach's branding: the coach's own row is the
+--     carrier.
+--   · widening `tenants` so a coach can own one — that invents a tenant for a
+--     person who has just been taken out of one, and part 164's whole
+--     authorisation argument (a personal tenant has one occupant, a gym has
+--     staff) stops being derivable the moment tenants are minted for people
+--     who left.
+--
+-- `trainers` is where `session_fee`, `late_cancel_fee`, `brand_color` and
+-- `delivery_mode` already live. It is the row that survives leaving a gym, by
+-- part 711's own decision, which is precisely the row this fact has to survive
+-- on. It is the coach's own record of how they trade.
+--
+-- ── PRECEDENCE, STATED ONCE ──────────────────────────────────────────────
+--
+--     The gym on `profiles.tenant_id` is the authority on the currency.
+--     `trainers.currency` applies IF AND ONLY IF `profiles.tenant_id` is null.
+--
+-- Not "if the gym has not set one". A coach in a gym whose owner has not set a
+-- currency is a coach waiting on their owner, and letting them name their own
+-- instead would put a second, disagreeing answer on the same screens the owner
+-- is about to fill in — and would price this coach's packages differently from
+-- the coach standing next to them.
+--
+-- The rule is keyed on `profiles.tenant_id` and on nothing else, because that
+-- is the column the reads already use — `myTenantCurrency()` and the tenant
+-- provider both resolve it — and a precedence rule keyed on a different fact
+-- from the read it governs is two rules. `trainers.tenant_id` is emphatically
+-- NOT that fact: part 711 leaves it pointing at a gym the coach has left.
+--
+-- A coach who sets their own currency and later joins a gym keeps the column;
+-- the gym's answer simply outranks it from that moment. It is not cleared,
+-- because clearing it is a reprice of everything they sold while independent,
+-- and because they may leave again.
+--
+-- ── SET ONCE, NEVER A SILENT REPRICE ─────────────────────────────────────
+--
+-- Identical to part 164's rule and for identical reasons, restated because
+-- this is a second column that can be got wrong the same way. A currency is
+-- not a label on a figure, it is part of the figure. A coach who has priced
+-- packages in GBP and then flips to JPY has repriced their entire catalogue by
+-- a factor of a hundred — `trainer_packages.price_cents` is what a card is
+-- charged — and converting the stored amounts would reprice them quietly while
+-- not converting them reprices them loudly. Neither is a thing a settings tap
+-- may do to somebody's customers.
+--
+-- So `where currency is null` is checked BEFORE the update and is also IN the
+-- update, so two taps a moment apart land on 'already_set' rather than on a
+-- silent overwrite. Correcting a currency set wrongly is a support
+-- conversation with the rows in front of both people.
+--
+-- ── NO DEFAULT, EVER ─────────────────────────────────────────────────────
+--
+-- Nullable, no default, no backfill. Part 99 made that decision for
+-- `tenants.currency`, part 150 dropped seven `default 'AED'`s that had been
+-- quietly answering for gyms that never chose, and `coachMoney.ts` returns
+-- null rather than a figure for a currency nobody stated. An unset currency
+-- stays unset and every amount stays withheld. There is no value here that is
+-- not simply wrong for half the people running this app.
+--
+-- ── The grant is a SELECT and not an UPDATE, on purpose ───────────────────
+--
+-- `trainers` grants nothing at table level (measured in part 153:
+-- `authenticated=dm/postgres`, with every readable column granted by name), so
+-- a new column is invisible AND unwritable until it is named. This names it
+-- for SELECT only.
+--
+-- `trainers_self_rw` is `for all using (auth.uid() = id)`, so an UPDATE grant
+-- on this column would let a coach write it directly with the anon key —
+-- past the set-once rule, past the "only when you have no gym" rule, and past
+-- the ISO check being turned into a sentence rather than a constraint
+-- violation. Every one of those is the reason the write is an RPC. The column
+-- is readable by the coach and writable only through `set_my_coach_currency`.
+--
+-- Idempotent; additive; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.trainers add column if not exists currency text;
+
+alter table public.trainers drop constraint if exists trainers_currency_is_iso;
+alter table public.trainers add constraint trainers_currency_is_iso
+  check (currency is null or currency ~ '^[A-Z]{3}$');
+
+comment on column public.trainers.currency is
+  'What this coach charges in when they have no gym — ISO 4217, uppercase. Read ONLY when profiles.tenant_id is null; a coach in a gym is priced in tenants.currency and this column is dormant. NULL means they have not chosen, never a value to default: render a dash and ask. Set once, through set_my_coach_currency(), because every stored price is denominated in it.';
+
+-- SELECT only. See the header: the write is an RPC because three rules sit on
+-- it that a column grant cannot express.
+grant select (currency) on public.trainers to authenticated;
+
+
+-- ── the one write ─────────────────────────────────────────────────────────
+--
+-- The sibling of `set_my_tenant_currency()` (part 164) and deliberately the
+-- same shape: SECURITY DEFINER with a pinned search_path, revoked from
+-- `public` AND `anon` by name, granted to `authenticated`, answering with
+-- jsonb so the five outcomes a boolean would collapse into one `false` stay
+-- distinguishable at the client.
+--
+-- Definer is required rather than stylistic. RLS on `profiles` is
+-- `id = auth.uid()`, which is enough to read one's own tenant_id — but the
+-- refusals below have to be decided by the same statement that writes, not by
+-- the app, or the rule is advisory.
+create or replace function public.set_my_coach_currency(p_currency text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_uid       uuid := (select auth.uid());
+  v_has_prof  boolean;
+  v_tenant    uuid;
+  v_has_row   boolean;
+  v_existing  text;
+  v_code      text;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'reason', 'not_signed_in');
+  end if;
+
+  -- Upper-cased and trimmed here rather than trusted from the caller, so a
+  -- 'gbp' arriving from some future free-text field sets a currency instead of
+  -- raising a constraint violation. The regex is `trainers_currency_is_iso`
+  -- restated; it exists to turn a violation into a sentence, not to be a
+  -- second, softer rule.
+  v_code := upper(btrim(coalesce(p_currency, '')));
+  if v_code !~ '^[A-Z]{3}$' then
+    return jsonb_build_object('ok', false, 'reason', 'bad_code');
+  end if;
+
+  select true, p.tenant_id into v_has_prof, v_tenant
+    from public.profiles p where p.id = v_uid;
+
+  -- An account with no profile row is not a coach with no gym. Answered apart
+  -- so it cannot be read as "you are independent, choose a currency" — there
+  -- is no record here to hang one on.
+  if v_has_prof is not true then
+    return jsonb_build_object('ok', false, 'reason', 'no_profile');
+  end if;
+
+  -- THE PRECEDENCE RULE, enforced by the write rather than by the screen. A
+  -- coach in a gym is priced by that gym: `tenants.currency`, set by its owner
+  -- or — when they are the only person in it — through
+  -- set_my_tenant_currency() from part 164. Writing this column for them would
+  -- be a second answer that can disagree with the one their clients are
+  -- charged in.
+  if v_tenant is not null then
+    return jsonb_build_object('ok', false, 'reason', 'has_tenant');
+  end if;
+
+  select true, tr.currency into v_has_row, v_existing
+    from public.trainers tr where tr.id = v_uid;
+
+  -- Nowhere to put it. `trainers` is the coach's own record and part 711 keeps
+  -- it when somebody leaves a gym, so this is rare — but "there is no coach
+  -- record for this account" is a different sentence from "you have not chosen
+  -- yet", and an app told the second would draw a picker that writes nothing.
+  if v_has_row is not true then
+    return jsonb_build_object('ok', false, 'reason', 'no_coach_row');
+  end if;
+
+  if v_existing is not null then
+    -- Answered WITH the code it already holds, so the app can say which one.
+    -- "Already set" with no code sends a coach looking on another screen.
+    return jsonb_build_object('ok', false, 'reason', 'already_set', 'currency', v_existing);
+  end if;
+
+  -- `where currency is null` a second time, and it is not belt and braces: the
+  -- read above and this write are not one statement, so two taps a moment
+  -- apart would otherwise have the later one overwrite the earlier. The
+  -- predicate makes the write itself decide, and a lost race lands on
+  -- 'already_set' below rather than on a silent reprice.
+  update public.trainers
+     set currency = v_code
+   where id = v_uid and currency is null;
+
+  if not found then
+    return jsonb_build_object('ok', false, 'reason', 'already_set');
+  end if;
+
+  return jsonb_build_object('ok', true, 'currency', v_code);
+end;
+$function$;
+
+comment on function public.set_my_coach_currency(text) is
+  'Lets a coach with NO gym (profiles.tenant_id is null) name the currency they charge in, once, when none is set. Refuses a coach who is in a gym — that gym''s tenants.currency is the authority — and refuses to change one already set, because every stored price is denominated in it. See part 940.';
+
+-- Revoked from `public` AND from `anon` by name. Postgres grants EXECUTE to
+-- PUBLIC on every new function and `anon` resolves through that grant, so
+-- naming only one of them leaves the other standing. This is how
+-- `log_gym_event` became an unauthenticated cross-tenant write.
+revoke all on function public.set_my_coach_currency(text) from public;
+revoke all on function public.set_my_coach_currency(text) from anon;
+grant execute on function public.set_my_coach_currency(text) to authenticated;
+
+
+-- ── how many are in the state this part exists for ───────────────────────
+--
+-- A number that should be readable rather than discovered, the same way part
+-- 710 returns `tenants_without_a_timezone()`. A coach in here has no gym and
+-- has not named a currency, so every figure in their app is withheld and
+-- nothing they sell can be priced.
+create or replace function public.coaches_without_a_currency()
+returns integer
+language sql stable security definer set search_path to 'public', 'pg_temp' as $fn$
+  select count(*)::int
+    from public.trainers tr
+    join public.profiles p on p.id = tr.id
+   where p.tenant_id is null and tr.currency is null;
+$fn$;
+
+comment on function public.coaches_without_a_currency() is
+  'How many coaches have no gym AND no currency of their own, and therefore cannot price a package, issue an invoice or have a session filed at a rate. Should be falling.';
+
+revoke all on function public.coaches_without_a_currency() from public, anon;
+grant execute on function public.coaches_without_a_currency() to authenticated;
+
+-- ▶ the-invoice-currency-follows-the-same-order.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The invoice currency follows the same order as everything else.
+--
+-- The other half of part 940, and the reason it is a separate file: 940 adds a
+-- column and one write, and this changes a function somebody's documents are
+-- issued by. They are applied together and they are read apart.
+--
+-- ── The disagreement that exists today ────────────────────────────────────
+--
+-- `issue_coach_invoice()` (part 138, last re-emitted by part 188) resolves a
+-- currency the caller did not state in two steps: the coach's own packages
+-- when they unanimously agree, then the gym. The gym link is
+--
+--     from public.trainers tr join public.tenants t on t.id = tr.tenant_id
+--
+-- and that is the wrong column. `revoke_staff_role()` (part 711) takes a coach
+-- off a gym's staff by clearing `profiles.tenant_id`, and it KEEPS the
+-- `trainers` row on purpose — deleting it would set `clients.trainer_id` null
+-- underneath the history and strand every per-coach figure that joins on it.
+-- `trainers.tenant_id` is NOT NULL, so it goes on naming the gym the coach has
+-- left, for ever.
+--
+-- The consequence is one coach with two answers. Every screen in the coach app
+-- reads `profiles.tenant_id` — `myTenantCurrency()`, the tenant provider — and
+-- shows an independent coach a dash. This function reads `trainers.tenant_id`
+-- and denominates their invoices in their old gym's currency. The document is
+-- the one that gets sent to a client, and it was the one that was wrong.
+--
+-- ── What this changes, and what it deliberately does not ──────────────────
+--
+-- Three lines of a hundred-and-five. The body below is `pg_get_functiondef` of
+-- the live function, taken verbatim on 3 Sep 2026, with the currency chain
+-- replaced and comments added at the chain. Every refusal, the advisory lock,
+-- the gapless per-coach sequence and the insert are untouched, and the
+-- signature is character-for-character the live one — an overload here is not
+-- a cosmetic problem, it is PostgREST resolving `issue_coach_invoice` against
+-- two candidates and refusing (part 188 had to drop the eight-argument version
+-- for exactly that).
+--
+-- The chain becomes:
+--
+--   1 · what the caller stated. The app always states it.
+--   2 · the coach's own packages, unanimous. Unchanged.
+--   3 · the gym on `profiles.tenant_id`.            ← was trainers.tenant_id
+--   4 · `trainers.currency` (part 940), and ONLY when there is no gym.  ← new
+--
+-- Link 4 is guarded on "no gym" rather than on "nothing has answered yet".
+-- That is part 940's precedence rule and it is what stops a coach inside a gym
+-- whose owner has not chosen from quietly pricing themselves — which would put
+-- a different currency on their invoice from the one their packages charge in,
+-- and from the one the coach at the next desk uses.
+--
+-- Nothing here invents a currency. The last line of the chain is still
+-- `raise exception 'no currency has been set…'`, and that refusal is correct:
+-- an invoice with the wrong three letters on it is worse than no invoice.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION public.issue_coach_invoice(p_bill_to text, p_description text, p_amount_cents bigint, p_issued_on date, p_kind text, p_client_id uuid DEFAULT NULL::uuid, p_currency text DEFAULT NULL::text, p_note text DEFAULT NULL::text, p_due_on date DEFAULT NULL::date, p_tax_rate_pct numeric DEFAULT NULL::numeric, p_tax_registration text DEFAULT NULL::text)
+ RETURNS coach_invoices
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  uid uuid := auth.uid();
+  ccy text;
+  n   integer;
+  reg text;
+  out_row public.coach_invoices;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  if not exists (select 1 from public.trainers t where t.id = uid) then
+    raise exception 'no trainer profile for this account';
+  end if;
+
+  if p_bill_to is null or btrim(p_bill_to) = '' then
+    raise exception 'an invoice has to say who it is for';
+  end if;
+  if p_description is null or btrim(p_description) = '' then
+    raise exception 'an invoice has to say what it is for';
+  end if;
+  if p_amount_cents is null or p_amount_cents <= 0 then
+    raise exception 'an invoice for nothing is not an invoice';
+  end if;
+  if p_amount_cents >= 100000000000 then
+    raise exception 'that amount is too large';
+  end if;
+  if p_kind is null or p_kind not in ('received', 'requested') then
+    raise exception 'say whether this records money received or money requested';
+  end if;
+  if p_issued_on is null then
+    raise exception 'an invoice has to carry the date it was issued';
+  end if;
+  if p_issued_on > current_date + 1 then
+    raise exception 'an invoice cannot be dated in the future';
+  end if;
+
+  -- Refused, not corrected. A document that says it fell due before it was
+  -- written is not one anybody can act on, and silently swapping the two dates
+  -- would print terms the coach did not type. There is deliberately no upper
+  -- bound: a coach settling annually with a corporate client is ordinary.
+  if p_due_on is not null and p_due_on < p_issued_on then
+    raise exception 'an invoice cannot fall due before it is issued';
+  end if;
+
+  -- Refused rather than clamped, for the reason every money refusal in this
+  -- product is refused rather than corrected: clamping 120 to 100 prints a rate
+  -- the coach did not type onto a document about their tax affairs.
+  if p_tax_rate_pct is not null and (p_tax_rate_pct < 0 or p_tax_rate_pct > 100) then
+    raise exception 'a tax rate is a percentage between 0 and 100';
+  end if;
+  reg := nullif(btrim(coalesce(p_tax_registration, '')), '');
+  if reg is not null and length(reg) > 60 then
+    raise exception 'that tax registration number is longer than any this can print';
+  end if;
+
+  if p_client_id is not null and not exists (
+    select 1 from public.clients c where c.id = p_client_id and c.trainer_id = uid
+  ) then
+    raise exception 'that client is not one of yours';
+  end if;
+
+  -- ── the currency, in one order, and the same order the app shows ──────
+  --
+  -- 1 · what the caller stated. The app always states it — see
+  --     `fetchInvoiceCurrency` in src/ui/coachInvoices.ts, which resolves the
+  --     same three links below and disables the Issue button when none of
+  --     them answers — so the chain here is the fallback for a caller that
+  --     did not, and it must not be able to reach a different answer.
+  ccy := nullif(btrim(upper(coalesce(p_currency, ''))), '');
+
+  -- 2 · the coach's own packages, unanimous or nothing. Unchanged from part
+  --     138: a coach selling in sterling inside a dirham gym is selling in
+  --     sterling, and a coach with packages in two currencies has not said
+  --     which this invoice is in.
+  if ccy is null then
+    select case when count(distinct upper(k.currency)) = 1 then max(upper(k.currency)) end
+      into ccy
+    from public.trainer_packages k
+    where k.trainer_id = uid and k.currency is not null and btrim(k.currency) <> '';
+  end if;
+  -- 3 · the gym, read from `profiles.tenant_id`.
+  --
+  --     Was `from public.trainers tr join public.tenants t on t.id =
+  --     tr.tenant_id`. That is the wrong column and part 711 is why:
+  --     `revoke_staff_role()` clears `profiles.tenant_id` and deliberately
+  --     KEEPS the `trainers` row, still pointing at the gym the coach has
+  --     left. So the old join denominated an independent coach's invoices in
+  --     the currency of a gym they no longer belong to — while every other
+  --     screen in the app showed them a dash, because those read
+  --     `profiles.tenant_id`. One coach, two answers, and the one on the
+  --     document was the wrong one.
+  --
+  --     `profiles.tenant_id` is the column that says which gym somebody is
+  --     in, and it is the column `myTenantCurrency()` and the tenant provider
+  --     already read. Part 940 states the precedence rule against it; this is
+  --     that rule, in the one place that writes a currency onto a document.
+  if ccy is null then
+    select upper(btrim(t.currency)) into ccy
+    from public.profiles pr
+    join public.tenants t on t.id = pr.tenant_id
+    where pr.id = uid and t.currency is not null and btrim(t.currency) <> '';
+  end if;
+
+  -- 4 · the coach's own currency (part 940), AND ONLY WHEN THERE IS NO GYM.
+  --
+  --     Guarded on `tenant_id is null` rather than on `ccy is still null`. A
+  --     coach who IS in a gym whose owner has not set a currency must not be
+  --     answered from their own dormant column: that would price their
+  --     invoices differently from the coach standing next to them, and
+  --     differently again from the packages their clients are charged in.
+  --     They are waiting on their owner, and the exception below says so.
+  if ccy is null and exists (
+    select 1 from public.profiles pr where pr.id = uid and pr.tenant_id is null
+  ) then
+    select upper(btrim(tr.currency)) into ccy
+    from public.trainers tr
+    where tr.id = uid and tr.currency is not null and btrim(tr.currency) <> '';
+  end if;
+  if ccy is null then
+    raise exception 'no currency has been set, so there is nothing to price this in';
+  end if;
+  if ccy !~ '^[A-Z]{3,4}$' then
+    raise exception 'currency must be a three-letter code';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(uid::text, 138));
+
+  select coalesce(max(i.seq), 0) + 1 into n
+  from public.coach_invoices i
+  where i.coach_id = uid;
+
+  insert into public.coach_invoices
+    (coach_id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, note,
+     tax_rate_pct, tax_registration)
+  values
+    (uid, n, p_client_id, btrim(p_bill_to), btrim(p_description), p_amount_cents, ccy, p_kind,
+     p_issued_on, p_due_on, nullif(btrim(coalesce(p_note, '')), ''),
+     p_tax_rate_pct, reg)
+  returning * into out_row;
+
+  return out_row;
+end $function$;
+
+-- `create or replace` keeps the function's existing ACL, so these are here for
+-- a run from an empty database rather than to change anything on a live one.
+-- Both `public` and `anon` are named: Postgres grants EXECUTE to PUBLIC on
+-- every new function and `anon` resolves through that grant, so naming one
+-- leaves the other standing.
+revoke all on function public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text, date, numeric, text) from public;
+revoke all on function public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text, date, numeric, text) from anon;
+grant execute on function public.issue_coach_invoice(text, text, bigint, date, text, uuid, text, text, date, numeric, text) to authenticated;
+
+-- ▶ a-receipt-the-other-side-can-see.sql
+
+-- A receipt the other side can see, and a watermark that only ever moves
+-- forward.
+--
+-- ── What part 88 built, and the half it did not ────────────────────────────
+--
+-- 88-message-read-state.sql created `message_reads` (one row per thread per
+-- SIDE), `mark_thread_read()` to move a side's watermark to `now()`, and the
+-- two unread counts the coach's roster and inbox badge with. All of that is
+-- wired and working: src/ui/roster.tsx reads `coach_unread_counts()` and
+-- src/ui/coachThreads.ts joins it.
+--
+-- What nobody can do under part 88 is SEE THE OTHER SIDE'S ROW. Read its two
+-- policies again:
+--
+--   message_reads_client   reader = 'client' and client_id = auth.uid()
+--   message_reads_coach    reader = 'coach'  and is_my_client(client_id)
+--
+-- A client may read only the 'client' row — their own. A coach may read only
+-- the 'coach' row — their own. Neither policy grants either person sight of the
+-- other's `last_read_at`, so a read RECEIPT — "they have seen this" — is not
+-- merely unimplemented in the app, it is unexpressible against this table. That
+-- is the privacy decision part 88 took, and taking it back is what this part is
+-- for, so it is argued below rather than assumed.
+--
+-- ── The privacy decision, and why it is SYMMETRIC ──────────────────────────
+--
+-- A read receipt tells one person when another person looked at their phone.
+-- That is a real disclosure and it is not made lightly.
+--
+-- It is symmetric — the coach sees when the client read, the client sees when
+-- the coach read — for one reason: the asymmetric version is the coach watching
+-- the client. The coach ALREADY has the stronger signal in aggregate, because
+-- `coach_unread_counts()` tells them, per client, how many of that client's
+-- messages are unopened, which is a statement about the coach's own reading.
+-- What the coach does not have, and what the client does not have either, is
+-- whether the person they wrote to has opened it. Giving that to only one of
+-- them, in a relationship where one party is paying the other and one party
+-- holds the roster, would make it a monitoring feature. Given to both, it is
+-- the ordinary courtesy every messenger has offered for fifteen years: I can
+-- see whether you have seen what I sent you, and you can see the same of me.
+--
+-- The disclosure is bounded three ways and it is worth naming each:
+--
+--   · ONE TIMESTAMP PER THREAD PER SIDE. Not per message, not a history. It
+--     says "the last time you opened this conversation", and nothing about how
+--     often, how long, or what was on screen.
+--   · ONLY TO THE OTHER PERSON ON THE THREAD. `thread_read_receipt` is scoped
+--     by the same two predicates the policies use; a coach who is not this
+--     client's coach, an owner, another member, an anon caller, all get null.
+--   · NULL IS THE ANSWER TO EVERY QUESTION THIS FUNCTION WILL NOT ANSWER. An
+--     unauthorised caller gets exactly what a caller whose peer has never
+--     opened the thread gets, so the function's silence tells nobody anything
+--     about whether the thread exists.
+--
+-- The app narrows it further and that is a presentation choice, not a promise
+-- of this function: src/lib/readReceipt.ts renders the word "Read" under a
+-- bubble and never a time, so the screen says the fact and not the hour.
+--
+-- ── The watermark moves FORWARD only, and is clamped to server time ────────
+--
+-- `mark_thread_read()` wrote `now()`, so the only value it could ever set was
+-- one the server chose and one later than what was there. Marking read up to a
+-- CALLER-SUPPLIED moment — which is what "the newest message actually on the
+-- reader's screen" needs — reopens both directions:
+--
+--   · BACKWARD. A second phone, a stale screen, a retry with an old value:
+--     any of them would un-read messages the reader has already read, and the
+--     other person's "Read" would blink back to "Sent". `greatest()` in the
+--     conflict clause makes that impossible.
+--   · FORWARD PAST THE PRESENT. A device whose clock is hours fast would mark
+--     read every message the next few hours bring — messages that do not exist
+--     yet, on a screen nobody has looked at. `least(p_at, now())` makes the
+--     caller's clock evidence about the past only. A phone that is slow simply
+--     under-claims, which is the harmless direction: the badge stays up.
+--
+-- `mark_thread_read()` is kept and REDEFINED to delegate here, so there is one
+-- implementation of the write rather than two that could drift on the clamp or
+-- on the monotonicity. Its behaviour is unchanged: `now()` is trivially
+-- forward and trivially not in the future.
+--
+-- It is kept rather than dropped even though the app has stopped calling it.
+-- The one call site — `useThread` in src/ui/messaging.ts, which fired the
+-- instant the initial read settled — has moved to `mark_thread_read_at` in
+-- src/ui/readReceipts.ts, because `now()` is a claim about a screen nobody has
+-- necessarily looked at and that claim is now shown to somebody else. But this
+-- part is applied to a database that phones talk to over the air, and the
+-- bundle on a phone that has not taken the update yet still calls the old name.
+-- Dropping it would turn "the badge does not clear" into "the badge does not
+-- clear on every phone that has not restarted", for the sake of removing eight
+-- lines. It goes when the old bundles do.
+--
+-- ── What this part does NOT do ─────────────────────────────────────────────
+--
+-- It does not change what UNREAD means. `coach_unread_counts()` and
+-- `client_unread_count()` are untouched and still compare `messages.created_at`
+-- against the same watermark, so the roster badge, the coach's inbox and the
+-- receipt are three readings of ONE number. Part 148's argument against a
+-- second definition of unread holds here and this part is a caller of the
+-- first, not an author of a second.
+
+-- Mark this side of the thread read up to a moment the caller names.
+--
+-- The side is inferred rather than passed, exactly as in part 88 and for the
+-- same reason: a caller must not be able to mark the OTHER person's side read.
+-- Returns false rather than raising for every refusal, because the app's caller
+-- swallows failure by design — an unmarked thread keeps claiming a message is
+-- waiting, which overstates and never hides.
+create or replace function public.mark_thread_read_at(p_client uuid, p_at timestamptz)
+returns boolean
+language plpgsql security definer set search_path to 'public'
+as $fn$
+declare v_role text; v_at timestamptz;
+begin
+  if auth.uid() is null or p_client is null or p_at is null then return false; end if;
+  if p_client = auth.uid() then
+    v_role := 'client';
+  elsif exists (select 1 from clients c where c.id = p_client and c.trainer_id = auth.uid()) then
+    v_role := 'coach';
+  else
+    return false;
+  end if;
+  -- The caller's clock is not evidence about the future.
+  v_at := least(p_at, now());
+  insert into message_reads (client_id, reader, last_read_at)
+       values (p_client, v_role, v_at)
+  on conflict (client_id, reader) do update
+     set last_read_at = greatest(message_reads.last_read_at, excluded.last_read_at);
+  return true;
+end $fn$;
+
+-- The zero-argument spelling, unchanged in behaviour and now one line thick.
+create or replace function public.mark_thread_read(p_client uuid)
+returns boolean
+language sql security definer set search_path to 'public'
+as $fn$
+  select public.mark_thread_read_at(p_client, now());
+$fn$;
+
+-- When the OTHER person on this thread last opened it, or null.
+--
+-- Null covers three different facts on purpose — they have never opened it, the
+-- caller is not on this thread, and nobody is signed in — because separating
+-- them would turn this into a probe for whether a given uuid is somebody's
+-- client. The app treats null as "not read", which is the pessimistic reading
+-- and the only safe one.
+create or replace function public.thread_read_receipt(p_client uuid)
+returns timestamptz
+language sql stable security definer set search_path to 'public'
+as $fn$
+  select r.last_read_at
+    from message_reads r
+   where r.client_id = p_client
+     and r.reader = case
+           when p_client = auth.uid() then 'coach'
+           when exists (select 1 from clients c
+                         where c.id = p_client and c.trainer_id = auth.uid()) then 'client'
+           else null
+         end;
+$fn$;
+
+revoke execute on function public.mark_thread_read_at(uuid, timestamptz) from public, anon;
+grant execute on function public.mark_thread_read_at(uuid, timestamptz) to authenticated;
+revoke execute on function public.thread_read_receipt(uuid) from public, anon;
+grant execute on function public.thread_read_receipt(uuid) to authenticated;
+
+-- ▶ the-gym-inviting-you-could-not-be-named.sql
+
+-- The gym inviting you could not be named.
+--
+-- ── The hole ──────────────────────────────────────────────────────────────
+--
+-- 37-member-invites.sql gives the invitee exactly one read: `mi_invitee_read`,
+-- which matches `lower(email) = lower(auth.jwt() ->> 'email')` and returns the
+-- invite row. That row carries a `tenant_id` and a `plan_id` and no names, and
+-- the invitee can read neither of the tables those point at:
+--
+--   · `tenants_client_r` (142) scopes tenant rows to somebody who is ALREADY in
+--     the tenant, through coach_clients. An invitee is not, by definition —
+--     the invite is what makes them one.
+--   · `membership_plans` is the gym's own price list and is read by its members
+--     and its staff, not by a stranger holding an invitation.
+--
+-- Both of those are right, and the consequence is that the app cannot say which
+-- gym is inviting you or onto what plan. app/(client)/trainers.tsx renders
+-- "A Gym Has Invited You to Join" and a sentence saying the plan's name could
+-- not be read, which is honest and is not what the gym paid for: the member is
+-- being asked to join something the screen cannot name.
+--
+-- ── Why a function and not a policy ───────────────────────────────────────
+--
+-- Because RLS selects ROWS, not columns. A policy on `tenants` wide enough to
+-- show an invitee the gym's name would hand them the whole tenant row —
+-- settings, currency, brand, retention, the lot — for a gym they have not
+-- joined. 242-a-fee-a-client-can-read-the-currency-of.sql makes exactly this
+-- argument on this exact table and answers it the same way: a SECURITY DEFINER
+-- function that returns the two columns and nothing else.
+--
+-- ── What it discloses, and to whom ────────────────────────────────────────
+--
+-- To a signed-in caller, for each PENDING invitation addressed to their own
+-- email address: the tenant id (which they can already read off the invite
+-- row), the gym's name, the plan id (likewise) and the plan's name. Nothing
+-- else, and nothing at all for an invitation addressed to anybody else.
+--
+-- The predicate is the same one `mi_invitee_read` uses, `nullif` included: an
+-- unauthenticated caller has no email claim, and coalescing it to '' would make
+-- an invite stored with a blank address readable by anon. `member_invites` has
+-- a not-blank constraint on email as well, and both stay.
+--
+-- Accepted and revoked invitations are excluded. The name of a gym that
+-- withdrew an invitation is not something this needs to keep answering.
+--
+-- ── The app does not depend on this having been applied ───────────────────
+--
+-- src/ui/gymInvites.ts calls this and treats a failure — including "function
+-- does not exist" — as "no names available". The invitations still list and can
+-- still be accepted; they are described rather than named. So this part
+-- improves a working screen and does not gate one.
+
+create or replace function public.my_invited_gyms()
+returns table (tenant_id uuid, gym_name text, plan_id uuid, plan_name text)
+language sql stable security definer set search_path = public as $$
+  select mi.tenant_id, t.name, mi.plan_id, p.name
+    from public.member_invites mi
+    join public.tenants t on t.id = mi.tenant_id
+    left join public.membership_plans p on p.id = mi.plan_id
+   where mi.status = 'pending'
+     and lower(mi.email) = lower(nullif(auth.jwt() ->> 'email', ''));
+$$;
+
+-- Postgres grants EXECUTE to PUBLIC on every new function and Supabase's
+-- default privileges add anon on top, so the revoke has to come first or the
+-- grant back means nothing. Same convention as 37-member-invites.sql, which
+-- documents the live acl this was verified against.
+revoke execute on function public.my_invited_gyms() from public, anon;
+grant  execute on function public.my_invited_gyms() to authenticated;
+
+-- ▶ a-profile-photo-that-leaves-the-phone.sql
+
+-- A profile photo that leaves the phone.
+--
+-- ── What `profiles.avatar` has been holding ───────────────────────────────
+--
+-- app/(client)/profile.tsx handed the image picker's asset uri to `setPhoto`,
+-- and src/ui/clientData.tsx wrote that string into `profiles.avatar`. On a
+-- handset that string is
+--
+--     file:///var/mobile/Containers/Data/Application/<UUID>/tmp/…jpg
+--
+-- a path inside ONE device's sandbox. The member saw their photo, because their
+-- own device could open its own file. Their coach saw a blank circle, in the
+-- thread and on the roster, because `profiles.avatar` is read by other accounts
+-- as a URL. And the member's own copy vanished the first time iOS cleared the
+-- picker cache, with nothing on screen having changed.
+--
+-- There was no bucket. There was no upload. This part is the missing half.
+--
+-- ── Why this bucket is PUBLIC when almost every other one is private ──────
+--
+-- Say it plainly, because the default in this schema is private and every other
+-- bucket here re-asserts `public = false` on every run.
+--
+-- `profiles.avatar` is one text column read by four different readers in three
+-- codebases: src/ui/messaging.ts for the thread peer, the coach's roster, the
+-- member's own screens, and studio-web. They all put it straight into an image
+-- source. A private bucket would mean each of those four resolving a signed URL
+-- before it could draw a face, and a signature that expires while a screen is
+-- open — which is a redesign of three codebases, not a fix for a member whose
+-- coach cannot see them.
+--
+-- What is actually disclosed: a profile photograph, to anybody holding its
+-- exact URL. The key is `<uid>/<16 random hex>.jpg`, so a URL cannot be derived
+-- from knowing whose photo it is, and no SELECT policy is granted to `anon`, so
+-- the bucket cannot be LISTED by an unauthenticated caller — only fetched by
+-- exact key. The photo is one the member chose to show their coach and their
+-- gym, and it carries no location, because src/ui/avatarUpload.ts re-encodes
+-- every upload through ImageManipulator, which does not carry EXIF forward.
+--
+-- What is NOT in this bucket, and must not be put in it: progress photographs
+-- (`photos`, part 124, private), injury documents (`injury-docs`, part 91,
+-- private, no coach branch at all), and message media (`message-media`, part
+-- 124, private). Those are private because their content is private. A profile
+-- picture is the one image in this product whose entire purpose is that other
+-- people see it.
+--
+-- If that trade is ever judged wrong, the change is: flip `public` to false
+-- here, add a signed-URL resolver, and point all four readers at it. The column
+-- would then hold the object key rather than a URL, and every reader that
+-- rendered the raw column would draw nothing until it was updated.
+--
+-- Idempotent; safe to re-run.
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The bucket
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- 2 MB, the same number src/lib/avatarImage.ts refuses at, so the app can say
+-- a sentence before a byte leaves rather than render a 413 as an unexplained
+-- failure. JPEG and PNG only: the app re-encodes everything to JPEG, and PNG is
+-- accepted so an object stored by an earlier hand is still readable.
+--
+-- `public = true` is written on the insert AND on the conflict update, for the
+-- same reason parts 49, 91, 124, 135 and 330 write `false` in both places: a
+-- bucket somebody flipped in the dashboard is put back by re-running setup.sql.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('avatars', 'avatars', true, 2097152, array['image/jpeg', 'image/png'])
+on conflict (id) do update
+  set public = true,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · Storage policies — your own folder, and nobody else's
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- RLS on storage.objects is enabled by Supabase itself. Asserted rather than
+-- assumed, because a policy on a table with RLS off is inert and would look
+-- exactly like a working restriction — the same guard parts 45, 91, 124, 135
+-- and 330 open with.
+do $$
+begin
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'storage' and c.relname = 'objects' and c.relrowsecurity
+  ) then
+    raise exception 'storage.objects does not have RLS enabled — the avatars policies would be inert.';
+  end if;
+end $$;
+
+-- Writing. The first folder is the uploader's own id, which is what
+-- src/lib/avatarImage.ts builds and what its test asserts. Nobody can put a
+-- file in somebody else's folder, so nobody can replace another member's face.
+drop policy if exists avatars_obj_insert on storage.objects;
+create policy avatars_obj_insert on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+-- Listing, which is a different thing from fetching. The bucket being public
+-- means an object can be DOWNLOADED by exact key with no session; it does not
+-- make the object list readable. This grants the list to the owner of the
+-- folder alone, which is what src/lib/gdpr.ts needs to put a member's own photo
+-- into their own data export.
+drop policy if exists avatars_obj_read on storage.objects;
+create policy avatars_obj_read on storage.objects for select to authenticated
+  using (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+-- Deleting, so a superseded photo can be collected and so a member removing
+-- their account takes their face with them.
+drop policy if exists avatars_obj_delete on storage.objects;
+create policy avatars_obj_delete on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+-- No UPDATE policy, for the reason parts 91, 124 and 330 give: an UPDATE policy
+-- allows the bytes behind a key that has already been drawn to be replaced. The
+-- app uploads with upsert:false to a fresh key every time.
+drop policy if exists avatars_obj_update on storage.objects;
+
+-- DELIBERATELY ABSENT: a coach branch, a tenant branch and an owner branch.
+-- None is needed — the object is fetched by URL, not by policy — and each would
+-- hand somebody the ability to list or delete another person's folder. Dropped
+-- rather than merely not created, so applying this part removes one if a later
+-- hand added it.
+drop policy if exists avatars_obj_coach_read on storage.objects;
+drop policy if exists avatars_obj_tenant_read on storage.objects;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · The device paths already stored
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Every one of these is a location inside somebody's handset, sitting in a row
+-- their coach, their gym and the web console read. None of them has ever drawn
+-- for anybody but its owner, so nothing is lost by clearing them — the member's
+-- own screen keeps its local copy and app/(client)/profile.tsx tells them what
+-- happened and asks for the photo again.
+--
+-- src/ui/clientData.tsx will not write another one (isDeviceAvatar guards the
+-- update), so this runs once and then matches nothing.
+update public.profiles
+   set avatar = null
+ where avatar is not null
+   and (
+        avatar ilike 'file:%'
+     or avatar ilike 'content:%'
+     or avatar ilike 'ph:%'
+     or avatar ilike 'assets-library:%'
+     or avatar like '/var/%'
+     or avatar like '/data/%'
+     or avatar like '/storage/%'
+   );

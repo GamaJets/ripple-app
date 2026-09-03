@@ -397,160 +397,188 @@ export default function TrainerCredentials() {
       </ScrollView>
 
       {/* ── the credential form ─────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: every field below the first one is behind it, and this form has seven.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFormOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '88%' }}>
-          <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
-            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.md }}>
-              {editing ? 'Edit' : 'Add'} a credential
-            </Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFormOpen(false)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '88%' }}>
+            <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
+              <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.md }}>
+                {editing ? 'Edit' : 'Add'} a credential
+              </Text>
 
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              {(['certification', 'insurance'] as const).map((k) => (
-                <Pressable key={k} onPress={() => setKind(k)} accessibilityRole="button"
-                  style={{
-                    flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center',
-                    backgroundColor: draft.kind === k ? t.brand : t.surface2,
-                  }}>
-                  <Text style={{ ...ty.caption, color: draft.kind === k ? t.bg : t.ink2 }}>
-                    {k === 'certification' ? 'Qualification' : 'Insurance'}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+                {(['certification', 'insurance'] as const).map((k) => (
+                  <Pressable key={k} onPress={() => setKind(k)} accessibilityRole="button"
+                    style={{
+                      flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center',
+                      backgroundColor: draft.kind === k ? t.brand : t.surface2,
+                    }}>
+                    <Text style={{ ...ty.caption, color: draft.kind === k ? t.bg : t.ink2 }}>
+                      {k === 'certification' ? 'Qualification' : 'Insurance'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
-              {draft.kind === 'certification' ? 'QUALIFICATION' : 'COVER'}
-            </Text>
-            <TextInput
-              value={draft.title}
-              onChangeText={(v) => setDraft((d) => ({ ...d, title: v }))}
-              placeholder={draft.kind === 'certification' ? 'Level 3 Personal Trainer' : 'Public liability'}
-              placeholderTextColor={t.ink3}
-              maxLength={MAX_TITLE}
-              accessibilityLabel="What the credential is"
-              style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink, marginBottom: sp.md }}
-            />
-
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
-              {draft.kind === 'certification' ? 'AWARDING BODY' : 'INSURER'}
-            </Text>
-            <TextInput
-              value={draft.issuer}
-              onChangeText={(v) => setDraft((d) => ({ ...d, issuer: v }))}
-              placeholder={draft.kind === 'certification' ? 'CIMSPA' : 'Insure4Sport'}
-              placeholderTextColor={t.ink3}
-              maxLength={MAX_ISSUER}
-              accessibilityLabel="Who issued it"
-              style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink, marginBottom: sp.md }}
-            />
-
-            {/* Only for a qualification, and the reason is on the screen. A
-                registration number is the one thing that lets a reader check
-                the claim themselves; a policy number is checkable by nobody and
-                identifies a live policy, so it is not collected at all. */}
-            {referenceAllowed(draft.kind) ? (<>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>REGISTRATION NUMBER (OPTIONAL)</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
+                {draft.kind === 'certification' ? 'QUALIFICATION' : 'COVER'}
+              </Text>
               <TextInput
-                value={draft.reference}
-                onChangeText={(v) => setDraft((d) => ({ ...d, reference: v }))}
-                placeholder="R123456"
+                value={draft.title}
+                onChangeText={(v) => setDraft((d) => ({ ...d, title: v }))}
+                placeholder={draft.kind === 'certification' ? 'Level 3 Personal Trainer' : 'Public liability'}
                 placeholderTextColor={t.ink3}
-                maxLength={MAX_REFERENCE}
-                autoCapitalize="characters"
-                accessibilityLabel="Registration or certificate number"
-                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
+                maxLength={MAX_TITLE}
+                accessibilityLabel="What the credential is"
+                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink, marginBottom: sp.md }}
               />
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginBottom: sp.md }}>
-                Shown on your profile. It is what lets a client look you up on the register themselves —
-                which is worth more than anything we could put next to it.
-              </Text>
-            </>) : (
-              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                Policy numbers are not published. Nobody outside your insurer can check one, and it
-                identifies a live policy — the insurer and the renewal date are what a client needs.
-              </Text>
-            )}
 
-            <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>ISSUED (OPTIONAL)</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
+                {draft.kind === 'certification' ? 'AWARDING BODY' : 'INSURER'}
+              </Text>
+              <TextInput
+                value={draft.issuer}
+                onChangeText={(v) => setDraft((d) => ({ ...d, issuer: v }))}
+                placeholder={draft.kind === 'certification' ? 'CIMSPA' : 'Insure4Sport'}
+                placeholderTextColor={t.ink3}
+                maxLength={MAX_ISSUER}
+                accessibilityLabel="Who issued it"
+                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink, marginBottom: sp.md }}
+              />
+
+              {/* Only for a qualification, and the reason is on the screen. A
+                  registration number is the one thing that lets a reader check
+                  the claim themselves; a policy number is checkable by nobody and
+                  identifies a live policy, so it is not collected at all. */}
+              {referenceAllowed(draft.kind) ? (<>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>REGISTRATION NUMBER (OPTIONAL)</Text>
                 <TextInput
-                  value={draft.issuedOn}
-                  onChangeText={(v) => setDraft((d) => ({ ...d, issuedOn: v }))}
-                  placeholder="2019-06-01"
+                  value={draft.reference}
+                  onChangeText={(v) => setDraft((d) => ({ ...d, reference: v }))}
+                  placeholder="R123456"
                   placeholderTextColor={t.ink3}
-                  maxLength={10}
-                  accessibilityLabel="Issue date, year dash month dash day"
+                  maxLength={MAX_REFERENCE}
+                  autoCapitalize="characters"
+                  accessibilityLabel="Registration or certificate number"
                   style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
                 />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>EXPIRES (OPTIONAL)</Text>
-                <TextInput
-                  value={draft.expiresOn}
-                  onChangeText={(v) => setDraft((d) => ({ ...d, expiresOn: v }))}
-                  placeholder="2027-06-01"
-                  placeholderTextColor={t.ink3}
-                  maxLength={10}
-                  accessibilityLabel="Expiry date, year dash month dash day"
-                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
-                />
-              </View>
-            </View>
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
-              Leave the expiry blank only if it genuinely never runs out. Blank is shown as "no expiry
-              date given", which is a different thing from a date in the past.
-            </Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginBottom: sp.md }}>
+                  Shown on your profile. It is what lets a client look you up on the register themselves —
+                  which is worth more than anything we could put next to it.
+                </Text>
+              </>) : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                  Policy numbers are not published. Nobody outside your insurer can check one, and it
+                  identifies a live policy — the insurer and the renewal date are what a client needs.
+                </Text>
+              )}
 
-            {problem !== 'ok' ? (
-              <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{draftProblemText(problem)}</Flag>
-            ) : null}
+              <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>ISSUED (OPTIONAL)</Text>
+                  <TextInput
+                    value={draft.issuedOn}
+                    onChangeText={(v) => setDraft((d) => ({ ...d, issuedOn: v }))}
+                    placeholder="2019-06-01"
+                    placeholderTextColor={t.ink3}
+                    maxLength={10}
+                    accessibilityLabel="Issue date, year dash month dash day"
+                    style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>EXPIRES (OPTIONAL)</Text>
+                  <TextInput
+                    value={draft.expiresOn}
+                    onChangeText={(v) => setDraft((d) => ({ ...d, expiresOn: v }))}
+                    placeholder="2027-06-01"
+                    placeholderTextColor={t.ink3}
+                    maxLength={10}
+                    accessibilityLabel="Expiry date, year dash month dash day"
+                    style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
+                  />
+                </View>
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+                Leave the expiry blank only if it genuinely never runs out. Blank is shown as "no expiry
+                date given", which is a different thing from a date in the past.
+              </Text>
 
-            <Cta label={saving ? 'Saving…' : editing ? 'Save Changes' : 'Add It'} wide
-              disabled={saving || problem !== 'ok'} onPress={() => { void save(); }} />
-            <View style={{ marginTop: sp.md }}>
-              <Ghost label="Cancel" onPress={() => setFormOpen(false)} />
-            </View>
-          </ScrollView>
-        </View>
+              {problem !== 'ok' ? (
+                <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{draftProblemText(problem)}</Flag>
+              ) : null}
+
+              <Cta label={saving ? 'Saving…' : editing ? 'Save Changes' : 'Add It'} wide
+                disabled={saving || problem !== 'ok'} onPress={() => { void save(); }} />
+              <View style={{ marginTop: sp.md }}>
+                <Ghost label="Cancel" onPress={() => setFormOpen(false)} />
+              </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── the reply sheet ─────────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the reply box and the button that posts it are both under it.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!replyTo} transparent animationType="slide" onRequestClose={() => setReplyTo(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReplyTo(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '88%' }}>
-          {replyTo ? (
-            <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
-              <Text style={{ ...ty.title, color: t.ink }}>Reply</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
-                To {reviewerLabel(replyTo)}’s {replyTo.rating} of {MAX_RATING} review, {when(replyTo.createdAt)}.
-              </Text>
-              {replyTo.body ? (
-                <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{replyTo.body}</Text>
-              ) : null}
-              <TextInput
-                value={replyText}
-                onChangeText={setReplyText}
-                placeholder="Answer it the way you would in the gym."
-                placeholderTextColor={t.ink3}
-                multiline
-                maxLength={MAX_REPLY}
-                accessibilityLabel="Your public reply"
-                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.lg, minHeight: 120, ...ty.body, color: t.ink, textAlignVertical: 'top' }}
-              />
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
-                Clearing the box removes your reply. If this client rewrites their review later, your reply
-                goes with it — it answered what they wrote before.
-              </Text>
-              <Cta label={replying ? 'Posting…' : 'Post Reply'} wide disabled={replying}
-                onPress={() => { void sendReply(); }} />
-              <View style={{ marginTop: sp.md }}>
-                <Ghost label="Cancel" onPress={() => setReplyTo(null)} />
-              </View>
-            </ScrollView>
-          ) : null}
-        </View>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReplyTo(null)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '88%' }}>
+            {replyTo ? (
+              <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
+                <Text style={{ ...ty.title, color: t.ink }}>Reply</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
+                  To {reviewerLabel(replyTo)}’s {replyTo.rating} of {MAX_RATING} review, {when(replyTo.createdAt)}.
+                </Text>
+                {replyTo.body ? (
+                  <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>{replyTo.body}</Text>
+                ) : null}
+                <TextInput
+                  value={replyText}
+                  onChangeText={setReplyText}
+                  placeholder="Answer it the way you would in the gym."
+                  placeholderTextColor={t.ink3}
+                  multiline
+                  maxLength={MAX_REPLY}
+                  accessibilityLabel="Your public reply"
+                  style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.lg, minHeight: 120, ...ty.body, color: t.ink, textAlignVertical: 'top' }}
+                />
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
+                  Clearing the box removes your reply. If this client rewrites their review later, your reply
+                  goes with it — it answered what they wrote before.
+                </Text>
+                <Cta label={replying ? 'Posting…' : 'Post Reply'} wide disabled={replying}
+                  onPress={() => { void sendReply(); }} />
+                <View style={{ marginTop: sp.md }}>
+                  <Ghost label="Cancel" onPress={() => setReplyTo(null)} />
+                </View>
+              </ScrollView>
+            ) : null}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

@@ -487,8 +487,19 @@ export default function TrainerLeads() {
       </Modal>
 
       {/* ── recording a follow-up ─────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          This sheet is anchored to the bottom of the window and is short, so with the
+          keyboard up the WHOLE of it — the note, the caption and Save — sat behind it.
+          Nothing scrolls here, so there is no scroller for the page fix to act on: the
+          sheet itself has to rise.
+
+          The scrim container becomes the KeyboardAvoidingView rather than gaining a
+          wrapper, which is exactly how app/(trainer)/costs.tsx, receipts.tsx and
+          invoices.tsx do it — `behavior="padding"` shrinks the flex:1 column and the
+          bottom-anchored sheet comes up with it. */}
       <Modal visible={!!writing} animationType="slide" transparent onRequestClose={() => setWriting(null)}>
-        <View style={{ flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1, backgroundColor: '#0008', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34 }}>
             <Text style={{ ...ty.head, color: t.ink }}>What you did about {writing?.name ?? 'this enquiry'}</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
@@ -516,7 +527,7 @@ export default function TrainerLeads() {
               <Ghost label="Cancel" onPress={() => { if (!saving) { setWriting(null); setDraft(''); } }} />
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

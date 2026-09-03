@@ -348,192 +348,206 @@ export default function Templates() {
       </ScrollView>
 
       {/* ── bulk-assign sheet ────────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the start date is typed after a list of clients, well down the sheet.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!assignTpl} transparent animationType="slide" onRequestClose={() => setAssignTpl(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignTpl(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
-          {assignTpl && (
-            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
-              <Text style={{ ...ty.title, color: t.ink }}>Assign “{assignTpl.name}”</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Pick the clients who should get this program.</Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignTpl(null)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
+            {assignTpl && (
+              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
+                <Text style={{ ...ty.title, color: t.ink }}>Assign “{assignTpl.name}”</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Pick the clients who should get this program.</Text>
 
-              {/* This assign replaces whatever each client is on, so the sheet
-                  has to say which of them are on something. Under any status
-                  but 'ready' it cannot, and the button at the bottom is
-                  withheld rather than annotated. */}
-              {!assignGuard.allowed ? (
-                <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programmes'}
-                  title={programStatus === 'loading' ? 'Reading what these clients are on' : 'What these clients are on could not be read'}
-                  note={assignGuard.reason ?? undefined} />
-              ) : null}
+                {/* This assign replaces whatever each client is on, so the sheet
+                    has to say which of them are on something. Under any status
+                    but 'ready' it cannot, and the button at the bottom is
+                    withheld rather than annotated. */}
+                {!assignGuard.allowed ? (
+                  <Notice tone={t.warn} kicker={programStatus === 'loading' ? 'Reading' : 'Programmes'}
+                    title={programStatus === 'loading' ? 'Reading what these clients are on' : 'What these clients are on could not be read'}
+                    note={assignGuard.reason ?? undefined} />
+                ) : null}
 
-              {/* The injury half. Held per ticked client, and said out loud —
-                  a bulk assign that quietly dropped somebody would leave the
-                  coach believing they had sent it. */}
-              {assignGuard.allowed && !plan.allowed && plan.reason && pickedIds.length ? (
-                <Notice tone={t.warn} kicker="Injuries" title={plan.label ?? 'Held'} note={plan.reason} />
-              ) : null}
-              {plan.allowed && plan.heldNote ? (
-                <Notice tone={t.warn} kicker="Not everybody" title="Some of these are held" note={plan.heldNote} />
-              ) : null}
+                {/* The injury half. Held per ticked client, and said out loud —
+                    a bulk assign that quietly dropped somebody would leave the
+                    coach believing they had sent it. */}
+                {assignGuard.allowed && !plan.allowed && plan.reason && pickedIds.length ? (
+                  <Notice tone={t.warn} kicker="Injuries" title={plan.label ?? 'Held'} note={plan.reason} />
+                ) : null}
+                {plan.allowed && plan.heldNote ? (
+                  <Notice tone={t.warn} kicker="Not everybody" title="Some of these are held" note={plan.heldNote} />
+                ) : null}
 
-              {/* An unread roster is not an empty one, and a short one is not
-                  the whole book — "Select all" over it selects part of it. */}
-              {rosterStatus === 'error' ? (
-                <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-                  note="Nobody is listed below because the roster did not come back — it does not mean you have no clients." />
-              ) : rosterStatus === 'partial' ? (
-                <PartialRead what="clients on your book" shown={roster.length} />
-              ) : null}
+                {/* An unread roster is not an empty one, and a short one is not
+                    the whole book — "Select all" over it selects part of it. */}
+                {rosterStatus === 'error' ? (
+                  <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+                    note="Nobody is listed below because the roster did not come back — it does not mean you have no clients." />
+                ) : rosterStatus === 'partial' ? (
+                  <PartialRead what="clients on your book" shown={roster.length} />
+                ) : null}
 
-              {roster.length === 0 && rosterStatus === 'ready' ? (
-                <Text style={{ ...ty.label, color: t.ink3 }}>No clients yet — add or invite a client first.</Text>
-              ) : null}
-              {roster.map((c, i) => {
-                const on = !!picked[c.id];
-                // Only sayable off a whole read. Under any other status the
-                // absence of a programme means nothing was found out, and
-                // marking somebody "no program yet" on that basis is how a
-                // coach comes to overwrite one without realising.
-                const replaces = assignGuard.allowed && !!getProgram(c.id);
-                const held = plan.blocked.find((b) => b.clientId === c.id);
-                return (
-                  <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                    accessibilityRole="button" accessibilityLabel={c.name}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                    <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                      {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
-                    </View>
-                    <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
-                      {/* The warning is a DOT, not the ink. warn as caption text
-                          measures 3.87–4.08:1 on the three light palettes —
-                          under AA — so "replaces the program they are on" was
-                          hardest to read on the coach who most needed it. The
-                          words carry the meaning; the dot carries the tone at
-                          the 3:1 a mark has to clear. */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                        {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-                        <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
-                          {c.goal}{replaces ? ' · replaces the program they are on' : ''}
-                        </Text>
+                {roster.length === 0 && rosterStatus === 'ready' ? (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>No clients yet — add or invite a client first.</Text>
+                ) : null}
+                {roster.map((c, i) => {
+                  const on = !!picked[c.id];
+                  // Only sayable off a whole read. Under any other status the
+                  // absence of a programme means nothing was found out, and
+                  // marking somebody "no program yet" on that basis is how a
+                  // coach comes to overwrite one without realising.
+                  const replaces = assignGuard.allowed && !!getProgram(c.id);
+                  const held = plan.blocked.find((b) => b.clientId === c.id);
+                  return (
+                    <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
+                      accessibilityRole="button" accessibilityLabel={c.name}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                      <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                        {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
                       </View>
-                      {/* Their own sentence, on their own row. A count of how
-                          many are held tells the coach nothing about whose
-                          shoulder it is. */}
-                      {held ? (
-                        <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag>
-                      ) : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-              {/* ── selecting everybody, over a list that may be part of one ──
-                  "Select All" over a roster that came back at its row limit
-                  ticks a thousand people and calls it everybody. Nothing on
-                  screen is false — the names are real and the count is the size
-                  of what loaded — and the coach is still about to act on a set
-                  they cannot see, believing they can.
+                      <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
+                        {/* The warning is a DOT, not the ink. warn as caption text
+                            measures 3.87–4.08:1 on the three light palettes —
+                            under AA — so "replaces the program they are on" was
+                            hardest to read on the coach who most needed it. The
+                            words carry the meaning; the dot carries the tone at
+                            the 3:1 a mark has to clear. */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                          {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                          <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
+                            {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                          </Text>
+                        </View>
+                        {/* Their own sentence, on their own row. A count of how
+                            many are held tells the coach nothing about whose
+                            shoulder it is. */}
+                        {held ? (
+                          <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+                {/* ── selecting everybody, over a list that may be part of one ──
+                    "Select All" over a roster that came back at its row limit
+                    ticks a thousand people and calls it everybody. Nothing on
+                    screen is false — the names are real and the count is the size
+                    of what loaded — and the coach is still about to act on a set
+                    they cannot see, believing they can.
 
-                  So the gesture is not withheld and not warned about: it is
-                  RENAMED to the number actually shown, and the line under it
-                  says there are more past them. Ticking a thousand named people
-                  is a true gesture; calling it "all" is not. Under a failed or
-                  unfinished read there is no honest scoped version — there is
-                  no list — so it is withheld and says which of the two it is.
-                  Individual ticks stay available throughout: a tick is a claim
-                  about one person the coach can see and read. */}
-              {/* ── the day the block begins ──────────────────────────────
-                  Only on a block, because on a one-week programme there is no
-                  week for a date to count to and the field would be a control
-                  that changes nothing a coach can see.
+                    So the gesture is not withheld and not warned about: it is
+                    RENAMED to the number actually shown, and the line under it
+                    says there are more past them. Ticking a thousand named people
+                    is a true gesture; calling it "all" is not. Under a failed or
+                    unfinished read there is no honest scoped version — there is
+                    no list — so it is withheld and says which of the two it is.
+                    Individual ticks stay available throughout: a tick is a claim
+                    about one person the coach can see and read. */}
+                {/* ── the day the block begins ──────────────────────────────
+                    Only on a block, because on a one-week programme there is no
+                    week for a date to count to and the field would be a control
+                    that changes nothing a coach can see.
 
-                  It does NOT hold the programme back. `CLIENT_STARTS_NOW` is
-                  printed under it saying so, for the reason the builder gives
-                  at length: a coach who believes the date is enforced, and
-                  assigns a block "starting Monday" on a Thursday, has replaced
-                  their client's Friday session while believing they did not. */}
-              {isBlock(assignTpl.program) ? (
-                <View style={{ marginTop: sp.lg }}>
-                  <Text style={{ ...ty.micro, color: t.ink3 }}>
-                    Starts on · {weekCount(assignTpl.program)} week block
-                  </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
-                    <TextInput value={startsOn} onChangeText={setStartsOn}
-                      placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
-                      autoCapitalize="none" autoCorrect={false}
-                      accessibilityLabel="The day this block begins, as year, month and day"
-                      style={{
-                        ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
-                        paddingHorizontal: 12, paddingVertical: 9, flex: 1,
-                      }} />
-                    {startsOn ? <Ghost label="Clear" onPress={() => setStartsOn('')} /> : null}
-                  </View>
-                  {/* Refused rather than corrected, and said while they type. A
-                      date this app cannot read is not stored at all — a stored
-                      value that will not parse puts every screen reading it
-                      into "unreadable" for ever. */}
-                  {startsOn && !isStartDate(startsOn) ? (
-                    <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
-                      Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
-                      programme goes out with no start date rather than one nothing can read back.
-                    </Flag>
-                  ) : (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
-                      {CLIENT_STARTS_NOW} Without one, everybody you tick stays on week one of this
-                      block until you set a date.
+                    It does NOT hold the programme back. `CLIENT_STARTS_NOW` is
+                    printed under it saying so, for the reason the builder gives
+                    at length: a coach who believes the date is enforced, and
+                    assigns a block "starting Monday" on a Thursday, has replaced
+                    their client's Friday session while believing they did not. */}
+                {isBlock(assignTpl.program) ? (
+                  <View style={{ marginTop: sp.lg }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>
+                      Starts on · {weekCount(assignTpl.program)} week block
                     </Text>
-                  )}
-                </View>
-              ) : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+                      <TextInput value={startsOn} onChangeText={setStartsOn}
+                        placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
+                        autoCapitalize="none" autoCorrect={false}
+                        accessibilityLabel="The day this block begins, as year, month and day"
+                        style={{
+                          ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
+                          paddingHorizontal: 12, paddingVertical: 9, flex: 1,
+                        }} />
+                      {startsOn ? <Ghost label="Clear" onPress={() => setStartsOn('')} /> : null}
+                    </View>
+                    {/* Refused rather than corrected, and said while they type. A
+                        date this app cannot read is not stored at all — a stored
+                        value that will not parse puts every screen reading it
+                        into "unreadable" for ever. */}
+                    {startsOn && !isStartDate(startsOn) ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
+                        Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
+                        programme goes out with no start date rather than one nothing can read back.
+                      </Flag>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                        {CLIENT_STARTS_NOW} Without one, everybody you tick stays on week one of this
+                        block until you set a date.
+                      </Text>
+                    )}
+                  </View>
+                ) : null}
 
-              {selAll.note ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{selAll.note}</Text>
-              ) : null}
-              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: selAll.note ? sp.sm : sp.lg }}>
-                <View style={{ opacity: selAll.allowed ? 1 : 0.4 }} pointerEvents={selAll.allowed ? 'auto' : 'none'}>
-                  <Ghost label={selAll.label} onPress={() => {
-                    if (!selAll.allowed) return;
-                    setPicked(Object.fromEntries(roster.map((c) => [c.id, true])));
-                  }} />
+                {selAll.note ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{selAll.note}</Text>
+                ) : null}
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: selAll.note ? sp.sm : sp.lg }}>
+                  <View style={{ opacity: selAll.allowed ? 1 : 0.4 }} pointerEvents={selAll.allowed ? 'auto' : 'none'}>
+                    <Ghost label={selAll.label} onPress={() => {
+                      if (!selAll.allowed) return;
+                      setPicked(Object.fromEntries(roster.map((c) => [c.id, true])));
+                    }} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    {/* Withheld, not warned about. One tap here writes over as
+                        many training programmes as there are ticks, with no undo
+                        and nothing told to the clients — so it waits until the
+                        screen knows what it would be replacing. */}
+                    {/* `planFanOut` is shared with the Groups screen, and with
+                        nobody ticked it answers in that screen's vocabulary:
+                        "Nobody In This Group Yet". This screen has no groups —
+                        the sheet opens with `setPicked({})` and the coach's whole
+                        client list sitting directly above the button — so on
+                        every fresh open the primary control named a group that
+                        does not exist and told the coach it was empty while their
+                        clients were on screen. The `??` fallback written for this
+                        case could never run, because `plan.label` is null only
+                        once at least one client is ticked. Asked before the
+                        shared guard, so the guard keeps answering for every other
+                        refusal (the overwrite check, a missing programme) where
+                        its wording is right. */}
+                    {/* The same label the builder puts on the same gesture, from
+                        src/lib/assignPicker.ts — the two were the same expression
+                        written twice, and this screen already carries a comment
+                        about the one place they had drifted. */}
+                    <Cta label={assignCtaLabel({
+                      busy: assignBusy,
+                      picked: pickedIds.length,
+                      exercises: exCount(assignTpl),
+                      planLabel: plan.label,
+                      soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
+                    })} wide
+                      disabled={pickedIds.length === 0 || !plan.allowed || assignBusy} onPress={doAssign} />
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  {/* Withheld, not warned about. One tap here writes over as
-                      many training programmes as there are ticks, with no undo
-                      and nothing told to the clients — so it waits until the
-                      screen knows what it would be replacing. */}
-                  {/* `planFanOut` is shared with the Groups screen, and with
-                      nobody ticked it answers in that screen's vocabulary:
-                      "Nobody In This Group Yet". This screen has no groups —
-                      the sheet opens with `setPicked({})` and the coach's whole
-                      client list sitting directly above the button — so on
-                      every fresh open the primary control named a group that
-                      does not exist and told the coach it was empty while their
-                      clients were on screen. The `??` fallback written for this
-                      case could never run, because `plan.label` is null only
-                      once at least one client is ticked. Asked before the
-                      shared guard, so the guard keeps answering for every other
-                      refusal (the overwrite check, a missing programme) where
-                      its wording is right. */}
-                  {/* The same label the builder puts on the same gesture, from
-                      src/lib/assignPicker.ts — the two were the same expression
-                      written twice, and this screen already carries a comment
-                      about the one place they had drifted. */}
-                  <Cta label={assignCtaLabel({
-                    busy: assignBusy,
-                    picked: pickedIds.length,
-                    exercises: exCount(assignTpl),
-                    planLabel: plan.label,
-                    soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
-                  })} wide
-                    disabled={pickedIds.length === 0 || !plan.allowed || assignBusy} onPress={doAssign} />
-                </View>
-              </View>
-            </ScrollView>
-          )}
-        </View>
+              </ScrollView>
+            )}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

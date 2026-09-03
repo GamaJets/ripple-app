@@ -63,12 +63,15 @@ import { fetchInvoices, type GymInvoiceRow } from '@lib/gymInvoices';
 import { fetchGymCosts, gymCostsTaken, type GymCost } from '@lib/gymCosts';
 import { sumTaken, type Taken } from '@lib/coachMoney';
 import {
-  taxPeriod, recentTaxPeriods, periodMovingNote,
+  taxPeriod, taxPeriodAt, recentTaxPeriods, periodMovingNote,
   readGymTaxProfile, saveGymTaxProfile, fetchClosedMonths,
   taxProfileLine, taxProfileBlockers, NO_TAX_PROFILE,
   TAX_NO_RETURN_FIGURE, TAX_UNKNOWNS, TAX_FACTS_ARE_STATED_NOT_CHECKED,
-  type GymTaxProfile, type TaxPeriod,
+  type GymTaxProfile, type TaxPeriod, type PeriodAtZone,
 } from '@lib/gymTax';
+// The gym's own clock, read as its own three-state answer: set, not set, and
+// could not be asked. The third must never be drawn as the second.
+import { fetchGymZone } from '@lib/gymZone';
 import { toCsv } from '@lib/gymExport';
 import { readTenant } from '@/lib/currency';
 import { saveText } from '@/lib/save';
@@ -118,13 +121,24 @@ export default function Tax() {
   // query is a statement about a business's legal standing.
   const [profileState, setProfileState] = useState<'loading' | 'ready' | 'error'>('loading');
 
+  /**
+   * `tenants.timezone`, and the failure to read it, kept apart.
+   *
+   * The quarter's instants are cut on this. Until it lands the period is cut on
+   * the device and the caption below says so, rather than the page asserting the
+   * gym's clock over the reader's — which is what it did unconditionally.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneErr, setZoneErr] = useState<string | null>(null);
+
   const periods = useMemo(() => recentTaxPeriods(QUARTERS_OFFERED, MONTHS_OFFERED), []);
   // Opens on the quarter that has FINISHED, not the one running — the same
   // choice /accounting makes about months and for the same reason: a part
   // period is not something anybody files, and offering it first invites a
   // figure to be copied out before the period has stopped moving.
   const [key, setKey] = useState<string>(() => recentTaxPeriods(2, 0)[1] ?? recentTaxPeriods(1, 0)[0] ?? '');
-  const p = useMemo(() => taxPeriod(key), [key]);
+  const at: PeriodAtZone | null = useMemo(() => taxPeriodAt(key, zone), [key, zone]);
+  const p = at?.period ?? null;
 
   const [loaded, setLoaded] = useState<{ key: string; books: Books }>({ key: '', books: EMPTY });
 
@@ -172,6 +186,15 @@ export default function Tax() {
       if (!live) return;
       setGymName(t.name);
       setGymNameUnread(!!t.error);
+
+      // `fetchGymZone` rather than a second inline `timezone` select. It is the
+      // one read that keeps "the gym has not set a timezone" apart from "the
+      // gym record would not load", and printing the first over the second
+      // sends an owner to change a setting that is already correct.
+      const z = await fetchGymZone(supabase, who.tenantId);
+      if (!live) return;
+      setZone(z.zone);
+      setZoneErr(z.error);
 
       const tax = await readGymTaxProfile(supabase, who.tenantId);
       if (!live) return;
@@ -239,9 +262,9 @@ export default function Tax() {
         </select>
       </div>
 
-      {!p
+      {!at
         ? <Banner tone="crit">{key} is not a period this console can open.</Banner>
-        : <Period p={p} books={books} gymName={gymName} profile={profile} profileState={profileState} />}
+        : <Period at={at} zoneErr={zoneErr} books={books} gymName={gymName} profile={profile} profileState={profileState} />}
     </Shell>
   );
 }
@@ -338,10 +361,11 @@ function Profile({ profile, state, tenantId, onSaved }: {
 
 /* ── one period ────────────────────────────────────────────────────────────── */
 
-function Period({ p, books, gymName, profile, profileState }: {
-  p: TaxPeriod; books: Books; gymName: string | null;
+function Period({ at, zoneErr, books, gymName, profile, profileState }: {
+  at: PeriodAtZone; zoneErr: string | null; books: Books; gymName: string | null;
   profile: GymTaxProfile; profileState: 'loading' | 'ready' | 'error';
 }) {
+  const p = at.period;
   const payments = books.payments.rows ?? [];
   const costs = books.costs.rows ?? [];
   const raised = useMemo(
@@ -370,9 +394,24 @@ function Period({ p, books, gymName, profile, profileState }: {
       {books.costs.why ? <Banner tone="crit">{books.costs.why}</Banner> : null}
       {books.closedErr ? <Banner tone="crit">{books.closedErr}</Banner> : null}
 
-      <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '10px 0 0' }}>
-        {p.label}, {p.firstDay} to {p.lastDay}, in the gym&rsquo;s own timezone.
-      </p>
+      {/* One sentence, and it is the one the basis supports. The page used to
+          print "in the gym’s own timezone" over bounds built by
+          `new Date(y, mo - 1, 1)`, which is the reader's laptop — so two people
+          exported two different quarters out of one database under a caption
+          saying they could not. `taxPeriodAt` returns the basis and the words
+          together for exactly that reason. */}
+      <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '10px 0 0' }}>{at.note}</p>
+
+      {/* A refused read of the timezone is a third state and gets its own
+          sentence: the period below is on the device's clock, and nobody should
+          be sent to Gym to set a timezone that may already be set. */}
+      {zoneErr ? (
+        <Banner tone="crit">
+          The gym&rsquo;s timezone could not be read: {zoneErr}. The period below is
+          therefore cut on your own device&rsquo;s clock. This is not a gym that has
+          not set one &mdash; it is a setting nobody could ask for.
+        </Banner>
+      ) : null}
 
       {moving ? <Banner tone="crit">{moving}</Banner> : null}
 

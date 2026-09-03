@@ -398,9 +398,31 @@ export function outcomeMessage(outcome: ExtractOutcome): { title: string; note: 
   }
 }
 
-/** A candidate's evidence as a starting note — the client edits or clears it. */
-export function candidateNote(c: InjuryCandidate): string {
-  return c.evidence;
+/**
+ * The note a proposal starts with, and it is EMPTY.
+ *
+ * It used to be `c.evidence` — the tidied line off the document. That line is
+ * the right thing to SHOW on the reading screen, and the wrong thing to seed
+ * the note with, because the note is the one part of a confirmed injury that
+ * travels: app/(client)/injuries.tsx renders it to the coach and
+ * app/(client)/scans.tsx carries it in the handover. So one tap on "Add This"
+ * with the field untouched sent the report's own sentence — a diagnosis, a
+ * clinician, findings about things that have nothing to do with training — to
+ * the coach verbatim, thirty pixels below a notice promising the coach sees
+ * only "the injury you confirm below … the same as if you had typed it in
+ * yourself". A default nobody has to touch is not a disclosure anybody made.
+ *
+ * So the field starts as it would have if they HAD typed it in themselves:
+ * empty, with "In your own words" in it. The evidence has not been hidden —
+ * app/(client)/injury-doc.tsx still prints it above the field, because the
+ * member is being asked to agree with a reading of their own document and must
+ * see the reading. Copying any of it across is then their act, not the app's.
+ *
+ * The parameter stays: this is the one place the seed is decided, and a seed
+ * made of the APP's words rather than the document's would belong here.
+ */
+export function candidateNote(_c: InjuryCandidate): string {
+  return '';
 }
 
 /**

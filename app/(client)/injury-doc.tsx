@@ -302,10 +302,19 @@ export default function InjuryDoc() {
           </Flag>
         ) : null}
 
+        {/* Empty, and deliberately. `candidateNote` used to seed this with the
+            line quoted above, so one tap on "Add This" sent the report's own
+            sentence to the coach as though the member had written it — under a
+            notice at the top of this screen promising the opposite. The
+            evidence is still on the card, four rows up; putting any of it here
+            is now something the member does. */}
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Note</Text>
         <TextInput value={d.note} onChangeText={(v) => setDraft(cand.key, { note: v })}
           placeholder="In your own words" placeholderTextColor={t.ink3} multiline
           style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 64, textAlignVertical: 'top' }} />
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+          Your coach reads this note. Nothing else off the document reaches them, so it starts empty.
+        </Text>
 
         {cand.movements.length ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>

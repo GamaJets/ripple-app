@@ -1922,10 +1922,33 @@ export default function TrainerClients() {
               question nobody answered hides nothing at all. */}
           <ChipGrid
             tone={t.brand}
-            items={(showsInPerson(delivery) ? SHORTCUTS : SHORTCUTS.filter((sc) => !IN_PERSON_SHORTCUTS.includes(sc)))
-              .map(([ic, label, route]) => ({
-                icon: ic, label, key: route, onPress: () => router.push(route as any),
-              }))}
+            items={[
+              ...(showsInPerson(delivery) ? SHORTCUTS : SHORTCUTS.filter((sc) => !IN_PERSON_SHORTCUTS.includes(sc)))
+                .map(([ic, label, route]) => ({
+                  icon: ic, label, key: route, onPress: () => router.push(route as any),
+                })),
+              // The door onto the notice composer, which had none. The sheet at
+              // the bottom of this file — composer, push switch, "Posted
+              // before" list — was complete and `bcOpen` was never set true
+              // anywhere in the repo, so the only way to post a gym-wide notice
+              // was unreachable while `reloadNotices` still paid for a read on
+              // every pull-to-refresh. It is a chip rather than a SHORTCUTS row
+              // because SHORTCUTS is a table of ROUTES and this is a modal on
+              // this screen; giving the table an action arm to hold one entry
+              // would make every other row carry a null.
+              //
+              // Beside Broadcast on purpose: those are the two all-client
+              // tools, and a coach who wants one has usually just considered
+              // the other. The sheet's own copy at the bottom of this file
+              // draws the line — a NOTICE is posted once and read on every
+              // client's dashboard; a MESSAGE lands in each person's thread.
+              {
+                icon: 'info' as IconName,
+                label: 'Post a Notice',
+                key: '/(trainer)/dashboard#post-a-notice',
+                onPress: () => setBcOpen(true),
+              },
+            ]}
           />
           {!showsInPerson(delivery) ? (
             <View style={{ marginTop: sp.lg }}>

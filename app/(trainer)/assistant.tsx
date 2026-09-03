@@ -68,7 +68,9 @@ import { useRoster } from '../../src/ui/roster';
 import { useSessions } from '../../src/ui/sessions';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
-import { myTenantCurrency } from '../../src/lib/subscriptions';
+import { fetchMyCurrency } from '../../src/lib/myCurrency';
+import { type MyCurrency } from '../../src/lib/currencySource';
+import { currencyForModel } from '../../src/lib/currencyForModel';
 import { deliveredValue, monthToDate, sessionMonth } from '../../src/lib/coachRevenue';
 import { askAboutMyBusiness, coachAvailable, type ChatMsg } from '../../src/lib/coach';
 import { useCoachChat } from '../../src/ui/coachChat';
@@ -118,11 +120,26 @@ export default function TrainerAssistant() {
   const figureStatus = worstStatus(rosterStatus, sessionsStatus);
   const figuresWhole = isWhole(figureStatus);
 
-  const [gymCur, setGymCur] = useState<string | null>(null);
-  const loadCurrency = useCallback(async () => {
-    const r = await myTenantCurrency();
-    setGymCur(r.currency);
-  }, []);
+  /**
+   * What this coach is priced in, through the one resolver.
+   *
+   * Was `myTenantCurrency()`, which answers about a GYM. That was the whole
+   * answer until part 940 gave a coach with no gym a currency of their own on
+   * `trainers.currency`; since then this screen has been telling the model that
+   * an independent coach's gym had not set one — about a gym that does not
+   * exist — and the model, correctly following its instruction to state no
+   * amount, wrote about that coach's business with every figure of money
+   * removed from it. `fetchMyCurrency` applies the precedence rule in
+   * src/lib/currencySource.ts: the gym first, always, and the coach's own
+   * column only when there is provably no gym.
+   *
+   * The whole answer is held, not just the code, because the model is told
+   * WHICH of six things is true when there is no code — see
+   * src/lib/currencyForModel.ts. `null` is the read still in flight, which is
+   * its own answer and not one of the six.
+   */
+  const [cur, setCur] = useState<MyCurrency | null>(null);
+  const loadCurrency = useCallback(async () => { setCur(await fetchMyCurrency()); }, []);
   useEffect(() => { void loadCurrency(); }, [loadCurrency]);
 
   /* ── pull to refresh ─────────────────────────────────────────────────────
@@ -207,7 +224,13 @@ export default function TrainerAssistant() {
       sessionsDeliveredThisMonth: sessionsMo,
       sessionsStillUnmarked: unmarkedMo,
       revenueAtOwnRate: revenue ?? 'unknown — no session rate set',
-      currency: gymCur ?? 'unknown — the gym has not set one, so state no amount',
+      // Was `gymCur ?? 'unknown — the gym has not set one, so state no amount'`
+      // — one sentence for six different states. Four of them it describes
+      // wrongly, and the commonest since part 940 is a coach with NO GYM, who
+      // was being described to the model as waiting on an owner who does not
+      // exist. `currencyForModel` says which of the six it is, in the third
+      // person, and every one of them still ends in "state no amount".
+      currency: currencyForModel(cur),
       clients,
       avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet',
       atRiskClients: figuresWhole ? roster.filter(atRiskClient).length : null,

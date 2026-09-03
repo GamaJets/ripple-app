@@ -56,7 +56,7 @@ import { useFoodLog } from '../../src/ui/foodLog';
 import { readinessMadeOf } from '../../src/lib/readiness';
 import { useReadiness } from '../../src/ui/readiness';
 import { suggestProgression } from '../../src/lib/progression';
-import { currentStreak } from '../../src/lib/streaks';
+import { shownStreak } from '../../src/lib/streaks';
 import { isWhole } from '../../src/ui/loadStatus';
 import { liftLabel } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
@@ -118,7 +118,11 @@ export default function Coach() {
   // an unread source behind it is not a slightly-off number here, it is a
   // confident sentence. That is why `caveats` travels with the score.
   const { readiness: _readiness, sleep: _sleepFor, breakdown: _made } = useReadiness();
-  const _streak = currentStreak(log);
+  // The figure the member's own screens show them. The AI coach speaks to
+  // them in the second person, so a streak here that disagrees with the ring
+  // on Home is the model telling them something about themselves that their
+  // app has just denied.
+  const _streak = shownStreak(log);
   const _lastEx = logWhole && log.length ? log[0].exercise : '';
   const _prog = logWhole ? suggestProgression(log, wu)[0] : undefined;
   // How this client is coached, in a sentence the model can act on.

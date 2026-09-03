@@ -53,6 +53,7 @@ import { Banner, Announce } from '@/components/Banner';
 import { DataTable, type Column } from '@/components/DataTable';
 import { money } from '@lib/gymRecord';
 import { readMinorAmount, type Taken } from '@lib/coachMoney';
+import { gymLink, noGymNote } from '@lib/gymLink';
 import { monthWindow, recentMonths, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
 import { isoDate } from '@lib/format';
 import { toCsv } from '@lib/gymExport';
@@ -128,17 +129,19 @@ export default function Costs() {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
-      if (!who?.tenantId) {
-        setLoaded({ key, costs: { rows: [], state: null, why: null } });
-        return;
-      }
-      const t = await readTenant(supabase, who.tenantId);
+      // `{ rows: [], state: null, why: null }` is a read that RAN and found
+      // nothing, and this screen renders that as "No cost is recorded in
+      // August" over a query nobody ever sent. An account with no gym on it
+      // gets a sentence below instead, before any figure.
+      const link = gymLink(who?.tenantId, 'recorded costs');
+      if (!link.linked) return;
+      const t = await readTenant(supabase, link.tenantId);
       if (!live) return;
       setGymName(t.name);
       setCcy(t.currency);
       setGymNameUnread(!!t.error);
       setTenantErr(t.error);
-      if (w) await load(who.tenantId, w);
+      if (w) await load(link.tenantId, w);
     })();
     return () => { live = false; };
   }, [load, w, key]);
@@ -170,6 +173,17 @@ export default function Costs() {
           it settles with its accountant are the owner&rsquo;s books. The database
           refuses this read independently, so this is not the only thing standing
           between you and it.
+        </p>
+      </Shell>
+    );
+  }
+
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/costs">
+        <h1>Costs</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('recorded costs')}
         </p>
       </Shell>
     );

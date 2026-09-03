@@ -44,6 +44,10 @@ import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 import { todayIso } from '../../src/lib/memberRecord';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
+// A class the gym called off. This screen listed one under Upcoming as a
+// confirmed booking and wrote it into the member's own phone calendar, where
+// nothing in this app can ever take it out again.
+import { isCancelled } from '../../src/lib/gymSchedule';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
@@ -104,7 +108,9 @@ const dayLabel = (iso: string) => fmtRelativeDay(iso);
 // the note asked for was a shared helper, and `cancelBookedSession` in
 // src/ui/sessions.tsx is it, called by both screens with the same arguments in
 // the same order. This screen keeps only the wording of its own alerts.
-type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; startsAt: string; durationMin: number; location?: string; waitlist?: boolean; onCancel: () => Promise<boolean>; pt?: TrainingSession };
+type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; startsAt: string; durationMin: number; location?: string; waitlist?: boolean; /** The gym called this class off. The row stays — the member booked it and
+ *  has to be told — and it is neither counted as a booking nor exported. */
+  cancelled?: boolean; onCancel: () => Promise<boolean>; pt?: TrainingSession };
 
 export default function Bookings() {
   const t = useTheme();
@@ -246,7 +252,7 @@ export default function Bookings() {
     for (const c of classes) {
       const st = myStatus[c.id];
       if (st && Date.parse(c.startsAt) > Date.now() - 3600_000) {
-        out.push({ id: 'c' + c.id, kind: 'class', title: c.title, sub: `${c.kind} · ${c.branch}${c.room ? ' · ' + c.room : ''}`, startsAt: c.startsAt, durationMin: c.durationMin ?? 45, location: [c.branch, c.room].filter(Boolean).join(' · ') || undefined, waitlist: st === 'waitlist', onCancel: () => cancelClass(c.id) });
+        out.push({ id: 'c' + c.id, kind: 'class', title: c.title, sub: `${c.kind} · ${c.branch}${c.room ? ' · ' + c.room : ''}`, startsAt: c.startsAt, durationMin: c.durationMin ?? 45, location: [c.branch, c.room].filter(Boolean).join(' · ') || undefined, waitlist: st === 'waitlist', cancelled: isCancelled(c), onCancel: () => cancelClass(c.id) });
       }
     }
     for (const s of sessions) {
@@ -452,13 +458,20 @@ export default function Bookings() {
    * rows and finds three in their calendar is owed the reason.
    */
   const addToCalendar = async () => {
-    const booked = items.filter((it) => !it.waitlist);
-    const queued = items.length - booked.length;
+    // A class the gym called off is not exported either, and for the harder
+    // version of the same reason: a waitlist place might still become a
+    // booking, and a cancelled class never will. Once it is in the member's
+    // real diary nothing here can remove it.
+    const booked = items.filter((it) => !it.waitlist && !it.cancelled);
+    const queued = items.filter((it) => it.waitlist && !it.cancelled).length;
+    const calledOff = items.filter((it) => it.cancelled).length;
     if (booked.length === 0) {
       Alert.alert(
         'Nothing to add',
         queued > 0
           ? `You are in the queue for ${queued} ${queued === 1 ? 'class' : 'classes'} and have nothing booked. A place in a queue is not a booking, so it is not written into your calendar — if one comes to you, it appears here as a booking and you can add it then.`
+          : calledOff > 0
+          ? `${calledOff === 1 ? 'The class you had booked has' : `The ${calledOff} classes you had booked have`} been called off by the gym, so there is nothing to add to your calendar.`
           : 'You have nothing booked yet, so there is nothing to add to your calendar.',
         [{ text: 'OK' }],
       );
@@ -472,10 +485,13 @@ export default function Bookings() {
       notes: it.sub,
     }));
     await shareIcs(buildIcs(evts, `${appName} — My bookings`), 'my-bookings.ics', 'Add to calendar');
-    if (queued > 0) {
+    if (queued > 0 || calledOff > 0) {
+      const left: string[] = [];
+      if (queued > 0) left.push(`the ${queued} ${queued === 1 ? 'place' : 'places'} you are waiting for — a queue is not a booking, and a calendar entry saying otherwise would still be there long after the class had run`);
+      if (calledOff > 0) left.push(`${calledOff === 1 ? 'the class the gym called off' : `the ${calledOff} classes the gym called off`} — ${calledOff === 1 ? 'it is' : 'they are'} not running`);
       Alert.alert(
-        'Your bookings, not your queues',
-        `${booked.length} booked ${booked.length === 1 ? 'session is' : 'sessions are'} in the file. The ${queued} ${queued === 1 ? 'place' : 'places'} you are waiting for ${queued === 1 ? 'is' : 'are'} not — a queue is not a booking, and a calendar entry saying otherwise would still be there long after the class had run.`,
+        'What went into the file',
+        `${booked.length} booked ${booked.length === 1 ? 'session is' : 'sessions are'} in it. Left out: ${left.join('; and ')}.`,
         [{ text: 'OK' }],
       );
     }
@@ -519,7 +535,10 @@ export default function Bookings() {
           {/* The count was gated only on non-emptiness, so under 'partial' it
               printed a subtotal as a total. It stays on `bookingsWhole` — a
               figure is only a figure when both reads answered in full. */}
-          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.length} booked` : undefined} />
+          {/* Cancelled classes are listed and are not counted as bookings —
+              the figure says "booked", and a class the gym called off is not
+              one. */}
+          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.filter((it) => !it.cancelled).length} booked` : undefined} />
           {/* Above the rows, not below them: the rows are what makes the list
               look finished, and the reader has to be told before they scroll
               past the one booking that did come back. */}
@@ -547,7 +566,15 @@ export default function Bookings() {
                   <Text style={{ ...ty.micro, color: t.ink3 }}>{it.kind === 'pt' ? 'Personal training' : 'Class'}</Text>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{it.title}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{dayLabel(it.startsAt)} · {timeLabel(it.startsAt)} · {it.sub}</Text>
-                  {it.waitlist ? (
+                  {/* The gym called it off. Said on the row, in the list the
+                      member opens to decide where to be this evening — this
+                      screen used to show it under Upcoming as confirmed. */}
+                  {it.cancelled ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                      <Text style={{ ...ty.caption, color: t.ink2 }}>Cancelled by the gym — this class is not running</Text>
+                    </View>
+                  ) : it.waitlist ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
                       <Text style={{ ...ty.caption, color: t.ink2 }}>On the waitlist</Text>

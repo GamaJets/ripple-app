@@ -18,7 +18,8 @@
 // that says "£6,180 across 84 sessions, with 12 still unmarked" is useful. One
 // that says £7,060 because it counted the twelve is a dispute.
 
-import { assertWhole, capLimit, ROW_CAP } from './rowCap';
+import { assertWhole, capLimit, readAll, ROW_CAP } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
@@ -414,34 +415,68 @@ export function namesById(
  * errors — lands in the same place.
  */
 async function fetchSessionNames(sb: Queryable, rows: any[]): Promise<Map<string, string>> {
-  const ids = sessionProfileIds(rows);
-  if (!ids.length) return new Map();
-  const { data, error } = await sb.from('profiles').select('id, full_name').in('id', ids);
-  if (error) return new Map();
-  return namesById((data ?? []) as Array<{ id: string; full_name?: string | null }>);
+  const out = new Map<string, string>();
+  // CHUNKED, because `fetchSessions` below now pages. One `.in()` was safe only
+  // while the read above refused past a thousand rows; past that it comes back
+  // with the first thousand names and says nothing, and a payroll board two
+  // thirds unnamed reads as a gym that never recorded who anybody is.
+  for (const chunk of chunkIds(uniqueIds(sessionProfileIds(rows)))) {
+    const { data, error } = await sb.from('profiles').select('id, full_name').in('id', chunk);
+    if (error) return out;
+    for (const [id, name] of namesById((data ?? []) as Array<{ id: string; full_name?: string | null }>)) {
+      out.set(id, name);
+    }
+  }
+  return out;
 }
 
+/**
+ * The one-to-ones in a window.
+ *
+ * ── Why this pages rather than refusing ────────────────────────────────────
+ *
+ * It was `.limit(capLimit())` plus `assertWhole`, and the reasoning for that
+ * was sound as far as it went: this list is summed into what the gym owes its
+ * trainers, and a set cut off at the limit would have priced the month at
+ * whatever fitted with no error to say so.
+ *
+ * What it missed is that a thousand sessions is a busy month, not an impossible
+ * one — the comment said so itself — and the alternative to a wrong figure is
+ * not a refused screen. Refusing took /payroll, /close and /sessions away
+ * entirely at exactly the gym size that has a payroll worth running, and
+ * /export asks for 1970 to 2100, so the bundle whose stated purpose is that
+ * leaving with the record must be possible refused at every gym past its first
+ * thousand hours.
+ *
+ * Every caller already bounds this by a date window, which is the shape
+ * `readAll` exists for (see src/lib/rowCap.ts): finite by construction, wanted
+ * in full, and now simply finished. `PAGE_CEILING` still refuses past fifty
+ * thousand sessions in one window.
+ *
+ * `starts_at` ties freely — two coaches both teaching at nine on Monday — so
+ * `id` closes the total order paging requires.
+ */
 export async function fetchSessions(
   sb: Queryable,
   tenantId: string,
   sinceIso: string,
   untilIso?: string,
 ): Promise<PtSession[]> {
-  let q = sb
-    .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
-    .eq('tenant_id', tenantId)
-    .gte('starts_at', sinceIso)
-    .order('starts_at', { ascending: false });
-  if (untilIso) q = q.lte('starts_at', untilIso);
-  q = q.limit(capLimit());
-  const { data, error } = await q;
-  if (error) throw error;
-
-  // This list is summed into what the gym owes its trainers. A thousand rows is
-  // a busy month, not an impossible one, and a set cut off at the limit would
-  // have priced the month at whatever fitted — with no error to say so.
-  const rows = assertWhole(data, 'sessions in this period') as any[];
+  const rows = await readAll<any>(
+    (from, to) => {
+      let q = sb
+        .from('sessions')
+        .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
+        .eq('tenant_id', tenantId)
+        .gte('starts_at', sinceIso);
+      if (untilIso) q = q.lte('starts_at', untilIso);
+      return q
+        .order('starts_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to);
+    },
+    'sessions in this period',
+  );
   const names = await fetchSessionNames(sb, rows);
   return rows.map((r) => rowToSession(r, names));
 }

@@ -15,7 +15,7 @@
 // says why — it never reports 0, which would tell a gym its class cannot run.
 
 import { assertWrote } from './wroteRows';
-import { assertWhole, capLimit } from './rowCap';
+import { readAll } from './rowCap';
 
 type Queryable = { from: (table: string) => any };
 
@@ -355,15 +355,34 @@ export function needsAttention(items: Equipment[], today: string): { item: Equip
 
 /* ── reads ─────────────────────────────────────────────────────────────────── */
 
+/**
+ * Every piece of kit this gym holds.
+ *
+ * Paged, and it was not bounded at all — no `capLimit()`, no `assertWhole`, no
+ * `readAll`. PostgREST answers an unbounded request with a thousand rows and
+ * says nothing, and these rows are not only a list: /equipment pairs them
+ * against the timetable on capacity, so a gym past a thousand items would have
+ * been told a class it can seat is oversubscribed, and told it in a red banner.
+ * A silent prefix feeding a capacity figure is the exact case src/lib/rowCap.ts
+ * calls strictly worse than a failed read.
+ *
+ * `category` and `name` both tie freely — a rack of twenty identical dumbbells
+ * is twenty rows with the same two values — so `id` supplies the total order
+ * `readAll` requires.
+ */
 export async function fetchEquipment(sb: Queryable, tenantId: string): Promise<Equipment[]> {
-  const { data, error } = await sb
-    .from('gym_equipment')
-    .select('id, name, category, identifier, quantity, status, purchased_on, service_interval_days, last_serviced_on, note, out_of_service_reason, out_of_service_since')
-    .eq('tenant_id', tenantId)
-    .order('category', { ascending: true })
-    .order('name', { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_equipment')
+      .select('id, name, category, identifier, quantity, status, purchased_on, service_interval_days, last_serviced_on, note, out_of_service_reason, out_of_service_since')
+      .eq('tenant_id', tenantId)
+      .order('category', { ascending: true })
+      .order('name', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's equipment",
+  );
+  return rows.map((r: any) => ({
     id: r.id,
     name: r.name,
     category: r.category ?? null,
@@ -588,23 +607,53 @@ export function logBlocker(
   return null;
 }
 
+/**
+ * The gym's maintenance and incident log.
+ *
+ * ── Why this pages rather than refusing ────────────────────────────────────
+ *
+ * It was `.limit(capLimit())` plus `assertWhole` over the gym's WHOLE history,
+ * on the one list in this product that only ever grows. Nothing here is ever
+ * deleted — it is the accident book — so at a thousand entries the entire
+ * Maintenance and incidents section went behind an error and stayed there, for
+ * a statutory record, at a gym whose only fault was having been open a while.
+ *
+ * `assertWhole` was the right instinct and the wrong shape. src/lib/rowCap.ts
+ * sets out where throwing is wrong: it is for a read that feeds a FIGURE, and
+ * this one feeds a list. Nothing computes an average or a total off these rows;
+ * refusing them protects no number and takes away a screen somebody needs in
+ * front of an inspector.
+ *
+ * And what a truncated read would have dropped is the OLDEST entries, which are
+ * the ones the log exists to answer for — so a silent prefix was never
+ * acceptable either. `readAll` is the third answer: the read is simply
+ * finished, and `PAGE_CEILING` still refuses past fifty thousand entries, which
+ * is a sentence about the size of the read rather than about the gym.
+ *
+ * `happened_on` is a DATE and `created_at` alone can tie on a bulk import, so
+ * `id` closes the total order `readAll` requires. Without it, pages of a tied
+ * ordering drop and repeat rows silently — which in an accident book is an
+ * incident that stops being in it.
+ */
 export async function fetchLog(
   sb: Queryable, tenantId: string, equipmentId?: string,
 ): Promise<LogEntry[]> {
-  let q = sb
-    .from('gym_equipment_log')
-    .select('id, equipment_id, equipment_label, kind, happened_on, performed_by, findings, cost_cents, currency, reported_to, recorded_by, created_at')
-    .eq('tenant_id', tenantId);
-  if (equipmentId) q = q.eq('equipment_id', equipmentId);
-  const { data, error } = await q
-    .order('happened_on', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  // Capped and refusing. A truncated maintenance history is one that has
-  // silently lost its OLDEST entries — the ones that answer "how often has this
-  // needed looking at", which is the whole question the log exists for.
-  return assertWhole(data, "this gym's maintenance and incident log").map((r: any) => ({
+  const rows = await readAll<any>(
+    (from, to) => {
+      let q = sb
+        .from('gym_equipment_log')
+        .select('id, equipment_id, equipment_label, kind, happened_on, performed_by, findings, cost_cents, currency, reported_to, recorded_by, created_at')
+        .eq('tenant_id', tenantId);
+      if (equipmentId) q = q.eq('equipment_id', equipmentId);
+      return q
+        .order('happened_on', { ascending: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to);
+    },
+    "this gym's maintenance and incident log",
+  );
+  return rows.map((r: any) => ({
     id: r.id,
     equipmentId: r.equipment_id ?? null,
     equipmentLabel: r.equipment_label ?? null,

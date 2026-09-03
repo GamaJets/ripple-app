@@ -172,10 +172,7 @@ const KNOWN = new Map([
   ['src/lib/coach.ts', { count: 1, fix: 'askCoach is the AI-coach round trip. the member\'s Coach screen builds its own call inline, so this is a second implementation nobody runs. Point the screen at it or delete it.' }],
   ['src/lib/connect.ts', { count: 1, fix: 'packageCurrencies reads which currencies a coach has priced packages in. Nothing asks. It is the check a coach\'s Connect payout screen needs before offering a currency.' }],
   ['src/lib/endCoaching.ts', { count: 1, fix: 'fetchEndRecord loads the permanent record of an ended coaching relationship. The end-coaching flow writes it and no screen reads it back.' }],
-  ['src/lib/gymPasses.ts', { count: 2, fix: 'fetchRedemptions and undoRedemption. The console\'s passes page lists passes and cannot show or reverse a redemption, which is the one mistake a front desk actually makes.' }],
   ['src/lib/gymSessions.ts', { count: 1, fix: 'fetchAwaitingOutcome lists sessions whose outcome nobody recorded. Nothing surfaces the list, so the backlog it exists to show is invisible.' }],
-  ['src/lib/gymZone.ts', { count: 1, fix: 'fetchGymZone reads tenants.timezone and is asserted in gymZone.test.ts. Every console page that renders a gym-local time takes the zone from somewhere else; this is the read that was written for it.' }],
-  ['src/lib/memberInvites.ts', { count: 2, fix: 'fetchMyInvites and acceptInvite — the MEMBER side of gym invites. The coach-invite equivalents in src/ui/invites.tsx are wired; this pair is the gym one and no screen calls it, so a gym invite cannot be accepted in the app.' }],
   ['src/lib/spotify.ts', { count: 3, fix: 'spotifyPlaylistTracks, spotifyDevices and spotifyTransfer. Playback is wired; choosing a device and moving playback to it is not, so a member with two speakers cannot pick one.' }],
   ['src/lib/trainerSessions.ts', { count: 1, fix: 'markMyOutcome records a coach\'s own outcome for a session. The coach Sessions screen is where it belongs; that file is another lane\'s today.' }],
 

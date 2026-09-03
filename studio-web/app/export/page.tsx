@@ -45,6 +45,7 @@ import { fetchPassTypes, fetchPasses } from '@lib/gymPasses';
 import { fetchVisits } from '@lib/gymVisits';
 import { fetchInvites } from '@lib/memberInvites';
 import { readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 import { sliceLoading, sliceReady, sliceFailed } from '@lib/memberView';
 import { fetchMemberRecords } from '@lib/gymMembers';
 import { attributionOf } from '@lib/gymSigning';
@@ -206,7 +207,11 @@ export default function ExportPage() {
       slice(() => fetchSessions(supabase, tenantId, READ_FROM, READ_TO)),
       slice(() => fetchPassTypes(supabase, tenantId)),
       slice(() => fetchPasses(supabase, tenantId)),
-      slice(() => fetchVisits(supabase, tenantId)),
+      // `whole: true`, not a bare call. Without it this landed on the branch
+      // that refuses an unbounded door log, so door-log.csv came out of a
+      // thrown read — under the banner at the top saying the bundle is
+      // complete. The export is the one caller that genuinely wants every row.
+      slice(() => fetchVisits(supabase, tenantId, { whole: true })),
       slice(() => fetchInvites(supabase, tenantId)),
       // The eight this bundle used to leave behind. Each is its own read with
       // its own three states, for the reason at the top of this file: an empty
@@ -1105,16 +1110,29 @@ async function readEvents(tenantId: string): Promise<ExportEvent[]> {
  * would be a missing file the bundle claimed was complete.
  */
 async function readPurchases(tenantId: string): Promise<ExportPurchase[]> {
-  const { data: trs, error } = await supabase
-    .from('trainers').select('id').eq('tenant_id', tenantId).limit(1001);
-  if (error) throw error;
-  const ids: string[] = (trs ?? []).map((r: any) => r.id);
-  if (!ids.length) return [];
-  const rows = await readAll<any>(
+  // The roster read was `.limit(1001)` with no probe and no assert, so past a
+  // thousand coaches `client_purchases` was scoped to a PARTIAL roster and
+  // purchases.csv came out short with no marker of any kind — the quiet
+  // failure src/lib/rowCap.ts calls "strictly worse than a failed read", inside
+  // a bundle that states it is complete. Paged, so there is no thousand.
+  const trs = await readAll<any>(
     (from, to) => supabase
+      .from('trainers').select('id').eq('tenant_id', tenantId)
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's coaches",
+  );
+  const ids: string[] = trs.map((r: any) => r.id);
+  if (!ids.length) return [];
+  // `readByIds` rather than one `.in()`: the roster no longer stops at a
+  // thousand, and `trainer_id` is a foreign key, so a chunk of ids answers with
+  // many more rows than ids and each chunk has to be finished.
+  const rows = await readByIds<any>(
+    ids,
+    (chunk, from, to) => supabase
       .from('client_purchases')
       .select('id, trainer_id, client_id, amount_cents, currency, sessions_total, sessions_used, status, created_at')
-      .in('trainer_id', ids)
+      .in('trainer_id', chunk)
       .order('created_at', { ascending: true })
       .order('id', { ascending: true })
       .range(from, to),

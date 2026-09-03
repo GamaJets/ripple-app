@@ -49,7 +49,8 @@
 // `payrollTotal` in src/lib/gymSessions.ts already refuses to answer over
 // unpriced work and `settlementBlocker` says so; nothing here weakens that.
 
-import { assertWhole, capLimit } from './rowCap';
+import { assertWhole, capLimit, readAll } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 import { sharedCurrency } from './gymRecord';
 // A timestamp read as the day it fell on IN THE GYM'S OWN TIMEZONE. Slicing the
@@ -346,18 +347,43 @@ export function classPayBlocker(
  *
  * `taughtOn` is what /payroll scopes a run by. Without it the run had no date
  * on these lines at all — see the note on `ClassPayLine.taughtOn`.
+ *
+ * ── Why this pages rather than refusing ────────────────────────────────────
+ *
+ * It was `.limit(capLimit())` plus `assertWhole`, tenant-wide with no date
+ * bound, and a settled line is stamped rather than deleted. Twenty classes a
+ * week is a thousand lines inside a year, so a gym in its second season crossed
+ * the cap and the read threw — and because /payroll builds every coach's run
+ * out of one call, the throw took the WHOLE screen with it. Nobody could be
+ * paid from the console at all, including the coaches whose own lines were
+ * nowhere near the cap. Refusing for good at a threshold the gym cannot get
+ * back under is not honesty, it is a screen that stops working on a birthday.
+ *
+ * The run genuinely needs the whole set — a line settled in any past month is
+ * how `runsFor` reconstructs what has already been paid, and an unsettled line
+ * from before the period is paid on this run because it has no other run coming
+ * (see `runScopeOf`) — so `readAll` finishes the read and `PAGE_CEILING` still
+ * refuses past fifty thousand lines, which is a sentence about the size of the
+ * read rather than about anybody's wages.
+ *
+ * `created_at` is a timestamp and a gym that registers a morning's classes in
+ * one sitting has rows tied on it to the microsecond only rarely — but rarely
+ * is not never, and `readAll` requires a TOTAL order or pages silently drop and
+ * repeat rows. `id` is the primary key and supplies it.
  */
 export async function fetchClassPay(
   sb: Queryable, tenantId: string,
 ): Promise<ClassPayLine[]> {
-  const { data, error } = await sb
-    .from('gym_class_pay')
-    .select('id, class_id, trainer_id, pay_kind, rate_cents, attendees, amount_cents, currency, settlement_id, created_at')
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  const rows = assertWhole(data, 'the class pay lines') as any[];
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_class_pay')
+      .select('id, class_id, trainer_id, pay_kind, rate_cents, attendees, amount_cents, currency, settlement_id, created_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the class pay lines',
+  );
   if (!rows.length) return [];
   const names = await namesFor(sb, rows.map((r) => r.trainer_id));
   const taught = await classDatesFor(sb, rows.map((r) => r.class_id));
@@ -468,15 +494,27 @@ export function adjustmentBlocker(amount: string, note: string, currency: string
   return null;
 }
 
+/**
+ * Every adjustment this gym has recorded, settled or not.
+ *
+ * Paged for the same reason `fetchClassPay` is, and with the same consequence
+ * when it was not: /payroll reads both in one `allSettled` and either refusal
+ * left a whole console unable to pay anybody. `applies_on` is a DATE, so a gym
+ * that files a batch of bonuses on the first of the month has every one of them
+ * tied on it — `id` is the primary key and gives `readAll` the total order it
+ * requires.
+ */
 export async function fetchAdjustments(sb: Queryable, tenantId: string): Promise<Adjustment[]> {
-  const { data, error } = await sb
-    .from('payroll_adjustments')
-    .select('id, trainer_id, kind, amount_cents, currency, note, applies_on, settlement_id')
-    .eq('tenant_id', tenantId)
-    .order('applies_on', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-  const rows = assertWhole(data, 'the payroll adjustments') as any[];
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('payroll_adjustments')
+      .select('id, trainer_id, kind, amount_cents, currency, note, applies_on, settlement_id')
+      .eq('tenant_id', tenantId)
+      .order('applies_on', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the payroll adjustments',
+  );
   if (!rows.length) return [];
   const names = await namesFor(sb, rows.map((r) => r.trainer_id));
   return rows.map((r) => ({
@@ -794,27 +832,39 @@ function numOrNull(v: unknown): number | null {
  *
  * A class this cannot read comes back absent, which the caller renders as an
  * unknown date rather than as a class taught at the epoch.
+ *
+ * CHUNKED, because the read above it now pages. A bare `.in()` was safe only
+ * while `fetchClassPay` refused past a thousand rows — a thousand rows carry at
+ * most a thousand distinct class ids, so the lookup could not truncate and the
+ * refusal was holding it up. With `readAll` above, ten thousand pay lines carry
+ * far more ids than one `in.()` may either fit in a request line or be answered
+ * with, and both failures are silent. See src/lib/idLookup.ts.
  */
 async function classDatesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable class date leaves the line undated, which the
-  // payroll run reports rather than silently scoping the line in or out
-  const { data } = await sb.from('gym_classes').select('id, starts_at').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
-    .map((c: any) => {
+  const out = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    // no-error-ok: an unreadable class date leaves the line undated, which the
+    // payroll run reports rather than silently scoping the line in or out
+    const { data } = await sb.from('gym_classes').select('id, starts_at').in('id', chunk).limit(capLimit());
+    for (const c of (data ?? []) as any[]) {
       const t = Date.parse(String(c?.starts_at ?? ''));
-      return Number.isFinite(t) ? ([c.id, isoDate(new Date(t))] as [string, string]) : null;
-    })
-    .filter((x: [string, string] | null): x is [string, string] => x !== null));
+      if (Number.isFinite(t)) out.set(c.id, isoDate(new Date(t)));
+    }
+  }
+  return out;
 }
 
+/** Chunked for the same reason `classDatesFor` is: both lookups sit behind
+ *  reads that page, so the id list is no longer bounded by a row cap. */
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name renders as a dash; the amount it labels is still real
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
-    .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
-    .filter(([, n]: [string, string]) => !!n));
+  const out = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    // no-error-ok: an unreadable name renders as a dash; the amount it labels is still real
+    const { data } = await sb.from('profiles').select('id, full_name').in('id', chunk).limit(capLimit());
+    for (const p of (data ?? []) as any[]) {
+      const n = (p.full_name || '').trim();
+      if (n) out.set(p.id, n);
+    }
+  }
+  return out;
 }

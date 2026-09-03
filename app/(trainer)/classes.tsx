@@ -23,7 +23,7 @@
 //     and the alert said "Class added" either way. A class that exists on the
 //     coach's phone alone is on nobody's timetable and cannot be booked.
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -806,168 +806,182 @@ export default function TrainerClasses() {
       </ScrollView>
 
       {/* ── manage one class ─────────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the reason a class was called off is typed at the very foot of a long form.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!manage} animationType="slide" transparent onRequestClose={() => setManage(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setManage(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.xl, maxHeight: '86%' }}>
-          {manage ? (
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <Text style={{ ...ty.micro, color: t.ink3 }}>{dayShort(manage.startsAt)} {timeLabel(manage.startsAt)}{manage.branch ? ' · ' + manage.branch : ''}</Text>
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{manage.title}</Text>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setManage(null)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.xl, maxHeight: '86%' }}>
+            {manage ? (
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <Text style={{ ...ty.micro, color: t.ink3 }}>{dayShort(manage.startsAt)} {timeLabel(manage.startsAt)}{manage.branch ? ' · ' + manage.branch : ''}</Text>
+                <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{manage.title}</Text>
 
-              {manage.status === 'cancelled' ? (
-                <>
-                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-                    This class is called off. {manage.cancelReason?.trim() ? `Reason recorded: ${manage.cancelReason.trim()}` : 'No reason was recorded.'} Its bookings, check-ins and waiting list are all still here.
-                  </Text>
-                  <View style={{ height: sp.lg }} />
-                  <Cta label="Put It Back On" wide disabled={mBusy} onPress={() => putBackOn(manage)} />
-                </>
-              ) : (
-                <>
-                  {/* ── correcting it ─────────────────────────────────────── */}
-                  <Text style={[lbl, { marginTop: sp.lg }]}>Title</Text>
-                  <TextInput value={mTitle} onChangeText={setMTitle} style={inp} />
-
-                  <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                    <Field label="Instructor">
-                      <TextInput value={mInstructor} onChangeText={setMInstructor} style={inp} />
-                    </Field>
-                    <Field label="Room" hint="optional">
-                      <TextInput value={mRoom} onChangeText={setMRoom} style={inp} />
-                    </Field>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                    {stepper('Minutes', String(mDur), () => setMDur((d) => (d > 15 ? d - 15 : d)), () => setMDur((d) => (d < 90 ? d + 15 : d)))}
-                    {stepper('Capacity', String(mCap), () => setMCap((c) => (c > 1 ? c - 1 : c)), () => setMCap((c) => c + 1))}
-                  </View>
-                  {/* The one figure a coach can set below what is already sold.
-                      Said here as well as refused on save, because a stepper
-                      that silently will not commit reads as a broken control. */}
-                  {countsKnown ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                      {manage.booked} booked. Capacity cannot go below that.
+                {manage.status === 'cancelled' ? (
+                  <>
+                    <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+                      This class is called off. {manage.cancelReason?.trim() ? `Reason recorded: ${manage.cancelReason.trim()}` : 'No reason was recorded.'} Its bookings, check-ins and waiting list are all still here.
                     </Text>
-                  ) : null}
+                    <View style={{ height: sp.lg }} />
+                    <Cta label="Put It Back On" wide disabled={mBusy} onPress={() => putBackOn(manage)} />
+                  </>
+                ) : (
+                  <>
+                    {/* ── correcting it ─────────────────────────────────────── */}
+                    <Text style={[lbl, { marginTop: sp.lg }]}>Title</Text>
+                    <TextInput value={mTitle} onChangeText={setMTitle} style={inp} />
 
-                  {/* ── when it starts ─────────────────────────────────────
-                      The field this sheet did not have. A class typed in at
-                      6am instead of 6pm could only be called off and retyped,
-                      and calling it off strands every booking on the row that
-                      goes. Offered for THIS class only: `updateSeriesFrom`
-                      refuses a start time by design, because setting a whole
-                      series to one instant stacks twelve classes on one
-                      evening. */}
-                  {mSeries && manage.seriesId ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                      The start time is not offered for a whole series. Every occurrence would be set to the same instant, which stacks the term on one evening — move one class at a time, with This Class selected.
-                    </Text>
-                  ) : (
-                    <>
-                      <Text style={[lbl, { marginTop: sp.lg }]}>Day</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
-                        {MOVE_DAYS.map((o) => {
-                          const at = daysLater(manage.startsAt, o);
-                          if (!at) return null;
-                          return chip(o === 0 ? `${dayShort(at)} · as typed` : dayShort(at), mDayOff === o, () => setMDayOff(o));
-                        })}
-                      </ScrollView>
+                    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                      <Field label="Instructor">
+                        <TextInput value={mInstructor} onChangeText={setMInstructor} style={inp} />
+                      </Field>
+                      <Field label="Room" hint="optional">
+                        <TextInput value={mRoom} onChangeText={setMRoom} style={inp} />
+                      </Field>
+                    </View>
 
-                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                        {stepper('Start hour', `${mHour % 12 || 12}${mHour >= 12 ? 'pm' : 'am'}`,
-                          () => setMHour((h) => (h + 23) % 24), () => setMHour((h) => (h + 1) % 24))}
-                      </View>
-
-                      <Text style={[lbl, { marginTop: sp.md }]}>Start time</Text>
-                      <View style={{ flexDirection: 'row', gap: 7 }}>
-                        {SERIES_MINUTES.map((m) => (
-                          <View key={m} style={{ flex: 1 }}>
-                            <Pressable onPress={() => setMMinute(m)} accessibilityRole="button"
-                              accessibilityState={{ selected: m === mMinute }}
-                              accessibilityLabel={`${mHour % 12 || 12}:${String(m).padStart(2, '0')}${mHour >= 12 ? 'pm' : 'am'}`}
-                              style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === mMinute ? t.brand : t.surface2 }}>
-                              <Text style={{ ...ty.label, fontWeight: m === mMinute ? '500' : '400', color: m === mMinute ? t.brandInk : t.ink2 }}>
-                                :{String(m).padStart(2, '0')}
-                              </Text>
-                            </Pressable>
-                          </View>
-                        ))}
-                      </View>
-                      {/* Three different things to say, and only one of them at
-                          a time. A move into the past is the one that matters:
-                          a class behind the coach is on nobody's timetable and
-                          cannot be booked, and its bookings go with it. */}
-                      {startChanged(manage) ? (
-                        Date.parse(movedStart(manage) as string) <= Date.now() ? (
-                          <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
-                            That puts the class in the past, where nobody can book it and everybody who already has is left holding a place at a time that has been and gone. Pick a time that is still ahead.
-                          </Text>
-                        ) : (
-                          <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
-                            Moves from {dayShort(manage.startsAt)} {timeLabel(manage.startsAt)} to {dayShort(movedStart(manage) as string)} {timeLabel(movedStart(manage) as string)}. Bookings, check-ins and the waiting list all move with it, and nobody is notified — tell them yourself.
-                          </Text>
-                        )
-                      ) : (
-                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                          Starts {dayShort(manage.startsAt)} at {timeLabel(manage.startsAt)}. Change any of these to move it; saving without touching them leaves the time exactly as it is.
-                        </Text>
-                      )}
-                    </>
-                  )}
-
-                  {/* Only for a row that belongs to something. A one-off has no
-                      series, and a series of one makes these two verbs the same
-                      button. */}
-                  {manage.seriesId ? (
-                    <View style={{ marginTop: sp.md }}>
-                      <Text style={lbl}>Apply to</Text>
-                      <View style={{ flexDirection: 'row', gap: 7 }}>
-                        {chip('This Class', !mSeries, () => setMSeries(false))}
-                        {chip('This And Later', mSeries, () => setMSeries(true))}
-                      </View>
+                    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                      {stepper('Minutes', String(mDur), () => setMDur((d) => (d > 15 ? d - 15 : d)), () => setMDur((d) => (d < 90 ? d + 15 : d)))}
+                      {stepper('Capacity', String(mCap), () => setMCap((c) => (c > 1 ? c - 1 : c)), () => setMCap((c) => c + 1))}
+                    </View>
+                    {/* The one figure a coach can set below what is already sold.
+                        Said here as well as refused on save, because a stepper
+                        that silently will not commit reads as a broken control. */}
+                    {countsKnown ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                        Classes that have already run are never changed. They are the gym's record of what happened.
+                        {manage.booked} booked. Capacity cannot go below that.
                       </Text>
-                    </View>
-                  ) : null}
+                    ) : null}
 
-                  <View style={{ height: sp.lg }} />
-                  <Cta label={mBusy ? 'Saving…' : 'Save Changes'} wide disabled={mBusy} onPress={() => saveEdits(manage)} />
-
-                  <Rule />
-
-                  {/* ── calling it off ────────────────────────────────────── */}
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Call it off</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.sm }}>
-                    The class stays on the timetable marked as cancelled, and keeps its bookings, its check-ins and its waiting list. That is the evidence the hour was wanted.
-                  </Text>
-                  <TextInput value={mReason} onChangeText={setMReason} placeholder="Why is it off? e.g. instructor off sick" placeholderTextColor={t.ink3} style={inp} />
-                  <View style={{ height: sp.md }} />
-                  <Ghost label={mSeries && manage.seriesId ? 'Call Off This And Later' : 'Call Off This Class'} onPress={() => callOff(manage)} />
-
-                  {/* ── or erase it, if nobody ever booked it ─────────────── */}
-                  {canRemove(manage) ? (
-                    <View style={{ marginTop: sp.lg }}>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-                        Nobody has booked this class, so it can be removed outright. Use Call Off for anything that was on the timetable and did not happen.
+                    {/* ── when it starts ─────────────────────────────────────
+                        The field this sheet did not have. A class typed in at
+                        6am instead of 6pm could only be called off and retyped,
+                        and calling it off strands every booking on the row that
+                        goes. Offered for THIS class only: `updateSeriesFrom`
+                        refuses a start time by design, because setting a whole
+                        series to one instant stacks twelve classes on one
+                        evening. */}
+                    {mSeries && manage.seriesId ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                        The start time is not offered for a whole series. Every occurrence would be set to the same instant, which stacks the term on one evening — move one class at a time, with This Class selected.
                       </Text>
-                      <Ghost label="Remove This Class" onPress={() => removeClass(manage)} />
-                    </View>
-                  ) : (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                      {countsKnown
-                        ? 'This class has bookings, so it cannot be removed. Calling it off keeps them and keeps the record.'
-                        : 'How many have booked could not be read, so removing is not offered. An unknown count is not an empty class.'}
+                    ) : (
+                      <>
+                        <Text style={[lbl, { marginTop: sp.lg }]}>Day</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
+                          {MOVE_DAYS.map((o) => {
+                            const at = daysLater(manage.startsAt, o);
+                            if (!at) return null;
+                            return chip(o === 0 ? `${dayShort(at)} · as typed` : dayShort(at), mDayOff === o, () => setMDayOff(o));
+                          })}
+                        </ScrollView>
+
+                        <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                          {stepper('Start hour', `${mHour % 12 || 12}${mHour >= 12 ? 'pm' : 'am'}`,
+                            () => setMHour((h) => (h + 23) % 24), () => setMHour((h) => (h + 1) % 24))}
+                        </View>
+
+                        <Text style={[lbl, { marginTop: sp.md }]}>Start time</Text>
+                        <View style={{ flexDirection: 'row', gap: 7 }}>
+                          {SERIES_MINUTES.map((m) => (
+                            <View key={m} style={{ flex: 1 }}>
+                              <Pressable onPress={() => setMMinute(m)} accessibilityRole="button"
+                                accessibilityState={{ selected: m === mMinute }}
+                                accessibilityLabel={`${mHour % 12 || 12}:${String(m).padStart(2, '0')}${mHour >= 12 ? 'pm' : 'am'}`}
+                                style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === mMinute ? t.brand : t.surface2 }}>
+                                <Text style={{ ...ty.label, fontWeight: m === mMinute ? '500' : '400', color: m === mMinute ? t.brandInk : t.ink2 }}>
+                                  :{String(m).padStart(2, '0')}
+                                </Text>
+                              </Pressable>
+                            </View>
+                          ))}
+                        </View>
+                        {/* Three different things to say, and only one of them at
+                            a time. A move into the past is the one that matters:
+                            a class behind the coach is on nobody's timetable and
+                            cannot be booked, and its bookings go with it. */}
+                        {startChanged(manage) ? (
+                          Date.parse(movedStart(manage) as string) <= Date.now() ? (
+                            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+                              That puts the class in the past, where nobody can book it and everybody who already has is left holding a place at a time that has been and gone. Pick a time that is still ahead.
+                            </Text>
+                          ) : (
+                            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+                              Moves from {dayShort(manage.startsAt)} {timeLabel(manage.startsAt)} to {dayShort(movedStart(manage) as string)} {timeLabel(movedStart(manage) as string)}. Bookings, check-ins and the waiting list all move with it, and nobody is notified — tell them yourself.
+                            </Text>
+                          )
+                        ) : (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                            Starts {dayShort(manage.startsAt)} at {timeLabel(manage.startsAt)}. Change any of these to move it; saving without touching them leaves the time exactly as it is.
+                          </Text>
+                        )}
+                      </>
+                    )}
+
+                    {/* Only for a row that belongs to something. A one-off has no
+                        series, and a series of one makes these two verbs the same
+                        button. */}
+                    {manage.seriesId ? (
+                      <View style={{ marginTop: sp.md }}>
+                        <Text style={lbl}>Apply to</Text>
+                        <View style={{ flexDirection: 'row', gap: 7 }}>
+                          {chip('This Class', !mSeries, () => setMSeries(false))}
+                          {chip('This And Later', mSeries, () => setMSeries(true))}
+                        </View>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                          Classes that have already run are never changed. They are the gym's record of what happened.
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    <View style={{ height: sp.lg }} />
+                    <Cta label={mBusy ? 'Saving…' : 'Save Changes'} wide disabled={mBusy} onPress={() => saveEdits(manage)} />
+
+                    <Rule />
+
+                    {/* ── calling it off ────────────────────────────────────── */}
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Call it off</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.sm }}>
+                      The class stays on the timetable marked as cancelled, and keeps its bookings, its check-ins and its waiting list. That is the evidence the hour was wanted.
                     </Text>
-                  )}
-                </>
-              )}
+                    <TextInput value={mReason} onChangeText={setMReason} placeholder="Why is it off? e.g. instructor off sick" placeholderTextColor={t.ink3} style={inp} />
+                    <View style={{ height: sp.md }} />
+                    <Ghost label={mSeries && manage.seriesId ? 'Call Off This And Later' : 'Call Off This Class'} onPress={() => callOff(manage)} />
 
-              <View style={{ height: sp.lg }} />
-              <Ghost label="Done" onPress={() => setManage(null)} />
-            </ScrollView>
-          ) : null}
-        </View>
+                    {/* ── or erase it, if nobody ever booked it ─────────────── */}
+                    {canRemove(manage) ? (
+                      <View style={{ marginTop: sp.lg }}>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                          Nobody has booked this class, so it can be removed outright. Use Call Off for anything that was on the timetable and did not happen.
+                        </Text>
+                        <Ghost label="Remove This Class" onPress={() => removeClass(manage)} />
+                      </View>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                        {countsKnown
+                          ? 'This class has bookings, so it cannot be removed. Calling it off keeps them and keeps the record.'
+                          : 'How many have booked could not be read, so removing is not offered. An unknown count is not an empty class.'}
+                      </Text>
+                    )}
+                  </>
+                )}
+
+                <View style={{ height: sp.lg }} />
+                <Ghost label="Done" onPress={() => setManage(null)} />
+              </ScrollView>
+            ) : null}
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

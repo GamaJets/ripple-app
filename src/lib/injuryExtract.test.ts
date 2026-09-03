@@ -144,7 +144,12 @@ eq(candidateToInjury(c, { id: 'x', severity: 'severe', at: 'now', area: 'hip' })
 
 ok(INJURY_AREAS.some((a) => a.id === built.area),
   'whatever comes out names an area the rest of the app knows');
-eq(candidateNote(c), c.evidence, 'the note starts as the evidence, for the client to edit or clear');
+// The note is the one field of a confirmed injury the coach reads, so the
+// document's own sentence must never arrive there by default. `c.evidence` is
+// non-empty for every candidate, so this fails the moment the seed goes back.
+eq(candidateNote(c), '', 'the note starts empty — the client types their own words or none');
+ok(c.evidence.length > 0 && !candidateNote(c).includes(c.evidence),
+  'nothing off the document is seeded into the note a coach will read');
 
 /* ── the copy ──────────────────────────────────────────────────────────── */
 

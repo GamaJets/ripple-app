@@ -32,7 +32,8 @@
 // against a named payment, which is the only version of that sentence the
 // record can stand behind.
 
-import { assertWhole, capLimit } from './rowCap';
+import { capLimit, readAll } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 import type { InvoiceStatus } from './gymRecord';
 import { readMinorAmount } from './coachMoney';
@@ -202,25 +203,43 @@ export function dueAfter(issuedOn: string, days: number): string {
  * read with their own copy of it; this is the shared one, and it selects the
  * two columns supabase/parts/180 added that neither of them knew about.
  *
- * Capped through src/lib/rowCap.ts and REFUSING rather than reporting a prefix.
- * The order is `issued_on desc`, so what a truncated read would drop is the
- * OLDEST invoices — precisely the long-unpaid ones the ageing table exists to
- * surface. A truncated read here would not merely make "owed" smaller; it would
- * make the month appear to reconcile.
+ * ── Why this pages rather than refusing ────────────────────────────────────
+ *
+ * It was `.limit(capLimit())` plus `assertWhole`. Truncating was never an
+ * option and still is not — the order is `issued_on desc`, so what a prefix
+ * drops is the OLDEST invoices, precisely the long-unpaid ones the ageing table
+ * exists to surface, and the month would then appear to reconcile. But refusing
+ * was not the other half of a real choice either: this read is bounded only at
+ * the far end and no gym can make its invoice history shorter, so two hundred
+ * members billed monthly crossed a thousand in five months and the Billed
+ * section of /tax became a failure sentence at every filing, permanently.
+ *
+ * /close and /accounting had each already hit that wall and each written their
+ * own paged reader over the same table rather than fix the shared one. This is
+ * the shared one, so all three now finish the read, and `PAGE_CEILING` refuses
+ * past fifty thousand invoices — a sentence about the size of the read rather
+ * than about the money.
+ *
+ * `issued_on` is a DATE, so a gym that raises its whole book on the first of
+ * the month has hundreds of rows tied on it. `id` is the primary key and gives
+ * `readAll` the total order it requires; without it, pages of a tied ordering
+ * drop and repeat rows silently, which here is an invoice missing from a
+ * quarter somebody files.
  */
 export async function fetchInvoices(
   sb: Queryable, tenantId: string, upToDay: string,
 ): Promise<GymInvoiceRow[]> {
-  const { data, error } = await sb
-    .from('gym_invoices')
-    .select('id, number, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note, billed_name')
-    .eq('tenant_id', tenantId)
-    .lte('issued_on', upToDay)
-    .order('issued_on', { ascending: false })
-    .limit(capLimit());
-  if (error) throw error;
-
-  const rows = assertWhole(data, 'the invoices up to the end of this month');
+  const rows = await readAll<any>(
+    (from, to) => sb
+      .from('gym_invoices')
+      .select('id, number, member_id, membership_id, amount_cents, currency, issued_on, due_on, status, note, billed_name')
+      .eq('tenant_id', tenantId)
+      .lte('issued_on', upToDay)
+      .order('issued_on', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the invoices up to the end of this month',
+  );
   if (!rows.length) return [];
 
   const names = await namesFor(sb, rows.map((r: any) => r.member_id));
@@ -347,12 +366,19 @@ export async function settleInvoice(
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */
 
+/** CHUNKED, because `fetchInvoices` above now pages. A bare `.in()` was safe
+ *  only while the read above refused past a thousand rows — a thousand invoices
+ *  carry at most a thousand distinct members, so the lookup could not truncate
+ *  and the refusal was holding it up. See src/lib/idLookup.ts. */
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name falls back to the retained billed_name and then to a dash; the invoice it labels is still real
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
-    .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
-    .filter(([, n]: [string, string]) => !!n));
+  const out = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    // no-error-ok: an unreadable name falls back to the retained billed_name and then to a dash; the invoice it labels is still real
+    const { data } = await sb.from('profiles').select('id, full_name').in('id', chunk).limit(capLimit());
+    for (const p of (data ?? []) as any[]) {
+      const n = (p.full_name || '').trim();
+      if (n) out.set(p.id, n);
+    }
+  }
+  return out;
 }

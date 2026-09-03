@@ -139,7 +139,7 @@ eq(
   'the Android and iOS parsers produce the identical reading for the identical sample');
 
 // ── meals against readings ──────────────────────────────────────────────────
-const r = (at: string, mmol: number): GlucoseReading => ({ at, mmol, externalId: at, sourceName: null });
+const r = (at: string, mmol: number): GlucoseReading => ({ id: null, at, mmol, externalId: at, sourceName: null });
 const meals: MealRef[] = [
   { id: 'm1', name: 'Porridge', loggedAt: '2026-08-31T08:00:00Z', carbs: 60 },
   { id: 'm2', name: 'Lunch',    loggedAt: '2026-08-31T09:30:00Z', carbs: 40 },
@@ -198,13 +198,13 @@ for (let i = 0; i < MIN_FOR_PERCENT; i++) {
 eq(summarise(many).inTypicalPct, 50, 'half in the quoted range');
 
 // A garbage value that reached the list is excluded from the arithmetic.
-eq(summarise([r('2026-08-31T08:00:00Z', 5.0), { at: '2026-08-31T09:00:00Z', mmol: 0, externalId: null, sourceName: null }]).count,
+eq(summarise([r('2026-08-31T08:00:00Z', 5.0), { id: null, at: '2026-08-31T09:00:00Z', mmol: 0, externalId: null, sourceName: null }]).count,
   1, 'an implausible value does not drag the average down');
 
 // ── dedupe against what is already stored ───────────────────────────────────
 eq(unsaved([r('2026-08-31T08:00:00Z', 5.0)], ['2026-08-31T08:00:00Z']).length, 0, 'an already-stored sample is not sent again');
 eq(unsaved([r('2026-08-31T08:00:00Z', 5.0)], []).length, 1, 'a new sample is sent');
-eq(unsaved([{ at: '2026-08-31T08:00:00Z', mmol: 5.0, externalId: null, sourceName: null }], []).length, 0,
+eq(unsaved([{ id: null, at: '2026-08-31T08:00:00Z', mmol: 5.0, externalId: null, sourceName: null }], []).length, 0,
   'a hand-typed reading is never re-imported from Health');
 
 // ── typed input ─────────────────────────────────────────────────────────────

@@ -44,7 +44,9 @@ import { useAuth } from '../../src/ui/auth';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import { minorFromWhole } from '../../src/lib/coachMoney';
+import { rateCentsToSnapshot } from '../../src/lib/rateSnapshot';
+import { fetchMyCurrency } from '../../src/lib/myCurrency';
+import type { MyCurrency } from '../../src/lib/currencySource';
 import { tapLight } from '../../src/ui/haptics';
 import { type PtSession, type SessionOutcome } from '../../src/lib/gymSessions';
 import {
@@ -260,7 +262,36 @@ export default function TrainerSessions() {
   // free" — `undefined` and null are different instructions and src/ui/floorQueue.ts
   // carries that distinction through unflattened.
   const { sessionFee: ownFee } = useMyTrainerProfile();
-  const feeToSnapshot = tenant?.sessionFee ?? ownFee;
+
+  /* ── and the currency, which for a coach with no gym is not the gym's ────
+   *
+   * The fee above already fell back to the coach's own rate. The CONVERSION did
+   * not: it read `tenant?.currency`, which is null for a coach who has no gym,
+   * so `minorFromWhole` returned null and every session such a coach ever
+   * delivered was filed with no rate at all — including after part 940 let them
+   * say what they charge in. Their own fee had a figure and no unit.
+   *
+   * `fetchMyCurrency` answers it under the one precedence rule, in
+   * src/lib/currencySource.ts: the gym on `profiles.tenant_id` is the
+   * authority, and `trainers.currency` applies if and only if there is no gym.
+   * src/lib/rateSnapshot.ts is where this screen, the schedule and the log
+   * screen agree on what to do with the answer — all three call the same
+   * function, because three sessions of the same hour's work filed three
+   * different ways is worse than three filed with nothing.
+   *
+   * Read only when the tenant provider is not already holding a gym currency.
+   * Where it is, that IS the authoritative answer, asking again would spend a
+   * read to be told the same thing, and the in-memory copy is the one that
+   * survives a coach standing in a basement with no signal.
+   */
+  const gymCcy = (tenant?.currency || '').trim() || null;
+  const [myCcy, setMyCcy] = useState<MyCurrency | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (gymCcy) { setMyCcy(null); return; }
+    void (async () => { const c = await fetchMyCurrency(); if (live) setMyCcy(c); })();
+    return () => { live = false; };
+  }, [gymCcy]);
 
   // Whether there is a gym behind these sessions, which decides only what the
   // screen CALLS the thing it is asking for. A gym trainer is holding up a
@@ -577,19 +608,28 @@ export default function TrainerSessions() {
     if (!uid) return;
     setBusy(s.id);
     try {
-      // Snapshot the gym's fee at the moment of marking, so a later fee change
-      // cannot rewrite what this session was worth. The snapshot is taken HERE
-      // and carried into the queue rather than recomputed at flush time: a
-      // session marked on Tuesday and sent on Thursday is worth what it was
-      // worth on Tuesday, and re-reading the fee would let a rate change in
-      // between quietly rewrite it.
-      // Converted by the gym's currency, never by a factor of a hundred: in
-      // yen that snapshot was a hundred times the fee and in dinar a tenth of
-      // it, on the column payroll is settled from. An independent coach's own
-      // fee has no currency recorded anywhere, so it converts to null and NO
-      // rate is written — payrollByTrainer falls back to the rate the gym
-      // states today, which is a figure somebody chose.
-      const rateCents = minorFromWhole(feeToSnapshot, tenant?.currency) ?? undefined;
+      // Snapshot the fee at the moment of marking, so a later fee change cannot
+      // rewrite what this session was worth. The snapshot is taken HERE and
+      // carried into the queue rather than recomputed at flush time: a session
+      // marked on Tuesday and sent on Thursday is worth what it was worth on
+      // Tuesday, and re-reading the fee would let a rate change in between
+      // quietly rewrite it.
+      //
+      // A SNAPSHOT ALREADY WRITTEN IS A HISTORICAL FACT. This changes what is
+      // filed from now on and nothing else — no session already delivered is
+      // re-derived, re-priced or backfilled by any of this, including the ones
+      // an independent coach delivered with no currency to convert by.
+      //
+      // Converted by whatever currency actually resolves — src/lib/rateSnapshot.ts
+      // holds the rule and all three writing screens call it — and never by a
+      // factor of a hundred: in yen that snapshot was a hundred times the fee
+      // and in dinar a tenth of it, on the column payroll is settled from. When
+      // nothing names a currency it stays null, `undefined` leaves rate_cents
+      // untouched, and payrollByTrainer falls back to the rate the gym states
+      // today, which is a figure somebody chose. A zero is not.
+      const rateCents = rateCentsToSnapshot({
+        gymFee: tenant?.sessionFee, ownFee, gymCurrency: tenant?.currency, mine: myCcy,
+      }) ?? undefined;
       // ── the outcome, and the room it is recorded in ────────────────────
       //
       // This is the same money as the class tick, one session at a time, and

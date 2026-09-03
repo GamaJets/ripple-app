@@ -25,7 +25,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useSessions } from '../../src/ui/sessions';
-import { currentStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
+import { shownStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel } from '../../src/lib/units';
@@ -128,8 +128,10 @@ export default function Activity() {
       events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: e.cardio.mins || 30 } });
     }
   }
-  // Streak milestone (as of now)
-  const streak = currentStreak(log);
+  // Streak milestone (as of now), off the ONE streak figure — see
+  // `shownStreak` in src/lib/streaks.ts. The raw chain here meant a member
+  // could pass a milestone on Home and not have it appear in their own feed.
+  const streak = shownStreak(log);
   const milestone = prsKnown ? streakMilestone(streak) : null;
   if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak Milestone', sub: milestone, route: '/(client)/achievements' });
   // Check-ins

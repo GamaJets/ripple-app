@@ -75,6 +75,7 @@ import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isoToday } from '../../src/lib/dayPlan';
 import { plain } from '../../src/lib/units';
+import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import {
   readBodyHistory, bodyBoard, seriesOf, movementOf, readingLine, seriesAgeLine,
   isSeriesStale, metricUnit, metricValue, readManual, manualLine, manualFigures,
@@ -104,7 +105,17 @@ export default function ClientBody() {
   // system and is not touched by it.
   const wu = useSettings().weightUnit;
 
-  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  // Seeded once, and this screen never unmounts — it is registered `href: null`
+  // inside <Tabs> (app/(trainer)/_layout.tsx), so a `useState` initialiser runs
+  // for the FIRST client a coach opens it for and for nobody after. Opening it
+  // for Ben used to draw Amy. `subjectChange` is the rule, with the reasoning
+  // and the string[] hazard in src/lib/routeSubject.ts; it is applied during
+  // render rather than in an effect so the wrong person is never painted, not
+  // even for one frame.
+  const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
+  const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  const moved = subjectChange(seenParam, clientId);
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
 
   // Null is "we do not know", never "there are none". The two reads carry their
   // own status because they fail independently and mean different things when

@@ -11,7 +11,11 @@ import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { classFillState } from '../../src/lib/gymSchedule';
+// `isCancelled` is the one place `status: undefined` is interpreted, so the
+// coach's screen and this one agree about what a called-off class is. This
+// screen read no status at all: a class the gym had cancelled kept its spaces
+// count and its Book button, and members turned up to it.
+import { classFillState, isCancelled, classesThatRan } from '../../src/lib/gymSchedule';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
@@ -203,12 +207,20 @@ export default function Classes() {
                   is the same wrong answer as any other subtotal wearing the
                   name of a total — with the difference that a member reads this
                   one and decides there is nothing worth booking. */}
+              {/* Cancelled classes are listed — a member who booked one has to
+                  see it — and are not COUNTED. "Tuesday · 4 classes" over three
+                  running ones and a called-off one is a count of rows rather
+                  than a count of classes anybody can attend. */}
               <SectionHead title={g.label}
                 note={classStatus === 'ready'
-                  ? `${g.items.length} class${g.items.length === 1 ? '' : 'es'}`
+                  ? `${classesThatRan(g.items).length} class${classesThatRan(g.items).length === 1 ? '' : 'es'}`
                   : classStatus === 'partial' ? 'Not all read' : undefined} />
               {g.items.map((c, i) => {
                 const mine = myStatus[c.id];
+                // Called off by the gym. Everything below branches on it: there
+                // are no spaces in a class that is not running, and there is
+                // nothing to book.
+                const off = isCancelled(c);
                 // `booked` is 0 for every class until the count RPC fills it
                 // in. When that failed, subtracting it would advertise a full
                 // class as completely empty, so no claim is made about spaces.
@@ -229,11 +241,17 @@ export default function Classes() {
                               with twelve were the same grey dot, so the one
                               about to go looked like the one nobody wants. */}
                           <View style={{ width: 6, height: 6, borderRadius: 3,
-                            backgroundColor: mine ? t.brand : full ? t.s3 : fill === 'nearly' ? t.warn : t.ink3 }} />
-                          <Text style={{ ...ty.caption, color: t.ink2 }}>{mine === 'waitlist' ? 'On the waitlist' : mine ? 'Booked' : spotsLeft == null ? 'Spaces unknown' : full ? 'Class full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</Text>
+                            backgroundColor: off ? t.crit : mine ? t.brand : full ? t.s3 : fill === 'nearly' ? t.warn : t.ink3 }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>{off
+                            ? (mine ? 'Cancelled by the gym — you were booked in' : 'Cancelled by the gym')
+                            : mine === 'waitlist' ? 'On the waitlist' : mine ? 'Booked' : spotsLeft == null ? 'Spaces unknown' : full ? 'Class full' : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left`}</Text>
                         </View>
                       </View>
-                      {mine ? (
+                      {/* No control at all on a class that is not running.
+                          Booking one is not a thing the gym can honour, and
+                          "Cancel" on a class the gym has already called off
+                          offers to undo something that has already happened. */}
+                      {off ? null : mine ? (
                         <Ghost label={mine === 'waitlist' ? 'Leave Waitlist' : 'Cancel'} onPress={() => onCancel(c)} />
                       ) : (
                         <Cta label={full ? 'Join Waitlist' : 'Book'} onPress={() => onBook(c)} />

@@ -31,7 +31,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useBrand } from '../../src/ui/brand';
-import { currentStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
+import { shownStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
 import { charsPerLine, wrapLines } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
 import { FORWARD_CHAR } from '../../src/ui/direction';
@@ -157,7 +157,11 @@ export default function Cards() {
   const wu = useSettings().weightUnit;
   const [idx, setIdx] = useState(0);
 
-  const streak = currentStreak(log);
+  // `shownStreak`, not `currentStreak`. This card is exported as an image and
+  // posted, and it was printing the RAW chain while the ring on Home printed
+  // the frozen one — so a member whose freeze had bridged a missed day posted a
+  // smaller number than their own app had just congratulated them on.
+  const streak = shownStreak(log);
   const best = longestStreak(log);
   const prs = personalRecords(log, c.weightSeries).sort((a, b) => b.est1RM - a.est1RM);
   const topPr = prs[0];

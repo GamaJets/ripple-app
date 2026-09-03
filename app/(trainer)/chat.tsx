@@ -45,7 +45,9 @@ import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModul
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { peerHeading, type PeerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
-import { attachmentNoun, unsentNote } from '../../src/lib/messageAttachments';
+import { attachmentNoun } from '../../src/lib/messageAttachments';
+import { atBottom } from '../../src/lib/readReceipt';
+import { useReadReceipt } from '../../src/ui/readReceipts';
 import { useMyTemplates } from '../../src/ui/messageTemplates';
 import {
   applyTemplate, orderTemplates, templatesEmptyLine, hasUnfilledToken,
@@ -150,7 +152,7 @@ export default function CoachChat() {
   // Used where a sentence needs to address them. Falls back to the role word
   // rather than to a dash mid-sentence — "say hi to —" is not a sentence.
   const firstName = head.isName ? head.text.split(' ').filter(Boolean)[0] : null;
-  const { messages: msgs, send, status, unsent, cachedNote, reload: reloadThread } = useThread(clientId, 'coach');
+  const { messages: msgs, send, status, unsent, cachedNote, reload: reloadThread, threadId } = useThread(clientId, 'coach');
   /* ── the way out ───────────────────────────────────────────────────────
    *
    * The database has supported blocking and reporting in BOTH directions since
@@ -176,6 +178,27 @@ export default function CoachChat() {
   const [pending, setPending] = useState<PendingAttachment | null>(null);
   const [busy, setBusy] = useState(false);
   const scRef = useRef<ScrollView>(null);
+  /**
+   * The end of the conversation is on screen.
+   *
+   * One of the four clauses of "what counts as read" (src/lib/readReceipt.ts),
+   * and on this screen it is the load-bearing one twice over: this chat is a
+   * `Tabs.Screen` with `href: null` and no `unmountOnBlur`, so it stays mounted
+   * — scrolled wherever the coach left it — behind everything they open next.
+   * True to begin with because `onContentSizeChange` scrolls a freshly loaded
+   * thread to its end, and corrected by the first real scroll event.
+   */
+  const [atEnd, setAtEnd] = useState(true);
+  /**
+   * What each of the coach's own bubbles may claim, and the write that tells
+   * the client their messages have been read.
+   *
+   * The failure sentences are unchanged — `deliveryLine` delegates them back to
+   * `unsentNote`, which is why this screen no longer imports it — and the two
+   * new states are "Sent Mon 1/9" for a row the server has, and "· Read" once
+   * the client's own watermark has passed it.
+   */
+  const receipt = useReadReceipt({ threadId, role: 'coach', messages: msgs, unsent, atEnd, them: firstName ?? 'they' });
 
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
@@ -342,7 +365,16 @@ export default function CoachChat() {
             a live one believes they have heard everything — and the message
             that is missing is the one that arrived after the signal went. */}
         {cachedNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingTop: sp.sm }}>{cachedNote}</Flag> : null}
-        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled" refreshControl={pull}>
+        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled" refreshControl={pull}
+          // Feeds the "scrolled to the end" clause and nothing else; the
+          // decision, the debounce and the forward-only rule are all in
+          // src/lib/readReceipt.ts.
+          onScroll={(e) => setAtEnd(atBottom({
+            offsetY: e.nativeEvent.contentOffset.y,
+            viewport: e.nativeEvent.layoutMeasurement.height,
+            content: e.nativeEvent.contentSize.height,
+          }))}
+          scrollEventThrottle={64}>
           {/* A thread that failed to load has not been read, so it cannot be
               reported as one nobody has written in. */}
           {msgs.length === 0 && status !== 'loading' ? (
@@ -361,8 +393,9 @@ export default function CoachChat() {
             // Local-only: the upload or the insert was refused, so the client
             // cannot see it. The stage says which, because "the video did not
             // upload" is the half a coach can do something about.
+            // Only the MARK is decided here now. The sentence beside it comes
+            // from `receipt.line`, which reads the same `unsent` entry.
             const stage = unsent[m.id];
-            const kind = m.local?.kind ?? (m.attachment.state === 'ok' ? m.attachment.attachment.kind : null);
             const hasMedia = m.attachment.state !== 'none' || !!m.local;
             return (
               <Pressable key={m.id}
@@ -387,8 +420,11 @@ export default function CoachChat() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3, alignSelf: mine ? 'flex-end' : 'flex-start' }}>
                   {/* Status colours never colour text — the mark carries it. */}
                   {stage ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
+                  {/* One sentence, from one place: the failures still worded by
+                      `unsentNote`, plus the confirmation this screen never made
+                      out loud and the receipt it could not express at all. */}
                   <Text style={{ ...ty.caption, color: t.ink3 }}>
-                    {stage ? unsentNote(firstName ?? 'they', stage, kind) : m.sending ? 'Sending…' : fmt(m.createdAt)}
+                    {receipt.line(m, fmt(m.createdAt))}
                   </Text>
                 </View>
               </Pressable>

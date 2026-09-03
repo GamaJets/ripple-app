@@ -60,12 +60,59 @@ import { classifyWrite, type WriteError } from './offlineQueue';
  *
  * currency-ok: this is the list a coach CHOOSES from, and naming currencies is
  * the entire job of a currency picker. Nothing here is a figure, nothing here
- * is a fallback, and nothing here is applied to anybody's tenant until they tap
- * it. It is deliberately the same eight app/(owner)/ops.tsx offers a gym owner:
- * two pickers writing one column that offered different sets would be a coach
- * and their owner disagreeing about what currencies exist.
+ * is a fallback, and nothing here is applied to anybody's record until they tap
+ * it.
+ *
+ * ── Why it was eight, and why eight was a defect ──────────────────────────
+ *
+ * It was `AED GBP USD EUR SAR AUD CAD ZAR`. Every one of those has a minor
+ * unit of a hundredth, and the list was therefore quietly a statement that all
+ * money has two decimal places — which src/lib/coachMoney.ts spends two
+ * hundred lines proving false, twice over:
+ *
+ *   · `ZERO_DECIMAL` — sixteen currencies with no minor unit at all. A coach
+ *     in Tokyo could not choose JPY, so their only routes to being priced were
+ *     to pick something they do not charge in or to stay unpriced for ever.
+ *   · `THREE_DECIMAL` — five currencies billed in thousandths. A coach in
+ *     Kuwait could not choose KWD, which is the currency whose absence
+ *     `majorFromMinor` was written for: reading a dinar price as
+ *     `price_cents / 100` showed a coach ten times what they had set.
+ *
+ * Fixing the picker without fixing its options solves nothing — a control a
+ * coach can now reach, offering eight currencies none of which is theirs, is
+ * the same dead end with a button on it. So the list widens, and it widens to
+ * cover BOTH classes rather than to add a few more hundredths.
+ *
+ * ── What is in it ─────────────────────────────────────────────────────────
+ *
+ * Currencies Stripe bills in, chosen to cover the markets this product is sold
+ * into and to include every one of `THREE_DECIMAL` and the zero-decimal
+ * currencies with a real coaching market. `coachCurrency.test.ts` asserts the
+ * coverage against those two sets directly, so a currency added to
+ * coachMoney.ts and forgotten here is a failing test rather than a coach who
+ * cannot be paid.
+ *
+ * Alphabetical, deliberately. Any other order nominates a favourite, and the
+ * previous list opened with AED for no reason other than where the product was
+ * written. There is no default currency in this product and the picker must not
+ * imply one by position.
+ *
+ * ── The owner's picker is a separate literal, and it is now shorter ───────
+ *
+ * `app/(owner)/ops.tsx` declares its own `CURRENCIES` with the original eight
+ * in it. This constant used to say the two lists were deliberately identical;
+ * they are not any more, and pretending otherwise here is worse than saying so.
+ * That literal should import this one — two pickers writing currencies into one
+ * product that offer different sets is a coach and their owner disagreeing
+ * about what money exists — and until it does, a gym owner in Tokyo has the
+ * same problem this list has just fixed for a coach.
  */
-export const CURRENCY_CHOICES = ['AED', 'GBP', 'USD', 'EUR', 'SAR', 'AUD', 'CAD', 'ZAR'] as const;
+export const CURRENCY_CHOICES = [
+  'AED', 'AUD', 'BHD', 'BRL', 'CAD', 'CHF', 'CLP', 'CNY', 'CZK', 'DKK',
+  'EGP', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JOD', 'JPY', 'KRW', 'KWD',
+  'MAD', 'MXN', 'MYR', 'NGN', 'NOK', 'NZD', 'OMR', 'PHP', 'PLN', 'QAR',
+  'RON', 'SAR', 'SEK', 'SGD', 'THB', 'TND', 'TRY', 'USD', 'VND', 'ZAR',
+] as const;
 
 export type CurrencyChoice = (typeof CURRENCY_CHOICES)[number];
 
@@ -90,10 +137,31 @@ export type CurrencyChoice = (typeof CURRENCY_CHOICES)[number];
  *                unlike a check-in this is a settings write with no value to
  *                lose by being typed again, so it is not put on a queue that
  *                would then apply it hours later on some other screen.
+ *
+ * Three more arrive from `set_my_coach_currency()` (part 940), the route for a
+ * coach with NO gym, which writes `trainers.currency` rather than
+ * `tenants.currency`. They join the same union and are read by the same two
+ * functions on purpose: the screen offers exactly one of the two routes and
+ * has one place to render whatever comes back, and a second outcome type would
+ * be a second set of sentences to keep in step with these.
+ *
+ * 'has-tenant'   the coach IS in a gym, so that gym's currency is the answer
+ *                and this route refuses to write a second one. Part 940's
+ *                precedence rule, refused by the write rather than trusted to
+ *                the screen.
+ * 'no-record'    there is no profile row, or no `trainers` row, on this
+ *                account, so there is nowhere a currency could be kept. Not
+ *                "you have not chosen yet": a picker drawn on that would write
+ *                nothing and report that it had worked.
+ * 'no-column'    `trainers.currency` does not exist — part 940 has not been
+ *                applied. The sibling of 'unavailable', which is the same fact
+ *                about the FUNCTION, and kept apart from it because the two
+ *                are fixed by applying different halves of the same change.
  */
 export type SetCurrencyOutcome =
   | 'set' | 'no-tenant' | 'shared' | 'already-set' | 'bad-code'
-  | 'unavailable' | 'refused' | 'unsent';
+  | 'unavailable' | 'refused' | 'unsent'
+  | 'has-tenant' | 'no-record' | 'no-column';
 
 /**
  * Why setting a currency is offered ONCE and is not an edit.
@@ -162,6 +230,14 @@ export function readSetCurrency(reply: SetCurrencyReply | null | undefined): Set
     case 'shared_tenant': return 'shared';
     case 'already_set': return 'already-set';
     case 'bad_code': return 'bad-code';
+    // From `set_my_coach_currency()` (part 940). `no_profile` and
+    // `no_coach_row` are two ways of saying the same thing to the person in
+    // front of the screen — there is no record here to keep a currency on —
+    // and they are folded onto one outcome rather than one wording being
+    // written twice and drifting.
+    case 'has_tenant': return 'has-tenant';
+    case 'no_profile': return 'no-record';
+    case 'no_coach_row': return 'no-record';
     default: return 'refused';
   }
 }
@@ -181,7 +257,12 @@ export function setCurrencyLine(outcome: SetCurrencyOutcome, code: string): stri
     case 'set':
       return `You are priced in ${code}. Every figure the app shows you from here on is denominated in it, and every package you put on sale is priced in it.`;
     case 'no-tenant':
-      return 'This account is not attached to a gym, so there is nothing here to price. Nothing has changed.';
+      // No longer a dead end. Part 940 gives a coach with no gym a currency of
+      // their own, and the settings screen offers that picker instead of this
+      // route — so if this sentence is ever reached, it is because a gym went
+      // away between the read and the tap, and it has to point at the control
+      // that WILL work rather than at nothing.
+      return 'This account is not attached to a gym, so there is no gym setting to price against. The currency you charge in is yours to choose instead. Nothing has changed.';
     case 'shared':
       return 'You share this gym with other people, so its currency is the gym owner’s to set rather than yours. They set one in the gym settings and every screen follows. Nothing has changed.';
     case 'already-set':
@@ -194,6 +275,15 @@ export function setCurrencyLine(outcome: SetCurrencyOutcome, code: string): stri
       return 'Your currency was not saved and the reason was not given. Nothing has changed.';
     case 'unsent':
       return 'Nothing answered, so your currency was not saved and nothing has changed. Try again when you have signal.';
+    case 'has-tenant':
+      // The precedence rule, said to the person it refuses. This one DOES name
+      // an owner, and it is allowed to because there demonstrably is a gym —
+      // the server read the tenant on this coach's profile in order to answer.
+      return 'You belong to a gym, so what you charge in is that gym’s currency rather than one of your own. An owner sets it in the gym settings and every screen follows. Nothing has changed.';
+    case 'no-record':
+      return 'There is no coach record on this account, so there is nowhere for a currency to be kept. Nothing has changed.';
+    case 'no-column':
+      return 'Naming a currency of your own is not switched on yet. That is a change waiting to be applied to the database rather than anything you have done, and nothing has changed.';
   }
 }
 
@@ -216,5 +306,50 @@ export function setCurrencyLine(outcome: SetCurrencyOutcome, code: string): stri
 export function classifySetCurrencyError(e: WriteError | null | undefined): SetCurrencyOutcome {
   if (!e) return 'refused';
   if (isMissingFunction(e)) return 'unavailable';
+  return classifyWrite(e, 1) === 'refused' ? 'refused' : 'unsent';
+}
+
+/**
+ * True when the error is a column the database does not have.
+ *
+ * The read-side sibling of `isMissingFunction`, and it exists for the identical
+ * reason: `select currency from trainers` against a database where part 940
+ * has not been applied comes back as an ERROR, PostgREST's own 42703, and
+ * every rule in offlineQueue.ts calls that a refusal. It is not one. Reported
+ * as a refusal it becomes "your currency could not be read — try again in a
+ * moment", which is a sentence that will never come true and sends a coach
+ * tapping refresh for ever; reported as an empty answer it becomes "you have
+ * not chosen a currency", which draws a picker whose write cannot land.
+ *
+ * PostgREST answers an unknown column in a select list with PGRST204 or a 400
+ * naming it, and Postgres itself with 42703 (undefined_column). The code is the
+ * reliable half; the message catches the deployment where it arrives without
+ * one.
+ */
+export function isMissingColumn(e: WriteError | null | undefined): boolean {
+  const code = typeof e?.code === 'string' ? e.code.trim() : '';
+  if (code === '42703' || code === 'PGRST204') return true;
+  const msg = typeof e?.message === 'string' ? e.message.toLowerCase() : '';
+  return msg.includes('does not exist') && msg.includes('column');
+}
+
+/**
+ * The same three answers for the COACH's route, and a different first one.
+ *
+ * `classifySetCurrencyError` reports a missing function as 'unavailable',
+ * whose sentence ends "Your gym owner can still set one in the gym settings."
+ * That is true for a coach in a personal tenant and it is false — and unkind —
+ * for the coach this route exists for, who has no gym and no owner. So the
+ * same fact gets its own outcome here, with a sentence that names the deploy
+ * step and nobody else.
+ *
+ * The order is `isMissingFunction` first, for the reason spelled out above it:
+ * a missing function IS a refusal by every rule `classifyWrite` knows, so
+ * asking `classifyWrite` first reports an unapplied migration as the coach's
+ * currency having been declined.
+ */
+export function classifySetCoachCurrencyError(e: WriteError | null | undefined): SetCurrencyOutcome {
+  if (!e) return 'refused';
+  if (isMissingFunction(e)) return 'no-column';
   return classifyWrite(e, 1) === 'refused' ? 'refused' : 'unsent';
 }

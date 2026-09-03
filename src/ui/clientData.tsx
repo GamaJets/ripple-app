@@ -36,6 +36,7 @@ import { readCoachingMode, type CoachingMode, type Goal, type Diet } from '../li
 import type { Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
+import { isDeviceAvatar } from '../lib/avatarImage';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { registerFlush } from '../lib/offlineQueue';
@@ -486,7 +487,14 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // `count: 'exact'` makes the row count the answer instead.
         try {
           const [{ error: pErr, count: pCount }, { error: cErr, count: cCount }] = await Promise.all([
-            supabase.from('profiles').update({ full_name: name, avatar: photo }, { count: 'exact' }).eq('id', sbUid),
+            // `avatar` is a URL other accounts fetch, or nothing. It used to be
+            // whatever the picker handed back, which on a phone is a path inside
+            // THIS handset — the coach then read that path out of a shared row
+            // and drew a blank circle, and the member, whose own device could
+            // open its own file, had no way to know. src/ui/avatarUpload.ts is
+            // where a photo becomes a URL now; this is the second lock on the
+            // door, and it also clears the device paths already stored.
+            supabase.from('profiles').update({ full_name: name, avatar: isDeviceAvatar(photo) ? null : photo }, { count: 'exact' }).eq('id', sbUid),
             supabase.from('clients').update({
               dob: dob || null,
               height_cm: heightCm,

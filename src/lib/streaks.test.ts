@@ -19,7 +19,7 @@
 // invariant on each: a member who trained on N consecutive LOCAL calendar days
 // has a streak of N. In UTC, Dubai, Kiritimati and Midway that is a plain
 // restatement; in Auckland and Los Angeles it lands on the transition twice.
-import { currentStreak, currentStreakFrozen, streakRisk, activeDays, longestStreak } from './streaks';
+import { currentStreak, currentStreakFrozen, shownStreak, freezeBudget, streakRisk, activeDays, longestStreak } from './streaks';
 import type { WorkoutEntry } from './mockData';
 
 const errors: string[] = [];
@@ -146,6 +146,38 @@ const runEndingAt = (end: Date, n: number): WorkoutEntry[] => {
   const log = runEndingAt(today, 9);
   eq(longestStreak(log), 9, 'nine consecutive days is a longest run of nine');
   eq(currentStreak(log, today.getTime()), 9, 'and the current streak agrees with it');
+}
+
+/* ── one streak figure, not two ──────────────────────────────────────────── */
+//
+// Home showed the frozen streak in the ring and the raw one in the banner four
+// inches above it, and the raw one was what the Milestone Card exported to
+// Instagram, what the Activity feed showed and what the Weekly Report handed to
+// the model. `shownStreak` is the single answer every one of those now asks for.
+
+{
+  const today = middayOn(2026, 5, 15);
+  // Eleven active days, one missed day inside them, so there is a freeze in the
+  // bank (one per ten active days) and something for it to bridge.
+  const log = [
+    ...runEndingAt(new Date(2026, 5, 13, 12, 0, 0, 0), 11),
+    entryAt(today),
+  ];
+  const raw = currentStreak(log, today.getTime());
+  const shown = shownStreak(log, today.getTime());
+  ok(shown > raw, 'the freeze the app granted is reflected in the figure the member is shown');
+  eq(shown, currentStreakFrozen(log, freezeBudget(log), today.getTime()).streak,
+    'and it is exactly the frozen walk over the budget the log earned — no second opinion about either');
+}
+
+{
+  // No freeze earned yet: the two answers must agree, or every unfrozen member
+  // would see a different number for no reason.
+  const today = middayOn(2026, 5, 15);
+  const log = runEndingAt(today, 3);
+  eq(shownStreak(log, today.getTime()), currentStreak(log, today.getTime()),
+    'with nothing to bridge the shown streak is the plain chain');
+  eq(shownStreak([], today.getTime()), 0, 'and an empty log is zero, not a crash');
 }
 
 if (errors.length) { errors.forEach((e) => console.error(e)); console.error(`streaks: ${errors.length} failure(s)`); process.exit(1); }

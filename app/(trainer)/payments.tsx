@@ -230,7 +230,7 @@
 // rather than being given a price with a unit invented for it.
 import { useState, useEffect, useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -238,6 +238,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
+import { payoutStage, canOnboard } from '../../src/lib/payoutAccount';
 import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, adjustPackCredit, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
 // A chargeback is the one thing on this screen with a clock on it. See
 // src/lib/disputes.ts: the deadline is the content, a missing deadline is its
@@ -254,7 +255,7 @@ import {
   VALIDITY_NOT_RETROACTIVE, NO_VALIDITY_IS_FOREVER, EXPIRY_IS_NOT_A_REFUND,
 } from '../../src/lib/packExpiry';
 import { packageEditBlocker, isReprice, repriceNote } from '../../src/lib/packageEdit';
-import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, endSubscriptionNow, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
+import { fetchMySubscribers, fetchMySubscriptionPayments, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, endSubscriptionNow, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import {
   normaliseCode, promoBlocker, promoState, promoStateLabel, promoUseLine,
   PROMO_IS_A_PERCENTAGE, PROMO_IS_TYPED_AT_CHECKOUT, PROMO_LIVES_AT_STRIPE, PROMO_WITHDRAW_IS_FORWARD_ONLY,
@@ -269,6 +270,8 @@ import {
   type Refundable,
 } from '../../src/lib/refunds';
 import { subState, unsettledNote, canSwitchCancel } from '../../src/lib/subscriptionScope';
+import { fetchMyCurrency } from '../../src/lib/myCurrency';
+import { currencyFromNote, myCurrencyLine, type CurrencyFrom, type MyCurrencyGap } from '../../src/lib/currencySource';
 import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, minorMoney, currencyDecimals, readMinorAmount, majorFromMinor, feeMismatches, type Pot, type TakenRow } from '../../src/lib/coachMoney';
 // Deliberately no `readNumber` on this screen. It is the house reader for a
 // typed figure and it is right for a load or a distance, where leniency costs
@@ -383,6 +386,14 @@ export default function TrainerPayments() {
   const t = useTheme();
   const router = useRouter();
   const [conn, setConn] = useState<ConnectStatus | null>(null);
+  // The other half of `conn`, and the reason this screen used to lie about
+  // somebody's payout account. `fetchMyConnect` answers null for "could not
+  // read" and a zeroed row for "no account" — its own comment says the caller
+  // renders those differently — but `conn` is initialised to null too, so the
+  // value alone cannot tell a failed read from a read that has not happened
+  // from an account that does not exist. The status is held beside it and the
+  // pair is resolved by `payoutStage`.
+  const [connRead, setConnRead] = useState<LoadStatus>('loading');
   // null is not []. [] is a trainer who sells nothing; null is a price list we
   // could not read, and telling someone they have no packages when they do is
   // how a duplicate price list gets built.
@@ -402,8 +413,24 @@ export default function TrainerPayments() {
   // here means the gym has not set one, and a price is not offered until it
   // has — a package priced in a currency nobody chose is a wrong number in
   // front of every client who ever sees it.
+  //
+  // Read through `fetchMyCurrency`, not `myTenantCurrency`. The gym is still
+  // the authority wherever there is one; the difference is a coach who has NO
+  // gym, whose currency lives on `trainers.currency` (part 940) and who could
+  // otherwise never price a package at all — Add Package was disabled for them
+  // for ever, under a sentence naming a gym owner who does not exist.
+  //
+  // `gap` rather than an error string, because the six causes are six
+  // different sentences and only one of them is anybody's setting: see
+  // src/lib/currencySource.ts.
   const [currency, setCurrency] = useState<string | null>(null);
-  const [currencyErr, setCurrencyErr] = useState<string | null>(null);
+  const [currencyGap, setCurrencyGap] = useState<MyCurrencyGap | null>(null);
+  // Where the code came from, kept beside it. The two sources behave
+  // differently and the coach can only act on one: a gym's currency changes
+  // when its owner changes it, and their own never changes at all. A price
+  // field labelled with three letters and no account of where they came from
+  // is the thing that let one coach be denominated by a gym they had left.
+  const [currencyFrom, setCurrencyFrom] = useState<CurrencyFrom | null>(null);
   // Who is paying this coach every month. 'ready' with nothing means nobody has
   // subscribed; 'error' with nothing means we could not find out, and those are
   // not the same fact about somebody's income.
@@ -467,10 +494,10 @@ export default function TrainerPayments() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [c, p, s, cur, b, r, pr, dp] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), myTenantCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes(), fetchMyDisputes()]);
-    setConn(c); setPkgs(p); setPkgErr(p === null);
+    const [c, p, s, cur, b, r, pr, dp] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), fetchMyCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes(), fetchMyDisputes()]);
+    setConn(c); setConnRead(c === null ? 'error' : 'ready'); setPkgs(p); setPkgErr(p === null);
     setSubs(s.rows); setSubsStatus(s.status);
-    setCurrency(cur.currency); setCurrencyErr(cur.error);
+    setCurrency(cur.currency); setCurrencyGap(cur.gap); setCurrencyFrom(cur.from);
     setBuys(b.rows); setBuysStatus(b.status);
     setPays(r.rows); setPaysStatus(r.status);
     setPromos(pr);
@@ -501,9 +528,11 @@ export default function TrainerPayments() {
     // Nothing is priced in a currency nobody chose. There is no sensible
     // default in a white-label product — see tenants.currency, part 99.
     if (!currency) {
-      Alert.alert('No currency set', currencyErr
-        ? 'We could not read what your gym charges in, so a price would have no unit. Try again in a moment.'
-        : 'Your gym has not set a currency yet, so there is nothing to price this in. An owner sets it in the gym settings.');
+      // One sentence per cause, and the causes are not interchangeable: a read
+      // that failed is fixed by trying again, a gym with no currency is fixed
+      // by its owner, and a coach with no gym fixes it themselves in Settings.
+      // All three used to arrive as the middle one.
+      Alert.alert('No currency set', myCurrencyLine(currencyGap ?? 'unreadable', 'there is nothing to price this in'));
       return;
     }
     // A recurring package is never also a session pack — the constraint in part
@@ -1044,7 +1073,18 @@ export default function TrainerPayments() {
     load();
   } }]);
 
-  const active = conn?.charges_enabled;
+  /**
+   * Whether this coach can be paid — and, separately, whether we know.
+   *
+   * Was `const active = conn?.charges_enabled;`, and everything below branched
+   * on `!active`. That is true of a live account whose read failed, and of one
+   * that has not been read yet, so a coach in a lift was shown "Set Up Payouts"
+   * with a button under it that starts a SECOND Stripe onboarding — a duplicate
+   * account, with their passport and their bank details in it, that nobody can
+   * pay them through. src/lib/payoutAccount.ts keeps the five states apart.
+   */
+  const stage = payoutStage(conn, connRead);
+  const active = stage === 'active';
 
   /**
    * Whose money this is, in one word, read off Stripe rather than assumed.
@@ -1298,19 +1338,34 @@ export default function TrainerPayments() {
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (
           <>
             {/* ── payout status: the one decision on this screen ──────────── */}
-            {!active ? (
+            {/* Three renders, not two. The middle one is new: a read that did
+                not come back is not a coach without an account, and the button
+                is what makes the difference matter — `onboard` opens Stripe and
+                a second onboarding under the same coach is a second live
+                account. `canOnboard` is the gate and it is false here on
+                purpose; the only control offered is the one that asks again. */}
+            {stage === 'unreadable' ? (
+              <View style={{ marginTop: sp.xl }}>
+                <Notice tone={t.crit} kicker="Payouts" title="Could not read your payout account"
+                  note="This is not a statement that you have none — if you had set one up it is still set up, and any client payment already on its way is unaffected. Nothing about setting one up is offered here until we can see what you already have.">
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta label={loading ? 'Checking…' : 'Try Again'} wide disabled={loading} onPress={() => { void load(); }} />
+                  </View>
+                </Notice>
+              </View>
+            ) : !active ? (
               <View style={{ marginTop: sp.xl }}>
                 {/* The arrangement is added to the NOTE rather than dropped in
                     as a second Text, because the kit reads kicker, title and
                     note out as one statement and a stray line beside them is
                     skipped by a screen reader. It is only added once Stripe has
                     said what the account is — see `kind`. */}
-                <Notice tone={t.warn} kicker="Payouts" title="Set Up Payouts"
-                  note={conn?.stripe_account_id
+                <Notice tone={t.warn} kicker="Payouts" title={stage === 'started' ? 'Finish Setting Up Payouts' : 'Set Up Payouts'}
+                  note={stage === 'started'
                     ? 'Finish verifying with Stripe to go live.' + (kind === 'standard' ? ' Payments land in your own Stripe account, and its fees, refunds and chargebacks come out of your balance.' : '')
                     : 'Connect a payout account with Stripe.'}>
                   <View style={{ marginTop: sp.lg }}>
-                    <Cta label={busy ? 'Opening…' : (conn?.stripe_account_id ? 'Continue Setup' : 'Set Up Payouts')} wide disabled={busy} onPress={onboard} />
+                    <Cta label={busy ? 'Opening…' : (stage === 'started' ? 'Continue Setup' : 'Set Up Payouts')} wide disabled={busy || !canOnboard(stage)} onPress={onboard} />
                   </View>
                 </Notice>
               </View>
@@ -2127,17 +2182,19 @@ export default function TrainerPayments() {
                   onPick={(k: BillingInterval | null) => { setInterval(k); if (k) setSessions(''); }} />
               </View>
 
-              {/* The gym's currency, stated rather than picked — and dashed
+              {/* The coach's currency, stated rather than picked — and dashed
                   rather than guessed. Repple is white-labelled, so there is no
                   currency this screen could assume that is not simply wrong for
-                  half the gyms running it. Null is a missing setting an owner
-                  fixes, not a value to fill in here. */}
+                  half the people running it.
+                  Six causes, six sentences, and only ONE of them is a gym
+                  owner's to fix. This branch used to offer two, and the second
+                  of them — "an owner sets it in the gym settings" — was shown
+                  to a coach with no gym and nobody to ask, which is what made
+                  Add Package permanently dead for the self-employed. */}
               {!currency ? (
                 <View style={{ marginTop: sp.md }}>
                   <Flag tone={t.warn}>
-                    {currencyErr
-                      ? 'We could not read what your gym charges in, so a price here would have no unit. Nothing can go on sale until we can.'
-                      : 'Your gym has not set a currency yet, so a price here would have no unit. An owner sets it in the gym settings, then packages can go on sale.'}
+                    {myCurrencyLine(currencyGap ?? 'unreadable', 'a price here would have no unit and nothing can go on sale')}
                   </Flag>
                 </View>
               ) : null}
@@ -2146,6 +2203,16 @@ export default function TrainerPayments() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Price ({fig(currency)})</Text>
                   <TextInput value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="500" placeholderTextColor={t.ink3} style={input} />
+                  {/* Which of the two places these three letters came from,
+                      said out loud. It is the answer to the question a coach
+                      cannot otherwise ask of this field — and the disagreement
+                      that existed for a year (a gym's currency on the invoices
+                      of a coach who had left it) was invisible precisely
+                      because every screen printed the code and none of them
+                      printed its source. */}
+                  {currencyFromNote(currencyFrom, currency) ? (
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: 5 }}>{currencyFromNote(currencyFrom, currency)}</Text>
+                  ) : null}
                 </View>
                 {/* Not offered at all on a recurring package. `sessions` is a
                     balance granted once and drawn down; nothing renews it, so
@@ -2217,97 +2284,111 @@ export default function TrainerPayments() {
           A sheet rather than an alert because an alert cannot hold a box, the
           currency beside the box, and the exact figure read back — and without
           those three a typed amount is a figure nobody checked. */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the amount to give back is typed halfway down it.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!refunding} animationType="slide" transparent onRequestClose={() => setRefunding(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRefunding(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
-          {/* The heading names WHICH KIND of charge, because the two are
-              adjacent acts on the same screen and a coach who meant to give
-              back last month's renewal must not be looking at a sheet that
-              says sale. */}
-          <Text style={{ ...ty.head, color: t.ink }}>{refunding?.kind === 'renewal' ? 'Refund This Renewal' : 'Refund This Sale'}</Text>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {/* What was charged and what is still standing. Both, because the
-                second is the number the amount below is judged against and a
-                coach looking at a partly refunded charge would otherwise work
-                from the first. */}
-            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-              {refunding?.who || 'This client'}
-              {refunding && minorMoney(refunding.rule.amountCents, refunding.rule.currency) ? ` — ${minorMoney(refunding.rule.amountCents, refunding.rule.currency)} was charged` : ''}
-            </Text>
-            {refunding?.what ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refunding.what}</Text>
-            ) : null}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-              {refundLeftMoney
-                ? `${refundLeftMoney} of it can still be given back.`
-                : `What is left on this ${refunding?.kind === 'renewal' ? 'renewal' : 'sale'} can be given back.`}
-            </Text>
-
-            <View style={{ marginTop: sp.lg }}>
-              <Pick label="How much"
-                options={[{ key: 'whole', label: 'All Of It' }, { key: 'part', label: 'Part Of It' }]}
-                chosen={refundWhole ? 'whole' : 'part'}
-                onPick={(k: string) => { setRefundWhole(k === 'whole'); setRefundAmt(''); }} />
-            </View>
-
-            {!refundWhole ? (
-              <>
-                <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Amount</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  {/* The SALE's own currency, shown and not editable. A refund
-                      is made in the money the charge was made in and in no
-                      other, and there is no currency this box could offer that
-                      would not be a different amount of money. */}
-                  <Text style={{ ...ty.label, color: t.ink3 }}>{(refunding?.rule.currency || '').toUpperCase()}</Text>
-                  {/* The keyboard follows the currency. A yen has no minor unit,
-                      so a decimal point on that pad is a key that can only
-                      produce a slip; everything else can carry a fraction and
-                      the pad has to have the point on it. */}
-                  <TextInput value={refundAmt} onChangeText={setRefundAmt}
-                    keyboardType={refundDp === 0 ? 'number-pad' : 'decimal-pad'}
-                    placeholder={refundDp === 0 ? '0' : '0.' + '0'.repeat(refundDp ?? 2)} placeholderTextColor={t.ink3}
-                    accessibilityLabel={`Amount to refund, in ${(refunding?.rule.currency || '').toUpperCase()}`}
-                    style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
-                </View>
-                {/* Read back before it is sent. The coach checks the figure this
-                    app understood, not the characters they typed. */}
-                {refundMoney ? (
-                  <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{refundMoney} would go back.</Text>
-                ) : null}
-                {refundProblem ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{refundProblem}</Flag> : null}
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{REFUND_PART_IS_EXACT}</Text>
-              </>
-            ) : null}
-
-            {/* Everything a refund does not do, said before the tap rather than
-                discovered afterwards. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{REFUND_DOES_NOT}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFUND_FEES_NOTE}</Text>
-            {/* Whose balance it leaves, read off THIS CHARGE. A coach who has
-                since moved to direct charges still has older sales and older
-                renewals on the platform, and the two sentences say opposite
-                things. */}
-            {refunding ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                {refundBalanceNote(accountForObject({ stripe_account_id: refunding.account }) ? 'direct' : 'destination')}
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRefunding(null)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+            {/* The heading names WHICH KIND of charge, because the two are
+                adjacent acts on the same screen and a coach who meant to give
+                back last month's renewal must not be looking at a sheet that
+                says sale. */}
+            <Text style={{ ...ty.head, color: t.ink }}>{refunding?.kind === 'renewal' ? 'Refund This Renewal' : 'Refund This Sale'}</Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* What was charged and what is still standing. Both, because the
+                  second is the number the amount below is judged against and a
+                  coach looking at a partly refunded charge would otherwise work
+                  from the first. */}
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
+                {refunding?.who || 'This client'}
+                {refunding && minorMoney(refunding.rule.amountCents, refunding.rule.currency) ? ` — ${minorMoney(refunding.rule.amountCents, refunding.rule.currency)} was charged` : ''}
               </Text>
-            ) : null}
-            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{REFUND_IS_FINAL}</Flag>
-          </ScrollView>
-          <View style={{ height: sp.md }} />
-          <Cta wide
-            disabled={!refundReady || refundBusy === refunding?.id}
-            label={refundBusy === refunding?.id ? 'Refunding…' : refundWhole ? 'Refund What Is Left' : 'Refund This Amount'}
-            onPress={() => {
-              if (!refunding || !refundReady) return;
-              // Whole sends NO amount at all, so the server resolves it from the
-              // row rather than from anything this screen believes about it.
-              if (refundWhole) confirmRefund(refunding, undefined, refundLeftMoney, false);
-              else if (refundCents != null) confirmRefund(refunding, refundCents, refundMoney, refundCents < refundLeft);
-            }} />
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setRefunding(null)} />
-        </View>
+              {refunding?.what ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refunding.what}</Text>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                {refundLeftMoney
+                  ? `${refundLeftMoney} of it can still be given back.`
+                  : `What is left on this ${refunding?.kind === 'renewal' ? 'renewal' : 'sale'} can be given back.`}
+              </Text>
+
+              <View style={{ marginTop: sp.lg }}>
+                <Pick label="How much"
+                  options={[{ key: 'whole', label: 'All Of It' }, { key: 'part', label: 'Part Of It' }]}
+                  chosen={refundWhole ? 'whole' : 'part'}
+                  onPick={(k: string) => { setRefundWhole(k === 'whole'); setRefundAmt(''); }} />
+              </View>
+
+              {!refundWhole ? (
+                <>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Amount</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    {/* The SALE's own currency, shown and not editable. A refund
+                        is made in the money the charge was made in and in no
+                        other, and there is no currency this box could offer that
+                        would not be a different amount of money. */}
+                    <Text style={{ ...ty.label, color: t.ink3 }}>{(refunding?.rule.currency || '').toUpperCase()}</Text>
+                    {/* The keyboard follows the currency. A yen has no minor unit,
+                        so a decimal point on that pad is a key that can only
+                        produce a slip; everything else can carry a fraction and
+                        the pad has to have the point on it. */}
+                    <TextInput value={refundAmt} onChangeText={setRefundAmt}
+                      keyboardType={refundDp === 0 ? 'number-pad' : 'decimal-pad'}
+                      placeholder={refundDp === 0 ? '0' : '0.' + '0'.repeat(refundDp ?? 2)} placeholderTextColor={t.ink3}
+                      accessibilityLabel={`Amount to refund, in ${(refunding?.rule.currency || '').toUpperCase()}`}
+                      style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+                  </View>
+                  {/* Read back before it is sent. The coach checks the figure this
+                      app understood, not the characters they typed. */}
+                  {refundMoney ? (
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{refundMoney} would go back.</Text>
+                  ) : null}
+                  {refundProblem ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{refundProblem}</Flag> : null}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{REFUND_PART_IS_EXACT}</Text>
+                </>
+              ) : null}
+
+              {/* Everything a refund does not do, said before the tap rather than
+                  discovered afterwards. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{REFUND_DOES_NOT}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{REFUND_FEES_NOTE}</Text>
+              {/* Whose balance it leaves, read off THIS CHARGE. A coach who has
+                  since moved to direct charges still has older sales and older
+                  renewals on the platform, and the two sentences say opposite
+                  things. */}
+              {refunding ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {refundBalanceNote(accountForObject({ stripe_account_id: refunding.account }) ? 'direct' : 'destination')}
+                </Text>
+              ) : null}
+              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{REFUND_IS_FINAL}</Flag>
+            </ScrollView>
+            <View style={{ height: sp.md }} />
+            <Cta wide
+              disabled={!refundReady || refundBusy === refunding?.id}
+              label={refundBusy === refunding?.id ? 'Refunding…' : refundWhole ? 'Refund What Is Left' : 'Refund This Amount'}
+              onPress={() => {
+                if (!refunding || !refundReady) return;
+                // Whole sends NO amount at all, so the server resolves it from the
+                // row rather than from anything this screen believes about it.
+                if (refundWhole) confirmRefund(refunding, undefined, refundLeftMoney, false);
+                else if (refundCents != null) confirmRefund(refunding, refundCents, refundMoney, refundCents < refundLeft);
+              }} />
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setRefunding(null)} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── change a package's name or price ────────────────────────────────
@@ -2318,56 +2399,70 @@ export default function TrainerPayments() {
           new rate has NOT, because connect-checkout inlines the price into each
           Stripe subscription at checkout and Stripe bills that one forever
           after. Telling them quietly would be worse than not offering it. */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: a package's name and its price are both typed below the fold.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!editing} animationType="slide" transparent onRequestClose={() => setEditing(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Edit This Package</Text>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Name</Text>
-            <TextInput value={editName} onChangeText={(v) => { setEditName(v); if (editErr) setEditErr(null); }}
-              placeholder="What your client sees" placeholderTextColor={t.ink3}
-              accessibilityLabel="Package name"
-              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+            <Text style={{ ...ty.head, color: t.ink }}>Edit This Package</Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md, marginBottom: sp.sm }}>Name</Text>
+              <TextInput value={editName} onChangeText={(v) => { setEditName(v); if (editErr) setEditErr(null); }}
+                placeholder="What your client sees" placeholderTextColor={t.ink3}
+                accessibilityLabel="Package name"
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Price</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-              {/* The package's OWN currency, shown and not editable. It is a
-                  lookup that older `client_purchases` rows still fall back to
-                  — part 132 added their currency column and rows before it are
-                  null — so changing it here would redenominate sales that have
-                  already happened. */}
-              <Text style={{ ...ty.label, color: t.ink3 }}>{editing?.currency ? editing.currency.toUpperCase() : ''}</Text>
-              <TextInput value={editPrice} onChangeText={(v) => { setEditPrice(v); if (editErr) setEditErr(null); }}
-                keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={t.ink3}
-                accessibilityLabel={`Price in ${editing?.currency ? editing.currency.toUpperCase() : 'this package’s currency'}`}
-                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
-            </View>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              A package keeps the currency it was created in for its whole life. To sell in another one, withdraw this and create a new package.
-            </Text>
-
-            {/* Said only when the price has actually moved. A coach warned
-                about their subscribers every time they correct a typo stops
-                reading the warning, and this is the warning that matters. */}
-            {editing && isReprice(editPatch() ?? {}, editing.price_cents) ? (
-              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{repriceNote(subCount)}</Flag>
-            ) : null}
-
-            {editing && (editing.sessions != null || editing.billing_interval) ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                {editing.billing_interval
-                  ? 'How often this charges cannot be changed here — a running subscription bills on the schedule Stripe holds, and this screen would only be describing a different one.'
-                  : 'How many sessions this grants cannot be changed here. Packs already bought keep the number they were sold with, so changing it would only alter what you believe you sold.'}
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Price</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                {/* The package's OWN currency, shown and not editable. It is a
+                    lookup that older `client_purchases` rows still fall back to
+                    — part 132 added their currency column and rows before it are
+                    null — so changing it here would redenominate sales that have
+                    already happened. */}
+                <Text style={{ ...ty.label, color: t.ink3 }}>{editing?.currency ? editing.currency.toUpperCase() : ''}</Text>
+                <TextInput value={editPrice} onChangeText={(v) => { setEditPrice(v); if (editErr) setEditErr(null); }}
+                  keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={t.ink3}
+                  accessibilityLabel={`Price in ${editing?.currency ? editing.currency.toUpperCase() : 'this package’s currency'}`}
+                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                A package keeps the currency it was created in for its whole life. To sell in another one, withdraw this and create a new package.
               </Text>
-            ) : null}
 
-            {editErr ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{editErr}</Flag> : null}
-          </ScrollView>
-          <View style={{ height: sp.md }} />
-          <Cta wide disabled={editBusy} label={editBusy ? 'Saving…' : 'Save Changes'} onPress={() => { void saveEdit(); }} />
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setEditing(null)} />
-        </View>
+              {/* Said only when the price has actually moved. A coach warned
+                  about their subscribers every time they correct a typo stops
+                  reading the warning, and this is the warning that matters. */}
+              {editing && isReprice(editPatch() ?? {}, editing.price_cents) ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>{repriceNote(subCount)}</Flag>
+              ) : null}
+
+              {editing && (editing.sessions != null || editing.billing_interval) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {editing.billing_interval
+                    ? 'How often this charges cannot be changed here — a running subscription bills on the schedule Stripe holds, and this screen would only be describing a different one.'
+                    : 'How many sessions this grants cannot be changed here. Packs already bought keep the number they were sold with, so changing it would only alter what you believe you sold.'}
+                </Text>
+              ) : null}
+
+              {editErr ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{editErr}</Flag> : null}
+            </ScrollView>
+            <View style={{ height: sp.md }} />
+            <Cta wide disabled={editBusy} label={editBusy ? 'Saving…' : 'Save Changes'} onPress={() => { void saveEdit(); }} />
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setEditing(null)} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

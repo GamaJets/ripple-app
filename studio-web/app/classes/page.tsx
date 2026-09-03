@@ -127,10 +127,28 @@ interface Trainer { id: string; name: string | null }
  * "the classes with no place recorded" is a real bucket a gym with two rooms and
  * some unlabelled Tuesdays needs to look at, and it must not collide with a
  * label somebody actually used. `branchSpan` only ever collects TRIMMED,
- * NON-EMPTY labels, so a control character is unreachable from the data.
+ * NON-EMPTY labels, so anything `String.prototype.trim` strips is unreachable
+ * from the data — which is what the leading SPACE below is doing.
+ *
+ * ── it was U+0000, and that emptied the screen ────────────────────────────
+ *
+ * A NUL is unreachable from the data too, and it does not survive HTML. This
+ * value goes out as an `<option value>` and comes back through
+ * `e.target.value`, and the HTML tokenizer replaces U+0000 in an attribute
+ * value with U+FFFD — a rule in the parsing spec, not a browser quirk. So the
+ * string this file serialised and the string the parser handed back were not
+ * equal, `atPlace` matched nothing, and picking "classes with no place
+ * recorded" at a gym that has some emptied every table on the screen: no
+ * error, nothing to reset but a reload. `load()` below calls a filter that
+ * empties every table "the one sentence this page must never say by accident".
+ *
+ * A space is stripped by `trim` exactly as a NUL is, so the collision argument
+ * is unchanged, and an attribute value inside quotes preserves it byte for
+ * byte. Written as the escape so that no editor, formatter or reviewer can
+ * quietly lose it.
  */
 const ALL_PLACES = '';
-const NO_PLACE = '\u0000unlabelled';
+const NO_PLACE = '\u0020unlabelled';
 
 /** Whether a row belongs in the current selection. `ALL_PLACES` keeps
  *  everything; `NO_PLACE` keeps exactly the rows `branchSpan` counts as

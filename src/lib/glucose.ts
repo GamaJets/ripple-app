@@ -56,6 +56,14 @@ export function plausible(mmol: unknown): mmol is number {
 
 /** One reading, as the app holds it. */
 export interface GlucoseReading {
+  /** The row's own id, or null for a reading this app is holding that no row
+   *  exists for yet (an import that has not been read back, a queued write).
+   *  It is here because without it a screen cannot ask for a reading to be
+   *  REMOVED: `useGlucose().remove` takes an id, has been written and tested
+   *  since the table landed, and could not be called from anywhere — so a
+   *  mistyped 15.5 for 5.5 sat in the fortnight average, the in-range
+   *  percentage and the coach's copy for ever. */
+  id: string | null;
   /** ISO timestamp the sample was taken. */
   at: string;
   /** Always mmol/L. */
@@ -133,6 +141,10 @@ export function parseHealthSamples(rows: unknown): GlucoseReading[] {
       seen.add(id);
     }
     out.push({
+      // A sample read out of the health store has no row of ours yet. Null
+      // rather than the store's own uuid: `id` is this app's row id, and it is
+      // what `remove` deletes by.
+      id: null,
       at,
       // One decimal, because that is the column's scale. Rounding here rather
       // than letting Postgres do it keeps the value the app charted and the

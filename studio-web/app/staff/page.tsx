@@ -49,6 +49,7 @@ import {
 } from '@lib/gymRota';
 import { money } from '@lib/gymRecord';
 import { readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { wrote, refused, sayText, sayTone, type Said } from '@lib/consoleSay';
 import { fetchClientActivity, DRIFT_LABEL, DEFAULT_WINDOWS, type Drift } from '@lib/clientDrift';
@@ -1571,12 +1572,30 @@ async function fetchTrainers(tenantId: string): Promise<StaffTrainer[]> {
  *
  * `profiles_owner_tenant_r` is what makes this readable and is also its limit:
  * an owner sees the profiles in their own tenant and no others.
+ *
+ * ── Why this pages ────────────────────────────────────────────────────────
+ *
+ * It was a bare `.select()` with no `capLimit()`, no `assertWhole` and no
+ * `readAll`, and `profiles` holds every MEMBER of the gym, not just its staff.
+ * PostgREST answers an unbounded request with a thousand rows and says nothing,
+ * so past a thousand members this roster and the "A member of this gym…" picker
+ * beside it quietly omitted people — and a receptionist who cannot be found is
+ * a receptionist who cannot be given access. `fetchClients` two functions down
+ * had already been paged for exactly this and left its argument written out.
+ *
+ * `created_at` ties on a bulk import and `full_name` ties on two people with
+ * the same name, so the order is closed on `id`.
  */
 async function fetchPeople(tenantId: string): Promise<Person[]> {
-  const { data, error } = await supabase
-    .from('profiles').select('id, full_name, role, created_at').eq('tenant_id', tenantId);
-  if (error) throw error;
-  return (data ?? []).map((p: any) => ({
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('profiles').select('id, full_name, role, created_at')
+      .eq('tenant_id', tenantId)
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the people attached to this gym',
+  );
+  return rows.map((p: any) => ({
     id: p.id,
     name: (p.full_name || '').trim() || null,
     // Anything the column's own constraint does not permit is treated as no
@@ -1601,15 +1620,24 @@ async function fetchPeople(tenantId: string): Promise<Person[]> {
  * the shape part 184 uses for the financial record and part 711 takes for the
  * same reason — an access log that blocked an erasure would be worse than one
  * that survives it half-anonymised.
+ *
+ * Paged for the same reason `fetchPeople` is. Unbounded, this stopped at a
+ * thousand grants and "How they got here" silently blanked for everybody past
+ * them — an access log that goes short without saying so is the one record on
+ * this screen whose whole purpose is being complete.
  */
 async function fetchGrants(tenantId: string): Promise<StaffGrant[]> {
-  const { data, error } = await supabase
-    .from('staff_grants')
-    .select('id, subject_id, subject_name, actor_id, actor_name, role, granted_at, revoked_at, revoked_by, revoked_by_name, note')
-    .eq('tenant_id', tenantId)
-    .order('granted_at', { ascending: false });
-  if (error) throw error;
-  return (data ?? [])
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('staff_grants')
+      .select('id, subject_id, subject_name, actor_id, actor_name, role, granted_at, revoked_at, revoked_by, revoked_by_name, note')
+      .eq('tenant_id', tenantId)
+      .order('granted_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+    'the record of who put whom on this staff',
+  );
+  return rows
     .map((r: any) => grantFromRow(r))
     .filter((g): g is StaffGrant => g !== null);
 }
@@ -1688,22 +1716,34 @@ async function fetchClasses(tenantId: string, fromIso: string, toIso: string): P
   return demand.filter((d) => d.kind === 'class');
 }
 
-/** Names and join dates from `profiles`, where they live. Throws on a failed
- *  read rather than returning an empty map — an unnamed staff list on a payroll
- *  screen is not a cosmetic problem. */
+/**
+ * Names and join dates from `profiles`, where they live. Throws on a failed
+ * read rather than returning an empty map — an unnamed staff list on a payroll
+ * screen is not a cosmetic problem.
+ *
+ * CHUNKED. It was one `.in('id', unique)` over a list built from `fetchClients`,
+ * which pages: past a thousand clients the lookup came back with the first
+ * thousand names and said nothing, so every client after them rendered
+ * nameless. A table of dashes does not look broken — it looks like a gym that
+ * never recorded who its members are. See src/lib/idLookup.ts.
+ */
 async function profilesFor(
   ids: (string | null | undefined)[],
 ): Promise<Map<string, { name: string | null; since: string | null }>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
   const out = new Map<string, { name: string | null; since: string | null }>();
-  if (!unique.length) return out;
-  const { data, error } = await supabase
-    .from('profiles').select('id, full_name, created_at').in('id', unique);
-  if (error) throw error;
-  for (const p of data ?? []) {
-    out.set((p as any).id, {
-      name: ((p as any).full_name || '').trim() || null,
-      since: (p as any).created_at ?? null,
+  const rows = await readByIds<any>(
+    ids,
+    (chunk, from, to) => supabase
+      .from('profiles').select('id, full_name, created_at')
+      .in('id', chunk)
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the names of the people on this staff',
+  );
+  for (const p of rows) {
+    out.set(p.id, {
+      name: ((p.full_name || '') as string).trim() || null,
+      since: p.created_at ?? null,
     });
   }
   return out;

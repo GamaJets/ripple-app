@@ -85,7 +85,9 @@ import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/t
 import { peerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { fmtRelativeDay } from '../../src/lib/format';
-import { attachmentNoun, unsentNote } from '../../src/lib/messageAttachments';
+import { attachmentNoun } from '../../src/lib/messageAttachments';
+import { atBottom } from '../../src/lib/readReceipt';
+import { useReadReceipt } from '../../src/ui/readReceipts';
 import {
   blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
   reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
@@ -179,7 +181,7 @@ export default function Messages() {
   const router = useRouter();
   const peer = useThreadPeerName('client', null);
   const head = peerHeading(peer, 'coach');
-  const { messages: msgs, send, status, unsent, cachedNote, hasOlder, loadingOlder, olderError, loadOlder, reload } = useThread(null, 'client');
+  const { messages: msgs, send, status, unsent, cachedNote, hasOlder, loadingOlder, olderError, loadOlder, reload, threadId } = useThread(null, 'client');
   // There is no realtime subscription on this thread, so a reply that arrived
   // while the member was looking at the screen appeared only if they sent
   // something themselves or left and came back. `reload` re-reads the newest
@@ -206,6 +208,17 @@ export default function Messages() {
   // and throws the reader back to the bottom of the thread they just stepped
   // out of — the newest messages, which is the half they were not reading.
   const heldPosition = useRef(false);
+  /**
+   * The end of the conversation is on screen.
+   *
+   * One of the four clauses of "what counts as read" (src/lib/readReceipt.ts):
+   * a thread scrolled to the top is not a thread whose newest message has been
+   * drawn. Measured from `onScroll` below, and true to begin with because the
+   * `onContentSizeChange` above scrolls a freshly loaded thread to its end —
+   * so the first render genuinely is at the bottom, and the first real scroll
+   * event corrects this the instant a finger moves.
+   */
+  const [atEnd, setAtEnd] = useState(true);
   // "your coach" rather than their name, and everywhere on this surface. A name
   // that could not be read renders as a dash, and a dash as the subject of
   // "— will not be able to send you messages" reads as the screen having broken
@@ -213,6 +226,17 @@ export default function Messages() {
   const OTHER = 'your coach';
   const blockNote = blockedComposerNote(safety.state, OTHER);
   const canSend = canSendInto(safety.state);
+  /**
+   * What each of this member's own bubbles is allowed to claim, and the write
+   * that tells their coach they have read theirs.
+   *
+   * `line` returns the failure sentences unchanged — they still come from
+   * `unsentNote`, which is why this screen no longer imports it directly — and
+   * adds the two states the report asked for: "Sent 09:41" once the row is on
+   * the server, and "· Read" once the coach's own watermark has passed it.
+   * The other person's bubbles keep their bare time.
+   */
+  const receipt = useReadReceipt({ threadId, role: 'client', messages: msgs, unsent, atEnd, them: OTHER });
 
   const attach = async (source: AttachSource) => {
     const { attachment, error } = await pickMessageAttachment(source);
@@ -347,6 +371,16 @@ export default function Messages() {
             if (heldPosition.current) { heldPosition.current = false; return; }
             scRef.current?.scrollToEnd({ animated: true });
           }}
+          // Whether the newest message is actually in front of the reader.
+          // Nothing is written from here: this only feeds the clause, and the
+          // decision, the debounce and the forward-only rule all live in
+          // src/lib/readReceipt.ts.
+          onScroll={(e) => setAtEnd(atBottom({
+            offsetY: e.nativeEvent.contentOffset.y,
+            viewport: e.nativeEvent.layoutMeasurement.height,
+            content: e.nativeEvent.contentSize.height,
+          }))}
+          scrollEventThrottle={64}
           keyboardShouldPersistTaps="handled">
           {/* ── the beginning of the conversation, when it is not on screen ──
               `useThread` reads newest-first at the row cap, so a long coaching
@@ -381,8 +415,10 @@ export default function Messages() {
             // Left unmarked it reads as delivered, which is the belief the send
             // path was fixed to stop creating. The stage says WHICH half went
             // wrong, because "the photo did not upload" is the actionable half.
+            // Only the MARK is decided here now; the sentence beside it comes
+            // from `receipt.line`, which reads the same `unsent` entry and adds
+            // the two states this screen never had.
             const stage = unsent[m.id];
-            const kind = m.local?.kind ?? (m.attachment.state === 'ok' ? m.attachment.attachment.kind : null);
             const hasMedia = m.attachment.state !== 'none' || !!m.local;
             return (
               // A long press on ANY bubble opens the report, and only a bubble
@@ -439,8 +475,13 @@ export default function Messages() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3, alignSelf: mine ? 'flex-end' : 'flex-start' }}>
                   {/* Status colours never colour text — the mark carries it. */}
                   {stage ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
+                  {/* One sentence, from one place. The failure wordings are
+                      still `unsentNote`'s — `deliveryLine` delegates them — and
+                      what is new is that a bubble the server HAS taken now says
+                      so ("Sent 09:41"), and says "· Read" once the coach's own
+                      watermark has passed it. */}
                   <Text style={{ ...ty.caption, color: t.ink3 }}>
-                    {stage ? unsentNote('your coach', stage, kind) : m.sending ? 'Sending…' : fmt(m.createdAt)}
+                    {receipt.line(m, fmt(m.createdAt))}
                   </Text>
                 </View>
               </Pressable>

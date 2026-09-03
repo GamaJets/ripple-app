@@ -56,6 +56,13 @@ import { capLimit, capped } from '../../src/lib/rowCap';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
+// The GYM's invitation, which is a different record from the coach's and had no
+// screen at all: src/lib/memberInvites.ts could read and redeem one and nothing
+// imported either function, so the email telling two hundred people to "sign up
+// with this exact address" ended here, on the screen the getting-started
+// checklist points at, with nothing about their gym on it.
+import { useGymInvites } from '../../src/ui/gymInvites';
+import { gymInviteCards, acceptedMessage, type GymInviteCard } from '../../src/lib/gymInvite';
 import { joinByCode } from '../../src/ui/joinCode';
 import { isPlausibleCode, normaliseCode, CODE_LENGTH } from '../../src/lib/joinCode';
 import { peekJoinCode, clearJoinCode } from '../../src/ui/pendingJoinCode';
@@ -116,6 +123,10 @@ export default function FindTrainer() {
   const router = useRouter();
   const cd = useClientData();
   const { received, acceptInvite, declineInvite, reload: reloadInvites } = useInvites();
+  const gym = useGymInvites();
+  // Which one is mid-accept, so the button says so and no second tap can fire a
+  // second redemption at the same row.
+  const [acceptingGym, setAcceptingGym] = useState<string | null>(null);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   // Three answers where there were two. `coaches: []` meant both "no trainer has
   // published a profile" and "we never got an answer from the server", and this
@@ -137,8 +148,8 @@ export default function FindTrainer() {
   // at the top of it are their own read. An invitation sent while this screen
   // was open appeared nowhere until the app was killed.
   const pull = usePullToRefresh(useCallback(() => {
-    setAttempt((n) => n + 1); reloadInvites(); cd.reload();
-  }, [reloadInvites, cd.reload]));
+    setAttempt((n) => n + 1); reloadInvites(); gym.reload(); cd.reload();
+  }, [reloadInvites, gym.reload, cd.reload]));
   const [sent, setSent] = useState<Record<string, boolean>>({});
   // Set only when the pending-requests read itself failed. Absence of a request
   // and an unreadable list of requests are different things: the first means
@@ -368,6 +379,47 @@ export default function FindTrainer() {
     Alert.alert('You are connected', (coachName || 'Your coach') + ' is now your ' + COACHED_MODE_SHORT[m].toLowerCase() + ' coach. Their plan, feedback and messaging are now on your app.', [{ text: 'Great' }]);
   };
 
+  // Every sentence on these cards is composed in src/lib/gymInvite.ts, where it
+  // is tested — including the two this screen would otherwise get wrong: a plan
+  // attached but unreadable is not "no plan", and a gym this account cannot yet
+  // read the name of is described rather than named.
+  const gymCards = useMemo(
+    () => gymInviteCards(gym.invites, { byTenant: gym.gymNames }),
+    [gym.invites, gym.gymNames],
+  );
+
+  /**
+   * Accept the gym's invitation.
+   *
+   * Nothing is said to have happened until the server returns the membership it
+   * opened — the hook returns that id and nothing else counts as a yes. The
+   * failure sentence comes from the reason the SQL raised, so "you had already
+   * accepted this" and "this has lapsed" stay two different answers, which is
+   * exactly what accept_member_invite went to the trouble of distinguishing.
+   */
+  const acceptGym = async (card: GymInviteCard) => {
+    const inv = gym.invites.find((i) => i.id === card.id) ?? null;
+    setAcceptingGym(card.id);
+    const r = await gym.accept(card.id);
+    setAcceptingGym(null);
+    if (!r.ok) {
+      Alert.alert('Not accepted', r.message ?? 'Nothing was accepted.');
+      // Ask again: the invitation may have been withdrawn or used elsewhere,
+      // and the card must stop offering a button for a row that is gone.
+      gym.reload();
+      return;
+    }
+    notifySuccess();
+    Alert.alert(
+      'You have joined',
+      acceptedMessage(inv ? gym.gymNames.get(inv.tenantId) ?? null : null),
+      [
+        { text: 'Not Now', style: 'cancel' },
+        { text: 'Open Membership', onPress: () => router.push('/(client)/membership') },
+      ],
+    );
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -527,10 +579,23 @@ export default function FindTrainer() {
         Alert.alert('Could not send request', error.message);
         return;
       }
-      setSent((s) => ({ ...s, [coach.id]: true }));
-      notifySuccess();
 
-      if (duplicate || !made?.length) {
+      // ── a duplicate and a write that stored nothing are not the same ─────
+      //
+      // They were handled by one branch — `if (duplicate || !made?.length)` —
+      // under a badge that had already been set to "Request pending". But an
+      // insert PostgREST narrows to zero rows under a policy is NOT an error;
+      // it resolves with `error: null` and an empty array, a fact this very
+      // file relies on elsewhere. So a request the server stored nothing for
+      // was reported back as "you have already asked them", the row was badged
+      // as pending, and the member waited for an answer to a question nobody
+      // had been asked.
+      //
+      // The unique violation is a real duplicate: a request of theirs IS
+      // sitting with that coach, so the badge and the sentence are both true.
+      if (duplicate) {
+        setSent((s) => ({ ...s, [coach.id]: true }));
+        notifySuccess();
         Alert.alert(
           'Already asked',
           `You have already asked ${coach.name} to coach you and they have not answered yet. Asking again does not move you up any list — they still have the first one.`,
@@ -538,6 +603,20 @@ export default function FindTrainer() {
         );
         return;
       }
+      // No row came back and nothing objected. Nothing was written, so nothing
+      // is claimed and no badge is set.
+      if (!made?.length) {
+        reportError('findTrainer.request', new Error('coach_requests insert returned no row'));
+        Alert.alert(
+          'Not sent',
+          `Your request to ${coach.name} was not stored, so they have not been asked. Nothing has been sent anywhere — try again in a moment.`,
+          [{ text: 'OK' }],
+        );
+        return;
+      }
+
+      setSent((s) => ({ ...s, [coach.id]: true }));
+      notifySuccess();
 
       // ── the push that was never sent ──────────────────────────────────────
       //
@@ -737,6 +816,47 @@ export default function FindTrainer() {
                   <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineInvite(iv.id)} /></View>
                   <View style={{ flex: 2 }}><Cta label="Accept Invitation" wide onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} /></View>
                 </View>
+              </Notice>
+            ))}
+          </View>
+        ) : null}
+
+        {/* ── the gym's invitation ────────────────────────────────────────
+            A different record from the coach invitation above and, until now,
+            one with no screen anywhere: the gym emails "sign up with this exact
+            address — that is how the invitation finds you", the member does
+            exactly that, and every route in the app ended without mentioning
+            their gym. The plan the gym attached sat pending until reception
+            typed them in again.
+
+            Nothing is drawn while the read is in flight. An error is drawn,
+            because "we could not check" is not "nobody has invited you", and
+            the member is the only person who can tell those apart by trying
+            again. */}
+        {gym.status === 'error' ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Notice tone={t.warn} kicker="Your gym" title="We couldn’t check for a gym invitation"
+              note="This is our end, not an answer about you. If a gym has invited you it is still waiting — this screen simply could not read it.">
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try Again" wide onPress={gym.reload} />
+              </View>
+            </Notice>
+          </View>
+        ) : gymCards.length > 0 ? (
+          <View style={{ marginTop: sp.lg }}>
+            {gymCards.map((card) => (
+              <Notice key={card.id} tone={card.canAccept ? t.brand : t.warn}
+                kicker="Gym invitation" title={card.title} note={card.note}>
+                {/* No button at all on one that cannot be redeemed. The SQL
+                    would refuse it, and a button that fails is worse than the
+                    sentence explaining why there is none. */}
+                {card.canAccept ? (
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta label={acceptingGym === card.id ? 'Accepting…' : 'Accept and Join'} wide
+                      disabled={acceptingGym != null}
+                      onPress={() => acceptGym(card)} />
+                  </View>
+                ) : null}
               </Notice>
             ))}
           </View>

@@ -39,6 +39,11 @@ import {
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit, readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
+import { gymLink, noGymNote } from '@lib/gymLink';
+// The month's instants on the GYM'S clock, and the caption that says whose
+// clock they are. `fetchGymZone` keeps "not set" apart from "could not ask".
+import { cutAtGym, type AtGym } from '@lib/gymWindow';
+import { fetchGymZone } from '@lib/gymZone';
 import { fetchMemberships, matchPayment, fetchOnlineOrders, type Membership, type OnlineOrder } from '@lib/gymRecord';
 import { onlineOrderProblem } from '@lib/gymOrderPayment';
 import { fetchGymCosts, gymCostsTaken, gymCostCategoryLabel, type GymCost } from '@lib/gymCosts';
@@ -266,7 +271,22 @@ export default function Accounting() {
   // not something anybody files, and offering it first invites a figure to be
   // copied out of here before the month has stopped moving.
   const [key, setKey] = useState<string>(() => recentMonths(2)[1] ?? monthKeyOf());
-  const w = useMemo(() => monthWindow(key), [key]);
+  /**
+   * `tenants.timezone`, and the failure to read it, kept apart.
+   *
+   * The month's bounds are cut on this. Until it lands they are the device's
+   * and the caption says so — the page used to assert "in the gym’s own
+   * timezone" over `new Date(y, mo - 1, 1)`, so a Gulf gym's 1 October takings
+   * were August's month-end read from London and September's read at the desk.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneErr, setZoneErr] = useState<string | null>(null);
+
+  const at: AtGym<MonthWindow> | null = useMemo(() => {
+    const base = monthWindow(key);
+    return base ? cutAtGym(base, zone) : null;
+  }, [key, zone]);
+  const w = at?.window ?? null;
 
   // Stored WITH the month it was read for, and used only when the two agree.
   // Without that, switching from June to July paints one frame of June's
@@ -338,36 +358,37 @@ export default function Accounting() {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
-      if (!who?.tenantId) {
-        setLoaded({
-          key,
-          books: {
-            invoices: { rows: [], state: null, why: null },
-            payments: { rows: [], state: null, why: null },
-            settled: { rows: [], state: null, why: null },
-            costs: { rows: [], state: null, why: null },
-            marks: new Map(),
-            marksErr: null,
-            online: { rows: [], state: null, why: null },
-          },
-        });
-        return;
-      }
+      // An account with no gym is NOT a month in which the gym did nothing.
+      //
+      // Every slice here used to be written as `{ rows: [], state: null, why:
+      // null }` — a read that ran and found nothing — so this screen printed
+      // "No payment is recorded in August. That is a statement about the
+      // record, not about the till.", an empty register and a reconciliation
+      // saying both sides agree, to a member of staff whose profile had simply
+      // lost its tenant link. The render below now stops before any of it; the
+      // slices stay 'loading' and are never reached.
+      const link = gymLink(who?.tenantId, 'payments, invoices or settlements');
+      if (!link.linked) return;
       // The currency is read here as well as the name, because this screen now
       // WRITES invoices and an invoice with no currency on it is not a bill.
       // `readTenant` keeps the error apart from the values, so a refused read
       // is "we could not ask" rather than "the gym has not set one".
-      const tRes = await readTenant(supabase, who.tenantId);
+      const tRes = await readTenant(supabase, link.tenantId);
       if (!live) return;
       setGymName(tRes.name);
       setCcy(tRes.currency);
       setGymNameErr(tRes.error);
+
+      const z = await fetchGymZone(supabase, link.tenantId);
+      if (!live) return;
+      setZone(z.zone);
+      setZoneErr(z.error);
       // The roster, for the invoice form. Its own read and its own failure: an
       // invoice register that will not load must not also empty the picker that
       // would let somebody raise the invoice they came here to raise.
       // eslint-disable-next-line -- no-error-ok: fetchMemberships throws on a refusal; null is the failed state the form renders
-      fetchMemberships(supabase, who.tenantId).then((r) => { if (live) setMembers(r); }).catch(() => { if (live) setMembers(null); });
-      if (w) await load(who.tenantId, w);
+      fetchMemberships(supabase, link.tenantId).then((r) => { if (live) setMembers(r); }).catch(() => { if (live) setMembers(null); });
+      if (w) await load(link.tenantId, w);
     })();
     return () => { live = false; };
   }, [load, w, key]);
@@ -402,6 +423,19 @@ export default function Accounting() {
     );
   }
 
+  // Said before any figure, because every figure below would be a claim about
+  // the gym's trading built out of a fact about the reader's profile.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} current="/accounting">
+        <h1>Accounting</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('payments, invoices or settlements')}
+        </p>
+      </Shell>
+    );
+  }
+
   return (
     <Shell me={me} gymName={gymName} current="/accounting">
       <h1>Accounting</h1>
@@ -430,8 +464,8 @@ export default function Accounting() {
 
       {!w
         ? <Banner tone="crit">{key} is not a month this console can open.</Banner>
-        : <Month w={w} books={books} gymName={gymName} ccy={ccy} members={members}
-                 tenantId={me.tenantId!} me={me}
+        : <Month at={at!} zoneErr={zoneErr} books={books} gymName={gymName} ccy={ccy} members={members}
+                 tenantId={me.tenantId} me={me}
                  onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }} />}
     </Shell>
   );
@@ -439,10 +473,12 @@ export default function Accounting() {
 
 /* ── one month, worked out ─────────────────────────────────────────────────── */
 
-function Month({ w, books, gymName, ccy, members, tenantId, me, onChange }: {
-  w: MonthWindow; books: Books; gymName: string | null; ccy: TenantCurrency;
+function Month({ at, zoneErr, books, gymName, ccy, members, tenantId, me, onChange }: {
+  at: AtGym<MonthWindow>; zoneErr: string | null;
+  books: Books; gymName: string | null; ccy: TenantCurrency;
   members: Membership[] | null; tenantId: string; me: Me; onChange: () => void;
 }) {
+  const w = at.window;
   const ended = monthEnded(w);
 
   // Ageing has to be as at a date, and the honest one differs by month. For a
@@ -491,11 +527,21 @@ function Month({ w, books, gymName, ccy, members, tenantId, me, onChange }: {
       {books.payments.why ? <Banner tone="crit">{books.payments.why}</Banner> : null}
       {books.settled.why ? <Banner tone="crit">{books.settled.why}</Banner> : null}
 
+      {/* The caption comes out of `cutAtGym` with the bounds, so it cannot
+          claim the gym's clock over the device's. */}
       <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '10px 0 0' }}>
-        {w.label}, {w.firstDay} to {w.lastDay}, in the gym&rsquo;s own timezone.
+        {at.note}{' '}
         Receivables are aged as at <span className="mono">{asAt}</span>
         {ended ? ' — the month end.' : ' — today, because this month has not finished.'}
       </p>
+
+      {zoneErr ? (
+        <Banner tone="crit">
+          The gym&rsquo;s timezone could not be read: {zoneErr}. The month below is
+          therefore cut on your own device&rsquo;s clock. This is not a gym that has
+          not set one &mdash; it is a setting nobody could ask for.
+        </Banner>
+      ) : null}
 
       <div
         style={{

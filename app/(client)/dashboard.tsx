@@ -46,7 +46,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
-import { currentStreak, weekStats, personalRecords, streakRisk, freezeBudget, currentStreakFrozen } from '../../src/lib/streaks';
+import { shownStreak, weekStats, personalRecords, streakRisk, freezeBudget } from '../../src/lib/streaks';
 import { severeSummary } from '../../src/lib/injuries';
 import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
@@ -266,8 +266,14 @@ export default function Home() {
   const workout = planDays[todayIdx % (planDays.length || 1)] || planDays[0] || { focus: 'Rest Day', exercises: [] };
 
   const freezes = freezeBudget(log);
-  const frz = currentStreakFrozen(log, freezes);
-  const streak = frz.streak;
+  // ONE number on this screen. The ring took the frozen streak and the banner
+  // four inches above it took `risk.streak`, which is the raw chain — so a
+  // member whose freeze had bridged a missed day read "23" in the ring and
+  // "A freeze is holding your 12-day streak" over it, on the screen that grants
+  // the freeze. `streakRisk` is still asked WHETHER the streak is at risk,
+  // because that question is about the unhelped chain; it is no longer asked
+  // how long it is.
+  const streak = shownStreak(log);
   const risk = streakRisk(log);
   const protectedTonight = risk.atRisk && freezes > 0;
   const sevInj = severeSummary(c.injuries);
@@ -279,7 +285,7 @@ export default function Home() {
     // (src/ui/motivationNudges.tsx) — this button stays because it is the one
     // that lets somebody arm it on a day the automatic rule would not, and
     // because a control that vanishes is a control somebody reports missing.
-    try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + risk.streak + '-day streak going.', when, { route: '/(client)/workouts' }, 'motivation'); } catch { /* ignore */ }
+    try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + streak + '-day streak going.', when, { route: '/(client)/workouts' }, 'motivation'); } catch { /* ignore */ }
   };
   // Priced with the member's own weight over time, so a pull-up counts. See
   // src/lib/bodyweightSets.ts — an unweighed member's bodyweight sets are
@@ -503,7 +509,7 @@ export default function Home() {
           {risk.atRisk ? (
             <Notice tone={protectedTonight ? t.brand : t.warn}
               kicker={protectedTonight ? 'Streak protected' : 'Streak at risk'}
-              title={protectedTonight ? `A freeze is holding your ${risk.streak}-day streak` : `Your ${risk.streak}-day streak is on the line`}
+              title={protectedTonight ? `A freeze is holding your ${streak}-day streak` : `Your ${streak}-day streak is on the line`}
               note={protectedTonight
                 ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight is covered, but training keeps it growing.`
                 : 'Log one session today to keep it alive.'}>

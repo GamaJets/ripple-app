@@ -27,7 +27,12 @@ import { wrote, refused as sayRefused, sayText, sayTone, type Said } from '@lib/
 import {
   fetchPasses, fetchPassTypes, issuePass, redeemPass,
   summarisePasses, passStatus, remainingUses, passBlocker, spendable,
-  type GymPass, type PassType,
+  // The other half of the pass ledger. `redeemPass` has been wired since the
+  // desk existed and these two were called by nothing, so a visit taken off the
+  // wrong person's pass could not be put back by anybody, anywhere in the
+  // product — the one mistake a front desk actually makes.
+  fetchRedemptions, undoRedemption, redemptionUndoBlocker,
+  type GymPass, type PassType, type Redemption,
 } from '@lib/gymPasses';
 import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
 import { buildRollCall, rollCallHtml, emergencyLine } from '@lib/rollCall';
@@ -1562,6 +1567,67 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
   const [takeWhy, setTakeWhy] = useState('');
   const [taking, setTaking] = useState<string | null>(null);
 
+  /**
+   * The pass whose history is open, and what came back for it.
+   *
+   * Three states and not two. `rows: null` with `why: null` is still reading,
+   * `why` set is a refused read, and `rows: []` is a pass nothing has been
+   * taken off — which on this panel is a real and common answer and must not
+   * share a sentence with either of the others.
+   */
+  const [history, setHistory] = useState<{ pass: GymPass; rows: Redemption[] | null; why: string | null } | null>(null);
+  const [undoing, setUndoing] = useState<string | null>(null);
+
+  const openHistory = async (p: GymPass) => {
+    setMsg(null);
+    setHistory({ pass: p, rows: null, why: null });
+    try {
+      const rows = await fetchRedemptions(supabase, p.id);
+      // The panel may have been closed, or another pass opened, while this was
+      // in flight. Landing the answer anyway would draw one pass's visits under
+      // another pass's heading, which on a screen whose whole job is to say
+      // whose visit this was is the worst available outcome.
+      setHistory((h) => (h && h.pass.id === p.id ? { ...h, rows } : h));
+    } catch (e: any) {
+      const why = e?.message ?? 'The read was refused.';
+      setHistory((h) => (h && h.pass.id === p.id ? { ...h, why } : h));
+    }
+  };
+
+  /**
+   * Put one visit back.
+   *
+   * The database is the guarantee, twice over: part 31's trigger recomputes
+   * `uses_spent` from the surviving rows, so there is no second counter to keep
+   * in step, and only an owner's policy permits the delete — a trainer may take
+   * a pass and may not put one back. `undoRedemption` runs
+   * `redemptionUndoBlocker` again on the way there, so the refusal below is the
+   * same sentence whichever side catches it.
+   *
+   * What this does NOT do is remove the door log entry. The arrival happened,
+   * or it did not, and that is a separate correction — so the panel says so
+   * rather than leaving somebody to discover that "Visits today" did not move.
+   */
+  const undo = async (r: Redemption) => {
+    setMsg(null);
+    const blocked = redemptionUndoBlocker(r);
+    if (blocked) { setMsg(sayRefused(blocked)); return; }
+    setUndoing(r.id);
+    try {
+      await undoRedemption(supabase, r);
+      setMsg(wrote('Put back. The pass has the visit again; the door log still shows the arrival, which is a separate correction.'));
+      // Re-read rather than splice. The count on the row comes from the
+      // database's own recomputation, and a screen that removes the line
+      // itself is a screen that disagrees with the trigger the moment one of
+      // them is wrong.
+      const rows = await fetchRedemptions(supabase, r.passId);
+      setHistory((h) => (h && h.pass.id === r.passId ? { ...h, rows, why: null } : h));
+      onChange();
+    } catch (e: any) {
+      setMsg(sayRefused(e?.message, 'That visit was NOT put back.'));
+    } finally { setUndoing(null); }
+  };
+
   const sell = async (e: React.FormEvent) => {
     e.preventDefault();
     const t = (types ?? []).find((x) => x.id === typeId);
@@ -1697,6 +1763,23 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
         return p.covers === 'pt'
           ? <span style={{ color: 'var(--ink3)', fontSize: 12 }} title={why}>not for the door</span>
           : null;
+      } },
+    // The way back. A pass with nothing taken off it has nothing to show, so
+    // the control is not drawn for one — but a used-up or expired pass still
+    // gets it, because those are exactly the passes a wrong redemption makes.
+    { key: 'history', header: '', value: () => 0, align: 'right',
+      render: (p) => {
+        if (p.usesSpent <= 0) return null;
+        const open = history?.pass.id === p.id;
+        return (
+          <button
+            style={linkBtn}
+            aria-expanded={open}
+            onClick={() => (open ? setHistory(null) : void openHistory(p))}
+          >
+            {open ? 'Hide visits' : 'Visits taken'}
+          </button>
+        );
       } },
   ];
 
@@ -1836,6 +1919,82 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
       {passes === null ? <Unresolved state={passesUnread === 'failed' ? 'failed' : 'loading'} what="the passes" /> : (
         <DataTable rows={passes} columns={cols} rowKey={(p) => p.id} empty="No passes issued yet." />
       )}
+
+      {/* What was taken off one pass, and the way to put one back.
+          `redeemPass` has been wired since this desk existed and its opposite
+          number was called by nothing, so a visit taken off the wrong person's
+          card could not be reversed by anybody anywhere in the product — the
+          member was simply told they had nine left. */}
+      {history ? (
+        <div style={{
+          margin: '0 14px 14px', padding: '11px 13px', background: 'var(--surface2)',
+          border: '1px solid var(--ring)',
+        }}>
+          <h3 style={{ margin: 0, fontSize: 13 }}>
+            Visits taken off {history.pass.holderName ?? 'this pass'}
+            {history.pass.passTypeName ? ` · ${history.pass.passTypeName}` : ''}
+          </h3>
+
+          {history.why ? (
+            <p style={{ margin: '7px 0 0', fontSize: 12.5, color: 'var(--crit)', maxWidth: '78ch' }}>
+              What has been taken off this pass could not be read: {history.why}. That is
+              not a pass nothing has been taken off &mdash; the counter beside it says{' '}
+              {history.pass.usesSpent} {history.pass.usesSpent === 1 ? 'has' : 'have'} been.
+            </p>
+          ) : history.rows === null ? (
+            <p style={{ margin: '7px 0 0', fontSize: 12.5, color: 'var(--ink3)' }}>Still reading…</p>
+          ) : history.rows.length === 0 ? (
+            <p style={{ margin: '7px 0 0', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '78ch' }}>
+              Nothing has been taken off this pass. The counter beside it says{' '}
+              {history.pass.usesSpent}, so those two disagree &mdash; which is worth
+              knowing rather than smoothing over.
+            </p>
+          ) : (
+            <>
+              <p style={{ margin: '7px 0 9px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '78ch' }}>
+                Putting one back returns the visit to the card. It does NOT remove the
+                arrival from the door log &mdash; the person either came in or they did
+                not, and that is a separate correction on the log above.
+                {me.role === 'owner' ? null : ' Only an owner may put a visit back; the database refuses it either way.'}
+              </p>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                {history.rows.map((r) => {
+                  const blocked = redemptionUndoBlocker(r);
+                  return (
+                    <li key={r.id} style={{
+                      display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap',
+                      padding: '7px 0', borderTop: '1px solid var(--ring)',
+                    }}>
+                      {/* Same formatter as every other stamp on this screen —
+                          the reader's clock. A lone gym-zone label in one panel
+                          of a page that draws six other times on the device's
+                          would be harder to read, not more honest. */}
+                      <span className="mono" style={{ fontSize: 12.5 }}>
+                        {new Date(r.redeemedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                      </span>
+                      <span style={{ fontSize: 12.5, color: 'var(--ink3)', flex: 1, minWidth: 180 }}>
+                        {r.sessionId ? 'paid for a one-to-one'
+                          : r.classId ? 'taken against a class'
+                          : 'taken at the door'}
+                      </span>
+                      {blocked ? (
+                        <span style={{ fontSize: 12, color: 'var(--ink3)', maxWidth: '54ch' }}>{blocked}</span>
+                      ) : me.role === 'owner' ? (
+                        <button
+                          style={linkBtn} disabled={undoing === r.id}
+                          onClick={() => void undo(r)}
+                        >
+                          {undoing === r.id ? 'Putting back…' : 'Put this visit back'}
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </div>
+      ) : null}
     </Section>
   );
 }

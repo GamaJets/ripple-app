@@ -99,6 +99,41 @@ export function currentStreakFrozen(log: WorkoutEntry[], freezes: number = 0, no
   return { streak, freezesUsed: used, frozen };
 }
 
+/**
+ * THE streak figure. The one a member is shown, wherever they are shown one.
+ *
+ * ── Why this exists ───────────────────────────────────────────────────────
+ *
+ * There were two. `currentStreakFrozen(log, freezeBudget(log))` was the ring on
+ * Home and the hero on Consistency; the raw `currentStreak` was the banner four
+ * inches above that ring, the Milestone Card exported as an image and posted to
+ * Instagram, the Activity feed, and the Weekly Report — including the figure
+ * handed to the model that writes the report's summary.
+ *
+ * So a member whose freeze had bridged a missed day read "23" in the ring and,
+ * on the same screen, "A freeze is holding your 12-day streak", and the card
+ * they posted said 12. The freeze feature exists to tell somebody that a missed
+ * day did not cost them the run, and it was being contradicted by the screen
+ * that granted it.
+ *
+ * The frozen figure wins because it is the one the product PROMISES: the budget
+ * is earned from the log (`freezeBudget`), the app spends it silently, and a
+ * member who is told their streak survived must not then be shown the number it
+ * would have been if it had not.
+ *
+ * The budget is derived here rather than passed in, for the same reason it is
+ * derived in `freezeBudget` rather than persisted: two callers computing their
+ * own budget is exactly how two answers happen.
+ *
+ * `currentStreak` stays exported and is still the right function for one
+ * question — "would this chain have held with no help" — which is what
+ * `streakRisk` asks. Nothing else should call it. A screen showing a member
+ * their streak calls this.
+ */
+export function shownStreak(log: WorkoutEntry[], now: number = Date.now()): number {
+  return currentStreakFrozen(log, freezeBudget(log), now).streak;
+}
+
 export interface StreakRisk { atRisk: boolean; streak: number; trainedToday: boolean }
 /**
  * Retention signal: an active streak (>=2) that will break tonight because the

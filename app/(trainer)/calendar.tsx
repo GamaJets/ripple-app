@@ -43,7 +43,10 @@ import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
-import { minorFromWhole } from '../../src/lib/coachMoney';
+import { rateCentsToSnapshot } from '../../src/lib/rateSnapshot';
+import { fetchMyCurrency } from '../../src/lib/myCurrency';
+import type { MyCurrency } from '../../src/lib/currencySource';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { hitSlopFor, MIN_TARGET } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
@@ -338,6 +341,36 @@ export default function TrainerSchedule() {
   // waitlist moved with it. Neither shows up here without asking again.
   useFocusEffect(useCallback(() => { reloadFees(); }, [reloadFees]));
   const { tenant } = useTenant();
+  /* ── what a checked-in session is filed as being worth ───────────────────
+   *
+   * Two halves, and this screen was missing BOTH of them for a coach with no
+   * gym. It snapshotted `tenant?.sessionFee` alone, where the marking queue and
+   * the log screen both fall back to the coach's own rate; and it converted by
+   * `tenant?.currency`, which is null for a coach with no gym, so the figure
+   * had no unit and no rate was written at all.
+   *
+   * Both are the same fix and they are made together on purpose. The three
+   * screens that write `sessions.rate_cents` must agree — a coach who checks a
+   * client in here, marks the next one from the queue and finishes a third from
+   * the log screen would otherwise have one hour of the same work filed three
+   * different ways, with nothing on any screen saying which was right. All
+   * three now call `rateCentsToSnapshot`, and the currency comes from the one
+   * precedence rule in src/lib/currencySource.ts: the gym is the authority, and
+   * `trainers.currency` (part 940) applies if and only if there is no gym.
+   *
+   * The read is skipped where the tenant provider already holds a gym currency
+   * — that IS the authoritative answer, and it is the copy that survives a
+   * check-in made in a basement.
+   */
+  const { sessionFee: ownFee } = useMyTrainerProfile();
+  const gymCcy = (tenant?.currency || '').trim() || null;
+  const [myCcy, setMyCcy] = useState<MyCurrency | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (gymCcy) { setMyCcy(null); return; }
+    void (async () => { const c = await fetchMyCurrency(); if (live) setMyCcy(c); })();
+    return () => { live = false; };
+  }, [gymCcy]);
   /* ── who is in an hour, and the answer that used to be guessed ──────────
    *
    * This was `roster.find((c) => c.id === id)?.name ?? 'Open slot'`, and those
@@ -2134,8 +2167,11 @@ export default function TrainerSchedule() {
     // the figure the gym settles payroll against, so it is converted by the
     // currency or it is not written at all — `undefined` leaves `rate_cents`
     // unset, and payrollByTrainer already reads that as unknown rather than
-    // as nothing owed.
-    const rateCents = minorFromWhole(tenant?.sessionFee, tenant?.currency) ?? undefined;
+    // as nothing owed. A snapshot already written is a historical fact: this
+    // decides what is filed from now on and rewrites nothing behind it.
+    const rateCents = rateCentsToSnapshot({
+      gymFee: tenant?.sessionFee, ownFee, gymCurrency: tenant?.currency, mine: myCcy,
+    }) ?? undefined;
     const out = await floor.attempt({
       kind: 'session-outcome', sessionId: s.id, clientName: who, outcome: 'completed', rateCents,
     });

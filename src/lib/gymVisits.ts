@@ -576,25 +576,42 @@ export class AdmissionRefused extends Error {
  * `readAll` orders on `id` after `entered_at` because paging needs a TOTAL
  * order and two people scanning in the same second are two rows Postgres may
  * hand back in either order.
+ *
+ * ── `whole`, and the one caller that has to have everything ───────────────
+ *
+ * /export is not computing a figure. Its stated purpose is that leaving with
+ * the record must be possible, and it asked for the door log with no window at
+ * all — so it landed on the branch that refuses, and the bundle came out
+ * carrying a stub file under a banner saying "this bundle is complete".
+ *
+ * Refusing an UNBOUNDED read is still right for every screen: those are the
+ * ones computing a number, and none of them needs the gym's whole history to do
+ * it. So the export says what it is doing instead. `whole: true` is a caller
+ * stating that it wants every row and will wait for them, which is a different
+ * request from "give me the log" and now looks like one in the source.
+ * `PAGE_CEILING` refuses past fifty thousand visits either way.
  */
 export async function fetchVisits(
   sb: Queryable,
   tenantId: string,
-  opts: { sinceIso?: string; limit?: number } = {},
+  opts: { sinceIso?: string; limit?: number; whole?: boolean } = {},
 ): Promise<Visit[]> {
   const columns = 'id, member_id, pass_id, class_id, entered_at, exited_at, source, note, profiles(full_name)';
 
-  if (opts.sinceIso && !opts.limit) {
+  if ((opts.sinceIso || opts.whole) && !opts.limit) {
     const rows = await readAll<any>(
       (from, to) => sb
         .from('gym_visits')
         .select(columns)
         .eq('tenant_id', tenantId)
-        .gte('entered_at', opts.sinceIso)
+        // Applied only where there is one. `.gte(col, undefined)` is not a
+        // no-op in PostgREST — it is a malformed filter — so the whole-log
+        // branch must not send it.
+        .gte('entered_at', opts.sinceIso ?? '1970-01-01T00:00:00.000Z')
         .order('entered_at', { ascending: false })
         .order('id', { ascending: false })
         .range(from, to),
-      'visits in this period',
+      opts.sinceIso ? 'visits in this period' : "this gym's door log",
     );
     return rows.map(rowToVisit);
   }

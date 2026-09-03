@@ -44,6 +44,7 @@ import { MIN_TARGET } from '../../src/lib/a11y';
 import { num, fmtClock, fmtAxisDay } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import { dateParts } from '../../src/lib/localDate';
+import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { useRoster } from '../../src/ui/roster';
 import { useTenant } from '../../src/ui/tenant';
 import { RHYTHM_WEEKS } from '../../src/ui/attendance';
@@ -125,7 +126,17 @@ export default function ClientAttendanceScreen() {
   // this is the picker, which is also what makes the route safe to list in
   // search — see the exclusion rule at the top of src/lib/features.ts.
   const { clientId } = useLocalSearchParams<{ clientId?: string }>();
-  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  // Seeded once, and this screen never unmounts — it is registered `href: null`
+  // inside <Tabs> (app/(trainer)/_layout.tsx), so a `useState` initialiser runs
+  // for the FIRST client a coach opens it for and for nobody after. Opening it
+  // for Ben used to draw Amy. `subjectChange` is the rule, with the reasoning
+  // and the string[] hazard in src/lib/routeSubject.ts; it is applied during
+  // render rather than in an effect so the wrong person is never painted, not
+  // even for one frame.
+  const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
+  const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  const moved = subjectChange(seenParam, clientId);
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
   const a = useClientAttendance(picked);
 
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);

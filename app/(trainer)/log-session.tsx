@@ -90,7 +90,7 @@
 //     FOR the person whose training this is, so a picker that could point an
 //     hour at somebody else's booking is a refused insert at best. With a
 //     session in hand the client is the session's, stated and not chosen.
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -125,10 +125,13 @@ import {
 // The rate to snapshot when this screen marks a session delivered. The same
 // figure app/(trainer)/sessions.tsx snapshots, from the same two places and by
 // the same currency-aware conversion — a session finished from here must not be
-// worth a different amount from one finished from the queue.
+// worth a different amount from one finished from the queue. That is now
+// literal: both call `rateCentsToSnapshot`, and so does the schedule.
 import { useTenant } from '../../src/ui/tenant';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
-import { minorFromWhole } from '../../src/lib/coachMoney';
+import { rateCentsToSnapshot } from '../../src/lib/rateSnapshot';
+import { fetchMyCurrency } from '../../src/lib/myCurrency';
+import type { MyCurrency } from '../../src/lib/currencySource';
 import { notifySuccess } from '../../src/ui/haptics';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -208,6 +211,28 @@ export default function LogSession() {
   // below uses it.
   const { tenant } = useTenant();
   const { sessionFee: ownFee } = useMyTrainerProfile();
+  /* ── the currency, which for a coach with no gym is not the gym's ────────
+   *
+   * The fee already fell back to the coach's own rate; the conversion did not.
+   * It read `tenant?.currency`, null for a coach with no gym, so an
+   * independent coach's finished sessions were filed with no rate at all.
+   * `fetchMyCurrency` answers it under the one precedence rule in
+   * src/lib/currencySource.ts — the gym is the authority, `trainers.currency`
+   * applies if and only if there is no gym — and src/lib/rateSnapshot.ts is
+   * where this screen, the marking queue and the schedule agree on the answer.
+   *
+   * Skipped where the tenant provider already holds a gym currency: that IS
+   * the authoritative answer, and it is also the copy that survives having no
+   * signal, which on this screen is the normal case.
+   */
+  const gymCcy = (tenant?.currency || '').trim() || null;
+  const [myCcy, setMyCcy] = useState<MyCurrency | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (gymCcy) { setMyCcy(null); return; }
+    void (async () => { const c = await fetchMyCurrency(); if (live) setMyCcy(c); })();
+    return () => { live = false; };
+  }, [gymCcy]);
 
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
@@ -468,11 +493,15 @@ export default function LogSession() {
         // Snapshotted here and carried into the queue rather than recomputed at
         // flush time, exactly as the marking screen does it: a session finished
         // on Tuesday and sent on Thursday is worth what it was worth on
-        // Tuesday. Converted by the gym's own currency and never by a factor of
-        // a hundred. Null converts to undefined, which is "do not touch the
-        // rate" — a coach with no fee recorded must not have a zero written
-        // into the column payroll is settled from.
-        const rateCents = minorFromWhole(tenant?.sessionFee ?? ownFee, tenant?.currency) ?? undefined;
+        // Tuesday. A snapshot already written is a historical fact and nothing
+        // here rewrites or backfills one — this decides only what is filed from
+        // now on. Converted by whatever currency actually resolves, never by a
+        // factor of a hundred. Null converts to undefined, which is "do not
+        // touch the rate" — a coach with no fee or no currency recorded must
+        // not have a zero written into the column payroll is settled from.
+        const rateCents = rateCentsToSnapshot({
+          gymFee: tenant?.sessionFee, ownFee, gymCurrency: tenant?.currency, mine: myCcy,
+        }) ?? undefined;
         outcomeAnswer = await queue.attempt({
           kind: 'session-outcome', sessionId, clientName: pickedName,
           outcome: 'completed', rateCents,

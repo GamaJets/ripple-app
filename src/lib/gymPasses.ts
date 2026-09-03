@@ -89,6 +89,19 @@ export interface Redemption {
   id: string;
   passId: string;
   classId: string | null;
+  /**
+   * The one-to-one this credit paid for, or null for a visit taken at the door.
+   *
+   * Read, and not decoration. supabase/parts/370 puts the column here and a
+   * matching `pack_drawn_*` stamp on the session, and it keeps the two in step
+   * from the SESSION side: unmarking the outcome deletes the redemption and
+   * clears the stamp in one trigger. Deleting the redemption on its own leaves
+   * the session still claiming it was paid from a pack while the credit is back
+   * on the card — a desync nothing in this product would ever report.
+   *
+   * So this field exists to be REFUSED on. See `redemptionUndoBlocker`.
+   */
+  sessionId: string | null;
   redeemedAt: string;
   redeemedBy: string | null;
 }
@@ -710,7 +723,7 @@ export async function redeemPass(
 export async function fetchRedemptions(sb: Queryable, passId: string): Promise<Redemption[]> {
   const { data, error } = await sb
     .from('gym_pass_redemptions')
-    .select('id, pass_id, class_id, redeemed_at, redeemed_by')
+    .select('id, pass_id, class_id, session_id, redeemed_at, redeemed_by')
     .eq('pass_id', passId)
     .order('redeemed_at', { ascending: false })
     .limit(capLimit());
@@ -723,13 +736,54 @@ export async function fetchRedemptions(sb: Queryable, passId: string): Promise<R
     id: r.id,
     passId: r.pass_id,
     classId: r.class_id ?? null,
+    sessionId: r.session_id ?? null,
     redeemedAt: r.redeemed_at,
     redeemedBy: r.redeemed_by ?? null,
   }));
 }
 
-/** Undo a redemption taken by mistake. The trigger puts the visit back. */
-export async function undoRedemption(sb: Queryable, redemptionId: string): Promise<void> {
-  const { error } = await sb.from('gym_pass_redemptions').delete().eq('id', redemptionId);
+/**
+ * Why this visit cannot be put back from here, or null when it can.
+ *
+ * ── The one redemption a desk must not delete ──────────────────────────────
+ *
+ * A redemption carrying a `session_id` is not a visit somebody took at the
+ * door. It is the record that a delivered one-to-one was paid for out of a
+ * pack, written by `sessions_pack_draw()` when the outcome was marked, and the
+ * SESSION carries the matching half — `pack_drawn_at`, `pack_drawn_pass_id`,
+ * `pack_drawn_kind`.
+ *
+ * supabase/parts/370 keeps those two in step from the session's side and only
+ * from there: unmarking the outcome deletes the redemption AND clears the
+ * stamp, in one trigger, so the two facts cannot disagree. Deleting the
+ * redemption on its own puts the credit back on the card and leaves the session
+ * still saying it was paid from that card. Nothing in this product reports that
+ * disagreement, and the member is credited for a session they had.
+ *
+ * So the desk is refused and told where the undo actually lives. Refusing by
+ * name rather than hiding the control: a button that is simply absent is a
+ * front desk that concludes the software cannot do it at all, which is the
+ * complaint this whole item started from.
+ */
+export function redemptionUndoBlocker(r: Pick<Redemption, 'sessionId'>): string | null {
+  if (r.sessionId) {
+    return 'This credit was not spent at the door — it paid for a one-to-one, and the session still says so. Putting it back from here would leave the session claiming it was paid from this pass while the visit is back on the card. Undo it on Sessions instead, by taking the outcome off that session: the database returns the credit and clears the session in one step.';
+  }
+  return null;
+}
+
+/**
+ * Undo a redemption taken by mistake. The trigger puts the visit back.
+ *
+ * Takes the ROW rather than an id, so `redemptionUndoBlocker` runs on the way
+ * to the database and not only on the way to the screen. The two guards on
+ * `redeemPass` are arranged the same way and for the same reason: a rule
+ * enforced only where the button is drawn is a rule that lapses the first time
+ * a second caller appears.
+ */
+export async function undoRedemption(sb: Queryable, r: Redemption): Promise<void> {
+  const blocked = redemptionUndoBlocker(r);
+  if (blocked) throw new Error(blocked);
+  const { error } = await sb.from('gym_pass_redemptions').delete().eq('id', r.id);
   if (error) throw error;
 }

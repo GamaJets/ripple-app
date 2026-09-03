@@ -275,6 +275,10 @@ const FILE_STORES: { bucket: string; what: string; depth: 1 | 2 }[] = [
   { bucket: 'photos', what: 'A progress photograph you took', depth: 1 },
   { bucket: 'injury-docs', what: 'An injury document you uploaded. Only you can see this one.', depth: 1 },
   { bucket: 'message-media', what: 'A photo or video in your conversation with your coach', depth: 2 },
+  // Added with supabase/parts/961, which is where a profile photo started
+  // being a file at all. Before that the column held a path inside the
+  // member's own handset and there was nothing in any bucket to export.
+  { bucket: 'avatars', what: 'Your profile photo, as your coach and your gym see it', depth: 1 },
 ];
 
 /** How many objects to ask for per folder. Storage's own default is 100, which

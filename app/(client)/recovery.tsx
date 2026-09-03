@@ -13,7 +13,7 @@
 // 1–5 selector was invisible and untappable. Quality is now shown as marks.
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
-import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -124,7 +124,11 @@ export default function Recovery() {
  // the app is used in gyms with no reception — so what they hold can now be
  // either a server-confirmed answer or this device's cached copy, and the
  // screen has to say which. See src/ui/loadStatus.ts.
- const { sleep, addSleep, status: sleepStatus, unsent: unsentNights, reload: reloadSleep } = useWellness();
+ // `removeSleep` is taken now. It has existed in the provider, implemented and
+ // argued for, with no caller anywhere: a night typed as 12 when the member
+ // meant 1.2 went on being a twelve-hour night in their average and in the
+ // readiness score on their home screen for as long as the account existed.
+ const { sleep, addSleep, removeSleep, status: sleepStatus, unsent: unsentNights, reload: reloadSleep } = useWellness();
  const { water: cups, waterGoal: goalCups, waterStatus, addWater: addCup, removeWater: removeCup, reload: reloadHabits } = useHabits();
  const cd = useClientData();
  const wear = useWearables();
@@ -310,6 +314,34 @@ export default function Recovery() {
  const pull = usePullToRefresh(useCallback(() => {
    deviceSleep.refresh(); void wear.syncAll(); reloadSleep(); reloadHabits(); reloadLog(); cd.reload();
  }, [deviceSleep, wear, reloadSleep, reloadHabits, reloadLog, cd.reload]));
+ /**
+  * Take one night back out of the log.
+  *
+  * Asked first: a night is a measurement about the member's own body and there
+  * is nothing on the other side of this to undo it with. Reported on the
+  * delete's OWN answer — `removeSleep` resolves false both for a refusal and
+  * for a delete that matched no rows, and it puts the night back on screen
+  * itself, so the only thing left to do here is not claim it went.
+  */
+ const confirmRemoveNight = (id: string, hours: number, at: string) => {
+  const nightLabel = new Date(at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  Alert.alert(
+   'Remove this night?',
+   `${hours} hours on ${nightLabel} would come off your sleep log, and out of your average and your readiness score with it. This cannot be undone.`,
+   [
+    { text: 'Keep It', style: 'cancel' },
+    {
+     text: 'Remove',
+     style: 'destructive',
+     onPress: async () => {
+      const gone = await removeSleep(id);
+      if (!gone) Alert.alert('It is still there', 'That night could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.');
+     },
+    },
+   ],
+  );
+ };
+
  const G = layout.gutter;
 
  return (
@@ -588,6 +620,12 @@ export default function Recovery() {
      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
       <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>{sx.hours} h</Text>
       <Quality n={sx.quality} color={t.brand} dim={t.surface3} />
+      {/* A visible control, not a gesture: a way out that nothing announces is
+          not a way out. `Ghost icon="minus"` speaks as "Remove", and the label
+          names the night so four of these do not all say the same thing. */}
+      <Ghost icon="minus"
+       a11yLabel={`Remove the ${sx.hours} hour night of ${new Date(sx.at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`}
+       onPress={() => confirmRemoveNight(sx.id, sx.hours, sx.at)} />
      </View>
     </View>
    ))}

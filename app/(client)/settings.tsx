@@ -403,7 +403,13 @@ export default function Settings() {
         // request the server READ and declined is a policy answer, and sending
         // somebody to their router over it means they try again, and again,
         // with no idea why. `retryLine` says which — src/lib/reachability.ts.
-        if (!ok) { Alert.alert('Not requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email support@repplefitness.com from the address on your account.`); return; }
+        // `BRAND.supportEmail`, not the literal. This screen already does it
+        // properly fifty lines up, in `incompleteExportLine` — and the address
+        // it hardcoded here is the SUPPLIER'S. A member of a white-label gym,
+        // at the one moment they most need an escalation that works, was sent
+        // to a company they have never heard of, that cannot act for their gym,
+        // and whose existence they were never told about.
+        if (!ok) { Alert.alert('Not requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`); return; }
         Alert.alert('Deletion requested', 'Your account is scheduled for deletion and your data will be erased. You have been signed out.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch { /* ignore */ } } }]);
       } },
       ],
@@ -418,7 +424,7 @@ export default function Settings() {
           const ok = await withdrawAccountDeletion();
           if (!ok) {
             reportError('settings.withdrawDeletion', new Error('withdraw_account_deletion did not clear the request'));
-            Alert.alert('Not withdrawn', `Your deletion request is still in place — nothing has changed. ${retryLine(reach)} You can also email support@repplefitness.com from the address on your account.`);
+            Alert.alert('Not withdrawn', `Your deletion request is still in place — nothing has changed. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
             return;
           }
           // Re-read rather than assume: what the screen shows next comes from the

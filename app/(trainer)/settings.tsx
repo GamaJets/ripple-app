@@ -87,6 +87,8 @@ import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
 import { useTenant } from '../../src/ui/tenant';
 import { CURRENCY_CHOICES, setCurrencyLine, WHY_NOT_A_REPRICE, type SetCurrencyOutcome } from '../../src/lib/coachCurrency';
+import { fetchMyCurrency, setMyCoachCurrency } from '../../src/lib/myCurrency';
+import { myCurrencyLine, type MyCurrency } from '../../src/lib/currencySource';
 import {
   exportMyDataDetailed, readMyFile, requestAccountDeletion, withdrawAccountDeletion,
   fetchDeletionRequestedAt, type ExportFile,
@@ -422,6 +424,28 @@ export default function TrainerSettings() {
   const [curMsg, setCurMsg] = useState<{ bad: boolean; text: string } | null>(null);
   const [curBusy, setCurBusy] = useState(false);
 
+  // ── the THIRD route, for a coach who has no gym at all ──────────────────
+  //
+  // The two routes above both write `tenants.currency`, and both need a
+  // tenant. A coach whose `profiles.tenant_id` is null has none, so this
+  // screen used to draw them one sentence — "This account is not attached to a
+  // gym, so there is nothing here to price" — and no control of any kind.
+  // That is not a dead end in some corner of the product: it is Add Package
+  // disabled, no invoice issuable, and every session filed at a null rate,
+  // for the coach this app is mostly sold to. `revoke_staff_role()` (part 711)
+  // puts a coach into exactly that state by design, the moment a gym takes
+  // them off its staff.
+  //
+  // Part 940 gives them `trainers.currency`, and `fetchMyCurrency` reads the
+  // two in the one order that can never disagree: the gym wherever there is
+  // one, their own only where there is not. `own` here is that read, and the
+  // picker below is drawn from `own.canSetOwn` rather than from "there is no
+  // code" — because a failed read has no code either, and offering a choice
+  // over one is how a currency that already exists gets overwritten.
+  const [own, setOwn] = useState<MyCurrency | null>(null);
+  const loadOwnCurrency = useCallback(async () => { setOwn(await fetchMyCurrency()); }, []);
+  useEffect(() => { void loadOwnCurrency(); }, [loadOwnCurrency]);
+
   const chooseCurrency = async (code: string) => {
     if (curBusy) return;
     setCurBusy(true);
@@ -432,6 +456,12 @@ export default function TrainerSettings() {
       // false here is a write that really did not land rather than an RLS
       // narrowing reported as success.
       outcome = (await updateTenant({ currency: code })) ? 'set' : 'refused';
+    } else if (!tenant && tenantStatus === 'ready') {
+      // No gym, established rather than assumed — `tenantStatus === 'ready'`
+      // is doing the work here, because `!tenant` is also true of a read that
+      // failed. The server checks the same thing again and refuses with
+      // 'has-tenant' if it disagrees; this only decides which route to try.
+      outcome = await setMyCoachCurrency(code);
     } else {
       outcome = await setOwnCurrency(code);
     }
@@ -443,6 +473,10 @@ export default function TrainerSettings() {
     // optimistic about it. `setOwnCurrency` refreshes itself, so this is only
     // the owner branch above catching up.
     if (outcome === 'set' && role === 'owner') refreshTenant();
+    // The coach's own currency is not in the tenant provider, so it is re-read
+    // here for the same reason: what the screen says next has to come from the
+    // database rather than from the tap that hoped it would.
+    if (outcome === 'set') void loadOwnCurrency();
   };
 
   // null = not read yet. `requestedAt: null` inside a loaded object means
@@ -957,9 +991,42 @@ export default function TrainerSettings() {
               Your gym could not be read, so what it charges in is not known. That is a read that failed rather than a setting nobody has made, and nothing can be changed until it can be read.
             </Flag>
           ) : !tenant ? (
-            <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
-              This account is not attached to a gym, so there is nothing here to price.
-            </Text>
+            // NO GYM — and, since part 940, no longer a dead end.
+            //
+            // Four different sentences under here and they are four different
+            // facts. `own` is null until the read comes back; after that the
+            // gap says which of "could not read", "not deployed yet", "no
+            // coach record" and "you have not chosen" is true, and only the
+            // last of them draws a picker. `canSetOwn` is the gate rather than
+            // "there is no code", because a failed read has no code either and
+            // a picker over one can overwrite a currency that already exists.
+            !own ? (
+              <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>Reading what you charge in…</Text>
+            ) : own.currency ? (<>
+              <Line t={t} first label="Priced in" value={own.currency} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>
+            </>) : own.canSetOwn ? (<>
+              <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
+                You are attached to no gym, so what you charge in is yours to say — and until you say it every amount in this app is withheld rather than guessed at: your analytics, your invoices, the price of anything you sell and the rate every session is filed at. Repple is white-labelled and there is no default that would be right for both a London coach and a Tokyo one. Choose once. It is not editable afterwards, because every price you go on to store is denominated in it.
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                {CURRENCY_CHOICES.map((c) => (
+                  <Pressable key={c} onPress={() => { void chooseCurrency(c); }} disabled={curBusy}
+                    accessibilityRole="button" accessibilityState={{ disabled: curBusy }}
+                    accessibilityLabel={`Price me in ${c}`}
+                    style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: t.surface2, opacity: curBusy ? 0.5 : 1 }}>
+                    <Text style={{ ...ty.label, color: t.ink2 }}>{c}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>) : (
+              // Everything else this read can come back as. A mark, never ink
+              // on the sentence: nothing here has gone wrong on the coach's
+              // account, and two of the three are somebody else's deploy.
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                {myCurrencyLine(own.gap ?? 'unreadable', 'nothing in this app can be priced')}
+              </Flag>
+            )
           ) : tenant.currency ? (<>
             <Line t={t} first label="Priced in" value={tenant.currency} />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>

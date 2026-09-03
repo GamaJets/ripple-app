@@ -32,6 +32,13 @@ import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, readNumber, type WeightUnit, type LengthUnit } from '../../src/lib/units';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { uploadMyAvatar } from '../../src/ui/avatarUpload';
+// A profile photo used to be stored as the picker's own file:// path — a
+// location inside this handset, written into a row the coach, the gym and the
+// web console all read, where it drew as a blank circle for every one of them.
+// These decide what may be stored and what may be drawn; the bytes now go to a
+// bucket (supabase/parts/961) and the column holds the URL of the object.
+import { avatarSource, isDeviceAvatar, DEVICE_AVATAR_NOTE, AVATAR_UPLOAD_FAILED_NOTE } from '../../src/lib/avatarImage';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
 import { monthNamesShort, fmtFullDay } from '../../src/lib/format';
@@ -307,10 +314,25 @@ export default function Profile() {
     cd.reload(); void coachNutrition.reload();
   }, [cd.reload, coachNutrition]));
 
+  // Uploaded first, and the column is only pointed at something that is in the
+  // bucket. `setPhoto` used to be given `res.assets[0].uri` — the picker's path
+  // inside this phone — so the member saw their photo, their coach saw a blank
+  // circle, and the picture disappeared the first time iOS cleared its cache.
+  const [photoBusy, setPhotoBusy] = useState(false);
   const pickPhoto = async (fromCamera: boolean) => {
     if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'set your photo'))) return;
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] });
-    if (!res.canceled && res.assets && res.assets[0]) cd.setPhoto(res.assets[0].uri);
+    if (res.canceled || !res.assets || !res.assets[0]) return;
+    setPhotoBusy(true);
+    const up = await uploadMyAvatar(cd.id === 'unknown' ? '' : cd.id, res.assets[0].uri);
+    setPhotoBusy(false);
+    if (!up.url) {
+      // Nothing is set. A photo the server never received must not be shown
+      // here as though it had been — that is the whole defect being closed.
+      Alert.alert('Photo not saved', up.error ?? AVATAR_UPLOAD_FAILED_NOTE);
+      return;
+    }
+    cd.setPhoto(up.url);
   };
   const changePhoto = () => Alert.alert('Profile photo', undefined, [
     { text: 'Take Photo', onPress: () => pickPhoto(true) },
@@ -520,9 +542,14 @@ export default function Profile() {
             <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>{statsLine}</Text>
           </Pressable>
           <Ghost icon="pencil" onPress={openEdit} />
-          <Pressable onPress={changePhoto} accessibilityRole="button" accessibilityLabel="Change your profile photo">
-            {cd.photo ? (
-              <Image source={{ uri: cd.photo }} style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
+          <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityRole="button"
+            accessibilityLabel={photoBusy ? 'Uploading your profile photo' : 'Change your profile photo'}>
+            {/* `avatarSource`, not `cd.photo`. A row still holding a device path
+                from before the upload existed would otherwise draw here — and
+                only here, on the one device that can open it, which is exactly
+                how nobody noticed the coach could not. */}
+            {avatarSource(cd.photo) ? (
+              <Image source={{ uri: avatarSource(cd.photo)! }} style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
             ) : (
               <View style={{ width: 56, height: 56, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
                 {cd.init ? (
@@ -537,6 +564,16 @@ export default function Profile() {
             </View>
           </Pressable>
         </View>
+
+        {/* A photo saved before there was anywhere to put it. The member is the
+            only person who can fix it and the one person for whom nothing looks
+            wrong — their own device draws its own file happily. */}
+        {isDeviceAvatar(cd.photo) ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{DEVICE_AVATAR_NOTE}</Flag>
+        ) : null}
+        {photoBusy ? (
+          <Flag tone={t.ink3} style={{ marginTop: sp.md }}>Uploading your photo…</Flag>
+        ) : null}
 
         <ScreenHelp screen="me" />
 

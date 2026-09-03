@@ -82,6 +82,7 @@ import {
 import { isoToday } from '../../src/lib/dayPlan';
 import { kgToLb, lengthLabel, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
+import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
@@ -154,7 +155,17 @@ export default function ClientGoals() {
   // nobody can tell which number belongs to which system.
   const lu = useSettings().lengthUnit;
 
-  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  // Seeded once, and this screen never unmounts — it is registered `href: null`
+  // inside <Tabs> (app/(trainer)/_layout.tsx), so a `useState` initialiser runs
+  // for the FIRST client a coach opens it for and for nobody after. Opening it
+  // for Ben used to draw Amy. `subjectChange` is the rule, with the reasoning
+  // and the string[] hazard in src/lib/routeSubject.ts; it is applied during
+  // render rather than in an effect so the wrong person is never painted, not
+  // even for one frame.
+  const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
+  const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  const moved = subjectChange(seenParam, clientId);
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
 
   // Null is "we do not know", never "there are none". Each read carries its own
   // status because they fail independently: a refused check_ins read must not

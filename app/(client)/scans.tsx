@@ -56,6 +56,11 @@ import { reportError } from '../../src/lib/reportError';
 import {
   parseInBodySheet, sheetMassKg, ASSUMED_METRIC_NOTE, CONVERTED_FROM_LB_NOTE, type SheetRead,
 } from '../../src/lib/inbodySheet';
+// And which unit the AI READER's figures are in, which its answer does not say.
+// The vision model is asked for a field called `weightKg` and hands back a bare
+// number off a sheet that may be printed in pounds; the OCR text of the same
+// photograph carries the word. See src/lib/inbodyVision.ts.
+import { reconcileInBodyUnit, visionMassKg } from '../../src/lib/inbodyVision';
 import { useTheme } from '../../src/ui/components';
 import { useToast } from '../../src/ui/toast';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -568,21 +573,39 @@ export default function Scans() {
       const asset = res.assets[0]; const uri = asset.uri; setImg(uri); setReading(true); setOcrMsg(null); setScanMx(null);
       let b64 = asset.base64 || undefined;
       try { const mm = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) b64 = mm.base64; } catch { /* fall back to original */ }
-      if (visionAvailable() && b64) {
-        const v = await analyzeInBody(b64, 'image/jpeg');
-        if (v && (v.weightKg != null || v.bodyFatPct != null || v.skeletalMuscleKg != null)) {
-          setReading(false);
-          setScanMx(v.metrics ?? null);
-          if (v.weightKg != null) setWt(fieldFromKg(v.weightKg));
-          // Body fat comes back a percentage and goes in as one.
-          if (v.bodyFatPct != null) setBf(String(v.bodyFatPct));
-          if (v.skeletalMuscleKg != null) setSm(fieldFromKg(v.skeletalMuscleKg));
-          if (v.takenAt) { const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.takenAt); if (dm) { const yr = parseInt(dm[1], 10); /* Widen FIRST, then index into the widened list: a stored date the wheel cannot show is a date the app would silently rewrite. */ const ys = yearsAround(now, yr); const yi = ys.indexOf(yr); const mo = parseInt(dm[2], 10) - 1; const dd = parseInt(dm[3], 10) - 1; if (yi >= 0 && mo >= 0 && mo <= 11 && dd >= 0) { setYears(ys); setDY(yi); setDM(mo); setDD(dd); } } }
-          setOcrMsg('Read from your scan: ' + [v.weightKg != null ? 'weight ' + weightLabel(v.weightKg, wu) : '', v.bodyFatPct != null ? 'body fat ' + v.bodyFatPct + '%' : '', v.skeletalMuscleKg != null ? 'muscle ' + weightLabel(v.skeletalMuscleKg, wu) : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
-          return;
-        }
+      // Both readers, together. They are two calls to the same backend against
+      // the same image, so running them in parallel costs no more wall time
+      // than the vision call alone did — and the text read is what carries the
+      // WORD the sheet printed next to the figure. Without it the vision path
+      // filed a US-configured printout's 180.4 lb as 180 kg: the exact defect
+      // src/lib/inbodySheet.ts was written to close, live on the path that
+      // actually runs, because this branch returned before the parser was
+      // reached. The OCR read is still the fallback when vision says nothing.
+      const [v, sheet] = await Promise.all([
+        visionAvailable() && b64 ? analyzeInBody(b64, 'image/jpeg') : Promise.resolve(null),
+        ocrInBody(b64),
+      ]);
+      if (v && (v.weightKg != null || v.bodyFatPct != null || v.skeletalMuscleKg != null)) {
+        setReading(false);
+        setScanMx(v.metrics ?? null);
+        // What unit the model's masses are in, decided from the printed words
+        // and from whether the model's number matches the printed figure or
+        // the converted one. Unknown is a real answer and is said out loud
+        // rather than resolved by a guess.
+        const verdict = reconcileInBodyUnit({
+          visionWeight: v.weightKg, sheetWeight: sheet.weight, sheetUnit: sheet.unit,
+        });
+        const vwKg = visionMassKg(v.weightKg, verdict);
+        const vmKg = visionMassKg(v.skeletalMuscleKg, verdict);
+        if (vwKg != null) setWt(fieldFromKg(vwKg));
+        // Body fat comes back a percentage and goes in as one.
+        if (v.bodyFatPct != null) setBf(String(v.bodyFatPct));
+        if (vmKg != null) setSm(fieldFromKg(vmKg));
+        if (v.takenAt) { const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(v.takenAt); if (dm) { const yr = parseInt(dm[1], 10); /* Widen FIRST, then index into the widened list: a stored date the wheel cannot show is a date the app would silently rewrite. */ const ys = yearsAround(now, yr); const yi = ys.indexOf(yr); const mo = parseInt(dm[2], 10) - 1; const dd = parseInt(dm[3], 10) - 1; if (yi >= 0 && mo >= 0 && mo <= 11 && dd >= 0) { setYears(ys); setDY(yi); setDM(mo); setDD(dd); } } }
+        setOcrMsg('Read from your scan: ' + [vwKg != null ? 'weight ' + weightLabel(vwKg, wu) : '', v.bodyFatPct != null ? 'body fat ' + v.bodyFatPct + '%' : '', vmKg != null ? 'muscle ' + weightLabel(vmKg, wu) : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.' + (verdict.note ? ' ' + verdict.note : ''));
+        return;
       }
-      const r = await ocrInBody(b64);
+      const r = sheet;
       setReading(false);
       // The masses come off the sheet in the sheet's OWN unit, and it is read
       // off the printout rather than assumed. A US-configured InBody prints

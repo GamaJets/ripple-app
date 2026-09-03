@@ -2215,41 +2215,55 @@ export default function ClientScreen() {
       </ScrollView>
 
       {/* ── ask them to record it ─────────────────────────────────────────── */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the note explaining what the client mentioned sits at the foot of the sheet.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={askOpen} animationType="slide" transparent onRequestClose={() => setAskOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAskOpen(false)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Ask {who} to Record One</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            You cannot add this for them — an injury has to come from the person who has it, or the
-            programme gate it closes would mean nothing. This messages them and points them at the
-            right screen.
-          </Text>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What did they mention?</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-              {INJURY_AREAS.map((a) => (
-                <Pressable key={a.id} onPress={() => setAskArea(askArea === a.id ? null : a.id)}
-                  accessibilityRole="button" accessibilityState={{ selected: askArea === a.id }}
-                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: askArea === a.id ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, color: askArea === a.id ? t.brandInk : t.ink2 }}>{a.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>In your words (optional)</Text>
-            <TextInput value={askNote} onChangeText={setAskNote} multiline
-              placeholder={`You mentioned your knee was sore after Tuesday…`}
-              placeholderTextColor={t.ink3}
-              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              They read this in your thread, so write it as you would say it. What they add is theirs,
-              and they can change or remove it whenever they like.
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAskOpen(false)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+            <Text style={{ ...ty.head, color: t.ink }}>Ask {who} to Record One</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+              You cannot add this for them — an injury has to come from the person who has it, or the
+              programme gate it closes would mean nothing. This messages them and points them at the
+              right screen.
             </Text>
-          </ScrollView>
-          <View style={{ height: sp.md }} />
-          <Cta wide disabled={askBusy} label={askBusy ? 'Sending…' : 'Send the Ask'} onPress={sendAsk} />
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setAskOpen(false)} />
-        </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What did they mention?</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {INJURY_AREAS.map((a) => (
+                  <Pressable key={a.id} onPress={() => setAskArea(askArea === a.id ? null : a.id)}
+                    accessibilityRole="button" accessibilityState={{ selected: askArea === a.id }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: askArea === a.id ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, color: askArea === a.id ? t.brandInk : t.ink2 }}>{a.label}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>In your words (optional)</Text>
+              <TextInput value={askNote} onChangeText={setAskNote} multiline
+                placeholder={`You mentioned your knee was sore after Tuesday…`}
+                placeholderTextColor={t.ink3}
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                They read this in your thread, so write it as you would say it. What they add is theirs,
+                and they can change or remove it whenever they like.
+              </Text>
+            </ScrollView>
+            <View style={{ height: sp.md }} />
+            <Cta wide disabled={askBusy} label={askBusy ? 'Sending…' : 'Send the Ask'} onPress={sendAsk} />
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setAskOpen(false)} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── record what was tried ──────────────────────────────────────────
@@ -2261,55 +2275,69 @@ export default function ClientScreen() {
           finished wearing an answer. A coach who genuinely does not know
           chooses "Not recorded" themselves, which is a different event from
           having skipped the question. */}
+      {/* ── the keyboard covered this sheet ────────────────────────────────
+          A bottom sheet is anchored to the bottom of the window, so the keyboard comes
+          up OVER it: the note saying what was actually tried sits at the foot of the sheet.
+
+          The fix a sheet takes is not the page one. `automaticallyAdjustKeyboardInsets`
+          scrolls a focused row inside a scroller that stays where it is; here the whole
+          sheet has to move. This wrapper is the pattern app/(trainer)/invoices.tsx,
+          costs.tsx and receipts.tsx already use and the one on the picker in
+          app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
+          the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
+          percentage maxHeight resolves against the shrunken box, so it stays whole
+          instead of running off the top. */}
       <Modal visible={!!logging} animationType="slide" transparent onRequestClose={() => setLogging(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLogging(null)} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
-          <Text style={{ ...ty.head, color: t.ink }}>Log a Contact with {who}</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            Everybody on your gym’s staff sees this. It records what was tried, not whether it worked — and it is not attendance, so it does not change how this client is assessed.
-          </Text>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How did you contact them?</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
-              {channelOptions(CHANNELS).map((o) => (
-                <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, channel: o.value } : d))}
-                  accessibilityRole="button" accessibilityState={{ selected: logging?.channel === o.value }}
-                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.channel === o.value ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, color: logging?.channel === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What came of it?</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
-              {outcomeOptions(CONTACT_OUTCOMES).map((o) => (
-                <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, outcome: o.value } : d))}
-                  accessibilityRole="button" accessibilityState={{ selected: logging?.outcome === o.value }}
-                  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.outcome === o.value ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, color: logging?.outcome === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What was said (optional)</Text>
-            <TextInput value={logging?.note ?? ''} onChangeText={(v) => setLogging((d) => (d ? { ...d, note: v } : d))} multiline
-              placeholder="Away until the 12th, coming back to the Tuesday class."
-              placeholderTextColor={t.ink3}
-              style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              The reason two people do not make the same call. Optional, because “rang, no answer” is already worth recording.
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setLogging(null)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
+            <Text style={{ ...ty.head, color: t.ink }}>Log a Contact with {who}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
+              Everybody on your gym’s staff sees this. It records what was tried, not whether it worked — and it is not attendance, so it does not change how this client is assessed.
             </Text>
-            {logErr ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{logErr}</Flag> : null}
-          </ScrollView>
-          <View style={{ height: sp.md }} />
-          <Cta wide disabled={logBusy || !!(logging && draftBlocker(logging))}
-            label={logBusy ? 'Recording…' : 'Record It'} onPress={() => { void saveContact(); }} />
-          {logging && draftBlocker(logging)
-            ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{draftBlocker(logging)}</Text>
-            : null}
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => setLogging(null)} />
-        </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How did you contact them?</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
+                {channelOptions(CHANNELS).map((o) => (
+                  <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, channel: o.value } : d))}
+                    accessibilityRole="button" accessibilityState={{ selected: logging?.channel === o.value }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.channel === o.value ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, color: logging?.channel === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What came of it?</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg }}>
+                {outcomeOptions(CONTACT_OUTCOMES).map((o) => (
+                  <Pressable key={o.value} onPress={() => setLogging((d) => (d ? { ...d, outcome: o.value } : d))}
+                    accessibilityRole="button" accessibilityState={{ selected: logging?.outcome === o.value }}
+                    style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: logging?.outcome === o.value ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, color: logging?.outcome === o.value ? t.brandInk : t.ink2 }}>{o.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>What was said (optional)</Text>
+              <TextInput value={logging?.note ?? ''} onChangeText={(v) => setLogging((d) => (d ? { ...d, note: v } : d))} multiline
+                placeholder="Away until the 12th, coming back to the Tuesday class."
+                placeholderTextColor={t.ink3}
+                style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                The reason two people do not make the same call. Optional, because “rang, no answer” is already worth recording.
+              </Text>
+              {logErr ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{logErr}</Flag> : null}
+            </ScrollView>
+            <View style={{ height: sp.md }} />
+            <Cta wide disabled={logBusy || !!(logging && draftBlocker(logging))}
+              label={logBusy ? 'Recording…' : 'Record It'} onPress={() => { void saveContact(); }} />
+            {logging && draftBlocker(logging)
+              ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{draftBlocker(logging)}</Text>
+              : null}
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => setLogging(null)} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

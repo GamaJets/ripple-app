@@ -45,6 +45,8 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
+import { isMissingColumn } from '../lib/coachCurrency';
+import type { MyCurrencyGap } from '../lib/currencySource';
 import { draftMinorUnits, readTaxRate, type CoachInvoice, type InvoiceDraft, type InvoiceKind } from '../lib/coachInvoice';
 import { invoiceNotification, invoiceReminderNotification } from '../lib/notifyCopy';
 import { recordInbox } from './pushNotifications';
@@ -197,8 +199,9 @@ export async function fetchInvoiceIssuer(): Promise<{ name: string | null; statu
 
 /* ── the currency, which is never assumed ─────────────────────────────────── */
 
-/** Where a currency came from, so the screen can say. */
-export type CurrencySource = 'packages' | 'gym';
+/** Where a currency came from, so the screen can say. 'own' is
+ *  `trainers.currency` (part 940) — a coach with no gym, priced by themselves. */
+export type CurrencySource = 'packages' | 'gym' | 'own';
 
 export interface InvoiceCurrency {
   /** ISO 4217 uppercase, or null when nobody has stated one. Null is NOT a
@@ -207,43 +210,76 @@ export interface InvoiceCurrency {
   currency: string | null;
   source: CurrencySource | null;
   status: LoadStatus;
+  /**
+   * WHY there is no code, when there is none. Null whenever a code was found.
+   *
+   * `status` alone cannot say it any more. It separates "still reading", "a
+   * read failed" and "everything answered", and that was the whole story while
+   * a gym was the only place a currency could live — "everything answered and
+   * there is none" meant one thing and one sentence. It now means four:
+   * the gym has set none, the coach has no gym and has chosen none, there is
+   * no `trainers` row to keep one on, or part 940 is not applied. The first
+   * sends the coach to an owner and the second sends them to their own
+   * Settings, and telling an independent coach to go and find a gym owner is
+   * the dead end this whole change exists to end.
+   */
+  gap: MyCurrencyGap | null;
 }
 
 /**
  * The currency this coach's invoices are denominated in.
  *
- * Resolved in the same order as `issue_coach_invoice()` resolves it in part
- * 138 — the coach's own packages when they unanimously agree on one, else the
- * gym's `tenants.currency` — so the screen shows the coach exactly what the
- * server will use, rather than a second opinion that could differ from it.
+ * Resolved in the same order `issue_coach_invoice()` resolves it — part 138 as
+ * amended by part 941 — so the screen shows the coach exactly what the server
+ * will use rather than a second opinion that could differ from it:
+ *
+ *   1 · the coach's own packages, when they unanimously agree on one.
+ *   2 · the gym on `profiles.tenant_id`.
+ *   3 · `trainers.currency` (part 940), and ONLY when there is no gym.
  *
  * Packages first, deliberately. A coach who sells in sterling inside a gym
- * denominated in dirhams is selling in sterling; the gym's setting is the
+ * denominated in dirhams is selling in sterling; the two links below are the
  * fallback for a coach who has priced nothing yet.
  *
- * There is NO literal fallback anywhere in this function. tenants.currency is
- * nullable on purpose (part 99) and null means "this gym has not told us" — and
- * an invoice with the wrong three letters on it is worse than no invoice,
- * because it reads as a considered figure and it is a different amount of
- * money.
+ * ── The column this used to join on, and the year it was wrong for ────────
+ *
+ * The gym half was `from trainers tr join tenants t on t.id = tr.tenant_id`.
+ * That is the wrong column. `revoke_staff_role()` (part 711) takes a coach off
+ * a gym's staff by clearing `profiles.tenant_id` and deliberately KEEPS the
+ * `trainers` row — deleting it would strand every per-coach figure that joins
+ * on it — so `trainers.tenant_id` goes on naming the gym they have left, for
+ * ever. Every other screen in the coach app reads `profiles.tenant_id` and
+ * showed such a coach a dash; this one denominated their invoices in their old
+ * gym's currency. One coach, two answers, and the one that reached a client
+ * was the wrong one.
+ *
+ * ── Link 3 is guarded on "no gym", not on "nothing answered yet" ──────────
+ *
+ * That is part 940's precedence rule, and src/lib/currencySource.ts is where
+ * it is stated and tested. A coach INSIDE a gym whose owner has not chosen is
+ * waiting on that owner: answering them from their own dormant column would
+ * put a different currency on their invoice from the one their packages charge
+ * in, and from the one the coach at the next desk issues in.
+ *
+ * There is NO literal fallback anywhere in this function. Every code is one
+ * somebody chose, and an invoice with the wrong three letters on it is worse
+ * than no invoice, because it reads as a considered figure and it is a
+ * different amount of money.
  */
 export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
-  if (!USE_SUPABASE) return { currency: null, source: null, status: 'ready' };
+  if (!USE_SUPABASE) return { currency: null, source: null, status: 'ready', gap: null };
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id;
-    if (!uid) return { currency: null, source: null, status: 'error' };
+    if (!uid) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
 
-    const [pkgRes, gymRes] = await Promise.all([
+    const [pkgRes, profRes] = await Promise.all([
       supabase.from('trainer_packages').select('currency').eq('trainer_id', uid).limit(capLimit()),
-      supabase.from('trainers').select('tenant_id, tenants(currency)').eq('id', uid).limit(1),
+      supabase.from('profiles').select('tenant_id').eq('id', uid).maybeSingle(),
     ]);
 
     if (pkgRes.error) reportError('coachInvoices.currency.packages', pkgRes.error);
-    if (gymRes.error) reportError('coachInvoices.currency.gym', gymRes.error);
-    // Both halves failing is genuinely unknown. One failing still leaves the
-    // other able to answer, and an answer from one is a real answer.
-    if (pkgRes.error && gymRes.error) return { currency: null, source: null, status: 'error' };
+    if (profRes.error) reportError('coachInvoices.currency.profile', profRes.error);
 
     if (!pkgRes.error) {
       const codes = new Set(
@@ -254,23 +290,60 @@ export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
       // Unanimous or nothing. A coach with packages in two currencies has not
       // told us which one this invoice is in, and picking the commoner of the
       // two would be a guess wearing a statistic.
-      if (codes.size === 1) return { currency: [...codes][0], source: 'packages', status: 'ready' };
+      if (codes.size === 1) return { currency: [...codes][0], source: 'packages', status: 'ready', gap: null };
     }
 
-    if (!gymRes.error) {
-      const rows = (gymRes.data ?? []) as { tenants?: { currency: string | null } | { currency: string | null }[] | null }[];
-      const t = rows[0]?.tenants;
-      const cur = (Array.isArray(t) ? t[0]?.currency : t?.currency) || '';
-      const code = cur.trim().toUpperCase();
-      if (code.length >= 3) return { currency: code, source: 'gym', status: 'ready' };
+    // The profile read is what says whether there is a gym at all, so a failure
+    // of it is UNKNOWN and stops here. Falling through to `trainers.currency`
+    // on it would consult the coach's own column for a coach who may well be in
+    // a gym — the exact second answer this function has just stopped giving.
+    if (profRes.error) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+
+    const tid = (profRes.data as { tenant_id: string | null } | null)?.tenant_id ?? null;
+    const partial: LoadStatus = pkgRes.error ? 'partial' : 'ready';
+
+    if (tid) {
+      const { data: ten, error: tenErr } = await supabase.from('tenants').select('currency').eq('id', tid).maybeSingle();
+      if (tenErr) {
+        reportError('coachInvoices.currency.gym', tenErr);
+        return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+      }
+      // A tenant_id that resolves to no readable row is still a gym — the
+      // profile names one. It is a gym whose currency we do not have, which is
+      // unknown rather than unset: RLS hiding the row and an owner never
+      // choosing look identical from here, and only one of them is fixed by an
+      // owner.
+      if (!ten) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+      const code = ((ten as { currency: string | null }).currency || '').trim().toUpperCase();
+      if (code.length >= 3) return { currency: code, source: 'gym', status: 'ready', gap: null };
+      // A gym with no currency is the owner's to fix, and it stays that way.
+      // `trainers.currency` is deliberately not reached from here.
+      return { currency: null, source: null, status: partial, gap: 'gym-unset' };
     }
 
-    // Read fine, and nobody has set one. That is an answer, and it is the
-    // answer the screen turns into "ask your gym owner to set a currency".
-    return { currency: null, source: null, status: pkgRes.error || gymRes.error ? 'partial' : 'ready' };
+    // No gym. Only now is the coach's own column consulted.
+    const { data: tr, error: trErr } = await supabase.from('trainers').select('currency').eq('id', uid).maybeSingle();
+    if (trErr) {
+      // An unapplied part 940 is a deploy step, not a failed read. Reported as
+      // 'error' it becomes "try again in a moment" about a thing that will
+      // never come true until somebody runs the part.
+      if (isMissingColumn(trErr)) return { currency: null, source: null, status: partial, gap: 'unavailable' };
+      reportError('coachInvoices.currency.own', trErr);
+      return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+    }
+    // `trainers_self_rw` is `for all using (auth.uid() = id)`, so a coach can
+    // always see their own row. No row here is genuinely no row, not RLS — and
+    // it is a real state: there is nowhere for a currency to be kept.
+    if (!tr) return { currency: null, source: null, status: partial, gap: 'nowhere' };
+    const own = ((tr as { currency: string | null }).currency || '').trim().toUpperCase();
+    if (own.length >= 3) return { currency: own, source: 'own', status: 'ready', gap: null };
+
+    // Read fine, no gym, and they have not chosen. THEY fix this, in Settings,
+    // and there is no owner anywhere in the sentence.
+    return { currency: null, source: null, status: partial, gap: 'own-unset' };
   } catch (e) {
     reportError('coachInvoices.currency', e);
-    return { currency: null, source: null, status: 'error' };
+    return { currency: null, source: null, status: 'error', gap: 'unreadable' };
   }
 }
 

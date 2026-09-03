@@ -33,7 +33,7 @@ import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaL
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useMeasurements } from '../../src/ui/measurements';
 import { useCheckIns } from '../../src/ui/checkins';
-import { currentStreak, weekStats, personalRecords, streakMilestone } from '../../src/lib/streaks';
+import { shownStreak, weekStats, personalRecords, streakMilestone } from '../../src/lib/streaks';
 import { useState, useEffect, useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { askAboutMyWeek, coachAvailable } from '../../src/lib/coach';
@@ -87,7 +87,11 @@ export default function WeeklyReport() {
   const lu = st.lengthUnit;
 
   const wk = weekStats(log, Date.now(), c.weightSeries);
-  const streak = currentStreak(log);
+  // The figure this screen prints AND the figure it hands the model that
+  // writes the summary. Both were the raw chain, so the report contradicted
+  // the ring on Home and the model was told a streak the app had already told
+  // the member was longer.
+  const streak = shownStreak(log);
   const milestone = streakMilestone(streak);
   const prs = personalRecords(log, c.weightSeries);
 

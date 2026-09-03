@@ -112,6 +112,26 @@ const openUrl = async (url?: string | null) => { if (url) { try { await Linking.
  * `error` and a null currency are different again — one is "your gym has not
  * told us", the other is "we could not find out" — because the first is fixed
  * by an owner in settings and the second is fixed by trying again.
+ *
+ * ── This function answers about a GYM, and only about a gym ───────────────
+ *
+ * It is not the whole answer any more and it is deliberately unchanged.
+ * `{ currency: null, error: null }` here means "this account is attached to no
+ * gym", which used to be the end of the road: there was no other place a
+ * currency could live, so every screen correctly withheld every figure and told
+ * the coach to go and find a gym owner who did not exist.
+ *
+ * Part 940 gives a coach with no gym a currency of their own on
+ * `trainers.currency`, and `fetchMyCurrency()` in src/lib/myCurrency.ts is the
+ * read that puts the two in order — the gym first, always, and the coach's own
+ * ONLY when there is provably no gym. A screen that needs to know what this
+ * coach is priced in should call that one.
+ *
+ * This is left as it is rather than widened because widening it would change
+ * what five existing callers are being told, silently, in the direction of
+ * "there is always an answer". `assistant.tsx`, `analytics.tsx` and
+ * `src/ui/coachSetup.ts` still ask this question and still get the gym's
+ * answer; moving them is a separate, visible edit.
  */
 export async function myTenantCurrency(): Promise<{ currency: string | null; error: string | null }> {
   try {

@@ -87,6 +87,7 @@ import {
   type CoachMealPlan,
 } from '../../src/lib/mealPlan';
 import type { Diet, Goal } from '../../src/lib/types';
+import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { FORWARD_ARROW } from '../../src/ui/direction';
 
 const CLIENT_COLS = 'diet, meals_per_day, avoid, goal, activity, manual_weight_kg, manual_body_fat_pct';
@@ -126,7 +127,17 @@ export default function ClientNutrition() {
   // somebody lands on them. The picker stays for the same reason the other
   // per-client screens keep theirs: the screen is reachable without a param.
   const { clientId } = useLocalSearchParams<{ clientId?: string; name?: string }>();
-  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  // Seeded once, and this screen never unmounts — it is registered `href: null`
+  // inside <Tabs> (app/(trainer)/_layout.tsx), so a `useState` initialiser runs
+  // for the FIRST client a coach opens it for and for nobody after. Opening it
+  // for Ben used to draw Amy. `subjectChange` is the rule, with the reasoning
+  // and the string[] hazard in src/lib/routeSubject.ts; it is applied during
+  // render rather than in an effect so the wrong person is never painted, not
+  // even for one frame.
+  const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
+  const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  const moved = subjectChange(seenParam, clientId);
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
 
   // Null is "we do not know", never "there is none". The profile carries its
   // own status because it is the one that decides whether a plan may be

@@ -67,6 +67,7 @@ import { fetchInvoiceCurrency, type InvoiceCurrency } from '../../src/ui/coachIn
 import { supabase } from '../../src/lib/supabase';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
+import { myCurrencyLine } from '../../src/lib/currencySource';
 
 const DASH = '—';
 
@@ -77,7 +78,7 @@ export default function Receipts() {
 
   const [rows, setRows] = useState<CoachReceipt[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
-  const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading' });
+  const [ccy, setCcy] = useState<InvoiceCurrency>({ currency: null, source: null, status: 'loading', gap: null });
   /** The signed-in coach's own id, for the one refusal in `receiptBlockers`.
    *  Null while it is being read, which makes the guard inert for that instant
    *  — acceptable because the same row is refused by a CHECK constraint in the
@@ -182,10 +183,22 @@ export default function Receipts() {
   // Four causes and not two: 'partial' and 'loading' are not settled facts
   // about the gym, and sending a coach to an owner over a query that failed
   // tells neither of them anything. src/lib/currencyGap.ts holds the wording.
+  //
+  // And 'unset' is itself several facts since part 940, which is why this now
+  // branches the way app/(trainer)/invoices.tsx does. A gym was once the only
+  // place a currency could live, so "no currency has been set for you" could
+  // safely end by naming a gym owner. A coach with no gym has no owner to
+  // name, and that sentence sent them to look for a person who does not exist
+  // — while the setting they could actually make sat one screen away in
+  // Settings. `ccy.gap` carries which it is: the gym has set none, they have
+  // chosen none, there is no coach record, or part 940 is not applied. Only
+  // the first names an owner.
   const curGap = currencyGapOfStatus({ currency: ccy.currency, status: ccy.status });
   const currencyBlocker = curGap
     ? curGap === 'unset'
-      ? 'No currency has been set for you, so there is nothing to record a payment in. Repple is white-labelled, so there is no default that would be right for every gym. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
+      ? ccy.gap && ccy.gap !== 'gym-unset'
+        ? myCurrencyLine(ccy.gap, 'there is nothing to record a payment in')
+        : 'No currency has been set for you, so there is nothing to record a payment in. Repple is white-labelled, so there is no default that would be right for every gym. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
       : currencyGapLine(curGap, 'nothing can be recorded')
     : null;
 

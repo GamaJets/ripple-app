@@ -113,6 +113,7 @@ import {
   type Strand,
 } from '../../src/lib/coachLedger';
 import { fetchClientPurchases, fetchMyConnect, type CoachPurchase, type ConnectStatus } from '../../src/lib/connect';
+import { payoutStage } from '../../src/lib/payoutAccount';
 import { fetchMySubscriptionPayments, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import { fetchMySubscription, fetchFailedInvoices, money as platformMoney, type Subscription, type Invoice } from '../../src/lib/billing';
 import { fetchMyCodeReturns, type CodeReturnsRead } from '../../src/ui/joinCode';
@@ -978,15 +979,23 @@ export default function CoachMoney() {
 
         <Section>
           <SectionHead title="Where It Lands" />
-          {connect.read === 'error' ? (
+          {/* Four sentences, and there used to be three. 'error' was branched
+              and 'loading' was not, so for the length of the read `acct` was
+              null and this fell to the last arm — a coach opening the screen
+              was told, in the app's own confident type, that they have no
+              payout account. Loading, failed and empty are three different
+              sentences; src/lib/payoutAccount.ts resolves which. */}
+          {payoutStage(connect.acct, connect.read) === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Reading your payout account…</Text>
+          ) : payoutStage(connect.acct, connect.read) === 'unreadable' ? (
             <Flag>
               Your payout account could not be read. This is not a statement that you have none — if you had set one up it is still set up.
             </Flag>
-          ) : connect.acct?.charges_enabled ? (
+          ) : payoutStage(connect.acct, connect.read) === 'active' ? (
             <Text style={{ ...ty.label, color: t.ink2 }}>
               Your Stripe payout account is active, so a client can be charged. When each payment reaches your bank, and what Stripe took for it, are things only Stripe knows.
             </Text>
-          ) : connect.acct?.stripe_account_id ? (
+          ) : payoutStage(connect.acct, connect.read) === 'started' ? (
             <Text style={{ ...ty.label, color: t.ink2 }}>
               Your Stripe payout account is started but not finished, so nobody can be charged yet. Finish it on the Payments screen.
             </Text>
