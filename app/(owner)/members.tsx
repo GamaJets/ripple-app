@@ -27,7 +27,6 @@ import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import { isoDate } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { readState, hasRows, canSayEmpty, staleNote, failedNote } from '../../src/lib/staleRead';
@@ -39,26 +38,33 @@ import {
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
 import { FORWARD_ICON } from '../../src/ui/direction';
+// The gym's own calendar day for the date this screen WRITES, and the sentence
+// for a gym that has not said which calendar that is. See `today` below.
+import { fetchGymZone } from '../../src/lib/gymZone';
+import { gymTodayWindow } from '../../src/lib/gymToday';
 
 /**
- * Today, on the CALENDAR THE PERSON IS STANDING IN.
+ * The day a membership starts is the GYM's day.
  *
- * This was `new Date().toISOString().slice(0, 10)`, which is the UTC day. A
- * membership opened at 5pm in Los Angeles was filed as starting TOMORROW — so
- * the billing anniversary is a day out, the member is counted in the wrong
- * month's joiners, and a gym east of Greenwich gets the same error in the other
- * direction before 8am.
+ * ── Two wrong answers, both fixed here ────────────────────────────────────
  *
- * `isoDate` reads the local calendar and writes the `YYYY-MM-DD` the column
- * holds. It is the same helper /accounting already uses and it is deliberately
- * not localised — this is a storage key, not a sentence.
+ * This was `new Date().toISOString().slice(0, 10)`, the UTC day: a membership
+ * opened at 5pm in Los Angeles was filed as starting TOMORROW, so the billing
+ * anniversary is a day out and the member is counted in the wrong month's
+ * joiners. That became `isoDate(new Date())`, the reader's day, and the note
+ * that replaced it said the remaining half — the phone's timezone rather than
+ * the gym's — was "a separate item and a schema change".
  *
- * The wider question — that "local" here means the phone's timezone and not the
- * GYM's, because `tenants` has no timezone column at all — is a separate item
- * and a schema change. This is strictly the half that is wrong for everybody
- * outside UTC, including an owner standing in their own gym.
+ * The schema change happened. `tenants.timezone` is supabase/parts/710 and
+ * src/lib/gymToday.ts is the one place that turns it into a day, so the note
+ * outlived the gap it described. An owner opening a membership from home three
+ * hours west of their own gym, at nine in the evening, still dated it
+ * yesterday — and this is the date the anniversary is billed on.
+ *
+ * `gymTodayWindow` never guesses. A gym with no zone, a zone read that failed,
+ * and a zone this runtime cannot resolve all come back as the reader's day
+ * carrying `NO_ZONE_NOTE`, which the sheet below prints where it writes.
  */
-const today = () => isoDate(new Date());
 
 const STATUS_TONE = (t: Theme, s: MembershipStatus) =>
   s === 'active' ? t.brand : s === 'frozen' ? t.s3 : t.ink3;
@@ -71,6 +77,16 @@ const STATUS_LABEL: Record<MembershipStatus, string> = {
  *  not a ledger — /accounting and the console's own screens are where a gym's
  *  full payment history is read, and both of them page rather than cap. */
 const PAYMENTS_WINDOW_DAYS = 30;
+
+/**
+ * How many name matches the Open a Membership sheet asks for.
+ *
+ * Small on purpose — it is a typeahead at a desk, not a report. Named rather
+ * than written into the query as a bare 12 because the SENTENCE beside it has
+ * to use the same number: a list at the ceiling is a prefix, and the copy that
+ * says "nobody matching" may only be printed when it is not.
+ */
+const SEARCH_LIMIT = 12;
 
 const METHODS: PaymentMethod[] = ['card', 'cash', 'transfer', 'direct_debit', 'other'];
 const METHOD_LABEL: Record<PaymentMethod, string> = {
@@ -118,6 +134,10 @@ export default function OwnerMembers() {
   const [search, setSearch] = useState('');
   const [found, setFound] = useState<Candidate[] | null>(null);
   const [searchFailed, setSearchFailed] = useState(false);   // the lookup errored, ≠ no matches
+  /** Whether the lookup came back at its own ceiling — so what is on screen is
+   *  the first few matches rather than all of them, and "nobody matching" is
+   *  not a sentence this sheet may say. */
+  const [searchCut, setSearchCut] = useState(false);
   const [picked, setPicked] = useState<Candidate | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
 
@@ -134,9 +154,42 @@ export default function OwnerMembers() {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [reloading, setReloading] = useState(false);
 
+  /**
+   * `tenants.timezone`, and whether it could be read at all — three outcomes,
+   * kept apart. A failed read is not a gym with no timezone: the first is
+   * nothing to act on, and the second is a settings field to go and fill in.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneUnread, setZoneUnread] = useState(false);
+  /**
+   * Today at the gym, recomputed on every render.
+   *
+   * Not frozen into a `useState` initialiser: a desk phone with this screen
+   * open across midnight would otherwise keep writing yesterday's date onto
+   * every membership opened after twelve, which is the shape of frozen-`today`
+   * bug this codebase keeps finding.
+   */
+  const dayWindow = gymTodayWindow(zone);
+  /** Whose calendar the start date will be written on, where that needs saying.
+   *  Two silences, two sentences — a failed zone read is not an unset zone. */
+  const clockNote = zoneUnread
+    ? 'This gym’s timezone could not be read, so the start date below is your own device’s calendar day, '
+      + 'not the gym’s. That is a read that did not come back, not a gym with no timezone set.'
+    : dayWindow.note;
+
   const load = useCallback(async () => {
     if (!tenant?.id) return;
     setReloading(true);
+    // The gym's clock, on its own try/catch. A register full of members is
+    // still worth showing to somebody whose timezone read was refused, and the
+    // sheet that writes a date says whose calendar it used.
+    try {
+      const z = await fetchGymZone(supabase, tenant.id);
+      setZone(z.zone); setZoneUnread(!!z.error);
+    } catch (e) {
+      reportError('members.zone', e);
+      setZone(null); setZoneUnread(true);
+    }
     try {
       /**
        * ── The payments read is BOUNDED now ──────────────────────────────
@@ -221,7 +274,7 @@ export default function OwnerMembers() {
   const runSearch = async (text: string) => {
     setSearch(text);
     const needle = text.trim();
-    if (needle.length < 2 || !tenant?.id) { setFound(null); setSearchFailed(false); return; }
+    if (needle.length < 2 || !tenant?.id) { setFound(null); setSearchFailed(false); setSearchCut(false); return; }
     try {
       // supabase-js RESOLVES on a database error rather than rejecting, so
       // `error` has to be read off the result — the catch below only ever
@@ -236,21 +289,34 @@ export default function OwnerMembers() {
         .select('id, full_name')
         .eq('tenant_id', tenant.id)
         .ilike('full_name', `%${needle}%`)
-        .limit(12);
+        // ORDERED, because twelve of them are kept and the rest are dropped.
+        // Postgres promises nothing about which rows a `limit` without an
+        // `order` returns, so the same surname typed twice could hand back two
+        // different twelves — and the one the member is standing in front of
+        // you for might be in neither. An order makes the twelve at least
+        // predictable and repeatable.
+        .order('full_name', { ascending: true })
+        .limit(SEARCH_LIMIT);
       if (error) throw error;
       const held = new Set(list.filter((m) => m.status === 'active').map((m) => m.memberId));
-      setFound((data ?? [])
+      const rows = (data ?? []) as any[];
+      // At the ceiling means there are probably more. The sentence below turns
+      // on this: "nobody matching, or everyone matching already holds an
+      // active membership" is a claim about EVERYONE matching, and it cannot be
+      // made from a truncated twelve.
+      setSearchCut(rows.length >= SEARCH_LIMIT);
+      setFound(rows
         .map((r: any) => ({ id: String(r.id), name: String(r.full_name || 'Member') }))
         .filter((c: Candidate) => !held.has(c.id)));
       setSearchFailed(false);
-    } catch (e) { reportError('members.search', e); setFound(null); setSearchFailed(true); }
+    } catch (e) { reportError('members.search', e); setFound(null); setSearchFailed(true); setSearchCut(false); }
   };
 
   const commitMembership = async () => {
     if (!picked || !tenant?.id) return;
     setBusy(true);
     try {
-      await createMembership(supabase, tenant.id, { memberId: picked.id, planId, startedOn: today() });
+      await createMembership(supabase, tenant.id, { memberId: picked.id, planId, startedOn: dayWindow.day });
       setAddOpen(false); setPicked(null); setSearch(''); setFound(null); setSearchFailed(false); setPlanId(null);
       await load();
     } catch (e) {
@@ -282,6 +348,17 @@ export default function OwnerMembers() {
       } },
     ]);
   };
+
+  /**
+   * Whether Record payment may act, named once.
+   *
+   * It was spelled out three times in the sheet below — in `disabled`, in the
+   * fill colour and in the ink colour — and the third copy had dropped `cur`,
+   * so a gym that has not set a currency drew brand-coloured text on a disabled
+   * grey button. Three copies of a condition is how one of them comes to
+   * disagree, and the one that disagreed was the one a person looks at.
+   */
+  const payReady = !!amount.trim() && !busy && !!cur;
 
   const commitPayment = async () => {
     if (!payFor || !tenant?.id) return;
@@ -534,6 +611,18 @@ export default function OwnerMembers() {
               Find someone in your gym who does not already hold an active membership.
             </Text>
 
+            {/* The start date this sheet is about to write, and whose calendar
+                it is. Said here rather than nowhere: the date never appeared on
+                screen at all, and it is the date the billing anniversary falls
+                on for as long as the membership runs. Nothing is drawn when the
+                gym has set a zone and it was read — there is no disclosure to
+                make then. */}
+            {clockNote ? (
+              <View style={{ marginBottom: sp.lg }}>
+                <Flag tone={t.warn}>{`This membership will be recorded as starting ${dayWindow.day} — ${clockNote}`}</Flag>
+              </View>
+            ) : null}
+
             <Text style={lab}>Member</Text>
             {picked ? (
               <Pressable onPress={() => { setPicked(null); setFound(null); setSearchFailed(false); setSearch(''); }}
@@ -555,10 +644,21 @@ export default function OwnerMembers() {
                 ) : found !== null ? (
                   found.length === 0 ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                      Nobody matching, or everyone matching already holds an active membership.
+                      {searchCut
+                        ? `More than ${SEARCH_LIMIT} people match that, and every one this lookup saw already holds an active membership — which is not the same as everyone who matches. Type more of the name.`
+                        : 'Nobody matching, or everyone matching already holds an active membership.'}
                     </Text>
                   ) : (
                     <View style={{ marginTop: sp.sm, maxHeight: 190 }}>
+                      {/* Said above the list rather than under it, because the
+                          list scrolls and this is the part that stops somebody
+                          concluding a name is not in the gym. */}
+                      {searchCut ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                          The first {SEARCH_LIMIT} matches, in name order &mdash; there are more. If the person
+                          you want is not here, type more of their name.
+                        </Text>
+                      ) : null}
                       <ScrollView keyboardShouldPersistTaps="handled">
                         {found.map((c, i) => (
                           <Pressable key={c.id} onPress={() => setPicked(c)}
@@ -610,7 +710,18 @@ export default function OwnerMembers() {
             )}
 
             <View style={{ marginTop: sp.lg }}>
+              {/* Disabled by colour only, and colour is the one thing a screen
+                  reader does not get: this read as an ordinary "Open
+                  membership" button whether or not anybody had been picked, and
+                  a double-tap did nothing and said nothing. See src/lib/a11y.ts
+                  and the `Cta` in src/ui/kit.tsx, which announces its own
+                  disabled state; these three hand-rolled sheet buttons in the
+                  owner app were the ones that did not. */}
               <Pressable disabled={!picked || busy} onPress={commitMembership}
+                accessibilityRole="button"
+                accessibilityLabel={picked ? `Open a membership for ${picked.name ?? 'this member'}` : 'Open membership'}
+                accessibilityState={{ disabled: !picked || busy, busy }}
+                accessibilityHint={!picked ? 'Search for a member and choose one first.' : undefined}
                 style={{ backgroundColor: picked && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
                 <Text style={{ ...ty.label, fontWeight: '600', color: picked && !busy ? t.brandInk : t.ink3 }}>
                   {busy ? 'Opening…' : 'Open membership'}
@@ -668,7 +779,16 @@ export default function OwnerMembers() {
               {METHODS.map((m) => {
                 const on = method === m;
                 return (
+                  // Which method is chosen was carried entirely by the fill
+                  // colour, so a screen reader heard four identical buttons —
+                  // "Card", "Cash", … — with nothing saying which one this
+                  // payment is about to be recorded as. `selected` is the
+                  // announcement, and app/(owner)/rota.tsx's own chips have
+                  // used it since they were written.
                   <Pressable key={m} onPress={() => setMethod(m)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Record this as ${METHOD_LABEL[m]}`}
+                    accessibilityState={{ selected: on }}
                     style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
                     <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>{METHOD_LABEL[m]}</Text>
                   </Pressable>
@@ -677,9 +797,24 @@ export default function OwnerMembers() {
             </View>
 
             <View style={{ marginTop: sp.lg }}>
+              {/* Three reasons this refuses and none of them was said out
+                  loud. The currency one is the worst: with no `tenants.currency`
+                  the button is dead for a reason explained in a paragraph
+                  further up the sheet that a screen reader has already passed,
+                  and the sentence is what the person needs, not the dimming.
+                  The ink also disagreed with the fill — `color` tested
+                  `amount.trim() && !busy` while `backgroundColor` tested `cur`
+                  as well, so a currency-less gym drew brand-coloured text on
+                  the disabled grey. One condition now, named once. */}
               <Pressable disabled={!amount.trim() || busy || !cur} onPress={commitPayment}
-                style={{ backgroundColor: amount.trim() && !busy && cur ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: amount.trim() && !busy ? t.brandInk : t.ink3 }}>
+                accessibilityRole="button"
+                accessibilityLabel={`Record this payment against ${payFor?.memberName ?? 'this member'}`}
+                accessibilityState={{ disabled: !payReady, busy }}
+                accessibilityHint={!cur
+                  ? 'This gym has not set its currency, so a payment cannot be recorded yet. An owner sets it in Ops.'
+                  : !amount.trim() ? 'Enter an amount first.' : undefined}
+                style={{ backgroundColor: payReady ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: payReady ? t.brandInk : t.ink3 }}>
                   {busy ? 'Recording…' : 'Record payment'}
                 </Text>
               </Pressable>

@@ -92,6 +92,13 @@ export default function Compare() {
   // of these", which is a reassurance this screen cannot check.
   const [shares, setShares] = useState<ShareGrant[] | null>(null);
   const [coach, setCoach] = useState<CoachRef | null>(null);
+  // Why the badges are dashes. The em-dash was the honest half and the screen
+  // stopped there: no sentence, and no gesture that would ask again — the pull
+  // handler below did not touch this read. So a member looking at two
+  // photographs of their own body could not find out whether their coach can
+  // open them, for as long as the screen stayed open. The sibling read on
+  // app/(client)/scans.tsx has had a sentence and a Try Again the whole time.
+  const [sharesErr, setSharesErr] = useState<string | null>(null);
   const [sel, setSel] = useState<string[]>([]);
 
   const loadPhotos = useCallback(async () => {
@@ -113,25 +120,29 @@ export default function Compare() {
   // weight, body fat and muscle at each date — come from `cd.scans`, which has
   // its own status and its own three sentences on this screen, and none of them
   // had a way back.
-  const pull = usePullToRefresh(useCallback(() => { void loadPhotos(); cd.reload(); }, [loadPhotos, cd.reload]));
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [c, g] = await Promise.all([fetchMyCoach(), fetchMyShares()]);
-        if (cancelled) return;
-        setCoach(c);
-        setShares(g);
-      } catch (e) {
-        reportError('compare.photos.shares', e);
-        // Left null on purpose. Every badge below renders unknown as an
-        // em-dash rather than as "only you can see this".
-        if (!cancelled) setShares(null);
-      }
-    })();
-    return () => { cancelled = true; };
+  const loadShares = useCallback(async () => {
+    setSharesErr(null);
+    try {
+      const [c, g] = await Promise.all([fetchMyCoach(), fetchMyShares()]);
+      setCoach(c);
+      setShares(g);
+    } catch (e) {
+      reportError('compare.photos.shares', e);
+      // Left null on purpose. Every badge below renders unknown as an
+      // em-dash rather than as "only you can see this" — and now the screen
+      // says why, and offers to ask again.
+      setShares(null);
+      setSharesErr('We couldn’t read who can see these photos.');
+    }
   }, []);
+  useEffect(() => { void loadShares(); }, [loadShares]);
+
+  // The shares read is in the pull now too. It was the one read on this screen
+  // with no way back at all.
+  const pull = usePullToRefresh(useCallback(() => {
+    void loadPhotos(); void loadShares(); cd.reload();
+  }, [loadPhotos, loadShares, cd.reload]));
 
   // The pair named in the URL, seeded ONCE the photo list has landed.
   //
@@ -345,6 +356,22 @@ export default function Compare() {
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
                 Oldest first. Tap two to compare; tap a selected one again to drop it. To send a photo to your coach, or delete one, press and hold it on the Progress tab.
               </Text>
+              {/* The three states of the shares read, said out loud. The badges
+                  below already draw 'unknown' as an em-dash; this is the
+                  sentence that says what the dash means and the gesture that
+                  asks again. Same shape as app/(client)/scans.tsx. */}
+              {sharesErr ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Flag tone={t.warn}>
+                    {sharesErr} Nothing has changed either way — this screen just could not read the list, so it will not tell you these are private.
+                  </Flag>
+                  <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                    <Ghost label="Try Again" onPress={() => { void loadShares(); }} />
+                  </View>
+                </View>
+              ) : shares === null ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>Checking what your coach can see…</Text>
+              ) : null}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.md }}>
                 {photos.map((p) => {
                   const selIdx = sel.indexOf(p.id);

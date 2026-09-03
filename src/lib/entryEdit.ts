@@ -193,6 +193,23 @@ export interface WorkoutDraft {
   sets: WorkoutDraftSet[];
   mins: string;
   dist: string;
+  /**
+   * The unit the distance is in — 'km' or 'mi'.
+   *
+   * The one field the correction sheet could not touch, and the one most
+   * likely to be wrong. The app opened every cardio log on kilometres for
+   * everybody until recently, which is exactly how a member in Dallas filed a
+   * five-mile run as five kilometres; the unit travels into the log with the
+   * number (`WorkoutEntry.cardio.unit`) so that entry then says 5 km for ever.
+   * The draft carried no unit at all and the patch rebuilt the record with
+   * `{ ...entry.cardio, mins, dist }`, so the spread carried the original unit
+   * straight through whatever the sheet showed.
+   *
+   * Optional, and an omitted one keeps whatever the entry already had — a
+   * caller that has no unit control must not be able to silently rewrite the
+   * unit by leaving a field out.
+   */
+  distUnit?: string;
   watts: string;
   kcal: string;
 }
@@ -229,7 +246,11 @@ export function readWorkoutEdit(entry: WorkoutEntry, draft: WorkoutDraft): Edit<
     if (watts == null || watts < 0) return { ok: false, reason: 'Watts is not a number. Leave it empty if your machine did not show one.' };
     // Spread the original first so hrAvg and hrHigh — measured by a watch and
     // not editable here — survive a correction to the minutes beside them.
-    const cardio: NonNullable<WorkoutEntry['cardio']> = { ...entry.cardio, mins: Math.round(mins), dist };
+    // The unit is applied EXPLICITLY, after the spread. It used to be carried
+    // through by `...entry.cardio` with nothing able to change it.
+    const unit = typeof draft.distUnit === 'string' && draft.distUnit.trim()
+      ? draft.distUnit.trim() : entry.cardio.unit;
+    const cardio: NonNullable<WorkoutEntry['cardio']> = { ...entry.cardio, mins: Math.round(mins), dist, unit };
     if (watts > 0) cardio.watts = Math.round(watts); else delete cardio.watts;
     patch.cardio = cardio;
   } else {

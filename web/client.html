@@ -100,6 +100,10 @@ addEventListener('DOMContentLoaded', function () {
             <a class="store" href="https://apps.apple.com/app/id6790096518"><img class="apple on-light" src="badges/app-store.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"><img class="apple on-dark" src="badges/app-store-white.svg" alt="Download on the App Store" width="120" height="40" loading="lazy"></a>
             <a class="store" href="https://play.google.com/store/apps/details?id=com.washateria.repple"><img class="play" src="badges/google-play.png" alt="Get it on Google Play" width="646" height="250" loading="lazy"></a>
           </div>
+          <p class="tiny" style="margin:10px 0 0;color:var(--ink3)">
+            Being released now &mdash; if a button does not open a listing yet, that app has not
+            finished going out. <a href="/signup">Create your account</a> today and sign in when it lands.
+          </p>
         </div>
       </div>
     </div>
@@ -429,7 +433,10 @@ addEventListener('DOMContentLoaded', function () {
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Apple Health, in and out</strong> — heart rate, active energy, steps, resting HR and workouts, only with your permission, revocable any time.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>WHOOP, Oura, Fitbit, Garmin</strong> — connect the ones you use, for exactly what you connected them for.</span></li>
+            <!-- site-claim: wearables-connect — the vendors this build can actually connect. Checked against src/lib/wearables by scripts/check-site-claims.mjs; the bullet below carries the ones that cannot. -->
+            <span><strong>WHOOP and Oura</strong> — connect the ones you use, for exactly what you connected them for.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Fitbit and Garmin are named but cannot be connected</strong> — Repple has not finished registering with Fitbit, and Garmin&rsquo;s Health API is not self-serve. Both are listed in the app so you can see we know about your device, and both say the same thing there. On an iPhone each already writes into Apple Health, which is the route that works today.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Steps come from the phone</strong> — heart rate and calories need a watch on your wrist, and the screen says which is which rather than leaving you to guess why a figure is empty.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -598,7 +605,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
         <ul class="ticks">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Three ways to log</strong> — photograph the meal, scan the barcode, or just describe it. Barcodes are looked up in the Open Food Facts database.</span></li>
+            <span><strong>Three ways to log</strong> — photograph the meal, scan the barcode, or just describe it. Barcodes are looked up in the Open Food Facts database. Photographing a meal and describing one both send what you gave to a model outside the app to be read; <a href="/privacy#ai">Privacy</a> sets out exactly what goes and where.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Training, standard or rest</strong> — mark the day and the targets move with it, rather than holding one number across a week that is not one kind of week.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -661,7 +668,7 @@ addEventListener('DOMContentLoaded', function () {
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Tape numbers between scans</strong> — girths in centimetres, logged as often as you like, for the weeks when you are nowhere near the machine.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Progress photos</strong> — kept on your account; add two and you can put a before and an after next to each other.</span></li>
+            <span><strong>Progress photos</strong> — kept privately on your account; add two and you can put a before and an after next to each other. Your coach sees one only if you share that photo, and you can take the sharing back.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>A metric at a time</strong> — composition trends chart each measure on its own, and say plainly when there are not yet enough scans to draw one.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -903,7 +910,7 @@ addEventListener('DOMContentLoaded', function () {
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>One thread</strong> — messages with your coach, in the app, updating as they are sent.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Injuries you disclose are trained around</strong> — record an area, a severity and a note, and the Train tab works with it until you mark it recovered. Guidance, not medical advice.</span></li>
+            <span><strong>Injuries you disclose are trained around</strong> — record an area, a severity and a note, and the Train tab works with it until you mark it recovered. Your coach sees the area and the severity, never your note and never a document. If you upload a physio report or a scan result, Repple asks before sending it away to be read as text, names the company that would read it, and takes no for an answer. Guidance, not medical advice.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>No coach yet?</strong> — browse the trainers who have opted into the directory and send a real request. There are no star ratings, because there is no review system to produce them.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
@@ -1054,11 +1061,11 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Can I fix something I logged wrong?</summary>
-        <div class="a"><p>Yes. Any past entry can be edited — the exercise, the sets, the cardio figures, the calories — without deleting the session and starting again. Scan fields read from a photographed report can be corrected before you save them.</p></div>
+        <div class="a"><p>Yes. Any past entry can be edited — the exercise, the sets, the cardio figures, the calories — without deleting the session and starting again. Scan fields read from a photographed report can be corrected before you save them, which is worth doing: reading a printout is done by services outside the app, they misread a digit occasionally, and the figures are yours to correct. <a href="/privacy#ai">Privacy</a> says which services and what is sent.</p></div>
       </details>
       <details>
         <summary>Who can see my data?</summary>
-        <div class="a"><p>You, always. A coach you have deliberately linked to. And your gym, for the membership and attendance information needed to run the place — not your private messages. Nobody else, and never for advertising. The detail is in <a href="/privacy">Privacy</a>; what a coach can and cannot read, line by line, is in <a href="/security">Security &amp; data</a>.</p></div>
+        <div class="a"><p>You, always. A coach you have deliberately linked to. And your gym, for the membership and attendance information needed to run the place — not your private messages. No one else is shown your record, and none of it is used for advertising. The one thing worth knowing beyond that: some features work by sending what you gave them to a service outside the app to be read — a meal photo, an InBody sheet, an injury document, or a question you ask the in-app coach. <a href="/privacy#ai">Privacy</a> names each service and lists exactly what reaches it; what a coach can and cannot read, line by line, is in <a href="/security">Security &amp; data</a>.</p></div>
       </details>
       <details>
         <summary>Can I get everything back out?</summary>
@@ -1066,7 +1073,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>What does it cost?</summary>
-        <div class="a"><p>Pricing isn't published yet — the apps are in their first release and we would rather set it against how people actually use them than guess in advance. Creating an account and logging your training costs nothing today. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we'll talk plainly about it. <a href="/pricing">Pricing</a> sets out what can honestly be said in the meantime — including that a gym is billed per site rather than per member, and that nothing is charged today.</p></div>
+        <div class="a"><p>Pricing isn't published yet — the apps are in their first release and we would rather set it against how people actually use them than guess in advance. Creating an account and logging your training costs nothing today. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> and we'll talk plainly about it. <a href="/pricing">Pricing</a> sets out what can honestly be said in the meantime — including that a gym is billed per site rather than per member, and that no subscription is charged today — the one live charge being 10% of anything sold through Repple’s own checkout.</p></div>
       </details>
     </div>
   </div>

@@ -281,9 +281,16 @@ export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
     if (pkgRes.error) reportError('coachInvoices.currency.packages', pkgRes.error);
     if (profRes.error) reportError('coachInvoices.currency.profile', profRes.error);
 
-    if (!pkgRes.error) {
+    // `capped()` rather than the raw rows, because unanimity is a claim about
+    // the WHOLE set. `.limit(capLimit())` hands back a prefix, and a prefix that
+    // happens to be all one currency says "unanimous" about a coach whose next
+    // package is priced in another — which puts the wrong three letters on an
+    // invoice and makes it a different amount of money. A truncated read here
+    // knows less than an empty one, so it falls through to the gym.
+    const pkgPage = capped((pkgRes.data ?? []) as { currency: string | null }[]);
+    if (!pkgRes.error && !pkgPage.truncated) {
       const codes = new Set(
-        ((pkgRes.data ?? []) as { currency: string | null }[])
+        pkgPage.rows
           .map((p) => (p.currency || '').trim().toUpperCase())
           .filter((c) => c.length >= 3),
       );
@@ -300,7 +307,7 @@ export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
     if (profRes.error) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
 
     const tid = (profRes.data as { tenant_id: string | null } | null)?.tenant_id ?? null;
-    const partial: LoadStatus = pkgRes.error ? 'partial' : 'ready';
+    const partial: LoadStatus = pkgRes.error || pkgPage.truncated ? 'partial' : 'ready';
 
     if (tid) {
       const { data: ten, error: tenErr } = await supabase.from('tenants').select('currency').eq('id', tid).maybeSingle();
@@ -400,8 +407,10 @@ async function tellTheClient(invoice: CoachInvoice): Promise<boolean | null> {
     // the number of rows it wrote, which is the only honest answer to whether
     // this landed — an undeployed function and a refused write both come back
     // as zero, and both mean the client was not told.
-    const wrote = await recordInbox([invoice.clientId], note.title, note.body);
-    return wrote > 0;
+    // One recipient, so `atCap` cannot be true here and is not read. The count
+    // is still the only honest answer to whether this landed.
+    const { recorded } = await recordInbox([invoice.clientId], note.title, note.body);
+    return recorded > 0;
   } catch (e) {
     reportError('coachInvoices.notify', e);
     return false;
@@ -557,8 +566,10 @@ async function tellTheClientAgain(invoice: CoachInvoice): Promise<boolean | null
   if (!invoice.clientId) return null;
   const note = invoiceReminderNotification(invoice);
   try {
-    const wrote = await recordInbox([invoice.clientId], note.title, note.body);
-    return wrote > 0;
+    // One recipient, so `atCap` cannot be true here and is not read. The count
+    // is still the only honest answer to whether this landed.
+    const { recorded } = await recordInbox([invoice.clientId], note.title, note.body);
+    return recorded > 0;
   } catch (e) {
     reportError('coachInvoices.remind.notify', e);
     return false;

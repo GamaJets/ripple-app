@@ -75,7 +75,7 @@ import {
 import {
   classOffBuckets, classOffConfirmation, classOffNotification,
 } from '../../src/lib/notifyCopy';
-import { capLimit } from '../../src/lib/rowCap';
+import { readByIds } from '../../src/lib/idLookup';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { supabase } from '../../src/lib/supabase';
 
@@ -339,38 +339,79 @@ export default function TrainerClasses() {
    */
   const tellTheRoom = useCallback(async (
     classIds: readonly string[], classTitle: string, why: string,
-  ): Promise<{ people: number | null; pushed: number }> => {
-    if (!classIds.length) return { people: 0, pushed: 0 };
+  ): Promise<{ people: number | null; pushed: number; partial: boolean }> => {
+    if (!classIds.length) return { people: 0, pushed: 0, partial: false };
     let me: string | null = null;
     // A failed read of our own id costs the coach one notification about their
     // own cancellation. A failed read of the roster costs twelve people theirs,
     // which is why only the second one is reported.
     try { me = (await supabase.auth.getUser()).data?.user?.id ?? null; } catch { me = null; }
-    const { data, error } = await supabase
-      .from('class_bookings')
-      .select('user_id, class_id')
-      .in('class_id', classIds as string[])
-      .limit(capLimit());
-    if (error) return { people: null, pushed: 0 };
-    const rows = (data ?? [])
-      .map((r: { user_id?: unknown; class_id?: unknown }) => ({
-        userId: String(r?.user_id ?? '').trim(),
-        classId: String(r?.class_id ?? '').trim(),
-      }))
-      .filter((r) => r.userId && r.classId && r.userId !== me);
+    // ── Why this is `readByIds` and not one capped `.in()` ─────────────────
+    //
+    // It was `.in('class_id', classIds).limit(capLimit())`, and both halves of
+    // that were bounds nobody had checked against the thing being read.
+    //
+    // The id list is a whole SERIES. `cancelSeriesFrom` hands back every
+    // remaining occurrence, and a weekly class booked out three years ahead is
+    // 156 of them — past `ID_CHUNK`, where a single `.in()` truncates the
+    // filter or 414s, both in silence. The row list is every booking across all
+    // of them: forty people a week for a year is two thousand rows, and 1,001
+    // of them came back. Neither failure said anything.
+    //
+    // What it cost: `people` is printed to the coach as "N people had booked",
+    // and `pushed` decides whether the confirmation says "a push was queued to
+    // all of them". A truncated read makes both numbers smaller AND sends
+    // fewer notifications, so the coach is told a reassuring figure about a
+    // room that is partly still expecting a class. `readByIds` chunks the ids
+    // and pages each chunk to the end; `id` is the primary key and supplies the
+    // total order `readAll` requires.
+    let rows: { userId: string; classId: string }[];
+    try {
+      const read = await readByIds<{ id: string; user_id: unknown; class_id: unknown }>(
+        classIds as string[],
+        (chunk, from, to) => supabase
+          .from('class_bookings')
+          .select('id, user_id, class_id')
+          .in('class_id', chunk)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'who had booked these classes',
+      );
+      rows = read
+        .map((r) => ({
+          userId: String(r?.user_id ?? '').trim(),
+          classId: String(r?.class_id ?? '').trim(),
+        }))
+        .filter((r) => r.userId && r.classId && r.userId !== me);
+    } catch {
+      // Including a set too big to read honestly. `people: null` is already the
+      // "we could not read who had booked" sentence, and it is the right one:
+      // the classes ARE off, and the coach has to tell the room themselves.
+      return { people: null, pushed: 0, partial: false };
+    }
     // Grouped by how many of THEIR OWN bookings went, so nine weeks of a series
     // is one notification per person rather than nine, and nobody is told a
     // figure about somebody else's diary. See src/lib/notifyCopy.ts.
     const buckets = classOffBuckets(rows);
     let people = 0;
     let pushed = 0;
+    // send-push pages `push_tokens` and reports `partial` when a chunk of that
+    // read failed or ran off its page ceiling. It was thrown away here, so a
+    // send that reached an unknown fraction of a full room was reported to the
+    // coach as "a push was queued to all of them" — the truncation-as-total
+    // defect this screen's `readByIds` was added to fix, one layer further out.
+    // ANY bucket reporting it makes the whole sentence's claim a floor: the
+    // buckets are one cancellation seen from several diaries, not several
+    // events, and the coach acts on the sentence as a whole.
+    let partial = false;
     for (const b of buckets) {
       people += b.userIds.length;
       const n = classOffNotification(classTitle, b.classes, why);
       const res = await sendPushChecked(b.userIds, n.title, n.body, { route: n.route });
       if (res.ok) pushed += b.userIds.length;
+      if (res.partial) partial = true;
     }
-    return { people, pushed };
+    return { people, pushed, partial };
   }, []);
 
   const callOff = (c: GymClass) => {
@@ -400,7 +441,7 @@ export default function TrainerClasses() {
         refresh();
         Alert.alert(
           series ? 'Series called off' : 'Class called off',
-          classOffConfirmation(ids.length, told.people, told.pushed),
+          classOffConfirmation(ids.length, told.people, told.pushed, told.partial),
         );
       } catch (e) {
         Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so the classes are still on the timetable.');
@@ -887,7 +928,14 @@ export default function TrainerClasses() {
                         </ScrollView>
 
                         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                          {stepper('Start hour', `${mHour % 12 || 12}${mHour >= 12 ? 'pm' : 'am'}`,
+                          {/* `fmtClock`, like the create form two hundred lines
+                              above. This file removed the hand-built am/pm from
+                              itself and left it standing on the one control that
+                              relocates a class people have already paid for and
+                              put in their diaries — so a 24-hour-clock coach set
+                              the new time in a notation they do not use, on the
+                              action with the most people downstream of it. */}
+                          {stepper('Start hour', fmtClock(mHour, 0),
                             () => setMHour((h) => (h + 23) % 24), () => setMHour((h) => (h + 1) % 24))}
                         </View>
 
@@ -897,7 +945,7 @@ export default function TrainerClasses() {
                             <View key={m} style={{ flex: 1 }}>
                               <Pressable onPress={() => setMMinute(m)} accessibilityRole="button"
                                 accessibilityState={{ selected: m === mMinute }}
-                                accessibilityLabel={`${mHour % 12 || 12}:${String(m).padStart(2, '0')}${mHour >= 12 ? 'pm' : 'am'}`}
+                                accessibilityLabel={fmtClock(mHour, m)}
                                 style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === mMinute ? t.brand : t.surface2 }}>
                                 <Text style={{ ...ty.label, fontWeight: m === mMinute ? '500' : '400', color: m === mMinute ? t.brandInk : t.ink2 }}>
                                   :{String(m).padStart(2, '0')}

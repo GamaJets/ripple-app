@@ -49,7 +49,7 @@ export function LockScreen() {
             : `Unlock with ${label} to see your training.`}
         </Text>
 
-        <Pressable onPress={attempt} disabled={busy} accessibilityRole="button"
+        <Pressable onPress={attempt} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button"
           accessibilityLabel={`Unlock with ${label}`}
           style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.xl, paddingVertical: 14, minWidth: 200, alignItems: 'center', opacity: busy ? 0.5 : 1 }}>
           <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>

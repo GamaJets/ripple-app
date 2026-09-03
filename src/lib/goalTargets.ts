@@ -19,6 +19,10 @@
 //  · A goal with no number is never given one. A custom goal is a sentence;
 //    percentages of sentences are how "progress" stops meaning anything.
 
+// A bare `date` column read as the day it says, not as UTC midnight. See the
+// note on `isOverdue`.
+import { localDate } from './localDate';
+
 export type GoalKind = 'weight' | 'bodyfat' | 'muscle' | 'custom';
 /** The kinds with a series behind them. 'custom' is deliberately not one. */
 export type MeasuredKind = Exclude<GoalKind, 'custom'>;
@@ -166,10 +170,43 @@ export function projectionOf(goal: GoalTarget, series: readonly Point[], nowMs: 
   return { kind: 'eta', weeklyRate, etaMs: nowMs + weeks * 7 * 86400000 };
 }
 
-/** Whether a target date has gone by with the goal still open. */
+/**
+ * Whether a target date has gone by with the goal still open.
+ *
+ * ── Two things this got wrong, and they compounded ────────────────────────
+ *
+ * It was `Date.parse(goal.targetDateISO) < nowMs`.
+ *
+ * `goal_targets.target_date` is a bare Postgres `date`, and `Date.parse` of a
+ * bare date is UTC MIDNIGHT — the instant the day BEGINS, somewhere else. So a
+ * goal targeted at the 12th went overdue at the first moment of the 12th in
+ * UTC, which is:
+ *
+ *   · the 12th, all day, for the person whose goal it is. "By 12 Sep" and
+ *     "Target date passed (12 Sep)" on the same screen on the same morning.
+ *   · from 17:00 on the ELEVENTH in Los Angeles, so a coach there chased a
+ *     client about a deadline the client still had a whole day of.
+ *   · not until 14:00 on the 12th in Kiritimati, so the same coach reading
+ *     from the other side of the line saw the opposite.
+ *
+ * A target date is a calendar day in the goal-setter's own life, and a day is
+ * not late until it is over. `localDate` reads the bare date as LOCAL midnight
+ * (src/lib/localDate.ts is the file that exists for this exact trap), and the
+ * deadline is the local midnight that ENDS it — the next day's, computed by
+ * calendar arithmetic rather than by adding 86,400,000, because two days a
+ * year are 23 and 25 hours long.
+ *
+ * `isOverdue` on a gym invoice, in src/lib/monthEnd.ts, has always said "an
+ * invoice due today is not late today" and says it by comparing two bare date
+ * strings and never building a Date at all. This is the same rule; it could not
+ * be written the same way only because the signature here takes an instant.
+ */
 export function isOverdue(goal: GoalTarget, nowMs: number): boolean {
   if (goal.achievedAtISO || !goal.targetDateISO) return false;
-  return ms(goal.targetDateISO) < nowMs;
+  const d = localDate(goal.targetDateISO);
+  if (!d) return false;
+  const dayIsOver = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+  return nowMs >= dayIsOver;
 }
 
 /** List order: open goals before achieved ones, then by target date, with

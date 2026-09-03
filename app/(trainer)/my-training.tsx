@@ -60,6 +60,8 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { trainingDays, setsSummary } from '../../src/lib/ownTraining';
+import { tonnageNote, type BodyweightHistory } from '../../src/lib/bodyweightSets';
+import { useCheckIns } from '../../src/ui/checkins';
 import { dayKeyOfDate } from '../../src/lib/entryEdit';
 import { readLift, volumeIn, convertedNote, type WeightUnit } from '../../src/lib/units';
 import { weekStats } from '../../src/lib/streaks';
@@ -103,7 +105,32 @@ export default function MyTraining() {
   const todayKey = dayKeyOfDate(new Date());
   const today = days.find((d) => d.day === todayKey) ?? null;
   const recent = days.filter((d) => d.day !== todayKey).slice(0, RECENT_DAYS);
-  const wk = weekStats(log);
+  /* ── the coach's own weight, so their bodyweight sets are worth something ──
+   *
+   * `weekStats(log)` was called with the third argument omitted, which defaults
+   * the bodyweight history to `[]` — and `entryTonnage` cannot price a press-up,
+   * a pull-up or a dip without a bodyweight recorded on or before the day it was
+   * done, so it counts them as unknown instead. A calisthenics week read as a
+   * fraction of the work, and the caveat `weekStats` hands back in
+   * `unpricedSets` was never read.
+   *
+   * The coach's weigh-ins are on `check_ins.weight_kg` — the same series
+   * app/(trainer)/my-progress.tsx charts, filtered the same way, because a NULL
+   * column arrives here as 0 and a body that weighs nothing prices every set at
+   * nothing. Every client screen in this product passes this series; the coach
+   * was getting the honest figure everywhere except the screen about themselves.
+   */
+  const ci = useCheckIns();
+  const myWeights: BodyweightHistory = useMemo(
+    () => ci.checkins
+      .filter((c) => Number.isFinite(c.weightKg) && c.weightKg > 0)
+      .map((c) => ({ t: c.at, v: c.weightKg })),
+    [ci.checkins],
+  );
+  const wk = weekStats(log, Date.now(), myWeights);
+  /** The sets this week's total could not price, in the words every other
+   *  screen uses for them. Null when there are none. */
+  const unpricedNote = tonnageNote({ kg: wk.volumeKg, unknownSets: wk.unpricedSets });
 
   /* ── logging by text ─────────────────────────────────────────────────── */
 
@@ -380,6 +407,12 @@ export default function MyTraining() {
               // either unit long before it passes anything else.
               { label: 'Lifted', value: whole ? num(volumeIn(wk.volumeKg, wu)) : fig(null), unit: whole ? wu : undefined },
             ]} />
+            {/* The sets that are not in the number above it. Every client
+                screen and the coach's view of a CLIENT print this; the coach's
+                own week did not. */}
+            {whole && unpricedNote ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{unpricedNote}</Text>
+            ) : null}
             {!whole ? (
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
                 {status === 'loading'

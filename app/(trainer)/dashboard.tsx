@@ -548,9 +548,43 @@ export default function TrainerClients() {
   // on stays exactly what is listed under them — see `shownRoster`.
   const [rosterQ, setRosterQ] = useState('');
   const [tagDraft, setTagDraft] = useState('');
+  /**
+   * Accept an invitation to a gym, and say which of the two things happened.
+   *
+   * The congratulation used to be unconditional. `acceptTrainerInvite` goes to
+   * real trouble to make a refusal recoverable — src/ui/trainerInvites.tsx puts
+   * the invitation BACK on this dashboard when the RPC did not attach — and the
+   * boolean saying so was dropped on the floor. So a coach whose acceptance the
+   * server refused was welcomed to a platform they are not on, pushed to set up
+   * a profile for it, and then found the invitation sitting on the dashboard
+   * again with nothing to explain it. That reads as the app having lost their
+   * acceptance rather than never having had it, and joining a gym is the moment
+   * a coach's roster, currency and payroll change hands.
+   */
   const acceptJoin = async (id: string, ownerName: string | null) => {
-    await acceptTrainerInvite(id);
+    const joined = await acceptTrainerInvite(id);
+    if (!joined) {
+      Alert.alert('Not joined',
+        `You have NOT been added to ${ownerName || 'that gym'} — the server did not accept it, so nothing has changed and none of your clients have moved. `
+        + 'The invitation is back on this screen; try it again in a moment, or ask them to send a new one.');
+      return;
+    }
     Alert.alert('Welcome to the platform', 'You have joined ' + (ownerName || 'the platform') + ' as a trainer. Let us set up your profile.', [{ text: 'Set up profile', onPress: () => router.push('/(trainer)/profile') }, { text: 'Later' }]);
+  };
+  /**
+   * Withdraw an invitation, and only say it is withdrawn when it is.
+   *
+   * The row used to be filtered off this list on the tap and the result thrown
+   * away. An invitation is a live link into the coach's book: cancel one sent to
+   * the wrong address, watch it disappear, and that address can still join them
+   * — with no second place in the app to check, because the list the row was in
+   * is the list that was just filtered.
+   */
+  const cancelInvite = async (id: string, email: string) => {
+    if (await revokeInvite(id)) return;
+    Alert.alert('Not cancelled',
+      `${email} can still use that invitation to join you — the server did not confirm the cancellation, so it is still live and the row is still here. `
+      + 'Try again in a moment.');
   };
   const [pnote, setPnote] = useState('');
   const [bcOpen, setBcOpen] = useState(false);
@@ -1939,11 +1973,28 @@ export default function TrainerClients() {
           ) : null}
         </Section>
 
-        {/* ── pending invites ────────────────────────────────────────────── */}
-        {sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
+        {/* ── pending invites ──────────────────────────────────────────────
+            The section used to VANISH when the read failed, because `sent` is
+            `[]` under 'error' and the only test was `length > 0`. So the coach
+            re-invited people who already have a live invitation, and part 37's
+            partial unique index refused it — a second failure with an even less
+            useful explanation. This screen already refuses to trust this list
+            twice over, for `openInviteEmails` and for the CSV import; this is
+            the third place and it was the one a coach reads first. */}
+        {inviteStatus === 'error' ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Pending Invites" note={`${sentInvites.filter((i) => i.status === 'pending').length} awaiting`} />
+            <SectionHead title="Pending Invites" />
+            <Flag t={t} tone={t.warn}
+              text={'Your open invitations could not be read, so none are listed. That is not a statement that '
+                + 'nobody is waiting on you — anyone you have already invited still has a live invitation, and '
+                + 'inviting them again will be refused.'} />
+          </Section>
+        </>) : sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Pending Invites"
+              note={inviteStatus === 'ready' ? `${sentInvites.filter((i) => i.status === 'pending').length} awaiting` : undefined} />
             {sentInvites.filter((i) => i.status === 'pending').map((i, idx) => (
               <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -1953,7 +2004,7 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{i.email}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHED_MODE_SHORT[i.mode]} · awaiting sign-up / accept</Text>
                 </View>
-                <Ghost label="Cancel" onPress={() => revokeInvite(i.id)} />
+                <Ghost label="Cancel" onPress={() => cancelInvite(i.id, i.email)} />
               </View>
             ))}
           </Section>
@@ -1963,7 +2014,19 @@ export default function TrainerClients() {
 
         {/* ── the roster ─────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Your Clients" note={active > 0 ? driftNote() : undefined} />
+          {/* `isWhole(rosterStatus)`, not `active > 0`. `active` is
+              `roster.length`, so under 'partial' this caption was drawn over a
+              FRAGMENT of the book: "2 drifting" counted from part of it, or —
+              worse — "Everyone is holding their own pattern", a flat all-clear
+              about clients whose rows never came back. The Hero twenty lines
+              above was fixed for exactly this and its comment says so; the
+              section head kept the old gate. Every other consumer of `bands`
+              on this screen already asks (`toContact`, `segN`,
+              `bookState.clientsDrifting`). */}
+          <SectionHead title="Your Clients"
+            note={!isWhole(rosterStatus)
+              ? undefined
+              : active > 0 ? driftNote() : undefined} />
 
           {/* The read failed. Say so, say what it cost, and do NOT let the
               ordinary order pass for the drift order. */}
@@ -2433,7 +2496,17 @@ export default function TrainerClients() {
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="AI Weekly Summary" />
                 {aiSummary ? <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>{aiSummary}</Text> : null}
+                {/* Role and state, because the only thing that changed while a
+                    summary was being written was the opacity and the word
+                    inside — and a control with no `accessibilityRole` is not
+                    announced as a button at all, so a coach on VoiceOver had
+                    nothing telling them the tap had landed. */}
                 <Pressable onPress={() => genSummary(sel)} disabled={aiBusy}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: aiBusy, busy: aiBusy }}
+                  accessibilityLabel={aiBusy
+                    ? `Writing the weekly summary for ${sel.name}`
+                    : aiSummary ? `Write the weekly summary for ${sel.name} again` : `Generate an AI weekly summary for ${sel.name}`}
                   style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: aiBusy ? 0.6 : 1 }}>
                   {aiBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
                   <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{aiBusy ? 'Generating…' : aiSummary ? 'Regenerate summary' : 'Generate AI weekly summary'}</Text>
@@ -3248,7 +3321,15 @@ export default function TrainerClients() {
                     onPress={() => { Share.share({ message: inviteMessage(c.code) }).catch(() => {}); }}
                     disabled={!c.isLive}
                     accessibilityRole="button"
-                    accessibilityLabel={`Share the code for ${c.label}, ${c.code.split('').join(' ')}`}
+                    /* A withdrawn code is refused, and `opacity: 0.5` was the
+                       whole of what said so — which a screen reader does not
+                       have. The state is announced, and the label says which
+                       code it is talking about rather than leaving a coach to
+                       tap a dead control and guess. */
+                    accessibilityState={{ disabled: !c.isLive }}
+                    accessibilityLabel={c.isLive
+                      ? `Share the code for ${c.label}, ${c.code.split('').join(' ')}`
+                      : `The code for ${c.label} has been withdrawn and cannot be shared`}
                     style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8, opacity: c.isLive ? 1 : 0.5 }}>
                     <Text style={{ ...ty.label, ...numeric, color: t.ink, letterSpacing: 2 }}>{c.code}</Text>
                   </Pressable>
@@ -3599,7 +3680,15 @@ export default function TrainerClients() {
 function CoachSetupRow() {
   const t = useTheme();
   const router = useRouter();
-  const { facts, status } = useCoachSetup();
+  const { facts, status, reload } = useCoachSetup();
+  // Re-read every time the coach comes back, exactly as
+  // app/(trainer)/getting-started.tsx does with the same provider. The card
+  // names the NEXT outstanding step and links straight to it, so without this
+  // the loop is: tap the row, do the thing, come back, and be told to do it
+  // again — the provider's only trigger is its own mount. Pulling down did not
+  // fix it either, which is what turns a stale card into a coach believing the
+  // setting did not save and going back to change it a second time.
+  useRefreshOnFocus(useCallback(() => { void reload(); }, [reload]));
   // The same fact app/(trainer)/getting-started.tsx uses, for the same reason
   // and from the same place. This card names the NEXT outstanding step, and
   // the two screens disagreeing about what is outstanding — this one sending a

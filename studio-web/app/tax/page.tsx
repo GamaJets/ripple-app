@@ -55,7 +55,15 @@
 // quarter in which the gym took nothing — and this is the page somebody works
 // from at a deadline.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
+// `landed` comes from here too. This file declared its own copy, byte for
+// byte, three lines under the import that already brings in `Read` and
+// `reading` from the same module — which is the exact drift lib/read.ts was
+// written to stop: when the fourth state lands it lands in one place, and a
+// private copy is a screen the change cannot reach.
+import { type Unread, type Read, reading, landed } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { Banner, Announce } from '@/components/Banner';
 import { fetchPayments, money, type GymPayment } from '@lib/gymRecord';
@@ -82,15 +90,6 @@ import { saveText } from '@/lib/save';
 const QUARTERS_OFFERED = 4;
 const MONTHS_OFFERED = 6;
 
-type Unread = 'loading' | 'failed' | null;
-interface Read<T> { rows: T[] | null; state: Unread; why: string | null }
-const reading = <T,>(): Read<T> => ({ rows: null, state: 'loading', why: null });
-
-function landed<T>(res: PromiseSettledResult<T[]>, what: string): Read<T> {
-  if (res.status === 'fulfilled') return { rows: res.value, state: null, why: null };
-  const why = (res.reason as { message?: string })?.message;
-  return { rows: null, state: 'failed', why: `Could not read ${what}${why ? `: ${why}` : '.'}` };
-}
 
 interface Books {
   payments: Read<GymPayment>;
@@ -112,6 +111,10 @@ const EMPTY: Books = {
 
 export default function Tax() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymNameUnread, setGymNameUnread] = useState(false);
 
@@ -179,6 +182,10 @@ export default function Tax() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) { setProfileState('ready'); return; }
 
@@ -208,8 +215,11 @@ export default function Tax() {
 
   const books = loaded.key === key ? loaded.books : EMPTY;
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -349,7 +359,7 @@ function Profile({ profile, state, tenantId, onSaved }: {
         its own invoices &mdash; so nothing else about your tax affairs belongs in this box.
       </p>
       {blockers.length ? (
-        <ul style={{ margin: '0 14px 12px', paddingLeft: 18, fontSize: 12.5, color: '#f0c04e', maxWidth: '78ch' }}>
+        <ul style={{ margin: '0 14px 12px', paddingLeft: 18, fontSize: 12.5, color: 'var(--warn)', maxWidth: '78ch' }}>
           {blockers.map((b) => <li key={b} style={{ marginBottom: 4 }}>{b}</li>)}
         </ul>
       ) : null}
@@ -451,9 +461,12 @@ function Figures({ label, read, taken, p, note }: {
   return (
     <Section title={`${label} — ${p.label}`} sub={note}>
       {read.state === 'loading' ? (
-        <div style={{ padding: '22px 16px', color: 'var(--ink3)' }}>Loading…</div>
+        // Announced, and the failure below it announced too — this is a page
+        // somebody works a return from, and a section that quietly stops being
+        // a figure has to say so out loud.
+        <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '22px 16px', color: 'var(--ink3)' }}>Loading…</div>
       ) : read.state === 'failed' ? (
-        <div style={{ padding: '16px 14px', color: 'var(--ink2)', fontSize: 13, borderLeft: '3px solid var(--crit)' }}>
+        <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '16px 14px', color: 'var(--ink2)', fontSize: 13, borderLeft: '3px solid var(--crit)' }}>
           This read failed, so this figure is <strong>unknown</strong> rather than nothing.
           Nothing on this line may be filed.
         </div>
@@ -475,13 +488,13 @@ function Figures({ label, read, taken, p, note }: {
             ))}
           </div>
           {taken.pots.length > 1 ? (
-            <p style={{ margin: '10px 14px 14px', fontSize: 12.5, color: '#f0c04e', maxWidth: '78ch' }}>
+            <p style={{ margin: '10px 14px 14px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '78ch' }}>
               Two currencies. They are not added and there is no combined figure &mdash; this app
               holds no rate, and a single number over them would be about neither.
             </p>
           ) : null}
           {taken.unlabelled || taken.unpriced ? (
-            <p style={{ margin: '10px 14px 14px', fontSize: 12.5, color: '#f0c04e', maxWidth: '78ch' }}>
+            <p style={{ margin: '10px 14px 14px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '78ch' }}>
               {taken.unlabelled ? `${taken.unlabelled} row(s) state no currency and are counted out of the figures above. ` : ''}
               {taken.unpriced ? `${taken.unpriced} row(s) carry no amount, so the figures are short by exactly those. ` : ''}
               Neither is a zero.
@@ -654,17 +667,5 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
       </div>
       {children}
     </section>
-  );
-}
-
-function Kpi({ label, text, note }: { label: string; text: string | null | undefined; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
   );
 }

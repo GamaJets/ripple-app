@@ -230,7 +230,7 @@ export function whenToDeliver(at: Date, category: NotifyCategory, prefs: NotifyP
   if (!def?.quietable || !prefs.quiet) return new Date(at.getTime());
   if (!inQuietHours(at.getHours(), prefs)) return new Date(at.getTime());
   const out = new Date(at.getTime());
-  out.setHours(prefs.quietToHour, 0, 0, 0);
+  out.setHours(prefs.quietToHour, deliveryMinute(at.getHours(), at.getMinutes(), prefs), 0, 0);
   // The window wrapped past midnight, so the end of it is TOMORROW morning
   // relative to the notification's own evening. Without this a 23:00 nudge with
   // a 22→07 window would be moved to 07:00 the same morning, sixteen hours in
@@ -253,6 +253,94 @@ export function hourToDeliver(hour: number, category: NotifyCategory, prefs: Not
   const def = categoryDef(category);
   if (!def?.quietable || !prefs.quiet) return hour;
   return inQuietHours(hour, prefs) ? prefs.quietToHour : hour;
+}
+
+/* ── why a shifted reminder does not land on the top of the hour ───────────
+ *
+ * Everything moved out of quiet hours used to be set to `quietToHour, 0, 0, 0`
+ * — the same instant, to the millisecond, for every reminder in the window.
+ * src/lib/reminderPlan.ts emits a hydration nudge on the hour for every step of
+ * its window, so a 22:00 and a 23:00 reminder both became 07:00:00.000, as did
+ * any fixed reminder set on the hour. The OS collapses simultaneous banners, so
+ * the member got one and lost the rest — the shift exists so a nudge is never
+ * dropped, and stacking is how it dropped them anyway.
+ *
+ * So the window is mapped ONTO the ending hour, monotonically: a reminder's
+ * position through quiet hours becomes its minute past `quietToHour`. Order is
+ * preserved — a 22:00 nudge still arrives before a 23:00 one — and everything
+ * still lands inside the first hour the member is awake.
+ *
+ * It is not injective and cannot be: a ten-hour window has 600 minutes in it
+ * and there are 60 to land on. Two reminders within about ten minutes of each
+ * other in the night still share a minute. That is a far smaller collapse than
+ * every reminder in the window sharing one instant, and the honest description
+ * of the guarantee is "order kept, spread out", not "never collides".
+ */
+
+/** Minutes from the start of quiet hours to `hour:minute`, wrapping midnight. */
+function intoQuiet(hour: number, minute: number, prefs: NotifyPrefs): number {
+  const from = prefs.quietFromHour * 60;
+  const at = hour * 60 + minute;
+  return at >= from ? at - from : at + 24 * 60 - from;
+}
+
+/** How long quiet hours run, in minutes. Never zero: `inQuietHours` already
+ *  treats a zero-length window as no quiet hours at all. */
+function quietLengthMinutes(prefs: NotifyPrefs): number {
+  const from = prefs.quietFromHour * 60;
+  const to = prefs.quietToHour * 60;
+  return to > from ? to - from : to + 24 * 60 - from;
+}
+
+/**
+ * The minute past `quietToHour` a reminder due at `hour:minute` should take.
+ *
+ * 0–59, monotonic in the reminder's position through the window, so the first
+ * thing due in the night is the first thing delivered in the morning.
+ */
+export function deliveryMinute(hour: number, minute: number, prefs: NotifyPrefs): number {
+  const len = quietLengthMinutes(prefs);
+  if (len <= 0) return 0;
+  const into = Math.max(0, Math.min(len, intoQuiet(hour, minute, prefs)));
+  if (len <= 60) return Math.min(59, into);
+  return Math.min(59, Math.round((into / len) * 59));
+}
+
+/**
+ * The hour AND minute a repeating reminder should fire at.
+ *
+ * The full form of `hourToDeliver`, which answers with an hour and therefore
+ * could only ever put everything on the top of it.
+ */
+export function timeToDeliver(
+  hour: number,
+  minute: number,
+  category: NotifyCategory,
+  prefs: NotifyPrefs,
+): { hour: number; minute: number } {
+  const def = categoryDef(category);
+  if (!def?.quietable || !prefs.quiet || !inQuietHours(hour, prefs)) return { hour, minute };
+  return { hour: prefs.quietToHour, minute: deliveryMinute(hour, minute, prefs) };
+}
+
+/**
+ * What to tell somebody who has just typed a time inside their own quiet hours,
+ * or null when the time they typed is the time it will arrive.
+ *
+ * The reminders screen echoed the typed time back beside the box and said
+ * nothing, so a member who set a supplement reminder for 11pm found out it was
+ * a morning reminder by never being reminded at night.
+ */
+export function movedNote(
+  hour: number,
+  minute: number,
+  category: NotifyCategory,
+  prefs: NotifyPrefs,
+  label: (h: number, m: number) => string,
+): string | null {
+  const out = timeToDeliver(hour, minute, category, prefs);
+  if (out.hour === hour && out.minute === minute) return null;
+  return `That is inside your quiet hours (${quietLabel(prefs)}), so this one will arrive at ${label(out.hour, out.minute)} instead. Nothing is dropped — it waits.`;
 }
 
 /** "10pm to 7am" — for the sentence under the switch. Sentence case, no stop. */

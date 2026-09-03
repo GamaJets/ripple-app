@@ -307,7 +307,16 @@ export default function Music() {
      return;
    }
    // `conn.apple` was tested here and is unreachable — nothing ever set it.
-   Alert.alert('Connect Spotify', 'Saving a playlist to an account needs Spotify. Every track here opens in Apple Music on a tap, which needs nothing.');
+   //
+   // The second sentence used to read "Every track here opens in Apple Music on
+   // a tap, which needs nothing." Nothing on this screen has ever opened Apple
+   // Music: the only track handler in this file is `openInSpotify`, which builds
+   // an open.spotify.com search and otherwise offers to install Spotify. So the
+   // one sentence whose job was telling somebody what they could do WITHOUT
+   // connecting described a feature the header of this file records as never
+   // having existed — and it was read by exactly the person it was worst for,
+   // an Apple Music subscriber with no Spotify account.
+   Alert.alert('Connect Spotify', 'Saving a playlist to an account needs Spotify. Without it you can still use the list here — tapping a track searches for it in Spotify, and the titles are ordinary ones you can find in whatever you listen on.');
  };
 
  const G = layout.gutter;
@@ -370,7 +379,7 @@ export default function Music() {
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
  {DURATIONS.map((d) => <Chip key={d} on={minutes === d} label={`${d} min`} onPress={() => setMinutes(d)} />)}
  </View>
- <Pressable onPress={() => generate(salt + 1)} disabled={genBusy} accessibilityRole="button"
+ <Pressable onPress={() => generate(salt + 1)} disabled={genBusy} accessibilityState={{ disabled: genBusy }} accessibilityRole="button"
  style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginTop: sp.xl, opacity: genBusy ? 0.7 : 1, flexDirection: 'row', justifyContent: 'center', gap: sp.sm }}>
  {genBusy ? <ActivityIndicator color={t.brandInk} size="small" /> : null}
  <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{genBusy ? 'Finding songs…' : pl ? 'Regenerate Playlist' : 'Generate Workout Playlist'}</Text>
@@ -463,7 +472,7 @@ export default function Music() {
  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.name}</Text>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
  </View>
- <Pressable onPress={() => toggleService(s.id)} disabled={s.id === 'spotify' && spotifyBusy}
+ <Pressable onPress={() => toggleService(s.id)} disabled={s.id === 'spotify' && spotifyBusy} accessibilityState={{ disabled: !!(s.id === 'spotify' && spotifyBusy) }}
  accessibilityRole="button" accessibilityLabel={(conn[s.id] ? 'Disconnect ' : 'Connect ') + s.name}
  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, minWidth: 92, alignItems: 'center', backgroundColor: conn[s.id] ? t.surface2 : (s.id === 'spotify' ? t.brand : t.surface2) }}>
  {s.id === 'spotify' && spotifyBusy

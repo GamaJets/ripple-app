@@ -25,6 +25,7 @@
 //      src/lib/offlineQueue.ts · `unsentNote` walks, for the same reason.
 import {
   OUTBOX_CAP, OUTBOX_KINDS, addItem, bumpTry, dropItem, inOrder, isOutboxKind, kindNoun, lapsedNote,
+  mergeLapsed, newRowId, outboxLapsedKey,
   newItem, ofKind, outboxKey, outboxNote, partitionLapsed, readOutbox, type OutboxItem,
 } from './outbox';
 import { isPending } from './wellnessSync';
@@ -76,6 +77,39 @@ const UID = '11111111-1111-1111-1111-111111111111';
   eq(back.items[0].tries, 3, 'the attempt count survives a relaunch, or the diagnostics lie');
 }
 
+{
+  // A hole in the list, which JSON.stringify of a sparse array really does
+  // produce. The row guard has to SKIP these; reaching for `.kind` on one
+  // throws, the throw is caught by the same handler that catches unparseable
+  // bytes, and the whole queue comes back `read: false` — so one null entry
+  // stops the device writing at all and every intent behind it sits there
+  // until the app is reinstalled. One bad row is not an unreadable file.
+  const good = newItem('goal', { kind: 'weight' });
+  const withHoles = readOutbox(`[null, ${JSON.stringify(good)}, 7, "text"]`);
+  eq(withHoles.read, true, 'a null entry among the rows is a bad ROW, not a file that could not be read');
+  eq(withHoles.items.length, 1, 'it and the other non-objects are skipped');
+  eq(withHoles.items[0].id, good.id, 'and the real intent behind them still comes back');
+}
+
+{
+  // The two coerced fields, neither of which any other assertion here supplies
+  // in a broken form.
+  const at = '2026-09-01T09:00:00.000Z';
+  const row = (o: Record<string, unknown>) =>
+    readOutbox(JSON.stringify([{ id: 'i1', kind: 'message', at, payload: null, ...o }])).items[0];
+
+  eq(row({ tries: 'seven' }).tries, 0,
+    'a tries count that is not a number reads as none tried — a phone that has never sent must not report an attempt it never made');
+  eq(row({}).tries, 0, 'and so does one that was never written');
+
+  // `expiresAt` is what `partitionLapsed` reads, and it is the only thing
+  // standing between a lapsing intent and being replayed weeks late. Dropping
+  // a real expiry is the dangerous direction: the intent then never lapses.
+  eq(row({ expiresAt: at }).expiresAt, at, 'a written expiry survives the relaunch, or the intent never lapses and is replayed long after it stopped meaning anything');
+  eq(row({ expiresAt: 1_759_000_000 }).expiresAt, null, 'and an expiry of the wrong shape is no expiry rather than a value nothing can parse');
+  eq(row({}).expiresAt, null, 'an intent with no expiry keeps none');
+}
+
 /* ── 2 · the cap refuses rather than evicts ────────────────────────────── */
 
 {
@@ -117,8 +151,97 @@ const UID = '11111111-1111-1111-1111-111111111111';
   eq(p.lapsed[0].id, gone.id, 'and it is that one');
   eq(p.live.length, 3, 'the rest are still worth sending');
   ok(p.live.some((i) => i.id === junk.id), 'an expiry this file could not read is treated as no expiry, never as already lapsed');
+  // The boundary itself, which the fixture above steps around by a second on
+  // each side. `<=` and `<` differ only at the instant an expiry equals now,
+  // and an intent whose moment has exactly arrived has stopped meaning
+  // anything — sending it is the thing the expiry was set to prevent.
+  const onTheDot = newItem('pt-approval', { id: 's4' }, { expiresAt: new Date(now).toISOString() });
+  const edge = partitionLapsed([onTheDot], now);
+  eq(edge.lapsed.length, 1, 'an expiry that has exactly arrived HAS lapsed — the boundary is inclusive');
+  eq(edge.live.length, 0, 'and it is not still offered for sending');
+  const aMsLeft = partitionLapsed([newItem('pt-approval', { id: 's5' }, { expiresAt: new Date(now + 1).toISOString() })], now);
+  eq(aMsLeft.lapsed.length, 0, 'and one millisecond before it, it has not');
+
   ok(lapsedNote('pt-approval').includes('not sent'), 'and the member is told plainly that it did not happen');
   ok(!/will be sent|we will/i.test(lapsedNote('message')), 'a lapsed intent must not promise anything further');
+}
+
+/* ── 3a · the id that makes a replay safe ──────────────────────────────── */
+//
+// At-least-once delivery: the insert lands, the answer is lost, `classifyWrite`
+// says 'unsent' and the intent is offered again. Whether the member ends up
+// with one row or two comes down to who chose the key, so this is the whole of
+// the difference between a queue and a duplicating machine.
+
+{
+  const id = newRowId();
+  ok(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id),
+    `A ROW ID MUST BE A UUID THE COLUMN WILL TAKE — got "${id}"`);
+  const seen = new Set<string>();
+  for (let i = 0; i < 5000; i++) seen.add(newRowId());
+  eq(seen.size, 5000, 'and two rows must never be given the same one');
+}
+
+/* ── 3b · the notice outlives the process ──────────────────────────────── */
+//
+// A lapsed intent is out of `outboxKey` the instant it lapses — it must never
+// be sent — so from that line onwards the lapse notice is the ONLY record it
+// ever existed. Held in React state alone it was a member being told only if
+// they happened to look at the home screen before the process next ended, and
+// a swipe-away or an OS reclaim took Tuesday's planned day with it in silence.
+// `mergeLapsed` is what goes to the device, so what it keeps is what somebody
+// actually gets told.
+
+{
+  const a = newItem('day-plan', { d: 1 }, { at: '2026-09-01T09:00:00.000Z' });
+  const b = newItem('day-plan', { d: 2 }, { at: '2026-09-02T09:00:00.000Z' });
+  const g = newItem('goal', { kind: 'weight' }, { at: '2026-09-01T08:00:00.000Z' });
+
+  // One line per kind is what app/(client)/dashboard.tsx draws, and
+  // `lapsedNote` is singular whatever the count, so a second notice of the same
+  // kind could not change a word on any screen.
+  const folded = mergeLapsed([a], [b, g]);
+  eq(folded.length, 2, 'ONE NOTICE PER KIND — three lapsed planned days are one thing to say');
+  eq(folded.filter((i) => i.kind === 'day-plan').length, 1, 'the planned days fold together');
+  eq(folded.find((i) => i.kind === 'day-plan')!.id, b.id, 'and the newest is the one kept');
+  ok(folded.some((i) => i.kind === 'goal'), 'a different kind is a different sentence and survives');
+
+  // The launch that matters: a notice already on the device, and a fresh lapse
+  // of another kind found on the same read. Neither may push the other out.
+  const held = mergeLapsed([], [a]);
+  const afterLaunch = mergeLapsed(held, [g]);
+  eq(afterLaunch.length, 2, 'a new lapse does not clear one the member has not acknowledged yet');
+
+  // The tie, which every fixture above avoids by using distinct moments. Two
+  // planned days lapsing in the same millisecond is what a single flush of a
+  // queue that went offline at one moment actually looks like, and the stated
+  // rule is that the later ARRIVAL wins — `>=` rather than `>`. Between two
+  // notices reading the identical sentence it decides nothing a member can
+  // see, which is exactly why it would go unnoticed if it silently reversed:
+  // the id it keeps is the id the dashboard dismisses, so the wrong one
+  // sticking is a notice that cannot be cleared.
+  const sameMoment = '2026-09-04T09:00:00.000Z';
+  const older = newItem('day-plan', { d: 3 }, { at: sameMoment });
+  const newer = newItem('day-plan', { d: 4 }, { at: sameMoment });
+  eq(mergeLapsed([older], [newer]).find((i) => i.kind === 'day-plan')!.id, newer.id,
+    'on an exact tie the later arrival wins');
+  eq(mergeLapsed([newer], [older]).find((i) => i.kind === 'day-plan')!.id, older.id,
+    'which is a fact about arrival order and not about the two ids');
+
+  // Bounded by the union, not by a number: a phone in a drawer for a month
+  // cannot accumulate notices faster than there are kinds of write.
+  let piled: ReturnType<typeof mergeLapsed> = [];
+  for (let i = 0; i < 500; i++) {
+    piled = mergeLapsed(piled, [newItem(OUTBOX_KINDS[i % OUTBOX_KINDS.length], { i })]);
+  }
+  eq(piled.length, OUTBOX_KINDS.length, 'and it can never hold more than one of each');
+  eq(piled.map((i) => i.kind).join(','), OUTBOX_KINDS.join(','),
+    'drawn in the union order, so the home screen puts the same line in the same place every launch');
+
+  // Two accounts on one phone must not inherit each other's notices, which is
+  // the same rule `outboxKey` keeps for the work itself.
+  ok(outboxLapsedKey('u1') !== outboxLapsedKey('u2'), 'the notices are keyed per account');
+  ok(outboxLapsedKey('u1') !== outboxKey('u1'), 'and they are not the outbox — an unread outbox must not lose them');
 }
 
 /* ── 4 · order ─────────────────────────────────────────────────────────── */

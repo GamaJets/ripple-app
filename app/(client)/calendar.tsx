@@ -260,6 +260,18 @@ export default function Calendar() {
   // and they do not turn up.
   const sessionsKnown = sessionsStatus !== 'error';
   const sessionsCountable = sessionsStatus === 'ready';
+  /**
+   * Whether the coach's taken hours may be treated as all of them.
+   *
+   * `waitlistable_slots()` ends `limit 500` inside its own body and orders
+   * `starts_at asc`, so a cut list loses the FAR END of the window — see
+   * SLOTS_ROW_CAP in src/ui/sessions.tsx. Without this the day gates below drew
+   * "Nothing on this day" over a day that was really full, for the days
+   * furthest out, to a member who would have joined the waitlist for one of
+   * them. It also covers 'error' and 'loading', which those gates never
+   * consulted for this read at all.
+   */
+  const takenWhole = isWhole(waitStatus);
   // The other side of this booking happens on somebody else's phone. Re-read on
   // focus so what is on screen is the diary as it stands, not as it stood at
   // launch — including a slot that has just been taken.
@@ -626,6 +638,18 @@ export default function Calendar() {
   // could have answered. The two that can report back are now awaited, and the
   // alert claims only what actually happened.
   async function book(s: TrainingSession) {
+    // The second line, and the one that does not depend on which control was
+    // drawn. A grid can be looked at for a long time — the hour a member taps
+    // may have been in the future when the screen was painted — and everything
+    // below this draws a credit and tells a coach to expect somebody.
+    if (hasEnded(s)) {
+      Alert.alert(
+        'That hour has gone',
+        'That time has already passed, so it cannot be booked and nothing has been charged. Pick a time still to come.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
     // Into 'Session booked', into 'Not booked', and into the push the COACH
     // receives — so an English weekday here was written into their phone too.
     const slot = `${weekdayNamesShort()[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}`;
@@ -1125,7 +1149,7 @@ export default function Calendar() {
               loading line below stands in its place; `isWhole` also excludes
               'partial', where the session or the workout on this day may be
               one of the rows that did not come back. */}
-          {logWhole && sessionsCountable && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
+          {logWhole && sessionsCountable && takenWhole && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Icon name="calendar" size={24} color={t.ink3} />
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Nothing on this day. Days with a grey dot have open slots you can book; a coloured dot is a workout you logged, and a hollow ring is a day you planned.</Text>
@@ -1137,18 +1161,27 @@ export default function Calendar() {
               rather than either asserting emptiness or leaving a heading over
               nothing at all. Only when there is genuinely nothing to draw yet:
               a day with a session on it needs no line about the reading. */}
-          {!(logWhole && sessionsCountable) && logStatus !== 'error' && sessionsStatus !== 'error'
+          {!(logWhole && sessionsCountable && takenWhole) && logStatus !== 'error' && sessionsStatus !== 'error'
             && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center' }}>
-                {logStatus === 'loading' || sessionsStatus === 'loading'
+                {logStatus === 'loading' || sessionsStatus === 'loading' || waitStatus === 'loading'
                   ? 'Reading this day…'
                   // Named as the one that was actually cut short, not as both.
                   // Telling a member their calendar is truncated when it is
                   // their training log points them at the wrong read.
                   : sessionsStatus === 'partial'
                     ? 'There is more in your calendar than we can read in one go, so this day can’t be called empty. Anything booked on it is still booked.'
-                    : 'You have more training logged than we can read in one go, so this day can’t be called empty. Nothing is missing from your log.'}
+                    // The taken hours are a third read with a third ceiling, and
+                    // it used to fall through to the log sentence — which named
+                    // the wrong one and, worse, named a read that was perfectly
+                    // fine. `waitlistable_slots()` is ordered earliest-first, so
+                    // it is the far end of the window that goes missing, which
+                    // is exactly the part of the calendar somebody scrolls out
+                    // to when they are looking for an hour to wait for.
+                    : !takenWhole
+                      ? 'Your coach has more hours booked than we can read in one go, so this day can’t be called empty. There may be a slot on it you could join the waitlist for.'
+                      : 'You have more training logged than we can read in one go, so this day can’t be called empty. Nothing is missing from your log.'}
               </Text>
             </View>
           ) : null}
@@ -1168,7 +1201,16 @@ export default function Calendar() {
              * So a session whose time has passed shows what became of it —
              * delivered, not attended, cancelled, or still waiting on the coach
              * to say — and offers nothing to press. */
-            const ended = isMine && hasEnded(s);
+            /* The past check is asked of the HOUR, not of whose hour it is.
+             * It used to be `isMine && hasEnded(s)`, so the whole argument
+             * above applied to exactly one of the two kinds of row on this
+             * grid: an `available` slot on a day in March was `ended: false`
+             * whatever the date, captioned "Available", and carried a live Book
+             * button — and `book()` has no date guard of its own, so it went to
+             * `bookSession`, then `redeemSession`, and drew a credit for an
+             * hour that had already been. */
+            const gone = hasEnded(s);
+            const ended = isMine && gone;
             const v = ended ? pastVerdict(s) : null;
             return (
               <View key={s.id}>
@@ -1178,10 +1220,17 @@ export default function Calendar() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                      {v ? PAST_STATE_NOTE[v.state] : isMine ? 'Confirmed with your coach' : (s.released ? 'Just opened up' : 'Available')}
+                      {/* "Available" is a claim about a slot somebody can take.
+                          An hour that has already been is not available and
+                          never was going to be — it is an hour the coach had
+                          open and nobody booked. */}
+                      {v ? PAST_STATE_NOTE[v.state]
+                        : isMine ? 'Confirmed with your coach'
+                        : gone ? 'Nobody booked this hour'
+                        : (s.released ? 'Just opened up' : 'Available')}
                     </Text>
                   </View>
-                  {ended ? null : isMine ? (
+                  {ended || gone ? null : isMine ? (
                     <Ghost label="Cancel" onPress={() => cancel(s)} />
                   ) : (
                     <Cta label="Book" onPress={() => book(s)} />

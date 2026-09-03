@@ -482,11 +482,21 @@ async function usableToken(
     return { ok: false, why: 'Google would not renew this connection, which usually means access was removed in your Google account. Connect again.' };
   }
   const access = r.tok.access_token!;
-  await service.from('calendar_links').update({
+  // Unchecked, and supabase-js resolves with `{ error }` rather than throwing,
+  // so a failure here was silent. The call this token was fetched for still
+  // works — that is why it is not fatal — but nothing was stored, so every
+  // subsequent request refreshes again. Google does rotate a refresh token when
+  // it chooses to, and a rotation that is not stored leaves this row holding one
+  // Google will refuse for ever: the coach's calendar then reads
+  // `refresh_failed` and the only remedy is reconnecting, which nothing tells
+  // them to do. Logged rather than swallowed, because that is the difference
+  // between a findable fault and a connection that just stopped.
+  const { error: storeErr } = await service.from('calendar_links').update({
     access_token: access,
     refresh_token: r.tok.refresh_token ?? row.refresh_token,
     expires_at: new Date(Date.now() + (Number(r.tok.expires_in) || 3600) * 1000).toISOString(),
     updated_at: new Date().toISOString(),
   }).eq('user_id', userId).eq('provider', PROVIDER);
+  if (storeErr) console.error('calendar-sync: renewed the Google token for ' + userId + ' and could not store it, so this connection may need reconnecting:', storeErr.message);
   return { ok: true, token: access };
 }

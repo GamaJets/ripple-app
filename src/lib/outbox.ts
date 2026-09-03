@@ -50,10 +50,20 @@
 //     This clause used to name a body scan alongside them, and that was a
 //     misreading of what a scan write IS. `clientData.addScan` inserts six
 //     columns — the date, the two weights, the body-fat percentage, the muscle
-//     mass and a source string — and does not touch storage at all. The
-//     photograph of the printout is held on the phone for the member's own
-//     reference and is never uploaded, so there is no file for a cache sweep to
-//     take. A scan is numbers about the member's own body: not scarce, no money
+//     mass and a source string — and does not touch storage at all. There is no
+//     STORAGE OBJECT behind a scan: `scans.image_path` is never written by this
+//     app, no bucket holds the page, and so there is no file for a cache sweep
+//     to take.
+//
+//     Said as "the photograph is never uploaded", which is how this read until
+//     now, that is false and worth correcting even though the conclusion does
+//     not move. A page the member says yes to is base64-posted to TWO named
+//     companies — vision-analyze → api.anthropic.com and ocr-scan →
+//     api.ocr.space — see src/ui/scanSheets.ts and src/lib/scanSheetConsent.ts.
+//     That send happens on the screen, in front of the member, before anything
+//     reaches this queue; what is queued is the six numbers that came back out
+//     of it. The claim this clause needs is the narrow one, so it makes the
+//     narrow one. A scan is numbers about the member's own body: not scarce, no money
 //     in it, and it says the same thing whenever it lands. That is 'scan'
 //     below, and it is why the one screen that says "try again in a moment"
 //     over a member's InBody printout no longer has to.
@@ -215,6 +225,71 @@ export const OUTBOX_PREFIX = 'outbox:v1:';
 export const outboxKey = (uid: string): string => `${OUTBOX_PREFIX}${uid}`;
 
 /**
+ * Where the things this account has to be TOLD about live.
+ *
+ * ── Why a lapsed intent needs a key of its own ────────────────────────────
+ *
+ * `partitionLapsed` returns the lapsed items rather than deleting them, and the
+ * docstring says why: "a lapsed intent is the one case where the member has to
+ * be told: they typed something, it never went, and it is not going to.
+ * Dropping it silently is exactly the failure this whole file is about, moved
+ * later in time."
+ *
+ * The telling was held in React state and nowhere else. The moment an intent
+ * lapses it comes OUT of `outboxKey` — correctly, it must never be sent — and
+ * the only record that it ever existed is a `useState` in
+ * src/ui/outbox.tsx. So the sequence that actually happens on a phone is: a
+ * member marks next Tuesday as a rest day in a basement studio; Tuesday passes;
+ * they open the app on Wednesday, the lapse is detected on the load, the intent
+ * is written out of the outbox — and if the process ends before they happen to
+ * read the home screen (a launch straight into another tab, a swipe-away, the
+ * OS reclaiming a backgrounded app), the notice is gone with it and nothing
+ * will ever raise it again. The member believes they marked the day.
+ *
+ * That is the file's own failure arriving through the one door it left open, so
+ * the notice is written to the device and survives until the member has
+ * acknowledged it.
+ */
+export const OUTBOX_LAPSED_PREFIX = 'outbox:lapsed:v1:';
+export const outboxLapsedKey = (uid: string): string => `${OUTBOX_LAPSED_PREFIX}${uid}`;
+
+/**
+ * The lapse notices to keep, given the ones already held and the ones that have
+ * just lapsed.
+ *
+ * ONE PER KIND, newest first, which is not a cap chosen for space — it is
+ * exactly what gets drawn. app/(client)/dashboard.tsx renders
+ * `[...new Set(lapsed.map((i) => i.kind))]`, one `lapsedNote(kind)` per kind,
+ * and `lapsedNote` is singular whatever the count: "A planned day was waiting
+ * to send for too long". Three lapsed planned days are one thing to say, so
+ * keeping three of them would be storing two rows that can never change a word
+ * on any screen.
+ *
+ * Bounded by the union rather than by a number, which is the property worth
+ * having: a phone left in a drawer for a month cannot accumulate lapse notices
+ * faster than there are kinds of write.
+ *
+ * The NEWEST of a kind is the one kept, and that is the opposite direction from
+ * `addItem`'s refusal — deliberately, because these are not work. `addItem`
+ * refuses past the cap because evicting would discard something a member typed
+ * that could still be sent; nothing here can ever be sent, and between two
+ * notices that say the identical sentence the more recent is the one whose
+ * moment the member is likelier to remember.
+ */
+export function mergeLapsed(existing: readonly OutboxItem[], incoming: readonly OutboxItem[]): OutboxItem[] {
+  const newest = new Map<OutboxKind, OutboxItem>();
+  for (const i of [...existing, ...incoming]) {
+    const held = newest.get(i.kind);
+    // `>=` so a later arrival wins a tie, which is the same "the last one is
+    // the answer" rule the rest of this file keeps.
+    if (!held || Date.parse(i.at) >= Date.parse(held.at)) newest.set(i.kind, i);
+  }
+  // In the union's own order, so the home screen draws the same list in the
+  // same place every launch rather than in whatever order the lapses happened.
+  return OUTBOX_KINDS.map((k) => newest.get(k)).filter((i): i is OutboxItem => i !== undefined);
+}
+
+/**
  * How many intents one device will hold.
  *
  * There is a number here for a reason that is not tidiness: AsyncStorage on
@@ -227,6 +302,55 @@ export const outboxKey = (uid: string): string => `${OUTBOX_PREFIX}${uid}`;
  * refusal is a thing the caller can put in front of somebody.
  */
 export const OUTBOX_CAP = 200;
+
+/**
+ * A uuid for a row this device is about to write, chosen HERE rather than by
+ * the server.
+ *
+ * ── What it is for ────────────────────────────────────────────────────────
+ *
+ * At-least-once delivery. The insert reaches Postgres, the rows are written,
+ * and the RESPONSE is lost on the way back — a tunnel, a dropped 4G handover,
+ * the app backgrounded mid-request. `classifyWrite` sees no answer, correctly
+ * calls that 'unsent', and the intent stays queued; the next flush offers it
+ * again. If the server minted the key there is nothing for the second offer to
+ * collide with and the member ends up with two of something. If the DEVICE
+ * minted it, the second offer comes back 23505 and the handler reads that for
+ * what it plainly is: the row is there.
+ *
+ * That is the property `ScanIntent` already relies on and states at length, and
+ * it was minted privately in app/(client)/scans.tsx where nothing else could
+ * reach it. It is a rule about queued writes, so it lives with them.
+ *
+ * ── Why not expo-crypto ──────────────────────────────────────────────────
+ *
+ * `expo-crypto` calls `requireNativeModule` at module scope, so importing it
+ * throws while the importing file is LOADING on any install made before that
+ * dependency landed — the whole screen, not the one feature, and no `if` inside
+ * a component runs early enough to help. That is what scripts/check-native.mjs
+ * refuses, and it is right to: an over-the-air update carries the JavaScript and
+ * never the native half.
+ *
+ * So: the platform's own `crypto.randomUUID` where the runtime has one, and
+ * otherwise a v4 built from `Math.random`. `Math.random` is not a source of
+ * secrets and this is not a secret — it is a primary key for a row about the
+ * member's own record, and which rows they may write is decided by RLS and not
+ * by anybody's ability to guess an id. What it has to be is UNIQUE, and 122
+ * random bits is unique enough that the app will never see two.
+ */
+export function newRowId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (typeof c?.randomUUID === 'function') {
+    try {
+      const id = c.randomUUID();
+      if (typeof id === 'string' && id) return id;
+    } catch { /* no usable platform uuid; the shape below is built by hand */ }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 let SEQ = 0;
 /** A new intent. `at` defaults to now and is the member's moment, not the

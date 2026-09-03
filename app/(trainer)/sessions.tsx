@@ -50,10 +50,10 @@ import type { MyCurrency } from '../../src/lib/currencySource';
 import { tapLight } from '../../src/ui/haptics';
 import { type PtSession, type SessionOutcome } from '../../src/lib/gymSessions';
 import {
-  MARK_WINDOW_DAYS, awaitingOutcome, clearMyOutcome, fetchMySessions, windowStart,
+  MARK_WINDOW_DAYS, awaitingOutcome, fetchMySessions, windowStart,
 } from '../../src/lib/trainerSessions';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/lib/floorQueue';
+import { floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/lib/floorQueue';
 // The record, as opposed to the queue. See "What Already Happened" below.
 import {
   pastSessions, pastVerdict, PAST_STATES, PAST_STATE_LABEL, PAST_STATE_NOTE, type PastState,
@@ -101,9 +101,10 @@ import { localDate } from '../../src/lib/localDate';
 import { fetchCoachRequests, answerRequest, type CoachRequest } from '../../src/ui/sessionRequests';
 import {
   COACH_ACCEPT_RULE, OUTCOME_LABEL, REQUEST_NOTE_MAX, answerRefusalNote,
-  answeredConfirmation, coachQueue, coachQueueNote,
+  answerTellLine, answeredConfirmation, coachQueue, coachQueueNote,
 } from '../../src/lib/sessionRequests';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
+import { hitSlopFor } from '../../src/lib/a11y';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { FORWARD_ICON } from '../../src/ui/direction';
@@ -473,10 +474,17 @@ export default function TrainerSessions() {
       { route: '/(client)/request-session' },
       'bookings',
     );
+    // Three outcomes, and this warned on one of them. `ok` covers a send that
+    // was accepted and could only part-read the client's handsets (`partial`),
+    // and a send that was accepted while `notify_users` wrote no row at all
+    // (`recorded: 0`) — both of which read on screen exactly like the case
+    // where the client has been told. `answerTellLine` is the one place the
+    // three are separated, and it is tested there.
     const lines = [answeredConfirmation(accept, when)];
-    if (!push.ok) {
-      lines.push('We couldn’t send them a notification, so they may not see this until they open the app.');
-    }
+    const told = answerTellLine({
+      ok: push.ok, recorded: push.recorded, inboxKept: push.inboxKept, partial: push.partial,
+    });
+    if (told) lines.push(told);
     Alert.alert(accept ? 'Session created' : 'Answered', lines.join('\n\n'), [{ text: 'OK' }]);
   }
 
@@ -651,6 +659,13 @@ export default function TrainerSessions() {
           'That outcome was not saved and is not waiting to send — the session may no longer exist, or it is not yours to mark.');
         return;
       }
+      // Nothing was kept. The session stays on the Mark Sessions queue, because
+      // that is where it actually still is — and the sentence names the cause,
+      // which unlike a refusal is one the coach can clear themselves.
+      if (out === 'full') {
+        Alert.alert('Not recorded', floorFullLine('That outcome'));
+        return;
+      }
       setQueue((prev) => (prev ?? []).filter((x) => x.id !== s.id));
       // The session leaves the queue and JOINS the record, in the same tap. It
       // is the same row seen two ways, and letting the history keep saying
@@ -696,19 +711,50 @@ export default function TrainerSessions() {
   const undo = async (entry: { s: PtSession; outcome: SessionOutcome }) => {
     if (!uid) return;
     try {
-      await clearMyOutcome(supabase, uid, entry.s.id);
+      // ── through the queue, like the mark it takes back ──────────────────
+      //
+      // This was `clearMyOutcome(supabase, uid, entry.s.id)` — straight to the
+      // server, while `mark` above goes through `floor.attempt`. The two halves
+      // of one feature met in exactly the conditions the queue was built for: a
+      // coach on a gym floor with no signal marked a session, the act was kept
+      // on the phone, they undid it in front of the client, the undo THREW, and
+      // when the signal came back the queue flushed the outcome they had
+      // retracted — onto that client's record and onto payroll.
+      //
+      // A retraction carries the same supersede key as the mark, so offline it
+      // replaces the queued act in place and nothing false is ever sent. When
+      // the mark HAD reached the server this is the clear that always had to
+      // happen, and it is now retried like everything else rather than lost to
+      // one failed round trip.
+      const out = await floor.attempt({
+        kind: 'session-outcome', sessionId: entry.s.id, clientName: entry.s.clientName ?? null, outcome: null,
+      });
+      if (out === 'refused') {
+        // The server read it and declined, so the outcome stands. Named as what
+        // is true of the RECORD, because that is what the coach has to act on.
+        Alert.alert('Not undone',
+          `${entry.s.clientName ?? 'That session'} is still recorded as “${OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome}” — the session may no longer exist, or it is not yours to change.`);
+        return;
+      }
       setJustMarked((prev) => prev.filter((x) => x.s.id !== entry.s.id));
       setQueue((prev) => [entry.s, ...(prev ?? [])]);
       // Back to unmarked in the record too, for the same reason as above.
       setAll((prev) => (prev ?? []).map((x) => (x.id === entry.s.id
         ? { ...x, outcome: null, outcomeAt: null } : x)));
       tapLight();
+      if (out === 'unsent') {
+        // Kept, not saved, and never the other way round. What matters to the
+        // coach here is the half that IS now true: the outcome they retracted
+        // will not be sent, whatever this phone was carrying.
+        Alert.alert('Kept on this phone', keptOfflineLine('Taking that outcome back'));
+      }
     } catch (e) {
-      // The row keeps its outcome on the server, so saying nothing here leaves
-      // the coach believing they took back a "no show" they did not — and the
-      // gym pays, or does not pay, on the outcome that is still recorded.
+      // The row may keep its outcome on the server, so saying nothing here
+      // leaves the coach believing they took back a "no show" they did not —
+      // and the gym pays, or does not pay, on the outcome that is still
+      // recorded.
       reportError('sessions.undo', e);
-      Alert.alert('Not undone', `${entry.s.clientName ?? 'That session'} is still recorded as “${OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome}”. Check your connection and tap undo again.`);
+      Alert.alert('Not undone', `${entry.s.clientName ?? 'That session'} may still be recorded as “${OUTCOMES.find((o) => o.id === entry.outcome)?.label ?? entry.outcome}”. Check your connection and tap undo again.`);
     }
   };
 
@@ -1041,9 +1087,26 @@ export default function TrainerSessions() {
 
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.md }}>
                 <Text style={{ ...ty.caption, color: t.ink3, alignSelf: 'center' }}>Whole day:</Text>
+                {/* The label is the control's own claim about an irreversible
+                    batch write, and it said "every session on Friday 14 March"
+                    while a filter was on — `days` is `byDay(shownRows)` and
+                    this acts on the shown rows only. `markDay`'s confirmation
+                    already corrects it, but the spoken label is the whole of
+                    what a VoiceOver user has BEFORE the dialog, and it is the
+                    sentence they act on. It says the count, and says "shown"
+                    when the list is narrowed, in the same words `narrowNote`
+                    uses.
+
+                    Vertical slop only: `paddingVertical: 5` around an 18pt
+                    caption is a 28pt row, under the 44 in src/lib/a11y.ts —
+                    and these chips sit 8pt apart, so horizontal slop would
+                    have neighbours fighting over the gap. */}
                 {WHOLE_DAY_OUTCOMES.map((o) => (
-                  <Pressable key={o.id} onPress={() => markDay(day, o.id)} hitSlop={6}
-                    accessibilityRole="button" accessibilityLabel={`Mark every session on ${day.label} as ${o.label}`}
+                  <Pressable key={o.id} onPress={() => markDay(day, o.id)}
+                    hitSlop={{ top: hitSlopFor(28), bottom: hitSlopFor(28), left: 0, right: 0 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Mark ${narrowed ? 'the' : 'all'} ${day.rows.length} ${day.rows.length === 1 ? 'session' : 'sessions'}${narrowed ? ' shown' : ''} on ${day.label} as ${o.label}`}
+                    accessibilityHint="Asks first. Each one can be undone afterwards."
                     style={{ borderWidth: hairline, borderColor: o.tone(t), borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 5 }}>
                     <Text style={{ ...ty.caption, color: o.tone(t) }}>{o.short}</Text>
                   </Pressable>
@@ -1065,6 +1128,7 @@ export default function TrainerSessions() {
                       {OUTCOMES.map((o) => (
                         <Pressable key={o.id} disabled={busy === s.id} onPress={() => mark(s, o.id)} hitSlop={4}
                           accessibilityRole="button" accessibilityLabel={`${s.clientName ?? 'Client'}: ${o.label}`}
+                          accessibilityState={{ disabled: busy === s.id, busy: busy === s.id }}
                           style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8 }}>
                           <Text style={{ ...ty.label, fontWeight: '600', color: o.tone(t) }}>{o.short}</Text>
                         </Pressable>
@@ -1229,6 +1293,7 @@ export default function TrainerSessions() {
                   onPress={() => void load(loadedDays + MARK_WINDOW_DAYS)}
                   hitSlop={8}
                   accessibilityRole="button"
+                  accessibilityState={{ disabled: widening, busy: widening }}
                   accessibilityLabel={`Read the ${MARK_WINDOW_DAYS} days before ${dayOnly(windowFrom)}`}
                   style={{ borderWidth: hairline, borderColor: t.ring, borderRadius: radius.pill, paddingHorizontal: sp.lg, paddingVertical: sp.sm, opacity: widening ? 0.5 : 1 }}>
                   <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>

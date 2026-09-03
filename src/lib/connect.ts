@@ -8,6 +8,7 @@ import { appLink, WEB_ORIGIN } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
 import { capLimit, capped, TruncatedRead, ROW_CAP } from './rowCap';
+import { readByIds } from './idLookup';
 import { writeFailure } from './wroteRows';
 import { packBalance, readDraw, drew, drawReason, type DrawOutcome, type PackPurchase, type PackBalance } from './packDraw';
 import { PACKAGE_NOT_SAVED, packageEditBlocker, packageUpdateRow, type PackagePatch } from './packageEdit';
@@ -216,19 +217,39 @@ export async function fetchMyConnect(): Promise<ConnectStatus | null> {
 /**
  * Packages the signed-in trainer sells.
  *
- * `[]` means they sell none. **`null` means we could not read them**, which the
- * payments screen must not render as "no packages yet" — a trainer told that
- * about their own price list will build it a second time, and their clients see
- * duplicates of everything they already sell.
+ * Empty rows under 'ready' means they sell none. **'error' means we could not
+ * read them**, which the payments screen must not render as "no packages yet" —
+ * a trainer told that about their own price list will build it a second time,
+ * and their clients see duplicates of everything they already sell.
+ *
+ * ── And why there is a limit on it now ─────────────────────────────────────
+ *
+ * There was no `.limit()` at all, which does not mean "no ceiling" — it means
+ * PostgREST's own, 1000 rows, applied silently and reported as a complete set.
+ * app/(trainer)/payments.tsx prints `.filter(active).length` as the number
+ * beside the "Your Packages" heading, so past a thousand packages that heading
+ * would have stated a floor as a total, with nothing anywhere to say so.
+ *
+ * A thousand packages is not a price list anyone has today. That is exactly the
+ * argument this codebase has stopped accepting: "the table only holds a few
+ * rows" is a fact about this month, the cost of `capLimit()` is one row, and
+ * `capped()` is what turns a hope into a claim the screen can act on.
  */
-export async function fetchMyPackages(): Promise<TrainerPackage[] | null> {
+export async function fetchMyPackages(): Promise<{ rows: TrainerPackage[]; status: LoadStatus }> {
   try {
     const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id; if (!uid) return null;
-    const { data, error } = await supabase.from('trainer_packages').select('*').eq('trainer_id', uid).order('created_at', { ascending: false });
-    if (error) return null;
-    return (data as TrainerPackage[]) ?? [];
-  } catch { return null; }
+    const uid = auth?.user?.id; if (!uid) return { rows: [], status: 'error' };
+    const { data, error } = await supabase.from('trainer_packages').select('*')
+      .eq('trainer_id', uid)
+      // `.order('id')` behind the date so the set is totally ordered: two
+      // packages created in the same second are two rows Postgres may return
+      // in either order, and at the cap that decides which is dropped.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(capLimit());
+    if (error) { reportError('connect.fetchMyPackages', error); return { rows: [], status: 'error' }; }
+    const page = capped((data as TrainerPackage[]) ?? []);
+    return { rows: page.rows, status: page.truncated ? 'partial' : 'ready' };
+  } catch (e) { reportError('connect.fetchMyPackages', e); return { rows: [], status: 'error' }; }
 }
 
 /**
@@ -706,20 +727,51 @@ export async function fetchClientPurchases(): Promise<{ rows: CoachPurchase[]; s
     // no unit, and that is unrecoverable rather than unread.
     const pkgIds = [...new Set(page.rows.map((r) => r.package_id).filter(Boolean))] as string[];
     const pkgs = new Map<string, { name: string | null; currency: string | null }>();
-    if (pkgIds.length) {
-      // no-error-ok: a package we cannot read leaves the sale unlabelled and unpriced-in-anything, which is the same outcome as a package that was deleted — and both are reported by sumTaken as amounts missing from the total, never as dollars
-      const { data: rows } = await supabase.from('trainer_packages').select('id, name, currency').in('id', pkgIds).limit(capLimit());
-      (rows ?? []).forEach((p: any) => { if (p?.id) pkgs.set(p.id, { name: (p.name || '').trim() || null, currency: (p.currency || '').trim() || null }); });
-    }
+    try {
+      // Chunked, and the reason is the REQUEST LINE rather than the row cap.
+      // `page.rows` is `capLimit()`-bounded, so `pkgIds` can hold a thousand
+      // uuids; at ~39 bytes each inside `in.("…","…")` that is a ~39KB query
+      // string against the 8KB request line nginx and most CDNs enforce, and
+      // the proxy refuses past roughly two hundred. The refusal is a 414,
+      // supabase-js does not reject on it, and it arrives as `data: null` —
+      // indistinguishable from "none of these packages could be read".
+      //
+      // no-error-ok (about the ROW ceiling, which chunking now guarantees is
+      // never reached — each chunk is 150 ids against a 1000-row cap): a
+      // package we cannot read leaves the sale unlabelled and
+      // unpriced-in-anything, which is the same outcome as a package that was
+      // deleted — and both are reported by sumTaken as amounts missing from the
+      // total, never as dollars. The 414 was never covered by that argument:
+      // it takes the unit off EVERY sale at once, on a screen about money.
+      const pkgRows = await readByIds<any>(
+        pkgIds,
+        // `.order('id')` on a primary-key lookup is total, which is the
+        // contract `readAll` requires of every page it is handed.
+        (chunk, from, to) => supabase.from('trainer_packages').select('id, name, currency')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the packages these sales were made from',
+      );
+      pkgRows.forEach((p: any) => { if (p?.id) pkgs.set(p.id, { name: (p.name || '').trim() || null, currency: (p.currency || '').trim() || null }); });
+    } catch { /* an unread package leaves the sale unlabelled, exactly as a deleted one does */ }
 
     const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
     const names = new Map<string, string>();
-    if (clientIds.length) {
-      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read stays null and renders as a dash; the purchase it labels is still real and still paid for
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
-      (profs ?? []).forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
-    }
+    try {
+      // Chunked for the reason above, and with the same cost of not being: a
+      // 414 over the whole list puts a dash where the buyer's name goes on
+      // every row at once, which reads as a sales list nobody can be matched to.
+      //
+      // no-error-ok (about the ROW ceiling — one row per id, 150 ids a chunk):
+      // a name we cannot read stays null and renders as a dash; the purchase it
+      // labels is still real and still paid for.
+      const profs = await readByIds<any>(
+        clientIds,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the clients who bought these',
+      );
+      profs.forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
+    } catch { /* a name that will not read is a dash, never a wrong name */ }
 
     const rows: CoachPurchase[] = page.rows.map((r) => ({
       ...r,
@@ -800,12 +852,28 @@ export async function fetchMyDisputes(): Promise<{ rows: CoachDispute[]; status:
 
     const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
     const names = new Map<string, string>();
-    if (clientIds.length) {
-      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read stays null and renders as a dash; the dispute it labels is still live and still has a deadline on it
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
-      (profs ?? []).forEach((pr: any) => { if (pr?.id) names.set(pr.id, (pr.full_name || '').trim()); });
-    }
+    try {
+      // Chunked, about the REQUEST LINE and not the row cap. `clientIds` is
+      // bounded by a `capLimit()` read, so up to a thousand uuids at ~39 bytes
+      // each inside `in.("…","…")` — a ~39KB query string against an 8KB
+      // request line. The proxy refuses past roughly two hundred with a 414,
+      // supabase-js does not reject on it, and it lands as `data: null`, which
+      // is the same shape as no names coming back.
+      //
+      // no-error-ok (about the ROW ceiling: one row per id, 150 ids a chunk, so
+      // a chunk cannot reach it): a name we cannot read stays null and renders
+      // as a dash; the dispute it labels is still live and still has a deadline
+      // on it. What that argument does NOT cover is losing every name at once —
+      // a coach answering a chargeback has to know whose it is, and a list of
+      // dated dashes with money and deadlines on them is not answerable.
+      const profs = await readByIds<any>(
+        clientIds,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the clients who raised these disputes',
+      );
+      profs.forEach((pr: any) => { if (pr?.id) names.set(pr.id, (pr.full_name || '').trim()); });
+    } catch { /* a name that will not read is a dash; the dispute is still listed */ }
 
     const rows: CoachDispute[] = page.rows.map((r) => ({
       ...r,

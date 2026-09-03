@@ -55,7 +55,7 @@ import { outboxNote } from '../../src/lib/outbox';
 import { useOutbox } from '../../src/ui/outbox';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import {
-  COACH_DOC_ACCEPT_RULE, COACH_DOC_NOT_REPPLE, docLine, outstanding,
+  COACH_DOC_ACCEPT_RULE, COACH_DOC_ACCESS_ENDS_NOTE, COACH_DOC_NOT_REPPLE, docLine, outstanding,
   outstandingCount, shapeDocs, sizeLabel, type CoachDoc, type RawCoachDoc,
 } from '../../src/lib/coachDocs';
 
@@ -106,6 +106,18 @@ export default function ClientCoachDocumentsScreen() {
       if (!id) { setSignedOut(true); setStatus('error'); return; }
       setSignedOut(false);
       setUid(id);
+      // sql-cap-ok: my_coach_documents() ends `limit 200`
+      // (supabase/parts/156-a-document-meant-for-one-client.sql) on the
+      // paperwork of the ONE coach this client trains under, and it orders
+      // `required desc, created_at desc` before it cuts. Both halves matter.
+      // The only figure this screen states over the list is
+      // `outstandingCount`, which counts documents that are required, in
+      // circulation and unaccepted — and required documents sort first, so a
+      // cut at two hundred can only ever drop optional ones. The count cannot
+      // be made wrong until a single coach is holding more than two hundred
+      // REQUIRED documents, at which point the ceiling is the smaller of that
+      // gym's problems. What a cut would drop is an old optional handout, from
+      // the bottom of a list nobody counts.
       const { data, error } = await supabase.rpc('my_coach_documents');
       // An empty list under a failed read means the paperwork could not be
       // READ, not that there is none — and "your coach hasn't asked you for
@@ -132,9 +144,23 @@ export default function ClientCoachDocumentsScreen() {
       Alert.alert('Couldn’t open it', 'The link to that document could not be created just now. Try again in a moment.');
       return;
     }
-    setOpened((p) => (p.includes(d.id) ? p : [...p, d.id]));
-    try { await WebBrowser.openBrowserAsync(data.signedUrl); }
-    catch (e) { reportError('clientCoachDocs.open', e); Alert.alert('Couldn’t open it', 'This device would not open that document.'); }
+    // Recorded AFTER the browser has actually opened it, not before.
+    //
+    // This was on the line above the `try`, so a device that could not open the
+    // document at all — the throw below, with its own alert saying exactly that
+    // — still counted as having read it, and the Accept button underneath went
+    // live. What the member then wrote is the record `COACH_DOC_ACCEPT_RULE`
+    // describes: a dated acceptance against their name that "can't be edited or
+    // withdrawn afterwards, by you or by them", for a waiver that never
+    // appeared on their screen. The gate below is the only place the claim can
+    // be true, and it was being told something that had not happened.
+    try {
+      await WebBrowser.openBrowserAsync(data.signedUrl);
+      setOpened((p) => (p.includes(d.id) ? p : [...p, d.id]));
+    } catch (e) {
+      reportError('clientCoachDocs.open', e);
+      Alert.alert('Couldn’t open it', 'This device would not open that document, so it is not marked as read. Try again, or open it on another device.');
+    }
   }
 
   /**
@@ -327,6 +353,18 @@ export default function ClientCoachDocumentsScreen() {
                 kicker="ACCEPTING"
                 title="It can’t be taken back"
                 note={COACH_DOC_ACCEPT_RULE}
+              />
+            </Section>
+            {/* The other half of that permanence, and the half only the coach
+                was being told. The acceptance is for ever; the ACCESS is not —
+                `can_read_coach_doc` follows `clients.trainer_id`, so changing
+                coach closes every one of these, accepted or not. Somebody who
+                may need a copy has to know that before the day it happens. */}
+            <Section>
+              <Notice
+                kicker="WHILE THIS IS YOUR COACH"
+                title="These open for you while you are coached by them"
+                note={COACH_DOC_ACCESS_ENDS_NOTE}
               />
             </Section>
           </>

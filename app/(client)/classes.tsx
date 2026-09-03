@@ -86,22 +86,41 @@ export default function Classes() {
     }
     if (st === 'waitlist') Alert.alert('Added to waitlist', `${c.title} is full — you're on the waitlist and we'll move you up if a spot opens.`);
     else {
-      if (notifPush) {
-        const when = new Date(Date.parse(c.startsAt) - 60 * 60 * 1000);
-        // Category 'classes' — its own switch, separate from session reminders
-        // and separate from anything the coach sends. "A member's only way to
-        // stop 6am class reminders was to stop hearing from their coach" is the
-        // report this closes. Quiet hours do not apply: the class is at 6am
-        // because they booked it at 6am.
-        scheduleLocal(`${c.title} in 1 hour`, `${timeLabel(c.startsAt)} at ${c.branch}${c.room ? ' · ' + c.room : ''} with ${c.instructor}.`, when, { route: '/(client)/bookings' }, 'classes');
-      }
-      // The reminder sentence is only printed when a reminder was actually
-      // scheduled. The alternative is not silence: a member who has switched
-      // notifications off is told the booking is theirs and that nothing will
-      // arrive to remind them, which is what makes the switch trustworthy
-      // rather than merely obeyed.
-      Alert.alert('Booked', `You're in for ${c.title} at ${c.branch}, ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}.`
-        + (notifPush ? " We'll remind you an hour before." : ' Notifications are off, so there will be no reminder.'));
+      // ── the sentence is decided by what actually happened ────────────────
+      //
+      // It used to be decided by `notifPush` alone, over a call whose answer
+      // was thrown away. `scheduleLocal` resolves null in three cases this
+      // screen never asked about: no notifications module, the member's own
+      // 'classes' switch turned off — which the comment below introduces five
+      // lines before the promise it belonged to — and a time already in the
+      // past. So a member booking a 6pm class at half past five, and a member
+      // who muted class reminders while keeping everything else, both read a
+      // promise the app had already declined to keep. They stop watching the
+      // clock because they were told something would. A missed class is a
+      // missed class, and at most gyms it is a no-show charge too.
+      const when = new Date(Date.parse(c.startsAt) - 60 * 60 * 1000);
+      const tooLate = when.getTime() <= Date.now();
+      // Category 'classes' — its own switch, separate from session reminders
+      // and separate from anything the coach sends. "A member's only way to
+      // stop 6am class reminders was to stop hearing from their coach" is the
+      // report this closes. Quiet hours do not apply: the class is at 6am
+      // because they booked it at 6am.
+      const armed = notifPush
+        ? await scheduleLocal(`${c.title} in 1 hour`, `${timeLabel(c.startsAt)} at ${c.branch}${c.room ? ' · ' + c.room : ''} with ${c.instructor}.`, when, { route: '/(client)/bookings' }, 'classes')
+        : null;
+      // Four outcomes, four sentences. A member who has switched notifications
+      // off is told the booking is theirs and that nothing will arrive to
+      // remind them, which is what makes the switch trustworthy rather than
+      // merely obeyed — and the same courtesy is now extended to the other
+      // three ways there is no reminder.
+      const reminder = armed
+        ? " We'll remind you an hour before."
+        : !notifPush
+        ? ' Notifications are off, so there will be no reminder.'
+        : tooLate
+        ? ' It starts in under an hour, so there is no reminder — head over.'
+        : ' We could not set a reminder for this one, so nothing will arrive. Check your class reminders in Settings, or set your own alarm.';
+      Alert.alert('Booked', `You're in for ${c.title} at ${c.branch}, ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}.` + reminder);
     }
   };
   const onCancel = (c: GymClass) => {

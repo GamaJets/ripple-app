@@ -36,7 +36,7 @@
 import type { WorkoutEntry } from './mockData';
 import type { BodyweightHistory } from './bodyweightSets';
 import { longestStreak, personalRecords } from './streaks';
-import { isBodyweightSet, setLoadKg } from './bodyweightSets';
+import { tonnage } from './bodyweightSets';
 
 export type BadgeKey =
   | 'first-rep' | 'on-a-roll' | 'week-warrior' | 'two-weeks' | 'unstoppable'
@@ -120,24 +120,25 @@ export interface BadgeFigures {
  * to it.
  */
 export function badgeFigures(log: readonly WorkoutEntry[], history: BodyweightHistory = []): BadgeFigures {
-  let totalVolumeKg = 0;
-  let unpricedBodyweightSets = 0;
-  for (const e of log) {
-    if (!e.sets) continue;
-    for (let i = 0; i < e.sets.length; i++) {
-      const [reps] = e.sets[i];
-      if (!reps) continue;
-      const kg = setLoadKg(e, i, e.sets[i], history, e.t);
-      if (kg == null || kg <= 0) {
-        // A set that IS bodyweight and came back unpriced is the app failing to
-        // read, not the member failing to lift. Counted so the screen can say
-        // "unknown" rather than "locked" about the badges it holds back.
-        if (isBodyweightSet(e, i)) unpricedBodyweightSets++;
-        continue;
-      }
-      totalVolumeKg += reps * kg;
-    }
-  }
+  // `tonnage`, not a fourth copy of the set loop. This one was the copy that
+  // never learned about holds: it resolved a load through `setLoadKg` and then
+  // multiplied it by the SECONDS of a plank, so one 45-second hold by an 80 kg
+  // member scored 3,600 kg and unlocked One Tonne on its own. The badges meant
+  // to mark a year of lifting were given away in a week, and every badge on the
+  // screen — including the earned ones — was worth less afterwards.
+  //
+  // src/lib/bodyweightSets.ts is where that arithmetic lives and where it is
+  // right: holds skipped outright, bodyweight sets priced at what the member
+  // weighed on the day, and the ones it could not price counted separately
+  // rather than folded into the total as zeros.
+  //
+  // `unknownSets` is exactly `unpricedBodyweightSets` was: a set that IS
+  // bodyweight and came back unpriced is the app failing to read, not the
+  // member failing to lift, so the screen can say "unknown" rather than
+  // "locked" about the badges it holds back.
+  const t = tonnage(log, history);
+  const totalVolumeKg = t.kg;
+  const unpricedBodyweightSets = t.unknownSets;
   return {
     totalWorkouts: log.length,
     longestStreak: longestStreak(log as WorkoutEntry[]),

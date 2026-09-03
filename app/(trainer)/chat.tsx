@@ -46,6 +46,7 @@ import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/t
 import { peerHeading, type PeerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
 import { attachmentNoun } from '../../src/lib/messageAttachments';
+import { fmtRelativeDay } from '../../src/lib/format';
 import { atBottom } from '../../src/lib/readReceipt';
 import { useReadReceipt } from '../../src/ui/readReceipts';
 import { useMyTemplates } from '../../src/ui/messageTemplates';
@@ -152,7 +153,20 @@ export default function CoachChat() {
   // Used where a sentence needs to address them. Falls back to the role word
   // rather than to a dash mid-sentence — "say hi to —" is not a sentence.
   const firstName = head.isName ? head.text.split(' ').filter(Boolean)[0] : null;
-  const { messages: msgs, send, status, unsent, cachedNote, reload: reloadThread, threadId } = useThread(clientId, 'coach');
+  // `hasOlder`, `loadingOlder`, `olderError` and `loadOlder` were on the hook
+  // and taken by the client's copy of this screen alone. `useThread` reads
+  // newest-first at the row cap, so a long coaching relationship arrives with
+  // its own start missing — reported as `status: 'partial'` and said NOWHERE on
+  // the coach's side, which has only 'loading' and 'error' branches, so a
+  // truncated thread rendered as a complete one.
+  //
+  // The coach is the one who needs the history: a client scrolls back to find
+  // what they were told, and a coach scrolls back to find what they promised
+  // and to read it out to somebody disputing it.
+  const {
+    messages: msgs, send, status, unsent, cachedNote, reload: reloadThread, threadId,
+    hasOlder, loadingOlder, olderError, loadOlder,
+  } = useThread(clientId, 'coach');
   /* ── the way out ───────────────────────────────────────────────────────
    *
    * The database has supported blocking and reporting in BOTH directions since
@@ -178,6 +192,9 @@ export default function CoachChat() {
   const [pending, setPending] = useState<PendingAttachment | null>(null);
   const [busy, setBusy] = useState(false);
   const scRef = useRef<ScrollView>(null);
+  /** Set just before older messages are asked for, so the content growing at the
+   *  TOP does not throw the coach back to the bottom of the thread. */
+  const heldPosition = useRef(false);
   /**
    * The end of the conversation is on screen.
    *
@@ -293,7 +310,18 @@ export default function CoachChat() {
     setTplOpen(false);
   };
 
-  const fmt = (iso: string) => { const d = new Date(iso); const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
+  // The stamp under every bubble, and the sister screen's already. This was a
+  // hardcoded English weekday array glued to `${d.getDate()}/${d.getMonth() + 1}`
+  // — a day name in a language the coach may not read, over a date that is
+  // 9 December here and 12 September in the United States. It is the same
+  // wording, on the same message, as the one the CLIENT sees under their copy
+  // of it (app/(client)/messages.tsx), so the two disagreeing about which day a
+  // message was sent on is a disagreement inside one conversation.
+  //
+  // `fmtRelativeDay` is that screen's answer and is now this one's: the reader's
+  // own language, the reader's own date order, and "Today"/"Tomorrow" which
+  // neither hand-rolled copy ever managed.
+  const fmt = (iso: string) => fmtRelativeDay(iso);
   const G = layout.gutter;
   const { ref: barRef, lift } = useKeyboardLift();
 
@@ -365,7 +393,15 @@ export default function CoachChat() {
             a live one believes they have heard everything — and the message
             that is missing is the one that arrived after the signal went. */}
         {cachedNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingTop: sp.sm }}>{cachedNote}</Flag> : null}
-        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled" refreshControl={pull}
+        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }}
+          // Jumping to the end is right for a new message and exactly wrong for
+          // older ones: a coach who asked for the start of the conversation and
+          // was thrown back to the bottom of it has not been given the history.
+          onContentSizeChange={() => {
+            if (heldPosition.current) { heldPosition.current = false; return; }
+            scRef.current?.scrollToEnd({ animated: true });
+          }}
+          keyboardShouldPersistTaps="handled" refreshControl={pull}
           // Feeds the "scrolled to the end" clause and nothing else; the
           // decision, the debounce and the forward-only rule are all in
           // src/lib/readReceipt.ts.
@@ -375,6 +411,27 @@ export default function CoachChat() {
             content: e.nativeEvent.contentSize.height,
           }))}
           scrollEventThrottle={64}>
+          {/* ── the beginning of the conversation, when it is not on screen ──
+              Said ABOVE the oldest bubble, which is where the missing part
+              actually is, and with the control beside the sentence rather than
+              a sentence on its own. The same shape app/(client)/messages.tsx
+              has had since the paging was built. */}
+          {hasOlder || status === 'partial' ? (
+            <View style={{ marginBottom: sp.lg, gap: sp.sm }}>
+              <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>
+                {hasOlder
+                  ? 'This is not the whole conversation. Earlier messages are on the server and not on this screen.'
+                  : 'That is the whole conversation.'}
+              </Text>
+              {hasOlder ? (
+                <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
+                  <Ghost label={loadingOlder ? 'Loading…' : 'Load Earlier Messages'}
+                    onPress={() => { if (loadingOlder) return; heldPosition.current = true; void loadOlder(); }} />
+                </View>
+              ) : null}
+              {olderError ? <Flag tone={t.warn}>{olderError}</Flag> : null}
+            </View>
+          ) : null}
           {/* A thread that failed to load has not been read, so it cannot be
               reported as one nobody has written in. */}
           {msgs.length === 0 && status !== 'loading' ? (

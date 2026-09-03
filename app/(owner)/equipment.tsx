@@ -28,7 +28,12 @@ import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import { isoDate } from '../../src/lib/format';
+// The gym's own calendar day, and the sentence for a gym that has not said
+// which calendar that is. `tenants.timezone` (supabase/parts/710) is where a
+// gym answers; src/lib/gymToday.ts is the one place that turns the answer into
+// a day and NAMES which clock it used.
+import { fetchGymZone } from '../../src/lib/gymZone';
+import { gymTodayWindow } from '../../src/lib/gymToday';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { readState, staleNote } from '../../src/lib/staleRead';
@@ -40,18 +45,32 @@ import {
 import { FORWARD_ICON } from '../../src/ui/direction';
 
 /**
- * Today, on the calendar the owner is standing in — not UTC's.
+ * Today, on the GYM's calendar — not UTC's, and no longer the reader's either.
  *
- * This was `new Date().toISOString().slice(0, 10)`. A service recorded at 5pm
- * in Los Angeles was dated TOMORROW, and this screen then reads that date back
- * into a SAFETY CONFIRMATION: "the treadmill will be recorded as serviced on
- * …". Stating a date to somebody and writing a different one is bad; stating
- * the wrong date about a machine's service history is the kind of record an
- * insurer reads afterwards.
+ * ── Where this started ────────────────────────────────────────────────────
  *
- * `isoDate` is the local calendar day, and is what the column wants.
+ * `new Date().toISOString().slice(0, 10)`, the UTC day. A service recorded at
+ * 5pm in Los Angeles was dated TOMORROW, and this screen reads that date back
+ * into a SAFETY CONFIRMATION — "the treadmill will be recorded as serviced on
+ * …" — and forward into `serviceState`, which decides what is overdue. Stating
+ * a date to somebody and writing a different one is bad; doing it to a machine's
+ * service history is the kind of record an insurer reads afterwards.
+ *
+ * ── Why `isoDate(new Date())` was only half the fix ───────────────────────
+ *
+ * It swapped UTC's day for the READER's, and the reader is a phone. The same
+ * gym opened at the front desk and by an owner on holiday in Lisbon reports two
+ * different Tuesdays out of one database, with nothing on either screen saying
+ * which — and this screen WRITES the day it computed. An owner three hours west
+ * of their own gym, at nine in the evening, logs a service against yesterday.
+ *
+ * `tenants.timezone` exists (supabase/parts/710) and `gymTodayWindow` is the one
+ * place in TypeScript that turns it into a day. It never guesses: a gym that has
+ * not set a zone, a zone read that failed, and a stored zone this runtime cannot
+ * resolve all come back as the reader's day with `basis: 'reader'` and
+ * `NO_ZONE_NOTE` attached, which this screen prints beside the board rather than
+ * quietly substituting a calendar nobody chose.
  */
-const todayIso = () => isoDate(new Date());
 
 const STATE_LABEL: Record<ServiceState, string> = {
   overdue: 'Overdue',
@@ -95,8 +114,33 @@ export default function OwnerEquipment() {
    *  board an owner walks past is exactly the figure that must say its age. */
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
+  /**
+   * `tenants.timezone`, and whether it could be read at all.
+   *
+   * Read beside the register rather than pulled off the tenant context, which
+   * does not carry it. Three outcomes and they are kept apart:
+   * `{ zone: 'Asia/Dubai' }` is a gym that has said, `{ zone: null, error: null }`
+   * is a gym that has not, and `{ error }` is a read that failed — and the third
+   * must never be shown as the second, because "this gym has not set a timezone"
+   * is an instruction to go and change a setting that may already be right.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneUnread, setZoneUnread] = useState(false);
+
   const load = useCallback(async () => {
     if (!tenant?.id) return;
+    // The zone is read first and its failure is separate: a register full of
+    // kit is still worth showing to somebody whose timezone read was refused,
+    // and `gymTodayWindow` answers a null zone with the reader's day and the
+    // note that says so.
+    try {
+      const z = await fetchGymZone(supabase, tenant.id);
+      setZone(z.zone);
+      setZoneUnread(!!z.error);
+    } catch (e) {
+      reportError('equipment.zone', e);
+      setZone(null); setZoneUnread(true);
+    }
     try {
       setItems(await fetchEquipment(supabase, tenant.id));
       setFailed(false);
@@ -126,7 +170,24 @@ export default function OwnerEquipment() {
   // attention queue and the list below are all derived from it.
   const pull = usePullToRefresh(load);
 
-  const today = todayIso();
+  // Recomputed on every render rather than frozen into a `useState` initialiser.
+  // A board left open across midnight — which is what a maintenance screen on a
+  // front desk does — would otherwise keep marking things due against
+  // yesterday, and would write yesterday's date onto a service logged at ten
+  // past twelve.
+  const dayWindow = gymTodayWindow(zone);
+  const today = dayWindow.day;
+  /**
+   * The sentence to print beside the board about whose day it is.
+   *
+   * Two different silences and they get two different sentences. A failed zone
+   * read is not a gym that has not set a timezone.
+   */
+  const clockNote = zoneUnread
+    ? 'This gym’s timezone could not be read, so the dates and the “due” column below are your own device’s, '
+      + 'not the gym’s. That is a read that did not come back, not a gym with no timezone set — '
+      + 'nothing about the schedules has changed.'
+    : dayWindow.note;
   // The loader above already keeps a register that HAD come back when a later
   // read is refused. What it did not do is tell the screen apart from a screen
   // that has never read anything — so the hero printed a real count from the
@@ -291,6 +352,16 @@ export default function OwnerEquipment() {
                 ? 'Every scheduled item is in date.'
                 : `${sum?.overdue ?? 0} overdue · ${sum?.due ?? 0} due · ${sum?.unrecorded ?? 0} never serviced`}
         />
+
+        {/* Whose day the "due" column was cut on. Printed rather than assumed:
+            every date this screen shows, and every date it WRITES when a
+            service is logged, comes off `today` above, and a board that says
+            "Overdue" against a calendar the reader brought with them from
+            another timezone is a claim about a machine somebody stands on.
+            Nothing appears here when the gym has set a zone and it was read. */}
+        {clockNote ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{clockNote}</Flag>
+        ) : null}
 
         <Rule />
 
@@ -491,7 +562,21 @@ export default function OwnerEquipment() {
               decision, not as a missing service.
             </Text>
 
+            {/* The refusal was drawn and never said. This control's only
+                statement that it will not act is a grey fill, and a grey fill
+                is exactly what a screen reader does not have: VoiceOver read
+                "Add to the register" identically whether the name field was
+                filled in or empty, and a double-tap did nothing with no
+                explanation. `accessibilityState.disabled` is the announcement
+                — src/lib/a11y.ts and the `Cta` in src/ui/kit.tsx, which has
+                carried it since it was written. The hint says WHY, because
+                "dimmed" on its own is a fact about the button rather than
+                about what the person has to do. */}
             <Pressable disabled={!name.trim() || busy} onPress={commitAdd}
+              accessibilityRole="button"
+              accessibilityLabel="Add this item to the equipment register"
+              accessibilityState={{ disabled: !name.trim() || busy, busy }}
+              accessibilityHint={!name.trim() ? 'Give the item a name first.' : undefined}
               style={{ backgroundColor: name.trim() && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
               <Text style={{ ...ty.label, fontWeight: '600', color: name.trim() && !busy ? t.brandInk : t.ink3 }}>
                 {busy ? 'Adding…' : 'Add to the register'}

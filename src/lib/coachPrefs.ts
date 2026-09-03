@@ -138,6 +138,38 @@ export function goalsEmptyLine(status: LoadStatus, revenue: number, clients: num
 }
 
 /**
+ * What became of a target the coach just set.
+ *
+ * Three outcomes, and only one of them is "saved". Setting a goal used to be
+ * `onPress={() => { setGoals({…}); setGoalOpen(false); }}` — a void call, a
+ * sheet that closed, and a progress bar that redrew against the new number
+ * whichever of these actually happened.
+ *
+ *   · 'saved'        the account row was written and the row count says so.
+ *   · 'device-only'  the account write was deliberately SKIPPED, because the
+ *                    prefs read had failed and writing this handset's cache
+ *                    over targets that may exist elsewhere is exactly what that
+ *                    guard is for. The target is real on this phone and nowhere
+ *                    else, and a coach who reinstalls or picks up a second phone
+ *                    will find it gone.
+ *   · 'failed'       the write was attempted and did not land.
+ *
+ * A goal is the one figure on that screen the coach authored rather than the
+ * app computing, which makes it the one most worth telling them about.
+ */
+export type GoalSaveOutcome = 'saved' | 'device-only' | 'failed';
+
+export function goalSaveLine(outcome: GoalSaveOutcome): string | null {
+  if (outcome === 'saved') return null;
+  if (outcome === 'device-only') {
+    return 'Your targets are set on this phone only. They could not be read from your account earlier in this session, so nothing has been written there — '
+      + 'saving over targets we could not read would be a guess. Open this screen again once you have signal and set them once more.';
+  }
+  return 'Your targets are set on this phone, and they did NOT reach your account. The bars below are measured against them either way, '
+    + 'but they will not be here on another phone or after a reinstall. Try again in a moment.';
+}
+
+/**
  * What to say under the rate box on the check-in screen.
  *
  * Same shape, same reason. An empty box under 'error' is a read that failed,

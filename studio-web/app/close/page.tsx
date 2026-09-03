@@ -18,7 +18,9 @@
 // missing `.error` check on any query below would turn a broken month into an
 // empty one, which on this screen means a payroll run over nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships, fetchPayments, money, sharedCurrency } from '@lib/gymRecord';
@@ -31,7 +33,11 @@ import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode }
 import { readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
 import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
-import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
+import { sliceLoading, sliceReady, sliceFailed, sliceNote, type Slice } from '@lib/memberView';
+// The reader's locale, the GYM's zone. This page is printed for an accountant
+// and every date on it is a month boundary; drawn on the reader's clock, a
+// month closed at 09:00 in Dubai reads as the previous day in London.
+import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
 import {
   monthWindow, recentMonths, monthKeyOf, buildClose, isOverdue, closeHeadline, monthEnded,
   type CloseRecord, type MonthClose, type GymInvoice, type Line, type Blocker,
@@ -48,6 +54,11 @@ import {
 // assuming; see the note on it in src/lib/coachMoney.ts.
 import { minorFromWhole } from '@lib/coachMoney';
 import { gymLink, noGymNote } from '@lib/gymLink';
+import { parseGymZone, gymDay } from '@lib/gymZone';
+// The reader's own calendar day — the fallback where the gym has set no zone,
+// and the SAME one `buildClose` falls back to, so the sheet cannot hold two.
+import { isoDay } from '@lib/weekStart';
+import { Fetched, useFetched } from '@/components/Fetched';
 import { toCsv } from '@lib/gymExport';
 import { saveText } from '@/lib/save';
 import { Banner } from '@/components/Banner';
@@ -65,11 +76,17 @@ const MONTHS_OFFERED = 13;
 
 export default function Close() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // `tenants.currency`. A month-end close is the document an owner reconciles
   // against a bank statement, so the one thing it must not do is name a
   // currency nobody chose — see currencyOf() at the foot of this file.
   const [gymCcy, setGymCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
   const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
 
@@ -113,8 +130,7 @@ export default function Close() {
 
   const w = useMemo(() => monthWindow(key), [key]);
 
-  const load = useCallback(async (tenantId: string, mw: NonNullable<ReturnType<typeof monthWindow>>) => {
-    setLoaded({ key: '', rec: EMPTY });
+  const load = useCallback(async (tenantId: string, mw: NonNullable<ReturnType<typeof monthWindow>>): Promise<boolean> => {
     // Five independent reads, deliberately not one Promise.all under a single
     // catch. An invoice table that 500s must not take the payments down with
     // it: the close is allowed to be partial, but only if it says which part
@@ -146,14 +162,42 @@ export default function Close() {
       // prevent.
       setCloses(null);
       setClosesErr(e?.message ?? 'The record of closed months could not be read.');
+      return false;
     }
+    // Whole only when all five reads AND the record of closes came back.
+    return payments.state === 'ready' && invoices.state === 'ready'
+      && sessions.state === 'ready' && memberships.state === 'ready'
+      && passes.state === 'ready';
   }, []);
+
+  /*
+   * The close, kept current.
+   *
+   * Month-end is the one job in a gym two people genuinely do at once: the
+   * owner on this screen, the bookkeeper on /accounting and /costs recording
+   * the last of the month's invoices. This screen read once, at page open, and
+   * then printed "Every figure reads today exactly as it read at the close" —
+   * a comparison between a snapshot stored in the database and a read taken in
+   * this browser minutes or hours ago. Taking a close from a stale read files a
+   * month that was already different when the button was pressed, and the drift
+   * line then reports no drift.
+   *
+   * Two minutes, plus every return to the tab.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId && w ? load(me.tenantId, w) : Promise.resolve(false)),
+    { everyMs: 2 * 60_000 },
+  );
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       // `sliceReady([])` is the gym saying it has none. An account with no gym
       // on it was written as five of them, so this screen closed a month over a
@@ -163,20 +207,26 @@ export default function Close() {
       const link = gymLink(who?.tenantId, 'payments, invoices or one-to-ones');
       if (!link.linked) return;
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', link.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy, timezone').eq('id', link.tenantId).single();
       if (!live) return;
       // Checked, not assumed. A null session fee from a failed read would price
       // every unrated session at nothing and quietly shrink payroll; the two
       // are told apart so the screen can say "the fee could not be read".
       setGymName(tErr ? null : t?.name ?? null);
       setGymCcy(tErr ? null : (((t?.currency ?? '') as string).trim().toUpperCase() || null));
+      // The gym's own wall clock, for the one date this screen computes rather
+      // than reads: what counts as overdue TODAY. See `Owed` below.
+      const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+      setZone(z.kind === 'zone' ? z.zone : null);
       setSessionFee(tErr ? null : t?.session_fee ?? null);
       setPolicyCode(tErr ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
       setFeeRead(tErr ? 'failed' : 'ok');
-      if (w) await load(link.tenantId, w);
+      // Through `refresh`, so the first read stamps the same way every later
+      // one does.
+      if (w) refresh();
     })();
     return () => { live = false; };
-  }, [load, w, key]);
+  }, [load, w, key, refresh]);
 
   // Only the record that was actually read for the month on screen. Anything
   // else is EMPTY, which renders as "still reading" rather than as another
@@ -219,12 +269,37 @@ export default function Close() {
     return buildClose(rec, w, {
       policy,
       fallbackRateCents: feeCents,
+      // The GYM's day, which this call was not passing at all.
+      //
+      // `CloseOptions.today` in src/lib/monthEnd.ts exists for this one caller
+      // and says so: "The day to judge an invoice overdue against… the GYM's
+      // own, `gymDay(Date.now(), zone)`. It was not injectable at all until now,
+      // and what it did instead was take UTC's calendar day… An invoice due on
+      // the 31st was counted overdue from 5pm on the 31st in Los Angeles, on the
+      // one screen an owner uses to sign off a month."
+      //
+      // The parameter landed and this call site never took it, so `buildClose`
+      // fell through to `isoDay(new Date(now))` — the READER's day. That decides
+      // `owed.overdue`, `owed.overdueCents` and the same two on `arrears`, which
+      // are the arrears figures on the sheet and the blocker sentences under
+      // them. Meanwhile `Owed` seven hundred lines below computes the gym's day
+      // for itself and colours its Status column red on that — so one screen
+      // counted overdue on two different calendars, and the row and the total
+      // above it disagreed for the hours between the two midnights.
+      //
+      // `?? undefined` rather than `?? isoDay(...)`: with no zone, letting
+      // `buildClose` fall back is byte-identical to what a zone-less gym gets
+      // today, and the fallback is argued in one place rather than two.
+      today: gymDay(Date.now(), zone) ?? undefined,
       fmt: (c) => money(c, currency) ?? '—',
     });
-  }, [rec, w, policy, feeCents, currency]);
+  }, [rec, w, policy, feeCents, currency, zone]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -274,7 +349,8 @@ export default function Close() {
       </p>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '16px 0 4px' }}>
-        <select value={key} onChange={(e) => setKey(e.target.value)} style={{ ...field, minWidth: 190 }}>
+        {/* Named — see the same control on /accounting. */}
+        <select aria-label="Which month" value={key} onChange={(e) => setKey(e.target.value)} style={{ ...field, minWidth: 190 }}>
           {months.map((m) => {
             const mw = monthWindow(m);
             return <option key={m} value={m}>{mw ? mw.label : m}</option>;
@@ -308,14 +384,20 @@ export default function Close() {
         </Banner>
       ) : null}
 
+      {/* When these figures were read. The Verdict block below states that
+          "every figure reads today exactly as it read at the close" — a
+          comparison between a stored snapshot and THIS read, so the age of this
+          read is part of the claim. */}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh} what="this month" />
+
       {!w || !close ? (
         <Banner tone="crit">{key} is not a month this console can open.</Banner>
       ) : (
         <CloseView
-          c={close} rec={rec} currency={currency} gymCcy={gymCcy} feeRead={feeRead} sessionFee={sessionFee} feeCents={feeCents}
+          c={close} rec={rec} currency={currency} gymCcy={gymCcy} zone={zone} feeRead={feeRead} sessionFee={sessionFee} feeCents={feeCents}
           gymName={gymName} monthKey={key} tenantId={me.tenantId!} me={me}
           closes={closes} closesErr={closesErr}
-          onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }}
+          onChange={refresh}
         />
       )}
     </Shell>
@@ -324,9 +406,12 @@ export default function Close() {
 
 /* ── the close itself ──────────────────────────────────────────────────────── */
 
-function CloseView({ c, rec, currency, gymCcy, feeRead, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, onChange }: {
+function CloseView({ c, rec, currency, gymCcy, zone, feeRead, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, onChange }: {
   c: MonthClose;
   rec: CloseRecord;
+  /** `tenants.timezone` — the only correct basis for what "today" means to
+   *  this gym. Null when the gym has not set one. */
+  zone: string | null;
   /** What the PAYMENTS agree on. Only figures the payments produced may wear
    *  it — see `currencyOf`. */
   currency: TenantCurrency;
@@ -358,7 +443,7 @@ function CloseView({ c, rec, currency, gymCcy, feeRead, sessionFee, feeCents, gy
     <>
       <Verdict c={c} />
       <Signoff
-        c={c} currency={currency} monthKey={monthKey} tenantId={tenantId} me={me}
+        c={c} currency={currency} monthKey={monthKey} zone={zone} tenantId={tenantId} me={me}
         closes={closes} closesErr={closesErr} onChange={onChange}
       />
       <Handoff c={c} rec={rec} currency={currency} gymName={gymName} monthKey={monthKey} />
@@ -438,9 +523,9 @@ function CloseView({ c, rec, currency, gymCcy, feeRead, sessionFee, feeCents, gy
           their own rows agree on, and null where they agree on nothing — which
           each of those sections already has a sentence for. */}
       <Income c={c} rec={rec} currency={currency} />
-      <Owed c={c} rec={rec} currency={owedCcy} />
+      <Owed c={c} rec={rec} currency={owedCcy} zone={zone} />
       <Reconciliation c={c} rec={rec} />
-      <Payroll c={c} rec={rec} currency={gymCcy} sessionFee={sessionFee} feeCents={feeCents} />
+      <Payroll c={c} rec={rec} currency={gymCcy} zone={zone} sessionFee={sessionFee} feeCents={feeCents} />
       <Passes c={c} rec={rec} currency={passesCcy} />
     </>
   );
@@ -504,14 +589,38 @@ function Verdict({ c }: { c: MonthClose }) {
  * standing. A month that closed and then moved is two facts and an auditor
  * wants both.
  */
-function Signoff({ c, currency, monthKey, tenantId, me, closes, closesErr, onChange }: {
-  c: MonthClose; currency: TenantCurrency; monthKey: string; tenantId: string; me: Me;
+function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr, onChange }: {
+  c: MonthClose; currency: TenantCurrency; monthKey: string;
+  /** `tenants.timezone`. A close is stamped at an instant and read as a date;
+   *  which date it is is a fact about the gym, not about the reader. */
+  zone: string | null;
+  tenantId: string; me: Me;
   closes: MonthCloseRow[] | null; closesErr: string | null; onChange: () => void;
 }) {
   const [note, setNote] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /*
+   * The close is confirmed, and the reopen beside it already was.
+   *
+   * `<button onClick={doClose}>` fired `closeMonth` on one click, with one
+   * optional note field and nothing between the press and a permanent row —
+   * while the Reopen beside it demanded a typed sentence, and /costs confirms
+   * before removing one £40 line.
+   *
+   * Closing a month writes the snapshot every later drift comparison is
+   * measured against, and supabase/parts/182 then refuses payment and cost
+   * writes dated inside it. So the click that needed no confirmation was the
+   * one that locks a month for the whole gym, and the one that needed a typed
+   * sentence was the one that unlocks it.
+   *
+   * A step rather than a typed reason: a close is the ordinary, correct
+   * month-end action and making somebody write a sentence to do their job is
+   * how a confirmation becomes a thing people click through. What it must not
+   * be is one press.
+   */
+  const [confirming, setConfirming] = useState(false);
 
   const live = closes ? liveCloseFor(monthKey, closes) : null;
   const history = (closes ?? []).filter((r) => r.monthKey === monthKey);
@@ -527,7 +636,7 @@ function Signoff({ c, currency, monthKey, tenantId, me, closes, closesErr, onCha
     setBusy(true); setErr(null);
     try {
       await closeMonth(supabase, tenantId, monthKey, snap, me.id, note.trim() || null);
-      setNote('');
+      setNote(''); setConfirming(false);
       onChange();
     } catch (e: any) {
       setErr(`${monthKey} was NOT closed: ${e?.message ?? 'the write was refused'}. Nothing has changed and the month is still open.`);
@@ -568,7 +677,7 @@ function Signoff({ c, currency, monthKey, tenantId, me, closes, closesErr, onCha
         <>
           <div style={{ padding: '12px 14px', fontSize: 13, color: 'var(--ink2)' }}>
             Closed by {live.closedByName ?? 'somebody whose name could not be read'} on{' '}
-            <span className="mono">{new Date(live.closedAt).toLocaleString()}</span>.
+            <span className="mono">{gymDateTimeText(live.closedAt, zone) ?? 'a date that could not be read'}</span>.
             {live.note ? <> &ldquo;{live.note}&rdquo;</> : null}
           </div>
           {live.blockersAtClose ? (
@@ -620,12 +729,35 @@ function Signoff({ c, currency, monthKey, tenantId, me, closes, closesErr, onCha
             <input value={note} onChange={(e) => setNote(e.target.value)}
                    placeholder="A note for whoever reads this later (optional)"
                    style={{ ...field, flex: 2, minWidth: 260 }} aria-label="A note on this close" />
-            <button onClick={doClose} disabled={busy || !!blocker} style={primaryBtn}>
-              {busy ? 'Closing…' : `Close ${monthKey}`}
-            </button>
+            {confirming ? (
+              <>
+                <button onClick={doClose} disabled={busy} style={primaryBtn}>
+                  {busy ? 'Closing…' : `Yes — close ${monthKey}`}
+                </button>
+                <button onClick={() => setConfirming(false)} disabled={busy} style={field}>
+                  Not yet
+                </button>
+              </>
+            ) : (
+              <button onClick={() => { setErr(null); setConfirming(true); }} disabled={busy || !!blocker} style={primaryBtn}>
+                {`Close ${monthKey}`}
+              </button>
+            )}
           </div>
+          {confirming ? (
+            <Banner tone="warn">
+              <strong style={{ color: 'var(--ink)' }}>This files {monthKey} permanently.</strong>{' '}
+              The figures on this screen are stored as they stand, and every later reading of this
+              month is compared against them. The database will then refuse a payment, an invoice,
+              a cost or a payroll run dated inside {monthKey} &mdash; for everybody, at both desks
+              and in the office &mdash; until somebody reopens it with a written reason.
+              {c.state === 'blocked'
+                ? ' This month is not ready by the checks above, and the reasons are stored on the close word for word.'
+                : ''}
+            </Banner>
+          ) : null}
           {blocker ? (
-            <p style={{ margin: '9px 0 0', fontSize: 12.5, color: '#f0c04e', maxWidth: '76ch' }}>{blocker}</p>
+            <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '76ch' }}>{blocker}</p>
           ) : c.state === 'blocked' ? (
             <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '76ch' }}>
               This month is not ready by the checks above, and it can still be closed. The reasons
@@ -636,15 +768,30 @@ function Signoff({ c, currency, monthKey, tenantId, me, closes, closesErr, onCha
         </div>
       )}
 
-      {history.length > 1 ? (
+      {/*
+        * Off by one, in exactly the case the reason field was made mandatory for.
+        *
+        * This was `history.length > 1`. After ONE close and ONE reopen there is
+        * one row for the month, `liveCloseFor` returns nothing (the close has a
+        * `reopenedAt`), so `live` is null and the screen rendered the Close form
+        * and nothing else — no reopen reason, no who, no when, no figures as
+        * they stood. A month that was closed and then reopened showed no trace
+        * of ever having been closed.
+        *
+        * The section's own argument, three hundred lines up: "Reopening is
+        * deliberate, needs a reason, and leaves the original close standing. A
+        * month that closed and then moved is two facts and an auditor wants
+        * both." One row is already two facts whenever it carries a reopen.
+        */}
+      {history.length > 1 || history.some((h) => h.reopenedAt) ? (
         <div style={{ padding: '12px 14px', borderTop: '1px solid var(--ring)' }}>
           <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>Everything that has happened to {monthKey}</h3>
           <ul style={{ margin: '6px 0 0', padding: '0 0 0 18px', color: 'var(--ink2)', fontSize: 12.5, lineHeight: 1.6 }}>
             {history.map((h) => (
               <li key={h.id}>
-                Closed {new Date(h.closedAt).toLocaleDateString()} by {h.closedByName ?? 'somebody'}
+                Closed {gymDateText(h.closedAt, zone) ?? 'on a date that could not be read'} by {h.closedByName ?? 'somebody'}
                 {h.reopenedAt
-                  ? <>, reopened {new Date(h.reopenedAt).toLocaleDateString()} by {h.reopenedByName ?? 'somebody'} &mdash; &ldquo;{h.reopenReason}&rdquo;</>
+                  ? <>, reopened {gymDateText(h.reopenedAt, zone) ?? 'on a date that could not be read'} by {h.reopenedByName ?? 'somebody'} &mdash; &ldquo;{h.reopenReason}&rdquo;</>
                   : ' — still in force'}
               </li>
             ))}
@@ -808,7 +955,7 @@ function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
     >
       <Part slice={rec.payments} what="the payments taken">
         {c.income ? (
-          <DataTable
+          <DataTable noun="payment methods"
             rows={c.income.byMethod} columns={cols} rowKey={(l) => l.key}
             empty="No payment was recorded in this month. That is not the same as no income — it is the same as nobody having entered one."
           />
@@ -830,7 +977,7 @@ function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
                   cost="payments cannot be attributed, so this is unknown rather than unattributed" />
         ) : null}
         {c.purpose ? (
-          <DataTable
+          <DataTable noun="income purposes"
             rows={c.purpose} columns={purposeCols} rowKey={(l) => l.key}
             empty="Nothing to attribute — no payment was recorded in this month."
           />
@@ -863,8 +1010,26 @@ function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
 
 /* ── what is still owed ────────────────────────────────────────────────────── */
 
-function Owed({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
-  const today = new Date().toISOString().slice(0, 10);
+function Owed({ c, rec, currency, zone }: {
+  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; zone: string | null;
+}) {
+  // The GYM's today, not UTC's. This was `new Date().toISOString().slice(0, 10)`
+  // — the UTC calendar date — which for a gym east of Greenwich turns over hours
+  // before the gym's own day does and for one west of it hours after. This
+  // figure decides which invoices read as overdue on a page printed for an
+  // accountant, and an invoice due on the 31st is not late on the morning of
+  // the 31st wherever the reader happens to be.
+  //
+  // The FALLBACK is `isoDay`, the reader's own day, and it was UTC's. Not a
+  // free choice: `buildClose` at the top of this file is now handed
+  // `gymDay(Date.now(), zone) ?? undefined` and falls back internally to
+  // `isoDay(new Date(now))`, so a gym that has set no zone had this table
+  // colouring its Status column on UTC's calendar while the "Still owed" tile
+  // three inches above it counted `arrears.overdue` on the reader's. One
+  // screen, two calendars, disagreeing for the hours between two midnights —
+  // which is the whole defect this line was written to end, arriving by the
+  // other door. The two fallbacks are now the same expression.
+  const today = gymDay(Date.now(), zone) ?? isoDay(new Date());
   // Both null at a gym that has not set a currency, and the paragraph below
   // states the invoice counts rather than a dash when they are.
   const outstanding = c.arrears ? money(c.arrears.outstandingCents, currency) : null;
@@ -918,7 +1083,7 @@ function Owed({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency:
                   </>}
             </p>
           ) : null}
-          <DataTable
+          <DataTable noun="unpaid invoices"
             rows={open} columns={cols} rowKey={(i) => i.id}
             empty="No unpaid invoice stands against this month. If the gym does not invoice through Repple, that is what this looks like — there is no second record to check the takings against."
           />
@@ -979,8 +1144,9 @@ const RECON_LABEL: Record<string, string> = {
 
 /* ── what is unmarked, and therefore blocking payroll ──────────────────────── */
 
-function Payroll({ c, rec, currency, sessionFee, feeCents }: {
-  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; sessionFee: number | null; feeCents: number | null;
+function Payroll({ c, rec, currency, zone, sessionFee, feeCents }: {
+  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; zone: string | null;
+  sessionFee: number | null; feeCents: number | null;
 }) {
   const unmarked = useMemo(
     () => (rec.sessions.state === 'ready' ? rec.sessions.rows : [])
@@ -1013,7 +1179,7 @@ function Payroll({ c, rec, currency, sessionFee, feeCents }: {
 
   const sessionCols: Column<PtSession>[] = [
     { key: 'when', header: 'Started', value: (s) => s.startsAt,
-      render: (s) => new Date(s.startsAt).toLocaleString() },
+      render: (s) => gymDateTimeText(s.startsAt, zone) ?? <span className="dash">not stated</span> },
     { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName },
     { key: 'client', header: 'Client', value: (s) => s.clientName },
     { key: 'mins', header: 'Minutes', value: (s) => s.durationMin, numeric: true },
@@ -1049,7 +1215,7 @@ function Payroll({ c, rec, currency, sessionFee, feeCents }: {
                   : null}
             </p>
           ) : null}
-          <DataTable
+          <DataTable noun="payroll lines"
             rows={c.payroll?.lines ?? []} columns={cols} rowKey={(l) => l.trainerId}
             empty="No one-to-one ran in this month. Nothing to pay, and nothing blocking."
           />
@@ -1065,7 +1231,7 @@ function Payroll({ c, rec, currency, sessionFee, feeCents }: {
                   {unmarked.length === 1 ? 'this one' : `these ${unmarked.length}`}.
                 </p>
               </div>
-              <DataTable
+              <DataTable noun="unmarked sessions"
                 rows={unmarked} columns={sessionCols} rowKey={(s) => s.id}
                 empty="—"
               />
@@ -1301,7 +1467,10 @@ function currencyOf(rec: CloseRecord, gym: TenantCurrency): TenantCurrency {
 /** The note under a KPI whose figure is missing — which of the three states it
  *  is missing for. */
 function stateNote(s: Slice<unknown>, what: string): string {
-  return s.state === 'failed' ? `${what} not read` : `reading ${what}…`;
+  // Four arms via `sliceNote`, and the `??` keeps the 'ready' wording exactly
+  // what it was. The arm that mattered is the fourth: a truncated read used to
+  // fall into `reading …` and tell an accountant the month was still loading.
+  return sliceNote(s, what) ?? `reading ${what}…`;
 }
 
 /**
@@ -1316,8 +1485,34 @@ function Part<T>({ slice, what, children }: {
     <>
       {slice.state === 'loading' ? <Loading /> : null}
       {slice.state === 'failed' ? <Failed reason={slice.reason} what={what} /> : null}
+      {slice.state === 'partial' ? <Truncated what={what} cap={slice.cap} /> : null}
       {slice.state === 'ready' ? children : null}
     </>
+  );
+}
+
+/**
+ * The banner over a section whose read came back at its ceiling.
+ *
+ * Neither the failure banner nor the empty sentence: the rows are real and
+ * there are more of them. It does not draw the table beneath it, because every
+ * figure on this screen comes through `rowsOf`, which is null for a truncated
+ * read on purpose — an empty table under a "cut off" heading is a worse page
+ * than the heading alone. On a month-end screen this is the one that matters
+ * most: a prefix of the month's payments is a smaller month, and the accountant
+ * has no way to see that from a number.
+ */
+function Truncated({ what, cap }: { what: string; cap: number }) {
+  return (
+    <div style={{
+      padding: '16px 14px', margin: '14px', borderRadius: 0,
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
+      background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
+    }}>
+      Read the first {cap} rows of {what}, and there are more. This section is a{' '}
+      <strong>prefix</strong>, not the whole month, so no figure is totalled over it and no
+      month may be closed on it.
+    </div>
   );
 }
 
@@ -1357,18 +1552,3 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

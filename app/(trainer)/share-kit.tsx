@@ -123,6 +123,7 @@ import { deliveredBetween, fetchMySessions, windowStart } from '../../src/lib/tr
 import type { PtSession } from '../../src/lib/gymSessions';
 import {
   CARD_SIZES, cardSize, charsPerLine, wrapLines, weekCard, resultCard,
+  BRAND_UNREAD_NOTE, LOGO_SET_NOT_FETCHED,
   type CardShape, type ShareCard, type CardBuild, type Stat,
 } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
@@ -160,7 +161,11 @@ export default function ShareKit() {
   const { width } = useWindowDimensions();
   const { user: authUser, loading: authLoading } = useAuth();
   const coachId = authUser?.id ?? null;
-  const { tenant, refresh: refreshTenant } = useTenant();
+  // `status` as well as the tenant. src/ui/tenant.tsx carries it precisely
+  // because "this coach has no gym" and "the gym could not be read" are two
+  // different answers, and on this screen the difference is which NAME gets
+  // published — see `BRAND_UNREAD_NOTE`.
+  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
 
   const [mode, setMode] = useState<Mode>('week');
   const [shape, setShape] = useState<CardShape>('post');
@@ -347,10 +352,24 @@ export default function ShareKit() {
     ]);
   }, [loadSentPhotos, grants, refreshRoster, logo, ig, refreshTenant]));
 
-  const brand = (tenant?.name || authUser?.name || '').trim();
+  /**
+   * Whether the brand on this card is known at all.
+   *
+   * A WHOLE read with no tenant is a real answer — an independent coach has no
+   * gym and their own name is the brand. Anything else is not knowing, and the
+   * fallback below silently turns not knowing into the coach's own account
+   * name across a public post.
+   */
+  const brandKnown = tenantStatus === 'ready';
+  const brand = brandKnown ? (tenant?.name || authUser?.name || '').trim() : '';
   const span = SPANS.find((s) => s.days === days) ?? SPANS[0];
 
   const build: CardBuild = useMemo(() => {
+    // Before anything else, and it applies to both card kinds: a card is not
+    // composed at all while the name it would carry is unknown. 'unread' is the
+    // existing refusal for a card that cannot be made from a read, and it is
+    // what disables Share and Post to Instagram below.
+    if (!brandKnown) return { ok: false, reason: 'unread', why: BRAND_UNREAD_NOTE };
     if (mode === 'result') {
       return resultCard(
         {
@@ -389,7 +408,7 @@ export default function ShareKit() {
     const clients = agrees ? new Set(delivered.map((s) => s.clientId).filter(Boolean)).size : null;
 
     return weekCard({ brand, spanLabel: span.label, sessions, minutes, clients, logo: logo.dataUri });
-  }, [mode, rows, days, span.label, brand, clientName, spanText, figures, note, okFigures, okName,
+  }, [mode, rows, days, span.label, brand, brandKnown, clientName, spanText, figures, note, okFigures, okName,
       logo.dataUri, pickedId, pickedUri, photoConsent]);
 
   const size = cardSize(shape);
@@ -691,6 +710,14 @@ export default function ShareKit() {
               {rosterStatus === 'error' ? (
                 <Notice kicker="Could not read your clients" title="No photos offered"
                   note="Your book could not be read, so there is nobody to look up permissions for. This is not a coach with no clients." />
+              ) : rosterStatus === 'loading' ? (
+                // Two states used to fall past this branch into the chip row
+                // and render as one: a short book and a book still arriving,
+                // both drawn as the whole book. What this screen composes gets
+                // POSTED PUBLICLY under the coach's name, and the coach looking
+                // for the one client whose result they want to put out, and not
+                // finding them, concludes the permission was withdrawn.
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Reading your clients…</Text>
               ) : (
                 <>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
@@ -705,6 +732,15 @@ export default function ShareKit() {
                       );
                     })}
                   </ScrollView>
+
+                  {rosterStatus === 'partial' ? (
+                    <View style={{ marginTop: sp.md }}>
+                      <Flag tone={t.warn}>
+                        Your book came back short, so these are not all of your clients. A client you
+                        cannot find here has not withdrawn anything — pull to refresh and look again.
+                      </Flag>
+                    </View>
+                  ) : null}
 
                   {!subject ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{PICK_A_CLIENT_FIRST}</Text>
@@ -808,6 +844,16 @@ export default function ShareKit() {
           )}
         </Section>
 
+        {/* The logo is set and its picture did not arrive. Said HERE, on the
+            screen that publishes, because this is the only surface where an
+            unbranded card is permanent — app/(trainer)/brand.tsx has drawn the
+            same distinction all along. */}
+        {logo.path && logo.pictureStatus === 'error' ? (
+          <Section>
+            <Flag tone={t.warn}>{LOGO_SET_NOT_FETCHED}</Flag>
+          </Section>
+        ) : null}
+
         {build.ok ? (
           <>
             <Rule />
@@ -821,7 +867,14 @@ export default function ShareKit() {
         ) : null}
 
         <Section>
+          {/* A card that could not be built refuses this control, and the
+              refusal was said ONLY in the palette: the fill drops to
+              `surface2` and the ink to `ink3`. A coach using VoiceOver heard
+              "Share this card, button", tapped it, and got silence — with no
+              way to learn that the figures behind the card had not been read.
+              The state is now announced as well as coloured. */}
           <Pressable onPress={share} disabled={busy || !build.ok} accessibilityRole="button" accessibilityLabel="Share this card"
+            accessibilityState={{ disabled: busy || !build.ok, busy }}
             style={{ backgroundColor: build.ok ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1 }}>
             {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={build.ok ? t.brandInk : t.ink3} />}
             <Text style={{ ...ty.label, fontWeight: '600', color: build.ok ? t.brandInk : t.ink3 }}>{busy ? 'Preparing…' : 'Share this card'}</Text>
@@ -849,6 +902,7 @@ export default function ShareKit() {
               {pages.map((p) => (
                 <Pressable key={p.id} onPress={() => { void choose(p); }} disabled={igBusy}
                   accessibilityRole="button" accessibilityLabel={`Post to ${p.igUsername ? `@${p.igUsername}` : p.name}`}
+                  accessibilityState={{ disabled: igBusy, busy: igBusy }}
                   style={{ paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, marginBottom: sp.sm }}>
                   <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{p.igUsername ? `@${p.igUsername}` : p.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.name}</Text>

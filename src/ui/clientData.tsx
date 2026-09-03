@@ -40,6 +40,7 @@ import { isDeviceAvatar } from '../lib/avatarImage';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { registerFlush } from '../lib/offlineQueue';
+import { writeFailure } from '../lib/wroteRows';
 
 // Declared in src/lib/types.ts alongside the labels and the two predicates the
 // screens branch on; re-exported because every client screen imports it from
@@ -406,8 +407,15 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
             // reads as in-person to everybody but themselves, and a new phone
             // would silently take the narrowed value as the truth.
             if (agreed !== stored) {
-              const { error: mErr } = await supabase.from('clients').update({ mode: agreed }).eq('id', sbUid);
-              if (mErr) reportError('clientData.promoteMode', mErr);
+              // Counted, not just error-checked: an UPDATE that matches no row
+              // comes back 204 with `error: null`, and the whole point of this
+              // write is that the server is the only copy the coach's roster
+              // and the console read. A promotion that silently landed nowhere
+              // leaves a hybrid client reading as in-person to everybody but
+              // themselves — which is the state this block exists to end.
+              const mRes = await supabase.from('clients').update({ mode: agreed }, { count: 'exact' }).eq('id', sbUid);
+              const mWhy = writeFailure('Your coaching mode', mRes);
+              if (mWhy) reportError('clientData.promoteMode', mRes.error ?? new Error(mWhy));
             }
           }
           if (Array.isArray(r.injuries)) setInjuries(r.injuries);
@@ -712,8 +720,13 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           // made. Losing it costs the InBody detail, not the scan, so the scan
           // still counts as stored — but the failure is recorded rather than
           // discarded.
-          const { error: mErr } = await supabase.from('scans').update({ metrics: s.metrics }).eq('id', data.id);
-          if (mErr) reportError('clientData.addScan.metrics', mErr);
+          // Counted for the same reason every other write on this row is: a
+          // 204 over zero rows is how the composition breakdown goes missing
+          // with nothing recorded anywhere, and the scan then reads as stored
+          // WITH its InBody detail when only half of it landed.
+          const mRes = await supabase.from('scans').update({ metrics: s.metrics }, { count: 'exact' }).eq('id', data.id);
+          const mWhy = writeFailure('The composition breakdown for that scan', mRes);
+          if (mWhy) reportError('clientData.addScan.metrics', mRes.error ?? new Error(mWhy));
         }
         return true;
       } catch (e) { reportError('clientData.addScan', e); return false; }

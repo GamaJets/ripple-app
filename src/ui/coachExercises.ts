@@ -21,6 +21,7 @@ import { USE_SUPABASE } from '../lib/config';
 import { mergeExerciseLists, type CoachExercise } from '../lib/coachExerciseList';
 import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
+import { writeFailure } from '../lib/wroteRows';
 
 export { mergeExerciseLists, type CoachExercise };
 
@@ -133,10 +134,25 @@ export function useCoachExercises(): CoachExercisesApi {
     setSaved((p) => p.filter((x) => x.name !== name));
     if (!USE_SUPABASE || !uid) return false;
     try {
-      const { error } = await supabase.from('coach_exercises').delete().eq('coach_id', uid).eq('name', name);
-      return !error;
-    } catch { return false; }
-  }, [uid]);
+      // COUNTED, and put back when the server did not confirm. The row is
+      // dropped from state above before the request goes out, and PostgREST
+      // answers a DELETE that matched nothing with a 204 and `error: null` —
+      // so `!error` was `true` for a refusal, and the movement vanished from
+      // the coach's own list while the row stayed on the server and came back
+      // at the next load.
+      const del = await supabase.from('coach_exercises')
+        .delete({ count: 'exact' }).eq('coach_id', uid).eq('name', name);
+      if (writeFailure('That movement', del)) {
+        // Re-read rather than reinstate from memory. `reload` is what this
+        // hook already treats as the truth about what the server holds, and a
+        // row put back by hand would be this device's guess at a row it has
+        // just been told it did not delete.
+        reload();
+        return false;
+      }
+      return true;
+    } catch { reload(); return false; }
+  }, [uid, reload]);
 
   return { saved, status, remember, forget, reload };
 }

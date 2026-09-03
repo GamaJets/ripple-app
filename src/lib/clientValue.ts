@@ -314,6 +314,38 @@ export const VALUE_MAY_DOUBLE_COUNT =
   'A payment recorded by hand that Stripe also took is counted twice here. The two rows share nothing this app can read, so nothing can spot it — record only what did not go through Repple.';
 
 /**
+ * The number of payments, ONLY when every read behind it was whole.
+ *
+ * `payments` on the value is a count of the rows that arrived, and it is
+ * counted deliberately even where the total is withheld — "we could not total
+ * 14 payments" is a better sentence than "we could not total your payments".
+ * That is right for a SENTENCE and wrong for a figure in a KPI row, which is
+ * where app/(trainer)/client.tsx was printing it: "Payments 4" sat inches from
+ * "Worth —", so the dash read as "we cannot price these four" rather than "we
+ * do not know there were four". A coach deciding whether to chase somebody for
+ * money read four payments as a fact about a paying client, when it was four
+ * rows out of an unknown number.
+ *
+ * Null is the dash. The count survives, in `paymentsFloorLine` below, where it
+ * is stated as the floor it is.
+ */
+export const paymentsCounted = (v: ClientValue): number | null =>
+  (v.ledger.status === 'ready' ? v.payments : null);
+
+/**
+ * The count as a floor, for the sentence under a withheld total.
+ *
+ * Null when the ledger is whole — the KPI has already said it — and null when
+ * nothing arrived at all, because "at least 0 payments" is not a sentence.
+ */
+export function paymentsFloorLine(v: ClientValue): string | null {
+  if (v.ledger.status === 'ready' || v.payments === 0) return null;
+  return v.payments === 1
+    ? 'At least 1 payment is on record. One of the reads behind this did not come back whole, so that is a floor and not a count.'
+    : `At least ${num(v.payments)} payments are on record. One of the reads behind this did not come back whole, so that is a floor and not a count.`;
+}
+
+/**
  * What to say where a client's total would have gone.
  *
  * Never "they have paid you nothing" over a read that did not complete. On this

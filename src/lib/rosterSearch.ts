@@ -134,3 +134,31 @@ export function rosterSearchLine(o: {
       return o.matched > 0 ? null : `Nobody on your roster matches “${q}”.`;
   }
 }
+
+/**
+ * The line under a picker that shows only the first screenful of a roster.
+ *
+ * Said when nothing has been typed, so `rosterSearchLine` above is silent, and
+ * it is the ONE sentence on that screen a coach acts on: "type a name to find
+ * the rest" is an instruction about where the missing people are.
+ *
+ * `known` is how many names the app actually holds, and that is not the size of
+ * the book unless the read was whole. Under 'partial' this used to print the
+ * page size as the total — so a coach searching for somebody who did not make
+ * the page typed the name, got nothing, and concluded the client is not on
+ * their book. Under 'error' it is whatever survived a failure and is not a
+ * count of anything.
+ */
+export function rosterPickerLine(o: { status: LoadStatus; shown: number; known: number }): string {
+  const tail = 'Type a name to find the rest.';
+  switch (o.status) {
+    case 'error':
+      return `Showing the ${o.shown} clients this app still had. Your roster could not be read, so this is not a count of your book. ${tail}`;
+    case 'loading':
+      return `Showing ${o.shown} of the clients read so far — your roster is still arriving. ${tail}`;
+    case 'partial':
+      return `Showing ${o.shown} of the ${o.known} clients that arrived. Your roster came back short, so that is not all of them and a name you cannot find here may still be on your book.`;
+    case 'ready':
+      return `Showing ${o.shown} of your ${o.known} clients — ${tail.charAt(0).toLowerCase()}${tail.slice(1)}`;
+  }
+}

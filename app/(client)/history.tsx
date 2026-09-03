@@ -88,7 +88,7 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import {
   monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths,
   gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals,
-  prTimeline, volumeArc, MAX_MONTHS, MONTH_LABELS,
+  prTimeline, volumeArc, MAX_MONTHS, monthLabels,
   type MonthCell, type YearRow,
 } from '../../src/lib/longView';
 import { tonnageNote } from '../../src/lib/bodyweightSets';
@@ -186,7 +186,7 @@ function YearGrid({ rows, peak, t, unit }: { rows: YearRow[]; peak: number | nul
         <View style={{ width: 32 }} />
         <View style={{ flex: 1 }}>
           <Svg width="100%" height={12} viewBox={`0 0 ${W} 12`} preserveAspectRatio="xMinYMid meet">
-            {MONTH_LABELS.map((m, i) => (
+            {monthLabels().map((m: string, i: number) => (
               <SvgText key={m} x={xOf(i) + CELL / 2} y={9} fontSize={9} fill={t.ink3} textAnchor="middle">
                 {m[0]}
               </SvgText>
@@ -195,8 +195,11 @@ function YearGrid({ rows, peak, t, unit }: { rows: YearRow[]; peak: number | nul
         </View>
       </View>
       {rows.map((row) => {
+        // Read once per row rather than once per cell: `monthLabels()` resolves
+        // the reader's locale on every call, and a spoken year is twelve cells.
+        const names = monthLabels();
         const spoken = `${row.year}. ` + row.cells
-          .map((c, m) => (c ? `${MONTH_LABELS[m]}, ${describeMonth(c, unit)}` : null))
+          .map((c, m) => (c ? `${names[m]}, ${describeMonth(c, unit)}` : null))
           .filter(Boolean).join('. ') + '.';
         return (
           <View key={row.year} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>

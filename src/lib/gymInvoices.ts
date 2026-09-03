@@ -177,6 +177,12 @@ export function isoDay(s: string | null | undefined): boolean {
   const v = String(s ?? '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
   const d = new Date(`${v}T00:00:00Z`);
+  // utc-day-ok: this states no day to anybody — it asks whether the string it
+  // was handed survives a round trip, which is how `2026-02-31` is caught after
+  // Date has rolled it into March. Both ends of that trip must be the same
+  // calendar or the comparison is meaningless, and the string was anchored at
+  // UTC midnight one line up. A local read here would fail every valid date for
+  // every reader who is not on UTC.
   return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === v;
 }
 
@@ -189,6 +195,13 @@ export function isoDay(s: string | null | undefined): boolean {
 export function dueAfter(issuedOn: string, days: number): string {
   const t = Date.parse(`${issuedOn}T00:00:00Z`);
   if (!Number.isFinite(t)) return issuedOn;
+  // utc-day-ok: exactly what the note above claims, and the claim is the whole
+  // design. `issuedOn` is a bare day off a `date` column, it is anchored at UTC
+  // midnight, days are added, and the same kind of bare day comes back — UTC
+  // goes in, UTC comes out, and it cancels. "Thirty days after the 1st" has to
+  // be the 31st for the owner in Auckland and the member in Denver both,
+  // because it is one date printed on one invoice, and reading it back with the
+  // local getters is the arithmetic this function exists to replace.
   return new Date(t + days * 86400000).toISOString().slice(0, 10);
 }
 

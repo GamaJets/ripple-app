@@ -50,7 +50,35 @@ eq(trialFrom('', START), null, 'and neither is an empty one');
 eq(trialFrom('whenever', START), null, 'nor one that will not parse');
 eq(trialFrom('2026-09-01T10:00:00.000Z', NaN), null, 'and a clock that will not read produces no figure either');
 
-eq(trialFrom('2026-09-01T10:00:00.000Z', START)!.startedOn, '2026-09-01', 'the start day is reported as a day');
+// ── the start day belongs to the coach, not to UTC ────────────────────────
+//
+// This used to be pinned to the literal '2026-09-01', and that pin was the
+// assertion that `startedOn` is UTC's day — which is nobody's. It is printed at
+// the coach: `trialSentence` says "Your free trial started on …" and "counted
+// from …", on the billing screen, in front of somebody about to be asked for
+// money. A coach in Kiritimati who signed up at midnight on the 2nd read the
+// 1st, and had a day of their fortnight they could not account for.
+//
+// It cannot be pinned to a literal at all, and that is the point rather than a
+// weakness of the test: this suite runs in six zones spanning UTC-11 to UTC+14,
+// so there is no instant that falls on one calendar day in all of them. What is
+// pinned instead is the CONTRACT — the day read off the coach's own calendar —
+// built here from the local getters directly rather than from the function this
+// file is testing. Under Pacific/Kiritimati and Pacific/Midway that day is not
+// UTC's for this instant, so a regression to `toISOString().slice(0, 10)` fails
+// two of the six runs.
+const startedState = trialFrom('2026-09-01T10:00:00.000Z', START)!;
+const startInstant = new Date(Date.parse('2026-09-01T10:00:00.000Z'));
+const pad2 = (n: number) => String(n).padStart(2, '0');
+eq(startedState.startedOn,
+  `${startInstant.getFullYear()}-${pad2(startInstant.getMonth() + 1)}-${pad2(startInstant.getDate())}`,
+  'the start day is the coach’s own calendar day, not UTC’s');
+ok(/^\d{4}-\d{2}-\d{2}$/.test(startedState.startedOn),
+  'and it is still a plain day, because the sentence prints it verbatim');
+// `daysLeft` is the half that must NOT move with the zone: it is counted from
+// the start INSTANT, so it is the same number for every coach on earth. The
+// arithmetic block above asserts it under all six.
+eq(startedState.daysLeft, TRIAL_DAYS, 'and the countdown beside it is zone-independent, as it has to be');
 
 /* ── 2. an unread trial is not an expired one ───────────────────────────── */
 
@@ -101,6 +129,39 @@ const account = trialFrom('2026-01-01T10:00:00.000Z', START)!; // 0 days left
 eq(trialDisagreement(account, 0), null, 'agreement says nothing');
 eq(trialDisagreement(null, 11), null, 'and nothing is claimed when the account could not be read');
 eq(trialDisagreement(account, null), null, 'or when the phone has no figure');
+
+// ── the agreement that is not zero ─────────────────────────────────────────
+//
+// Every assertion above is made against an account with NO days left, and zero
+// is the one value at which `localDaysLeft - account.daysLeft` and
+// `localDaysLeft + account.daysLeft` cannot be told apart. Both give 0 on
+// agreement and both give 11 on the disagreement above, so the subtraction at
+// the heart of this function was asserted by nothing at all.
+//
+// It matters in the ordinary direction, not the exotic one: the common case is
+// a coach mid-trial whose phone and account agree, and under an addition every
+// one of them is shown a sentence saying the two figures differ and naming the
+// same number twice.
+{
+  const midTrial = trialFrom('2026-09-01T10:00:00.000Z', START + 3 * DAY)!;
+  eq(midTrial.daysLeft, TRIAL_DAYS - 3, 'the fixture is mid-trial rather than run out');
+  eq(trialDisagreement(midTrial, midTrial.daysLeft), null,
+    'a phone that agrees with an account still in its trial says nothing');
+  ok(trialDisagreement(midTrial, midTrial.daysLeft + 4) != null, 'and one that is four days out does');
+
+  // The threshold. Under a day is not a disagreement — the two figures are cut
+  // from clocks that tick independently — and a whole day is.
+  eq(trialDisagreement(midTrial, midTrial.daysLeft + 0.5), null, 'half a day apart is not a disagreement worth a sentence');
+  ok(trialDisagreement(midTrial, midTrial.daysLeft + 1) != null, 'a whole day apart is');
+
+  // Said in words, and the words have to agree with themselves.
+  const one = trialDisagreement(midTrial, 1);
+  ok(/has 1 day recorded/.test(String(one)), 'one day is a day, not "1 days"');
+  const many = trialDisagreement(midTrial, 3);
+  ok(/has 3 days recorded/.test(String(many)), 'and three are days');
+  ok(String(many).includes(String(midTrial.daysLeft)),
+    'and the account’s own figure is the one quoted back, not the phone’s repeated twice');
+}
 
 /* ── 5. honest about not being a gate ───────────────────────────────────── */
 

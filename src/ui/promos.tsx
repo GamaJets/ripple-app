@@ -31,6 +31,7 @@ import { createContext, useContext, useCallback, useEffect, useState, type React
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
+import { readCappedByIds } from '../lib/cappedByIds';
 import { useAuthRevision } from './authRevision';
 import { useTenant } from './tenant';
 import type { LoadStatus } from './loadStatus';
@@ -96,21 +97,38 @@ export function PromosProvider({ children }: { children: ReactNode }) {
     let counts = new Map<string, number>();
     let countsKnown = true;
     if (rows.length) {
-      const { data: reds, error: rErr } = await supabase
-        .from('promo_redemptions')
-        .select('promo_id')
-        .in('promo_id', rows.map((r) => r.id))
-        .limit(capLimit());
-      if (rErr) {
+      // CHUNKED, and the limit is the REQUEST LINE rather than the row ceiling.
+      // Promo codes accumulate per tenant and nothing deletes them, so `rows`
+      // reaches the `capLimit()` ceiling of a thousand on a gym that has been
+      // running a few years. At ~39 bytes per uuid inside a PostgREST
+      // `in.("…","…")` list that is a ~39KB query string against the 8KB
+      // request line nginx and most CDNs enforce by default, refused past
+      // roughly two hundred ids with a 414 that supabase-js does not reject on
+      // and that arrives as `data: null`.
+      //
+      // Which is why `rErr` was not enough on its own: a 414 leaves it null, so
+      // the else branch ran over an empty set and every code rendered
+      // `redeemed: 0` with `countsKnown` still true — the app stating, as fact,
+      // that nobody has ever used any of this gym's codes. That is a number an
+      // owner decides an ad budget on.
+      //
+      // `readCappedByIds`, because `countsKnown` is exactly the truncation flag
+      // and a count off part of the rows must go to a dash rather than to a
+      // smaller number.
+      const red = await readCappedByIds<{ promo_id: string }>(
+        rows.map((r) => r.id),
+        (chunk) => supabase.from('promo_redemptions').select('promo_id')
+          .in('promo_id', chunk).limit(capLimit()),
+      );
+      if (red.error) {
         // The codes are real and readable; only the counts are not. Reported
         // as 'partial' so the list shows and the figures render as a dash —
         // a 0 here would say "nobody used it", which is the opposite of
         // "we could not count".
         countsKnown = false;
       } else {
-        const redPage = capped(reds);
-        if (redPage.truncated) countsKnown = false;
-        for (const r of redPage.rows as { promo_id: string }[]) {
+        if (red.truncated) countsKnown = false;
+        for (const r of red.rows) {
           counts.set(r.promo_id, (counts.get(r.promo_id) ?? 0) + 1);
         }
       }

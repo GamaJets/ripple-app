@@ -35,6 +35,9 @@
 import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
 import { BRAND } from './brands';
+// PostgREST stops at a thousand rows and says nothing. This file's whole
+// subject is a record that is short without saying so.
+import { capLimit, capped } from './rowCap';
 
 /**
  * What the export is called on the member's phone.
@@ -109,6 +112,24 @@ const TABLES = [
   // Paperwork they signed or accepted.
   'liability_waivers',                       // part 84  · liability_waivers_own_r
   'coach_document_acceptances',              // part 135 · coach_doc_accept_own_r
+  // The gym's own paperwork, and the signatures the member put on it: the
+  // waiver, the PAR-Q, the photo consent and the membership contract that
+  // app/(client)/agreements.tsx writes. These were missing, and they are the
+  // STRONGEST legal record a member creates in this app — supabase/parts/185
+  // makes a signature irreversible, and web/delete-account.html tells the
+  // member to export before requesting erasure, so this file is the last copy
+  // they will ever have of it. The gym's own console already pulls them
+  // (studio-web/app/export/page.tsx), so the member's own export was the one
+  // place they did not appear.
+  //
+  // The signatures narrow to the member (gym_agreement_sig_own_r, part 520).
+  // The agreements themselves are the tenant's documents, opened to the whole
+  // tenant by part 185 on the grounds that a document somebody has to sign and
+  // cannot read before signing is not consent — so this exports the WORDING
+  // beside the signature, which is the half that makes the signature mean
+  // anything a year later.
+  'gym_agreement_signatures',                // part 520 · gym_agreement_sig_own_r
+  'gym_agreements',                          // part 185 · gym_agreements_tenant_r
 ];
 
 /**
@@ -273,7 +294,32 @@ export interface ExportFile {
  */
 const FILE_STORES: { bucket: string; what: string; depth: 1 | 2 }[] = [
   { bucket: 'photos', what: 'A progress photograph you took', depth: 1 },
-  { bucket: 'injury-docs', what: 'An injury document you uploaded. Only you can see this one.', depth: 1 },
+  // ── The removed sentence, still standing in the one document that is ABOUT
+  //    where a person's data has been ────────────────────────────────────────
+  //
+  // This said "An injury document you uploaded. Only you can see this one."
+  //
+  // That is the exact sentence app/(client)/injury-doc.tsx was rewritten to
+  // remove, and src/lib/injuryDocConsent.ts spends its header explaining why:
+  // the bucket really is private to its owner (supabase/parts/91, own-folder
+  // policies with no trainer branch), and READING a document means sending a
+  // copy of it to OCR.space. A member who says yes to that has a document that
+  // more than one party has seen, and "only you can see this one" is then a
+  // false statement about it.
+  //
+  // It matters more here than it did on the screen, not less. This line is the
+  // label in a SUBJECT ACCESS EXPORT — the file a person asks for precisely
+  // because they want to know who holds what about them, and the one they keep
+  // after deleting the account. A manifest that answers that question wrongly
+  // is worse than one that does not answer it.
+  //
+  // The manifest cannot state the per-document answer: the consent rows are a
+  // separate read (`ocr_consents`), this walk is over storage objects, and
+  // matching them up here would make an export fail for a reason that has
+  // nothing to do with the export. So it says the part that is unconditionally
+  // true of every one of these files and points at where the per-document
+  // answer lives, which the member can open and read for themselves.
+  { bucket: 'injury-docs', what: 'An injury document you uploaded. It is stored where only you can open it, and your coach never sees the file. If you agreed to have one read, a copy of that document also went to OCR.space — the Injuries screen in the app says, against each document, which of yours those were.', depth: 1 },
   { bucket: 'message-media', what: 'A photo or video in your conversation with your coach', depth: 2 },
   // Added with supabase/parts/961, which is where a profile photo started
   // being a file at all. Before that the column held a path inside the
@@ -413,10 +459,33 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
 
   for (const tbl of TABLES) {
     try {
-      const { data, error } = await supabase.from(tbl).select('*');
+      // `capLimit()`, and then `capped()`. This was a bare `select('*')` with
+      // no limit and no truncation check, on a loop over every table a member
+      // has rows in — so PostgREST's configured maximum cut `workouts` and
+      // `messages` for anybody with a real history, and nothing on the way out
+      // noticed. `complete` below is computed from `failed` alone, so the file
+      // that reached the member was missing years of their own record with a
+      // field in it asserting that it was not. `listMyFiles` a few lines down
+      // already says why that is the worst shape this file can take: "a
+      // manifest that is short without saying so is the exact failure this
+      // whole file is about" — and web/delete-account.html has already told
+      // them to rely on this before they erase the original.
+      const { data, error } = await supabase.from(tbl).select('*').limit(capLimit());
       // The check that was missing. Without it a refusal becomes [].
       if (error) throw error;
-      out[tbl] = data ?? [];
+      const page = capped(data ?? []);
+      if (page.truncated) {
+        // An OBJECT, not an array, for the same reason a failed table is one:
+        // an array of a thousand rows cannot be told from the whole set by
+        // anybody opening this file in a year. The rows that did come back are
+        // kept inside it — nothing is thrown away — but they cannot be read as
+        // "this is all of them".
+        const reason = `only the first ${page.rows.length} rows could be read; there are more`;
+        failed.push({ table: tbl, reason });
+        out[tbl] = { error: 'INCOMPLETE — this table has more rows than could be read in one go', reason, rows: page.rows };
+      } else {
+        out[tbl] = page.rows;
+      }
     } catch (e: any) {
       const reason = e?.message ? String(e.message) : 'could not be read';
       failed.push({ table: tbl, reason });
@@ -441,9 +510,18 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
       // not go out at all — an unscoped one would succeed and return other
       // people's rows.
       if (!myId) throw new Error('nobody is signed in, so this could not be narrowed to your own rows');
-      const { data, error } = await supabase.from(c.table).select('*').eq(c.column, myId);
+      const { data, error } = await supabase.from(c.table).select('*').eq(c.column, myId).limit(capLimit());
       if (error) throw error;
-      out[c.table] = data ?? [];
+      // Same rule as the member's half. A coach's invoices and sessions are the
+      // two tables in this app most likely to pass a thousand rows.
+      const page = capped(data ?? []);
+      if (page.truncated) {
+        const reason = `only the first ${page.rows.length} rows could be read; there are more`;
+        failed.push({ table: c.table, reason });
+        out[c.table] = { error: `INCOMPLETE — ${c.what} has more rows than could be read in one go`, reason, rows: page.rows };
+      } else {
+        out[c.table] = page.rows;
+      }
     } catch (e: any) {
       const reason = e?.message ? String(e.message) : 'could not be read';
       failed.push({ table: c.table, reason });

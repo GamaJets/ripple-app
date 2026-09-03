@@ -5,9 +5,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import { reportError } from '../lib/reportError';
 import { inboxDecision, safeRoute } from '../lib/notifyInbox';
 import { pushConsent } from '../lib/pushConsent';
-import { allows, hourToDeliver, whenToDeliver, type NotifyCategory } from '../lib/notifyPrefs';
+import { allows, timeToDeliver, whenToDeliver, type NotifyCategory } from '../lib/notifyPrefs';
 import { notifyPrefs } from '../lib/notifyPrefsLatch';
 import { VARIANT, type AppVariant } from '../lib/variant';
 import type { CoachChannel } from '../lib/coachNotify';
@@ -49,22 +50,93 @@ export const pushAvailable = () => !!Notifications;
  * recipient and skips the ones the caller may not reach; it returns how many
  * rows it actually wrote, which is the only honest answer to "did that land".
  *
- * Returns that count. 0 covers "not worth recording", "signed out", "refused"
+ * Returns that count, and whether it is a COUNT or a FLOOR — see
+ * `NOTIFY_USERS_CAP`. 0 covers "not worth recording", "signed out", "refused"
  * and "nobody eligible" — callers that need to distinguish should look at
  * `sendPushChecked`, which reports the send separately.
  */
+/**
+ * The ceiling inside `notify_users()`.
+ *
+ * ── Why this number is written down twice ─────────────────────────────────
+ *
+ * supabase/parts/122 ends its recipient CTE with `limit 2000`. That is a
+ * ceiling the CLIENT CANNOT SEE. src/lib/rowCap.ts's whole mechanism is asking
+ * for one row more than you will accept — `capLimit()` — and it is useless
+ * here, because a `.limit()` written inside a `create function` body can only
+ * ever be narrowed by the caller, never exceeded. So `capped()` is blind to it,
+ * and this function's return value stopped being a count at two thousand and
+ * one recipients without anything saying so.
+ *
+ * What that did: a gym owner announcing a closure to 2,400 members was told
+ * "2,000 people have it in their notifications", which is a true number about
+ * a set that is not the one they addressed. Four hundred people were neither
+ * notified nor counted, and the sentence they were counted out of read as a
+ * complete answer. It is the same defect send-push had at a thousand HANDSETS
+ * (see `readAllFor` there), one layer up and one table over.
+ *
+ * The cap is not raised here, and deliberately: two thousand notification rows
+ * in one statement is already a large write, and moving the ceiling moves the
+ * cliff without removing it — the argument src/lib/rowCap.ts makes about
+ * `.limit(5000)`. What changes is that the caller can now tell the difference
+ * between a count and a floor, and say "at least".
+ *
+ * Paired with the SQL by scripts/check-sql-caps.mjs, which reads both numbers
+ * and fails by name the moment they disagree.
+ */
+export const NOTIFY_USERS_CAP = 2000;
+
+/** What `recordInbox` managed, and whether that is the whole of it. */
+export interface InboxRecord {
+  /** Rows `notify_users()` wrote. */
+  recorded: number;
+  /**
+   * More people were addressed than `notify_users()` will consider in one
+   * call, so `recorded` is a FLOOR and the people past the ceiling were
+   * neither written to nor counted.
+   *
+   * Decided from the length of the request rather than from the answer, and
+   * that is what makes it knowable at all: the server returns a number with no
+   * indication of what it stopped at, but the caller knows exactly how many
+   * people it asked about.
+   */
+  atCap: boolean;
+  /**
+   * Whether an inbox row was EVEN MEANT to be written.
+   *
+   * False is `inboxDecision` refusing this kind — a chat message whose row the
+   * `messages` trigger writes, a class-off whose row part 493 writes, or a
+   * race for a slot that is over before an inbox is opened. `recorded` is then
+   * 0 BY POLICY and is not evidence of anything.
+   *
+   * Nothing could tell those two zeroes apart, and one caller was reporting
+   * the wrong one out loud: app/(trainer)/calendar.tsx re-offers a freed slot
+   * with the title 'A slot just opened', which `notifyInbox` deliberately does
+   * not keep, so `recorded` came back 0 every single time and
+   * `reofferConfirmation` told the coach "the server recorded the notification
+   * for nobody — so none of your N clients has it in their notifications.
+   * Message them yourself, or try again." on a send that had gone out
+   * perfectly. A screen cannot measure a row that was never going to exist.
+   */
+  kept: boolean;
+}
+
 export async function recordInbox(
   userIds: string[],
   title: string,
   body: string,
   data?: Record<string, unknown>,
-): Promise<number> {
-  if (!USE_SUPABASE) return 0;
+): Promise<InboxRecord> {
+  if (!USE_SUPABASE) return { recorded: 0, atCap: false, kept: false };
   const ids = (userIds || []).filter(Boolean);
-  if (!ids.length) return 0;
+  if (!ids.length) return { recorded: 0, atCap: false, kept: false };
   const route = typeof data?.route === 'string' ? data.route : null;
   const decision = inboxDecision(title, body, route);
-  if (!decision.record) return 0;
+  if (!decision.record) return { recorded: 0, atCap: false, kept: false };
+  // Stated whatever happens below, including on a refusal: "we asked about more
+  // people than this call can hold" is true of the request and does not depend
+  // on the answer.
+  const atCap = ids.length > NOTIFY_USERS_CAP;
   try {
     const { data: n, error } = await supabase.rpc('notify_users', {
       p_user_ids: ids,
@@ -77,10 +149,10 @@ export async function recordInbox(
     // undeployed function and a function that wrote nothing both hand back a
     // falsy `data`, and reporting the first as "recorded 0" would be true by
     // accident rather than by measurement.
-    if (error) return 0;
+    if (error) return { recorded: 0, atCap, kept: true };
     const count = Number(n ?? 0);
-    return Number.isFinite(count) && count > 0 ? count : 0;
-  } catch { return 0; }
+    return { recorded: Number.isFinite(count) && count > 0 ? count : 0, atCap, kept: true };
+  } catch { return { recorded: 0, atCap, kept: true }; }
 }
 
 /**
@@ -128,22 +200,55 @@ export async function sendPush(userIds: string[], title: string, body: string, d
  *  rather than folded into `ok` so that no existing caller's meaning changes —
  *  `ok` still means exactly what it meant, which is "the send-push function
  *  accepted this". A screen that wants to say "they will see it next time they
- *  open the app" now has something true to say it on. */
-export async function sendPushChecked(userIds: string[], title: string, body: string, data?: Record<string, unknown>, channel?: PushChannel): Promise<{ ok: boolean; error?: string; recorded: number }> {
-  if (!USE_SUPABASE) return { ok: false, error: 'Not connected to the server.', recorded: 0 };
+ *  open the app" now has something true to say it on.
+ *
+ *  ── `partial`, and the floor that was being read as a total ──────────────
+ *
+ *  send-push used to truncate a broadcast at the first PostgREST page — a
+ *  thousand handsets — and return `sent: 1000` for a gym of four hundred
+ *  members with a phone and a tablet each. It now pages, and it reports
+ *  `partial: true` when a chunk failed or ran off its page ceiling, so `sent`
+ *  is a floor rather than the total.
+ *
+ *  Nothing read that flag. `invoke` hands the function's JSON back as `data`
+ *  and this function discarded it, so every caller in this repository was still
+ *  taking `ok: true` for "it went to everybody" — the same defect one layer
+ *  further out, and the reason `ok` alone was never enough. It is surfaced here
+ *  rather than at the seven call sites for the reason the channel filter gives:
+ *  a caller that has to remember is a caller that forgets.
+ *
+ *  It is a THIRD fact, not a flavour of `ok`. The send was accepted; some of
+ *  the recipient list could not be read. A screen that says nothing about it
+ *  keeps exactly the meaning it had.
+ *
+ *  ── `inboxKept`, and the zero that was never a measurement ───────────────
+ *
+ *  `recorded: 0` had two causes and no way to tell them apart: `notify_users`
+ *  wrote nothing, or `notifyInbox` refused to keep this kind of notification
+ *  at all. See `InboxRecord.kept` — a caller that reports the second as the
+ *  first tells a coach nobody was told over a send that worked. */
+export async function sendPushChecked(userIds: string[], title: string, body: string, data?: Record<string, unknown>, channel?: PushChannel): Promise<{ ok: boolean; error?: string; recorded: number; recordedAtCap?: boolean; inboxKept?: boolean; partial?: boolean }> {
+  if (!USE_SUPABASE) return { ok: false, error: 'Not connected to the server.', recorded: 0, inboxKept: false };
   const ids = (userIds || []).filter(Boolean);
-  if (!ids.length) return { ok: false, error: 'Nobody to send to.', recorded: 0 };
+  if (!ids.length) return { ok: false, error: 'Nobody to send to.', recorded: 0, inboxKept: false };
   // Awaited, and BEFORE the send. The row is the durable half of this — a push
   // is gone the moment it is dismissed and does not exist at all on a build
   // without expo-notifications — so if only one of the two can happen, it
   // should be the one that survives.
-  const recorded = await recordInbox(ids, title, body, data);
+  //
+  // `atCap` rides out with the count for the same reason `partial` does below:
+  // both are the difference between a number and a floor, and a caller that
+  // cannot see them can only ever report the floor as the total.
+  const { recorded, atCap, kept } = await recordInbox(ids, title, body, data);
   try {
-    const { error } = await supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {}, ...(channel ? { channel } : {}) } });
-    if (error) return { ok: false, error: error.message, recorded };
-    return { ok: true, recorded };
+    const { data: res, error } = await supabase.functions.invoke('send-push', { body: { user_ids: ids, title, body, data: data || {}, ...(channel ? { channel } : {}) } });
+    if (error) return { ok: false, error: error.message, recorded, recordedAtCap: atCap, inboxKept: kept };
+    // Only an explicit `true` counts. An older deployment of send-push omits
+    // the field entirely, and reading a missing flag as "incomplete" would put
+    // a warning under every announcement on a server where nothing is wrong.
+    return { ok: true, recorded, recordedAtCap: atCap, inboxKept: kept, partial: (res as any)?.partial === true };
   } catch (e: any) {
-    return { ok: false, error: e?.message || 'Could not reach the server.', recorded };
+    return { ok: false, error: e?.message || 'Could not reach the server.', recorded, recordedAtCap: atCap, inboxKept: kept };
   }
 }
 
@@ -264,7 +369,29 @@ export async function registerForPush(): Promise<string | null> {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth?.user?.id;
         if (uid) {
-          await supabase.from('push_tokens').upsert({ user_id: uid, token, platform: 'expo' }, { onConflict: 'token' });
+          // `error` is READ, and the two lines below say exactly why it has to
+          // be. supabase-js does not reject on a database error — it resolves,
+          // with `error` set — so `await` returning here proved nothing at all,
+          // and this file shipped the invariant in its own comment broken by
+          // the missing line the comment never thought to ask for.
+          //
+          // Two things went wrong when the upsert was refused. The note was
+          // written for a row that does not exist, which is precisely what
+          // sends `revokePushToken` hunting for something that was never there
+          // — and it reported success over it. And this function returned the
+          // token, so src/ui/settings.tsx drew the switch ON for a handset with
+          // no delivery address in the table: a member turning notifications on
+          // was shown that they were on and would never receive one.
+          const { error: tokErr } = await supabase.from('push_tokens')
+            .upsert({ user_id: uid, token, platform: 'expo' }, { onConflict: 'token' });
+          if (tokErr) {
+            reportError('pushNotifications.register', tokErr, { uid });
+            // Not remembered, and not returned. Null here is what the settings
+            // screen already renders as 'os-refused' — the honest reading of
+            // "we could not make this handset reachable", whether the OS or the
+            // database is what refused.
+            return null;
+          }
           // After the upsert, not before: the note is a record of what is in
           // the table, and a note written for a row that was never inserted
           // would send the revoke hunting for something that never existed.
@@ -325,17 +452,22 @@ export async function scheduleDailyReminder(title: string, body: string, hour: n
   try {
     const prefs = notifyPrefs();
     if (category && !allows(category, prefs)) return null;
-    // A repeating trigger has an hour and no date, so quiet hours move the HOUR
+    // A repeating trigger has an hour and no date, so quiet hours move the TIME
     // rather than pushing an instant forward. Same rule, stated separately in
     // notifyPrefs.ts so that a daily trigger cannot be accidentally pinned to
     // today's calendar on the way through.
-    const h = category ? hourToDeliver(hour, category, prefs) : hour;
+    //
+    // Hour AND minute. `hourToDeliver` answered with an hour, so everything
+    // moved out of quiet hours landed on the top of it — a 22:00 and a 23:00
+    // nudge both at 07:00:00.000, where the OS collapses them into one banner
+    // and the member loses the rest.
+    const when = category ? timeToDeliver(hour, minute, category, prefs) : { hour, minute };
     if (Notifications.getPermissionsAsync) {
       let status = (await Notifications.getPermissionsAsync())?.status;
       if (status !== 'granted') status = (await Notifications.requestPermissionsAsync())?.status;
       if (status !== 'granted') return null;
     }
-    return await Notifications.scheduleNotificationAsync({ content: { title, body, data: data || {} }, trigger: { type: 'daily', hour: h, minute } });
+    return await Notifications.scheduleNotificationAsync({ content: { title, body, data: data || {} }, trigger: { type: 'daily', hour: when.hour, minute: when.minute } });
   } catch { return null; }
 }
 
@@ -368,7 +500,9 @@ export async function scheduleWeeklyReminders(
   if (!Notifications || !weekdays.length) return [];
   const prefs = notifyPrefs();
   if (category && !allows(category, prefs)) return [];
-  const h = category ? hourToDeliver(hour, category, prefs) : hour;
+  // Hour and minute together — see `scheduleDailyReminder` above for what
+  // moving only the hour did to a window full of reminders.
+  const when = category ? timeToDeliver(hour, minute, category, prefs) : { hour, minute };
   try {
     if (Notifications.getPermissionsAsync) {
       let status = (await Notifications.getPermissionsAsync())?.status;
@@ -382,7 +516,7 @@ export async function scheduleWeeklyReminders(
     try {
       const id = await Notifications.scheduleNotificationAsync({
         content: { title, body, data: data || {} },
-        trigger: { type: 'weekly', weekday: w, hour: h, minute },
+        trigger: { type: 'weekly', weekday: w, hour: when.hour, minute: when.minute },
       });
       if (id) ids.push(id);
     } catch {

@@ -59,6 +59,9 @@ import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+// The month window's instant, recomputed at midnight, on foreground and on
+// focus — never frozen at mount. See src/ui/today.ts.
+import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Notice, Flag, Ghost } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
@@ -189,7 +192,15 @@ export default function TrainerAssistant() {
    * bound that moved on every re-render would recompute the month against a
    * different instant each time.
    */
-  const now = useMemo(() => new Date(), []);
+  /* `useNow`, not `useMemo(() => new Date(), [])`. The comment that stood here
+     said `now` was fixed "for the render"; an empty dependency array fixes it
+     for the life of the MOUNT, and this screen is a tab that stays mounted for
+     as long as the app runs. Both bounds of the month window come from it, so a
+     coach who opened this on the 31st and came back on the 1st read last
+     month's figures under a heading saying this month — and a pull-to-refresh
+     re-read the server against the same wrong dates, which made the stale
+     figure look freshly confirmed. See src/ui/today.ts. */
+  const now = useNow();
   const { from: monthFrom, to: monthTo } = useMemo(() => monthToDate(now), [now]);
   const month = useMemo(
     () => sessionMonth(sessions, sessionsStatus, monthFrom, monthTo),
@@ -406,8 +417,16 @@ export default function TrainerAssistant() {
             <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
               <TextInput value={input} onChangeText={setInput} placeholder="Ask about your book…" placeholderTextColor={t.ink3} multiline
                 style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
+              {/* The refusal is drawn — the circle goes to `surface3` with an
+                  empty box — and drawing is the only place it was said. A
+                  screen reader was handed "Send question, button" whether the
+                  box was empty or a question was already in flight, so the tap
+                  did nothing and nothing explained why. `accessibilityState`
+                  is where that belongs; `busy` rides on it too, because "still
+                  thinking" and "nothing typed" are different reasons to wait. */}
               <Pressable onPress={() => { void send(input); }} disabled={!input.trim() || busy}
                 accessibilityRole="button" accessibilityLabel="Send question"
+                accessibilityState={{ disabled: !input.trim() || busy, busy }}
                 style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: input.trim() && !busy ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ ...ty.head, color: t.brandInk }}>↑</Text>
               </Pressable>

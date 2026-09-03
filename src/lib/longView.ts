@@ -46,10 +46,30 @@
 import type { WorkoutEntry } from './mockData';
 import { est1RM } from './streaks';
 import { setLoadKg, isBodyweightSet, type BodyweightHistory } from './bodyweightSets';
+// A hold is not repetitions. This file re-implements the set loop three
+// times, and all three multiplied a plank's SECONDS by a load: the twelve-week
+// grid, lifetime tonnage and the Milestones timeline were each inflated by
+// holds counted as reps, and `est1RM` over forty-five "reps" produced a
+// fictional one-rep max that landed on the timeline as a record the member
+// never set — and that no real set could beat afterwards.
+// src/lib/progression.ts already carried this skip; these three did not.
+import { isTimedSet } from './timedSets';
+import { fmtPointMonth, monthNamesShort } from './format';
 
 const DAY = 86_400_000;
 
-export const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/**
+ * The twelve short month names for this grid's axis, index-aligned with
+ * `Date#getMonth`, in the reader's own language.
+ *
+ * A function rather than the exported `MONTH_LABELS` array it replaces. Two
+ * reasons: `monthNamesShort()` asks `appLocale()`, which is latched lazily, so
+ * a constant built at import time would pin a member's twelve-week grid to
+ * whatever locale had been resolved before the app started; and the array this
+ * hands back is the one src/lib/format.ts owns, so the axis of this chart and
+ * the axis of every other chart cannot drift into two different Septembers.
+ */
+export const monthLabels = (): readonly string[] => monthNamesShort();
 
 /** How far back the view will reach: three year-rows. Beyond that the screen
  *  says how many earlier months exist rather than drawing a wall of cells. */
@@ -93,7 +113,7 @@ export function nextMonth(key: string): string {
 /** 'Mar 2026'. An unrecognised key is returned as-is rather than guessed at. */
 export function monthLabel(key: string): string {
   const { year, month } = ymOf(key);
-  const name = MONTH_LABELS[month];
+  const name = monthLabels()[month];
   return name && Number.isFinite(year) ? `${name} ${year}` : key;
 }
 
@@ -150,7 +170,7 @@ export interface MonthCell {
 function blankCell(key: string): MonthCell {
   const { year, month } = ymOf(key);
   return {
-    key, year, month, label: MONTH_LABELS[month] ?? key,
+    key, year, month, label: monthLabels()[month] ?? key,
     trained: false, sessions: null, days: null, volumeKg: null, kcal: null,
     best1RM: null, topLift: null, unpricedSets: 0,
   };
@@ -177,6 +197,9 @@ function cellFrom(key: string, entries: WorkoutEntry[], history: BodyweightHisto
       const set = e.sets![i];
       const reps = set?.[0] ?? 0;
       if (!(reps > 0)) continue;
+      // A hold's "reps" are seconds. Skipped before the load is resolved, so a
+      // plank can reach neither the tonnage nor the estimated max.
+      if (isTimedSet(e, i)) continue;
       // The LOAD, which on a bodyweight set is the person plus whatever they
       // hung off themselves. Reading `set[1]` directly is what this did, and on
       // a pull-up that number is zero — so a month of calisthenics reported no
@@ -460,6 +483,9 @@ export function lifetimeTotals(log: WorkoutEntry[], history: BodyweightHistory =
       const set = e.sets![i];
       const reps = set?.[0] ?? 0;
       if (!(reps > 0)) continue;
+      // Not lifetime tonnage. A hold is not unpriced work either, so it is not
+      // counted in `unpriced` — it is work this total is not about.
+      if (isTimedSet(e, i)) continue;
       const weight = setLoadKg(e, i, set, history, e.t);
       if (weight == null || !(weight > 0)) { if (isBodyweightSet(e, i)) unpriced++; continue; }
       volume += reps * weight; anyVolume = true;
@@ -513,6 +539,10 @@ export function prTimeline(log: WorkoutEntry[], history: BodyweightHistory = [])
       const set = e.sets![i];
       const reps = set?.[0] ?? 0;
       if (!(reps > 0)) continue;
+      // The worst of the three. `est1RM(80, 45)` is a number no human has ever
+      // lifted, and once it is on the timeline as a personal record no real set
+      // can ever beat it — the member's Milestones list is closed by a plank.
+      if (isTimedSet(e, i)) continue;
       const weight = setLoadKg(e, i, set, history, e.t);
       if (weight == null || !(weight > 0)) continue;
       const one = est1RM(weight, reps);

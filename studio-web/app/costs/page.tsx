@@ -47,7 +47,10 @@
 // database error, so a missing `.error` check turns a refused query into a
 // month in which the gym spent nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { type Unread, type Read, reading } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { Banner, Announce } from '@/components/Banner';
 import { DataTable, type Column } from '@/components/DataTable';
@@ -56,6 +59,7 @@ import { readMinorAmount, type Taken } from '@lib/coachMoney';
 import { gymLink, noGymNote } from '@lib/gymLink';
 import { monthWindow, recentMonths, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
 import { isoDate } from '@lib/format';
+import { gymDay, NO_ZONE_NOTE } from '@lib/gymZone';
 import { toCsv } from '@lib/gymExport';
 import {
   fetchGymCosts, recordGymCost, deleteGymCost,
@@ -78,16 +82,17 @@ const MONTHS_OFFERED = 13;
  * recorded in August" over a query that errored is a sentence about a gym's
  * spending made out of a failure, and this is a screen somebody exports.
  */
-type Unread = 'loading' | 'failed' | null;
 
-interface Read<T> { rows: T[] | null; state: Unread; why: string | null }
 
-const reading = <T,>(): Read<T> => ({ rows: null, state: 'loading', why: null });
 
 /* ── the screen ────────────────────────────────────────────────────────────── */
 
 export default function Costs() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymNameUnread, setGymNameUnread] = useState(false);
   const [tenantErr, setTenantErr] = useState<string | null>(null);
@@ -95,6 +100,8 @@ export default function Costs() {
   // the column NOT NULL with no default, and a figure with the wrong three
   // letters on it is a different amount of money.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
 
   const months = useMemo(() => recentMonths(MONTHS_OFFERED), []);
 
@@ -102,7 +109,21 @@ export default function Costs() {
   // deliberate. That screen is read after a month has stopped moving; this one
   // is written as the money goes out, and defaulting it to last month would
   // have somebody record today's rent into August.
-  const [key, setKey] = useState<string>(() => monthKeyOf());
+  //
+  // Running FOR THE GYM. This was `useState(() => monthKeyOf())`, which is the
+  // month on the laptop that opened the tab — so on the first and last day of a
+  // month it disagrees with the gym: a cost entered at 09:00 on 1 September in
+  // Auckland was offered August by default, and a bookkeeper in London filing
+  // an Auckland gym's costs late on the 31st was offered the month after.
+  //
+  // Null means "the owner has not chosen", so the default follows the gym's own
+  // day as soon as the zone read lands rather than being frozen at mount. The
+  // browser's month is the fallback and only the fallback: a gym with no zone
+  // set has nothing better, and the note under the picker says so.
+  const [picked, setPicked] = useState<string | null>(null);
+  const gymToday = gymDay(Date.now(), zone);
+  const key = picked ?? (gymToday ? gymToday.slice(0, 7) : monthKeyOf());
+  const setKey = setPicked;
   const w = useMemo(() => monthWindow(key), [key]);
 
   // Stored WITH the month it was read for, and used only when the two agree.
@@ -128,6 +149,10 @@ export default function Costs() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       // `{ rows: [], state: null, why: null }` is a read that RAN and found
       // nothing, and this screen renders that as "No cost is recorded in
@@ -139,6 +164,7 @@ export default function Costs() {
       if (!live) return;
       setGymName(t.name);
       setCcy(t.currency);
+      setZone(t.zone);
       setGymNameUnread(!!t.error);
       setTenantErr(t.error);
       if (w) await load(link.tenantId, w);
@@ -148,8 +174,11 @@ export default function Costs() {
 
   const costs = loaded.key === key ? loaded.costs : reading<GymCost>();
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -216,13 +245,21 @@ export default function Costs() {
             return <option key={m} value={m}>{mw ? mw.label : m}</option>;
           })}
         </select>
+        {/* Which clock this screen's "today" came from. The month above and the
+            date on the form below are the gym's own day when the gym has said
+            what that is, and the reader's when it has not — and a reader has to
+            be told which, because on the first and last day of a month the two
+            disagree and the disagreement is which month a cost is filed in. */}
+        {zone ? null : (
+          <span style={{ fontSize: 12, color: 'var(--ink3)', maxWidth: '52ch' }}>{NO_ZONE_NOTE}</span>
+        )}
       </div>
 
       {!w
         ? <Banner tone="crit">{key} is not a month this console can open.</Banner>
         : (
           <Month
-            w={w} costs={costs} ccy={ccy} gymName={gymName}
+            w={w} costs={costs} ccy={ccy} zone={zone} gymName={gymName}
             tenantId={me.tenantId ?? null} me={me}
             onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }}
           />
@@ -233,8 +270,9 @@ export default function Costs() {
 
 /* ── one month ─────────────────────────────────────────────────────────────── */
 
-function Month({ w, costs, ccy, gymName, tenantId, me, onChange }: {
-  w: MonthWindow; costs: Read<GymCost>; ccy: TenantCurrency; gymName: string | null;
+function Month({ w, costs, ccy, zone, gymName, tenantId, me, onChange }: {
+  w: MonthWindow; costs: Read<GymCost>; ccy: TenantCurrency; zone: string | null;
+  gymName: string | null;
   tenantId: string | null; me: Me; onChange: () => void;
 }) {
   const rows = costs.rows ?? [];
@@ -260,7 +298,7 @@ function Month({ w, costs, ccy, gymName, tenantId, me, onChange }: {
           August cost stays on screen under a September heading — where the next
           press of Record would file it in the wrong month. */}
       <Record
-        key={w.key} w={w} ccy={ccy} tenantId={tenantId} me={me} onChange={onChange}
+        key={w.key} w={w} ccy={ccy} zone={zone} tenantId={tenantId} me={me} onChange={onChange}
       />
 
       <Ledger read={costs} rows={rows} w={w} onChange={onChange} />
@@ -343,13 +381,21 @@ function Totals({ read, taken, w }: { read: Read<GymCost>; taken: Taken; w: Mont
 
 /* ── recording one ─────────────────────────────────────────────────────────── */
 
-function Record({ w, ccy, tenantId, me, onChange }: {
-  w: MonthWindow; ccy: TenantCurrency; tenantId: string | null; me: Me; onChange: () => void;
+function Record({ w, ccy, zone, tenantId, me, onChange }: {
+  w: MonthWindow; ccy: TenantCurrency; zone: string | null;
+  tenantId: string | null; me: Me; onChange: () => void;
 }) {
   // Today, unless today is outside the month being looked at — in which case
   // the last day of that month, so somebody entering August's rent in September
   // is not silently given a September date on a screen headed August.
-  const today = isoDate(new Date());
+  //
+  // The GYM's today. `isoDate(new Date())` is the reader's calendar, and this
+  // date goes onto a permanent ledger row that /accounting and /close bucket by
+  // month: a cost paid at 09:00 on the 1st in Auckland must not be filed on the
+  // 31st because the person entering it is in London. Where the gym has no
+  // zone there is nothing better than the reader's day, and it is used —
+  // stating a wrong zone is worse than using the only clock there is.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
   const initialDay = today >= w.firstDay && today <= w.lastDay ? today : w.lastDay;
 
   const [description, setDescription] = useState('');
@@ -433,7 +479,7 @@ function Record({ w, ccy, tenantId, me, onChange }: {
         </p>
       ) : null}
 
-      <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '80ch' }}>
+      <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '80ch' }}>
         {GYM_COSTS_NOT_TWICE}
       </p>
 
@@ -446,7 +492,7 @@ function Record({ w, ccy, tenantId, me, onChange }: {
         </Banner>
       ) : null}
       {blockers.length && !writeErr && (description || amountText) ? (
-        <ul style={{ margin: '0 14px 12px', paddingLeft: 18, fontSize: 12.5, color: '#f0c04e', maxWidth: '78ch' }}>
+        <ul style={{ margin: '0 14px 12px', paddingLeft: 18, fontSize: 12.5, color: 'var(--warn)', maxWidth: '78ch' }}>
           {blockers.map((b) => <li key={b} style={{ marginBottom: 4 }}>{b}</li>)}
         </ul>
       ) : null}
@@ -502,7 +548,7 @@ function Ledger({ read, rows, w, onChange }: {
       {removeErr ? <Banner tone="crit">{removeErr}</Banner> : null}
       <Part read={read} what="the recorded costs"
             cost="what this gym spent in this month is unknown, not nil">
-        <DataTable
+        <DataTable noun="costs"
           rows={rows} columns={cols} rowKey={(c) => c.id}
           empty={gymCostsEmptyLine('ready')}
         />
@@ -556,7 +602,7 @@ function Where({ read, pots, w }: { read: Read<GymCost>; pots: GymCostPot[]; w: 
       sub={`What ${w.label} was spent on. A category nobody recorded anything against is absent rather than shown at zero — a "Utilities 0.00" line would be a statement that this gym spent nothing on power.`}
     >
       <Part read={read} what="the recorded costs" cost="the split by category is unknown">
-        <DataTable
+        <DataTable noun="cost categories"
           rows={lines} columns={cols} rowKey={(l) => l.key}
           empty={`Nothing is recorded as paid in ${w.label}, so there is nothing to split.`}
         />
@@ -649,10 +695,14 @@ function slugOf(name: string | null): string {
 function Part<T>({ read, what, cost, children }: {
   read: Read<T>; what: string; cost?: string; children: React.ReactNode;
 }) {
-  if (read.state === 'loading') return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
+  if (read.state === 'loading') return <Loading />;
   if (read.state === 'failed') {
     return (
-      <div style={{
+      // Announced. `Loading` above carries `role="status"`; this is what
+      // REPLACES it, and it was a plain div — so the whole of a refused ledger
+      // read was silent to a screen reader on the screen that says what the gym
+      // has spent.
+      <div role="status" aria-live="polite" aria-atomic="true" style={{
         padding: '16px 14px', margin: 14, borderRadius: 0,
         border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
         background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
@@ -710,17 +760,5 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
       </div>
       {children}
     </section>
-  );
-}
-
-function Kpi({ label, text, note }: { label: string; text: string | null | undefined; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
   );
 }

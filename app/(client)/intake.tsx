@@ -50,6 +50,12 @@ import { useMyIntake } from '../../src/ui/intake';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { draftDecision } from '../../src/lib/intakeDraft';
+// Whether the document on screen may be re-seeded, and whether it may be sent.
+// The two questions the pull-to-refresh used to answer wrongly at the same
+// moment — see the long note at the top of the module.
+import {
+  intakeBanner, intakeSaveAllowed, intakeSeedAction, type IntakeSource,
+} from '../../src/lib/intakeSeed';
 import {
   INTAKE_SECTIONS, READINESS_QUESTIONS, READINESS_NOT_ADVICE, READINESS_SEE_A_DOCTOR,
   TIME_WINDOWS, TRAINING_KINDS, TRAINING_PLACES, TRAINING_YEARS, WORK_KINDS,
@@ -175,20 +181,34 @@ export default function IntakeScreen() {
   //              built from this exact document.
   //   'local'    the read FAILED and this is a phone-only form. Nothing may be
   //              sent from here; see the notice, and the header above.
-  const [source, setSource] = useState<'server' | 'restored' | 'local'>('server');
+  //
+  // Null until something has been seeded, which is a third answer and not a
+  // shade of 'server': under a failed first read the screen used to call an
+  // unseeded form "server" and draw the crit Flag over it. See
+  // src/lib/intakeSeed.ts.
+  const [source, setSource] = useState<IntakeSource | null>(null);
+  // The same value, readable inside the seeding effect without listing it as a
+  // dependency — the effect must re-run on the reads, not on its own decision.
+  const sourceRef = useRef<IntakeSource | null>(null);
+  const setSeeded = useCallback((s: IntakeSource) => { sourceRef.current = s; setSource(s); }, []);
   // Set only in the one case src/lib/intakeDraft.ts refuses to decide: a draft
   // started from a blank, and a server document that turns out to hold real
   // answers. Two accounts of one person, and the app does not get to pick.
   const [choose, setChoose] = useState(false);
 
-  // Seeded once. Every keystroke writes a draft, which changes `m.draft`, which
-  // re-runs this effect — and without the latch the second run would re-derive
-  // "restored" from a draft the member had just typed, and put a banner about
-  // recovering their answers over a form they never left.
-  const seeded = useRef(false);
+  // Seeded once — with one exception, and that exception is the whole of
+  // src/lib/intakeSeed.ts. Every keystroke writes a draft, which changes
+  // `m.draft`, which re-runs this effect, and without a latch the second run
+  // would re-derive "restored" from a draft the member had just typed and put a
+  // banner about recovering their answers over a form they never left.
+  //
+  // The exception: a document seeded because the read FAILED is a stand-in, and
+  // it is replaced the moment the read succeeds. Latching on it is what let a
+  // pull-to-refresh bring the member's real answers into the provider, remove
+  // the warning, unlock Save — and leave the blank on screen for Save to write.
   useEffect(() => {
-    if (m.status === 'loading' || seeded.current) return;
-    seeded.current = true;
+    const action = intakeSeedAction(m.status, sourceRef.current);
+    if (action !== 'seed') return;
     // The read failed. This used to be the end of it: `status` stayed 'error',
     // `canSave` was false, and the screen drew a Flag where the form should be
     // — so a member in a gym reception with no signal could not start the form,
@@ -196,15 +216,20 @@ export default function IntakeScreen() {
     // there is nothing on the phone it is a blank marked as one.
     if (m.status === 'error') {
       setDraft(m.draft?.intake ?? emptyIntake(new Date().toISOString()));
-      setSource('local');
+      setSeeded('local');
       return;
     }
+    // Re-seeding over a stand-in, `draftDecision` is what stops the blank —
+    // or anything typed into it, which carries `basedOn: null` — being treated
+    // as a continuation of the document that has just arrived. Where the two
+    // disagree the member is asked, and Save stays withheld until they answer.
     const decision = draftDecision(m.draft, m.intake);
     setDraft(decision === 'restore' ? m.draft!.intake : (m.intake ?? emptyIntake(new Date().toISOString())));
-    setSource(decision === 'restore' ? 'restored' : 'server');
+    setSeeded(decision === 'restore' ? 'restored' : 'server');
     if (decision === 'ask') setChoose(true);
-  }, [m.status, m.intake, m.draft]);
+  }, [m.status, m.intake, m.draft, setSeeded]);
 
+  const banner = intakeBanner(m.status, source);
   const progress = intakeProgress(draft);
   const yeses = readinessDisclosed(draft);
   // Withheld under anything but a finished read, and under an unknown owner.
@@ -214,7 +239,13 @@ export default function IntakeScreen() {
   // different act from a write to the server, and keeping one buys nothing that
   // would justify softening this. Also withheld while the member still has the
   // two-documents choice in front of them.
-  const canSave = !!draft && m.status === 'ready' && m.mayEdit && !saving && !choose;
+  //
+  // `intakeSaveAllowed` asks the status AND where the document on screen came
+  // from, because those are two different claims: a 'ready' status says the
+  // server answered, not that this is what it answered with. The frame between
+  // a successful re-read and the effect above re-seeding is exactly a document
+  // the server did not supply under a status saying it did.
+  const canSave = !!draft && intakeSaveAllowed(m.status, source) && m.mayEdit && !saving && !choose;
 
   const edit = (fn: (d: Intake) => Intake) => {
     setSaved(false);
@@ -282,16 +313,29 @@ export default function IntakeScreen() {
         </Text>
 
         {/* ── whether what is on screen is really yours ────────────────── */}
-        {m.status === 'loading' ? (
+        {banner === 'loading' ? (
           <View style={{ marginTop: sp.lg }}>
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading what you have already answered…</Text>
           </View>
-        ) : m.status === 'error' ? (
+        ) : banner === 'unread' ? (
           <View style={{ marginTop: sp.lg }}>
             <Flag tone={t.crit}>
               Your intake could not be read, so this is not your form. It is what is on this phone,
               standing in for one that may already be full. Everything you type is kept here and
               nothing is sent, because saving now could replace answers you have already given.
+              {' '}{retryLine(reach)}
+            </Flag>
+          </View>
+        ) : banner === 'stale' ? (
+          /* A different failure and a different sentence. The re-read failed,
+             but an earlier one landed and what is on screen is what it
+             returned — so "this is not your form" would be false of it. Save is
+             still withheld: nothing is written over a document whose current
+             state is unknown. */
+          <View style={{ marginTop: sp.lg }}>
+            <Flag tone={t.warn}>
+              These are your answers as they were read a moment ago. Asking the server again did not
+              work, so nothing can be saved until it does — what you type is kept on this phone.
               {' '}{retryLine(reach)}
             </Flag>
           </View>

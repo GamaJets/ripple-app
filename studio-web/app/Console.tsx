@@ -13,7 +13,7 @@
 // It renders one control (the light/dark switch) and otherwise nothing.
 
 import { useCallback, useEffect, useState } from 'react';
-import { supabase, loadMe } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE } from '@/lib/supabase';
 import { BRAND } from '@lib/brands';
 
 type Theme = 'dark' | 'light';
@@ -187,7 +187,10 @@ export function Console() {
     let live = true;
     (async () => {
       const who = await loadMe();
-      if (!live || !who?.tenantId) return;
+      // The brand is decoration, so an unreadable auth answer is simply nothing
+      // to do here — the console stays in Studio's own colours, which is what
+      // an unbranded gym sees anyway.
+      if (!live || who === ME_UNREADABLE || !who?.tenantId) return;
       // no-error-ok: the brand is decoration; a refused read leaves the console in Studio's own colours, which is what an unbranded gym sees
       const { data } = await supabase
         .from('tenants').select('name, brand_color').eq('id', who.tenantId).single();

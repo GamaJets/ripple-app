@@ -53,7 +53,21 @@ const CATALOGUE_USE = /useExerciseCatalogue|useExerciseDetail|from '\.\.\/\.\.\/
 for (const app of APPS) {
   const dir = join(ROOT, `app/(${app})`);
   const files = walk(dir);
-  if (!files.length) continue;
+  /* The empty-set guard. This was `continue`, i.e. an empty directory was a PASS
+   * — rename `app/(client)` and this gate checked two variants and printed
+   * "every app shipping the exercise catalogue renders the RepDB credit,
+   * verbatim". That sentence is about a licence condition, so it is the last one
+   * in this repo that should be allowed to be a claim about a directory nobody
+   * opened. The three variants hold 71, 59 and 21 screens; ten is far below the
+   * smallest and far above nothing. */
+  if (files.length < 10) {
+    problems.push(
+      `app/(${app}) has ${files.length} screen${files.length === 1 ? '' : 's'}, which cannot be `
+      + 'right — the variant has moved and this check did not look at it. It cannot say whether '
+      + 'that binary credits RepDB.',
+    );
+    continue;
+  }
   const usesCatalogue = files.some((f) => CATALOGUE_USE.test(readFileSync(f, 'utf8')));
   if (!usesCatalogue) continue;
   const credits = files.some((f) => {

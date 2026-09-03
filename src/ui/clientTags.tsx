@@ -15,6 +15,7 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
+import { writeFailure } from '../lib/wroteRows';
 
 interface TagsValue {
   tagsFor: (clientId: string) => string[];
@@ -123,8 +124,18 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
     setMap((p) => ({ ...p, [clientId]: (p[clientId] || []).filter((x) => x !== tag) }));
     if (!USE_SUPABASE || !uid) return false;
     try {
-      const { error } = await supabase.from('client_tags').delete().eq('coach_id', uid).eq('client_id', clientId).eq('tag', tag);
-      return !error;
+      // COUNTED, and restored when the server did not confirm. The tag comes
+      // off state above before the request is sent, and PostgREST answers a
+      // DELETE that matched nothing with a 204 and `error: null` — so `!error`
+      // was true of a refusal, and the coach's own filter lost a label that was
+      // still on the client server-side and back at the next load.
+      const del = await supabase.from('client_tags')
+        .delete({ count: 'exact' }).eq('coach_id', uid).eq('client_id', clientId).eq('tag', tag);
+      if (writeFailure('That tag', del)) {
+        setMap((p) => ({ ...p, [clientId]: (p[clientId] || []).includes(tag) ? p[clientId] : [...(p[clientId] || []), tag] }));
+        return false;
+      }
+      return true;
     } catch { return false; }
   };
 

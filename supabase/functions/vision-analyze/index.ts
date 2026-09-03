@@ -8,6 +8,14 @@
 // Request  JSON: { mode: 'meal' | 'inbody', imageBase64: string, mediaType?: string }
 // Response JSON (meal):   { name, kcal, protein, carbs, fat, confidence }
 //          JSON (inbody): { weightKg, bodyFatPct, skeletalMuscleKg, takenAt? }
+//
+// Signed-in users only, for the reason written out at length in
+// supabase/functions/coach-chat: `verify_jwt` proves the bearer token was
+// signed by this project, and the public anon key is such a token. This
+// function POSTs a photograph — a meal, a body-composition sheet, or in
+// `physique` mode a person's body — to api.anthropic.com on Repple's key, and
+// it did so for anybody holding a string that ships inside the app bundle.
+import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -49,6 +57,13 @@ const PROMPTS: Record<string, string> = {
     'takenAt is the scan/test date. The date printed on the sheet is in DAY/MONTH/YEAR order (international format) — e.g. "05/07/2026" or "05.07.2026" means 5 July 2026, NOT 7 May. Convert it and return takenAt as YYYY-MM-DD (so 5 July 2026 -> "2026-07-05"). Use null for any field not present. Return numbers as numbers.',
 };
 
+/** The image types Anthropic's vision API accepts, and the only values that
+ *  may reach it from a request body. `mediaType` was taken verbatim — a caller
+ *  string placed straight into a call to a third party — and while Anthropic
+ *  refuses an unknown one, a field that is passed through unread is a field
+ *  nobody is checking. The app sends 'image/jpeg' and nothing else. */
+const MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
 function extractJson(text: string): any {
   const a = text.indexOf('{'), b = text.lastIndexOf('}');
   if (a === -1 || b === -1) throw new Error('No JSON in model response');
@@ -62,12 +77,24 @@ Deno.serve(async (req: Request) => {
   const key = Deno.env.get('ANTHROPIC_API_KEY');
   if (!key) return json({ error: 'ANTHROPIC_API_KEY not set on the function' }, 500);
 
+  // Signed-in users only — this spends a metered quota and sends a photograph
+  // to a third party. See the header.
+  const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  let userId = '';
+  try {
+    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    userId = data?.user?.id || '';
+  } catch { /* stays empty, and the refusal below is the answer */ }
+  if (!userId) return json({ error: 'Sign in to Repple to read a photo this way.' }, 401);
+
   let mode = 'meal', imageBase64 = '', mediaType = 'image/jpeg';
   try {
     const b = await req.json();
     mode = (b.mode === 'inbody' || b.mode === 'physique' || b.mode === 'machine') ? b.mode : 'meal';
     imageBase64 = String(b.imageBase64 || '').replace(/^data:image\/\w+;base64,/, '');
-    if (b.mediaType) mediaType = b.mediaType;
+    // Named, not passed through. Anything the vision API does not take is
+    // 'image/jpeg', which is what every caller in this repo sends anyway.
+    if (b.mediaType && MEDIA_TYPES.has(String(b.mediaType))) mediaType = String(b.mediaType);
   } catch { return json({ error: 'Invalid JSON body' }, 400); }
   if (!imageBase64) return json({ error: 'imageBase64 required' }, 400);
 

@@ -80,7 +80,9 @@
 // many words that to everybody else the session is still waiting on an outcome.
 import type { LoadStatus } from '../ui/loadStatus';
 import { hasEnded, wasBooked } from './sessionHistory';
-import { keptOfflineLine, refusedLine } from './floorQueue';
+import { floorFullLine, keptOfflineLine, refusedLine } from './floorQueue';
+import { readCappedByIds } from './cappedByIds';
+import { capLimit } from './rowCap';
 
 /* ── 1 · what may be finished ─────────────────────────────────────────────── */
 
@@ -178,6 +180,20 @@ export function finishCta(markDelivered: boolean, hasSession: boolean): string {
 export type WriteAnswer = 'stored' | 'refused' | 'unsent';
 
 /**
+ * What the LOG write can come back as, which is one more than the server has
+ * anything to say about.
+ *
+ * 'full' is the device refusing to keep it: nobody answered AND
+ * src/lib/floorQueue.ts is already holding `FLOOR_CAP` acts, so nothing was
+ * kept and nothing is coming. It is its own arm rather than a 'refused' because
+ * `refusedLine` says "the server read it and declined", which is false here and
+ * points a coach at the wrong thing to do about it — and rather than an
+ * 'unsent', which promises a send that will never happen for a queue that
+ * refused the write.
+ */
+export type LogAnswer = WriteAnswer | 'full';
+
+/**
  * What became of the outcome, which has two answers the log does not have.
  *
  * 'not-asked'      the coach turned the switch off, or came here without a
@@ -189,8 +205,9 @@ export type WriteAnswer = 'stored' | 'refused' | 'unsent';
 export type OutcomeAnswer = WriteAnswer | 'not-asked' | 'not-attempted';
 
 export interface FinishInput {
-  /** What the server said about the workout entries. */
-  entries: WriteAnswer;
+  /** What became of the workout entries — the server's three answers, plus the
+   *  device having refused to keep them. See `LogAnswer`. */
+  entries: LogAnswer;
   /** What the server said about the delivered mark. */
   outcome: OutcomeAnswer;
   /** How many exercises were offered. Used for wording only — never as
@@ -241,6 +258,10 @@ export function finishReport(r: FinishInput): FinishReport {
   /* the log */
   if (r.entries === 'stored') {
     lines.push(`${exercises(r.entryCount)} went into ${who}’s record, marked as logged by you. They will see it on their own phone and it counts towards their progress.`);
+  } else if (r.entries === 'full') {
+    // Nothing was kept, so the sets are still on this screen and nowhere else —
+    // which is why `mayLeave` is false for this arm as it is for a refusal.
+    lines.push(floorFullLine('This session'));
   } else if (r.entries === 'refused') {
     lines.push(refusedLine(
       'This session',
@@ -279,7 +300,7 @@ export function finishReport(r: FinishInput): FinishReport {
       break;
   }
 
-  const title = r.entries === 'refused'
+  const title = (r.entries === 'refused' || r.entries === 'full')
     ? 'Not saved'
     : r.entries === 'unsent'
       ? 'Kept on this phone'
@@ -289,7 +310,9 @@ export function finishReport(r: FinishInput): FinishReport {
           ? 'Session logged'
           : 'Logged, but not marked delivered';
 
-  return { title, lines, logged, closed, mayLeave: r.entries !== 'refused' };
+  // A coach may not walk away from sets that exist only on this screen. That is
+  // true of a refusal and equally true of a queue that would not keep them.
+  return { title, lines, logged, closed, mayLeave: r.entries !== 'refused' && r.entries !== 'full' };
 }
 
 /* ── 4 · what was logged, read back against the session ───────────────────── */
@@ -353,6 +376,32 @@ export interface SessionLogCounts {
  * working marking queue because a count could not be read would take away the
  * thing the coach came for. `loggedAgainstLine` is what stops the empty map
  * being rendered as "nothing was logged".
+ *
+ * ── Why the id list is chunked ─────────────────────────────────────────────
+ *
+ * `sessionIds` is one id per row on the Mark Sessions screen, and that read is
+ * `capLimit()`-bounded — so up to a thousand ids arrive here. A uuid costs
+ * about 39 bytes inside a PostgREST `in.("…","…")` list, so a thousand of them
+ * is a ~39KB request line against the 8KB nginx and most CDNs enforce by
+ * default. Past roughly two hundred ids the proxy refuses the query before the
+ * database ever sees it, the refusal is a **414**, supabase-js does not reject
+ * on it, and it arrives as `data: null`.
+ *
+ * `data: null` with no error is the same shape as "nothing is logged against
+ * any of these sessions". So a coach at the end of a busy month opened their
+ * marking queue and every single session on it read "Nothing is filed against
+ * this session" — a sentence about an hour they ran and wrote up, on the screen
+ * they use to decide whether it was delivered, with no error anywhere and
+ * nothing to pull to refresh into working. `cap` was arguing about the ROW
+ * ceiling, which it gets right; the request line is the other limit and nothing
+ * was arguing about it at all.
+ *
+ * `readCappedByIds` and not `readByIds`: the 400-row cap is a deliberate
+ * product decision — this is a label under a row, `partial` is a sentence the
+ * screen can say, and walking every `workouts` row a thousand sessions have
+ * ever collected to write it would make a screen that works slowly wrong. The
+ * cap now applies per chunk, which is strictly more rows than before and never
+ * fewer, and `truncated` is still carried rather than assumed away.
  */
 export async function fetchSessionLogCounts(
   sb: Queryable,
@@ -361,19 +410,25 @@ export async function fetchSessionLogCounts(
 ): Promise<SessionLogCounts> {
   const empty = (status: LoadStatus): SessionLogCounts =>
     ({ status, bySession: new Map(), namesBySession: new Map() });
-  const ids = [...new Set(sessionIds.filter((s) => !!s))];
-  if (!ids.length) return empty('ready');
-  const { data, error } = await sb
-    .from('workouts')
-    .select('id, session_id, exercise, performed_at')
-    .in('session_id', ids)
-    .order('performed_at', { ascending: true })
-    .limit(cap + 1);
+  const { rows, truncated, error } = await readCappedByIds<{ session_id?: string | null; exercise?: string | null }>(
+    sessionIds,
+    (chunk) => sb
+      .from('workouts')
+      .select('id, session_id, exercise, performed_at')
+      .in('session_id', chunk)
+      // `.order('id')` behind `performed_at` so the rows the cap CUTS are the
+      // same ones every time. Two movements logged in the same second are two
+      // rows Postgres may return in either order, and at the boundary that
+      // decides which of them a coach is shown.
+      .order('performed_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(capLimit(cap)),
+    { cap },
+  );
   if (error) return empty('error');
-  const rows = (data ?? []) as Array<{ session_id?: string | null; exercise?: string | null }>;
   const bySession = new Map<string, number>();
   const namesBySession = new Map<string, string[]>();
-  for (const row of rows.slice(0, cap)) {
+  for (const row of rows) {
     const id = row.session_id;
     if (!id) continue;
     bySession.set(id, (bySession.get(id) ?? 0) + 1);
@@ -383,7 +438,7 @@ export async function fetchSessionLogCounts(
     if (!seen) namesBySession.set(id, [name]);
     else if (!seen.includes(name)) seen.push(name);
   }
-  return { status: rows.length > cap ? 'partial' : 'ready', bySession, namesBySession };
+  return { status: truncated ? 'partial' : 'ready', bySession, namesBySession };
 }
 
 /**

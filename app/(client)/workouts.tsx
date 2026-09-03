@@ -7,6 +7,9 @@
 // Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+// The clock this screen judges "today" by, kept live across the midnight a
+// late session runs past. See the note at `useNow()` below.
+import { useNow } from '../../src/ui/today';
 import { BRAND } from '../../src/lib/brands';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
@@ -63,7 +66,7 @@ import { bodyweightAtKg, bodyweightSetLabel, tonnage, tonnageNote, type Bodyweig
 // A hold is a set whose first number is seconds. The programme builder writes
 // '45 sec' planks and '30 sec/side' side planks, so the prescription is read
 // here to decide which box this screen opens with — see src/lib/timedSets.ts.
-import { isTimedPrescription, prescribedSeconds, readHold, holdLabel, timedSetLabel } from '../../src/lib/timedSets';
+import { isTimedPrescription, prescribedSeconds, readHold, holdLabel, timedSetLabel, setChipLabel, setListLabel } from '../../src/lib/timedSets';
 // The set row itself, which used to be a local component and so was reachable
 // from this screen and nowhere else. See src/ui/LogSetRow.tsx.
 import { LogSetRow, SetKindChip, type LoggedSet } from '../../src/ui/LogSetRow';
@@ -360,7 +363,39 @@ export default function Train() {
   const viewWeek = weekPick != null && weekPick >= 0 && weekPick < blk.weeks.length ? weekPick : blk.week.index;
   const weekOnScreen = blk.weeks[viewWeek] ?? null;
   const blockLine = clientWeekLine(blk.week, viewWeek);
-  const todayIdx = weekIndexOf(new Date());
+  // ── The clock this screen judges "today" by ──────────────────────────────
+  //
+  // This was `weekIndexOf(new Date())`, and `today0` five hundred lines down
+  // was a second, separate `new Date()`. Neither is frozen at mount, so
+  // check:frozen-day cannot see them and they are not the `useMemo(…, [])`
+  // defect — they are the other half of the same problem, which src/ui/today.ts
+  // states outright: "A bare `todayKey()` in the render body is correct and
+  // does not re-render: it is only right at the moment something else happens
+  // to redraw."
+  //
+  // This is the screen somebody has open while they train, and evening sessions
+  // run past midnight. At 00:00 nothing here redraws, so the day strip keeps its
+  // dot on yesterday and the section header keeps saying "Today ·" over it
+  // (lines ~1401 and ~1520 read `todayIdx` for exactly that). Then some
+  // unrelated render — a set typed, the log provider landing — recomputes both
+  // and the day silently moves, at whatever arbitrary moment that happens to be.
+  // Wrong-then-suddenly-right is worse than either, because the member cannot
+  // see the moment it changed.
+  //
+  // `useNow()` settles it on the two moments that can matter — local midnight,
+  // and the app coming back to the foreground — so the change happens when the
+  // day changes. ONE `now` for both readings, because two calls to `new Date()`
+  // in one render can straddle midnight and disagree with each other about
+  // which week the strip is on.
+  //
+  // What this deliberately does NOT move: `dayIdx` is the member's own
+  // selection and is seeded once, and `dateFor(i)` counts from `startOfWeek`,
+  // which does not change when the date rolls WITHIN a week. So on six
+  // midnights in seven the only thing that moves is the word "Today", onto the
+  // day that is now today. On the seventh the strip advances a week, which is
+  // what it should do, at midnight rather than at a random redraw.
+  const now = useNow();
+  const todayIdx = weekIndexOf(now);
   const [dayIdx, setDayIdx] = useState(todayIdx);
   // Which week the strip is on, counted back from this one. 0 is this week; -1
   // is last week.
@@ -638,7 +673,13 @@ export default function Train() {
   // Seeded from the member's own unit but switchable per entry: a machine in a
   // hotel gym is plated in whatever that gym uses, not in what the member reads.
   const [cxUnit, setCxUnit] = useState<WeightUnit>(wu);
-  const today0 = new Date();
+  // `now` from `useNow()` above, not a second `new Date()` — see the note
+  // there. A COPY of it and not `now` itself: `now` is state shared by every
+  // other reading on this screen, and `today0` is read seven more times below
+  // (`dstr(today0)`, the month-calendar bounds, the "is this today" test on
+  // every cell), so a future line doing `today0.setHours(0,0,0,0)` would
+  // otherwise reach through and change what `weekIndexOf` above was told.
+  const today0 = new Date(now);
   const week0 = startOfWeek(today0); week0.setDate(week0.getDate() + weekOffset * 7);
   // `setDate` past the end of a month rolls into the next one, so this arithmetic
   // survives a week that straddles a month or a year boundary without any help.
@@ -2195,8 +2236,11 @@ export default function Train() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{l.exercise}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
+                      {/* Through setListLabel: a hold reads as a clock, never as
+                          "45×— kg". The draft chips have always got this right
+                          and the saved row did not. */}
                       {l.sets && l.sets.length
-                        ? l.sets.map((st) => `${st[0]}×${fig(liftIn(st[1] || null, wu))}`).join('  ') + ` ${wu}`
+                        ? setListLabel(l, (kg) => fig(liftIn(kg, wu)), wu)
                         : l.cardio
                         ? [`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null].filter(Boolean).join(' · ')
                         : 'Logged'}
@@ -2244,7 +2288,16 @@ export default function Train() {
             <TextInput value={nlw} onChangeText={setNlw} placeholder={wu === 'lb' ? '"bench 3x8 135lb, squat 5 5 5 225lb"' : '"bench 3x8 60kg, squat 5 5 5 100kg"'} placeholderTextColor={t.ink3}
               onFocus={() => { setTimeout(() => pageScroll.current?.scrollToEnd({ animated: true }), 120); }}
               onSubmitEditing={logWorkoutNL} returnKeyType="done" style={inp} />
-            <Pressable onPress={logWorkoutNL} disabled={!nlw.trim()} accessibilityRole="button" accessibilityLabel="Log workout from text" style={{ backgroundColor: nlw.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
+            {/* `accessibilityState` as well as `disabled`. The refusal here was
+                drawn and nothing else: the fill drops to `t.surface2` and the
+                word to `t.ink3`, which is a colour change and a colour change
+                only. VoiceOver read "Log, button", the tap did nothing, and
+                nothing said why — so the member's own conclusion is that the
+                button is broken rather than that the field above it is empty.
+                Announced, it reads "Log, dimmed, button", which is the whole
+                sentence. Same edit at eleven other controls in this app that
+                said their refusal in colour alone. */}
+            <Pressable onPress={logWorkoutNL} disabled={!nlw.trim()} accessibilityState={{ disabled: !nlw.trim() }} accessibilityRole="button" accessibilityLabel="Log workout from text" style={{ backgroundColor: nlw.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
               <Text style={{ ...ty.label, fontWeight: '600', color: nlw.trim() ? t.brandInk : t.ink3 }}>Log</Text>
             </Pressable>
           </View>
@@ -2468,7 +2521,7 @@ export default function Train() {
                             </View>
                             {l.sets ? (
                               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
-                                {l.sets.map((s: number[], j: number) => { const _f = (l.feel || [])[j]; const _fc = _f === 'easy' ? t.good : _f === 'hard' ? t.crit : null; return <View key={j} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 5 }}>{_fc ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: _fc }} /> : null}<Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s[0]}×{fig(liftIn(s[1] || null, wu))} {wu}</Text></View>; })}
+                                {l.sets.map((s: number[], j: number) => { const _f = (l.feel || [])[j]; const _fc = _f === 'easy' ? t.good : _f === 'hard' ? t.crit : null; return <View key={j} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 5 }}>{_fc ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: _fc }} /> : null}<Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{setChipLabel(l, j, (kg) => fig(liftIn(kg, wu)), wu)}</Text></View>; })}
                               </View>
                             ) : l.cardio ? (
                               <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 5 }}>{[`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null, l.cardio.hrAvg ? `♥ ${l.cardio.hrAvg} avg / ${l.cardio.hrHigh ?? l.cardio.hrAvg} hi` : null].filter(Boolean).join(' · ')}</Text>
@@ -4510,6 +4563,12 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
     })));
   const [mins, setMins] = useState(entry.cardio ? String(entry.cardio.mins) : '');
   const [dist, setDist] = useState(entry.cardio ? String(entry.cardio.dist) : '');
+  // The unit is EDITABLE here, and it is the one field on a cardio entry most
+  // likely to be wrong: the app opened every cardio log on kilometres for
+  // everybody until recently, so a member in Dallas filed a five-mile run as
+  // five kilometres — and the only remedy this sheet offered was to delete the
+  // session, which also discards the heart-rate zones nobody can retype.
+  const [distUnit, setDistUnit] = useState<DistanceUnit>(entry.cardio?.unit === 'mi' ? 'mi' : 'km');
   const [watts, setWatts] = useState(entry.cardio && entry.cardio.watts ? String(entry.cardio.watts) : '');
   const [kcal, setKcal] = useState(entry.kcal != null ? String(entry.kcal) : '');
   const [busy, setBusy] = useState(false);
@@ -4564,7 +4623,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
         timed: rows[i].timed,
       });
     }
-    const read = readWorkoutEdit(entry, { name, sets, mins, dist, watts, kcal });
+    const read = readWorkoutEdit(entry, { name, sets, mins, dist, distUnit, watts, kcal });
     if (!read.ok) { Alert.alert('Check that', read.reason); return; }
     setBusy(true);
     const saved = await onSave(read.value);
@@ -4669,8 +4728,20 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                 <Field label="Minutes">
                   <TextInput value={mins} onChangeText={setMins} keyboardType="numeric" style={inp} />
                 </Field>
-                <Field label={`Distance · ${entry.cardio!.unit}`} a11y={`Distance in ${entry.cardio!.unit === 'mi' ? 'miles' : 'kilometres'}`}>
-                  <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
+                {/* The same tap-to-switch pill the logging form has, for the
+                    same reason: a fixed label states the unit and cannot fix
+                    it, and this is the correction sheet. */}
+                <Field label="Distance" hint={distUnit} a11y={`Distance in ${distanceUnitName(distUnit)}`}>
+                  <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                    <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
+                    <Pressable accessibilityRole="button"
+                      accessibilityLabel={`Distance unit: ${distanceUnitName(distUnit)}. Switch to ${distanceUnitName(distUnit === 'km' ? 'mi' : 'km')}`}
+                      hitSlop={hitSlopFor(36)}
+                      onPress={() => setDistUnit(distUnit === 'km' ? 'mi' : 'km')}
+                      style={{ minHeight: 36, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
+                      <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{distUnit}</Text>
+                    </Pressable>
+                  </View>
                 </Field>
               </View>
               <Field label="Avg watts" hint="optional" style={{ marginTop: sp.md }}>

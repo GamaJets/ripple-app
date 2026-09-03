@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Repple — pricing</title>
   <link rel="canonical" href="https://www.repplefitness.com/pricing">
-<meta name="description" content="Repple has no published price yet. What we can say: nothing is charged during the first release, a gym is billed per site rather than per member, and a quote comes from a conversation.">
+<meta name="description" content="Repple has no published subscription price yet. What we can say: Repple keeps 10% of anything sold through its own checkout, a gym is billed per site rather than per member, and a quote comes from a conversation.">
 <meta property="og:title" content="Repple — pricing">
 <meta property="og:description" content="No number on this page, because there isn't one yet. Here is what is true instead, and how to get a quote.">
 <meta property="og:url" content="https://www.repplefitness.com/pricing">
@@ -94,16 +94,20 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="lead-in">
       <div class="eyebrow">What is true today</div>
-      <h2 class="hd">Four things we can<br><span class="serif">say without guessing.</span></h2>
+      <h2 class="hd">Five things we can<br><span class="serif">say without guessing.</span></h2>
     </div>
     <div class="strip">
       <div>
         <div class="stat-n">0</div>
-        <div class="lbl"><strong>Nothing is charged.</strong> Not reduced, not trialling &mdash; nothing. No price is configured in the billing system, so the software cannot start a charge even if somebody asked it to.</div>
+        <div class="lbl"><strong>No subscription is charged.</strong> Not reduced, not trialling &mdash; nothing. No subscription price is configured in the billing system, so the software cannot open a checkout for one even if somebody asked it to. There is one charge that is not nothing, and it is the next panel along.</div>
       </div>
       <div>
         <div class="stat-n">Site</div>
         <div class="lbl"><strong>A gym, not a headcount.</strong> Whatever the number becomes, the thing being priced is the site. Signing up your two hundredth member does not change what your gym owes.</div>
+      </div>
+      <div>
+        <div class="stat-n">10%</div>
+        <div class="lbl"><strong>On payments taken through Repple&rsquo;s checkout.</strong> The one charge that is live. If a gym or a coach sells a membership, a pass or a package through Repple&rsquo;s own checkout, Repple keeps 10% of it and Stripe takes its processing fee on top. Refund the sale and our 10% goes back with it. A payment you record at the desk is a row rather than a transaction, so nothing is taken from it.</div>
       </div>
       <div>
         <div class="stat-n">Free</div>
@@ -115,8 +119,11 @@ addEventListener('DOMContentLoaded', function () {
       </div>
     </div>
     <p class="tiny after-sm">
-      The first of those is checkable rather than promised. The billing code refuses to open a
-      checkout unless a price has been created for it to charge, and none has been.
+      The first and the last are checkable rather than promised. The billing code refuses to open a
+      subscription checkout unless a price has been created for it to charge, and none has been. The
+      10% is the other side of the same code: it is a single figure applied to every sale that goes
+      through Repple&rsquo;s checkout, it is the platform&rsquo;s cut of a payment that otherwise lands in your
+      own Stripe account, and it is the number to ask us about if it is the wrong one for your gym.
     </p>
   </div>
 </section>
@@ -294,7 +301,7 @@ addEventListener('DOMContentLoaded', function () {
     <div class="faq">
       <details>
         <summary>Is this a free trial?</summary>
-        <div class="a"><p>No, and calling it one would be a way of implying a price. A trial has a length and a figure waiting at the end of it. This is a first release with no price set, which is a different thing: there is no clock running against you.</p></div>
+        <div class="a"><p>No, and calling it one would be a way of implying a price. A trial has a length and a figure waiting at the end of it; this is a first release with no subscription price set, which is a different thing. One honest caveat: the coach app does show a fourteen-day countdown on its dashboard, left over from the billing work. It gates nothing &mdash; no screen closes and no feature stops when it reaches zero, because there is no price for it to hand you on to. If you are looking at that counter wondering what happens at the end of it, the answer is nothing, and the counter is the thing that is wrong rather than the sentence above.</p></div>
       </details>
       <details>
         <summary>If I start now, what happens when pricing is set?</summary>
@@ -318,7 +325,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Why should we believe there is no hidden number?</summary>
-        <div class="a"><p>Because the same page would have to be lying about something checkable. The billing plumbing exists and is switched off: it refuses to open a checkout because no price has been created for it to charge. There is nowhere for a hidden figure to be hiding.</p></div>
+        <div class="a"><p>Because the one number that does exist is on this page. Repple keeps 10% of anything sold through its own checkout, and that is stated above rather than discovered in a settlement report. The subscription side is the checkable part: the billing plumbing exists and is switched off, and refuses to open a checkout because no price has been created for it to charge. Between the two, the whole of what Repple can take from a gym today is written down.</p></div>
       </details>
     </div>
   </div>
@@ -328,8 +335,9 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <h2 class="display">Ask, and get a<br><em>straight</em> answer.</h2>
     <p class="lede" style="margin:22px auto 0;max-width:52ch">
-      Four lines about your gym is enough. Nothing is charged in the meantime, and creating an
-      account costs nothing at all.
+      Four lines about your gym is enough. No subscription is charged in the meantime, creating an
+      account costs nothing at all, and the only money Repple takes today is 10% of what you sell
+      through its own checkout.
     </p>
     <div class="btn-row">
       <a class="btn primary" href="mailto:support@repplefitness.com?subject=Pricing">Email us about pricing</a>

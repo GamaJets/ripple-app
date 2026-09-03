@@ -186,6 +186,33 @@ export function dayOf(at: string, now: Date = new Date()): string {
 export const todayKey = (now: Date = new Date()): string => dayOf(now.toISOString(), now);
 
 /**
+ * How long until the local day rolls over, in milliseconds.
+ *
+ * ── Why a screen needs this ───────────────────────────────────────────────
+ *
+ * `todayKey()` read once into a `useMemo` with an empty dependency array is
+ * fixed for the life of the MOUNT, and a phone app screen is not remounted by
+ * being backgrounded. app/(trainer)/credentials.tsx judged every expiry against
+ * it: a coach who opened that screen on Sunday and came back to it on Wednesday
+ * was told their public liability insurance was current, two days after it ran
+ * out. Everything else on that screen is scrupulous about not saying more than
+ * it knows.
+ *
+ * LOCAL midnight, computed by rolling the date forward and zeroing the clock
+ * rather than by adding 24 hours — the two are 23 or 25 hours apart across a
+ * daylight-saving boundary, and a screen that woke an hour late on the last
+ * Sunday in October would spend that hour stating yesterday.
+ *
+ * Never zero or negative: a timer scheduled at 0 fires immediately and reads
+ * the same day back, which is a loop rather than a refresh.
+ */
+export function msUntilNextLocalDay(now: Date = new Date()): number {
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+  const ms = next.getTime() - now.getTime();
+  return ms > 0 ? ms : 1;
+}
+
+/**
  * The cached entries that belong to `day`.
  *
  * For a store that reads one day at a time. Yesterday's unsent meal is still

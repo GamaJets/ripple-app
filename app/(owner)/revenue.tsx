@@ -54,6 +54,7 @@ import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
 import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useToday } from '../../src/ui/today';
 
 export default function OwnerRevenue() {
   const t = useTheme();
@@ -95,7 +96,21 @@ export default function OwnerRevenue() {
   // right and one that happens to be.
   const trainersUnknown = loading || !isWhole(rosterStatus);
   // The gym's own currency (`tenants.currency`, part 99). Null until the tenant
-  // read returns, and gymMoney falls back to GYM_CURRENCY for that window.
+  // read returns, null for a gym that has not chosen one, and null when the
+  // read failed — and `gymMoney` renders a DASH for all three rather than a
+  // figure in a currency nobody chose.
+  //
+  // This comment used to end "and gymMoney falls back to GYM_CURRENCY for that
+  // window", which was true once and is not now: src/ui/tenant.tsx makes
+  // `gymMoney` a straight call to `wholeMoney`, whose contract is "a null
+  // amount or a missing currency renders a dash, and there is no fallback
+  // currency", and that file's own header says `gymMoney` no longer touches
+  // GYM_CURRENCY. The sentence is kept here rather than deleted because of the
+  // direction it was wrong in: it read as an instruction, and a future reader
+  // "restoring" the fallback it describes would put back the exact defect parts
+  // 150 and 940 were written to end — an owner's money screen denominated in a
+  // currency somebody else picked. Repple is white-labelled; there is no
+  // default currency anywhere in it, and a dash is the honest answer.
   const cur = tenant?.currency ?? null;
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   // The history hook PERSISTS what it is given, so this month's snapshot has to
@@ -132,13 +147,34 @@ export default function OwnerRevenue() {
   // m + k, 1)` normalises December + 1 into January of the next year, and
   // nothing here is ever parsed from a string, so a coach in Auckland gets
   // their own months and not UTC's.
+  //
+  // ── And they move ───────────────────────────────────────────────────────
+  //
+  // This was `useMemo(…, [])` reading `new Date()`. An empty dependency array
+  // does not fix a value for a render, it fixes it for the life of the MOUNT,
+  // and app/(owner)/_layout.tsx keeps this screen mounted — backgrounding the
+  // app does not tear it down. An owner who opened Revenue on the 30th and came
+  // back on the 2nd read a forecast whose first bar is the new month under a
+  // label saying the old one, and every bar after it shifted by one, which is
+  // precisely the confusion the paragraph above says these labels were added to
+  // end: "an owner could not tell whether the far end was February or March."
+  // The labels had stopped being able to answer that themselves.
+  //
+  // Keyed on `useToday()` rather than on a `useNow()`: the value that has to be
+  // right is a MONTH, `useToday` re-settles on the local day rolling over and
+  // on the app coming back to the foreground, and it compares before it sets —
+  // so this recomputes at most once a day and produces a new array only on the
+  // days it would produce a different one. The day string is also what the
+  // months are derived FROM, so there is no second clock read to disagree with
+  // the dependency.
+  const today = useToday();
   const forecastLabels = useMemo(() => {
-    const now = new Date();
+    const [y, m] = today.split('-').map(Number);
     return Array.from({ length: 7 }, (_, k) => {
-      const d = new Date(now.getFullYear(), now.getMonth() + k, 1);
+      const d = new Date(y, (m - 1) + k, 1);
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     });
-  }, []);
+  }, [today]);
 
   // Sessions delivered per trainer. The old split was by Repple plan, which is
   // what a trainer pays us — never a figure in the gym's own revenue.

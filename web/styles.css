@@ -25,7 +25,11 @@
 
   --ink:       #e9f2f0;
   --ink2:      #a6bcb7;
-  --ink3:      #67807b;
+  /* Was #67807b, which is 4.47:1 on --bg — under the 4.5:1 AA floor for body
+     text, and --ink3 is used for the .tiny captions under charts and store
+     badges, which are body text. #6a837e measures 4.66:1 on the same ground.
+     The light-theme --ink3 already passed at 4.71:1 and is unchanged. */
+  --ink3:      #6a837e;
 
   /* This site sells to gym owners — the homepage asks them to talk to us about
      their gym — and it was accented in #16b8a6, the CLIENT app's teal. It was
@@ -572,7 +576,15 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
   background: var(--sunk); color: var(--ink); border: var(--rule); font-family: var(--sans);
 }
 .fld { padding-right: 14px; }
-.pw input:focus, .fld:focus { outline: none; border-color: var(--accent); }
+/* A border-colour change alone was the whole focus indicator on the sign-up,
+   sign-in and password-reset fields. It disappears entirely in forced-colours
+   mode, where the author's border colour is overridden, and it is a 1px change
+   on a field that already had a border — so the ring is kept and thickened
+   rather than removed. */
+.pw input:focus, .fld:focus { border-color: var(--accent); }
+.pw input:focus-visible, .fld:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
 .eye {
   position: absolute; right: 4px; top: 0; bottom: 0; width: 40px;
   display: grid; place-items: center; background: none; border: none;
@@ -649,7 +661,7 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
 
     --ink:       #e9f2f0;
     --ink2:      #a6bcb7;
-    --ink3:      #67807b;
+    --ink3:      #6a837e;   /* kept in step with :root — see the contrast note there */
 
     /* Kept in step with :root above. This block restates the whole dark
        palette, so a change made only at :root is silently overridden here —

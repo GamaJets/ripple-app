@@ -70,7 +70,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { type LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isoToday } from '../../src/lib/dayPlan';
@@ -356,7 +356,7 @@ export default function ClientBody() {
 
             <Section>
               <SectionHead title="Client" />
-              {r.roster.length === 0 && r.status !== 'error' ? (
+              {r.roster.length === 0 && isWhole(r.status) ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   Nobody is on your book yet, so there are no scans to look at.
                 </Text>

@@ -238,7 +238,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
    * Null is returned for a failed read and an empty array for a real emptiness,
    * and the two stay apart all the way to the sentence the author is shown.
    */
-  const gymRecipients = async (): Promise<string[] | null> => {
+  const gymRecipients = async (): Promise<{ ids: string[]; truncated: boolean } | null> => {
     try {
       const { data, error } = await supabase.rpc('all_member_ids');
       if (error) return null;
@@ -246,17 +246,38 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
       // returned `table(user_id)`. Both are accepted here for the same reason
       // promotions.tsx accepts both — reading `.user_id` off a string gave
       // undefined for every member and pushed to nobody.
-      return Array.isArray(data)
-        ? data.map((r: any) => (typeof r === 'string' ? r : r?.user_id)).filter(Boolean).map(String)
-        : null;
+      if (!Array.isArray(data)) return null;
+      // `truncated: false` and not a `capped()` call, deliberately. This is an
+      // RPC with no `.limit()` on it, so there is no probe row to detect a
+      // ceiling with — the honest report is that this reader has no evidence
+      // either way, and inventing a truncation it cannot see would put a
+      // warning under every gym notice for ever. `all_member_ids` is the one
+      // to fix if a gym ever outgrows a PostgREST page; the flag is here so the
+      // sentence is ready when it does.
+      return {
+        ids: data.map((r: any) => (typeof r === 'string' ? r : r?.user_id)).filter(Boolean).map(String),
+        truncated: false,
+      };
     } catch { return null; }
   };
 
-  const coachRecipients = async (owner: string): Promise<string[] | null> => {
+  /**
+   * The coach's own roster.
+   *
+   * `capped()` and not the raw rows. The read asked for `capLimit()` — one PAST
+   * the ceiling, which is the whole point of asking for it — and then handed
+   * every row it got to the fan-out, probe row included, and reported the
+   * length as the number of people addressed. So a roster at the ceiling
+   * produced a count that was one too many and a truncation nothing anywhere
+   * mentioned. `truncated` now rides out with the ids, and `deliverySummary`
+   * refuses to state a floor as a total.
+   */
+  const coachRecipients = async (owner: string): Promise<{ ids: string[]; truncated: boolean } | null> => {
     try {
       const { data, error } = await supabase.from('clients').select('id').eq('trainer_id', owner).limit(capLimit());
       if (error) return null;
-      return (data ?? []).map((r: any) => String(r.id)).filter(Boolean);
+      const page = capped(data);
+      return { ids: page.rows.map((r: any) => String(r.id)).filter(Boolean), truncated: page.truncated };
     } catch { return null; }
   };
 
@@ -274,23 +295,33 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
    * so "it will go out in the morning" is a promise nothing could keep.
    */
   const fanOut = async (kind: NoticeKind, body: string, push: boolean): Promise<DeliveryReport> => {
-    const ids = kind === 'gym' ? await gymRecipients() : await coachRecipients((await currentUid()) ?? '');
+    // Both readers now answer in the same shape — the ids AND whether that is
+    // all of them — so the fan-out cannot lose the second half by treating the
+    // first as an array.
+    const found = kind === 'gym' ? await gymRecipients() : await coachRecipients((await currentUid()) ?? '');
+    const ids = found?.ids ?? null;
+    const truncated = !!found?.truncated;
     const note = noticeNotification(kind, body, kind === 'gym' ? gymName.current : null);
     if (!note || !ids || !ids.length) {
       return { recipients: ids ? ids.length : null, recorded: ids && ids.length === 0 ? 0 : null, push: 'off' };
     }
     if (!push) {
-      const recorded = await recordInbox(ids, note.title, note.body, { route: NOTICE_ROUTE });
-      return { recipients: ids.length, recorded, push: 'off' };
+      const { recorded, atCap } = await recordInbox(ids, note.title, note.body, { route: NOTICE_ROUTE });
+      return { recipients: ids.length, recorded, push: 'off', recipientsTruncated: truncated, recordedAtCap: atCap };
     }
     // sendPushChecked writes the inbox row FIRST and reports both halves
     // separately, so a failed push cannot be reported as a failed notice.
+    // `partial` is the third half: the send was accepted and part of the
+    // recipient list could not be read, which `ok` alone cannot say.
     const res = await sendPushChecked(ids, note.title, note.body, { route: NOTICE_ROUTE });
     return {
       recipients: ids.length,
       recorded: res.recorded,
       push: res.ok ? 'queued' : 'failed',
       pushError: res.error ?? null,
+      pushPartial: res.partial === true,
+      recipientsTruncated: truncated,
+      recordedAtCap: res.recordedAtCap === true,
     };
   };
 

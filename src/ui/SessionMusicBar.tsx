@@ -152,7 +152,7 @@ export function SessionMusicBar() {
       <View style={shell}>
         <Icon name="play" size={17} color={t.ink3} />
         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>Nothing playing. Start a track in Spotify and it appears here.</Text>
-        <Pressable onPress={() => command(() => spotifyPlay())} accessibilityRole="button" accessibilityLabel="Resume Spotify" disabled={busy}>
+        <Pressable onPress={() => command(() => spotifyPlay())} accessibilityRole="button" accessibilityLabel="Resume Spotify" disabled={busy} accessibilityState={{ disabled: busy }}>
           <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Resume</Text>
         </Pressable>
       </View>
@@ -187,17 +187,17 @@ export function SessionMusicBar() {
           note exists to stop somebody re-introducing. See UNMIRRORED in
           src/lib/direction.ts. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, direction: 'ltr' }}>
-        <Pressable onPress={() => command(spotifyPrevious)} disabled={busy} accessibilityRole="button" accessibilityLabel="Previous track" hitSlop={8}>
+        <Pressable onPress={() => command(spotifyPrevious)} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Previous track" hitSlop={8}>
           <Icon name="back" size={18} color={t.ink2} />
         </Pressable>
         <Pressable
           onPress={() => command(now.isPlaying ? spotifyPause : () => spotifyPlay())}
-          disabled={busy} accessibilityRole="button"
+          disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button"
           accessibilityLabel={now.isPlaying ? 'Pause' : 'Play'}
           style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
           {busy ? <ActivityIndicator size="small" color={t.brandInk} /> : <Icon name={now.isPlaying ? 'minus' : 'play'} size={16} color={t.brandInk} />}
         </Pressable>
-        <Pressable onPress={() => command(spotifyNext)} disabled={busy} accessibilityRole="button" accessibilityLabel="Next track" hitSlop={8}>
+        <Pressable onPress={() => command(spotifyNext)} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Next track" hitSlop={8}>
           <View style={{ transform: [{ scaleX: -1 }] }}><Icon name="back" size={18} color={t.ink2} /></View>
         </Pressable>
       </View>

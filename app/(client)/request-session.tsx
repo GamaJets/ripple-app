@@ -62,6 +62,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useThreadPeerName } from '../../src/ui/messaging';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useOutbox } from '../../src/ui/outbox';
+import { useToday } from '../../src/ui/today';
 import { outboxNote } from '../../src/lib/outbox';
 import { keptOnPhoneNote, notKeptNote, sessionRequestExpiry } from '../../src/lib/recordQueue';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
@@ -158,12 +159,20 @@ export default function RequestSessionScreen() {
   /** Today at midnight, local, and the days after it. Built from the device's
    *  own calendar rather than by adding 86,400,000 to an instant, so a day that
    *  is 23 or 25 hours long across a clock change is still one day. */
+  // Keyed on `today`, which `useToday` moves at the next local midnight and on
+  // every return to the foreground. The empty dependency list this had pinned
+  // the strip to the moment of MOUNT, and this screen sits in a gym bag with
+  // the phone: opened again the next morning, the first pill was yesterday, the
+  // first thing the member tapped was refused by `askBlocker` with nothing on
+  // the strip explaining it, and the twenty-eight days they were offered had
+  // quietly become twenty-seven.
+  const today = useToday();
   const days = useMemo(() => {
     const now = new Date();
     const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     return Array.from({ length: DAYS_OFFERED }, (_, i) =>
       new Date(base.getFullYear(), base.getMonth(), base.getDate() + i));
-  }, []);
+  }, [today]);
 
   const chosen = days[dayIdx] ?? days[0];
   const startsAt = chosen ? instantAt(chosen, hour, minute) : '';

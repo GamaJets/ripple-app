@@ -30,6 +30,7 @@ import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
 import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaLabel';
 import { shortDayLabel, todayISO } from '../../src/lib/bodyFigures';
+import { hitSlopFor } from '../../src/lib/a11y';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 // Which week of the block today belongs to. See src/lib/clientBlock.ts.
@@ -761,11 +762,24 @@ export default function Home() {
               ) : null}
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              {/* 36pt drawn, 44pt to the finger. These two are the smallest
+                  controls on the home screen and the ones most likely to be
+                  hit one-handed with a wet hand mid-session, which is the case
+                  MIN_TARGET in src/lib/a11y.ts is written for. `hitSlopFor`
+                  leaves the drawing alone — growing the circles would push the
+                  whole water row apart — and moves only the boundary the finger
+                  has to find. The two sit `sp.sm` (8pt) apart and the slop is
+                  4pt a side, so the regions meet in the middle of the gap and
+                  never overlap: every point still belongs to exactly one of
+                  them, which on a minus beside a plus is the property that
+                  matters. */}
               <Pressable accessibilityLabel="Remove a glass of water" accessibilityRole="button" onPress={removeWater}
+                hitSlop={hitSlopFor(36)}
                 style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="minus" size={16} color={t.ink2} />
               </Pressable>
               <Pressable accessibilityLabel="Add a glass of water" accessibilityRole="button" onPress={addWater}
+                hitSlop={hitSlopFor(36)}
                 style={{ width: 36, height: 36, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="plus" size={16} color={t.brandInk} />
               </Pressable>

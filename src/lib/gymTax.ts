@@ -61,6 +61,7 @@
 // the Supabase client as an argument like gymInvoices.ts does.
 import type { LoadStatus } from '../ui/loadStatus';
 import { monthWindow, monthKeyOf, type MonthKey, type MonthWindow } from './monthEnd';
+import { monthNames } from './format';
 import { assertWrote } from './wroteRows';
 // The gym's own clock. `cutAtGym` turns a window's calendar days into the
 // instants they actually span at the gym, clock changes included, and hands
@@ -136,8 +137,9 @@ export type TaxPeriodKey = string;
 
 export interface TaxPeriod {
   key: TaxPeriodKey;
-  /** 'August 2026', 'Q3 2026 · July to September'. Fixed English, not
-   *  locale-dependent, so a test can pin it. */
+  /** 'August 2026', 'Q3 2026 · July to September' — with the month names in
+   *  the reader's own language. The KEY is what anything is pinned to; this is
+   *  the sentence on the screen and it belongs to whoever is looking at it. */
   label: string;
   /** The months it is made of, oldest first. A quarter is three of this app's
    *  own months rather than a second opinion about where a month ends. */
@@ -154,10 +156,16 @@ const QUARTER_MONTHS: Record<string, number[]> = {
   Q1: [1, 2, 3], Q2: [4, 5, 6], Q3: [7, 8, 9], Q4: [10, 11, 12],
 };
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
+/**
+ * The twelve months, written out, in the language of whoever is filing.
+ *
+ * Read per call rather than held in a module constant: `monthNames()` asks
+ * `appLocale()`, which is latched lazily, and a constant evaluated at import
+ * would freeze the console's months to whatever the locale was before the app
+ * had resolved one. Twelve strings per period label is not a cost worth a
+ * stale language.
+ */
+const monthWords = () => monthNames();
 
 /**
  * The window for a period key, or null when the key is not one.
@@ -181,9 +189,10 @@ export function taxPeriod(key: TaxPeriodKey): TaxPeriod | null {
     }
     const first = windows[0];
     const last = windows[windows.length - 1];
+    const names = monthWords();
     return {
       key,
-      label: `${q[2]} ${year} · ${MONTH_NAMES[QUARTER_MONTHS[q[2]][0] - 1]} to ${MONTH_NAMES[QUARTER_MONTHS[q[2]][2] - 1]}`,
+      label: `${q[2]} ${year} · ${names[QUARTER_MONTHS[q[2]][0] - 1]} to ${names[QUARTER_MONTHS[q[2]][2] - 1]}`,
       months,
       firstDay: first.firstDay,
       lastDay: last.lastDay,
@@ -466,6 +475,11 @@ export async function fetchClosedMonths(
   sb: Queryable, tenantId: string, months: readonly MonthKey[],
 ): Promise<MonthKey[]> {
   if (!months.length) return [];
+  // Not chunked, and the bound is the caller's shape rather than a limit: a
+  // `TaxPeriod` is one month or one quarter, so `months` is one key or three.
+  // `recentTaxPeriods` builds every period this console offers and none of them
+  // is longer. Three uuid-free month keys is a request line of a couple of
+  // hundred bytes — nowhere near the 8KB a `.in()` has to respect.
   const { data, error } = await sb
     .from('gym_month_closes')
     .select('month_key')

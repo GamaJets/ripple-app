@@ -110,7 +110,13 @@ ok(
   const a = pay({ note: 'one' });
   const b = pay({ note: 'two' });
   const forward = keyPaymentRows(lines([a, b, a]));
-  eq(forward[0].key, forward[0].key, 'sanity');
+  // This read `eq(forward[0].key, forward[0].key, 'sanity')`, which compares a
+  // value to itself and is true of every possible implementation. The sanity it
+  // was reaching for is that the numbering agrees with `paymentImportKey`, the
+  // function the rest of the app keys by — if the two ever disagreed, a line
+  // written by one and looked up by the other would import twice.
+  eq(forward[0].key, paymentImportKey(a, 0), 'the first occurrence of a line is #0, by the same rule anything else computing a key would use');
+  eq(forward[2].key, paymentImportKey(a, 1), 'and its repeat later in the file is #1');
   ok(forward[0].key !== forward[2].key, 'the repeat of the first line is a second occurrence, not the same key');
   eq(forward[1].key, paymentImportKey(b, 0), 'an unrelated line between two repeats does not disturb their numbering');
 }

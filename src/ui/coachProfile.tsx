@@ -41,7 +41,10 @@ import { reportError } from '../lib/reportError';
 // Whether the autosave actually landed. Until this module the write ended
 // `.then(() => {}, () => {})` and the screen could not tell a saved profile
 // from a refused one — see that file's header.
-import { IDLE_SAVE, markPending, afterWrite, type SaveStatus } from '../lib/profileSave';
+import { IDLE_SAVE, markPending, afterWrite, profileWriteFailure, type SaveStatus } from '../lib/profileSave';
+// What may be stored in `profiles.avatar` at all. A device path is not a URL
+// anywhere but on the phone that chose it — see src/lib/avatarImage.ts.
+import { isDeviceAvatar } from '../lib/avatarImage';
 import {
   resolveTrainerAccess,
   mayReadTrainerProfile,
@@ -253,17 +256,38 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
     if (!USE_SUPABASE || !v.uid || !mine) return;
     try {
       const [a, b] = await Promise.all([
-        supabase.from('profiles').update({ full_name: v.name, avatar: v.photo }).eq('id', v.uid),
+        // `count: 'exact'`, on both. Without it PostgREST answers an UPDATE that
+        // matched ZERO rows with 204 and `error: null` — indistinguishable here
+        // from one that changed something — and this screen printed "Saved."
+        // over it. The two coaches who get that are not edge cases: one with no
+        // `trainers` row yet, and one an RLS policy refuses. `session_fee` is in
+        // the second statement, and it is the figure Analytics and the Assistant
+        // price everything from.
+        //
+        // `avatar` is the second lock, the same one src/ui/clientData.tsx puts
+        // on the same column: a picker on a phone hands back a path INSIDE THIS
+        // HANDSET, and that path in a shared row is a blank circle for every
+        // client, every thread and the directory card meant to win the coach
+        // work. src/ui/avatarUpload.ts is where a photo becomes a URL; nothing
+        // else may reach this column.
+        supabase.from('profiles')
+          .update({ full_name: v.name, avatar: isDeviceAvatar(v.photo) ? null : v.photo }, { count: 'exact' })
+          .eq('id', v.uid),
         supabase.from('trainers').update({
           bio: v.bio, tagline: v.tagline, offers: v.offers,
           specialties: v.specialties, session_fee: v.sessionFee, listed: v.listed,
-        }).eq('id', v.uid),
+        }, { count: 'exact' }).eq('id', v.uid),
       ]);
-      const err = a.error ?? b.error ?? null;
-      if (err) {
+      // Counted, never assumed. The sentence names which of the two halves did
+      // not land, because "your profile did not save" leaves a coach unable to
+      // tell whether it is their name or their rate that is still only here.
+      const why = profileWriteFailure(a, b);
+      if (why) {
+        if (a.error) reportError('coachProfile.persist.profiles', a.error);
+        if (b.error) reportError('coachProfile.persist.trainers', b.error);
         // Left dirty on purpose: the values are still only on this handset, and
         // the next edit or the unmount flush should try them again.
-        setSave((prev) => afterWrite(prev, false, Date.now(), err.message));
+        setSave((prev) => afterWrite(prev, false, Date.now(), why));
         return;
       }
       dirty.current = false;

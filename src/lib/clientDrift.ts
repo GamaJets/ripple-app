@@ -44,6 +44,7 @@
 // one mistake: absence of evidence read as evidence of health.
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, type StatusLevel } from './status';
 import { capLimit, capped } from './rowCap';
+import { readCappedByIds } from './cappedByIds';
 
 type Queryable = { from: (table: string) => any };
 
@@ -569,34 +570,62 @@ export async function readClientActivity(
     out[id].push({ at, kind });
   };
 
-  const ci = await sb.from('check_ins').select('user_id, at').in('user_id', askable).gte('at', sinceIso).limit(capLimit());
+  // ── Why all four of these are chunked ──────────────────────────────────
+  //
+  // `askable` is every linked client a coach has: src/ui/nudges.ts intersects
+  // a `capLimit()` read of `clients` with the roster, so a gym-attached coach
+  // with three hundred members sends three hundred uuids, and up to a thousand
+  // is reachable. A uuid costs about 39 bytes inside a PostgREST `in.("…","…")`
+  // list, which puts three hundred of them past the 8KB request line nginx and
+  // most CDNs enforce by default. The proxy refuses at roughly two hundred, the
+  // refusal is a **414**, supabase-js does not reject on it, and it arrives as
+  // `data: null` — so `if (error) throw` never fires and `capped(null)` is an
+  // empty page.
+  //
+  // Empty is not a neutral answer here. This function's whole output is "when
+  // was each client last active", and no rows for everybody means EVERY client
+  // reads as silent. That is precisely the state the drift nudges exist to act
+  // on: the coach is handed a list saying their entire book has gone quiet, and
+  // messages three hundred people who have been training all month. The feature
+  // built to notice inactivity would have been manufacturing it.
+  //
+  // `readCappedByIds` rather than `readByIds`: the per-read cap is deliberate
+  // and `truncated` is already carried out of here to the caller, who suppresses
+  // rather than guesses. Finishing these would walk every check-in, workout,
+  // session and door swipe the window holds to compute a last-seen date the
+  // first page already answers.
+  const ci = await readCappedByIds<any>(askable,
+    (chunk) => sb.from('check_ins').select('user_id, at')
+      .in('user_id', chunk).gte('at', sinceIso).limit(capLimit()));
   if (ci.error) throw ci.error;
-  const ciPage = capped<any>(ci.data);
-  truncated = truncated || ciPage.truncated;
-  for (const r of ciPage.rows) push(r.user_id, r.at, 'check_in');
+  truncated = truncated || ci.truncated;
+  for (const r of ci.rows) push(r.user_id, r.at, 'check_in');
 
-  const wo = await sb.from('workouts').select('user_id, performed_at').in('user_id', askable).gte('performed_at', sinceIso).limit(capLimit());
+  const wo = await readCappedByIds<any>(askable,
+    (chunk) => sb.from('workouts').select('user_id, performed_at')
+      .in('user_id', chunk).gte('performed_at', sinceIso).limit(capLimit()));
   if (wo.error) throw wo.error;
-  const woPage = capped<any>(wo.data);
-  truncated = truncated || woPage.truncated;
-  for (const r of woPage.rows) push(r.user_id, r.performed_at, 'workout');
+  truncated = truncated || wo.truncated;
+  for (const r of wo.rows) push(r.user_id, r.performed_at, 'workout');
 
   // Only sessions somebody confirmed took place. A booked slot whose clock has
   // passed is not evidence the client turned up — that inference is the bug
   // 33-session-outcomes.sql was written to end, and it would read here as a
   // client still attending when they had stopped.
-  const se = await sb.from('sessions').select('client_id, starts_at, outcome').in('client_id', askable).gte('starts_at', sinceIso).eq('outcome', 'completed').limit(capLimit());
+  const se = await readCappedByIds<any>(askable,
+    (chunk) => sb.from('sessions').select('client_id, starts_at, outcome')
+      .in('client_id', chunk).gte('starts_at', sinceIso).eq('outcome', 'completed').limit(capLimit()));
   if (se.error) throw se.error;
-  const sePage = capped<any>(se.data);
-  truncated = truncated || sePage.truncated;
-  for (const r of sePage.rows) push(r.client_id, r.starts_at, 'session');
+  truncated = truncated || se.truncated;
+  for (const r of se.rows) push(r.client_id, r.starts_at, 'session');
 
   if (opts.tenantId) {
-    const vi = await sb.from('gym_visits').select('member_id, entered_at').eq('tenant_id', opts.tenantId).in('member_id', askable).gte('entered_at', sinceIso).limit(capLimit());
+    const vi = await readCappedByIds<any>(askable,
+      (chunk) => sb.from('gym_visits').select('member_id, entered_at')
+        .eq('tenant_id', opts.tenantId).in('member_id', chunk).gte('entered_at', sinceIso).limit(capLimit()));
     if (vi.error) throw vi.error;
-    const viPage = capped<any>(vi.data);
-    truncated = truncated || viPage.truncated;
-    for (const r of viPage.rows) push(r.member_id, r.entered_at, 'visit');
+    truncated = truncated || vi.truncated;
+    for (const r of vi.rows) push(r.member_id, r.entered_at, 'visit');
   }
 
   return { byClient: out, notAsked, truncated };

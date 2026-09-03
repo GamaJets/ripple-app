@@ -46,6 +46,8 @@
 
 import type { ProgressPhoto } from './progressPhotos';
 import { PHOTO_BUCKET } from './progressPhotos';
+import { chunkIds, uniqueIds } from './idLookup';
+import { readAll } from './rowCap';
 // The coach-side read hands its rows out through these rather than as plain
 // strings — see ./photoInbox for why a signed URL is not a photo. This import
 // is one-way on purpose: photoInbox knows nothing about the sharing rule, so
@@ -280,14 +282,35 @@ export async function fetchMyShares(): Promise<ShareGrant[]> {
   const sb = db();
   const uid = await requireUid(sb);
 
-  const { data, error } = await sb
-    .from('progress_photo_shares')
-    .select('photo_id, client_id, coach_id, shared_at')
-    .eq('client_id', uid)
-    .order('shared_at', { ascending: false });
-  if (error) throw error;
+  // FINISHED, not capped. There was no `.limit()` here at all, which is not
+  // "no ceiling" — it is PostgREST's own, a thousand rows, applied silently and
+  // handed back looking like the whole set.
+  //
+  // Two things read this list and both are worse than a wrong number. The count
+  // is one: `sharedCount`/`sharedNote` print `grants.length` to the client as
+  // "{n} sent to your coach", which past a thousand would be a floor stated as
+  // a total. The other is a PRIVACY claim — `shareStateOf` answers 'private'
+  // for any photo not in this list, and the screen draws that as "Only you".
+  // So a truncated read tells a client that photographs their coach can open
+  // are visible to nobody but them. That is the one sentence in this file that
+  // must never be produced by a read that stopped early.
+  const data = await readAll<any>(
+    (from, to) => sb
+      .from('progress_photo_shares')
+      .select('photo_id, client_id, coach_id, shared_at')
+      .eq('client_id', uid)
+      // A TOTAL order, which `readAll` requires of every page it is handed.
+      // `shared_at` alone ties — a client who sends five photos in one tap
+      // stamps them in the same transaction — and the primary key is
+      // (photo_id, coach_id), so both go on the end.
+      .order('shared_at', { ascending: false })
+      .order('photo_id', { ascending: false })
+      .order('coach_id', { ascending: false })
+      .range(from, to),
+    'the photos you have sent to your coach',
+  );
 
-  return (data ?? []).map((r: any) => ({
+  return data.map((r: any) => ({
     photoId: r.photo_id as string,
     clientId: r.client_id as string,
     coachId: r.coach_id as string,
@@ -358,13 +381,27 @@ export async function fetchPhotosSharedWithMe(clientId: string): Promise<SharedP
   const sb = db();
   const uid = await requireUid(sb);
 
-  const { data: grantRows, error: gErr } = await sb
-    .from('progress_photo_shares')
-    .select('photo_id, client_id, coach_id, shared_at')
-    .eq('coach_id', uid).eq('client_id', clientId);
-  if (gErr) throw gErr;
+  // FINISHED for the reason `fetchMyShares` is: uncapped meant PostgREST's own
+  // silent thousand, and a short grant list here is photos the client DID send
+  // simply not appearing in what the coach is shown — which reads as a client
+  // who sent fewer than they did.
+  const grantRows = await readAll<any>(
+    (from, to) => sb
+      .from('progress_photo_shares')
+      .select('photo_id, client_id, coach_id, shared_at')
+      .eq('coach_id', uid).eq('client_id', clientId)
+      // A TOTAL order, which `readAll` requires of every page it is handed.
+      // `shared_at` alone ties — a client who sends five photos in one tap
+      // stamps them in the same transaction — and the primary key is
+      // (photo_id, coach_id), so both go on the end.
+      .order('shared_at', { ascending: false })
+      .order('photo_id', { ascending: false })
+      .order('coach_id', { ascending: false })
+      .range(from, to),
+    'the photos this client has sent you',
+  );
 
-  const grants: ShareGrant[] = (grantRows ?? []).map((r: any) => ({
+  const grants: ShareGrant[] = grantRows.map((r: any) => ({
     photoId: r.photo_id as string,
     clientId: r.client_id as string,
     coachId: r.coach_id as string,
@@ -379,13 +416,25 @@ export async function fetchPhotosSharedWithMe(clientId: string): Promise<SharedP
   if (lErr) throw lErr;
   const links: CoachLink[] = [{ clientId, coachId: uid, active: live === true }];
 
-  const { data: rows, error: pErr } = await sb
-    .from('progress_photos')
-    .select('id, client_id, taken_at, image_path')
-    .in('id', grants.map((g) => g.photoId));
-  if (pErr) throw pErr;
+  // Chunked. `grants` has no bound at all — it is every share this client has
+  // ever made to this coach, and a client on a twelve-week programme who sends
+  // a photo a week for three years is a good client, not an edge case. Past
+  // roughly two hundred uuids the `in.("…","…")` list crosses the 8KB request
+  // line, the proxy answers 414, and supabase-js returns that as `data: null`.
+  // Here that would not throw and would not show an error: `rows` becomes [],
+  // `allowed` becomes [], the function returns [] and the coach's screen says
+  // this client has shared nothing — about a client who has shared everything.
+  const rows: any[] = [];
+  for (const chunk of chunkIds(uniqueIds(grants.map((g) => g.photoId)))) {
+    const { data, error: pErr } = await sb
+      .from('progress_photos')
+      .select('id, client_id, taken_at, image_path')
+      .in('id', chunk);
+    if (pErr) throw pErr;
+    for (const r of ((data ?? []) as any[])) rows.push(r);
+  }
 
-  const allowed = (rows ?? [])
+  const allowed = rows
     .map((r: any) => ({ id: r.id as string, clientId: r.client_id as string, takenAt: r.taken_at as string, path: r.image_path as string }))
     .filter((r) => {
       const may = viewerMaySee(uid, r, grants, links);
@@ -457,13 +506,27 @@ export async function fetchSharedInbox(clientId: string): Promise<Inbox> {
   // direction that delays noticing a withdrawal.
   const readAtMs = Date.now();
 
-  const { data: grantRows, error: gErr } = await sb
-    .from('progress_photo_shares')
-    .select('photo_id, client_id, coach_id, shared_at')
-    .eq('coach_id', uid).eq('client_id', clientId);
-  if (gErr) throw gErr;
+  // FINISHED for the reason `fetchMyShares` is: uncapped meant PostgREST's own
+  // silent thousand, and a short grant list here is photos the client DID send
+  // simply not appearing in what the coach is shown — which reads as a client
+  // who sent fewer than they did.
+  const grantRows = await readAll<any>(
+    (from, to) => sb
+      .from('progress_photo_shares')
+      .select('photo_id, client_id, coach_id, shared_at')
+      .eq('coach_id', uid).eq('client_id', clientId)
+      // A TOTAL order, which `readAll` requires of every page it is handed.
+      // `shared_at` alone ties — a client who sends five photos in one tap
+      // stamps them in the same transaction — and the primary key is
+      // (photo_id, coach_id), so both go on the end.
+      .order('shared_at', { ascending: false })
+      .order('photo_id', { ascending: false })
+      .order('coach_id', { ascending: false })
+      .range(from, to),
+    'the photos this client has sent you',
+  );
 
-  const grants: ShareGrant[] = (grantRows ?? []).map((r: any) => ({
+  const grants: ShareGrant[] = grantRows.map((r: any) => ({
     photoId: r.photo_id as string,
     clientId: r.client_id as string,
     coachId: r.coach_id as string,
@@ -484,13 +547,22 @@ export async function fetchSharedInbox(clientId: string): Promise<Inbox> {
   // two numbers are already visible to a linked coach elsewhere is not a reason
   // to carry them into a screen about a photograph, where they would turn a
   // picture somebody chose to send into a body-composition reading beside it.
-  const { data: rows, error: pErr } = await sb
-    .from('progress_photos')
-    .select('id, client_id, taken_at, image_path')
-    .in('id', grants.map((g) => g.photoId));
-  if (pErr) throw pErr;
+  // Chunked for the same reason as fetchPhotosSharedWithMe above, and it bites
+  // harder here: this is the inbox. A 414 arrives as `data: null`, nothing
+  // throws, and the inbox renders empty beside `linkActive: true` — which reads
+  // as "your client has withdrawn everything" to the one person who would act
+  // on that.
+  const rows: any[] = [];
+  for (const chunk of chunkIds(uniqueIds(grants.map((g) => g.photoId)))) {
+    const { data, error: pErr } = await sb
+      .from('progress_photos')
+      .select('id, client_id, taken_at, image_path')
+      .in('id', chunk);
+    if (pErr) throw pErr;
+    for (const r of ((data ?? []) as any[])) rows.push(r);
+  }
 
-  const allowed = (rows ?? [])
+  const allowed = rows
     .map((r: any) => ({
       id: r.id as string,
       clientId: r.client_id as string,

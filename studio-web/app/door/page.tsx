@@ -8,8 +8,21 @@
 // reporting one: until visits are recorded, attendance is only ever the subset
 // of people who booked a class, and retention is inferred from a number that
 // is missing most of its input.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+// The reader's locale, the GYM's zone. This screen lives at a front desk, where
+// the two are usually the same clock — and it is also the screen an owner opens
+// from another country, where they are not, and where "today" deciding whether
+// a pass is still good makes the difference a member is turned away over.
+import { gymDateTimeText, gymTimeText } from '@lib/gymWhen';
+import { gymDay, parseGymZone } from '@lib/gymZone';
+// `Unresolved` comes from here rather than being declared at the bottom of
+// this file. Seven console screens held a byte-identical copy, every one of
+// them a plain `<div>` — so the sentence saying THIS section's rows could not
+// be read was never announced. One copy, with the live region on it.
+import { ConsoleGate, Unresolved } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { Banner as SharedBanner, Announce } from '@/components/Banner';
@@ -74,10 +87,20 @@ const CLASS_WINDOW_MIN = 90;
  * act on both of them — one by waiting, the other by telling the owner the gym
  * was empty this morning.
  */
-type Unread = 'loading' | 'failed' | null;
 
-/** The calendar day a visit belongs to, in the gym's own timezone. */
-const dayOf = (iso: string) => isoDate(new Date(iso));
+/**
+ * The calendar day a visit belongs to, at the GYM.
+ *
+ * It said "in the gym's own timezone" and was `isoDate(new Date(iso))`, which is
+ * the READER's. At a front desk those are the same clock and the comment was
+ * true of the machine it was written on; opened from anywhere else it is the
+ * reader's midnight that rolls the day over, and the four hours either side of
+ * it are visits filed on the wrong day and passes refused a day early.
+ *
+ * The reader's day stays as the fallback for a gym that has not set a zone,
+ * because then it is the only clock there is.
+ */
+const dayOf = (iso: string, zone: string | null) => gymDay(iso, zone) ?? isoDate(new Date(iso));
 
 /** An id for a queued arrival. `crypto.randomUUID` where the browser has it,
  *  and something unique enough where it does not — this only has to tell one
@@ -108,15 +131,13 @@ function isOffline(e: any): boolean {
     || m.includes('network request failed') || m.includes('load failed');
 }
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 export default function Door() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [visits, setVisits] = useState<Visit[] | null>(null);
   const [passes, setPasses] = useState<GymPass[] | null>(null);
@@ -198,6 +219,10 @@ export default function Door() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) {
         setVisits([]); setPasses([]); setTypes([]); setMembers([]); setClasses([]);
@@ -205,8 +230,12 @@ export default function Door() {
         return;
       }
       // no-error-ok: the gym's name is a header label; without it the header is blank and every figure below is unaffected
-      const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) setGymName(t?.name ?? null);
+      const { data: t } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+      if (live) {
+        setGymName(t?.name ?? null);
+        const z = parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
+      }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -238,6 +267,13 @@ export default function Door() {
    * subscribes, the door log is small, and a thirty-second read that always
    * arrives is worth more at a front desk than a socket that silently drops.
    */
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
+  // reader-day-ok: `dayTick` is not a "today" anybody reads — it is a REPAINT
+  // clock. Its only job is to change value when the machine with the tab open
+  // crosses midnight, so a tablet nobody has touched since yesterday re-renders;
+  // the day that is actually compared against is `gymDay(Date.now(), zone) ??
+  // dayTick` sixty lines below, which asks the gym first.
   const [dayTick, setDayTick] = useState(() => isoDate(new Date()));
   useEffect(() => {
     if (!me?.tenantId) return;
@@ -247,6 +283,7 @@ export default function Door() {
 
     const tick = () => {
       // The day first, so a rollover repaints even if the read is in flight.
+      // reader-day-ok: the repaint clock again — see `dayTick` above.
       const d = isoDate(new Date());
       setDayTick((prev) => (prev === d ? prev : d));
       if (document.visibilityState === 'hidden') return;
@@ -277,8 +314,11 @@ export default function Door() {
   const reload = useCallback(() => { if (me?.tenantId) void load(me.tenantId); }, [me, load]);
   const queue = useDoorQueue(me?.tenantId ?? '', reload);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -315,8 +355,12 @@ export default function Door() {
   // `dayTick` rather than a bare `new Date()`: the value is identical, and
   // holding it in state is what makes the rollover happen on a screen nobody
   // has touched since yesterday.
-  const today = dayTick;
-  const todays = (visits ?? []).filter((v) => dayOf(v.enteredAt) === today);
+  // Recomputed from `dayTick` rather than used as it stands, so the rollover
+  // that `dayTick` schedules still repaints while the DAY it names is the gym's.
+  // `dayTick` alone is the reader's date, which is what every "today" on this
+  // screen was being compared against.
+  const today = gymDay(Date.now(), zone) ?? dayTick;
+  const todays = (visits ?? []).filter((v) => dayOf(v.enteredAt, zone) === today);
 
   // "Inside now" means today, the same thing the Overview tile means by "In the
   // building". Over the 30-day window it meant "no exit recorded at any point
@@ -334,7 +378,7 @@ export default function Door() {
   // above. `currentlyInside` folds them so the headcount is people rather than
   // scans; they are counted here so a desk that is double-scanning finds out.
   const dupes = duplicateOpenVisits(todays);
-  const openBefore = (visits ?? []).filter((v) => !v.exitedAt && dayOf(v.enteredAt) !== today);
+  const openBefore = (visits ?? []).filter((v) => !v.exitedAt && dayOf(v.enteredAt, zone) !== today);
   // Of those, the ones a sweep has already accounted for. Two different things
   // for the desk: "nobody has looked at these" and "these are known to be
   // people who left without scanning out".
@@ -396,16 +440,16 @@ export default function Door() {
         records={records} tenantId={tenantId}
         membersUnread={unread(members)} classesUnread={unread(classes)}
         recordsUnread={recordsUnread}
-        today={today} queue={queue} onChange={refresh}
+        today={today} zone={zone} queue={queue} onChange={refresh}
       />
       <Inside
         inside={inside} openBefore={openBefore.length} swept={sweptBefore.length}
         duplicates={dupes.length}
         records={records} recordsUnread={recordsUnread} gymName={gymName}
         unread={unread(visits)} tenantId={tenantId} isOwner={me.role === 'owner'}
-        queue={queue} onChange={refresh}
+        queue={queue} zone={zone} onChange={refresh}
       />
-      <Today visits={todays} unread={unread(visits)} />
+      <Today visits={todays} unread={unread(visits)} zone={zone} />
       {/* Thirty days rather than today, because "when is my gym busy" is not a
           question about today. The window is the same one `load()` reads, so
           nothing here needs a second query. */}
@@ -413,7 +457,7 @@ export default function Door() {
       <Passes
         passes={passes} types={types} members={members} summary={pSum}
         passesUnread={unread(passes)} typesUnread={unread(types)}
-        tenantId={tenantId} today={today} me={me} onChange={refresh}
+        tenantId={tenantId} today={today} zone={zone} me={me} onChange={refresh}
       />
     </Shell>
   );
@@ -583,13 +627,16 @@ function useDoorQueue(tenantId: string, onChange: () => void): DoorQueue {
 
 /* ── check-in ──────────────────────────────────────────────────────────────── */
 
-function CheckInBar({ members, passes, classes, visits, records, tenantId, membersUnread, classesUnread, recordsUnread, today, queue, onChange }: {
+function CheckInBar({ members, passes, classes, visits, records, tenantId, membersUnread, classesUnread, recordsUnread, today, zone, queue, onChange }: {
   members: Membership[] | null; passes: GymPass[] | null; classes: GymClass[] | null;
   visits: Visit[] | null;
   records: Map<string, GymMemberRecord> | null;
   tenantId: string;
   membersUnread: Unread; classesUnread: Unread; recordsUnread: Unread;
   today: string;
+  /** `tenants.timezone`, or null when the gym has not set one. Every clock on
+   *  this screen is drawn on it. */
+  zone: string | null;
   queue: DoorQueue;
   onChange: () => void;
 }) {
@@ -791,7 +838,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
           ))}
           {nearby.map((c) => (
             <option key={c.id} value={`class:${c.id}`}>
-              {c.title} · {new Date(c.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {c.title} · {gymTimeText(c.startsAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? '—'}
             </option>
           ))}
         </select>
@@ -805,7 +852,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
       {preview && preview.verdict !== 'ok' && !refused ? (
         <p style={{
           margin: '0 14px 14px', fontSize: 12.5, maxWidth: '78ch',
-          color: preview.verdict === 'refuse' ? 'var(--crit)' : '#f0c04e',
+          color: preview.verdict === 'refuse' ? 'var(--crit)' : 'var(--warn)',
         }}>
           {preview.reason}
         </p>
@@ -827,7 +874,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
           ) : (
             <>
               {theirRecord?.medicalNote
-                ? <span style={{ color: '#f0c04e' }}>{theirRecord.medicalNote}{' · '}</span>
+                ? <span style={{ color: 'var(--warn)' }}>{theirRecord.medicalNote}{' · '}</span>
                 : null}
               {emergencyLine(theirRecord)
                 ? <>In an emergency ring {emergencyLine(theirRecord)}.</>
@@ -857,7 +904,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
       {pendingNote(queue.pending) ? (
         <div style={{
           margin: '0 14px 14px', padding: '11px 13px', background: 'var(--surface2)',
-          border: '1px solid var(--ring)', borderLeft: '3px solid #f0c04e',
+          border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
         }}>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)', maxWidth: '80ch' }}>
             {pendingNote(queue.pending)}
@@ -870,7 +917,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
           {queue.pending.filter((p) => p.refusedWhy).map((p) => (
             <p key={p.id} style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--ink2)', maxWidth: '80ch' }}>
               <span className="mono" style={{ color: 'var(--ink)' }}>
-                {new Date(p.atIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {gymTimeText(p.atIso, zone, { hour: '2-digit', minute: '2-digit' }) ?? '—'}
               </span>
               {' '}{p.memberName ?? 'somebody not identified'}
               {' '}{p.kind === 'out' ? 'leaving' : 'arriving'} — {p.refusedWhy}{' '}
@@ -889,7 +936,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
                       void checkIn(supabase, p.tenantId, {
                         memberId: p.memberId, passId: p.passId, classId: p.classId,
                         enteredAtIso: p.atIso, source: 'desk',
-                        overrideReason: `recorded at the desk while offline at ${new Date(p.atIso).toLocaleTimeString()}`,
+                        overrideReason: `recorded at the desk while offline at ${gymTimeText(p.atIso, zone) ?? p.atIso}`,
                       })
                         .then(() => { queue.settled(p.id); onChange(); })
                         .catch((e: any) => setMsg(sayRefused(e?.message, 'That arrival was still not recorded.')));
@@ -918,7 +965,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
           {queue.lapsed.length === 1 ? 'One door write was' : `${queue.lapsed.length} door writes were`} held on
           this machine for more than half a day and {queue.lapsed.length === 1 ? 'has' : 'have'} not been
           recorded:{' '}
-          {queue.lapsed.map((p) => `${p.memberName ?? 'not identified'} ${p.kind === 'out' ? 'leaving' : 'arriving'} at ${new Date(p.atIso).toLocaleString()}`).join(', ')}.
+          {queue.lapsed.map((p) => `${p.memberName ?? 'not identified'} ${p.kind === 'out' ? 'leaving' : 'arriving'} at ${gymDateTimeText(p.atIso, zone) ?? p.atIso}`).join(', ')}.
           An arrival is not written now because a visit from yesterday put into today&rsquo;s log is a
           stranger in Inside now; a departure is not written because the visit it closes has been open
           all night and the sweep is what accounts for those. Add them by hand if they matter.{' '}
@@ -1032,6 +1079,29 @@ function MemberPicker({ members, value, onPick, unread }: {
 }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
+  /*
+   * Which option the arrow keys are on, and why this control needed rewriting.
+   *
+   * The list was closed by `onBlur={() => window.setTimeout(() => setOpen(false),
+   * 150)}`. The comment beside it explained the delay as a fix for mouse clicks,
+   * and it is — for a mouse. The results are `<button>`s, so TABBING to the
+   * first one blurred the input and the list unmounted underneath the focused
+   * button a moment later: this control, on the one console screen a trainer can
+   * also open, could not be used from the keyboard at all. It is how the desk
+   * finds the person standing in front of them.
+   *
+   * The answer is the combobox pattern rather than a longer timeout: focus never
+   * leaves the input, the arrow keys move a highlight, Enter takes it, Escape
+   * closes. The options stop being tab stops (`tabIndex={-1}`) because in this
+   * pattern they are not meant to be — `aria-activedescendant` is what tells a
+   * screen reader which one is current while focus stays put.
+   *
+   * -1 is "nothing highlighted", which is the state the box opens in: a picker
+   * that pre-selects the first match is a picker that checks in the wrong person
+   * when somebody types a name and presses Enter without looking.
+   */
+  const [active, setActive] = useState(-1);
+  const listId = useId();
 
   // One entry per PERSON, not per membership row. Somebody who froze a
   // membership and opened another is one human being at the desk, and two
@@ -1063,6 +1133,30 @@ function MemberPicker({ members, value, onPick, unread }: {
     [people, q],
   );
 
+  // What the arrow keys can actually land on: the rows drawn, not every match.
+  const options = hits.slice(0, PICKER_ROWS);
+  // Typing changes the matches, so a highlight held over from the last keystroke
+  // would point at somebody else. It is cleared on every change of the query.
+  const cur = active >= 0 && active < options.length ? options[active] : null;
+
+  const take = (id: string) => { onPick(id); setQ(''); setOpen(false); setActive(-1); };
+
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') { setOpen(false); setActive(-1); return; }
+    if (!options.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault(); setOpen(true);
+      setActive((i) => (i + 1 >= options.length ? 0 : i + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault(); setOpen(true);
+      setActive((i) => (i <= 0 ? options.length - 1 : i - 1));
+    } else if (e.key === 'Enter' && cur) {
+      // Only when something is actually highlighted. Enter on a typed query
+      // with no highlight must not check in whoever happens to sort first.
+      e.preventDefault(); take(cur.id);
+    }
+  };
+
   const chosen = value ? people.find((p) => p.id === value) ?? null : null;
 
   // Chosen: the name, and a way back. Nothing is more confusing at a desk than
@@ -1076,7 +1170,7 @@ function MemberPicker({ members, value, onPick, unread }: {
             ? <span style={{ color: 'var(--warn)', marginLeft: 7, fontSize: 11.5 }}>{chosen.status}</span>
             : null}
         </span>
-        <button type="button" style={linkBtn} onClick={() => { onPick(''); setQ(''); }}>change</button>
+        <button type="button" style={linkBtn} onClick={() => { onPick(''); setQ(''); setActive(-1); }}>change</button>
       </span>
     );
   }
@@ -1085,33 +1179,53 @@ function MemberPicker({ members, value, onPick, unread }: {
     <span style={{ flex: 2, minWidth: 180, position: 'relative' }}>
       <input
         value={q}
-        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); setActive(-1); }}
         onFocus={() => setOpen(true)}
-        // Closed on a delay rather than immediately: a click on one of the
-        // buttons below blurs this input first, and closing on blur would
-        // unmount the button before its own click handler ran.
+        onKeyDown={onKey}
+        // Closed on a delay rather than immediately, still, because the options
+        // are pressed with `onMouseDown` prevented and a stray click elsewhere
+        // must close the list. Tabbing away now closes it correctly too: the
+        // options are not tab stops, so the next Tab genuinely leaves this
+        // control rather than landing on a button about to be unmounted.
         onBlur={() => window.setTimeout(() => setOpen(false), 150)}
         placeholder={unread === 'failed' ? 'Member list unread — check in anonymously' : 'Search a member, or leave blank for a walk-in'}
         aria-label="Search for the member at the desk"
+        role="combobox"
+        aria-expanded={open && !!q.trim()}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={cur ? `${listId}-${cur.id}` : undefined}
+        autoComplete="off"
         style={{ ...field, width: '100%' }}
       />
       {open && q.trim() ? (
         <span
+          id={listId}
+          role="listbox"
+          aria-label="Members matching what you typed"
           style={{
             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 5,
             background: 'var(--surface)', border: '1px solid var(--ring)', borderTop: 'none',
             display: 'block', maxHeight: 260, overflowY: 'auto',
           }}
         >
-          {hits.slice(0, PICKER_ROWS).map((p) => (
+          {options.map((p, i) => (
             <button
               key={p.id}
+              id={`${listId}-${p.id}`}
+              role="option"
+              aria-selected={i === active}
+              // Not a tab stop. Focus stays in the input; the highlight is what
+              // moves, and `aria-activedescendant` above is what says so.
+              tabIndex={-1}
               type="button"
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { onPick(p.id); setQ(''); setOpen(false); }}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => take(p.id)}
               style={{
                 display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
-                background: 'transparent', color: 'var(--ink2)', fontFamily: 'var(--sans)',
+                background: i === active ? 'var(--surface3)' : 'transparent',
+                color: 'var(--ink2)', fontFamily: 'var(--sans)',
                 fontSize: 13, padding: '7px 11px', border: 'none',
                 borderBottom: '1px solid var(--ring2)',
               }}
@@ -1151,12 +1265,15 @@ function MemberPicker({ members, value, onPick, unread }: {
 
 /* ── who is inside ─────────────────────────────────────────────────────────── */
 
-function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread, gymName, unread, tenantId, isOwner, queue, onChange }: {
+function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread, gymName, unread, tenantId, isOwner, queue, zone, onChange }: {
   inside: Visit[]; openBefore: number; swept: number; duplicates: number; unread: Unread;
   records: Map<string, GymMemberRecord> | null;
   recordsUnread: Unread;
   gymName: string | null;
   tenantId: string; isOwner: boolean;
+  /** `tenants.timezone`, or null when the gym has not set one. Every clock on
+   *  this screen is drawn on it. */
+  zone: string | null;
   queue: DoorQueue;
   onChange: () => void;
 }) {
@@ -1203,7 +1320,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
     { key: 'who', header: 'Who', value: (v) => v.memberName ?? 'zzz',
       render: (v) => v.memberName ?? <span className="dash">not identified</span> },
     { key: 'in', header: 'In since', value: (v) => v.enteredAt,
-      render: (v) => new Date(v.enteredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+      render: (v) => gymTimeText(v.enteredAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? <span className="dash">—</span> },
     { key: 'for', header: 'For', value: (v) => Date.now() - Date.parse(v.enteredAt), numeric: true,
       render: (v) => `${Math.max(0, Math.round((Date.now() - Date.parse(v.enteredAt)) / 60000))} min` },
     // The column this screen was missing, beside the headcount it already
@@ -1224,7 +1341,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
                 two seconds by somebody kneeling on the floor. Never the
                 client's own injury record — that stays theirs. */}
             {rec?.medicalNote
-              ? <div style={{ color: '#f0c04e', fontSize: 11.5, marginTop: 2 }}>{rec.medicalNote}</div>
+              ? <div style={{ color: 'var(--warn)', fontSize: 11.5, marginTop: 2 }}>{rec.medicalNote}</div>
               : null}
           </>
         );
@@ -1324,7 +1441,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
       </p>
       {msg ? <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
       {duplicates > 0 ? (
-        <p style={{ margin: '14px', fontSize: 12.5, color: '#f0c04e', maxWidth: '80ch' }}>
+        <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '80ch' }}>
           {duplicates === 1 ? 'One member has' : `${duplicates} members have`} more than one check-in
           open from today. They are counted once here — a headcount is people, not scans — but a
           desk producing these is scanning the same card twice, and this is the figure somebody
@@ -1349,7 +1466,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
         </p>
       ) : null}
       {unread ? <Unresolved state={unread} what="the door log" /> : (
-        <DataTable rows={inside} columns={cols} rowKey={(v) => v.id} empty="Nobody is checked in." />
+        <DataTable noun="people inside" rows={inside} columns={cols} rowKey={(v) => v.id} empty="Nobody is checked in." />
       )}
     </Section>
   );
@@ -1357,15 +1474,15 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
 
 /* ── today ─────────────────────────────────────────────────────────────────── */
 
-function Today({ visits, unread }: { visits: Visit[]; unread: Unread }) {
+function Today({ visits, unread, zone }: { visits: Visit[]; unread: Unread; zone: string | null }) {
   const cols: Column<Visit>[] = [
     { key: 'who', header: 'Who', value: (v) => v.memberName ?? 'zzz',
       render: (v) => v.memberName ?? <span className="dash">not identified</span> },
     { key: 'in', header: 'In', value: (v) => v.enteredAt,
-      render: (v) => new Date(v.enteredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+      render: (v) => gymTimeText(v.enteredAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? <span className="dash">—</span> },
     { key: 'out', header: 'Out', value: (v) => v.exitedAt ?? '',
       render: (v) => v.exitedAt
-        ? new Date(v.exitedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        ? gymTimeText(v.exitedAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? '—'
         : <span className="dash">—</span> },
     { key: 'stay', header: 'Stay', value: (v) => dwellMinutes(v) ?? -1, numeric: true,
       render: (v) => {
@@ -1378,13 +1495,13 @@ function Today({ visits, unread }: { visits: Visit[]; unread: Unread }) {
       // record, and it is the row an audit comes looking for. Marked here
       // rather than buried in a note nobody opens.
       render: (v) => wasOverridden(v)
-        ? <span title={v.note ?? undefined} style={{ color: '#f0c04e' }}>{v.source} · let in</span>
+        ? <span title={v.note ?? undefined} style={{ color: 'var(--warn)' }}>{v.source} · let in</span>
         : v.source },
   ];
   return (
     <Section title="Today" sub="Every arrival logged since local midnight — the gym's midnight, not UTC's.">
       {unread ? <Unresolved state={unread} what="the door log" /> : (
-        <DataTable rows={visits} columns={cols} rowKey={(v) => v.id} empty="No visits logged today." />
+        <DataTable noun="visits today" rows={visits} columns={cols} rowKey={(v) => v.id} empty="No visits logged today." />
       )}
     </Section>
   );
@@ -1531,11 +1648,15 @@ function Occupancy({ visits, unread, days }: {
 
 /* ── passes ────────────────────────────────────────────────────────────────── */
 
-function Passes({ passes, types, members, summary, passesUnread, typesUnread, tenantId, today, me, onChange }: {
+function Passes({ passes, types, members, summary, passesUnread, typesUnread, tenantId, today, zone, me, onChange }: {
   passes: GymPass[] | null; types: PassType[] | null; members: Membership[] | null;
   summary: ReturnType<typeof summarisePasses> | null;
   passesUnread: Unread; typesUnread: Unread;
-  tenantId: string; today: string; me: Me; onChange: () => void;
+  tenantId: string; today: string;
+  /** `tenants.timezone`, or null when the gym has not set one. Every clock on
+   *  this screen is drawn on it. */
+  zone: string | null;
+  me: Me; onChange: () => void;
 }) {
   const [typeId, setTypeId] = useState('');
   /**
@@ -1816,7 +1937,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
         </p>
       ) : (
         <form onSubmit={sell} style={formRow}>
-          <select value={typeId} onChange={(e) => setTypeId(e.target.value)} style={{ ...field, flex: 2 }}>
+          <select aria-label="Which pass" value={typeId} onChange={(e) => setTypeId(e.target.value)} style={{ ...field, flex: 2 }}>
             <option value="">Pass type…</option>
             {(types ?? []).filter((t) => t.active).map((t) => (
               <option key={t.id} value={t.id}>
@@ -1850,7 +1971,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
             style={{ ...field, flex: 2, opacity: holderId ? 0.5 : 1 }}
           />
           {selected?.kind === 'guest' ? (
-            <select value={hostId} onChange={(e) => setHostId(e.target.value)} style={{ ...field, flex: 2 }}>
+            <select aria-label="Whose guest" value={hostId} onChange={(e) => setHostId(e.target.value)} style={{ ...field, flex: 2 }}>
               <option value="">Guest of…</option>
               {activeMembers.map((m) => (
                 <option key={m.id} value={m.memberId}>{m.memberName ?? m.memberId}</option>
@@ -1917,7 +2038,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
       ) : null}
 
       {passes === null ? <Unresolved state={passesUnread === 'failed' ? 'failed' : 'loading'} what="the passes" /> : (
-        <DataTable rows={passes} columns={cols} rowKey={(p) => p.id} empty="No passes issued yet." />
+        <DataTable noun="passes" rows={passes} columns={cols} rowKey={(p) => p.id} empty="No passes issued yet." />
       )}
 
       {/* What was taken off one pass, and the way to put one back.
@@ -1965,12 +2086,14 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
                       display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap',
                       padding: '7px 0', borderTop: '1px solid var(--ring)',
                     }}>
-                      {/* Same formatter as every other stamp on this screen —
-                          the reader's clock. A lone gym-zone label in one panel
-                          of a page that draws six other times on the device's
-                          would be harder to read, not more honest. */}
+                      {/* Same formatter as every other stamp on this screen,
+                          which is now the GYM's clock rather than the reader's.
+                          The paragraph here used to argue for the device's on
+                          consistency grounds and it was right about consistency
+                          and wrong about which clock: every other stamp on this
+                          page has moved, so this one moves with them. */}
                       <span className="mono" style={{ fontSize: 12.5 }}>
-                        {new Date(r.redeemedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                        {gymDateTimeText(r.redeemedAt, zone, { dateStyle: 'medium', timeStyle: 'short' }) ?? '—'}
                       </span>
                       <span style={{ fontSize: 12.5, color: 'var(--ink3)', flex: 1, minWidth: 180 }}>
                         {r.sessionId ? 'paid for a one-to-one'
@@ -2033,18 +2156,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
 // The banner is the shared one now: studio-web/components/Banner.tsx. This
 // page's copy rendered into a plain <div>, so every "the write was refused and
 // nothing was saved" it said was a silence for a screen reader. The shared one
@@ -2060,10 +2171,4 @@ function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'c
  * A refused read used to fall through to the table's own empty line, so "we
  * could not ask" and "the gym has none" were the same sentence on screen.
  */
-function Unresolved({ state, what }: { state: Exclude<Unread, null>; what: string }) {
-  return (
-    <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
-      {state === 'loading' ? 'Loading…' : `Could not read ${what}. The banner above says why.`}
-    </div>
-  );
-}
+

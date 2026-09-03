@@ -37,6 +37,7 @@ import { shownStreak, weekStats, personalRecords, streakMilestone } from '../../
 import { useState, useEffect, useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { askAboutMyWeek, coachAvailable } from '../../src/lib/coach';
+import { REPORT_SHARE_BULLETS, reportHealthLines, type ReportHealthFact } from '../../src/lib/reportShare';
 import { useCoachShare } from '../../src/ui/coachShare';
 import {
   NEVER_SENT, WHERE_IT_GOES, NOT_MEDICAL_ADVICE,
@@ -44,6 +45,9 @@ import {
 } from '../../src/lib/coachShare';
 import { compositionInsights } from '../../src/lib/inbodyMetrics';
 import { isWhole } from '../../src/ui/loadStatus';
+// The day this screen judges against, kept live across midnight. See the
+// note at `useNow()` below.
+import { useNow } from '../../src/ui/today';
 
 export default function WeeklyReport() {
   const t = useTheme();
@@ -113,7 +117,19 @@ export default function WeeklyReport() {
   const wDeltaShown = weightDeltaIn(wDelta, wu) ?? 0;
   const waistDShown = lengthDeltaIn(waistD, lu);
 
-  const today = new Date();
+  // `useNow()` and not a bare `new Date()`. This is not the frozen-at-mount
+  // shape check:frozen-day looks for — a render-body `new Date()` is right
+  // every time this redraws — it is the other half of the same problem, which
+  // src/ui/today.ts states: it is only right at the moment something else
+  // happens to redraw, and this screen sits still while it is read.
+  //
+  // `range` is the date span printed on a weekly report the member SENDS to
+  // their coach. Left open overnight, the report goes out headed with a window
+  // that ended yesterday, over facts that were gathered for it — a document
+  // whose own dates are wrong about what it covers. `useNow` re-settles at
+  // local midnight, on foreground, and on focus, which is the moment a member
+  // comes back to this tab to send it.
+  const today = useNow();
   const weekStart = new Date(today); weekStart.setDate(today.getDate() - 6);
   const range = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${today.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
@@ -148,22 +164,29 @@ export default function WeeklyReport() {
 
   // Everything measured about their body. Weight, body fat, muscle, girths,
   // sleep and recovery — the same set `HEALTH_KEYS` gates on the AI Coach.
-  const healthFacts = [
+  // TAGGED, and that is the point. Each line carries the kind of thing it is,
+  // the bullets the member agrees to are derived from the same list of kinds
+  // in src/lib/reportShare.ts, and a sixth kind without a sixth bullet does not
+  // compile. The three bullets that used to be typed into the render below had
+  // already drifted from this array: the body-composition scan and the
+  // left/right limb finding went to the model and were named nowhere.
+  const healthTagged: ReportHealthFact[] = [
     // These lines are the summariser's only source of fact, so they carry the
     // client's own units: a model handed "82 kg" writes back "you're at 82 kg"
     // to somebody who has never used a kilogram in their life.
     // Through deltaLabel: an unchanged weight used to be stated to the model as
     // "(0 kg overall)", which is a change of zero rather than the absence of
     // one, and the model writes back about it as though something happened.
-    hasBody ? [`Weight ${fig(weightLabel(c.weightKg, wu))} (${deltaLabel(wDeltaShown, { since: null, unit: wu, noChange: 'no change' })} overall)`,
+    { kind: 'body', line: hasBody ? [`Weight ${fig(weightLabel(c.weightKg, wu))} (${deltaLabel(wDeltaShown, { since: null, unit: wu, noChange: 'no change' })} overall)`,
       c.bodyFatPct != null ? `body fat ${c.bodyFatPct}%` : null,
-      c.muscleKg != null ? `muscle ${fig(weightLabel(c.muscleKg, wu))}` : null].filter(Boolean).join(', ') + '.' : '',
-    waistDShown != null && mLatest ? `Waist ${fig(lengthLabel(mLatest.waist, lu))} (${deltaLabel(waistDShown, { since: null, unit: lu, noChange: 'no change' })} since the previous tape reading).` : '',
-    checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '',
-    comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '',
-    comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '',
-    comp.balance.length ? comp.balance.join(' ') : '',
-  ].filter(Boolean);
+      c.muscleKg != null ? `muscle ${fig(weightLabel(c.muscleKg, wu))}` : null].filter(Boolean).join(', ') + '.' : '' },
+    { kind: 'waist', line: waistDShown != null && mLatest ? `Waist ${fig(lengthLabel(mLatest.waist, lu))} (${deltaLabel(waistDShown, { since: null, unit: lu, noChange: 'no change' })} since the previous tape reading).` : '' },
+    { kind: 'checkin', line: checkIn ? `Check-in energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '' },
+    { kind: 'composition', line: comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '' },
+    { kind: 'composition', line: comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '' },
+    { kind: 'balance', line: comp.balance.length ? comp.balance.join(' ') : '' },
+  ];
+  const healthFacts = reportHealthLines(healthTagged);
   // One string per pile, so the effect below can depend on the FACTS rather
   // than on a hand-picked five of the values behind them. An array literal is a
   // new object on every render and would re-ask the model on every render; the
@@ -343,13 +366,20 @@ export default function WeeklyReport() {
             ) : coachAvailable() && consent === 'unasked' ? (
               <View>
                 <Notice tone={t.brand} kicker="Your data" title={REPORT_CONSENT_TITLE} note={REPORT_CONSENT_BODY}>
-                  {/* Rendered from the arrays in src/lib/coachShare.ts rather
-                      than typed here, so the list cannot drift from what is
-                      actually sent. A list somebody has read and agreed to that
-                      no longer describes the code is worse than no list. */}
+                  {/* Rendered from src/lib/reportShare.ts (the "sent" half) and
+                      src/lib/coachShare.ts (the "never" half) rather than typed
+                      here, so the list cannot drift from what is actually sent.
+                      A list somebody has read and agreed to that no longer
+                      describes the code is worse than no list — and this comment
+                      once sat directly over three bullets typed in by hand,
+                      which had drifted: the body-composition scan and a
+                      left/right limb finding went too, named nowhere. The
+                      bullets now come off the same tagged kinds the payload is
+                      built from, so a new fact line without a bullet does not
+                      compile. */}
                   <View style={{ marginTop: sp.md }}>
                     <Text style={{ ...ty.micro, color: t.ink3 }}>Only sent if you say yes</Text>
-                    {['your weight, body fat and skeletal muscle', 'your waist and other tape measurements', 'your check-in scores, including how you slept'].map((x) => (
+                    {REPORT_SHARE_BULLETS.map((x) => (
                       <View key={x} style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.xs }}>
                         <Text style={{ ...ty.label, color: t.brand }}>•</Text>
                         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{x}</Text>

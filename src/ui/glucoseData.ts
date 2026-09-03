@@ -35,6 +35,9 @@ import {
 } from '../lib/glucose';
 import { glucoseSource } from '../lib/wearables/glucoseSource';
 import { classifyWrite, type WriteOutcome } from '../lib/offlineQueue';
+// `newRowId` is the id the row carries, minted on the device so that an insert
+// whose answer was lost can be offered again without becoming a second reading.
+import { newRowId } from '../lib/outbox';
 import { keptOnPhoneNote, notKeptNote } from '../lib/recordQueue';
 import { useOutbox } from './outbox';
 import { useToast } from './toast';
@@ -327,6 +330,25 @@ export function useGlucose(personId?: string): GlucoseData {
   const addManual = useCallback(async (mmol: number, at?: string): Promise<boolean> => {
     if (readOnly || !target) return false;
     const taken = at ?? new Date().toISOString();
+    /**
+     * The row's own id, chosen here and used by BOTH writes below.
+     *
+     * That is the whole of the fix and the reason it has to be one id rather
+     * than one per attempt. The failure is at-least-once delivery: the insert
+     * below reaches Postgres, the row is written, and the response is lost on
+     * the way back — a tunnel, a handover, the app backgrounded mid-request.
+     * The catch calls that 'unsent', correctly, and the reading is queued; the
+     * queue then offers it again and the member gets two points on the chart
+     * for one finger-prick.
+     *
+     * `glucose_external_once` cannot catch it: it is partial on
+     * `external_id is not null`, and supabase/parts/102 is explicit that a
+     * hand-typed reading may repeat freely — which is right for somebody typing
+     * and wrong for a replay. The primary key is what tells the two apart, so
+     * the second offer of THIS row collides on it and `sendGlucose` reads the
+     * 23505 for what it is.
+     */
+    const rowId = newRowId();
     let out: WriteOutcome;
     try {
       // `.select('id')` and a counted outcome. An insert PostgREST narrows to
@@ -335,7 +357,7 @@ export function useGlucose(personId?: string): GlucoseData {
       // which is the bug `remove` and `setSharedFlag` were already written
       // against.
       const { data, error } = await supabase.from('glucose_readings').insert({
-        client_id: target, taken_at: taken, mmol_l: mmol, external_id: null, source: 'manual',
+        id: rowId, client_id: target, taken_at: taken, mmol_l: mmol, external_id: null, source: 'manual',
       }).select('id');
       out = classifyWrite(error as any, data ? data.length : 0);
     } catch { out = 'unsent'; }
@@ -345,7 +367,9 @@ export function useGlucose(personId?: string): GlucoseData {
     // says it was not saved.
     if (out === 'refused') return false;
     if (!outbox) return false;
-    const { result } = await outbox.enqueue('glucose', { mmol, at: taken });
+    // The SAME id the insert above offered. A different one here would be a
+    // different row and the replay would duplicate exactly as before.
+    const { result } = await outbox.enqueue('glucose', { id: rowId, mmol, at: taken });
     if (result !== 'queued') { say(notKeptNote('reading', result === 'full' ? 'full' : 'unavailable')); return false; }
     say(keptOnPhoneNote('reading'));
     return true;

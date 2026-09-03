@@ -132,8 +132,10 @@ function walk(dir, out = []) {
 }
 
 const findings = [];
+let scanned = 0;
 for (const root of ROOTS) {
   for (const file of walk(join(ROOT, root))) {
+    scanned++;
     const rel = relative(ROOT, file);
     readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
       const at = line.search(COLOR_PROP);
@@ -151,6 +153,20 @@ for (const root of ROOTS) {
       findings.push(`${rel}:${i + 1}  color: … ${m[0]} — a status colour used as text ink`);
     });
   }
+}
+
+/* ── the empty-set guard for rule 1 ────────────────────────────────────────
+ *
+ * `app` and `src/ui` held 324 source files the day this was added. A run that
+ * reads a handful of them has been pointed somewhere that is not the repository
+ * root, and the sentence this file prints at the end — "no status colour is
+ * used as text ink" — would then be a claim about a tree it never opened. That
+ * sentence is quoted as evidence, so it has to be earned.
+ */
+if (scanned < 150) {
+  console.error(`check-contrast: only found ${scanned} source files under ${ROOTS.join(', ')}, `
+    + 'which cannot be right. Run from the repository root. Refusing to pass.');
+  process.exit(1);
 }
 
 /* ── rule 2: the web console's CSS, measured ───────────────────────────────
@@ -208,20 +224,54 @@ function ratio(a, b) {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
-/** The custom properties in one `:root` / `:root[data-theme="light"]` block.
- *  Only hex values are collected — `--ring` is an rgba() and is not a colour
- *  anything is drawn ON, so it has nothing to measure. */
-function blockVars(css, selector) {
-  const at = css.indexOf(selector);
-  if (at < 0) return null;
-  const open = css.indexOf('{', at);
-  const close = css.indexOf('\n}', open);
-  if (open < 0 || close < 0) return null;
-  const vars = {};
-  for (const m of css.slice(open, close).matchAll(/--([a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;/g)) {
-    vars[m[1]] = m[2];
+/**
+ * EVERY `:root` block in the file, in source order, with the line it starts on
+ * and the `@media` condition it sits inside.
+ *
+ * It used to be one `indexOf(selector)` per block, which found the FIRST `:root`
+ * and the FIRST `:root[data-theme="light"]` and stopped. globals.css has four:
+ * the dark palette at :18, the daylight one at :86, and two more inside media
+ * queries at :203 and :267 that nothing measured. The one at :203 is the print
+ * palette, and it is the interesting kind of unmeasured — it overrides `--bg`,
+ * `--surface`, `--surface2` and `--rail` to white and `--ink*` to near-black,
+ * and leaves `--surface3` and every status colour at the DARK screen value. See
+ * the merge below for why that is the shape of the defect rather than a
+ * curiosity.
+ *
+ * Brace-counted rather than cut at the first `\n}`, because a `:root` inside an
+ * `@media` block is indented and its closing brace is not at column 0.
+ *
+ * Only hex values are collected — `--ring` is an rgba() and is not a colour
+ * anything is drawn ON, so it has nothing to measure.
+ */
+function rootBlocks(css) {
+  const out = [];
+  const re = /(^|\n)\s*(:root[^{\n]*)\{/g;
+  let m;
+  while ((m = re.exec(css))) {
+    const open = css.indexOf('{', m.index + m[0].length - 1);
+    let depth = 0, close = -1;
+    for (let i = open; i < css.length; i++) {
+      if (css[i] === '{') depth++;
+      else if (css[i] === '}') { depth--; if (!depth) { close = i; break; } }
+    }
+    if (close < 0) continue;
+    const vars = {};
+    for (const v of css.slice(open, close).matchAll(/--([a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;/g)) {
+      vars[v[1]] = v[2];
+    }
+    const before = css.slice(0, m.index);
+    const media = [...before.matchAll(/@media([^{]*)\{/g)].pop();
+    out.push({
+      selector: m[2].trim(),
+      line: before.split('\n').length + (m[1] ? 1 : 0),
+      vars,
+      // Only a guess at which @media it is inside — good enough to NAME the
+      // block in a failure message, which is all it is used for.
+      media: media && media.index > css.lastIndexOf('\n}\n', m.index) ? `@media${media[1].trim()}` : null,
+    });
   }
-  return vars;
+  return out;
 }
 
 /** Backgrounds a token can be drawn on. --rail is in here because the nav sits
@@ -236,33 +286,107 @@ const MARKS_CSS = ['good', 'warn', 'serious', 'crit', 'brand'];
 const AA_TEXT = 4.5;
 const AA_MARK = 3;
 
-for (const [selector, theme] of [[':root {', 'dark'], [':root[data-theme="light"]', 'light']]) {
-  let css;
-  try { css = readFileSync(join(ROOT, CSS), 'utf8'); } catch { break; }
-  const v = blockVars(css, selector);
-  if (!v) { findings.push(`${CSS}  the ${theme} block could not be read — nothing was measured`); continue; }
-  for (const [names, floor, kind] of [[INKS, AA_TEXT, 'as text'], [MARKS_CSS, AA_MARK, 'as a mark']]) {
-    for (const name of names) {
-      if (!v[name]) continue;
-      for (const g of GROUNDS) {
-        if (!v[g]) continue;
-        const r = ratio(v[name], v[g]);
-        if (r != null && r < floor) {
-          findings.push(
-            `${CSS}  ${theme}: --${name} ${v[name]} on --${g} ${v[g]} is ${r.toFixed(2)}:1 ${kind}, under ${floor}`,
-          );
+/**
+ * The backlog in the console's stylesheet, and why each is still standing.
+ *
+ * A RATCHET, not an exemption: the list may shrink and may never grow. Every
+ * entry is in `studio-web/app/globals.css`, which this lane does not write.
+ */
+const KNOWN_CSS = new Map([
+  // The print palette merged over the DARK screen palette. The daylight one
+  // prints clean — its status colours were already picked against white — so
+  // this is precisely "somebody on the default dark theme pressed Print".
+  ['print over dark: --ink #111111 on --surface3 #1b3229 is 1.38:1 as text, under 4.5', 'print does not override --surface3'],
+  ['print over dark: --ink2 #333333 on --surface3 #1b3229 is 1.08:1 as text, under 4.5', 'print does not override --surface3'],
+  ['print over dark: --ink3 #555555 on --surface3 #1b3229 is 1.84:1 as text, under 4.5', 'print does not override --surface3'],
+  ['print over dark: --brand #111111 on --surface3 #1b3229 is 1.38:1 as a mark, under 3', 'print does not override --surface3'],
+  ['print over dark: --warn #fab219 on --bg #ffffff is 1.83:1 as a mark, under 3', 'print leaves the four status colours at their dark-screen values'],
+  ['print over dark: --warn #fab219 on --surface #ffffff is 1.83:1 as a mark, under 3', 'same'],
+  ['print over dark: --warn #fab219 on --surface2 #ffffff is 1.83:1 as a mark, under 3', 'same'],
+  ['print over dark: --warn #fab219 on --rail #ffffff is 1.83:1 as a mark, under 3', 'same'],
+  ['print over dark: --serious #ec835a on --bg #ffffff is 2.64:1 as a mark, under 3', 'same'],
+  ['print over dark: --serious #ec835a on --surface #ffffff is 2.64:1 as a mark, under 3', 'same'],
+  ['print over dark: --serious #ec835a on --surface2 #ffffff is 2.64:1 as a mark, under 3', 'same'],
+  ['print over dark: --serious #ec835a on --rail #ffffff is 2.64:1 as a mark, under 3', 'same'],
+]);
+const cssStanding = new Set();
+
+let css = null;
+try { css = readFileSync(join(ROOT, CSS), 'utf8'); } catch { css = null; }
+if (css == null) {
+  // NOT a `break`. This used to swallow a missing stylesheet and go on to print
+  // "every ink and mark in studio-web/app/globals.css clears its floor", which
+  // is a sentence about a file it had failed to open.
+  findings.push(`${CSS}  could not be read — the console's palette was not measured at all`);
+} else {
+  const blocks = rootBlocks(css);
+  const base = {
+    dark: blocks.find((b) => b.selector === ':root' && !b.media)?.vars,
+    light: blocks.find((b) => b.selector.includes('data-theme="light"') && !b.media)?.vars,
+  };
+  for (const theme of ['dark', 'light']) {
+    if (!base[theme]) findings.push(`${CSS}  the ${theme} block could not be read — nothing was measured`);
+  }
+  if (blocks.length < 2) findings.push(`${CSS}  found ${blocks.length} :root block(s) — the stylesheet has been reshaped and this check can no longer read it`);
+
+  /**
+   * Every palette the console can actually render in: the two screen bases, and
+   * each override block MERGED OVER each base.
+   *
+   * The merge is the point. A block inside `@media print` that sets `--bg` to
+   * white and stops does not get a fresh palette — it gets the screen's, with
+   * its own values on top. Half a palette overridden is the shape the defect
+   * takes: white grounds under status colours picked for a near-black one.
+   */
+  const palettes = [];
+  for (const theme of ['dark', 'light']) {
+    if (!base[theme]) continue;
+    palettes.push({ name: theme, vars: base[theme], line: blocks.find((b) => b.vars === base[theme]).line });
+    for (const b of blocks) {
+      if (b.vars === base.dark || b.vars === base.light) continue;
+      if (!Object.keys(b.vars).length) continue;   // a block that sets no colour
+      const label = (b.media ?? b.selector).replace(/@media\s*/, '').replace(/[()]/g, '').split(':')[0].trim();
+      palettes.push({ name: `${label} over ${theme}`, vars: { ...base[theme], ...b.vars }, line: b.line });
+    }
+  }
+
+  for (const p of palettes) {
+    const v = p.vars;
+    for (const [names, floor, kind] of [[INKS, AA_TEXT, 'as text'], [MARKS_CSS, AA_MARK, 'as a mark']]) {
+      for (const name of names) {
+        if (!v[name]) continue;
+        for (const g of GROUNDS) {
+          if (!v[g]) continue;
+          const r = ratio(v[name], v[g]);
+          if (r == null || r >= floor) continue;
+          const what = `${p.name}: --${name} ${v[name]} on --${g} ${v[g]} is ${r.toFixed(2)}:1 ${kind}, under ${floor}`;
+          if (KNOWN_CSS.has(what)) { cssStanding.add(what); continue; }
+          findings.push(`${CSS}:${p.line}  ${what}`);
         }
       }
     }
-  }
-  // --brand-ink is the label written ON --brand, so it is measured against that
-  // one ground rather than the page's. This is the check tokens.ts does in code
-  // with brandInkFor(); here the pair is typed by hand and nothing resolved it.
-  if (v['brand-ink'] && v.brand) {
-    const r = ratio(v['brand-ink'], v.brand);
-    if (r != null && r < AA_TEXT) {
-      findings.push(`${CSS}  ${theme}: --brand-ink ${v['brand-ink']} on --brand ${v.brand} is ${r.toFixed(2)}:1, under ${AA_TEXT}`);
+    // --brand-ink is the label written ON --brand, so it is measured against
+    // that one ground rather than the page's. This is the check tokens.ts does
+    // in code with brandInkFor(); here the pair is typed by hand and nothing
+    // resolved it.
+    if (v['brand-ink'] && v.brand) {
+      const r = ratio(v['brand-ink'], v.brand);
+      if (r != null && r < AA_TEXT) {
+        const what = `${p.name}: --brand-ink ${v['brand-ink']} on --brand ${v.brand} is ${r.toFixed(2)}:1, under ${AA_TEXT}`;
+        if (KNOWN_CSS.has(what)) cssStanding.add(what);
+        else findings.push(`${CSS}:${p.line}  ${what}`);
+      }
     }
+  }
+
+  // A KNOWN_CSS entry that no longer reproduces. Reported so the backlog comes
+  // down with the work rather than sitting there as a licence.
+  const staleCss = [...KNOWN_CSS.keys()].filter((k) => !cssStanding.has(k));
+  if (!findings.length && staleCss.length) {
+    console.error('KNOWN_CSS is out of date — the ratchet only counts down if somebody turns it:\n');
+    for (const k of staleCss) console.error(`  ${k}`);
+    console.error('\nDelete those lines from KNOWN_CSS in scripts/check-contrast.mjs.\n');
+    process.exit(1);
   }
 }
 
@@ -290,6 +414,18 @@ if (findings.length) {
   process.exit(1);
 }
 console.log(
-  'contrast ok — no status colour is used as text ink, and every ink and mark in'
-  + `\n${CSS} clears its floor on all ${GROUNDS.length} grounds`,
+  `contrast ok — ${scanned} source files under ${ROOTS.join(' and ')} use no status colour as text`
+  + `\nink, and every ink and mark in ${CSS} clears its floor on all ${GROUNDS.length} grounds`
+  + `${cssStanding.size ? `, except the ${cssStanding.size} on the ratchet below` : ''}`,
 );
+if (cssStanding.size) {
+  console.log('\nStanding offences (ratcheted, they may not grow):');
+  for (const k of cssStanding) console.log(`  ${k}`);
+  console.log('\nAll twelve are one block: `@media print { :root { … } }` at '
+    + `${CSS}:203. It repaints the grounds white and the inks near-black and stops there —`
+    + '\n--surface3 and the four status colours keep their DARK screen values, so a reader on'
+    + '\nthe default theme who prints /close or /accounting gets amber marks at 1.83:1 and any'
+    + '\n--surface3 panel at 1.08:1, on paper, in a document somebody signs. The daylight'
+    + '\npalette prints clean. Fix: give the print block its own --surface3, --warn, --serious,'
+    + '\n--good and --crit, taken from the light block, which already clears both floors.');
+}

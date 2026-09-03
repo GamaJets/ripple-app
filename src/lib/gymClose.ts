@@ -44,6 +44,7 @@
 
 import { assertWrote } from './wroteRows';
 import { capLimit } from './rowCap';
+import { readByIds } from './idLookup';
 import type { MonthClose } from './monthEnd';
 
 type Queryable = { from: (table: string) => any };
@@ -336,12 +337,32 @@ function numOrNull(v: unknown): number | null {
   return v == null || !Number.isFinite(Number(v)) ? null : Number(v);
 }
 
+/**
+ * Who closed and who reopened each month, by id.
+ *
+ * CHUNKED, about the REQUEST LINE and not the row ceiling. `fetchCloses` reads
+ * up to `capLimit()` rows and this is handed TWO ids off each of them, so up to
+ * two thousand uuids arrive; at about 39 bytes each inside `in.("…","…")` that
+ * is a ~78KB query string against the 8KB request line nginx and most CDNs
+ * enforce by default. The refusal is a **414**, supabase-js does not reject on
+ * it, and it arrives as `data: null`.
+ *
+ * no-error-ok (about the ROW ceiling — one row per id, 150 ids a chunk): an
+ * unreadable name renders as a dash beside the close; the close itself is still
+ * recorded. What that does not cover is every name going at once on a month-end
+ * history, which is the record an auditor reads to see who signed off what.
+ */
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name renders as a dash beside the close; the close itself is still recorded
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
+  let rows: any[] = [];
+  try {
+    rows = await readByIds<any>(
+      ids,
+      (chunk, from, to) => sb.from('profiles').select('id, full_name')
+        .in('id', chunk).order('id', { ascending: true }).range(from, to),
+      'the names of the people who closed these months',
+    );
+  } catch { return new Map(); }
+  return new Map(rows
     .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
     .filter(([, n]: [string, string]) => !!n));
 }

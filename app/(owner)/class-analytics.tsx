@@ -49,12 +49,21 @@ import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 import { supabase } from '../../src/lib/supabase';
 import { money } from '../../src/lib/gymRecord';
+// The inverse of the `readMinorAmount` that `parseRate` reads this screen's
+// rate field back with: minor units → the major-unit string a person types,
+// with the number of places taken from the currency rather than assumed to be
+// two. A yen has none and a Kuwaiti dinar has three.
+import { majorFromMinor } from '../../src/lib/coachMoney';
 import {
   fetchTrainerPay, saveTrainerPay, fetchClassPay, addClassPay,
   classPayAmount, classPayBlocker, parseRate, payRateBlocker,
   CLASS_PAY_LABEL,
   type PayIndex, type ClassPayLine, type ClassPayKind,
 } from '../../src/lib/gymPay';
+// `tenants.timezone`, parsed, with a failed read kept apart from a gym that
+// has not set one. The tenant context does not carry the zone, and this screen
+// needs nothing else off the gym row.
+import { fetchGymZone } from '../../src/lib/gymZone';
 // The console's own month boundary, so "This month" on the phone and the
 // August run on the laptop are the same period rather than two numbers under
 // one label. Local midnight, not UTC's — see the header of monthEnd.ts.
@@ -146,18 +155,46 @@ function Bar({ t, label, note, pct, dim }: { t: Theme; label: string; note: stri
  */
 function RateRow({ t, existing, busy, cur, onSave, onCancel }: {
   t: Theme;
-  existing: { classRateCents: number | null; classPayKind: ClassPayKind | null } | null;
+  existing: { classRateCents: number | null; classPayKind: ClassPayKind | null; currency: string | null } | null;
   busy: boolean; cur: string;
   onSave: (amount: string, kind: ClassPayKind | '') => void;
   onCancel: () => void;
 }) {
+  /**
+   * The stored rate is in a DIFFERENT money from the one this box is in.
+   *
+   * `TrainerPay.currency` is never inherited from `tenants.currency` at read
+   * time — src/lib/gymPay.ts says why in writing: a gym that changes its
+   * currency must not retroactively re-denominate what it agreed to pay
+   * somebody. So a gym that switched from AED to GBP still holds a coach's rate
+   * in AED, and this box, which is labelled `cur` and whose contents `saveRate`
+   * parses and stores as `cur`, has no honest number to start from. It starts
+   * empty and says so, rather than showing 600 under a "GBP" label because the
+   * digits happen to be the same.
+   */
+  const otherMoney = !!existing?.currency && existing.currency !== cur && existing.classRateCents != null;
   const [amount, setAmount] = useState(
-    existing?.classRateCents == null ? '' : (existing.classRateCents / 100).toFixed(2),
+    // NOT `cents / 100`. The factor is a property of the currency: a yen has no
+    // minor unit, so a ¥5,000 class rate is stored as 5000 and was pre-filled
+    // here as "50.00" — the coach's rate rewritten to a hundredth of itself the
+    // moment the owner opened the editor and pressed Save. A Kuwaiti dinar has
+    // 1000 fils, so KWD 12.340 was shown as "123.40" and saved back as ten
+    // times the agreed rate. `majorFromMinor` takes the places from the
+    // currency and is the exact inverse of the `readMinorAmount` inside
+    // `parseRate` that reads this field back. src/lib/coachMoney.ts.
+    otherMoney ? '' : majorFromMinor(existing?.classRateCents, cur),
   );
-  const [kind, setKind] = useState<ClassPayKind | ''>(existing?.classPayKind ?? '');
+  const [kind, setKind] = useState<ClassPayKind | ''>(otherMoney ? '' : (existing?.classPayKind ?? ''));
 
   return (
     <View style={{ marginTop: sp.md }}>
+      {otherMoney ? (
+        <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+          {`This coach's rate is recorded in ${existing!.currency}, and this gym now works in ${cur}. `
+           + `The old amount is not shown here because it is not an amount of ${cur} — typing a new one `
+           + `replaces the ${existing!.currency} rate with a ${cur} one, and leaving this alone changes nothing.`}
+        </Flag>
+      ) : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, alignSelf: 'flex-start' }}>
         <Text style={{ ...ty.label, color: t.ink3 }}>{cur}</Text>
         <TextInput
@@ -271,7 +308,35 @@ export default function OwnerClassAnalytics() {
     classSummary(from, to)
       // The stamp moves on a read that LANDED. A refused one leaves it where it
       // was, because what is on screen is still the earlier read's.
-      .then((r) => { if (on) { setRows(r); rowsRange.current = range; setReadFailed(false); setAttendanceAt(Date.now()); } })
+      //
+      // ── null is a FAILED read, and it used to be filed as a blank screen ──
+      //
+      // `classSummary` never rejects. Read its body: the whole Supabase branch
+      // sits inside a `try { … } catch { return null }`, and it returns null
+      // for a PostgREST error, for a read that came back at the row cap, and
+      // for a shape it did not expect. So `.catch` below was unreachable,
+      // `readFailed` was never true, and every one of those three arrived here
+      // as `setRows(null)` with the failure flag CLEARED — which
+      // `readState(null, false)` calls 'loading'.
+      //
+      // The effect was that an owner whose payroll read was refused by RLS, or
+      // whose gym crossed a thousand classes in the Season range, sat looking
+      // at "Reading the register…" with no spinner and no further read coming.
+      // The two branches this file wrote to explain both cases — "This range
+      // could not be read" and `staleNote('register')` — could not be reached
+      // from any state the screen could get into.
+      //
+      // A null therefore raises `readFailed` and does NOT touch `rows`: on a
+      // first read that leaves 'failed' (nothing has ever landed, and the
+      // sentence says it is not an empty range), and on a refresh over rows
+      // already held it leaves 'stale' (the payroll table stays, labelled).
+      // That is exactly what src/lib/staleRead.ts is for, and this screen has
+      // been importing it without ever entering two of its four states.
+      .then((r) => {
+        if (!on) return;
+        if (r == null) { setReadFailed(true); return; }
+        setRows(r); rowsRange.current = range; setReadFailed(false); setAttendanceAt(Date.now());
+      })
       // A bare .then left a rejection unhandled and the screen showing whatever
       // it had, silently. The rows are now kept and LABELLED instead: a refresh
       // fails for reasons that say nothing about the register, and a coach's
@@ -300,7 +365,22 @@ export default function OwnerClassAnalytics() {
       fetchTrainerPay(supabase, tenantId)
         .then((p) => { if (on) setPay(p); })
         .catch((e) => { reportError('classAnalytics.trainerPay', e); if (on) setPay(null); throw e; }),
-      fetchClassPay(supabase, tenantId)
+      // The gym's own clock, read first, because `fetchClassPay` DATES every
+      // line it returns and cannot re-date them afterwards. Nothing on this
+      // screen renders `taughtOn` — `already` dedupes by class id and `queued`
+      // counts and sums — so passing the zone changes no pixel here today.
+      // It is passed anyway, and the parameter is required rather than
+      // optional, because the alternative is what /payroll did for as long as
+      // it was optional: take the reader's clock by saying nothing, and put a
+      // coach on the wrong month's run. A screen that starts printing these
+      // dates should not have to discover the fallback the way that one did.
+      //
+      // `fetchGymZone` reports a refused read as no zone rather than throwing,
+      // which is right here: a gym whose timezone could not be read still has
+      // classes to queue, and the lines fall back to the reader's day exactly
+      // as a gym that has set none does.
+      fetchGymZone(supabase, tenantId)
+        .then((z) => fetchClassPay(supabase, tenantId, z.zone))
         .then((p) => { if (on) setPaid(p); })
         .catch((e) => { reportError('classAnalytics.classPay', e); if (on) setPaid(null); throw e; }),
     ])

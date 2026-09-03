@@ -167,37 +167,65 @@ export default function OwnerSettings() {
   const [tenantAt, setTenantAt] = useState<number | null>(null);
   const [reloading, setReloading] = useState(false);
 
-  const readFacts = useCallback(async () => {
-    if (!USE_SUPABASE) { setFacts({ waiting: null, coOwners: null, requestedAt: null, selfRead: false }); return; }
+  /**
+   * Reads the three facts AND HANDS THEM BACK.
+   *
+   * It used to write them into state and return nothing, and the two deletion
+   * flows below both called it and then announced their own outcome without
+   * consulting it. The evidence was fetched and thrown away — see the note on
+   * `withdraw`. Returning the object is what lets those two say what the
+   * server actually holds rather than what the button hoped it would.
+   */
+  const readFacts = useCallback(async (): Promise<OwnerFacts> => {
+    const unread: OwnerFacts = { waiting: null, coOwners: null, requestedAt: null, selfRead: false };
+    if (!USE_SUPABASE) { setFacts(unread); return unread; }
     let uid: string | null = null;
     try {
       const { data: a } = await supabase.auth.getUser();
       uid = a?.user?.id ?? null;
     } catch (e) { reportError('ownerSettings.auth', e); }
-    if (!uid) { setFacts({ waiting: null, coOwners: null, requestedAt: null, selfRead: false }); return; }
+    if (!uid) { setFacts(unread); return unread; }
     const me = uid;
 
     // The three reads fail independently. A gym that cannot read its own
     // owner roster still has to be told how many people are waiting on it.
     const [q, o, p] = await Promise.allSettled([
-      // `pending_deletions` is security_invoker and scoped to the caller's own
-      // gym by RLS — no tenant filter here, on purpose. See deletions.tsx.
-      supabase.from('pending_deletions').select('subject_id'),
+      // COUNTED BY THE SERVER, and the exclusion of self is a `neq` rather
+      // than a filter afterwards.
+      //
+      // Both of these were bare `.select()` with no bound, and PostgREST caps
+      // an unbounded read at a thousand rows in silence (src/lib/rowCap.ts).
+      // The two numbers they produce are then stated as fact in a dialog about
+      // permanent erasure: "N people are waiting to be erased at your gym" and
+      // "N other owners would remain and could action them". A count taken over
+      // a truncated read is not a smaller number, it is a wrong one, and
+      // `deletions.tsx` reads this same view under a comment saying that
+      // "implausible" is not a good enough reason to leave a count unprobed.
+      //
+      // `head: true` with an exact count answers both without a row cap
+      // existing at all: the server counts and sends no rows, so there is
+      // nothing to truncate. `pending_deletions` is security_invoker and scoped
+      // to the caller's own gym by RLS — no tenant filter here, on purpose.
+      supabase.from('pending_deletions').select('subject_id', { count: 'exact', head: true }).neq('subject_id', me),
       // `profiles_owner_r` scopes this to the caller's tenant.
-      supabase.from('profiles').select('id').eq('role', 'owner'),
+      supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'owner').neq('id', me),
       supabase.from('profiles').select('deletion_requested_at').eq('id', me).maybeSingle(),
     ]);
 
+    // `count` and not `data.length` — `head: true` returns no rows at all, so
+    // a length here would be a confident nought over a gym with a queue. A
+    // null count from a settled read is still "not known" and stays null,
+    // which the copy below already distinguishes from zero.
     let waiting: number | null = null;
     if (q.status === 'fulfilled' && !q.value.error) {
-      waiting = (q.value.data ?? []).filter((r: any) => String(r.subject_id) !== me).length;
+      waiting = (q.value as { count?: number | null }).count ?? null;
     } else {
       reportError('ownerSettings.queue', q.status === 'rejected' ? q.reason : q.value.error);
     }
 
     let coOwners: number | null = null;
     if (o.status === 'fulfilled' && !o.value.error) {
-      coOwners = (o.value.data ?? []).filter((r: any) => String(r.id) !== me).length;
+      coOwners = (o.value as { count?: number | null }).count ?? null;
     } else {
       reportError('ownerSettings.owners', o.status === 'rejected' ? o.reason : o.value.error);
     }
@@ -211,13 +239,15 @@ export default function OwnerSettings() {
       reportError('ownerSettings.self', p.status === 'rejected' ? p.reason : p.value.error);
     }
 
-    setFacts({ waiting, coOwners, requestedAt, selfRead });
+    const read: OwnerFacts = { waiting, coOwners, requestedAt, selfRead };
+    setFacts(read);
+    return read;
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<OwnerFacts> => {
     setReloading(true);
     try {
-      await readFacts();
+      return await readFacts();
       // Stamped once, at the end, because the three reads land together as far
       // as this screen is concerned — `readFacts` settles all three and writes
       // one object. A read that failed leaves its own field null and the stamp
@@ -301,9 +331,27 @@ export default function OwnerSettings() {
         Alert.alert('Not requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again.');
         return;
       }
-      await load();
+      // The re-read is CONSULTED, not merely performed.
+      //
+      // `requestAccountDeletion` returns `!error`, and the RPC it calls is
+      // `returns void` ending in an UPDATE with `and deletion_requested_at is
+      // null` on it — so a request that matched no row comes back as a plain
+      // success. This screen then re-read `deletion_requested_at`, which is the
+      // exact flag the write was supposed to set, and announced the outcome
+      // without looking at it. The evidence was fetched and thrown away.
+      const after = await load();
+      if (after.selfRead && after.requestedAt == null) {
+        Alert.alert(
+          'Not requested',
+          'The server accepted that request and then reported no deletion pending on your account, so nothing has been recorded. Nothing has been deleted either. Try again, and if it keeps happening email support@repplefitness.com from the address on your account.',
+        );
+        return;
+      }
       Alert.alert(
         'Deletion requested',
+        (after.selfRead
+          ? ''
+          : 'Your account could not be re-read afterwards, so this could not confirm the request is now pending — check Deletion requests before relying on it.\n\n') +
         'Your request is recorded and now appears in Deletion requests alongside everyone else waiting. Only a gym owner can action it — which, while you are still signed in, means you.\n\nStaying signed in lets you carry it out yourself. Signing out leaves it for another owner.',
         [
           { text: 'Stay signed in', style: 'cancel' },
@@ -365,8 +413,26 @@ export default function OwnerSettings() {
               Alert.alert('Not withdrawn', 'Your deletion request is still in place — nothing has changed. Check your connection and try again, or email support@repplefitness.com from the address on your account.');
               return;
             }
-            await load();
-            Alert.alert('Request withdrawn', 'Your account will be kept and nothing has been deleted.');
+            // Consulted rather than assumed, exactly as `run` above now does.
+            // `withdrawAccountDeletion` is documented as returning true "if the
+            // flag was cleared" and in fact returns `!error` over a
+            // `returns void` RPC. Telling somebody their erasure request is
+            // withdrawn when it is still open and still actionable by any
+            // co-owner is the worst wrong sentence on this screen.
+            const after = await load();
+            if (after.selfRead && after.requestedAt != null) {
+              Alert.alert(
+                'Not withdrawn',
+                'The server accepted that, and your account still shows a deletion request pending — so it has NOT been withdrawn and any owner can still action it. Try again, or email support@repplefitness.com from the address on your account.',
+              );
+              return;
+            }
+            Alert.alert(
+              'Request withdrawn',
+              after.selfRead
+                ? 'Your account will be kept and nothing has been deleted.'
+                : 'Your account could not be re-read afterwards, so this could not confirm the request is gone. Nothing has been deleted — check this screen again before relying on it.',
+            );
           } finally { setWithdrawing(false); }
         } },
       ],

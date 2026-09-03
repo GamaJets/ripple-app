@@ -333,6 +333,17 @@ export function cancelOptions(o: {
 }): CancelOption[] {
   const now = o.now ?? Date.now();
   const notice = noticeHoursOf(o.policy);
+  // Whether there is a session to talk about at all. The caller hands this an
+  // empty string when the arrangement has nothing written out yet, and
+  // `insideNoticeWindow` answers false for an unparseable instant BY DESIGN —
+  // so the verdict came back 'in-time' and the sheet printed "Frees this one
+  // only … This is more than 24 hours away, so no fee applies", plus "Affects
+  // 1 booked session", about an hour that does not exist. The fee sentence is
+  // the dangerous one: a specific claim about the member's money over a session
+  // with no date. `seriesDetail` below has always handled the same missing
+  // value correctly; this half did not.
+  const hasNext = typeof o.startsAt === 'string' && o.startsAt.trim().length > 0
+    && Number.isFinite(Date.parse(o.startsAt));
   const inside = insideNoticeWindow(o.startsAt, notice, now);
   const verdict = lateCancelFee(o.policy, inside);
 
@@ -349,6 +360,21 @@ export function cancelOptions(o: {
   // arrangement two months out starts pricing sessions nobody cancelled.
   const later = Math.max(0, o.upcoming - 1);
 
+  const series: CancelOption = {
+    scope: 'series',
+    label: 'End the standing appointment',
+    detail: seriesDetail(later, o.startsAt),
+    charges: false,
+    verdict: null,
+    affects: later,
+  };
+
+  // No next occurrence, no occurrence option. Withheld rather than reworded:
+  // every field on it — the label, the fee verdict, the count of one — is a
+  // statement about a specific session, and there is none. The caller says so
+  // in its own words instead. See `cancelOptions` callers for that sentence.
+  if (!hasNext) return [series];
+
   return [
     {
       scope: 'occurrence',
@@ -358,14 +384,7 @@ export function cancelOptions(o: {
       verdict,
       affects: 1,
     },
-    {
-      scope: 'series',
-      label: 'End the standing appointment',
-      detail: seriesDetail(later, o.startsAt),
-      charges: false,
-      verdict: null,
-      affects: later,
-    },
+    series,
   ];
 }
 

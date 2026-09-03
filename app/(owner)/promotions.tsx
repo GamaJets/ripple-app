@@ -46,6 +46,13 @@ import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
+// `all_member_ids()` comes back through PostgREST and stops at the same ceiling
+// a table read does, so it is capped and probed like one. See `pushToMembers`.
+import { capLimit, capped } from '../../src/lib/rowCap';
+// The sentences an author reads after a fan-out. Written FROM this screen's own
+// defect — see the header of `deliverySummary` — so the report is handed over
+// in its shape rather than reworded here.
+import { deliverySummary, type DeliveryReport } from '../../src/lib/notifyCopy';
 
 export default function Promotions() {
   const t = useTheme();
@@ -72,8 +79,48 @@ export default function Promotions() {
   // to return ids.length and report it as "Sent to N members" while sendPush
   // swallowed every failure — so an undeployed function, or members with no
   // push token, still read as N delivered.
-  const pushToMembers = async (body: string): Promise<{ ok: boolean; queued: number; error?: string }> => {
-    if (!USE_SUPABASE) return { ok: false, queued: 0, error: 'Not connected to the server.' };
+  //
+  // ── And it went on returning ids.length ───────────────────────────────────
+  //
+  // `queued` was still the length of the list this screen HANDED OVER. The
+  // send stopped being assumed; the count never did. Three separate facts the
+  // server hands back were being dropped on the floor:
+  //
+  //   · `recorded` — the number `notify_users()` says it actually wrote. It is
+  //     lower than `ids.length` whenever RLS drops a recipient or a member has
+  //     left between the read and the tap, and `ok` stays true through all of
+  //     it;
+  //   · `recordedAtCap` — past two thousand members `recorded` is a FLOOR, so
+  //     a chain gym announcing an offer to 2,400 people was told a confident
+  //     "2,000" with four hundred people neither written to nor counted;
+  //   · `partial` — send-push could only part-read `push_tokens`, so however
+  //     many handsets lit up is a floor too.
+  //
+  // All three are the same mistake as the original one and none of them can be
+  // said by a number this screen computed for itself. `deliverySummary` in
+  // src/lib/notifyCopy.ts already writes every one of those sentences — its own
+  // header names THIS SCREEN as the scar it was written from — so the report is
+  // handed over in the shape it takes rather than reworded here for a fifth
+  // time. `readError` is kept beside it because a refused `all_member_ids()`
+  // has a server reason an owner can act on ("permission denied") and
+  // `recipients: null` can only say that something failed.
+  //
+  // `pushTitle` is a parameter and not `title` off the form. The Push button on
+  // an existing code below shares this function, and it was sending the members
+  // of the gym a banner headed with whatever half-typed words were sitting in
+  // the new-promotion title box — over a body about a completely different
+  // code. A push is read on a lock screen in two seconds and the heading is
+  // most of what is read.
+  const pushToMembers = async (
+    body: string,
+    pushTitle: string,
+  ): Promise<{ delivery: DeliveryReport; readError: string | null }> => {
+    if (!USE_SUPABASE) {
+      return {
+        delivery: { recipients: null, recorded: null, push: 'off' },
+        readError: 'Not connected to the server.',
+      };
+    }
     try {
       // `error` is read, not just `data`. supabase-js resolves on a database
       // error, so an RLS refusal or a missing function arrived here as
@@ -82,21 +129,60 @@ export default function Promotions() {
       // describes, reached by a different route. The owner is told their gym
       // has no members rather than that the call was refused, so they stop
       // pushing offers instead of fixing the permission.
-      const { data, error } = await supabase.rpc('all_member_ids');
-      if (error) return { ok: false, queued: 0, error: error.message };
+      // CAPPED AND PROBED. An RPC returning a set comes back through PostgREST
+      // and stops at the same thousand-row ceiling a table read does, silently.
+      // The list this produces is both the recipient list and the number
+      // reported back as "queued to N members" — so at a gym over the ceiling
+      // the owner was told a confident figure that was neither everybody nor
+      // described as a prefix, and the members past it were never sent to with
+      // nothing anywhere saying so. `capLimit()` asks for one more than the cap
+      // so the truncation is detectable at all.
+      const { data, error } = await supabase.rpc('all_member_ids').limit(capLimit());
+      // `recipients: null` and not 0. A refused read is not a gym with no
+      // members, and `deliverySummary` writes two different sentences for the
+      // two — which is the whole reason it takes a nullable.
+      if (error) {
+        return { delivery: { recipients: null, recorded: null, push: 'off' }, readError: error.message };
+      }
       // all_member_ids() is `returns setof uuid` live, so PostgREST hands back
       // a plain array of id strings. Reading .user_id off a string gave
       // undefined for every member, filtered the list to nothing, and told the
       // owner "No members to push to yet" every single time — a push that could
       // never be sent, blamed on having no members. Both shapes are accepted
       // because an earlier deployment of this function returned table(user_id).
-      const ids = Array.isArray(data)
-        ? data.map((r: any) => (typeof r === 'string' ? r : r?.user_id)).filter(Boolean)
-        : [];
-      if (!ids.length) return { ok: false, queued: 0, error: 'No members to push to yet.' };
-      const res = await sendPushChecked(ids, title.trim() || 'A new offer', body, { route: '/(client)/explore' });
-      return { ok: res.ok, queued: ids.length, error: res.error };
-    } catch (e: any) { return { ok: false, queued: 0, error: e?.message || 'Could not reach the server.' }; }
+      const page = capped(Array.isArray(data) ? data : null);
+      const ids = page.rows
+        .map((r: any) => (typeof r === 'string' ? r : r?.user_id))
+        .filter(Boolean) as string[];
+      // A read that SUCCEEDED and found nobody. `recipients: 0` is the branch
+      // of `deliverySummary` that says there is nobody to notify yet, which is
+      // a different sentence from the refusal above and from a failed send.
+      if (!ids.length) {
+        return { delivery: { recipients: 0, recorded: 0, push: 'off' }, readError: null };
+      }
+      const res = await sendPushChecked(ids, pushTitle.trim() || 'A new offer', body, { route: '/(client)/explore' });
+      // The offer still goes out to everybody the read DID return — refusing
+      // would leave a gym past the ceiling unable to push at all, for ever,
+      // because it cannot make itself smaller. What changes is that the number
+      // stops being presented as everybody.
+      return {
+        delivery: {
+          recipients: ids.length,
+          recorded: res.recorded,
+          push: res.ok ? 'queued' : 'failed',
+          pushError: res.error ?? null,
+          pushPartial: res.partial === true,
+          recipientsTruncated: page.truncated,
+          recordedAtCap: res.recordedAtCap === true,
+        },
+        readError: null,
+      };
+    } catch (e: any) {
+      return {
+        delivery: { recipients: null, recorded: null, push: 'off' },
+        readError: e?.message || 'Could not reach the server.',
+      };
+    }
   };
 
   const create = async (push: boolean) => {
@@ -107,12 +193,20 @@ export default function Promotions() {
       const res = await addPromo(c, disc);
       if (!res.ok) { Alert.alert('Could not create', res.reason || 'Try a different code.'); return; }
       const body = (msg.trim() || `${disc}% off with code ${c}`);
-      const pushRes = push ? await pushToMembers(body) : null;
+      const pushRes = push ? await pushToMembers(body, title) : null;
       setTitle(''); setCode(''); setMsg('');
+      // One sentence about the code, then the server's own account of what
+      // reached anybody. Nothing here counts, compares or hedges: every figure
+      // in the second half is one `notify_users()` or send-push returned, and
+      // `deliverySummary` is what decides whether it may be stated as a total,
+      // as "at least", or not at all.
       Alert.alert('Promotion created',
         !pushRes ? `“${c}” created. Push it to members any time.`
-          : pushRes.ok ? `“${c}” created and queued to ${pushRes.queued} member${pushRes.queued === 1 ? '' : 's'}. Only members on a push-enabled build with notifications on will receive it.`
-          : `“${c}” created, but the push did not go out: ${pushRes.error || 'unknown error'}. You can push it again from the list below.`);
+          : [
+            `“${c}” created.`,
+            pushRes.readError ? `The member list could not be read: ${pushRes.readError}` : null,
+            deliverySummary(pushRes.delivery),
+          ].filter(Boolean).join(' '));
     } finally { setBusy(false); }
   };
 
@@ -201,9 +295,9 @@ export default function Promotions() {
         {/* ── new promotion ──────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="New Promotion" />
-          <TextInput value={title} onChangeText={setTitle} placeholder="Title — e.g. Summer Special" placeholderTextColor={t.ink3} style={inp} />
+          <TextInput value={title} onChangeText={setTitle} accessibilityLabel="What this promotion is called" placeholder="Title — e.g. Summer Special" placeholderTextColor={t.ink3} style={inp} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-            <TextInput value={code} onChangeText={setCode} placeholder="CODE" autoCapitalize="characters" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
+            <TextInput value={code} onChangeText={setCode} accessibilityLabel="The code a member types to claim it" placeholder="CODE" autoCapitalize="characters" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.sm }}>
               <Pressable onPress={() => setDisc((d) => Math.max(5, d - 5))} hitSlop={8} accessibilityRole="button" accessibilityLabel="Lower the discount"
                 style={{ paddingHorizontal: 13, paddingVertical: 11 }}>
@@ -217,7 +311,7 @@ export default function Promotions() {
             </View>
           </View>
           <View style={{ height: sp.sm }} />
-          <TextInput value={msg} onChangeText={setMsg} placeholder="Push message (optional)" placeholderTextColor={t.ink3} style={inp} />
+          <TextInput value={msg} onChangeText={setMsg} accessibilityLabel="The push message members receive, optional" placeholder="Push message (optional)" placeholderTextColor={t.ink3} style={inp} />
           <View style={{ height: sp.lg }} />
           {/* `disabled={busy}` on the old buttons, preserved: `Ghost` takes no
               disabled prop, so the pair is gated as a group rather than one of
@@ -285,7 +379,21 @@ export default function Promotions() {
                   an offer `redeem_promo` will refuse, which is worse than not
                   telling them about it. */}
               {p.active ? (
-                <Ghost label="Push" onPress={() => { const body = `${p.discountPct}% off with code ${p.code}`; pushToMembers(body).then((r) => Alert.alert(r.ok ? 'Queued' : 'Not sent', r.ok ? `Queued to ${r.queued} member${r.queued === 1 ? '' : 's'}.` : (r.error || 'The push did not go out.'))); }} />
+                <Ghost label="Push" onPress={() => {
+                  const body = `${p.discountPct}% off with code ${p.code}`;
+                  // The same report as the create path, from the same function,
+                  // said in the same words. This one had its own hand-written
+                  // pair of sentences over `r.queued` — the length of the list
+                  // handed over — so the second place an owner can push an offer
+                  // was making the claim the first one had been fixed of.
+                  void pushToMembers(body, `${p.code} — an offer from your gym`).then((r) => Alert.alert(
+                    'Push',
+                    [
+                      r.readError ? `The member list could not be read: ${r.readError}` : null,
+                      deliverySummary(r.delivery),
+                    ].filter(Boolean).join(' '),
+                  ));
+                }} />
               ) : null}
               {/* The boolean was discarded here too: a code the server refused
                   to delete vanished from the list and stayed redeemable. */}

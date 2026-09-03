@@ -47,6 +47,29 @@
 //    the check. Stripe is the backstop — it refuses to refund more than the
 //    charge — and the CHECK constraint in part 192 is the second one.
 //
+//    THAT BACKSTOP DOES NOT CATCH THE ORDINARY CASE, which is why there is now
+//    an idempotency key on the Stripe call. Stripe refuses a refund that takes
+//    the total PAST the charge; it accepts two half refunds of the same sale
+//    quite happily, because together they are exactly the charge. So a coach
+//    double-tapping Refund on a 100 sale for 50 used to make TWO refunds of 50
+//    — the client got the whole sale back, and both writes below computed
+//    `already + 50` from the same `already` they had each read a moment
+//    earlier, so this database recorded 50. The screen showed half of what had
+//    actually gone.
+//
+//    The key is derived from the state the refund was decided against —
+//    the table, the row, what was already refunded, and the amount asked for.
+//    A second request that read the SAME state produces the SAME key and
+//    Stripe replays its first answer instead of moving money again. A genuine
+//    second refund cannot collide with it: `refunded_cents` has moved by then,
+//    so `already` differs and the key differs with it. (Stripe holds a key for
+//    24 hours, which is longer than any window this races in.)
+//
+//    It also repairs the retry-after-a-lost-mirror case, and in the right
+//    direction: if the money went back and the row below did not record it, the
+//    coach's second attempt is the same key, and Stripe returns the first
+//    refund rather than making another.
+//
 // ── Whose money it is ─────────────────────────────────────────────────────
 //
 // The COACH's, on both models, and the note the app shows says which way it
@@ -185,6 +208,11 @@ Deno.serve(async (req) => {
   const blocked = refundBlocker(refundable);
   if (blocked) return json({ error: blocked }, 409);
 
+  // What this sale has already had back. Read here rather than after the Stripe
+  // call because it is half of the idempotency key below as well as half of the
+  // running total afterwards, and the two must be the same number: the key has
+  // to describe the state the refund was DECIDED against.
+  const already = refundable.refundedCents;
   const left = refundableCents(refundable);
   // Omitted means the whole of what is LEFT, never the whole of the original
   // price — a second refund on a partly refunded sale must not try to give back
@@ -210,7 +238,15 @@ Deno.serve(async (req) => {
       // without it on a destination charge, Repple refunds the client and the
       // coach keeps the money.
       reverse_transfer: true,
-    }, acctOpts);
+    }, {
+      ...acctOpts,
+      // The state this refund was decided against, so that a request deciding
+      // the same thing twice moves money once. See THE THREE WAYS A REFUND
+      // GOES WRONG, point 3, at the top of this file. `already` is in the key
+      // deliberately: it is what makes a genuine SECOND refund of the same
+      // amount a different call rather than a replay of the first.
+      idempotencyKey: `repple-refund:${table}:${id}:${already}:${asked}`,
+    });
   } catch (e) { return stripeError('refund', e); }
   if (!refund || refund.status === 'failed' || refund.status === 'canceled') {
     return json({ error: 'Stripe did not make that refund, so nothing has been given back and nothing here has changed.' }, 502);
@@ -221,7 +257,7 @@ Deno.serve(async (req) => {
   // Written from Stripe's own `refund.amount`, not from what was asked for.
   // They are the same today; a Stripe-side adjustment that made them differ
   // would otherwise leave this app's running total permanently out by it.
-  const already = refundable.refundedCents;
+  // `already` is read further up, with the idempotency key that describes it.
   const total = already + (Number.isFinite(refund.amount) ? refund.amount : asked);
   const { error: wErr, count: wCount } = await service.from(table).update({
     refunded_cents: total,

@@ -32,6 +32,7 @@ import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/ki
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { Fetched } from '../../src/ui/fetched';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { FRAMES_ARE_UNHOSTED, demoCaption } from '../../src/lib/exerciseMedia';
 import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
@@ -67,6 +68,15 @@ export default function OwnerExercise() {
   // The movement itself is the read. The media below is derived from the row
   // this hook returns, so re-reading it re-resolves the demo too.
   const pull = usePullToRefresh(useCallback(() => { void reload(); }, [reload]));
+
+  /* When this movement was last read. See the same paragraph on
+   * app/(owner)/brand.tsx: these two were the only reading screens in this app
+   * with a pull and no stamp, which is a gesture whose effect an owner cannot
+   * see. `useExerciseDetail` carries no stamp, so the screen keeps one, and a
+   * failed re-read does not move it — the row on screen is still the old one. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => { if (status === 'ready') setFetchedAt(Date.now()); }, [status]);
+
   const caption = demoCaption(detail?.source, frames.length);
 
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
@@ -86,6 +96,9 @@ export default function OwnerExercise() {
               what is still English. */}
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
         </View>
+        <Fetched at={fetchedAt} onRefresh={() => { void reload(); }} busy={status === 'loading'}
+                 style={{ marginBottom: sp.md }} />
+
         {display?.note ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>
         ) : null}

@@ -28,7 +28,7 @@
 // Midway.
 import {
   DELIVERED_MEANS, NOT_DELIVERED_MEANS,
-  canFinish, finishBlockedNote, finishCta, finishReport, loggedAgainstLine,
+  canFinish, fetchSessionLogCounts, finishBlockedNote, finishCta, finishReport, loggedAgainstLine,
   loggedExercisesLine,
   type FinishInput, type OutcomeAnswer, type WriteAnswer,
 } from './sessionFinish';
@@ -141,6 +141,29 @@ const report = (over: Partial<FinishInput>) => finishReport({
   eq(r.closed, true, 'the mark reached the server');
   ok(/saved on this phone/i.test(r.lines[0]), 'the first sentence is about the entries');
   ok(/marked as delivered/i.test(r.lines[1]), 'the second is about the session');
+}
+
+/* ── 3b · the phone would not keep it, which is a fourth thing ─────────────
+ *
+ * `attempt` has a fourth answer: nobody answered AND src/lib/floorQueue.ts is
+ * already holding FLOOR_CAP acts, so nothing was kept. It must not read as any
+ * of the other three. 'unsent' promises a send that will never happen; 'stored'
+ * is absurd; 'refused' points the coach at a server that has never seen this,
+ * and at nothing they can do about it. */
+{
+  const r = report({ entries: 'full', entryCount: 4, outcome: 'not-attempted' });
+  eq(r.logged, false, 'nothing was kept, so nothing was logged');
+  eq(r.title, 'Not saved', 'and the title says so rather than "kept on this phone"');
+  const all = r.lines.join(' ');
+  ok(/not waiting to send/i.test(all),
+    `A REFUSED KEEP MUST NOT PROMISE A SEND — got ${JSON.stringify(r.lines)}`);
+  ok(!/server/i.test(r.lines[0]),
+    `and must not blame a server that never saw it — got ${JSON.stringify(r.lines[0])}`);
+  ok(!/4 exercises/.test(r.lines[0]), 'the count is not evidence here either');
+  eq(r.mayLeave, false,
+    'THE SETS EXIST ONLY ON THIS SCREEN — the coach may not walk away from them');
+  ok(/no session credit/i.test(all),
+    'and no credit is spent for an hour whose record was not kept');
 }
 
 /* ── 4 · the count is never evidence ────────────────────────────────────────
@@ -278,9 +301,224 @@ const report = (over: Partial<FinishInput>) => finishReport({
     'the tail is a count, never an ellipsis');
 }
 
-if (errors.length) {
-  console.error(`sessionFinish.test.ts — ${errors.length} failure(s):`);
-  for (const e of errors) console.error(`  · ${e}`);
-  process.exit(1);
+/* ── 9 · the read behind the count ──────────────────────────────────────────
+ *
+ * `fetchSessionLogCounts` is what app/(trainer)/sessions.tsx calls to decide
+ * what `loggedAgainstLine` above says about every session on the screen, and
+ * until now nothing exercised it at all — the sentences were asserted, the
+ * thing that chooses between them was not.
+ *
+ * The two halves that matter are the two this file already argues about
+ * everywhere else. A count has to be a count of rows, because a coach reads it
+ * as the number of movements written up and decides from it whether an hour was
+ * delivered. And a read that hit its ceiling has to come back `partial`,
+ * because `ready` with a short count is the app telling a coach that a session
+ * they filled has almost nothing in it — the same "empty list under a failed
+ * read" this codebase refuses everywhere else, wearing a cap.
+ *
+ * The database is a fake, as in gymPayReads.test.ts: what is under test is the
+ * counting and the truncation flag, not PostgREST. */
+
+type Row = { id?: string; session_id?: string | null; exercise?: string | null; performed_at?: string };
+
+/** Records the id list a read asked for, and answers with `rows`.
+ *
+ *  `asked.in` is the LAST chunk asked for and `asked.chunks` is every one of
+ *  them, because the read is chunked now and a fake that only remembered one
+ *  could not tell a chunked read from an unchunked one. `answer` may be a
+ *  function so a test can answer different chunks differently — which is the
+ *  only way to assert that a failure in the middle of a set stops the loop. */
+function fakeSb(
+  rows: Row[] | null | ((chunk: string[], nth: number) => { data: Row[] | null; error: unknown }),
+  error: unknown = null,
+) {
+  const asked: { table: string; in: string[] | null; limit: number | null; chunks: string[][] } =
+    { table: '', in: null, limit: null, chunks: [] };
+  const from = (table: string) => {
+    asked.table = table;
+    let mine: string[] = [];
+    const chain: any = {
+      select: () => chain,
+      in: (_c: string, ids: string[]) => { mine = ids; asked.in = ids; asked.chunks.push(ids); return chain; },
+      order: () => chain,
+      limit: (n: number) => { asked.limit = n; return chain; },
+      then: (res: (v: { data: Row[] | null; error: unknown }) => unknown) => res(
+        typeof rows === 'function' ? rows(mine, asked.chunks.length - 1) : { data: rows, error },
+      ),
+    };
+    return chain;
+  };
+  return { sb: { from } as any, asked };
 }
-console.log('sessionFinish.test.ts — all assertions passed');
+
+const log = (session: string, exercise: string | null = 'Back Squat'): Row =>
+  ({ session_id: session, exercise, performed_at: '2026-09-01T09:00:00.000Z' });
+
+async function readAssertions(): Promise<void> {
+  /* ── counting ─────────────────────────────────────────────────────────── */
+  {
+    const { sb } = fakeSb([log('s1'), log('s1', 'Bench Press'), log('s1', 'Deadlift'), log('s2')]);
+    const out = await fetchSessionLogCounts(sb, ['s1', 's2']);
+    eq(out.status, 'ready', 'a read that came back whole is whole');
+    // Derived from the fixture rather than written down twice: three rows were
+    // filed against s1, so the count is three. A count that started at one
+    // would read as four movements to a coach deciding whether the hour
+    // happened, and there is nothing on the screen to check it against.
+    eq(out.bySession.get('s1'), 3, 'three rows filed against a session is a count of three');
+    eq(out.bySession.get('s2'), 1, 'and one is one');
+    eq(out.bySession.get('s3'), undefined, 'a session nothing was filed against has no entry rather than a zero it did not earn');
+    eq(out.namesBySession.get('s1')!.join(', '), 'Back Squat, Bench Press, Deadlift', 'and the movements are named in the order they were performed');
+  }
+
+  {
+    // A session logged three times with the same movement is one movement done
+    // three times. The count and the names answer different questions and must
+    // not be made to agree.
+    const { sb } = fakeSb([log('s1'), log('s1'), log('s1', '  '), log('s1', null), log('s1', 'Row')]);
+    const out = await fetchSessionLogCounts(sb, ['s1']);
+    eq(out.bySession.get('s1'), 5, 'every row filed is counted, including the ones that carry no movement name');
+    eq(out.namesBySession.get('s1')!.join(', '), 'Back Squat, Row', 'but a repeated movement is named once and a blank name is not a name');
+  }
+
+  {
+    // A row with no session on it belongs to no session and must not be
+    // attributed to one.
+    const { sb } = fakeSb([log('s1'), { session_id: null, exercise: 'Ghost' }, { exercise: 'Orphan' }]);
+    const out = await fetchSessionLogCounts(sb, ['s1']);
+    eq(out.bySession.get('s1'), 1, 'only the rows that name a session are counted against it');
+    eq(out.bySession.size, 1, 'and the unattached ones land nowhere');
+  }
+
+  /* ── the ceiling ──────────────────────────────────────────────────────── */
+  //
+  // The boundary, from both sides, because `>` and `>=` differ by exactly one
+  // row and only the boundary tells them apart. The read asks for one MORE than
+  // the cap precisely so that "we hit the ceiling" is distinguishable from "the
+  // set is exactly this big" — a distinction that evaporates if the extra row
+  // is not asked for, and which decides whether a coach is shown a figure or
+  // told the figure is not established.
+  {
+    const CAP = 4;
+    const exactly = Array.from({ length: CAP }, () => log('s1'));
+    const { sb, asked } = fakeSb(exactly);
+    const out = await fetchSessionLogCounts(sb, ['s1'], CAP);
+    eq(out.status, 'ready', 'a set that exactly fills the cap is COMPLETE — the cap was reached, not exceeded');
+    eq(out.bySession.get('s1'), CAP, 'and every row of it is counted');
+    eq(asked.limit, CAP + 1, 'the read asks for one more than the cap, which is the only way it can tell a full set from a truncated one');
+  }
+
+  {
+    const CAP = 4;
+    const overflowing = Array.from({ length: CAP + 1 }, () => log('s1'));
+    const { sb } = fakeSb(overflowing);
+    const out = await fetchSessionLogCounts(sb, ['s1'], CAP);
+    eq(out.status, 'partial', 'one row past the cap is a truncated read and says so');
+    eq(out.bySession.get('s1'), CAP, 'and the count stops at the cap rather than including the row that only proved there were more');
+    // The pairing this exists for: `partial` is what stops the screen stating a
+    // total it cannot stand behind.
+    ok(/not necessarily all of them/.test(loggedAgainstLine(out.status, out.bySession.get('s1') ?? null)),
+      'and the sentence a coach reads says the figure is a floor rather than a total');
+  }
+
+  /* ── a read that did not happen ───────────────────────────────────────── */
+  {
+    const { sb } = fakeSb(null, { message: 'network' });
+    const out = await fetchSessionLogCounts(sb, ['s1']);
+    eq(out.status, 'error', 'a refused read is an error');
+    eq(out.bySession.size, 0, 'and comes back with no counts at all');
+    // The whole reason this returns a status beside the Map: an empty Map is
+    // indistinguishable from "nothing was logged", and saying that about a
+    // session a coach filled is the defect this shape exists to prevent.
+    ok(/could not be read/.test(loggedAgainstLine(out.status, null)),
+      'so the screen says the read failed rather than that the session is empty');
+  }
+
+  {
+    const { sb, asked } = fakeSb([log('s1')]);
+    const out = await fetchSessionLogCounts(sb, []);
+    eq(out.status, 'ready', 'no sessions to ask about is not a failure');
+    eq(out.bySession.size, 0, 'and nothing comes back');
+    eq(asked.table, '', 'and no query is sent at all');
+  }
+
+  /* ── the request line, which is a different ceiling from the row cap ─────
+   *
+   * The row cap above is about how many rows come BACK. This is about how many
+   * ids go OUT, and the two failures do not look alike from here.
+   *
+   * app/(trainer)/sessions.tsx hands over one id per row it is drawing, off a
+   * `capLimit()` read — so up to a thousand session ids arrive. A uuid costs
+   * about 39 bytes inside a PostgREST `in.("…","…")` list, which makes a
+   * thousand of them a ~39KB request line against the 8KB nginx and most CDNs
+   * enforce by default. The proxy refuses past roughly two hundred, the refusal
+   * is a 414, supabase-js does not reject on it, and it arrives as `data: null`
+   * with no error.
+   *
+   * `data: null` and no error is EXACTLY the shape of "nothing was logged
+   * against any of these". So the failure a coach saw was not an error screen:
+   * it was every session in their marking queue reading "Nothing is filed
+   * against this session", about hours they had run and written up, on the
+   * screen where they decide whether an hour was delivered and whether it gets
+   * paid. Nothing to pull to refresh into working, because nothing was broken
+   * as far as the app could tell. */
+  {
+    const ids = Array.from({ length: 400 }, (_, i) => `s${i}`);
+    const { sb, asked } = fakeSb([]);
+    await fetchSessionLogCounts(sb, ids);
+    ok(asked.chunks.length > 1, `four hundred ids must not travel in one .in() — got ${asked.chunks.length} chunk(s)`);
+    // Not "some number bigger than one": every chunk has to be small enough
+    // that the request line cannot be the thing that fails, and the boundary is
+    // the whole point of chunking at all.
+    ok(asked.chunks.every((c) => c.length <= 150),
+      `no chunk may exceed the 150 ids a ~5.9KB request line allows — got ${asked.chunks.map((c) => c.length).join(', ')}`);
+    // And every id must actually be asked about. A chunking bug that drops the
+    // tail is the same lie in a quieter voice.
+    eq(asked.chunks.flat().length, ids.length, 'and every id is asked about exactly once, across all the chunks');
+    eq([...new Set(asked.chunks.flat())].length, ids.length, 'with none of them asked about twice');
+  }
+
+  {
+    // The counts have to survive being assembled out of several chunks. A coach
+    // reads this number as the movements written up in an hour.
+    const ids = Array.from({ length: 300 }, (_, i) => `s${i}`);
+    const { sb } = fakeSb((chunk) => ({ data: chunk.map((id) => log(id)), error: null }));
+    const out = await fetchSessionLogCounts(sb, ids);
+    eq(out.status, 'ready', 'a chunked read that came back whole is whole');
+    eq(out.bySession.size, ids.length, 'every session counted, not just the ones in the last chunk');
+    eq(out.bySession.get('s0'), 1, 'the first chunk survives being followed by another');
+    eq(out.bySession.get('s299'), 1, 'and so does the last');
+  }
+
+  {
+    // A chunk that FAILS is an error for the whole read, not a set assembled
+    // from the chunks that worked. Half the queue reading "nothing logged"
+    // because the second request was refused is the original defect with a
+    // smaller blast radius, which is not the same as fixed.
+    const ids = Array.from({ length: 300 }, (_, i) => `s${i}`);
+    const { sb, asked } = fakeSb((chunk, nth) => (
+      nth === 0 ? { data: chunk.map((id) => log(id)), error: null } : { data: null, error: { message: 'refused' } }
+    ));
+    const out = await fetchSessionLogCounts(sb, ids);
+    eq(out.status, 'error', 'a chunk that was refused makes the whole read an error');
+    eq(out.bySession.size, 0, 'and no partial map is handed back to be read as a count');
+    eq(asked.chunks.length, 2, 'and the loop stops at the failure rather than asking the rest');
+  }
+
+  {
+    // The screen hands over one id per row it is drawing, and the same client
+    // can have two sessions on it. Asking for a duplicate id is a longer `.in()`
+    // for no extra rows.
+    const { sb, asked } = fakeSb([log('s1')]);
+    await fetchSessionLogCounts(sb, ['s1', 's1', '', 's2']);
+    eq(asked.in!.join(','), 's1,s2', 'the id list is deduplicated and the empty ones dropped before it is sent');
+  }
+}
+
+void readAssertions().then(() => {
+  if (errors.length) {
+    console.error(`sessionFinish.test.ts — ${errors.length} failure(s):`);
+    for (const e of errors) console.error(`  · ${e}`);
+    process.exit(1);
+  }
+  console.log('sessionFinish.test.ts — all assertions passed');
+});

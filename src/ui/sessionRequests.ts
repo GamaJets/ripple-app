@@ -33,6 +33,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
+import { readByIds } from '../lib/idLookup';
 import type { LoadStatus } from './loadStatus';
 import { shapeRequests, type RawSessionRequest, type SessionRequest } from '../lib/sessionRequests';
 
@@ -148,14 +149,33 @@ export async function fetchCoachRequests(): Promise<{
     const names = new Map<string, string>();
     let namesRead = true;
     if (ids.length) {
-      const { data: profs, error: nameErr } = await supabase
-        .from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
-      if (nameErr) { reportError('sessionRequests.names', nameErr); namesRead = false; }
-      else {
-        for (const p of (profs ?? []) as { id?: unknown; full_name?: unknown }[]) {
+      // CHUNKED, about the REQUEST LINE rather than the row ceiling. `ids` is
+      // bounded by the `capLimit()` read above, so a coach with a long
+      // unanswered queue sends hundreds of uuids at ~39 bytes each inside
+      // `in.("…","…")` — past the 8KB request line nginx and most CDNs enforce
+      // by default. The proxy answers 414 at roughly two hundred ids,
+      // supabase-js does not reject on it, and it arrives as `data: null` with
+      // `nameErr` null. So `namesRead` stayed TRUE while every row came back
+      // unnamed: the screen would have stated, positively, that these requests
+      // have no names on them.
+      try {
+        const profs = await readByIds<{ id?: unknown; full_name?: unknown }>(
+          ids,
+          (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+            .in('id', chunk).order('id', { ascending: true }).range(from, to),
+          'the names of the clients asking for these sessions',
+        );
+        for (const p of profs) {
           const n = typeof p.full_name === 'string' ? p.full_name.trim() : '';
           if (typeof p.id === 'string' && n) names.set(p.id, n);
         }
+      } catch (nameErr) {
+        // `readByIds` throws a refused chunk rather than returning a short set.
+        // Reported as names NOT read, which is the distinction this function
+        // already carries: a null name under `namesRead: true` is somebody RLS
+        // will not name, and under `false` it is somebody we could not ask
+        // about. The screen says different things about the two.
+        reportError('sessionRequests.names', nameErr); namesRead = false;
       }
     }
     return {

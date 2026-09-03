@@ -176,6 +176,71 @@ export function timedSetLabel(secs: number, loadLabel: string | null, bodyweight
   return loadLabel ? `${hold} with ${loadLabel}` : hold;
 }
 
+/**
+ * One SAVED set, as it reads on a chip in the log.
+ *
+ * ── The bug this is the fix for ───────────────────────────────────────────
+ *
+ * The draft chips in app/(client)/workouts.tsx already knew: a hold is printed
+ * as a clock and never as "45×", which is what a reps chip would say about a
+ * plank the app itself asked for. The two places that render a SAVED entry did
+ * not — they read `set[0]` and `set[1]` straight out of the row, so the moment
+ * a plank was saved it came back as "45×— kg". The app prescribes the hold,
+ * asks for it in seconds, prints it correctly while it is a draft, and then
+ * showed it back as forty-five repetitions of nothing. A coach reading the same
+ * rows sees forty-five plank reps.
+ *
+ * `loadLabel` is passed in rather than imported, because the number has to be
+ * rendered in the member's own unit and in the app's own "no figure" glyph, and
+ * neither of those belongs in a pure module. It is given null when the row
+ * carries no load, so the caller's own em-dash convention is what shows.
+ */
+export function setChipLabel(
+  e: Pick<WorkoutEntry, 'sets' | 'timed'>,
+  i: number,
+  loadLabel: (kg: number | null) => string,
+  unit: string,
+): string {
+  const set = e.sets?.[i];
+  const first = Number(set?.[0]) || 0;
+  const load = Number(set?.[1]) || 0;
+  if (isTimedSet(e, i)) {
+    // The seconds are the measurement. The load, when there is one, is what was
+    // held ON TOP of the member — "45 s × 10 kg" — and never a multiplicand.
+    return load > 0 ? `${holdLabel(first)} × ${loadLabel(load)} ${unit}` : holdLabel(first);
+  }
+  return `${first}×${loadLabel(load > 0 ? load : null)} ${unit}`;
+}
+
+/**
+ * Every set of an entry on one line, for the compact strip.
+ *
+ * The unit is stated once at the end and only when something on the line is a
+ * load, so an all-holds entry does not read "1:00  45 s kg".
+ */
+export function setListLabel(
+  e: Pick<WorkoutEntry, 'sets' | 'timed'>,
+  loadLabel: (kg: number | null) => string,
+  unit: string,
+): string {
+  const rows = e.sets ?? [];
+  const parts: string[] = [];
+  let anyLoaded = false;
+  for (let i = 0; i < rows.length; i++) {
+    const first = Number(rows[i]?.[0]) || 0;
+    const load = Number(rows[i]?.[1]) || 0;
+    if (isTimedSet(e, i)) {
+      parts.push(load > 0 ? `${holdLabel(first)} × ${loadLabel(load)}` : holdLabel(first));
+      if (load > 0) anyLoaded = true;
+    } else {
+      parts.push(`${first}×${loadLabel(load > 0 ? load : null)}`);
+      anyLoaded = true;
+    }
+  }
+  const line = parts.join('  ');
+  return anyLoaded && line ? `${line} ${unit}` : line;
+}
+
 /** Total seconds held across an entry. Zero when nothing in it was timed —
  *  which is the ordinary case and is not a measurement of anything. */
 export function entryHoldSeconds(e: WorkoutEntry): number {

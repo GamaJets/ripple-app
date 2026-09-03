@@ -57,6 +57,7 @@ import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../
 import { classifyWrite } from '../lib/offlineQueue';
 import { useOutbox } from './outbox';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
+import { messagePreview } from '../lib/messagePreview';
 import { resolvePeerAvatar } from '../lib/peerAvatar';
 import {
   blockStateOf, looksLikeThreadRefusal, REPORT_FAILED_NOTE, SEND_REFUSED_NOTE,
@@ -337,10 +338,21 @@ export async function signAttachment(path: string): Promise<string | null> {
  * Take an object back out of the bucket.
  *
  * Called on one path only: an attachment that uploaded and whose message row
- * was then refused. That file is unreachable — nothing points at it, and the
- * account-deletion purge described in supabase/parts/124 does not exist yet —
- * so removing it here is what stops the bucket accumulating photographs nobody
- * can see and nobody asked to keep.
+ * was then refused. That file is unreachable: nothing points at it.
+ *
+ * This used to say the account-deletion purge part 124's operator note asked
+ * for "does not exist yet". It does now — part 1120 built the queue, the hook
+ * and the drain, and `message-media` is one of the six buckets in
+ * `object_purge_bucket_is_ours` (1120's three plus 1152's coach-logos,
+ * coach-docs and exercise-videos). It is matched on BOTH path segments, so the
+ * orphan goes whether the erased account is the thread's or the sender's.
+ *
+ * That does not make this call redundant, and the difference is the whole
+ * reason it is still here. The purge is fired by an account being erased. Both
+ * participants may go on using the app for years, and until one of them leaves
+ * nothing in the database will ever look at this key. Removing it now is what
+ * stops the bucket accumulating photographs nobody can see and nobody asked to
+ * keep, for as long as the accounts live.
  *
  * Returns whether it went. Best effort by design: the send has already failed
  * and the sender is being told so, and a failure to clean up must not turn into
@@ -796,8 +808,11 @@ export function useThread(clientId: string | null, role: ChatRole) {
       }).select().single();
       if (error || !data) {
         // The file is up and nothing points at it. Take it back out rather than
-        // leave an object in the bucket that no row references and no purge
-        // exists for (the operator note in supabase/parts/124).
+        // leave an object in the bucket that no row references. This used to
+        // add "and no purge exists for", citing part 124's operator note; part
+        // 1120 has since written that purge and `message-media` is in it. But
+        // that purge only runs when one of the two accounts is erased, which
+        // may be never, so the orphan is still this call's to remove.
         if (stored) await removeMessageAttachment(stored.path);
         // A REFUSAL is not a failure to reach the server, and since part 240 it
         // is a state a member can put this thread into on purpose. Saying "that
@@ -830,7 +845,14 @@ export function useThread(clientId: string | null, role: ChatRole) {
       // It does not quote a caption that was never written, and it does not say
       // "sent you a message" either — the notification is most of what the
       // other person sees before they open it.
-      const preview = b || (stored ? `Sent you a ${attachmentNoun(stored.kind)}` : '');
+      //
+      // The wording moved to src/lib/messagePreview.ts because there are three
+      // places that need it, not one: this push, and BOTH halves of
+      // supabase/functions/notify-message — which had no words for a body-less
+      // message at all and skipped the whole call, inbox row included. Three
+      // authors of the same sentence is how the banner and the bell come to
+      // disagree about what arrived.
+      const preview = messagePreview(b, stored?.kind ?? null);
       // notify the other side (coach -> client push; client side needs the coach id, skipped)
       if (role === 'coach' && tid.current) sendPush([tid.current], 'New message from your coach', preview, { route: '/(client)/messages' });
       // The coach's route carries the thread key. It used to be the bare
@@ -849,7 +871,29 @@ export function useThread(clientId: string | null, role: ChatRole) {
       return { ok: true };
     } catch (e) {
       reportError('messaging.send', e);
-      if (stored) await removeMessageAttachment(stored.path);
+      // THE FILE IS DELIBERATELY LEFT WHERE IT IS.
+      //
+      // The `error` branch above removes it, and may: supabase-js resolved with
+      // a refusal, so the row certainly does not exist and the object certainly
+      // has nothing pointing at it. This branch is the other case, and it is
+      // not the same case. A thrown fetch is "no answer" — the insert may have
+      // COMMITTED and the response been lost on the way back, which is the
+      // ordinary shape of a connection dropping mid-request. Deleting the bytes
+      // here on that assumption produces the one state the order of these two
+      // steps exists to make impossible: a delivered message pointing at an
+      // attachment that is not there, permanently, on the recipient's screen.
+      //
+      // So the trade is stated rather than taken silently. An unreferenced
+      // object costs storage nobody is looking at; a message whose photograph
+      // will never load costs the conversation the photograph was the point of.
+      // The path is reported so it is findable. That used to read "when the
+      // purge described in supabase/parts/124 is eventually written"; it was
+      // written, in part 1120, and this key will be queued and deleted when
+      // either participant erases their account. Reporting it still matters,
+      // because until then nothing else names it: if the insert did commit,
+      // the object is referenced and healthy, and if it did not, it is an
+      // orphan this branch deliberately declined to remove.
+      if (stored) reportError('messaging.maybe-orphan', e, { path: stored.path });
       // Nobody answered at all — the offline case this whole path exists for.
       return keepForLater(localId, b, att);
     }
@@ -1040,8 +1084,15 @@ export function MessageOutboxHandler(): null {
             const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', q.clientId).single();
             const coach = (cr as any)?.trainer_id ?? null;
             if (coach) {
+              // 'chat', exactly as the live send above passes it. Without it
+              // this push went through send-push with no channel and so through
+              // the per-channel filter untouched: a coach who had muted chat
+              // was buzzed anyway, by any message that happened to have been
+              // typed in a basement. A mute that holds only when the sender had
+              // signal is not a mute, and the coach has no way to tell the two
+              // sends apart — they are the same client saying the same thing.
               sendPush([coach], 'New message from your client', q.body,
-                { route: '/(trainer)/chat?clientId=' + encodeURIComponent(q.clientId) });
+                { route: '/(trainer)/chat?clientId=' + encodeURIComponent(q.clientId) }, 'chat');
             }
           }
         } catch { /* the message is delivered either way */ }

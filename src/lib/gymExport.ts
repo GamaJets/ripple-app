@@ -1333,6 +1333,33 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
         reason: s.reason,
         file: '',
       });
+    } else if (s.state === 'partial') {
+      // A TRUNCATED read is reported here rather than written out as a CSV,
+      // and that is a deliberate choice against the rows in hand.
+      //
+      // The rows are real. Writing them would produce a file that looks exactly
+      // like the whole set: same name, same columns, a plausible row count, and
+      // nothing anywhere in the bundle saying it is a prefix once the folder has
+      // been copied somewhere else. src/lib/rowCap.ts's header is about exactly
+      // this — a truncated read is worse than a failed one because it succeeds,
+      // quietly, with the wrong answer — and an export is the artefact most
+      // likely to outlive the screen that produced it and be read by somebody
+      // who never saw a banner.
+      //
+      // So it takes the same shape as a failure: a named stub, `complete` false,
+      // and INCOMPLETE in the filename. The reason says which of the two it is,
+      // because "we could not read this" and "we read the first thousand of it"
+      // send whoever fixes it to two different places.
+      missing.push({
+        part,
+        label: EXPORT_LABEL[part],
+        cost: EXPORT_COST[part],
+        reason:
+          `the read came back at its ${s.cap}-row limit, so what arrived is a PREFIX of this part ` +
+          `rather than all of it — a file holding part of a set, named as though it held the set, ` +
+          `is the one thing this bundle must never contain`,
+        file: '',
+      });
     }
   }
   // A part still loading is not a part that failed, but it is equally not in

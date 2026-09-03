@@ -34,7 +34,12 @@ export default function ConsoleError({ error, reset }: {
   }, [error]);
 
   return (
-    <div style={{ padding: 40, maxWidth: '62ch' }}>
+    /* A live region, because this swaps in CLIENT-SIDE. There is no
+       document navigation, so focus does not move and nothing is read: the
+       page a person was working on is replaced by an error they are never
+       told about. components/Gate.tsx does the same for its unreachable
+       state and is the pattern this was missing. */
+    <div role="alert" aria-live="assertive" aria-atomic="true" style={{ padding: 40, maxWidth: '62ch' }}>
       <h1>This screen stopped</h1>
       <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
         Something on this page threw an error, so it is showing nothing rather than showing you

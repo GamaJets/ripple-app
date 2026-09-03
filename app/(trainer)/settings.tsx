@@ -80,6 +80,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, ListRow, Ghost, Flag, fig } from '../../src/ui/kit';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
+import { fmtDay } from '../../src/lib/format';
 import { sp, layout, hairline, type as ty, radius, elevation } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import { useAuth } from '../../src/ui/auth';
@@ -96,6 +97,7 @@ import {
 import { fileShareBlocker, shareBinaryFile, shareTextFile } from '../../src/lib/exportShare';
 import { BRAND } from '../../src/lib/brands';
 import {
+  COACH_DELETION_FILES_NOTE,
   coachDataFilename, fileSizeLabel, filesRowNote, incompleteExportLine, saveFileFailure,
 } from '../../src/lib/dataExport';
 import { reportError } from '../../src/lib/reportError';
@@ -184,11 +186,21 @@ function TriSwitchRow({ t, label, note, state, onPress, first }: {
 
 const ROLE_LABEL: Record<string, string> = { owner: 'Gym owner', trainer: 'Trainer', client: 'Member' };
 
-/** A timestamp as the day it happened, or a dash. Never the string "null". */
+/**
+ * A timestamp as the day it happened, or a dash. Never the string "null".
+ *
+ * `String(iso).slice(0, 10)` is the UTC date of a timestamptz, and the sentence
+ * this feeds — "You asked to be deleted on X" — is about a day in the coach's
+ * own life. A coach at UTC+14 who tapped the button at nine on the morning of
+ * the 1st was told they had asked on the 31st; one at UTC-11 who tapped it in
+ * the evening was told they had asked tomorrow. Neither is a date they could
+ * check against their own memory of doing it, which is the only thing this line
+ * is for. `fmtDay` reads the instant in the reader's own zone and writes it the
+ * way their locale writes a day, instead of as a bare column value.
+ */
 function day(iso: string | null): string {
   if (!iso) return '—';
-  const d = String(iso).slice(0, 10);
-  return d.length === 10 ? d : '—';
+  return fmtDay(iso);
 }
 
 export default function TrainerSettings() {
@@ -660,7 +672,18 @@ export default function TrainerSettings() {
       'Delete your coaching account?',
       'This asks for your Repple Coach account and everything of yours to be permanently erased — your coach profile, your programs and templates, your videos, your messages and your session history.\n\n' +
       'Your clients are not deleted. They stay with the gym, but they lose you as their coach, and anything you wrote only to them goes with your account.\n\n' +
-      `${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action this. It cannot be undone once they do.`,
+      `${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action this. It cannot be undone once they do.\n\n` +
+      // The sentence above promises "your videos, your messages and your session
+      // history" are erased, and the member's screen has carried the countervailing
+      // detail since it was written (app/(client)/settings.tsx:396). This screen
+      // carried none of it. Parts 1120, 1151 and 1152 are now applied, so what
+      // this note has to be careful about has MOVED rather than gone: coach-logos,
+      // coach-docs, exercise-videos and the coach's half of message-media are all
+      // on `object_purge` now, and a coach whose documents have been accepted can
+      // be erased — but a queued row is a delete that has been SENT, and the
+      // acceptances go with the account. Both are said out loud in the wording.
+      // One wording, from src/lib/dataExport.ts, so the two screens cannot drift.
+      COACH_DELETION_FILES_NOTE,
       [
         { text: 'Keep my account', style: 'cancel' },
         { text: 'Request deletion', style: 'destructive', onPress: () => { void run(); } },

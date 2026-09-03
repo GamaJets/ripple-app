@@ -159,8 +159,8 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
     // member every session the gym ran; filtering on a member field that does
     // not exist would hand them none.
     sessions: sliceReady([
-      { id: 's1', trainerId: 't1', trainerName: 'Ana', clientId: 'm1', clientName: 'Sara', startsAt: '2026-08-03T09:00:00Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: null, rateCents: 4500, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
-      { id: 's2', trainerId: 't1', trainerName: 'Ana', clientId: 'm2', clientName: 'Bo', startsAt: '2026-08-03T10:00:00Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: null, rateCents: 4500, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+      { id: 's1', trainerId: 't1', trainerName: 'Ana', clientId: 'm1', clientName: 'Sara', startsAt: '2026-08-03T09:00:00Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: null, rateCents: 4500, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+      { id: 's2', trainerId: 't1', trainerName: 'Ana', clientId: 'm2', clientName: 'Bo', startsAt: '2026-08-03T10:00:00Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: null, rateCents: 4500, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
     ]),
     passTypes: sliceReady([]),
     passes: sliceReady([

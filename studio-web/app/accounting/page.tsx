@@ -28,7 +28,10 @@
 // empty month, and an empty month here is a filed return that says the gym
 // took nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { type Unread, type Read, reading, landed, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchPayments, money, type GymPayment } from '@lib/gymRecord';
@@ -43,7 +46,12 @@ import { gymLink, noGymNote } from '@lib/gymLink';
 // The month's instants on the GYM'S clock, and the caption that says whose
 // clock they are. `fetchGymZone` keeps "not set" apart from "could not ask".
 import { cutAtGym, type AtGym } from '@lib/gymWindow';
-import { fetchGymZone } from '@lib/gymZone';
+// The reader's locale, the GYM's zone. Every date below was `toLocaleDateString()`
+// — the reader's zone — on the one document in this console where the month
+// boundary is the whole point: a payment taken at 01:00 on 1 September in Dubai
+// printed as 31 August for a bookkeeper in London, on a page headed September.
+import { gymDateText } from '@lib/gymWhen';
+import { fetchGymZone, gymDay } from '@lib/gymZone';
 import { fetchMemberships, matchPayment, fetchOnlineOrders, type Membership, type OnlineOrder } from '@lib/gymRecord';
 import { onlineOrderProblem } from '@lib/gymOrderPayment';
 import { fetchGymCosts, gymCostsTaken, gymCostCategoryLabel, type GymCost } from '@lib/gymCosts';
@@ -85,14 +93,7 @@ const MATCH_DAYS = 45;
  * "No payments this month" are both lies about a query that errored, and on
  * this screen the second one becomes a number on a tax return.
  */
-type Unread = 'loading' | 'failed' | null;
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 /* ── rows ──────────────────────────────────────────────────────────────────── */
 
@@ -146,20 +147,6 @@ interface Settled {
    *  every settlement recorded before that column existed — and is deliberately
    *  not read as zero, because zero is the claim that none of it was. */
   reimbursementCents: number | null;
-}
-
-/** One read, with the three states kept apart. */
-interface Read<T> {
-  rows: T[] | null;
-  state: Unread;
-  why: string | null;
-}
-
-const reading = <T,>(): Read<T> => ({ rows: null, state: 'loading', why: null });
-
-function landed<T>(res: PromiseSettledResult<T[]>, what: string): Read<T> {
-  if (res.status === 'fulfilled') return { rows: res.value, state: null, why: null };
-  return { rows: null, state: 'failed', why: failure(res, what) };
 }
 
 interface Books {
@@ -255,6 +242,10 @@ const sumNote = (s: Sum): string | undefined => (s.known ? undefined : s.why);
 
 export default function Accounting() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymNameErr, setGymNameErr] = useState<string | null>(null);
   // `tenants.currency`. An invoice raised from this screen is denominated in
@@ -357,6 +348,10 @@ export default function Accounting() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       // An account with no gym is NOT a month in which the gym did nothing.
       //
@@ -395,8 +390,11 @@ export default function Accounting() {
 
   const books = loaded.key === key ? loaded.books : EMPTY;
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -454,7 +452,10 @@ export default function Accounting() {
       ) : null}
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '16px 0 4px' }}>
-        <select value={key} onChange={(e) => setKey(e.target.value)} style={{ ...field, minWidth: 190 }}>
+        {/* Named. A <select> has no placeholder to fall back on, so with no
+            label this was announced as a bare combo box and its current value
+            — on the screen whose entire subject is WHICH MONTH. */}
+        <select aria-label="Which month" value={key} onChange={(e) => setKey(e.target.value)} style={{ ...field, minWidth: 190 }}>
           {months.map((m) => {
             const mw = monthWindow(m);
             return <option key={m} value={m}>{mw ? mw.label : m}</option>;
@@ -464,7 +465,7 @@ export default function Accounting() {
 
       {!w
         ? <Banner tone="crit">{key} is not a month this console can open.</Banner>
-        : <Month at={at!} zoneErr={zoneErr} books={books} gymName={gymName} ccy={ccy} members={members}
+        : <Month at={at!} zone={zone} zoneErr={zoneErr} books={books} gymName={gymName} ccy={ccy} members={members}
                  tenantId={me.tenantId} me={me}
                  onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }} />}
     </Shell>
@@ -473,8 +474,15 @@ export default function Accounting() {
 
 /* ── one month, worked out ─────────────────────────────────────────────────── */
 
-function Month({ at, zoneErr, books, gymName, ccy, members, tenantId, me, onChange }: {
-  at: AtGym<MonthWindow>; zoneErr: string | null;
+function Month({ at, zone, zoneErr, books, gymName, ccy, members, tenantId, me, onChange }: {
+  at: AtGym<MonthWindow>;
+  /** `tenants.timezone`. The window is already cut on it by `cutAtGym`; this is
+   *  the same zone for the DATES the rows are drawn with, which were being
+   *  drawn on the reader's clock while the totals above them were cut on the
+   *  gym's. One page, two calendars, and the difference is a day either side of
+   *  every month boundary. */
+  zone: string | null;
+  zoneErr: string | null;
   books: Books; gymName: string | null; ccy: TenantCurrency;
   members: Membership[] | null; tenantId: string; me: Me; onChange: () => void;
 }) {
@@ -486,7 +494,18 @@ function Month({ at, zoneErr, books, gymName, ccy, members, tenantId, me, onChan
   // is reconciling to. For the month still running it is today, because ageing
   // a debt to a date that has not arrived would show invoices as overdue before
   // they are.
-  const asAt = ended ? w.lastDay : isoDate(new Date());
+  //
+  // And "today" is the GYM's today. It was `isoDate(new Date())` — the
+  // reader's calendar — sitting four lines under a prop comment that says
+  // "One page, two calendars, and the difference is a day either side of every
+  // month boundary". `check:console-when` cannot see it, because nothing on
+  // this line formats a Date; the calendars only meet at the `<=` below, where
+  // `asAt` is compared against `issuedOn`, a `date` column holding a bare gym
+  // day. A London bookkeeper opening an Auckland gym's ledger at 22:00 ages the
+  // debt to yesterday and drops every invoice the gym raised today out of
+  // "owed" — on the one page whose figures get filed. The sentence beside the
+  // total says "as at {asAt}", so it names the wrong day out loud as well.
+  const asAt = ended ? w.lastDay : (gymDay(Date.now(), zone) ?? isoDate(new Date()));
 
   const paymentsAll = books.payments.rows;
   const inMonthPayments = useMemo(
@@ -594,19 +613,19 @@ function Month({ at, zoneErr, books, gymName, ccy, members, tenantId, me, onChan
         raised={raised} outstanding={outstanding} books={books}
       />
       <MoneyIn read={books.payments} rows={inMonthPayments} w={w} total={cashIn} />
-      <MoneyOut read={books.settled} rows={settledRows} total={cashOut} />
+      <MoneyOut read={books.settled} rows={settledRows} total={cashOut} zone={zone} />
       <CostsOut read={books.costs} rows={costRows} w={w} total={costsOut} />
       <NetCash net={net} w={w} costs={books.costs} />
       <Register
-        read={books.invoices} raised={raised} w={w} ccy={ccy}
+        read={books.invoices} raised={raised} w={w} ccy={ccy} zone={zone}
         members={members} tenantId={tenantId} onChange={onChange}
       />
       <Invoiced read={books.invoices} raised={raised} w={w} />
       <Ageing read={books.invoices} rows={outstanding} asAt={asAt} total={owedSum} />
-      <OnlineSales read={books.online} w={w} />
+      <OnlineSales read={books.online} w={w} zone={zone} />
       <Reconcile
         books={books} w={w} inMonthPayments={inMonthPayments}
-        tenantId={tenantId} me={me} onChange={onChange}
+        tenantId={tenantId} me={me} zone={zone} onChange={onChange}
       />
     </>
   );
@@ -703,7 +722,7 @@ function MoneyIn({ read, rows, w, total }: {
               ? ` ${unattributed.length} payment${unattributed.length === 1 ? '' : 's'} carr${unattributed.length === 1 ? 'ies' : 'y'} nobody's name — counted in the total, and unmatchable against any invoice.`
               : null}
           </p>
-          <DataTable
+          <DataTable noun="payment methods"
             rows={lines} columns={cols} rowKey={(l) => l.key}
             empty={`No payment is recorded as taken in ${w.label}. That is a statement about the record, not about the till.`}
           />
@@ -738,14 +757,14 @@ function MoneyIn({ read, rows, w, total }: {
  * A paid order that reached the ledger is not listed at all. It is an ordinary
  * payment and appears in Money in like any other.
  */
-function OnlineSales({ read, w }: { read: Read<OnlineOrder>; w: MonthWindow }) {
+function OnlineSales({ read, w, zone }: { read: Read<OnlineOrder>; w: MonthWindow; zone: string | null }) {
   const problems = (read.rows ?? [])
     .map((o) => ({ o, problem: onlineOrderProblem(o) }))
     .filter((x): x is { o: OnlineOrder; problem: string } => x.problem !== null);
 
   const cols: Column<{ o: OnlineOrder; problem: string }>[] = [
     { key: 'when', header: 'Paid', value: (r) => r.o.paidAt ?? '',
-      render: (r) => (r.o.paidAt ? new Date(r.o.paidAt).toLocaleDateString() : <span className="dash">not stated</span>) },
+      render: (r) => gymDateText(r.o.paidAt, zone) ?? <span className="dash">not stated</span> },
     { key: 'member', header: 'Member', value: (r) => r.o.memberName,
       render: (r) => r.o.memberName ?? <span className="dash">nobody named</span> },
     { key: 'what', header: 'Bought', value: (r) => r.o.kind },
@@ -762,7 +781,7 @@ function OnlineSales({ read, w }: { read: Read<OnlineOrder>; w: MonthWindow }) {
     >
       <Part read={read} what="the online sales"
             cost="whether anybody paid online and got nothing is unknown for this month">
-        <DataTable
+        <DataTable noun="online sales needing a person"
           rows={problems} columns={cols} rowKey={(r) => r.o.id}
           empty={`Every online sale in ${w.label} granted what it should and is in the payment record.`}
         />
@@ -773,10 +792,10 @@ function OnlineSales({ read, w }: { read: Read<OnlineOrder>; w: MonthWindow }) {
 
 /* ── money out ─────────────────────────────────────────────────────────────── */
 
-function MoneyOut({ read, rows, total }: { read: Read<Settled>; rows: Settled[]; total: Sum }) {
+function MoneyOut({ read, rows, total, zone }: { read: Read<Settled>; rows: Settled[]; total: Sum; zone: string | null }) {
   const cols: Column<Settled>[] = [
     { key: 'settled', header: 'Settled', value: (s) => s.settledAt,
-      render: (s) => new Date(s.settledAt).toLocaleDateString() },
+      render: (s) => gymDateText(s.settledAt, zone) ?? <span className="dash">not stated</span> },
     { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName },
     { key: 'period', header: 'For the period', value: (s) => s.periodFrom,
       render: (s) => (s.periodFrom && s.periodTo
@@ -790,7 +809,16 @@ function MoneyOut({ read, rows, total }: { read: Read<Settled>; rows: Settled[];
       render: (s) => (s.amountCents == null
         ? <span className="dash">no amount recorded</span>
         : <>{money(s.amountCents, s.currency)}</>) },
-    { key: 'per', header: 'Per session', value: (s) => perSession(s), numeric: true,
+    // "Per session, rounded" and not "Per session".
+    //
+    // The header said "Per session" and the cell rendered `money(c, s.currency)`
+    // — an exact, currency-denominated amount, indistinguishable from every
+    // other figure in a table printed for an accountant. The caveat that it is
+    // a sanity check rather than a figure to pay anybody from lived only in a
+    // comment on `perSession`. A settlement of £500.00 over 12 sessions prints
+    // £41.67, which multiplies back to £500.04: the one column on this page
+    // that does not reconcile, on the page whose whole job is reconciling.
+    { key: 'per', header: 'Per session, rounded', value: (s) => perSession(s), numeric: true,
       // A division, so the denominator is checked before it is used. A
       // settlement that paid for no sessions, or never said how many, has no
       // per-session figure — not a zero, and certainly not the whole amount.
@@ -819,7 +847,7 @@ function MoneyOut({ read, rows, total }: { read: Read<Settled>; rows: Settled[];
   return (
     <Section
       title="Money out (payroll)"
-      sub="Settlements recorded as paid in this month. Cash basis again, and the period column is why it matters: a settlement paid on the 3rd of August is August's cash and July's work."
+      sub="Settlements recorded as paid in this month. Cash basis again, and the period column is why it matters: a settlement paid on the 3rd of August is August's cash and July's work. The per-session column is the amount divided by the count and rounded to the nearest unit — the remainder is dropped rather than distributed, so it is a sanity check and will not multiply back to the settlement exactly."
     >
       <Part read={read} what="the payroll settlements"
             cost="money out is unknown for this month, so no net position is offered">
@@ -831,7 +859,7 @@ function MoneyOut({ read, rows, total }: { read: Read<Settled>; rows: Settled[];
             {' '}This is payroll only. It is not everything the gym paid out — it is
             everything the gym paid out <em>through Repple</em>.
           </p>
-          <DataTable
+          <DataTable noun="payroll settlements"
             rows={rows} columns={cols} rowKey={(s) => s.id}
             empty="No payroll settlement was recorded in this month. If trainers were paid outside Repple, this is what that looks like — and money out below is short by whatever that was."
           />
@@ -902,7 +930,7 @@ function CostsOut({ read, rows, w, total }: {
               ? ` ${pots.map((p) => money(p.minorUnits, p.currency)).join(' and ')} — kept apart, because this app holds no rate between them.`
               : null}
           </p>
-          <DataTable
+          <DataTable noun="costs"
             rows={rows} columns={cols} rowKey={(c) => c.id}
             empty={`No cost is recorded in ${w.label}. That is a statement about the record, not about the gym — rent, power and everything else reach this app only when somebody enters them on the Costs screen.`}
           />
@@ -1080,7 +1108,7 @@ function Invoiced({ read, raised, w }: { read: Read<Invoice>; raised: Invoice[];
             &ldquo;Marked paid&rdquo; is the register&rsquo;s claim, not the bank&rsquo;s.
             Whether a payment stands behind each one is the next section but one.
           </p>
-          <DataTable
+          <DataTable noun="invoice collection lines"
             rows={lines} columns={cols} rowKey={(l) => l.key}
             empty={`No invoice is dated in ${w.label}. If this gym takes money without invoicing, that is what this looks like — and there is then no second record to check the takings against.`}
           />
@@ -1109,11 +1137,22 @@ function Invoiced({ read, raised, w }: { read: Read<Invoice>; raised: Invoice[];
  * are the questions this page is built out of. Splitting them would mean
  * raising a bill on one screen and finding out what happened to it on another.
  */
-function Register({ read, raised, w, ccy, members, tenantId, onChange }: {
+function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
   read: Read<Invoice>; raised: Invoice[]; w: MonthWindow; ccy: TenantCurrency;
+  /** `tenants.timezone`. An invoice's issue date is the gym's day, not the
+   *  day it happens to be wherever the person raising it is sitting. */
+  zone: string | null;
   members: Membership[] | null; tenantId: string; onChange: () => void;
 }) {
-  const today = isoDate(new Date());
+  // The GYM's day, seeding both date boxes below. It was `isoDate(new Date())`,
+  // and lib/currency.ts names this exact failure in as many words: "a cost
+  // entered at 09:00 on 1 September in Auckland was offered August by default".
+  // An invoice carries its issue date into the ageing table, the month it is
+  // counted in and the number it is allocated — `next_gym_invoice_number` takes
+  // the YEAR from it — so a day out at a year boundary is an invoice numbered
+  // into the wrong year's sequence. The reader's day stays the fallback for a
+  // gym that has not set a zone.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
   const [memberId, setMemberId] = useState('');
   const [membershipId, setMembershipId] = useState('');
   const [amount, setAmount] = useState('');
@@ -1263,12 +1302,12 @@ function Register({ read, raised, w, ccy, members, tenantId, onChange }: {
         </Banner>
       ) : null}
       {blocker && !writeErr && (memberId || amount) ? (
-        <p className="no-print" style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '72ch' }}>{blocker}</p>
+        <p className="no-print" style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '72ch' }}>{blocker}</p>
       ) : null}
       {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
       {saved ? <Banner>{saved}</Banner> : null}
       <Part read={read} what="the invoice register" cost="what the gym billed this month is unknown">
-        <DataTable
+        <DataTable noun="invoices"
           rows={raised} columns={cols} rowKey={(i) => i.id}
           empty={`No invoice is dated in ${w.label}. Raise one above — until this wave there was no way to, from any screen in this product.`}
         />
@@ -1550,7 +1589,7 @@ function Ageing({ read, rows, asAt, total }: {
             {' '}Void and written-off invoices are money the gym has decided not to
             collect and are counted in neither this nor what came in.
           </p>
-          <DataTable rows={lines} columns={bandCols} rowKey={(l) => l.key}
+          <DataTable noun="ageing bands" rows={lines} columns={bandCols} rowKey={(l) => l.key}
                      empty="No band to show." />
           {rows.length ? (
             <div style={{ borderTop: '1px solid var(--ring)' }}>
@@ -1561,7 +1600,7 @@ function Ageing({ read, rows, asAt, total }: {
                   a number they have to take on trust.
                 </p>
               </div>
-              <DataTable rows={rows} columns={detailCols} rowKey={(i) => i.id} empty="—" />
+              <DataTable noun="aged invoices" rows={rows} columns={detailCols} rowKey={(i) => i.id} empty="—" />
             </div>
           ) : null}
         </>
@@ -1650,9 +1689,9 @@ function withinDays(iso: string, day: string, n: number): boolean {
   return Math.abs(t - d) <= n * DAY;
 }
 
-function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
+function Reconcile({ books, w, inMonthPayments, tenantId, me, zone, onChange }: {
   books: Books; w: MonthWindow; inMonthPayments: GymPayment[];
-  tenantId: string; me: Me; onChange: () => void;
+  tenantId: string; me: Me; zone: string | null; onChange: () => void;
 }) {
   const bothRead = books.invoices.state === null && books.payments.state === null;
   const r = useMemo(
@@ -1791,7 +1830,7 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
           empty="No unmatched payment from this member is in the window. Reach further back on Money, or explain the row."
           options={candidatePayments(i).map((p) => ({
             id: p.id,
-            label: `${new Date(p.takenAt).toLocaleDateString()} — ${money(p.amountCents, p.currency) ?? 'no amount'}${p.note ? ` (${p.note})` : ''}`,
+            label: `${gymDateText(p.takenAt, zone) ?? 'no date'} — ${money(p.amountCents, p.currency) ?? 'no amount'}${p.note ? ` (${p.note})` : ''}`,
           }))}
           onPick={(paymentId) => recordMatch(i, paymentId)}
         />
@@ -1802,7 +1841,7 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
 
   const payCols: Column<GymPayment>[] = [
     { key: 'taken', header: 'Taken', value: (p) => p.takenAt,
-      render: (p) => new Date(p.takenAt).toLocaleDateString() },
+      render: (p) => gymDateText(p.takenAt, zone) ?? <span className="dash">not stated</span> },
     { key: 'member', header: 'Member', value: (p) => p.memberName },
     { key: 'amount', header: 'Amount', value: (p) => p.amountCents, numeric: true,
       render: (p) => money(p.amountCents, p.currency) },
@@ -1852,7 +1891,7 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
           <li key={row.id} style={{ marginBottom: 4 }}>
             {label(row)} &mdash; &ldquo;{mark.note}&rdquo;{' '}
             <span style={{ color: 'var(--ink3)' }}>
-              ({mark.markedByName ?? 'somebody'}, {new Date(mark.markedAt).toLocaleDateString()})
+              ({mark.markedByName ?? 'somebody'}, {gymDateText(mark.markedAt, zone) ?? 'no date'})
             </span>
             <button
               className="no-print"
@@ -1926,7 +1965,7 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
               invoice was marked paid before the money moved.
             </p>
           </div>
-          <DataTable
+          <DataTable noun="unreconciled invoices"
             rows={invSplit?.open ?? []} columns={invCols} rowKey={(i) => i.id}
             empty={`Every invoice raised in ${w.label} and marked paid has a payment of the same amount from the same member behind it.`}
           />
@@ -1942,11 +1981,11 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
               and exactly where unbilled income hides at one that does not.
             </p>
           </div>
-          <DataTable
+          <DataTable noun="unreconciled payments"
             rows={paySplit?.open ?? []} columns={payCols} rowKey={(p) => p.id}
             empty={`Every attributed payment banked in ${w.label} lines up with an invoice.`}
           />
-          {explained(paySplit?.explained ?? [], (p) => <>{p.memberName ?? 'nobody named'}, {new Date(p.takenAt).toLocaleDateString()}</>, 'payment')}
+          {explained(paySplit?.explained ?? [], (p) => <>{p.memberName ?? 'nobody named'}, {gymDateText(p.takenAt, zone) ?? 'no date'}</>, 'payment')}
 
           {r.unattributed.length ? (
             <div style={{ borderTop: '1px solid var(--ring)' }}>
@@ -1960,8 +1999,8 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
                   money in, and they cannot be chased, refunded or explained later.
                 </p>
               </div>
-              <DataTable rows={unattSplit?.open ?? []} columns={payCols} rowKey={(p) => p.id} empty="—" />
-              {explained(unattSplit?.explained ?? [], (p) => <>{money(p.amountCents, p.currency) ?? 'an unreadable amount'}, {new Date(p.takenAt).toLocaleDateString()}</>, 'payment')}
+              <DataTable noun="unattributed payments" rows={unattSplit?.open ?? []} columns={payCols} rowKey={(p) => p.id} empty="—" />
+              {explained(unattSplit?.explained ?? [], (p) => <>{money(p.amountCents, p.currency) ?? 'an unreadable amount'}, {gymDateText(p.takenAt, zone) ?? 'no date'}</>, 'payment')}
             </div>
           ) : null}
 
@@ -2195,7 +2234,7 @@ function MatchPicker({ open, onOpen, onCancel, onPick, options, label, empty }: 
   }
   return (
     <span className="no-print" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-      <select value={chosen} onChange={(e) => setChosen(e.target.value)} style={{ ...field, maxWidth: 320 }}>
+      <select aria-label="Which branch" value={chosen} onChange={(e) => setChosen(e.target.value)} style={{ ...field, maxWidth: 320 }}>
         <option value="">Choose one…</option>
         {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
       </select>
@@ -2320,18 +2359,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null | undefined; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
 /** The same idea as a Kpi, inline inside a section header strip. */
 function Figure({ label, text, note }: { label: string; text: string | null; note?: string }) {
   return (
@@ -2345,6 +2372,3 @@ function Figure({ label, text, note }: { label: string; text: string | null; not
   );
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

@@ -24,7 +24,8 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { registerFlush, type WriteOutcome } from '../lib/offlineQueue';
 import {
-  addItem, bumpTry, dropItem, inOrder, newItem, ofKind, outboxKey, partitionLapsed, readOutbox,
+  addItem, bumpTry, dropItem, inOrder, mergeLapsed, newItem, ofKind, outboxKey, outboxLapsedKey,
+  partitionLapsed, readOutbox,
   type OutboxItem, type OutboxKind,
 } from '../lib/outbox';
 import type { LoadStatus } from './loadStatus';
@@ -87,9 +88,16 @@ interface OutboxValue {
    *
    * Surfaced rather than swallowed, because the member believes the thing
    * happened. src/lib/outbox.ts · `lapsedNote` is the sentence.
+   *
+   * One per kind, and held on the DEVICE rather than in this component's state
+   * — see `outboxLapsedKey`. The intent is out of the outbox the instant it
+   * lapses, so a notice that lived only in memory was a member being told only
+   * if they happened to look before the process next ended.
    */
   lapsed: OutboxItem[];
-  /** The member has been told. */
+  /** The member has been told, and the notice comes off the device with it.
+   *  Until this is called every launch draws it again, which is the point:
+   *  nothing else will ever raise it. */
   clearLapsed: () => void;
   /** Try everything now. Also wired to the app's reconnect and foreground
    *  triggers through src/lib/offlineQueue.ts · `flushAll`. */
@@ -105,6 +113,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
   const listRef = useRef<OutboxItem[]>([]);
+  const lapsedRef = useRef<OutboxItem[]>([]);
   const uidRef = useRef<string | null>(null);
   const handlers = useRef(new Map<OutboxKind, OutboxHandler>());
   /**
@@ -125,10 +134,52 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       .catch(() => { /* the session is correct this run either way */ });
   };
 
+  /**
+   * The notices, on the device.
+   *
+   * Written under their own key and NOT behind `writable`. That latch guards
+   * the outbox because writing over an outbox we could not read destroys work
+   * that could still be sent; this file holds nothing that can be sent, and a
+   * lapse notice the member has not seen is worth more than whatever unreadable
+   * bytes are under it. It is also the only list that can be written while
+   * `writable` is false, which is precisely the launch that needs it: the
+   * intents were still lapsing.
+   */
+  const persistLapsed = (list: OutboxItem[]) => {
+    const uid = uidRef.current;
+    if (!uid) return;
+    AsyncStorage.setItem(outboxLapsedKey(uid), JSON.stringify(list))
+      .catch(() => { /* the member is told this run either way */ });
+  };
+
   const setPending = (list: OutboxItem[]) => {
     listRef.current = list;
     setPendingState(list);
     persist(list);
+  };
+
+  /**
+   * Take these out of the queue and keep the sentence about them.
+   *
+   * One function rather than the two call sites it replaces, because the two
+   * halves must not be able to drift apart: an intent leaves `outboxKey` the
+   * moment it lapses, so if the notice is not written in the same breath there
+   * is a window in which no record of it exists anywhere. `mergeLapsed` folds
+   * it to one per kind, which is what the home screen draws.
+   */
+  const setLapsedList = (list: OutboxItem[]) => {
+    // Through a ref and a plain `setLapsed`, never a functional updater with the
+    // write inside it. React double-invokes updaters in development, so a cache
+    // write placed in one fires twice — the shape src/ui/workoutLog.tsx says
+    // this codebase has already had to unpick.
+    lapsedRef.current = list;
+    setLapsed(list);
+    persistLapsed(list);
+  };
+
+  const noteLapsed = (items: OutboxItem[]) => {
+    if (!items.length) return;
+    setLapsedList(mergeLapsed(lapsedRef.current, items));
   };
 
   /* ── read the device ─────────────────────────────────────────────────── */
@@ -149,8 +200,23 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       uidRef.current = uid;
       writable.current = true;
       // No account, or no backend. There is no outbox to key and nothing is
-      // hidden, so this is a settled empty rather than an unread one.
-      if (!uid || !USE_SUPABASE) { setPending([]); setLapsed([]); setStatus('ready'); return; }
+      // hidden, so this is a settled empty rather than an unread one. The
+      // notices go with it: they are this account's, and the next account must
+      // not be shown them.
+      if (!uid || !USE_SUPABASE) {
+        setPending([]);
+        lapsedRef.current = [];
+        setLapsed([]);
+        setStatus('ready');
+        return;
+      }
+      // What this account was still owed a sentence about from a previous run.
+      // Read BEFORE the outbox, so a lapse detected below merges into it rather
+      // than replacing it — a member who has not yet acknowledged Tuesday's
+      // planned day must not lose that notice because a goal lapsed today.
+      let held: OutboxItem[] = [];
+      try { held = readOutbox(await AsyncStorage.getItem(outboxLapsedKey(uid))).items; } catch { /* nothing held */ }
+      if (cancelled) return;
       let read = true;
       let items: OutboxItem[] = [];
       try {
@@ -162,7 +228,12 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       if (!read) writable.current = false;
       const split = partitionLapsed(items);
       setPending(inOrder(split.live));
-      setLapsed(split.lapsed);
+      // Assigned rather than merged through `noteLapsed`, because this is the
+      // first read of the run and `lapsedRef` is whatever the last account left
+      // in it. Written back straight away: the intents in `split.lapsed` have
+      // just been taken out of the outbox above, so the notice is the only
+      // record of them from this line onwards.
+      setLapsedList(mergeLapsed(held, split.lapsed));
       setStatus(read ? 'ready' : 'partial');
     })();
     return () => { cancelled = true; };
@@ -197,7 +268,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
     const split = partitionLapsed(listRef.current);
     if (split.lapsed.length) {
       setPending(split.live);
-      setLapsed((p) => [...p, ...split.lapsed]);
+      noteLapsed(split.lapsed);
     }
     // Oldest first across every kind. A thread replayed newest-first is a
     // different conversation, and a measurement out of order is a different
@@ -236,7 +307,9 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   useEffect(() => registerFlush('outbox', flush), [flush]);
 
   const countOf = useCallback((kind: OutboxKind) => ofKind(pending, kind).length, [pending]);
-  const clearLapsed = useCallback(() => setLapsed([]), []);
+  // The member has read it. Cleared from the device too — until this is
+  // pressed the notice is owed, and a launch that redrew it would be right to.
+  const clearLapsed = useCallback(() => { setLapsedList([]); }, []);
 
   const value = useMemo<OutboxValue>(
     () => ({ pending, status, countOf, enqueue, registerHandler, lapsed, clearLapsed, flush }),

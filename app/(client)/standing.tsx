@@ -532,6 +532,20 @@ export default function StandingAppointments() {
               {seriesLabel(endFor)} {withWhom}. These are two different things and they do two different things.
             </Text>
             <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Where the "cancel this one" option used to be when there is no
+                  next session. `cancelOptions` withholds that whole option now
+                  rather than pricing a session with no date; the sentence that
+                  replaces it is here, ABOVE the series option, where the fee
+                  verdict and the "Affects 1 booked session" line used to sit. */}
+              {!options.some((o) => o.scope === 'occurrence') ? (
+                <View style={{ paddingVertical: sp.md }}>
+                  <Flag tone={t.warn}>
+                    {!endFor.nextAt
+                      ? 'There is no next session on the books to cancel — either it has not been written out yet, or it has already been cancelled. Ending the arrangement below still works, and still costs nothing.'
+                      : 'That session could not be read, so there is nothing here to price or to cancel. Ending the arrangement below still works, and still costs nothing.'}
+                  </Flag>
+                </View>
+              ) : null}
               {options.map((o, i) => (
                 <View key={o.scope}>
                   {i > 0 ? <Rule /> : null}

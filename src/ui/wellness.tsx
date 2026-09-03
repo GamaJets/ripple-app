@@ -59,6 +59,7 @@ import { classifyWrite } from '../lib/offlineQueue';
 import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
+import { isFilableNight } from '../lib/sleepEntry';
 
 export interface SleepEntry { id: string; at: string; hours: number; quality: number }
 
@@ -84,15 +85,22 @@ export interface SleepEntry { id: string; at: string; hours: number; quality: nu
  * quality mark — and this is the second, exactly like the `if (!hours)` that
  * has always been below it.
  */
-export const MAX_SLEEP_HOURS = 24;
-export const MAX_QUALITY = 5;
+// The rule and the sentence both live in src/lib/sleepEntry.ts, where they run
+// under `npm test`. Re-exported here because this is where every caller already
+// looks for them, and because a refusal the screen cannot word is a refusal the
+// member experiences as silence.
+export { MAX_SLEEP_HOURS, MAX_QUALITY, isFilableNight, sleepRefusal } from '../lib/sleepEntry';
 
-/** Is this a night that can be filed at all? Pure, and the same question the
- *  column asks, so a refusal here and a refusal there cannot disagree. */
-export function isFilableNight(hours: number, quality: number): boolean {
-  return Number.isFinite(hours) && hours > 0 && hours <= MAX_SLEEP_HOURS
-    && Number.isInteger(quality) && quality >= 1 && quality <= MAX_QUALITY;
-}
+/**
+ * What happened to a night.
+ *
+ * Three outcomes rather than a boolean, and they are three different sentences.
+ * `addSleep` used to answer `false` both for a night it REFUSED and for a night
+ * it had filed on the phone with no server to send it to — which are opposite
+ * facts about the member's own record, and the screen could not tell them
+ * apart. Same shape as `logWorkouts`, for the same reason.
+ */
+export type SleepAdd = 'saved' | 'unsent' | 'refused';
 
 /** Per-account, so signing out and back in as somebody else cannot show one
  *  client another client's nights off this device. `availability.ts` caches
@@ -109,10 +117,11 @@ interface WellnessValue {
   // every app restart. Both were reported. There is one store now — useHabits —
   // and Recovery reads it directly, so the two screens cannot drift again.
   sleep: SleepEntry[];
-  /** Resolves true only once the night is stored server-side. False means the
-   *  entry is on this phone and nowhere else — it is still shown, and it will
-   *  be sent on the next launch that reaches the server. */
-  addSleep: (hours: number, quality: number) => Promise<boolean>;
+  /** 'saved' once the night is stored server-side. 'unsent' means the entry is
+   *  on this phone and nowhere else — it is still shown, and it goes up on the
+   *  next launch that reaches the server. 'refused' means it was NOT filed
+   *  anywhere and the member has to be told why; see `sleepRefusal`. */
+  addSleep: (hours: number, quality: number) => Promise<SleepAdd>;
   /**
    * Take a night back out.
    *
@@ -290,7 +299,7 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [authRev, readTick]);
 
-  const addSleep = async (hours: number, quality: number): Promise<boolean> => {
+  const addSleep = async (hours: number, quality: number): Promise<SleepAdd> => {
     // Unchanged from the in-memory version, and load-bearing: tapping "Log
     // Sleep" without touching either control used to file a night the client
     // never had, which then became their sleep average and fed readiness. The
@@ -302,14 +311,18 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
     // column refused it, nothing read the refusal, and 75 hours stayed in the
     // average and in readiness for ever. A night that cannot be stored is not
     // filed at all rather than filed and quietly disowned.
-    if (!hours) return false;
-    if (!isFilableNight(hours, quality)) return false;
+    // 'refused' and not `false`: nothing has been filed, here or anywhere, and
+    // the screen owes the member a sentence saying so.
+    if (!hours) return 'refused';
+    if (!isFilableNight(hours, quality)) return 'refused';
     const e: SleepEntry = { id: localId(), at: new Date().toISOString(), hours, quality };
     // Optimistic, and cached immediately — a night logged in a lift has to
     // survive the app being killed before the network ever comes back.
     setSleep(mergeLog<SleepEntry>(null, [e, ...listRef.current]).entries, uid);
-    if (!USE_SUPABASE || !uid) return false;
-    return send(uid, e);
+    // Filed on the phone, with no server to send it to. That is 'unsent', which
+    // is a night the member HAS logged — not a refusal.
+    if (!USE_SUPABASE || !uid) return 'unsent';
+    return (await send(uid, e)) ? 'saved' : 'unsent';
   };
 
   /**

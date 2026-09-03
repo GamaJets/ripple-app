@@ -29,6 +29,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+// The month window's instant, recomputed at midnight, on foreground and on
+// focus — never frozen at mount. See src/ui/today.ts.
+import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
@@ -54,7 +57,7 @@ import { useClientDrift } from '../../src/ui/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 import { useTrainerGoals, goalPct } from '../../src/ui/trainerGoals';
-import { goalsEmptyLine, parseGoal, goalText } from '../../src/lib/coachPrefs';
+import { goalsEmptyLine, goalSaveLine, parseGoal, goalText } from '../../src/lib/coachPrefs';
 import { useMonthlyHistory, YEAR_WINDOW } from '../../src/ui/useMrrHistory';
 import { useSessions } from '../../src/ui/sessions';
 import { fetchMyCurrency } from '../../src/lib/myCurrency';
@@ -163,7 +166,15 @@ export default function TrainerAnalytics() {
    * `now` is fixed for the render. The window's upper bound is "now", and a
    * bound that moves on every re-render would recompute a month's figures
    * against a different instant each time. */
-  const now = useMemo(() => new Date(), []);
+  /* `useNow`, not `useMemo(() => new Date(), [])`. The comment that stood here
+     said `now` was fixed "for the render"; an empty dependency array fixes it
+     for the life of the MOUNT, and this screen is a tab that stays mounted for
+     as long as the app runs. Both bounds of the month window come from it, so a
+     coach who opened this on the 31st and came back on the 1st read last
+     month's figures under a heading saying this month — and a pull-to-refresh
+     re-read the server against the same wrong dates, which made the stale
+     figure look freshly confirmed. See src/ui/today.ts. */
+  const now = useNow();
   const { from: monthFrom, to: monthTo } = useMemo(() => monthToDate(now), [now]);
   const month = useMemo(
     () => sessionMonth(sessions, sessionsStatus, monthFrom, monthTo),
@@ -385,6 +396,30 @@ export default function TrainerAnalytics() {
   const [goalOpen, setGoalOpen] = useState(false);
   const [gRev, setGRev] = useState('');
   const [gCli, setGCli] = useState('');
+  const [goalBusy, setGoalBusy] = useState(false);
+  /**
+   * Set the targets, and say if they did not leave the phone.
+   *
+   * This was `onPress={() => { setGoals({…}); setGoalOpen(false); }}` — a void
+   * call and a sheet that closed. Two silent ways a target ends up on one
+   * handset for good sat behind it: the account write is SKIPPED for the rest of
+   * a session in which the prefs read failed (deliberately, so this phone's
+   * cache cannot overwrite targets that may exist elsewhere), and the write
+   * itself was un-awaited and unchecked. Either way the bar redrew against the
+   * new number immediately, so nothing on the screen ever differed.
+   *
+   * A goal is the one figure here the coach authored rather than the app
+   * computing, and it is the one most likely to be gone.
+   */
+  const saveGoals = async () => {
+    if (goalBusy) return;
+    setGoalBusy(true);
+    const outcome = await setGoals({ revenue: parseGoal(gRev), clients: parseGoal(gCli) });
+    setGoalBusy(false);
+    setGoalOpen(false);
+    const said = goalSaveLine(outcome);
+    if (said) Alert.alert('Set on this phone', said);
+  };
   const [digest, setDigest] = useState('');
   const [digestBusy, setDigestBusy] = useState(false);
   // The digest is prose a coach acts on, written from these numbers. With the
@@ -1120,7 +1155,21 @@ export default function TrainerAnalytics() {
               paragraphs of plain English with no dashes in it, so a coach has
               no way to tell a summary of their month from a summary of what
               happened to load. */}
+          {/* The refusal was drawn and never announced. The button says "Needs
+              figures it could not read" and dims to 0.4, and neither of those
+              reaches a screen reader without a role and a state: with no
+              `accessibilityRole` VoiceOver does not call it a button, and with
+              no `accessibilityState` it does not say "dimmed", so the control
+              read as ordinary text and a coach could not tell why nothing
+              happened. Opacity is a colour, not a sentence. */}
           <Pressable onPress={genDigest} disabled={digestBusy || !figuresWhole}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: digestBusy || !figuresWhole, busy: digestBusy }}
+            accessibilityLabel={digestBusy
+              ? 'Writing your weekly business digest'
+              : !figuresWhole
+                ? 'Generate digest — unavailable, because the figures above could not all be read'
+                : digest ? 'Write the digest again' : 'Generate your weekly business digest'}
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm,
                      backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: digestBusy || !figuresWhole ? 0.4 : 1 }}>
             {digestBusy ? <ActivityIndicator color={t.brand} /> : <Icon name="sparkle" size={15} color={t.brand} />}
@@ -1204,7 +1253,7 @@ export default function TrainerAnalytics() {
               parseGoal, not parseInt: parseInt('12abc') is 12 and
               parseInt('-12') is -12, and both of those become a target the
               coach did not type — one of them a bar drawn backwards. */}
-          <Cta label="Save Goals" wide onPress={() => { setGoals({ revenue: parseGoal(gRev), clients: parseGoal(gCli) }); setGoalOpen(false); }} />
+          <Cta label={goalBusy ? 'Saving…' : 'Save Goals'} wide onPress={saveGoals} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setGoalOpen(false)} />
         </View>

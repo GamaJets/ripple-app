@@ -41,6 +41,9 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
+// A page of enquiries is up to ROW_CAP uuids and the follow-up read used to put
+// all of them into one `.in()`. See the note at that read.
+import { readCappedByIds } from '../lib/cappedByIds';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import { fetchMyJoinCodes } from './joinCode';
@@ -136,11 +139,30 @@ export function useLeads(): LeadBook {
       let unread = false;
       const ids = leads.map((l) => String(l.id ?? '')).filter(Boolean);
       if (ids.length) {
-        const noteRes = await supabase.from('coach_lead_notes')
-          .select('id, lead_id, body, at')
-          .in('lead_id', ids)
-          .order('at', { ascending: false })
-          .limit(capLimit());
+        // Chunked. `ids` comes off the `.limit(capLimit())` read above, so it
+        // is up to ROW_CAP = 1000 enquiry ids, and one `.in()` over that builds
+        // a ~39KB request line against the 8KB nginx and most CDNs allow. Past
+        // roughly two hundred ids the proxy refuses before the database sees
+        // the query; the 414 is not a rejected promise in supabase-js, so it
+        // lands in the branch below and every enquiry loses its follow-up
+        // history at once. The screen is honest about that — `unread` puts a
+        // sentence up rather than an empty list — but it is a whole feature
+        // switching off for a coach whose enquiry book grew past two hundred,
+        // with no way to tell that the size of their book was the cause.
+        //
+        // Still capped rather than finished (`readCappedByIds`, not
+        // `readByIds`): follow-ups are one row per note per enquiry with no
+        // bound at all, `unread` is already the honest answer to a short page,
+        // and paging every note a coach has ever written to compute a preview
+        // is not what this screen is for. See src/lib/cappedByIds.ts.
+        const noteRes = await readCappedByIds<RawFollowUp>(
+          ids,
+          (chunk) => supabase.from('coach_lead_notes')
+            .select('id, lead_id, body, at')
+            .in('lead_id', chunk)
+            .order('at', { ascending: false })
+            .limit(capLimit()),
+        );
         if (noteRes.error) {
           // Not fatal to the screen. The enquiries are real and actionable
           // without their history; the screen says the history is missing
@@ -150,7 +172,7 @@ export function useLeads(): LeadBook {
           unread = true;
         } else {
           const byLead: Record<string, RawFollowUp[]> = {};
-          for (const n of noteRes.data ?? []) {
+          for (const n of noteRes.rows) {
             const key = String((n as any).lead_id ?? '');
             if (!key) continue;
             (byLead[key] ||= []).push(n as RawFollowUp);
@@ -158,7 +180,10 @@ export function useLeads(): LeadBook {
           notes = Object.fromEntries(
             Object.entries(byLead).map(([k, v]) => [k, shapeFollowUps(v)]),
           );
-          unread = capped(noteRes.data).truncated;
+          // Already trimmed to the cap chunk by chunk, and `truncated` is true
+          // if ANY chunk was — an enquiry's notes are all in one chunk, so a
+          // short page still means somebody's history is missing.
+          unread = noteRes.truncated;
         }
       }
 

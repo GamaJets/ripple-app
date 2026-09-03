@@ -33,7 +33,7 @@
 // list — and this is a screen a coach comes to when a client has asked whether
 // they are insured. Both reads carry a LoadStatus and both empties are gated on
 // it.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, TextInput, Alert, ActivityIndicator, Pressable, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -46,8 +46,11 @@ import { useAuth } from '../../src/ui/auth';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import {
   fetchCoachCredentials, addCredential, updateCredential, deleteCredential,
-  fetchReviews, replyToReview, todayKey,
+  fetchReviews, replyToReview,
 } from '../../src/ui/reviews';
+// The day this screen judges every expiry against, kept current for as long as
+// the screen is open rather than fixed at the moment it mounted.
+import { useToday } from '../../src/ui/today';
 import {
   credentialBadge, credentialLine, credentialState, expiryLine, sortCredentials,
   validateDraft, draftProblemText, referenceAllowed, insuranceClaim,
@@ -81,7 +84,12 @@ export default function TrainerCredentials() {
   const { user, loading: authLoading } = useAuth();
   const uid = user?.id ?? null;
   const G = layout.gutter;
-  const today = useMemo(() => todayKey(), []);
+  // NOT `useMemo(() => todayKey(), [])`, which is what this was. An empty
+  // dependency array freezes the day at MOUNT, and backgrounding a phone does
+  // not remount a screen — so a coach who opened this on Sunday and came back on
+  // Wednesday had every expiry below judged against Sunday, and insurance that
+  // lapsed on Monday still read as current. See src/ui/today.ts.
+  const today = useToday();
 
   const [creds, setCreds] = useState<Credential[] | null>(null);
   const [credStatus, setCredStatus] = useState<LoadStatus>('loading');

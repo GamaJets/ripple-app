@@ -28,7 +28,9 @@
 // because a failed roster query drawn as an empty roster would report that not
 // one pass holder has ever joined this gym.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
@@ -39,6 +41,8 @@ import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from 
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { toCsv } from '@lib/gymExport';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
+import { noGymNote } from '@lib/gymLink';
+import { Fetched, useFetched } from '@/components/Fetched';
 import { Banner } from '@/components/Banner';
 import {
   buildPassConversion, suppressionSentence,
@@ -74,6 +78,10 @@ const OUTCOME_ORDER: HolderOutcome[] = ['joined-after', 'undecided', 'no-members
 
 export default function Passes() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // `tenants.currency`. The Paid column sums a person's passes, so it has no
   // single row's currency to borrow and inherits the gym's — or prints nothing.
@@ -84,8 +92,7 @@ export default function Passes() {
   const [contacts, setContacts] = useState<Map<string, GymMemberRecord> | null>(null);
   const [contactsErr, setContactsErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
-    setRec(EMPTY);
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // Four reads, deliberately not one Promise.all behind a single catch. A
     // price book that 500s must not take the pass counts down with it — the
     // page may be partial, but only if it says which part and what that costs.
@@ -108,21 +115,51 @@ export default function Passes() {
       slice(() => fetchPlans(supabase, tenantId)),
     ]);
     setRec({ passes, memberships, visits, plans });
+    // Whole only when all four came back. The stamp under the tiles is the age
+    // of the last read that was whole, so a refresh in which the price book
+    // failed does not move it — the banner beside it names which part is
+    // missing, which is the sentence this screen already knew how to write.
+    return passes.state === 'ready' && memberships.state === 'ready'
+      && visits.state === 'ready' && plans.state === 'ready';
   }, []);
+
+  /*
+   * The pass list, kept current.
+   *
+   * /door redeems against the same `gym_passes` rows and re-reads them every
+   * thirty seconds; this screen read once and stopped, so the two screens in
+   * the same building disagreed by however long this tab had been open. The
+   * report it produces is a call list of people whose passes ran out and did
+   * not join — and somebody who came in this morning and bought a membership at
+   * the desk was on it, and got phoned about it.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    { everyMs: 2 * 60_000 },
+  );
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) {
-        setRec({
-          passes: sliceReady([]), memberships: sliceReady([]),
-          visits: sliceReady([]), plans: sliceReady([]),
-        });
-        return;
-      }
+      // An account with no gym ran NONE of the four reads, and this wrote
+      // `sliceReady([])` for all four — four reads reported as having succeeded
+      // and found nothing. `buildPassConversion` then produced its full report
+      // over that: conversion counts, the suppression sentence and an empty
+      // call list. A receptionist whose account lost its gym link was told this
+      // gym has issued no passes and converted nobody, which is a specific
+      // finding about the business assembled out of a fact about their profile
+      // — the same substitution the last roadmap found on /accounting, /costs
+      // and /close. The render below stops before the report and says which it
+      // is; the record is left in its opening state, which is honest, because
+      // nothing was read.
+      if (!who?.tenantId) return;
       const { data: t, error: tErr } = await supabase
         .from('tenants').select('name, currency').eq('id', who.tenantId).single();
       // supabase-js RESOLVES on a database error, so this is checked rather
@@ -145,15 +182,20 @@ export default function Passes() {
       } catch (e: any) {
         if (live) { setContacts(null); setContactsErr(e?.message ?? 'The gym’s contact details could not be read.'); }
       }
-      await load(who.tenantId);
+      // Through `refresh`, so the first read stamps the same way every later
+      // one does.
+      refresh();
     })();
     return () => { live = false; };
-  }, [load]);
+  }, [load, refresh]);
 
   const c = useMemo(() => buildPassConversion(rec), [rec]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -179,6 +221,17 @@ export default function Passes() {
     );
   }
 
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} current="/passes">
+        <h1>Passes</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('passes, memberships or door visits')}
+        </p>
+      </Shell>
+    );
+  }
+
   const rate = c.joinedAfterRate;
 
   return (
@@ -192,6 +245,10 @@ export default function Passes() {
       {/* Printed first and always, including on an empty gym: the reader will
           supply the causal reading themselves if the page does not refuse it. */}
       <Banner>{CAUSAL_CAVEAT}</Banner>
+
+      {/* When these figures were read. /door redeems against the same rows
+          every thirty seconds; this screen used to read once and stop. */}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh} what="the pass record" />
 
       {c.warning ? <Banner tone="crit">{c.warning}</Banner> : null}
       {c.loading.length ? (
@@ -263,6 +320,8 @@ export default function Passes() {
           <Failed reason={reasonOf(rec.memberships)} part="memberships" />
         ) : null}
         {rec.passes.state === 'failed' ? <Failed reason={reasonOf(rec.passes)} part="passes" /> : null}
+        <Truncated s={rec.memberships} part="the roster" />
+        <Truncated s={rec.passes} part="passes" />
 
         {c.counts ? (
           <div style={{ padding: '18px 16px' }}>
@@ -304,6 +363,8 @@ export default function Passes() {
         {rec.memberships.state === 'failed' ? (
           <Failed reason={reasonOf(rec.memberships)} part="memberships" />
         ) : null}
+        <Truncated s={rec.memberships} part="the roster" />
+        <Truncated s={rec.passes} part="passes" />
         {rec.memberships.state === 'ready' && rec.passes.state === 'ready' ? (
           c.interval ? (
             <div style={{ padding: '18px 16px' }}>
@@ -355,10 +416,13 @@ function reasonOf(s: Slice<unknown>): string {
   return s.state === 'failed' ? s.reason : '';
 }
 
-/** A KPI footnote that keeps the three states apart. */
+/** A KPI footnote that keeps the four states apart. */
 function stateNote(s: Slice<unknown>, failed: string, ready?: string): string | undefined {
   if (s.state === 'failed') return failed;
   if (s.state === 'loading') return undefined;
+  // Its own arm, and not `ready`'s. A truncated read used to fall through to
+  // the ready sentence — "1,240 still live" over a figure taken from a prefix.
+  if (s.state === 'partial') return `only the first ${s.cap} rows came back, so this is a prefix and the figure is withheld`;
   return ready;
 }
 
@@ -563,8 +627,10 @@ function Holders({ c, rec, ccy, contacts }: {
       {rec.memberships.state === 'failed' ? (
         <Failed reason={reasonOf(rec.memberships)} part="memberships" />
       ) : null}
+      <Truncated s={rec.passes} part="passes" />
+      <Truncated s={rec.memberships} part="the roster" />
       {c.holders ? (
-        <DataTable
+        <DataTable noun="pass holders"
           rows={c.holders} columns={cols} rowKey={(h) => h.holderId}
           empty="No pass has been issued to somebody with an account. Passes sold to walk-ins are listed nowhere here, because there is no person for them to be a row about."
         />
@@ -669,7 +735,7 @@ function CallList({ c, rec, contacts, contactsErr }: {
       sub={`The call list this page exists to produce: ${all.length} ${all.length === 1 ? 'person' : 'people'} whose passes ran out without a membership. People whose pass is still live are not here — they have not decided anything yet, and asking them why they did not join is the wrong conversation.`}
     >
       {contactsErr ? (
-        <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: '#f0c04e' }}>
+        <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--warn)' }}>
           Contact details could not be read: {contactsErr}. The column below says
           &ldquo;not read&rdquo; rather than &ldquo;nothing recorded&rdquo; — this is not a list of
           people the gym has no number for.
@@ -695,7 +761,7 @@ function CallList({ c, rec, contacts, contactsErr }: {
       {/* `shown` is post-search, so "Nobody to call." over a query that matched
           nothing was a statement about the gym made out of what somebody typed
           — on the call list this whole page exists to produce. */}
-      <DataTable
+      <DataTable noun="pass holders who never joined"
         rows={shown} columns={cols} rowKey={(h) => h.holderId}
         empty={q.trim()
           ? `Nothing in this list matches “${q.trim()}”. Clear the search before concluding there is nobody to call.`
@@ -749,8 +815,10 @@ function Hosts({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
           &ldquo;later joined&rdquo; column is unknown rather than nought.
         </p>
       ) : null}
+      <Truncated s={rec.passes} part="passes" />
+      <Truncated s={rec.memberships} part="the roster" />
       {c.hosts ? (
-        <DataTable
+        <DataTable noun="hosts"
           rows={c.hosts} columns={cols} rowKey={(h) => h.hostMemberId}
           empty="No guest pass records who brought the guest. Recording the host at the desk is what makes this table possible."
         />
@@ -770,6 +838,7 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
     >
       {rec.passes.state === 'loading' ? <Loading /> : null}
       {rec.passes.state === 'failed' ? <Failed reason={reasonOf(rec.passes)} part="passes" /> : null}
+      <Truncated s={rec.passes} part="passes" />
       {m ? (
         <>
           <div style={{
@@ -819,6 +888,29 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
 
 /* ── the three states, once ────────────────────────────────────────────────── */
 
+
+/**
+ * The banner over a section whose read came back at its ceiling.
+ *
+ * Not the failure banner and not the empty sentence: the rows are real and
+ * there are more of them. Every figure on this page is gated on
+ * `state === 'ready'`, so a truncated read already withholds them — what it
+ * could not do until this existed is SAY SO, and a section that quietly draws
+ * nothing is the same blank screen a failure used to produce.
+ */
+function Truncated({ s, part }: { s: Slice<unknown>; part: string }) {
+  if (s.state !== 'partial') return null;
+  return (
+    <div style={{
+      margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)',
+      borderLeft: '3px solid var(--warn)', fontSize: 12.5, color: 'var(--ink2)',
+    }}>
+      Only the first {s.cap} rows of {part} were read, and there are more. Everything below would
+      be computed over a <strong>prefix</strong>, so it is withheld rather than shown as a total.
+    </div>
+  );
+}
+
 function Failed({ reason, part }: { reason: string; part: ConversionPart }) {
   return (
     <div style={{
@@ -835,12 +927,14 @@ function Failed({ reason, part }: { reason: string; part: ConversionPart }) {
   );
 }
 
-/** A table cell that keeps "not read", "not loaded" and "nothing there" apart. */
+/** A table cell that keeps "not read", "not loaded", "part read" and "nothing
+ *  there" apart — four states, four cells. */
 function Cell({ state, value, empty }: {
   state: Slice<unknown>['state']; value: string | null; empty: string;
 }) {
   if (state === 'loading') return <span className="dash">…</span>;
   if (state === 'failed') return <span className="dash">not read</span>;
+  if (state === 'partial') return <span className="dash">part read</span>;
   if (value == null) return <span className="dash">{empty}</span>;
   return <>{value}</>;
 }
@@ -877,18 +971,3 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

@@ -42,7 +42,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { MIN_TARGET } from '../../src/lib/a11y';
+import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { badges as groupBadges, canJoinNext, isGrouped, joinNext, leaveGroup } from '../../src/lib/setGroups';
 import { applyMove, shifts as dragShifts, targetIndex } from '../../src/lib/dragReorder';
 import { SET_METHODS, DEFAULT_METHOD, badgeFor, methodFor, otherMethodsHint } from '../../src/lib/setMethods';
@@ -107,6 +107,7 @@ import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDay
 import { notifySuccess } from '../../src/ui/haptics';
 import { WEEK_DAYS } from '../../src/lib/weekStart';
 import { FORWARD_ICON } from '../../src/ui/direction';
+import { DateSheet } from '../../src/ui/DateSheet';
 
 /** The week, in the order src/lib/weekStart.ts draws one. This is the order a
  *  new day is offered in and the order Cycle Day walks, so the builder and the
@@ -311,10 +312,40 @@ export default function Builder() {
   // that arithmetic already lives and is not re-implemented here.
   const { getProgram, assignProgramTo, clearProgram, clearProgramFrom, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
   const { templates, saveTemplateTo, removeTemplateFrom, isStarter, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
+  /**
+   * The coach's OWN saved templates, which is what "3 saved" claims to count.
+   *
+   * `templates` is never only theirs: src/ui/programTemplates.tsx seeds three
+   * built-in starters and composes the coach's rows in front of them. The
+   * status gate on the header was added and the arithmetic was not, so a coach
+   * who has saved nothing read "3 saved" and one who had saved two read five.
+   * That label is where they look to find out whether an evening's work is
+   * still there, and it would have said yes either way.
+   */
+  const savedCount = templates.filter((tpl) => !isStarter(tpl.id)).length;
   const router = useRouter();
 
   const params = useLocalSearchParams();
-  const [clientId, setClientId] = useState((params.clientId as string) || roster[0]?.id || '');
+  /**
+   * Who this is for — and nobody, unless the coach said so.
+   *
+   * This used to fall back to `roster[0]?.id`. That is not a choice, it is an
+   * alphabetical accident, and which name it lands on depends on whether the
+   * roster provider happened to be warm on the first render — so the same tap
+   * did different things on a cold launch and a warm one. What followed was
+   * worse than the arbitrariness: the effect below ticks the selected client as
+   * the recipient of an assign this file itself documents as irreversible, and
+   * the seeding effect loads that person's live block over the screen. A coach
+   * who opened Programs to sketch a week had the first person on their book
+   * already ticked and their programme already open, so the first thing they
+   * typed was an edit to somebody's live plan.
+   *
+   * Empty is a state the rest of the screen already handles: `seedDecision`
+   * answers "the builder is the coach's own scratch space and nothing is being
+   * claimed about anybody", and the assign control has nobody ticked until a
+   * name is chosen.
+   */
+  const [clientId, setClientId] = useState((params.clientId as string) || '');
   const [title, setTitle] = useState('');
   const [note, setNote] = useState('');
   /**
@@ -369,6 +400,12 @@ export default function Builder() {
    * resolved to a week somebody can train today.
    */
   const [startsOn, setStartsOn] = useState('');
+  /** Whether the month sheet over that field is open. Reported from the floor:
+   *  "is there a way that when you click on the space of the date the whole
+   *  calendar option pops up for selection?" — src/ui/DateSheet.tsx. The field
+   *  stays editable either way; the sheet is a second way in, not a
+   *  replacement, because coaches paste dates out of their own messages. */
+  const [startPick, setStartPick] = useState(false);
   const days: BDay[] = blockWeeks[weekIdx]?.days ?? [];
   const setDays: React.Dispatch<React.SetStateAction<BDay[]>> = (updater) =>
     setBlockWeeks((ws) => ws.map((w, i) => (i === weekIdx
@@ -555,6 +592,8 @@ export default function Builder() {
      different answer from an empty array, which would be a client who has
      logged nothing, and src/lib/programReview.ts reads the two differently:
      one stands the check down, the other runs it and finds nothing. */
+  /** Bumped by the pull below, so the log is re-read with everything else. */
+  const [reviewLogNonce, setReviewLogNonce] = useState(0);
   const [reviewLog, setReviewLog] = useState<WorkoutEntry[] | null>(null);
   const [reviewLogStatus, setReviewLogStatus] = useState<LoadStatus>('ready');
   /* The client whose answer is allowed to land. Tapping down a book starts a
@@ -603,7 +642,20 @@ export default function Builder() {
       setReviewLogStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [clientId, clientAskable]);
+  }, [clientId, clientAskable, reviewLogNonce]);
+  // ── the eighth read, which the refresh did not count ──────────────────────
+  //
+  // The comment under `pull` below opens "Seven reads sit behind this screen"
+  // and this was not one of them: the log effect closed on `[clientId,
+  // clientAskable]` with no nonce and no focus effect, so it ran once per
+  // client and never again. The builder is opened straight after a session more
+  // often than at any other moment, and the session that just happened is
+  // precisely what is missing — the coach pulls down out of habit, watches the
+  // spinner, and prescribes 42.5 kg against a log with no Tuesday in it.
+  //
+  // It feeds the programme review and the load suggestion the coach taps, so a
+  // stale copy is not a stale list, it is a number written into somebody's week.
+
   // ── This builder edits ONE person's copy ─────────────────────────────────
   //
   // A programme sent to a group is a fan-out: each member gets their own
@@ -621,12 +673,13 @@ export default function Builder() {
 
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
-   * Seven reads sit behind this screen and the builder crosses them on every
+   * Eight reads sit behind this screen and the builder crosses them on every
    * decision it makes: the book, what each client is already assigned (the
    * overwrite confirmation is counted off that), the template library, the
    * coach's saved movement names, the movement catalogue, the group
-   * membership line, and the injury acknowledgements the primary button is
-   * gated on.
+   * membership line, the injury acknowledgements the primary button is gated
+   * on, and what this client has actually trained — which drives the programme
+   * review and the load suggestion, and was the one this list used to omit.
    *
    * The injury read is the reason this gesture belongs here at all. The
    * button says "Injuries Could Not Be Read" and refuses — correctly — and
@@ -636,11 +689,16 @@ export default function Builder() {
    * NOTHING here touches the draft. Every one of these is a read; the week
    * the coach has laid out is untouched, which is the only reason a refresh
    * gesture is safe on a screen that is mostly an editor. */
-  const pull = usePullToRefresh(useCallback(() => Promise.all([
-    refreshRoster(), Promise.resolve(reloadPrograms()), Promise.resolve(reloadTemplates()),
-    Promise.resolve(coachEx.reload()), cat.reload(),
-    Promise.resolve(clientGroups.refresh()), acks.refresh(),
-  ]), [refreshRoster, reloadPrograms, reloadTemplates, coachEx, cat, clientGroups, acks]));
+  const pull = usePullToRefresh(useCallback(() => {
+    // The eighth: what this client has actually trained. See the note beside
+    // the effect that reads it.
+    setReviewLogNonce((n) => n + 1);
+    return Promise.all([
+      refreshRoster(), Promise.resolve(reloadPrograms()), Promise.resolve(reloadTemplates()),
+      Promise.resolve(coachEx.reload()), cat.reload(),
+      Promise.resolve(clientGroups.refresh()), acks.refresh(),
+    ]);
+  }, [refreshRoster, reloadPrograms, reloadTemplates, coachEx, cat, clientGroups, acks]));
 
   /**
    * ── The retry the injury gate never had ───────────────────────────────────
@@ -803,6 +861,21 @@ export default function Builder() {
 
   const setDayFocus = (di: number, focus: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, focus } : d)));
+  /**
+   * The conditioning line attached to a day.
+   *
+   * `cardio` was round-tripped through both mappers and rendered nowhere: the
+   * generated plans set it (`src/lib/programs.ts` writes "15 min incline walk"),
+   * the client is told to do it, and the coach could not see that it existed.
+   * So a block written for a runner and re-assigned to somebody rehabbing a
+   * knee carried the incline walk with it, silently, and the only person who
+   * ever read the prescription was the person doing it.
+   *
+   * An empty box clears the field rather than storing a blank string, so a day
+   * with no conditioning is a day with none and not a day prescribing "".
+   */
+  const setDayCardio = (di: number, cardio: string) =>
+    setDays((ds) => ds.map((d, i) => (i === di ? { ...d, cardio: cardio.trim() ? cardio : undefined } : d)));
   const addExercise = (di: number, name: string, group: string) =>
     setDays((ds) => ds.map((d, i) => (i === di ? { ...d, exercises: [...d.exercises, { key: nextKey(), name, group, sets: 3, reps: '10-12' }] } : d)));
   const removeExercise = (di: number, key: string) =>
@@ -1869,7 +1942,7 @@ export default function Builder() {
             'error' `templates.length` is the size of what arrived plus three
             built-in starters, which is not the size of the library. */}
         <Section>
-          <SectionHead title="Templates" note={tplStatus === 'ready' && templates.length ? `${num(templates.length)} saved` : undefined} />
+          <SectionHead title="Templates" note={tplStatus === 'ready' && savedCount ? `${num(savedCount)} saved` : undefined} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
             Save this week to reuse it with anybody, or start from one you have already built.
           </Text>
@@ -2144,6 +2217,20 @@ export default function Builder() {
                   <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
                 </Pressable>
               </View>
+
+              {/* The conditioning on this day, which used to travel through
+                  this screen invisibly. Under the header rather than in it: it
+                  is part of the day's prescription and not part of naming it,
+                  and a folded day does not need to show it. */}
+              {foldedDays[di] ? null : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>Conditioning</Text>
+                  <TextInput value={d.cardio ?? ''} onChangeText={(v) => setDayCardio(di, v)}
+                    placeholder="e.g. 15 min incline walk — leave empty for none" placeholderTextColor={t.ink3}
+                    accessibilityLabel={`Conditioning on ${d.day}, sent to the client alongside the exercises`}
+                    style={[inp, { flex: 1 }]} />
+                </View>
+              )}
 
               {foldedDays[di] ? null : (() => {
                 // Computed ONCE per day rather than per row: the badge for any
@@ -2424,12 +2511,21 @@ export default function Builder() {
                   <>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>Sets</Text>
+                    {/* 30pt round, against MIN_TARGET's 44, and they sit a
+                        gap apart — so the slop is what stops a thumb landing
+                        on "one set fewer" while reaching for "one set more".
+                        This is somebody's programme, not a volume control:
+                        the mis-tap is silent, it is saved, and the client
+                        trains the wrong session. The × on the set rows above
+                        already carries slop for the same reason. */}
                     <Pressable onPress={() => patchEx(di, e.key, { sets: Math.max(1, e.sets - 1) })} accessibilityRole="button" accessibilityLabel="One set fewer"
+                      hitSlop={hitSlopFor(30)}
                       style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="minus" size={14} color={t.ink2} />
                     </Pressable>
                     <Text style={{ ...value(16), color: t.ink, minWidth: 16, textAlign: 'center' }}>{e.sets}</Text>
                     <Pressable onPress={() => patchEx(di, e.key, { sets: Math.min(8, e.sets + 1) })} accessibilityRole="button" accessibilityLabel="One set more"
+                      hitSlop={hitSlopFor(30)}
                       style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="plus" size={14} color={t.ink2} />
                     </Pressable>
@@ -2583,7 +2679,21 @@ export default function Builder() {
                         const r = readRpe(v);
                         if (r.ok) patchEx(di, e.key, { rpe: r.rpe });
                       }}
-                      onBlur={() => setRpeDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      onBlur={() => {
+                        // Said, not swallowed — the same rule the Rest box in
+                        // this row has always kept. The coach typed @8.3, the
+                        // box showed @8.3 while they were in it, and on blur it
+                        // snapped back to whatever was there before with nothing
+                        // said. The reasonable reading is that the app is slow,
+                        // and the block goes out carrying last week's target.
+                        // `r.why` already exists and says exactly what is wrong
+                        // ("RPE is written in halves — 8 or 8.5, not 8.3").
+                        const typed = rpeDraft[e.key];
+                        setRpeDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readRpe(typed);
+                        if (!r.ok) Alert.alert('Check that effort target', r.why);
+                      }}
                       keyboardType="decimal-pad" placeholder="8.5" placeholderTextColor={t.ink3}
                       accessibilityLabel={`Prescribed effort for ${e.name}, on the RPE scale`}
                       style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
@@ -2596,7 +2706,13 @@ export default function Builder() {
                         const r = readPercent1RM(v);
                         if (r.ok) patchEx(di, e.key, { pct1rm: r.pct });
                       }}
-                      onBlur={() => setPctDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      onBlur={() => {
+                        const typed = pctDraft[e.key];
+                        setPctDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readPercent1RM(typed);
+                        if (!r.ok) Alert.alert('Check that percentage', r.why);
+                      }}
                       keyboardType="number-pad" placeholder="75" placeholderTextColor={t.ink3}
                       accessibilityLabel={`Prescribed share of a one-rep max for ${e.name}, as a whole percentage`}
                       style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
@@ -2609,7 +2725,13 @@ export default function Builder() {
                         const r = readTempo(v);
                         if (r.ok) patchEx(di, e.key, { tempo: r.tempo });
                       }}
-                      onBlur={() => setTempoDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; })}
+                      onBlur={() => {
+                        const typed = tempoDraft[e.key];
+                        setTempoDraft((prev) => { const n = { ...prev }; delete n[e.key]; return n; });
+                        if (typed == null || !typed.trim()) return;
+                        const r = readTempo(typed);
+                        if (!r.ok) Alert.alert('Check that tempo', r.why);
+                      }}
                       autoCapitalize="characters" autoCorrect={false}
                       placeholder="3-1-1-0" placeholderTextColor={t.ink3}
                       accessibilityLabel={`Prescribed rep speed for ${e.name}, as down, pause, up and pause`}
@@ -3018,12 +3140,32 @@ export default function Builder() {
               is what this control has always meant. */}
           <View style={{ marginBottom: sp.lg }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Starts on</Text>
+            {/* ── two ways to say a date, in one control ──────────────────
+                The field and the calendar button share a box, so tapping the
+                date's own space opens the month — which is what was asked for.
+                The TEXT half stays a real TextInput and keeps its keyboard,
+                because coaches paste dates out of a client's message and out of
+                their own notes, and a picker that took typing away would be a
+                regression for every one of them.
+
+                Not `@react-native-community/datetimepicker`. That is a native
+                module, a native module is a new binary, and this has to reach
+                coaches over the air on the build they are already running. */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
-              <TextInput value={startsOn} onChangeText={setStartsOn}
-                placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
-                autoCapitalize="none" autoCorrect={false}
-                accessibilityLabel="The day this block begins, as year, month and day"
-                style={[inp, { flex: 1, paddingVertical: 9, paddingHorizontal: 12 }]} />
+              <View style={[inp, { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 0, paddingHorizontal: 0 }]}>
+                <TextInput value={startsOn} onChangeText={setStartsOn}
+                  placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
+                  autoCapitalize="none" autoCorrect={false}
+                  accessibilityLabel="The day this block begins, as year, month and day. You can type it, or use the calendar button beside it."
+                  style={{ ...ty.body, color: t.ink, flex: 1, paddingVertical: 9, paddingHorizontal: 12 }} />
+                <Pressable onPress={() => setStartPick(true)}
+                  hitSlop={hitSlopFor(MIN_TARGET)}
+                  accessibilityRole="button"
+                  accessibilityLabel={startsOn ? 'Pick the start day from a calendar. Currently ' + startsOn : 'Pick the start day from a calendar'}
+                  style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="calendar" size={18} color={t.ink2} />
+                </Pressable>
+              </View>
               {startsOn ? (
                 <Ghost label="Clear" onPress={() => setStartsOn('')} />
               ) : null}
@@ -3042,6 +3184,32 @@ export default function Builder() {
             )}
           </View>
 
+          {/* ── the reason, ABOVE the control it is about ───────────────────
+              This sentence used to sit under the button. Both of those places
+              carry the same words, so this is not a rewrite — it is a move, and
+              the move is the whole argument: a disabled control is discovered by
+              TAPPING it, and an explanation printed below the tap is read after
+              the frustration rather than instead of it. The coach who reported
+              the missing calendar had been staring at the date field
+              immediately above; reading downward from it they met a dead button
+              before they met the reason, and concluded the date was the
+              blocker. It reads in the right order now.
+
+              And when they HAVE typed a date into an empty programme — the
+              exact state that was reported — the sentence says outright that
+              the date is not what is holding it. That is the misdiagnosis
+              itself, answered where it happens. */}
+          {blockExercises === 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.sm }}>
+              Add at least one exercise to assign this program.
+              {startsOn ? ' The start date is not what is holding it — an empty program is.' : ''}
+            </Text>
+          ) : pickedIds.length === 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.sm }}>
+              Tick everybody who should get this — one client or twenty.
+            </Text>
+          ) : null}
+
           <View style={{ opacity: canAssign ? 1 : 0.4 }} pointerEvents={canAssign && !assignBusy ? 'auto' : 'none'}>
             <Cta wide label={assignCtaLabel({
               busy: assignBusy,
@@ -3051,16 +3219,6 @@ export default function Builder() {
               soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
             })} onPress={assign} />
           </View>
-
-          {blockExercises === 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-              Add at least one exercise to assign this program.
-            </Text>
-          ) : pickedIds.length === 0 ? (
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
-              Tick everybody who should get this — one client or twenty.
-            </Text>
-          ) : null}
 
           {/* ── taking somebody off, without putting them on something else ──
               Un-assign was reachable only as the Revert below, which acts on
@@ -3097,6 +3255,20 @@ export default function Builder() {
         </Section>
 
       </ScrollView>
+
+      {/* ── the start day, as a month ─────────────────────────────────────
+          Dismissing it is a cancel and writes nothing: a picker that committed
+          whatever cell was under the highlight when it closed would put a start
+          date on a block the coach never chose, which is the same class of harm
+          `CLIENT_STARTS_NOW` is printed to prevent. */}
+      <DateSheet
+        visible={startPick}
+        value={startsOn}
+        heading="Starts On"
+        note="The day this block begins. Leave it unset to start now."
+        onCancel={() => setStartPick(false)}
+        onPick={(iso) => { setStartsOn(iso); setStartPick(false); }}
+      />
 
       {/* ── exercise picker ──────────────────────────────────────────────── */}
       <Modal visible={pickerDay !== null && !previewing} transparent animationType="slide" onRequestClose={() => setPickerDay(null)}>

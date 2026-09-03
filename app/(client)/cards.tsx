@@ -357,10 +357,19 @@ export default function Cards() {
         <Rule />
 
         <Section>
-          <Pressable onPress={() => router.push('/(client)/social')} accessibilityRole="button" accessibilityLabel="Connect Instagram or TikTok"
+          {/* This said "Connect Instagram / TikTok", in the spoken label as
+              well. app/(client)/social.tsx removed that feature deliberately —
+              its own header records a NETWORKS list whose Connect button
+              flipped a local boolean, stored no token, linked nothing and reset
+              on relaunch — and the control advertising it was left behind. A
+              member tapped a specific promise, landed on a screen that never
+              mentions either network, and concluded the connection was broken
+              or buried in a setting. What is actually there is the phone's own
+              share sheet, which is what this now says. */}
+          <Pressable onPress={() => router.push('/(client)/social')} accessibilityRole="button" accessibilityLabel="Share your progress"
             style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, alignSelf: 'center' }}>
             <Icon name="share" size={15} color={t.ink3} />
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Connect Instagram / TikTok {FORWARD_CHAR}</Text>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Share Your Progress {FORWARD_CHAR}</Text>
           </Pressable>
         </Section>
       </ScrollView>

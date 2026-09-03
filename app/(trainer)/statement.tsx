@@ -52,6 +52,7 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { monthNamesShort } from '../../src/lib/format';
 import { shareDoc, shareTextFile, pdfExportAvailable, fileShareBlocker } from '../../src/lib/exportShare';
 import {
   coachStatement, statementDoc, statementCsv, statementItemsCsv, statementFileStem,
@@ -90,7 +91,13 @@ const SPANS: { key: Span; label: string }[] = [
   { key: 'custom', label: 'Any Dates' },
 ];
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// The twelve month names for the year-start PICKER, in the reader's own
+// language. A row of pills is the shape `monthNamesShort` exists for — there is
+// no date to format, only twelve names — and it was a hardcoded English array,
+// so a coach whose phone is in French set their financial year from twelve
+// English abbreviations. `appLocale()` is resolved at launch and does not change
+// while the app runs, so this is read once at module scope.
+const MONTH_NAMES = monthNamesShort();
 
 /**
  * Where the coach's own year start is kept.

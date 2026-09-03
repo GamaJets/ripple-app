@@ -35,7 +35,7 @@
 import {
   gymCanSell, asConnectRow, termEnd, termFrom, addDays, renewStart, supersedeRow,
   offerFor, switchLabel, passNote, orderNote, orderIsLive, isBuyablePass, renewalIsContiguous,
-  offerMoney, type GymAccountFacts, type GymPlan,
+  offerMoney, fetchMyGymOrders, MY_ORDERS_CAP, type GymAccountFacts, type GymPlan,
 } from './memberBuy';
 import { canTakeDirectCharges } from './directCharges';
 import { standingOf, type MemberMembership } from './memberRecord';
@@ -355,5 +355,69 @@ eq(offerMoney(null, 'AED'), null, 'an amount nobody established is withheld too'
   ok(String(supersedeRow({ startedOn: '2026-09-01' }, '2026-09-20')!.status) !== 'active', 'so leaving an upgraded membership active must fail this file');
 }
 
-if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('memberBuy: ok');
+/* ── the fifty-first order ─────────────────────────────────────────────────
+ *
+ * This list feeds "Waiting On Stripe" — the one screen in the app that tells
+ * somebody their card was charged and nothing was granted. A window of fifty
+ * with no flag meant a drop-in buyer's older stuck order fell silently outside
+ * it while the header printed a confident count over what was left.
+ */
+{
+  // The smallest thing shaped like the query chain: whatever `.limit()` is
+  // asked for is what comes back, so the assertion is about the probe row.
+  const sbWith = (rowCount: number) => {
+    let asked = -1;
+    const chain: any = {
+      select: () => chain,
+      eq: () => chain,
+      order: () => chain,
+      limit: (n: number) => {
+        asked = n;
+        return Promise.resolve({
+          data: Array.from({ length: Math.min(rowCount, n) }, (_, i) => ({
+            id: `o${i}`, kind: 'pass', intent: 'new', status: 'pending',
+            amount_cents: 1000, currency: 'GBP', created_at: `2026-01-${String((i % 28) + 1).padStart(2, '0')}`,
+          })),
+          error: null,
+        });
+      },
+    };
+    return { sb: { from: () => chain, rpc: () => Promise.resolve({ data: null, error: null }), functions: { invoke: async () => ({ data: null, error: null }) } } as any, askedFor: () => asked };
+  };
+
+  void (async () => {
+    // One more than the window is asked for, or a full page and a truncated one
+    // look identical — the whole argument of src/lib/rowCap.ts.
+    const under = sbWith(3);
+    const a = await fetchMyGymOrders(under.sb, 'me');
+    ok(a.ok, 'a read that landed is ok');
+    if (a.ok) {
+      eq(a.value.orders.length, 3, 'a member with three orders gets three');
+      eq(a.value.truncated, false, 'and is not told anything is missing');
+    }
+    eq(under.askedFor(), MY_ORDERS_CAP + 1, 'the query asks for one past the window, as a probe');
+
+    const exact = await fetchMyGymOrders(sbWith(MY_ORDERS_CAP).sb, 'me');
+    if (exact.ok) {
+      eq(exact.value.orders.length, MY_ORDERS_CAP, 'exactly a window-full is a window-full');
+      eq(exact.value.truncated, false, 'and a set that is exactly the window is not truncated');
+    }
+
+    const over = await fetchMyGymOrders(sbWith(MY_ORDERS_CAP + 1).sb, 'me');
+    ok(over.ok, 'a truncated read still landed — it is not a failure');
+    if (over.ok) {
+      // The probe row is not data and must not reach the screen.
+      eq(over.value.orders.length, MY_ORDERS_CAP, 'the probe row is not shown');
+      eq(over.value.truncated, true, 'and the member is told there are more');
+    }
+
+    const out = await fetchMyGymOrders(sbWith(3).sb, '');
+    eq(out.ok, false, 'nobody signed in is a refusal, not an empty list');
+
+    // The one exit point. Everything above this file is synchronous and has
+    // already run; this block is the last thing, so the whole file's result is
+    // reported here rather than twice.
+    if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
+    console.log('memberBuy: ok');
+  })();
+}

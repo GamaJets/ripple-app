@@ -31,12 +31,16 @@ import { tapLight } from '../../src/ui/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMachine, visionAvailable } from '../../src/lib/vision';
+import { mayAnalyzePhoto, PHOTO_SENT, PHOTO_NOT_SENT, PHOTO_DESTINATION } from '../../src/lib/photoAI';
+import { usePhotoAI } from '../../src/ui/photoAI';
 import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../../src/lib/machines';
 import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Field } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 import { liftLabel, readLift, readNumber } from '../../src/lib/units';
+import { readHold, holdLabel } from '../../src/lib/timedSets';
+import { hitSlopFor } from '../../src/lib/a11y';
 
 // "km", "m" and "mi" are three glyphs a screen reader says as themselves — and
 // "mi" spoken aloud is not a word. The distance toggle says the whole thing.
@@ -61,6 +65,11 @@ export default function ScanMachine() {
   const router = useRouter();
   const { logWorkouts } = useWorkoutLog();
   const [permission, requestPermission] = useCameraPermissions();
+  // The camera permission above is about the hardware. This is about where the
+  // frame goes, which is a different question with a different answer, and for
+  // a long time only the first one was ever put — see src/lib/photoAI.ts.
+  const photoAI = usePhotoAI('machine');
+  const [askPhoto, setAskPhoto] = useState(false);
   const [scanned, setScanned] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
   const [rawCode, setRawCode] = useState('');
@@ -74,7 +83,19 @@ export default function ScanMachine() {
   // strength
   const [reps, setReps] = useState('');
   const [kg, setKg] = useState('');
-  const [sets, setSets] = useState<{ reps: number; kg: number }[]>([]);
+  // `bw` and `timed` per set, which this screen did not carry at all — the two
+  // flags every other load-entry point in the app writes. A member standing at
+  // an assisted-dip machine or a plank timer either typed 0 into the load box,
+  // which nothing downstream can tell from a barbell lift whose load was
+  // omitted, or typed the seconds into the reps box, which prices a hold as
+  // repetitions. This is the screen used AT the machine, so it is the one most
+  // likely to produce both.
+  const [sets, setSets] = useState<{ reps: number; kg: number; bw: boolean; timed: boolean }[]>([]);
+  // How the next set is being entered. Sticky between adds, because sets come
+  // in threes and fours and re-tapping "hold" for each one is how somebody ends
+  // up with a plank logged as reps.
+  const [bwSet, setBwSet] = useState(false);
+  const [timedSet, setTimedSet] = useState(false);
   // cardio
   const [mins, setMins] = useState('');
   const [dist, setDist] = useState('');
@@ -85,7 +106,30 @@ export default function ScanMachine() {
   const applyDef = (d: MachineDef) => { setExercise(d.name); setGroup(d.group); setCardio(!!d.cardio); setNeedsPick(false); tapLight(); };
 
   // Identify the machine from a photo (AI vision) — no code needed.
+  //
+  // The consent is checked BEFORE the camera opens, not before the upload. A
+  // member who has taken the photo has already taken it: putting the question
+  // afterwards makes agreeing the way to stop having wasted the gesture, which
+  // is not a question, it is a nudge.
   const identifyByPhoto = async () => {
+    const gate = mayAnalyzePhoto(photoAI.consent, visionAvailable());
+    if (!gate.allowed) {
+      if (gate.block === 'off') {
+        Alert.alert('Photo identifying is off', 'This build has no machine reader. Scan the code, or pick the machine from the list below.');
+      } else if (gate.block === 'unknown') {
+        // Still reading the stored answer. Not a refusal, and not a yes.
+        Alert.alert('One moment', 'Still checking your answer about photos. Try that again in a moment.');
+      } else {
+        // 'unasked' and 'refused' both land here: the question gets put, and
+        // somebody who said no can change their mind in the same place.
+        setAskPhoto(true);
+      }
+      return;
+    }
+    await capturePhoto();
+  };
+
+  const capturePhoto = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera access to identify a machine by photo.'); return; }
     const res = await ImagePicker.launchCameraAsync({ quality: 0.6, base64: true });
@@ -153,11 +197,16 @@ export default function ScanMachine() {
   // telling somebody typing pounds that their figure is over 600 kg would be
   // correcting them in a unit they do not use.
   const addSet = () => {
-    const r = parseInt(reps, 10) || 0;
+    // A hold is read by `readHold`, not by parseInt: '4 5' parses to 4 and puts
+    // a quarter of somebody's plank in the record with nothing to say so. It
+    // also accepts 1:30, because that is how a clock is read.
+    const first = timedSet ? readHold(reps) : null;
+    if (timedSet && first && !first.ok) { Alert.alert('Check that hold', first.reason); return; }
+    const r = timedSet ? (first as { ok: true; secs: number }).secs : (parseInt(reps, 10) || 0);
     if (!r) return;
     const load = readLift(kg, wu);
     if (!load.ok) { Alert.alert('Check that load', load.reason); return; }
-    setSets((p) => [...p, { reps: r, kg: load.kg ?? 0 }]);
+    setSets((p) => [...p, { reps: r, kg: load.kg ?? 0, bw: bwSet, timed: timedSet }]);
     setReps(''); tapLight();
   };
 
@@ -183,7 +232,17 @@ export default function ScanMachine() {
       // The same `strengthKcalOf` the caption above renders, so the log and
       // the screen cannot state different figures — and `undefined` rather than
       // a fabricated one when there was no load to estimate from.
-      entry = { t: new Date().toISOString(), exercise: exercise.trim(), sets: sets.map((s) => [s.reps, s.kg] as [number, number]), kcal: strengthKcalOf(sets) };
+      // The two flag arrays go with the sets. Written as full-length arrays
+      // rather than omitted when empty: `bw[i]`/`timed[i]` are read by index
+      // everywhere downstream, and a short array is a set nobody flagged.
+      entry = {
+        t: new Date().toISOString(),
+        exercise: exercise.trim(),
+        sets: sets.map((s) => [s.reps, s.kg] as [number, number]),
+        bw: sets.map((s) => s.bw),
+        timed: sets.map((s) => s.timed),
+        kcal: strengthKcalOf(sets),
+      };
     }
     // The result used to be thrown away, so "saved to your workout log" was
     // announced either way — with a button that opens that log — and a client
@@ -208,15 +267,18 @@ export default function ScanMachine() {
     ]);
   };
 
-  const rescan = () => { setScanned(null); setRawCode(''); setExercise(''); setGroup(''); setCardio(false); setNeedsPick(false); setRecalled(false); setSets([]); setReps(''); setKg(''); setMins(''); setDist(''); setWatts(''); setKcalIn(''); setManual(false); setQ(''); };
+  const rescan = () => { setScanned(null); setRawCode(''); setExercise(''); setGroup(''); setCardio(false); setNeedsPick(false); setRecalled(false); setSets([]); setBwSet(false); setTimedSet(false); setReps(''); setKg(''); setMins(''); setDist(''); setWatts(''); setKcalIn(''); setManual(false); setQ(''); };
   const inp = { flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 } as const;
 
   const showForm = scanned != null || manual;
   /** Kilogram-reps moved, at the same rate the log's own estimate uses, or null
    *  when nothing was loaded. Shared by the caption and by what is SAVED, so
    *  the two can never state different numbers. */
-  const strengthKcalOf = (ss: { reps: number; kg: number }[]): number | undefined => {
-    const volume = ss.reduce((a, s) => a + s.reps * (s.kg || 0), 0);
+  const strengthKcalOf = (ss: { reps: number; kg: number; timed: boolean }[]): number | undefined => {
+    // Holds are not in it. Seconds × kilograms is not a mass moved, and a
+    // 45-second plank under a 10 kg plate would otherwise be priced as 450 kg
+    // of work — the same arithmetic src/lib/bodyweightSets.ts refuses.
+    const volume = ss.reduce((a, s) => a + (s.timed ? 0 : s.reps * (s.kg || 0)), 0);
     return volume > 0 ? Math.round(volume / 60) : undefined;
   };
   const strengthKcal = strengthKcalOf(sets) ?? null;
@@ -263,6 +325,35 @@ export default function ScanMachine() {
             <Section>
               {reading ? (
                 <Text style={{ ...ty.label, color: t.ink2 }}>Identifying the machine from your photo…</Text>
+              ) : askPhoto ? (
+                /* The question, put before the camera opens. Rendered from the
+                   arrays in src/lib/photoAI.ts rather than typed here, so what
+                   somebody agrees to cannot drift from what is actually sent. */
+                <Notice kicker="Before you photograph it" title="The photo goes to a language model"
+                  note={PHOTO_DESTINATION}>
+                  <View style={{ marginTop: sp.md, gap: sp.xs }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>What is sent</Text>
+                    {PHOTO_SENT.map((line) => (
+                      <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>• {line}</Text>
+                    ))}
+                    <View style={{ height: sp.sm }} />
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>What is not</Text>
+                    {PHOTO_NOT_SENT.map((line) => (
+                      <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>• {line}</Text>
+                    ))}
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    A gym floor photo often has other people in it, and they are not being asked. Frame the machine.
+                  </Text>
+                  <View style={{ marginTop: sp.lg }}>
+                    <Cta label="Send the Photo" wide onPress={() => { photoAI.answer('yes'); setAskPhoto(false); void capturePhoto(); }} />
+                    <View style={{ height: sp.sm }} />
+                    {/* 'No' is recorded, not merely dismissed: a dismissal asks
+                        again on the next tap and that is how a question becomes
+                        a nag. The machine is still pickable from the list. */}
+                    <Ghost label="No — I'll Pick It Myself" onPress={() => { photoAI.answer('no'); setAskPhoto(false); setManual(true); setNeedsPick(true); setExercise(''); }} />
+                  </View>
+                </Notice>
               ) : (
                 <Ghost label="Identify by Photo" icon="camera" onPress={identifyByPhoto} />
               )}
@@ -369,16 +460,50 @@ export default function ScanMachine() {
             ) : (
               <Section>
                 <SectionHead title="Add Your Sets" note={sets.length ? `${sets.length} logged` : undefined} />
+                {/* What KIND of set this is, asked before the numbers, because
+                    the first box means different things under each answer. Both
+                    are sticky: sets come in threes and fours, and re-tapping
+                    "held" for each one is how a plank ends up logged as reps.
+                    MIN_TARGET on both — they are the two controls on this screen
+                    that decide what the record says. */}
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+                  <Pressable
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: bwSet }}
+                    accessibilityLabel="This was my own bodyweight"
+                    hitSlop={hitSlopFor(36)}
+                    onPress={() => { setBwSet((v) => !v); tapLight(); }}
+                    style={{ minHeight: 36, justifyContent: 'center', backgroundColor: bwSet ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md }}>
+                    <Text style={{ ...ty.caption, fontWeight: bwSet ? '600' : '500', color: bwSet ? t.brandInk : t.ink2 }}>My own bodyweight</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: timedSet }}
+                    accessibilityLabel="This was a hold, measured in seconds"
+                    hitSlop={hitSlopFor(36)}
+                    onPress={() => { setTimedSet((v) => !v); setReps(''); tapLight(); }}
+                    style={{ minHeight: 36, justifyContent: 'center', backgroundColor: timedSet ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md }}>
+                    <Text style={{ ...ty.caption, fontWeight: timedSet ? '600' : '500', color: timedSet ? t.brandInk : t.ink2 }}>Held, not repeated</Text>
+                  </Pressable>
+                </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
-                  <Field label="Reps">
-                    <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
+                  <Field label={timedSet ? 'Seconds' : 'Reps'}
+                    a11y={timedSet ? 'How long you held it, in seconds' : 'Repetitions'}>
+                    <TextInput value={reps} onChangeText={setReps}
+                      keyboardType={timedSet ? 'default' : 'numeric'}
+                      placeholder={timedSet ? '45 or 1:30' : undefined}
+                      placeholderTextColor={t.ink3}
+                      style={inp} />
                   </Field>
                   {/* The member's own unit, not a fixed "KG". The label and
                       the conversion move together: relabelling one without the
                       other is how a GBP gym's owner typed 50 into a box marked
                       "Amount (GBP)" and 50 dirhams went into the ledger — see
                       the header of scripts/check-currency.mjs. */}
-                  <Field label={wu.toUpperCase()} a11y={`Load in ${wu === 'kg' ? 'kilograms' : 'pounds'}`}>
+                  <Field label={bwSet ? `+${wu.toUpperCase()}` : wu.toUpperCase()}
+                    a11y={bwSet
+                      ? `Extra load on top of your bodyweight, in ${wu === 'kg' ? 'kilograms' : 'pounds'}`
+                      : `Load in ${wu === 'kg' ? 'kilograms' : 'pounds'}`}>
                     <TextInput value={kg} onChangeText={setKg} keyboardType="decimal-pad" style={inp} />
                   </Field>
                   <Ghost label="Add Set" onPress={addSet} />
@@ -393,7 +518,17 @@ export default function ScanMachine() {
                               reads in, so printing it with "kg" typed after it
                               showed a pounds member a figure they never lifted.
                               A blank load is still a dash rather than a 0. */}
-                          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>Set {i + 1}: {s.reps}×{s.kg ? liftLabel(s.kg, wu) : '–'}</Text>
+                          {/* A hold reads as a clock and never as "45×", and a
+                              bodyweight set says so rather than showing a dash
+                              where a weight would be — the dash is what made a
+                              dip indistinguishable from a barbell lift whose
+                              load somebody forgot to type. */}
+                          <Text style={{ ...ty.caption, ...numeric, fontWeight: '500', color: t.ink2 }}>
+                            Set {i + 1}: {s.timed
+                              ? `${holdLabel(s.reps)}${s.kg ? ` × ${liftLabel(s.kg, wu)}` : s.bw ? ' at bodyweight' : ''}`
+                              : `${s.reps}×${s.kg ? liftLabel(s.kg, wu) : s.bw ? 'bodyweight' : '–'}`}
+                            {s.bw && s.kg ? ' on top' : ''}
+                          </Text>
                           <Icon name="minus" size={12} color={t.ink3} />
                         </Pressable>
                       ))}

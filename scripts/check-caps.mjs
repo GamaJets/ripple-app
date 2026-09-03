@@ -110,6 +110,7 @@
 // Nothing here is a spell-checker for prose, and it must not become one.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { assertRootFloors } from './gate-floor.mjs';
 
 const ROOT = process.cwd();
 // Rules 1 and 3 are about src/ui/kit.tsx's slots and the faces they render in,
@@ -222,6 +223,18 @@ function walk(dir, out = []) {
 
 const appFiles = APP_ROOTS.flatMap((r) => walk(join(ROOT, r)));
 const allFiles = [...new Set(ALL_ROOTS.flatMap((r) => walk(join(ROOT, r))))];
+
+/* ── the empty-set guard ──────────────────────────────────────────────────
+ *
+ * There was none. `scripts/check-text.mjs:85` calls this "the empty-set guard
+ * every gate here has" — this was one of the two that did not have one, and it
+ * would have printed `caps ok — 0 files; 0 case-visible labels, no sibling run
+ * disagrees with itself` and exited 0 over a tree with the roots renamed.
+ * Counted per root; see scripts/gate-floor.mjs.
+ */
+assertRootFloors('check:caps', Object.fromEntries(
+  ALL_ROOTS.map((r) => [r, walk(join(ROOT, r)).length]),
+));
 
 /* ── the casing test ──────────────────────────────────────────────────────── */
 

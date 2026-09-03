@@ -83,7 +83,21 @@ export default function OwnerOverview() {
   // right and one that happens to be.
   const trainersUnknown = loading || !isWhole(rosterStatus);
   // The gym's own currency (`tenants.currency`, part 99). Null until the tenant
-  // read returns, and gymMoney falls back to GYM_CURRENCY for that window.
+  // read returns, null for a gym that has not chosen one, and null when the
+  // read failed — and `gymMoney` renders a DASH for all three rather than a
+  // figure in a currency nobody chose.
+  //
+  // This comment used to end "and gymMoney falls back to GYM_CURRENCY for that
+  // window", which was true once and is not now: src/ui/tenant.tsx makes
+  // `gymMoney` a straight call to `wholeMoney`, whose contract is "a null
+  // amount or a missing currency renders a dash, and there is no fallback
+  // currency", and that file's own header says `gymMoney` no longer touches
+  // GYM_CURRENCY. The sentence is kept here rather than deleted because of the
+  // direction it was wrong in: it read as an instruction, and a future reader
+  // "restoring" the fallback it describes would put back the exact defect parts
+  // 150 and 940 were written to end — an owner's money screen denominated in a
+  // currency somebody else picked. Repple is white-labelled; there is no
+  // default currency anywhere in it, and a dash is the honest answer.
   const cur = tenant?.currency ?? null;
   // The tenant is the OTHER read this console renders — the gym's name in the
   // header and the currency every money figure below is denominated in — and it

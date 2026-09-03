@@ -39,6 +39,8 @@
 //    to be paid comes from invoices it actually issued, or it comes from
 //    nowhere and the answer is a dash.
 
+import { isoDay } from './weekStart';
+import { monthNames } from './format';
 import type { GymPayment, Membership, InvoiceStatus } from './gymRecord';
 // The one rule about what a set of rows is denominated in, and the one
 // normalisation behind it. Imported rather than restated: this module used to
@@ -57,14 +59,21 @@ import { reconcile, type Reconciliation } from './finReconcile';
 /** 'YYYY-MM'. */
 export type MonthKey = string;
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
+/**
+ * The twelve months, written out, in the language of whoever is closing.
+ *
+ * Asked per call rather than held in a module constant: `monthNames()` reads
+ * `appLocale()`, which is latched lazily — a constant built at import time
+ * would pin every month label in the console to whatever the locale was before
+ * the app had resolved one.
+ */
+const monthWords = () => monthNames();
 
 export interface MonthWindow {
   key: MonthKey;
-  /** 'August 2026'. Fixed English, not locale-dependent, so a test can pin it. */
+  /** 'August 2026', in the reader's own language. `key` is the fixed thing —
+   *  'YYYY-MM' — and it is what everything is stored, matched and pinned on.
+   *  This is the sentence on the screen, and it belongs to whoever reads it. */
   label: string;
   /** First instant of the month. */
   fromIso: string;
@@ -99,7 +108,7 @@ export function monthWindow(key: MonthKey): MonthWindow | null {
 
   return {
     key,
-    label: `${MONTHS[mo - 1]} ${y}`,
+    label: `${monthWords()[mo - 1]} ${y}`,
     fromIso: from.toISOString(),
     toIso: to.toISOString(),
     firstDay: `${key}-01`,
@@ -554,6 +563,11 @@ export function loadingCloseParts(rec: CloseRecord): ClosePart[] {
   return CLOSE_PARTS.filter((p) => rec[p].state === 'loading');
 }
 
+/** The parts that came back, and came back short. */
+export function truncatedCloseParts(rec: CloseRecord): ClosePart[] {
+  return CLOSE_PARTS.filter((p) => rec[p].state === 'partial');
+}
+
 /**
  * The sentence above a half-loaded close, or null when every part is in.
  *
@@ -576,6 +590,7 @@ export function closeWarning(rec: CloseRecord): string | null {
 export type BlockerKind =
   | 'month_running'
   | 'read_failed'
+  | 'read_truncated'
   | 'still_loading'
   | 'unmarked_sessions'
   | 'unpriced_sessions'
@@ -612,6 +627,23 @@ export function closeBlockers(
     out.push({
       kind: 'read_failed',
       text: `Could not read ${b.label} — ${b.cost}. Nothing can be closed over a read that failed.`,
+    });
+  }
+
+  // A read that SUCCEEDED and came back short. Its own blocker, and not folded
+  // into `read_failed`, because it is the one that would otherwise get through:
+  // every gate on this screen is written `state === 'ready'`, which withholds
+  // the FIGURES, and none of them stops the month being signed off. A month
+  // closed over a prefix of its payments is a smaller month, signed, with
+  // nothing on the document saying so.
+  const cut = truncatedCloseParts(rec);
+  for (const p of cut) {
+    out.push({
+      kind: 'read_truncated',
+      text:
+        `Only the first rows of ${CLOSE_LABEL[p]} were read, and there are more — ${CLOSE_COST[p]}. ` +
+        `A month cannot be closed over part of a set: the figure would be a subtotal with a ` +
+        `signature under it.`,
     });
   }
 
@@ -717,6 +749,20 @@ export interface CloseOptions {
    *  than being valued at nothing. */
   fallbackRateCents?: number | null;
   now?: number;
+  /**
+   * The day to judge an invoice overdue against, as a plain ISO date — the
+   * GYM's own, `gymDay(Date.now(), zone)`.
+   *
+   * Injected for the same reason `fmt` is: this module holds no tenant and
+   * therefore no timezone, and a close that guessed one would be guessing about
+   * which side of a month boundary somebody's invoice fell. It was not
+   * injectable at all until now, and what it did instead was take UTC's
+   * calendar day — which is nobody's, and which is one day ahead of the gym for
+   * every reader west of Greenwich through their whole evening. An invoice due
+   * on the 31st was counted overdue from 5pm on the 31st in Los Angeles, on the
+   * one screen an owner uses to sign off a month.
+   */
+  today?: string;
   /** How to render an amount inside a sentence. Injected rather than assumed:
    *  this module holds no opinion about the gym's currency. */
   fmt?: (cents: number) => string;
@@ -738,7 +784,11 @@ export interface CloseOptions {
  */
 export function buildClose(rec: CloseRecord, w: MonthWindow, opts: CloseOptions): MonthClose {
   const now = opts.now ?? Date.now();
-  const today = new Date(now).toISOString().slice(0, 10);
+  // The reader's own day where the caller has not said which day it is. Not
+  // UTC's, which is what this was and which belongs to nobody in the building;
+  // see `today` on CloseOptions for what it cost. The gym's day is the true
+  // answer and it is one argument away.
+  const today = opts.today ?? isoDay(new Date(now));
 
   const paidRows = rowsOf(sliceMonth(rec.payments, w, (p) => p.takenAt));
   const invRows = rowsOf(rec.invoices);

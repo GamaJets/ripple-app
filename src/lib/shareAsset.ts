@@ -173,6 +173,38 @@ export type CardBuild =
 
 export type BlockReason = 'unread' | 'empty' | 'consent' | 'nothing-picked';
 
+/**
+ * Why a card cannot be composed while the coach's gym is unknown.
+ *
+ * app/(trainer)/share-kit.tsx took its brand as `tenant?.name || authUser?.name`
+ * with the tenant provider's `status` not even destructured. One of those two
+ * strings is a BUSINESS and the other is whatever the person typed when they
+ * signed up for an app, and a dropped connection for one second silently swaps
+ * one for the other. What comes out is a PNG the coach posts to a public feed
+ * with their own legal name across it instead of their gym's — not a rendering
+ * fault, but publishing a private detail, permanently, on their behalf.
+ *
+ * `tenant === null` under a WHOLE read is a different and correct answer: an
+ * independent coach has no gym and their own name is the brand. The refusal is
+ * only for not knowing which of the two situations this is.
+ */
+export const BRAND_UNREAD_NOTE =
+  'Your gym could not be read, so this card has no name to carry. It is not made rather than made with the wrong one — '
+  + 'a card that went out with your own account name where your gym\'s should be cannot be taken back. Pull to refresh and it will build.';
+
+/**
+ * The logo is set, and the picture of it did not arrive.
+ *
+ * Two different nulls arrive at `logo.dataUri`: no logo, and a logo whose file
+ * would not download. app/(trainer)/brand.tsx already draws the distinction;
+ * the screen that PUBLISHES did not, so the coach had done the work, the record
+ * said the logo was set, and the card that went out under their name was
+ * unbranded — invisible on the one surface where it is permanent.
+ */
+export const LOGO_SET_NOT_FETCHED =
+  'Your logo is set and the picture of it could not be fetched, so this card is being prepared without it. '
+  + 'Pull to refresh before you post if you want it on there.';
+
 /* ── word wrap ─────────────────────────────────────────────────────────────── */
 
 /**

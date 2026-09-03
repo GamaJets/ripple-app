@@ -56,7 +56,13 @@ addEventListener('DOMContentLoaded', function () {
   lookup` calls still answer `resultCount 0`, and all three Play pages still
   return 404. So the callout below is still the truth and stays exactly where
   it is — this note is here so the next person can see the claim was tested on
-  the day rather than inherited. Re-run it before deleting anything:
+  the day rather than inherited.
+  Re-checked again 3 Sep 2026 during the sweep that audited every claim on this
+  site against the code: STILL NOTHING. resultCount 0 on all three ids, 404 on
+  all three Play pages. The same "being released now" caveat was added under the
+  store badges on client.html, trainer.html and studio.html, which carried the
+  buttons with no caveat at all — three pages were showing a member a download
+  button for a listing that 404s. Re-run it before deleting anything:
 
       for id in 6790096518 6804358275 6804417240; do
         curl -s "https://itunes.apple.com/lookup?id=$id" | head -c 120; echo

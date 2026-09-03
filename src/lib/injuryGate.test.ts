@@ -5,7 +5,7 @@
 // program is built." These assertions pin the two ways that goes wrong — a
 // gate that never opens, and a gate that opens once and stays open past the
 // next disclosure.
-import { ackState, guardInjuries, injuryKey } from './injuryGate';
+import { ackState, guardInjuries, injuryKey, programmeChoiceState } from './injuryGate';
 import type { Injury } from './injuries';
 
 const errors: string[] = [];
@@ -129,6 +129,25 @@ for (const st of ['loading', 'ready', 'partial', 'error'] as const) {
 eq(injuryKey(knee), 'knee:mild', 'the key is area and severity');
 ok(injuryKey(knee) !== injuryKey(inj('knee', 'severe')), 'severity is part of the identity');
 ok(injuryKey(knee) === injuryKey(inj('knee', 'mild', 'a different note')), 'the note is not');
+
+/* ── the second client-side read, which is not the first one ───────────── */
+
+// The bug: one folded status meant a failed programme read was reported as a
+// failed acknowledgement read, and the block that failed drew as nothing.
+eq(programmeChoiceState('error', 0), 'unknown', 'a failed programme read is not "none assigned"');
+eq(programmeChoiceState('error', 3), 'unknown', 'nor is a failed one with stale rows still in hand');
+eq(programmeChoiceState('loading', 0), 'unknown', 'nor is one still in flight');
+eq(programmeChoiceState('ready', 0), 'none', 'a finished read with no rows is genuinely none');
+eq(programmeChoiceState('ready', 2), 'some', 'and with rows is all of them');
+eq(programmeChoiceState('partial', 900), 'partial', 'a truncated read is shown but never called all of them');
+eq(programmeChoiceState('partial', 0), 'unknown', 'a truncation that returned nothing tells us nothing');
+
+// The two states are independent: every combination is reachable, and the one
+// that mattered is a good acknowledgement read beside a failed programme read.
+eq(ackState('ready', [knee], [injuryKey(knee)]), 'covered',
+  'the acknowledgement read stands on its own when the programme read failed');
+eq(programmeChoiceState('error', 0), 'unknown',
+  'and the programme read says so on its own when the acknowledgement read worked');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('injuryGate: ok');

@@ -103,7 +103,7 @@ import { Icon } from '../../src/ui/Icon';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { useRoster } from '../../src/ui/roster';
-import { searchRoster, rosterSearchLine } from '../../src/lib/rosterSearch';
+import { searchRoster, rosterSearchLine, rosterPickerLine } from '../../src/lib/rosterSearch';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { useFloorQueue } from '../../src/ui/floorQueue';
@@ -487,7 +487,12 @@ export default function LogSession() {
      */
     let outcomeAnswer: OutcomeAnswer = 'not-asked';
     if (sessionId && markDelivered) {
-      if (out === 'refused') {
+      // 'full' joins 'refused' here for the same reason and a stronger one: the
+      // log did not reach anybody and is not going to, so spending a client's
+      // session credit for an hour with no record would be the ending point 4
+      // of the decision exists to prevent, with not even a queue entry to
+      // explain it later.
+      if (out === 'refused' || out === 'full') {
         outcomeAnswer = 'not-attempted';
       } else {
         // Snapshotted here and carried into the queue rather than recomputed at
@@ -502,10 +507,17 @@ export default function LogSession() {
         const rateCents = rateCentsToSnapshot({
           gymFee: tenant?.sessionFee, ownFee, gymCurrency: tenant?.currency, mine: myCcy,
         }) ?? undefined;
-        outcomeAnswer = await queue.attempt({
+        const marked = await queue.attempt({
           kind: 'session-outcome', sessionId, clientName: pickedName,
           outcome: 'completed', rateCents,
         });
+        // A device that would not keep the mark is not a server that refused
+        // it, but for the session it is the same fact and the same sentence:
+        // nothing was recorded and nothing is waiting. `OutcomeAnswer` has no
+        // 'full' arm because the outcome is one tap that can be made again from
+        // the Mark Sessions queue — unlike the entries above, which exist
+        // nowhere else — so it is reported as the refusal it functionally is.
+        outcomeAnswer = marked === 'full' ? 'refused' : marked;
       }
     }
 
@@ -706,6 +718,16 @@ export default function LogSession() {
               </View>
             ) : null}
 
+            {/*
+              * whole-ok: neither status this lets through can make the branch say the
+              * wrong thing. 'loading' is split out one line below and gets "Reading your
+              * clients…" — which is the whole reason that sentence is there, because this
+              * is the screen a coach opens mid-session while standing in front of the
+              * client, and "nobody is on your book" is the worst thing it could say to
+              * them. And 'partial' means the read stopped at the 1000-row ceiling
+              * (src/lib/rowCap.ts), so the roster holds a thousand names rather than
+              * none: it cannot reach an empty list to make this branch true.
+              */}
             {r.roster.length === 0 && r.status !== 'error' ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>
                 {r.status === 'loading'
@@ -737,8 +759,14 @@ export default function LogSession() {
             {clientQLine ? (
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{clientQLine}</Text>
             ) : capped ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                {`Showing ${shownClients.length} of your ${r.roster.length} clients — type a name to find the rest.`}
+              // `r.roster.length` is what THIS APP HOLDS, which is the size of
+              // the book only under a whole read. `useRoster` reports 'partial'
+              // on a truncated one, and this screen already honours it for the
+              // search sentence three lines up — while the sentence that tells
+              // a coach where the missing people are printed the page size as
+              // the total. See `rosterPickerLine`.
+              <Text style={{ ...ty.caption, color: r.status === 'ready' ? t.ink3 : t.ink2, marginTop: sp.md }}>
+                {rosterPickerLine({ status: r.status, shown: shownClients.length, known: r.roster.length })}
               </Text>
             ) : null}
 

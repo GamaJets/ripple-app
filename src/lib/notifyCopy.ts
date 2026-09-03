@@ -223,6 +223,75 @@ export interface DeliveryReport {
   /** Why the push did not go out. Shown verbatim: the author can act on "not
    *  connected to the server" and cannot act on "unknown error". */
   pushError?: string | null;
+  /**
+   * The recipient list was only PARTLY READ when the push went out.
+   *
+   * send-push reports this as `partial` when a chunk of the list failed or ran
+   * off its page ceiling: it pushed to everybody it could resolve and cannot
+   * say that was everybody. It is a separate fact from `push: 'failed'` —
+   * the send was accepted, and some of it happened.
+   *
+   * Undefined and false both mean "no reason to think anything was missed",
+   * which is what an older deployment of send-push, and every non-broadcast
+   * send, will hand back.
+   */
+  pushPartial?: boolean;
+  /**
+   * The list of people to address was itself capped.
+   *
+   * `recipients` is then a floor, not a count, and the sentence must not state
+   * it as a total — the same rule `LoadStatus`'s 'partial' member states for
+   * every other read in this codebase (src/ui/loadStatus.ts).
+   */
+  recipientsTruncated?: boolean;
+  /**
+   * More people were addressed than `notify_users()` considers in one call, so
+   * `recorded` is a FLOOR — see NOTIFY_USERS_CAP in src/ui/pushNotifications.ts
+   * and the `limit 2000` in supabase/parts/122.
+   *
+   * The people past that ceiling were neither written to nor counted, which is
+   * why this cannot be inferred from the numbers: `recorded` looks like an
+   * ordinary count and the shortfall is invisible in it. Under this flag the
+   * sentence says "at least", and never compares the two figures — the
+   * difference between them is not the number of people who were skipped.
+   */
+  recordedAtCap?: boolean;
+}
+
+/**
+ * The one sentence this product has about a push whose recipient list was only
+ * PARTLY READ.
+ *
+ * ── Why it is a constant and not four sentences ───────────────────────────
+ *
+ * `deliverySummary` below had the only wording for it, and four other screens
+ * — app/(trainer)/classes.tsx, app/(trainer)/calendar.tsx,
+ * app/(trainer)/sessions.tsx and app/(owner)/promotions.tsx — each state their
+ * own count over the same flag and had nothing to say about it. Four authors
+ * writing a fifth, sixth, seventh and eighth wording for "some of them may
+ * have got nothing" is how `fmtRelativeDay` came to exist in five copies that
+ * disagreed; the difference here is that these are sentences about whether
+ * somebody was told their class is off, so disagreeing about the hedge is
+ * disagreeing about how alarmed to be.
+ *
+ * It reads as a clause after a stated number, in every one of the five, and
+ * says the thing the number cannot: the count is what went out, and what went
+ * out is not known to be everybody.
+ */
+const PARTIAL_CAUSE = 'Not all of the recipient list could be read';
+export const PUSH_PARTIAL_NOTE = `${PARTIAL_CAUSE}, so more people may be without one than this says.`;
+
+/**
+ * The same clause for a send to ONE person.
+ *
+ * "More people may be without one" is a sentence about a crowd, and
+ * app/(trainer)/sessions.tsx answers a request from a single client. The CAUSE
+ * is identical and stays identical — that is the half a reader can act on, and
+ * splitting it would be the fifth wording this constant exists to prevent —
+ * and only the consequence changes number.
+ */
+export function pushPartialNote(recipients?: number | null): string {
+  return recipients === 1 ? `${PARTIAL_CAUSE}, so they may not have got one.` : PUSH_PARTIAL_NOTE;
 }
 
 /**
@@ -254,6 +323,24 @@ export function deliverySummary(r: DeliveryReport): string {
     parts.push('It is posted, and nobody could be notified about it just now. They will see it the next time they open their notices.');
   } else if (r.recorded === 0) {
     parts.push('It is posted. No notifications were recorded, so it will be seen when somebody opens their notices rather than arriving on its own.');
+  } else if (r.recordedAtCap) {
+    // "At least", because `recorded` stopped being a count at the ceiling
+    // inside notify_users(). Tested before `recipientsTruncated` because it is
+    // the stronger statement: rows were definitely not written here, whereas a
+    // capped ROSTER read only means the list of people may be short.
+    // No "send it again" here, and that omission is deliberate: the ceiling is
+    // a `limit` with no ORDER BY, so a second send would write to an arbitrary
+    // two thousand rather than to the ones that were missed. Telling an author
+    // to repeat it would be offering a remedy that does not remedy anything.
+    // The notice itself is on the server and everybody can still read it there.
+    parts.push(`It is posted, and at least ${num(r.recorded)} people have it in their notifications. There are more people on this notice than can be written to in one go, so some of them do not — they will see it when they open their notices.`);
+  } else if (r.recipientsTruncated) {
+    // `recipients` is a floor here, so it is not stated as a total and the two
+    // numbers are not compared: "3 of 1001" over a capped read invites the
+    // author to go and find the other 998, and there is no such number.
+    // Said before the push sentence, because it is a fact about who the notice
+    // was addressed to at all rather than about how it arrived.
+    parts.push(`It is posted, and ${num(r.recorded)} ${r.recorded === 1 ? 'person has' : 'people have'} it in their notifications. There are more people to address than this app could read in one go, so some may not have been included.`);
   } else if (r.recipients != null && r.recipients > r.recorded) {
     // Deliberately says which number is which. notify_users() skips a
     // recipient it may not reach (a client who left the roster, a hand-added
@@ -263,7 +350,14 @@ export function deliverySummary(r: DeliveryReport): string {
     parts.push(`It is posted, and ${num(r.recorded)} ${r.recorded === 1 ? 'person has' : 'people have'} it in their notifications.`);
   }
 
-  if (r.push === 'queued') {
+  if (r.push === 'queued' && r.pushPartial) {
+    // The send was accepted and part of the recipient list could not be read,
+    // so the number of handsets it reached is a floor. Said out loud rather
+    // than folded into the ordinary "queued" sentence, because "it went out"
+    // over a truncated list is the exact claim send-push's paging was added to
+    // stop making — and a caller that could not see the flag went on making it.
+    parts.push(`A push was queued as well. ${PUSH_PARTIAL_NOTE} Everyone above still has it in their notifications.`);
+  } else if (r.push === 'queued') {
     parts.push('A push was queued as well — only people on a push-enabled build with notifications turned on will get one.');
   } else if (r.push === 'failed') {
     parts.push(`The push did not go out: ${(r.pushError || '').trim() || 'the server did not say why'}.`);
@@ -604,11 +698,27 @@ export function classOffBuckets(
  * same transaction, this app cannot see whether it landed, and a sentence
  * promising a row that a missing trigger would make imaginary is exactly the
  * kind of claim this file exists to refuse.
+ *
+ * ── `pushPartial`, and why it does not change the number ──────────────────
+ *
+ * send-push reports `partial` when it could not read the whole of the
+ * `push_tokens` list for the people it was handed. `pushed` is still the right
+ * number to state — it is what this app asked for and what the function
+ * accepted — but the claim RIDING on it, that everybody else is the only one
+ * without a banner, stops being true: the send resolved an unknown subset of
+ * those handsets. So the figure stays and `PUSH_PARTIAL_NOTE` is appended to
+ * it, which is the same clause `deliverySummary` says for the same fact rather
+ * than a second wording for it.
+ *
+ * It is deliberately NOT folded into `pushed === 0`. A partly-read list is not
+ * a failed send: some of the room was woken up, and telling a coach nobody was
+ * would send them chasing twelve people who have already read it.
  */
 export function classOffConfirmation(
   cancelled: number,
   people: number | null,
   pushed: number | null,
+  pushPartial?: boolean,
 ): string {
   const n = Math.max(0, Math.floor(Number.isFinite(cancelled) ? cancelled : 0));
   const lead = `${num(n)} ${n === 1 ? 'class was' : 'classes were'} called off. Every booking, every check-in and every waiting list is kept.`;
@@ -621,7 +731,20 @@ export function classOffConfirmation(
     return `${lead} ${who}, and we couldn’t reach any of their phones just now — tell them yourself if the class is soon.`;
   }
   if (pushed < people) {
+    // "We couldn't reach the rest" names a set — the people-minus-pushed who
+    // are without one — and under `partial` there is no such set: the shortfall
+    // is on top of it and nobody counted it. So the confident half is replaced
+    // rather than added to.
+    if (pushPartial) {
+      return `${lead} ${who}. A push was queued to ${num(pushed)} of them. ${PUSH_PARTIAL_NOTE} Tell them yourself if the class is soon.`;
+    }
     return `${lead} ${who}. A push was queued to ${num(pushed)} of them; we couldn’t reach the rest, so tell them yourself if the class is soon.`;
+  }
+  if (pushPartial) {
+    // "All of them" is exactly the claim `partial` withdraws, so this branch
+    // does not make it. The send went out for everybody who was booked; what
+    // is not known is how many handsets it resolved to.
+    return `${lead} ${who}, and a push was queued for them. ${PUSH_PARTIAL_NOTE} Tell them yourself if the class is soon.`;
   }
   return `${lead} ${who}, and a push was queued to all of them. Only people on a push-enabled build with notifications turned on will get one.`;
 }

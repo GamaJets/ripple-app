@@ -73,6 +73,14 @@ import { useWearables } from '../../src/ui/wearables';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
 import { caloriesLeft, caloriesNote, dayBurn, macrosFor } from '../../src/lib/nutrition';
+// The three answers the target is built from — the coach's own, not a client
+// provider's defaults. See src/lib/coachMacros.ts.
+import { useMyMacroInputs } from '../../src/ui/coachOwnMacros';
+import {
+  ACTIVITY_LEVELS, activityLevelOf, builtFromLine, macroGate,
+  GOAL_WORD, DIET_WORD,
+} from '../../src/lib/coachMacros';
+import type { Diet, Goal } from '../../src/lib/types';
 import { readFoodEdit } from '../../src/lib/entryEdit';
 import { searchCommonFoods, type CommonFood } from '../../src/lib/foods';
 import { num } from '../../src/lib/format';
@@ -167,10 +175,17 @@ export default function MyNutrition() {
    * All of them, because a target is the profile's figures and the log's
    * total set against each other — refreshing one half would print a
    * remaining-for-today built out of two different moments. */
+  // Declared above the pull, which refreshes it: the three answers a target is
+  // built from are as much a read as the log and the profile are.
+  const own = useMyMacroInputs();
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     Promise.resolve(fl.reload()), Promise.resolve(cd.reload()),
     Promise.resolve(reloadHome()), wearables.syncAll(),
-  ]), [fl, cd, reloadHome, wearables]));
+    // The three answers the target is built from. Under a failed read the
+    // screen says so and offers no questions — this is the gesture that makes
+    // it ask again, and without it that state has no way out.
+    Promise.resolve(own.reload()),
+  ]), [fl, cd, reloadHome, wearables, own]));
 
   // An empty log under 'error' means "we could not read it", which is a
   // different sentence from "you have not eaten". Under 'partial' the rows are
@@ -186,13 +201,57 @@ export default function MyNutrition() {
   // live, so `useClientData` hands back nulls and constructed defaults and
   // reports 'error' for the read that never found a row. Feeding those to
   // macrosFor would produce a day's calories belonging to nobody.
+  /* ── the three answers, and whose they are ───────────────────────────────
+   *
+   * `cd.goal`, `cd.diet` and `cd.activity` used to be the last three arguments
+   * here, and none of them is the coach's. `useClientData` reads `clients`, a
+   * table a coach has no row in, so those three were its constructed defaults
+   * for EVERY coach in the product: 'muscle', 'meat' and a literal 1.5. Through
+   * src/lib/nutrition.ts that is a twelve per cent surplus, protein at 2.0 g
+   * per kg of lean mass and fat at 27% — so a coach who is cutting was handed a
+   * bulking target, headed "Calories Remaining", and counted the day down
+   * against it. The rest of this screen is scrupulous; the three inputs that
+   * decide the number were the three nobody had ever been asked for.
+   *
+   * They are now the coach's own answers, on `coach_prefs`
+   * (supabase/parts/1020), and `macroGate` is the one place that decides
+   * whether there is enough to build anything at all. */
+  const measured = cd.profileStatus === 'ready' && cd.weightKg != null && cd.bodyFatPct != null;
+  const gate = useMemo(
+    () => macroGate({ status: own.status, inputs: own.inputs, measured }),
+    [own.status, own.inputs, measured],
+  );
   const target = useMemo(() => {
-    if (cd.profileStatus !== 'ready') return null;
+    if (!gate.ok) return null;
     if (cd.weightKg == null || cd.bodyFatPct == null) return null;
     // No coach adjustment layered on: `coach_nutrition` is a coach's note to a
     // CLIENT, and nobody is coaching the coach.
-    return macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet });
-  }, [cd.profileStatus, cd.weightKg, cd.bodyFatPct, cd.activity, cd.goal, cd.diet]);
+    return macrosFor({
+      weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct,
+      activity: gate.activity, goal: gate.goal, diet: gate.diet,
+    });
+  }, [gate, cd.weightKg, cd.bodyFatPct]);
+
+  /**
+   * Store one of the three, and say so when the server refused.
+   *
+   * Never optimistic: `useMyMacroInputs` moves its own state only on a
+   * confirmed write, so a refused answer cannot become a target. A silent
+   * failure here would be a coach eating against a number built from an answer
+   * that is not on their account.
+   */
+  const saveOwn = async (patch: { goal?: Goal; diet?: Diet; activity?: number }) => {
+    if (!(await own.save(patch))) {
+      Alert.alert('Not saved',
+        'That answer did not reach your account, so nothing has changed and no target has been worked out from it. Try again in a moment.');
+    }
+  };
+  /** The chip for one of the two picker rows. */
+  const ownChip = (on: boolean) => ({
+    paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill,
+    backgroundColor: on ? t.brand : t.surface2,
+    borderWidth: hairline, borderColor: on ? t.brand : t.ring,
+  });
 
   const burn = target ? dayBurn(target, wToday) : null;
   // The same function the client's two nutrition screens call, so a coach and
@@ -308,7 +367,17 @@ export default function MyNutrition() {
         : 'Your food log could not be read, so today is unknown rather than empty.')
     : left
       ? caloriesNote(left)
-      : `${num(fl.consumed.kcal)} kcal logged today · no target, because nothing here has measured you`;
+      // "nothing here has measured you" is true of one of the four reasons
+      // there is no target and false of the other three — including the one
+      // that is now the common case, which is three questions nobody has
+      // answered. `macroGate` already knows which; the hero says the short
+      // version and the Macros section below carries the sentence and the
+      // controls.
+      : `${num(fl.consumed.kcal)} kcal logged today · ${
+        !gate.ok && gate.reason === 'unasked' ? 'no target until you answer the three questions below'
+        : !gate.ok && gate.reason === 'unread' ? 'no target, because what it is built from could not be read'
+        : !gate.ok && gate.reason === 'reading' ? 'no target yet — still reading'
+        : 'no target, because nothing here has measured you'}`;
 
   const macroRow = (label: string, eaten: number, tg: number | null) => {
     const pct = tg ? Math.max(0, Math.min(100, Math.round((eaten / tg) * 100))) : 0;
@@ -397,7 +466,68 @@ export default function MyNutrition() {
             {macroRow('Protein', fl.consumed.protein, target ? target.protein : null)}
             {macroRow('Carbs', fl.consumed.carbs, target ? target.carbs : null)}
             {macroRow('Fat', fl.consumed.fat, target ? target.fat : null)}
-            {!target ? (
+            {target ? (
+              /* What the number was built from, said beside it. A target a
+                 person eats against all day should carry its own assumptions —
+                 and this screen's used to be three defaults nobody could see,
+                 let alone disagree with. */
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                {builtFromLine(gate.ok ? gate.goal : 'muscle', gate.ok ? gate.diet : 'meat', gate.ok ? gate.activity : 1.55)}
+              </Text>
+            ) : null}
+            {!target && gate.ok === false && (gate.reason === 'unasked' || gate.reason === 'unread' || gate.reason === 'reading') ? (
+              /* The three questions, and the sentence saying why there is no
+                 number until they are answered. `macroGate` decides which of
+                 the four situations this is — a failed read is never reported
+                 as an unanswered question, because answering again is how a
+                 target quietly moves. */
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.caption, color: gate.reason === 'unread' ? t.ink2 : t.ink3 }}>{gate.why}</Text>
+                {gate.reason === 'unasked' ? (
+                  <>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>What are you training for?</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                      {(['fatloss', 'tone', 'muscle'] as Goal[]).map((g) => (
+                        <Pressable key={g} onPress={() => { void saveOwn({ goal: g }); }}
+                          accessibilityRole="button" accessibilityState={{ selected: own.inputs.goal === g }}
+                          style={ownChip(own.inputs.goal === g)}>
+                          <Text style={{ ...ty.label, color: own.inputs.goal === g ? t.brandInk : t.ink2 }}>{GOAL_WORD[g]}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>How do you eat?</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                      {(['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] as Diet[]).map((d) => (
+                        <Pressable key={d} onPress={() => { void saveOwn({ diet: d }); }}
+                          accessibilityRole="button" accessibilityState={{ selected: own.inputs.diet === d }}
+                          style={ownChip(own.inputs.diet === d)}>
+                          <Text style={{ ...ty.label, color: own.inputs.diet === d ? t.brandInk : t.ink2 }}>{DIET_WORD[d]}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    {/* A named level and never a decimal in a box: 1.55 is the
+                        largest single input to a maintenance figure and it is
+                        not a number anybody can calibrate themselves against. */}
+                    <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>How active is your week?</Text>
+                    {ACTIVITY_LEVELS.map((a) => {
+                      const on = activityLevelOf(own.inputs.activity) === a.id;
+                      return (
+                        <Pressable key={a.id} onPress={() => { void saveOwn({ activity: a.factor }); }}
+                          accessibilityRole="button" accessibilityState={{ selected: on }}
+                          accessibilityLabel={`${a.label}. ${a.note}`}
+                          style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                          <Text style={{ ...ty.label, fontWeight: on ? '600' : '400', color: on ? t.brand : t.ink }}>{a.label}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{a.note}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </>
+                ) : null}
+              </View>
+            ) : null}
+            {!target && (!gate.ok && gate.reason === 'unmeasured') ? (
               // Not a target of zero, and not a target guessed from a default
               // body. The reason is named, because "no target" with no reason
               // reads as a bug rather than as a missing measurement.
@@ -429,6 +559,17 @@ export default function MyNutrition() {
                     scan one: adding a scan does not clear a profile that could
                     not be read, and a button that cannot do what the sentence
                     above it needs is worse than no button. */}
+                {/*
+                  * whole-ok: 'partial' on the scans read is right to let through. Nothing
+                  * on this branch is a count or a total over the scan list — `measured`,
+                  * three lines up at the top of the screen, is computed from
+                  * `cd.profileStatus` and the weight and body-fat figures on the profile,
+                  * not from the scans at all. A scan history truncated at the ceiling
+                  * still has a profile that either carries those two numbers or does not,
+                  * and the button does exactly what the sentence above it promises: it
+                  * opens My Progress so one can be added. Withholding it under 'partial'
+                  * would take away a working control and gain no truth.
+                  */}
                 {cd.profileStatus !== 'error' && cd.scansStatus !== 'loading' && cd.scansStatus !== 'error' ? (
                   <View style={{ marginTop: sp.md }}>
                     <Ghost label="Add My Body Scan" icon="scale" onPress={() => router.push('/(trainer)/my-progress')} />

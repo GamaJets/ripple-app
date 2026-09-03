@@ -39,6 +39,11 @@
 // is a status line that names the moment of the last successful write, and says
 // so when there has not been one.
 
+// The count, not the absence of an error. A write that matched no rows is not
+// an error in PostgREST and looked exactly like a saved one here — see
+// `profileWriteFailure` at the foot of this file.
+import { writeFailure, type WriteResult } from './wroteRows';
+
 /** What is known about the last attempt to write this profile. */
 export type SaveState =
   /** Nothing has been changed this session; nothing has been written. */
@@ -127,3 +132,35 @@ export function afterWrite(prev: SaveStatus, ok: boolean, at: number, error?: st
  *  above — what is already on the server stays true while the next one flies. */
 export const markPending = (prev: SaveStatus): SaveStatus =>
   ({ state: 'pending', savedAt: prev.savedAt, error: null });
+
+/**
+ * Why the coach's profile save cannot be reported as saved, or null when it
+ * can.
+ *
+ * ── The half this module was missing ──────────────────────────────────────
+ *
+ * Everything above answers "did the request fail?". That was never the whole
+ * question. A PostgREST UPDATE that matches ZERO rows is not an error — it
+ * returns 204 with `error: null` — so the two statements behind this screen
+ * could both come back clean having changed nothing, and `afterWrite(prev,
+ * true, …)` printed "Saved." over it. The two ways that actually happens are
+ * the two most likely states a coach can be in: no `trainers` row yet, and an
+ * RLS policy refusing the write.
+ *
+ * `session_fee` goes through that second statement, and it is the number every
+ * priced figure in Analytics and the Assistant is derived from. So the count is
+ * what is checked here, exactly as src/lib/wroteRows.ts sets out — `null`
+ * counted as not-confirmed, so a call site that forgets `{ count: 'exact' }`
+ * says so rather than passing.
+ *
+ * BOTH halves are named. `profiles` holds the name and the photo and `trainers`
+ * holds the bio, the rate and the directory listing, and a coach told only that
+ * "your profile" did not save cannot tell which of the two is still only on
+ * this phone.
+ */
+export function profileWriteFailure(profiles: WriteResult, trainers: WriteResult): string | null {
+  const p = writeFailure('Your name and photo', profiles);
+  const t = writeFailure('Your bio, rate and listing', trainers);
+  if (p && t) return `${p} ${t}`;
+  return p ?? t;
+}

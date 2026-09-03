@@ -4,7 +4,11 @@
 // Two things must hold and the second is the one an allergic member depends on:
 // a dish whose name says shellfish is marked, and NOTHING here ever claims a
 // dish is clear. This app has not seen the kitchen.
-import { dishAllergens, dishAllergenMark, DISH_MARK_CAVEAT, SEARCH_MARK_CAVEAT } from './foodAllergens';
+import {
+  dishAllergens, dishAllergenMark, dishMarkNotice,
+  DISH_MARK_CAVEAT, DISH_MARK_LOADING, DISH_MARK_UNKNOWN, SEARCH_MARK_CAVEAT,
+} from './foodAllergens';
+import type { LoadStatus } from '../ui/loadStatus';
 import type { Allergen } from './meals';
 
 const errors: string[] = [];
@@ -41,6 +45,51 @@ for (const c of [DISH_MARK_CAVEAT, SEARCH_MARK_CAVEAT]) {
   ok(/unmarked/.test(c), 'the caveat is explicitly about the rows with no mark on them');
   ok(/not been checked/.test(c), 'and says they have not been checked');
   ok(!/safe|allergen-free|free from/i.test(c), 'nothing here ever clears a dish');
+}
+
+
+/* ── and whether the exclusions were read at all ─────────────────────────── */
+
+// The marks and the caveat used to vanish together the moment the profile read
+// was slow, and their joint absence is the same picture as a checked, clear
+// list. Four reads, four sentences.
+
+{
+  const loading = dishMarkNotice('loading', 0);
+  eq(loading.state, 'checking', 'a read in flight is not an empty exclusion list');
+  eq(loading.marked, false, 'and nothing below it is marked against anything yet');
+  eq(loading.text, DISH_MARK_LOADING, 'and it says so in its own sentence');
+
+  for (const s of ['error', 'partial'] as LoadStatus[]) {
+    const bad = dishMarkNotice(s, 0);
+    eq(bad.state, 'unknown', `A FAILED OR TRUNCATED READ IS NEVER DRAWN AS AN EMPTY ONE (${s})`);
+    eq(bad.marked, false, `and an unmarked dish under it has been checked against nothing (${s})`);
+    eq(bad.text, DISH_MARK_UNKNOWN, `and the screen says which of the four it is (${s})`);
+    // The worst version of this defect: the member DOES have exclusions and the
+    // read failed. Nothing may imply they were applied.
+    eq(dishMarkNotice(s, 3).marked, false,
+      `three exclusions that could not be read are three exclusions not applied (${s})`);
+    eq(dishMarkNotice(s, 3).text, DISH_MARK_UNKNOWN, `and the sentence does not change with them (${s})`);
+  }
+
+  const marks = dishMarkNotice('ready', 1);
+  eq(marks.state, 'marks', 'a landed read with an exclusion in it marks the rows');
+  eq(marks.marked, true, 'and the marks mean something');
+  eq(marks.text, DISH_MARK_CAVEAT, 'under the standing caveat that they are read off the name');
+
+  const none = dishMarkNotice('ready', 0);
+  eq(none.state, 'none', 'a landed read with nothing in it says nothing');
+  eq(none.text, null, 'and there is no caveat over a list with nothing to mark against');
+  eq(none.marked, true, 'and the absence of marks is a true absence');
+
+  // Three sentences, and no two of them the same.
+  const said = [DISH_MARK_LOADING, DISH_MARK_UNKNOWN, DISH_MARK_CAVEAT];
+  eq(new Set(said).size, 3, 'loading, failed and empty are three different sentences');
+  ok(/could not be read/.test(DISH_MARK_UNKNOWN), 'the failure says the read failed');
+  ok(/not been checked/.test(DISH_MARK_UNKNOWN), 'and that an unmarked dish means nothing');
+  for (const c of said) {
+    ok(!/safe|allergen-free|free from|no shellfish/i.test(c), 'and none of them clears a dish');
+  }
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

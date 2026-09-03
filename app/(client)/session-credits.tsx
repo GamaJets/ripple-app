@@ -46,14 +46,23 @@ import { coachPackLines, gymPtLines, chooseRoute, routeReason, creditsLeft, payi
   buildLedger, expectedDraws, clientLedgerLine, shortfallLine,
   type CreditRoute, type CreditSession, type Entitlement, type Ledger, type LedgerRow } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
+import { useToday } from '../../src/ui/today';
 
-/** The day used to judge whether a gym pass is still live. Local, because a
- *  pass expires on a date at the gym and not at an instant in UTC. */
-function todayISO(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
+// The day used to judge whether a gym pass is still live was a private copy of
+// `todayIso` built here — local, correctly, because a pass expires on a date at
+// the gym and not at an instant in UTC, but computed ONCE per render on a screen
+// that has no reason to render again.
+//
+// That is the shape src/ui/today.ts exists to replace, and this screen is a
+// sharper case than the label it looked like. `today` is the argument to
+// `gymPtLines`, which is what `chooseRoute` weighs against the coach's pack —
+// so the stale day does not merely mislabel a pass, it decides WHOSE MONEY pays
+// for the next session. A gym pass that ran out at midnight goes on being
+// offered as the payer, and the booking made against it is one the gym will
+// refuse at the door while the member's coach pack sits unspent beside it.
+//
+// `useToday` re-reads the day at the next local midnight and on every return to
+// the foreground, which is when this screen is actually being looked at.
 
 const when = (iso: string) => {
   const d = new Date(iso);
@@ -81,7 +90,7 @@ export default function SessionCredits() {
   useEffect(() => { load(); }, [load]);
   const pull = usePullToRefresh(load);
 
-  const today = todayISO();
+  const today = useToday();
 
   const coachLines: Entitlement[] | null = useMemo(
     () => (packs === undefined ? null : coachPackLines(packs?.lines ?? null)), [packs]);

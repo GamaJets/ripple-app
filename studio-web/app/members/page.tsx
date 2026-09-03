@@ -21,7 +21,9 @@
 // that draws as an empty record is how a gym concludes a member has paid
 // nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
@@ -47,6 +49,12 @@ import { searchRows, searchNote } from '@lib/consoleSearch';
 import { paidTotal, paidNote } from '@lib/gymPaidTotal';
 import { wrote, refused, sayText, sayTone, type Said } from '@lib/consoleSay';
 import { isoDate } from '@lib/format';
+// The reader's locale, the GYM's zone. Every date on a member's record — a
+// payment, a door visit, a booking, an invite — was drawn on whichever laptop
+// was open, so the same member's last visit read as two different days at two
+// desks in two countries.
+import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
+import { gymDay, parseGymZone } from '@lib/gymZone';
 import {
   fetchMemberNotes, addMemberNote, noteBlocker, withLegacy, noteAttribution, MAX_NOTE,
   type MemberNote,
@@ -59,8 +67,15 @@ import {
 } from '@lib/gymReach';
 import {
   sliceLoading, sliceReady, sliceFailed,
+  // The four-arm note. Every tile below was a hand-written two-arm version —
+  // `state === 'failed' ? 'x not read' : <an affirmative claim>` — so a
+  // TRUNCATED read fell into the affirmative arm and this page told an owner
+  // "no visit in 90 days" and "no plan attached" about rows it had simply not
+  // read. Those two sentences are acted on: one is why a member gets a
+  // win-back call, the other is why somebody goes looking for a missing plan.
+  sliceNote,
   buildDossiers, retentionRead, doorLogActive, attendanceCaveat,
-  partialWarning, brokenParts, completeness,
+  partialWarning, truncationWarning, brokenParts, completeness,
   DEFAULT_WINDOW_DAYS,
   type Slice, type MemberRecord, type MemberBooking, type MemberDossier,
 } from '@lib/memberView';
@@ -81,11 +96,17 @@ const EMPTY: MemberRecord = {
 
 export default function Members() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // `tenants.currency`. The payment ROWS below carry their own currency and use
   // it; the two figures that SUM them across a member's history have none of
   // their own, and inherit the gym's rather than a default.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [rec, setRec] = useState<MemberRecord>(EMPTY);
   const [sel, setSel] = useState<string | null>(null);
   /**
@@ -140,6 +161,10 @@ export default function Members() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) {
         setRec({
@@ -150,12 +175,14 @@ export default function Members() {
         return;
       }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency, timezone').eq('id', who.tenantId).single();
       // supabase-js resolves on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
       if (live) {
         setGymName(tErr ? null : t?.name ?? null);
         setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
       await load(who.tenantId);
     })();
@@ -197,8 +224,11 @@ export default function Members() {
     window.history.replaceState(null, '', url.toString());
   }, []);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -225,13 +255,24 @@ export default function Members() {
   }
 
   const warning = partialWarning(rec);
+  // A separate sentence from the one above, deliberately. "We could not read the
+  // door log" and "we read the first thousand visits of more" are two different
+  // states of this page and a reader acts on them differently: the first is a
+  // fault to chase, the second is a figure to stop quoting.
+  const cut = truncationWarning(rec);
   const caveat = attendanceCaveat(rec);
   // The gym's own calendar day. /door judges every pass against this and this
   // screen judged the same passes against the UTC date, so for the four hours
   // between local and UTC midnight the two screens gave a member two different
-  // answers about the same pass. One day, computed once, in the reader's own
-  // zone — the same expression `isoDate` gives the Door screen.
-  const today = isoDate(new Date());
+  // answers about the same pass.
+  //
+  // The reader's own day was the second half of that same bug, and it is now
+  // the FALLBACK rather than the answer: a pass expires at the end of a day AT
+  // THE GYM, so an owner checking from Sydney was told a pass had run out while
+  // the member was standing at the turnstile with hours left on it. `isoDate`
+  // is kept for the gym that has not set a timezone, where the reader's clock
+  // is the only clock there is.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
   const chosen = sel && dossiers ? dossiers.find((d) => d.memberId === sel) ?? null : null;
 
   // The headline this page exists to produce: members whose classes stopped but
@@ -266,6 +307,7 @@ export default function Members() {
       </p>
 
       {warning ? <Banner tone="crit">{warning}</Banner> : null}
+      {cut ? <Banner tone="crit">{cut}</Banner> : null}
       {caveat ? <Banner>{caveat}</Banner> : null}
 
       <div
@@ -278,13 +320,13 @@ export default function Members() {
         <Kpi
           label="On the roster"
           text={dossiers ? String(dossiers.length) : null}
-          note={rec.memberships.state === 'failed' ? 'memberships not read' : undefined}
+          note={sliceNote(rec.memberships, 'the membership list') ?? undefined}
         />
         <Kpi
           label="Seen this week"
           text={rec.visits.state === 'ready' ? seenWithin(dossiers, 7) : null}
           note={
-            rec.visits.state === 'failed' ? 'door log not read'
+            rec.visits.state !== 'ready' ? sliceNote(rec.visits, 'the door log') ?? undefined
               : active === false ? 'nothing at the door in 90 days'
               : undefined
           }
@@ -333,7 +375,7 @@ export default function Members() {
       {chosen ? (
         <Dossier
           d={chosen} rec={rec} active={active} onClose={() => pick(null)} ccy={ccy}
-          today={today}
+          today={today} zone={zone}
           gymRec={gymRecs?.get(chosen.memberId) ?? null} gymRecsRead={gymRecs !== null}
           tenantId={tenantId} me={me} onSaved={() => load(tenantId)}
         />
@@ -549,8 +591,15 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuer
         <Failed reason={(rec.memberships as { reason: string }).reason}
                 what="the membership list" />
       ) : null}
+      {/* `dossiers` is null under a truncated read too — `rowsOf` withholds a
+          prefix — so this section rendered its heading over nothing at all and
+          said not one word about why. A headed, empty roster reads as a gym
+          with no members. */}
+      {rec.memberships.state === 'partial' ? (
+        <Truncated what="the membership list" cap={rec.memberships.cap} />
+      ) : null}
       {dossiers ? (
-        <DataTable
+        <DataTable noun="members"
           rows={shown} columns={cols} rowKey={(d) => d.memberId}
           empty="No memberships recorded yet. Open one under Money and this page fills in."
         />
@@ -561,9 +610,12 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuer
 
 /* ── one member ────────────────────────────────────────────────────────────── */
 
-function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, tenantId, me, onSaved }: {
+function Dossier({ d, rec, active, onClose, ccy, today, zone, gymRec, gymRecsRead, tenantId, me, onSaved }: {
   d: MemberDossier; rec: MemberRecord; active: boolean | null; onClose: () => void;
   ccy: TenantCurrency;
+  /** `tenants.timezone`, or null when the gym has not set one. Every date in
+   *  this record is drawn on it. */
+  zone: string | null;
   /** The gym's own calendar day, which is what a pass expiry is compared
    *  against here and on /door. Passed in rather than computed twice. */
   today: string;
@@ -618,7 +670,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
         }}
       >
         <Kpi label="Membership" text={d.status ? cap(d.status) : null}
-             note={d.planName ?? (rec.memberships.state === 'failed' ? 'not read' : 'no plan attached')} />
+             note={d.planName ?? sliceNote(rec.memberships, 'the membership list') ?? 'no plan attached'} />
         {/* ── one tile, one currency ─────────────────────────────────────
             This was `amount(d.paidCents, ccy)`, where `paidCents` is
             `pays.reduce((a, p) => a + p.amountCents, 0)` — every payment added
@@ -636,7 +688,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
         <Kpi
           label="Paid, all time"
           text={paid.kind === 'one' ? money(paid.minorUnits, paid.currency) ?? null : null}
-          note={paidNote(paid, d.lastPaidAt ? `last ${new Date(d.lastPaidAt).toLocaleDateString()}` : undefined)}
+          note={paidNote(paid, d.lastPaidAt ? `last ${gymDateText(d.lastPaidAt, zone) ?? 'on a date that could not be read'}` : undefined)}
         />
         <Kpi
           label="Last at the door"
@@ -646,8 +698,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
               : d.lastSeenDays === 0 ? 'today' : `${d.lastSeenDays} days`
           }
           note={
-            rec.visits.state === 'failed' ? 'door log not read'
-              : rec.visits.state === 'loading' ? undefined
+            rec.visits.state !== 'ready' ? sliceNote(rec.visits, 'the door log') ?? undefined
               : d.lastSeenDays == null ? `no visit in ${WINDOW_DAYS} days`
               : `${d.floorVisits} on the floor, ${d.classVisits} at a class`
           }
@@ -656,7 +707,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
           label="Class attendance"
           text={d.showRate == null ? null : `${Math.round(d.showRate * 100)}%`}
           note={
-            rec.bookings.state === 'failed' ? 'bookings not read'
+            rec.bookings.state !== 'ready' ? sliceNote(rec.bookings, 'the class bookings') ?? undefined
               : d.booked === 0 ? 'booked nothing in the window'
               : d.booked == null ? undefined
               : `${d.attended} of ${d.booked} booked`
@@ -666,7 +717,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
           label="One-to-ones"
           text={d.delivered == null ? null : String(d.delivered)}
           note={
-            rec.sessions.state === 'failed' ? 'sessions not read'
+            rec.sessions.state !== 'ready' ? sliceNote(rec.sessions, 'the sessions') ?? undefined
               : d.unmarked ? `${d.unmarked} still unmarked`
               : d.noShows ? `${d.noShows} no-show${d.noShows === 1 ? '' : 's'}`
               : undefined
@@ -675,7 +726,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
         <Kpi
           label="Pass visits left"
           text={d.passVisitsLeft == null ? null : String(d.passVisitsLeft)}
-          note={rec.passes.state === 'failed' ? 'passes not read' : 'door and classes only'}
+          note={sliceNote(rec.passes, 'the passes') ?? 'door and classes only'}
         />
         {/* Counted apart from pass visits, because they buy different things: a
             PT credit pays for an hour with a coach and opens no turnstile. The
@@ -712,7 +763,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
 
       <Part title="Memberships" slice={rec.memberships} what="memberships">
         {d.memberships ? (
-          <DataTable
+          <DataTable noun="memberships"
             rows={d.memberships}
             columns={[
               { key: 'plan', header: 'Plan', value: (m: Membership) => m.planName },
@@ -728,11 +779,11 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
 
       <Part title="Payments" slice={rec.payments} what="payments">
         {d.payments ? (
-          <DataTable
+          <DataTable noun="payments"
             rows={d.payments}
             columns={[
               { key: 'when', header: 'Taken', value: (p: GymPayment) => p.takenAt,
-                render: (p: GymPayment) => new Date(p.takenAt).toLocaleDateString() },
+                render: (p: GymPayment) => gymDateText(p.takenAt, zone) ?? <span className="dash">not stated</span> },
               { key: 'amt', header: 'Amount', value: (p: GymPayment) => p.amountCents, numeric: true,
                 render: (p: GymPayment) => money(p.amountCents, p.currency) },
               { key: 'how', header: 'Method', value: (p: GymPayment) => p.method.replace('_', ' ') },
@@ -746,11 +797,11 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
 
       <Part title={`Door log — last ${WINDOW_DAYS} days`} slice={rec.visits} what="the door log">
         {d.visits ? (
-          <DataTable
+          <DataTable noun="visits"
             rows={d.visits}
             columns={[
               { key: 'in', header: 'In', value: (v: Visit) => v.enteredAt,
-                render: (v: Visit) => new Date(v.enteredAt).toLocaleString() },
+                render: (v: Visit) => gymDateTimeText(v.enteredAt, zone) ?? <span className="dash">not stated</span> },
               { key: 'stay', header: 'Stay', value: (v: Visit) => dwellMinutes(v) ?? null, numeric: true,
                 render: (v: Visit) => {
                   const m = dwellMinutes(v);
@@ -777,13 +828,11 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
 
       <Part title="Classes booked and attended" slice={rec.bookings} what="class bookings">
         {d.bookings ? (
-          <DataTable
+          <DataTable noun="class bookings"
             rows={d.bookings}
             columns={[
               { key: 'when', header: 'When', value: (b: MemberBooking) => b.startsAt,
-                render: (b: MemberBooking) => b.startsAt
-                  ? new Date(b.startsAt).toLocaleString()
-                  : <span className="dash">—</span> },
+                render: (b: MemberBooking) => gymDateTimeText(b.startsAt, zone) ?? <span className="dash">—</span> },
               { key: 'what', header: 'Class', value: (b: MemberBooking) => b.classTitle },
               { key: 'status', header: 'Booking', value: (b: MemberBooking) => b.status },
               { key: 'came', header: 'Turned up', value: (b: MemberBooking) => b.attendedAt,
@@ -801,11 +850,11 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
 
       <Part title="One-to-ones" slice={rec.sessions} what="one-to-ones">
         {d.sessions ? (
-          <DataTable
+          <DataTable noun="one-to-one sessions"
             rows={d.sessions}
             columns={[
               { key: 'when', header: 'When', value: (s: PtSession) => s.startsAt,
-                render: (s: PtSession) => new Date(s.startsAt).toLocaleString() },
+                render: (s: PtSession) => gymDateTimeText(s.startsAt, zone) ?? <span className="dash">not stated</span> },
               { key: 'who', header: 'Trainer', value: (s: PtSession) => s.trainerName },
               { key: 'out', header: 'Outcome', value: (s: PtSession) => s.outcome,
                 render: (s: PtSession) => s.outcome
@@ -836,7 +885,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
 
       <Part title="Passes" slice={rec.passes} what="passes">
         {d.passes ? (
-          <DataTable
+          <DataTable noun="passes"
             rows={d.passes}
             columns={[
               { key: 'type', header: 'Pass', value: (p: GymPass) => p.passTypeName },
@@ -870,7 +919,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
       </Part>
 
       <GymRecordEditor
-        memberId={d.memberId} name={d.name} rec={gymRec} read={gymRecsRead}
+        memberId={d.memberId} name={d.name} rec={gymRec} read={gymRecsRead} zone={zone}
         tenantId={tenantId} me={me} onSaved={onSaved}
       />
 
@@ -879,7 +928,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
         gymRecsRead={gymRecsRead} tenantId={tenantId} me={me}
       />
 
-      <Invites d={d} rec={rec} />
+      <Invites d={d} rec={rec} zone={zone} />
     </section>
   );
 }
@@ -909,8 +958,10 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
  * it is given. That matters because the row is shared: a note typed here must
  * not blank a phone number somebody entered at the desk five minutes ago.
  */
-function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
+function GymRecordEditor({ memberId, name, rec, read, zone, tenantId, me, onSaved }: {
   memberId: string; name: string | null; rec: GymMemberRecord | null; read: boolean;
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
   tenantId: string; me: Me; onSaved: () => void;
 }) {
   const [phone, setPhone] = useState(rec?.phone ?? '');
@@ -1006,7 +1057,7 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
             <button type="submit" disabled={busy} style={btn}>{busy ? 'Saving…' : 'Save'}</button>
             {rec?.updatedAt ? (
               <span style={{ fontSize: 12, color: 'var(--ink3)' }}>
-                last changed {new Date(rec.updatedAt).toLocaleDateString()}
+                last changed {gymDateText(rec.updatedAt, zone) ?? 'on a date that could not be read'}
               </span>
             ) : (
               <span style={{ fontSize: 12, color: 'var(--ink3)' }}>nothing recorded yet</span>
@@ -1156,18 +1207,18 @@ function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
 
 /** Invites are addressed to an email, not to an account, so they cannot be
  *  filtered by member id. Shown whole and labelled, rather than guessed at. */
-function Invites({ d, rec }: { d: MemberDossier; rec: MemberRecord }) {
+function Invites({ d, rec, zone }: { d: MemberDossier; rec: MemberRecord; zone: string | null }) {
   const mine = (d.invites ?? []).filter((i) => i.acceptedBy === d.memberId);
   return (
     <Part title="Invite" slice={rec.invites} what="invites">
       {d.invites ? (
-        <DataTable
+        <DataTable noun="invites"
           rows={mine}
           columns={[
             { key: 'to', header: 'Sent to', value: (i: MemberInvite) => i.email },
             { key: 'plan', header: 'Plan', value: (i: MemberInvite) => i.planName },
             { key: 'when', header: 'Sent', value: (i: MemberInvite) => i.createdAt,
-              render: (i: MemberInvite) => new Date(i.createdAt).toLocaleDateString() },
+              render: (i: MemberInvite) => gymDateText(i.createdAt, zone) ?? <span className="dash">not stated</span> },
             { key: 'state', header: 'State', value: (i: MemberInvite) => inviteState(i) },
           ]}
           rowKey={(i: MemberInvite) => i.id}
@@ -1200,9 +1251,35 @@ function Part<T>({ title, slice, what, children }: {
       </div>
       {slice.state === 'loading' ? <Loading /> : null}
       {slice.state === 'failed' ? <Failed reason={slice.reason} what={what} /> : null}
+      {slice.state === 'partial' ? <Truncated what={what} cap={slice.cap} /> : null}
       {/* Loaded-and-empty is the DataTable's own empty sentence, written once
           per section beside the columns it describes. */}
       {slice.state === 'ready' ? children : null}
+    </div>
+  );
+}
+
+
+/**
+ * The banner over a section whose read came back at its ceiling.
+ *
+ * The rows are real and there are more of them, so this is neither the failure
+ * banner nor the empty sentence. It does not draw the table beneath it: every
+ * figure on this screen is computed through `rowsOf`, which is null for a
+ * truncated read on purpose, so the table under this banner would be an empty
+ * one — "cut off" over "nothing recorded" is a worse page than the banner
+ * alone. A section that means to LIST a prefix reads its rows through
+ * `rowsToShow` and says so itself.
+ */
+function Truncated({ what, cap }: { what: string; cap: number }) {
+  return (
+    <div style={{
+      padding: '16px 14px', margin: '0 14px 14px', borderRadius: 0,
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
+      background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
+    }}>
+      Read the first {cap} rows of {what}, and there are more. This section is a{' '}
+      <strong>prefix</strong>, not the whole record, so nothing here is counted or totalled.
     </div>
   );
 }
@@ -1220,12 +1297,16 @@ function Failed({ reason, what }: { reason: string; what: string }) {
   );
 }
 
-/** A table cell that keeps "not read", "not loaded" and "nothing there" apart. */
+/** A table cell that keeps "not read", "not loaded", "part read" and "nothing
+ *  there" apart — four states, four cells. */
 function Cell({ state, value, empty }: {
   state: Slice<unknown>['state']; value: string | null; empty: string;
 }) {
   if (state === 'loading') return <span className="dash">…</span>;
   if (state === 'failed') return <span className="dash">not read</span>;
+  // The rows behind this figure are a prefix, so the figure over them is a
+  // subtotal. Withheld, and named as something other than a failure.
+  if (state === 'partial') return <span className="dash">part read</span>;
   if (value == null) return <span className="dash">{empty}</span>;
   return <>{value}</>;
 }
@@ -1435,8 +1516,12 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
         <div style={{ display: 'grid', gap: 10, padding: 14 }}>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
             {segments.map((x) => (
+              // `aria-pressed` — which group a message is being written to was
+              // carried by a background colour alone.
               <button
                 key={x.id}
+                type="button"
+                aria-pressed={x.id === segId}
                 onClick={() => setSegId(x.id)}
                 style={{
                   ...field, cursor: 'pointer',
@@ -1480,13 +1565,13 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
                   Better said here than discovered by a member reading half a
                   sentence. */}
               {willTruncateInbox(body) ? (
-                <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>
+                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--warn)' }}>
                   The inbox copy is cut at {INBOX_BODY} characters by the database and yours is{' '}
                   {body.trim().length}. The full text stays on the notice board; the inbox line will
                   stop mid-sentence.
                 </p>
               ) : null}
-              {blocker ? <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
+              {blocker ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--warn)' }}>{blocker}</p> : null}
 
               <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
                 <button onClick={send} disabled={busy || !!blocker} style={btn}>
@@ -1555,18 +1640,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
 // The banner is the shared one now: studio-web/components/Banner.tsx. This
 // page's copy rendered into a plain <div>, so every "the write was refused and
 // nothing was saved" it said was a silence for a screen reader. The shared one
@@ -1576,6 +1649,3 @@ function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'c
   return <SharedBanner tone={tone} live={live}>{children}</SharedBanner>;
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

@@ -320,12 +320,47 @@ export async function fetchVendorBody(id: ProviderId): Promise<VendorBodyResult>
  * Actually drop the stored token. This used to be a no-op with a comment claiming
  * revocation happened server-side; nothing deleted the row, so "disconnect" only
  * cleared a local flag and the dead token lingered forever.
+ *
+ * ── and then it was a no-op again, for a subtler reason ───────────────────
+ *
+ * The delete sat inside a `try/catch` whose entire purpose was to notice the
+ * failure, and the catch could not fire. supabase-js does not reject on a
+ * database error: it RESOLVES, with `error` set, and nothing here was reading
+ * it. So a delete refused by row-level security ran to completion as far as
+ * this function was concerned, `noteTokenDead` recorded the token as gone, the
+ * screen said Disconnected — and the row was still in `wearable_tokens`.
+ *
+ * That is worse than the original no-op, because the app now asks the SERVER
+ * first on launch (see src/ui/wearables.tsx) and the server still had the
+ * token. The member disconnected their watch, watched it say so, closed the
+ * app, and found it connected again the next morning, with no explanation
+ * available to them and nothing recorded anywhere that a write had failed.
+ *
+ * So the error is read, and the failure is thrown rather than swallowed. It
+ * throws rather than returning a flag because `WearableProvider.disconnect`
+ * returns `Promise<void>` and its callers already have `catch` arms wired for
+ * exactly this — what they did not have was anything to catch.
  */
 export async function disconnectVendor(id: ProviderId): Promise<void> {
+  let error: unknown = null;
   try {
-    await supabase.from('wearable_tokens').delete().eq('provider', id);
+    // Counted, not inferred. Zero matched rows is fine and is not an error
+    // here: a member who connected on another handset and disconnects on this
+    // one has no row of their own to delete. What must not pass silently is a
+    // REFUSAL, which is what `error` carries.
+    ({ error } = await supabase.from('wearable_tokens').delete().eq('provider', id));
   } catch (e) {
-    reportError('wearables.disconnect', e, { provider: id });
+    error = e;
+  }
+  if (error) {
+    reportError('wearables.disconnect', error, { provider: id });
+    // Deliberately BEFORE `noteTokenDead`, and the order is the fix. Marking
+    // the token dead is a statement about a row that is still there, and every
+    // screen downstream reads that note as the disconnection having happened.
+    throw new Error(
+      'Repple could not remove this device’s connection from your account, so it is still connected. '
+      + 'This is a connection problem rather than a refusal — try again in a moment.',
+    );
   }
   // Whatever we knew about that token was about a row that is now gone. Left in
   // place it would outlive its subject and put a "reconnect WHOOP" sentence in

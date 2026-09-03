@@ -60,8 +60,9 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import {
-  fetchCoachCredentials, fetchMyReview, canReview, writeReview, withdrawReview, todayKey,
+  fetchCoachCredentials, fetchMyReview, canReview, writeReview, withdrawReview,
 } from '../../src/ui/reviews';
+import { useToday } from '../../src/ui/today';
 import {
   credentialBadge, credentialLine, expiryLine, sortCredentials, insuranceClaim, insuranceLine,
   credentialState, CLAIM_NOTE, type Credential,
@@ -102,7 +103,14 @@ export default function MyCoach() {
   const router = useRouter();
   const [coach, setCoach] = useState<CoachProfile | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
-  const today = useMemo(() => todayKey(), []);
+  // `useToday`, not `useMemo(() => todayKey(), [])`. That empty dependency list
+  // fixes the day for the life of the MOUNT, and nothing here unmounts when a
+  // phone goes in a pocket. This string is the second argument to every
+  // judgement below — `insuranceClaim`, `credentialState`, `expiryLine` — so a
+  // member who left this screen open overnight was shown "Insurance stated by
+  // the coach" about cover that lapsed at midnight, presented as a current
+  // fact about somebody they are about to pay to put them under a barbell.
+  const today = useToday();
 
   // `null` under 'error' rather than `[]`, so nothing downstream can turn a
   // refused read into "this coach has declared no insurance" — which is a

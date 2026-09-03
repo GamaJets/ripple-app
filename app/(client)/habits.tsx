@@ -34,6 +34,7 @@ import { donePercent } from '../../src/lib/checklist';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
 import { readNumber } from '../../src/lib/units';
+import { hitSlopFor } from '../../src/lib/a11y';
 
 // The same bounds clients_step_goal_check, clients_sleep_goal_hours_check
 // (supabase/parts/60) and clients_water_goal_glasses_check (part 70) enforce.
@@ -146,7 +147,14 @@ export default function Habits() {
             </Text>
           ) : null}
           <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
+            {/* 38pt drawn, 44pt to the finger. The one control on this screen
+                that takes something AWAY, sitting beside a full-width Add — so
+                a near-miss on it is a glass the member logged and did not get
+                credited, and the correction is another two taps. `hitSlopFor`
+                grows only the boundary; the circle is a deliberate visual size
+                against the Cta next to it. See MIN_TARGET in src/lib/a11y.ts. */}
             <Pressable accessibilityLabel="Remove a glass of water" accessibilityRole="button" onPress={h.removeWater}
+              hitSlop={hitSlopFor(38)}
               style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="minus" size={16} color={t.ink2} />
             </Pressable>

@@ -185,8 +185,34 @@ export function planExpiry(dateISO: string): string | null {
  * drops anything already saved by `external_id`, so the honest retry for a
  * failed import is to run it again, not to replay a batch assembled from a
  * window that has since moved.
+ *
+ * ── Why it carries its own row id ────────────────────────────────────────
+ *
+ * `glucose_external_once` is PARTIAL — `where external_id is not null` — and
+ * supabase/parts/102 says exactly why: "hand-typed readings (external_id null)
+ * can repeat freely while an imported one can only ever land once". That is the
+ * right rule for a member typing, because two readings twenty minutes apart can
+ * genuinely be the same number. It is the wrong rule for a REPLAY, and the two
+ * were indistinguishable: an insert whose rows landed and whose response was
+ * lost comes back 'unsent', stays queued, and goes up again — and the member
+ * gets two points on the chart for one finger-prick, with no way to tell which
+ * is the phantom.
+ *
+ * `glucose_readings.id` is a uuid primary key, so minting it on the device is
+ * the whole fix: the second offer collides on the key and the handler reads
+ * that for what it is. Exactly what `ScanIntent` does, for exactly the same
+ * reason, and `src/lib/outbox.ts` · `newRowId` is the shared minting.
+ *
+ * NULLABLE, and that is not laziness. A reading queued by a build that predates
+ * this field has no id, and refusing it would discard something a member typed
+ * in order to fix a duplicate they have not got. Those replay exactly as badly
+ * as they always did and no worse; the server fills the key in as it always
+ * did, and the queue drains.
  */
 export interface GlucoseIntent {
+  /** The row's own id, chosen on the device. Null for one queued by a build
+   *  that had not started choosing it. */
+  id: string | null;
   mmol: number;
   at: string;
 }
@@ -197,7 +223,7 @@ export function asGlucoseIntent(p: unknown): GlucoseIntent | null {
   const mmol = typeof o.mmol === 'number' && Number.isFinite(o.mmol) && o.mmol > 0 ? o.mmol : null;
   const at = typeof o.at === 'string' && !Number.isNaN(Date.parse(o.at)) ? o.at : null;
   if (mmol == null || at == null) return null;
-  return { mmol, at };
+  return { id: typeof o.id === 'string' && o.id.trim() ? o.id.trim() : null, mmol, at };
 }
 
 /* ── the body scan ─────────────────────────────────────────────────────── */
@@ -210,9 +236,17 @@ export function asGlucoseIntent(p: unknown): GlucoseIntent | null {
  * src/lib/outbox.ts refuses four kinds of write and one of its clauses used to
  * name a scan: "anything carrying a file". A scan write carries no file. The
  * INSERT is six columns of numbers — the date, weight, body fat, muscle mass
- * and a source string — and `scans.image_path` is never written by this app;
- * the photograph of the printout stays on the phone for the member's own
- * reference. So there is no cache directory this intent depends on surviving.
+ * and a source string — and `scans.image_path` is never written by this app, so
+ * there is no cache directory this intent depends on surviving.
+ *
+ * This used to add "the photograph of the printout stays on the phone for the
+ * member's own reference", and that sentence is no longer true of the feature
+ * even though it was never what the argument rested on. A page the member
+ * consents to is sent to api.anthropic.com and api.ocr.space to be read
+ * (src/ui/scanSheets.ts, src/lib/scanSheetConsent.ts). It is sent from the
+ * screen and it is not sent from here: by the time a row reaches this queue the
+ * page has been read and only the numbers remain. No bucket ever holds it,
+ * which is the whole of what this clause needs.
  *
  * It passes the other three clauses outright: nothing is scarce (nobody else
  * can take a member's own body composition), no money moves, and it says the

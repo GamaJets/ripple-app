@@ -84,6 +84,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
+import { isWhole } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
@@ -319,7 +320,7 @@ export default function ClientPhotos() {
 
         <Section>
           <SectionHead title="Client" />
-          {r.roster.length === 0 && r.status !== 'error' ? (
+          {r.roster.length === 0 && isWhole(r.status) ? (
             <Text style={{ ...ty.body, color: t.ink3 }}>Nobody is on your book yet.</Text>
           ) : (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>

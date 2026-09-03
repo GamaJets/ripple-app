@@ -170,11 +170,26 @@ ok(programmeCaveat(true, 'Sam') === null, 'a known programme needs no caveat');
 ok((programmeCaveat(false, 'Sam') ?? '').includes('Sam'),
   'and an unknown one is said out loud, because no conflicts looks the same as never having checked');
 
-// ── labels, built rather than formatted ──
-ok(dayHeading('2026-09-01') === 'Tue 1 Sep',
-  `the heading is the client's own calendar day in every zone, got ${dayHeading('2026-09-01')}`);
-ok(dayHeading('2026-09-07') === 'Mon 7 Sep', 'and does not drift a day west of Greenwich');
-ok(dayHeading('2026-01-31') === 'Sat 31 Jan', 'month names are one-based off the index');
+// ── labels: the right DAY, written the reader's way ──
+//
+// 'Tue 1 Sep' was the old expectation, and it was an assertion about a pair of
+// English arrays inside dayHeading rather than about the heading's contract.
+// The contract is: the weekday and the date of the day that was asked for, in
+// the reader's own language, and never the day before. So the expectation is
+// derived here from a LOCALLY built date through the same three fields — which
+// pins the day itself in all six zones test:zones runs, and leaves the words to
+// whatever locale the runner is in.
+{
+  const heading = (y: number, m: number, d: number) =>
+    new Date(y, m, d).toLocaleDateString(undefined, { weekday: 'short' })
+      + ' ' + new Date(y, m, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  ok(dayHeading('2026-09-01') === heading(2026, 8, 1),
+    `the heading is the client's own calendar day in every zone, got ${dayHeading('2026-09-01')}`);
+  ok(dayHeading('2026-09-07') === heading(2026, 8, 7), 'and does not drift a day west of Greenwich');
+  ok(dayHeading('2026-09-01') !== heading(2026, 7, 31),
+    'the 1st is never the 31st of the month before, which is what UTC midnight would make it');
+  ok(dayHeading('2026-01-31') === heading(2026, 0, 31), 'month names are one-based off the index');
+}
 ok(dayHeading('nonsense') === '—', 'an unreadable date renders as a dash, not as today');
 ok(whenLabel(TODAY, TODAY) === 'Today', 'today says so');
 ok(whenLabel('2026-09-02', TODAY) === 'Tomorrow' && whenLabel('2026-08-31', TODAY) === 'Yesterday',

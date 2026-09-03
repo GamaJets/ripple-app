@@ -24,7 +24,7 @@
 // rate is a bare number the coach types about a payment Repple does not make.
 import {
   parseRate, rateText, payEstimate, parseGoal, goalText, goalPct,
-  goalsEmptyLine, rateFieldNote,
+  goalsEmptyLine, goalSaveLine, rateFieldNote,
   parseCooldown, cooldownText, cooldownNote, MIN_NUDGE_COOLDOWN, MAX_NUDGE_COOLDOWN,
 } from './coachPrefs';
 import { paceFor, cooldownFloor, MIN_COOLDOWN_DAYS, MAX_COOLDOWN_DAYS, DEFAULT_COOLDOWN_DAYS } from './interventions';
@@ -233,6 +233,34 @@ eq(mutedDaysFor('sent', drift, { minCooldownDays: 45 }), 45, 'sending honours it
 // No preference must behave exactly as it did before this existed.
 eq(mutedDaysFor('sent', drift), mutedDaysFor('sent', drift, null),
   'an absent preference changes nothing at all');
+
+/* ── a target that never left the phone ─────────────────────────────────── */
+//
+// Setting a goal was a void call behind a sheet that closed itself, and two
+// silent ways of keeping the target on one handset for good sat behind it: the
+// account write is skipped for the rest of a session whose prefs read failed,
+// and the write itself was un-awaited and unchecked.
+
+eq(goalSaveLine('saved'), null, 'a target that reached the account says nothing — the bars speak for themselves');
+
+{
+  const dev = goalSaveLine('device-only') ?? '';
+  ok(dev.length > 0, 'a target that was never sent says so');
+  ok(/this phone/i.test(dev), 'and names where it actually is');
+  ok(!/saved to your account|stored on your account/i.test(dev), 'and never claims the account has it');
+}
+
+{
+  const bad = goalSaveLine('failed') ?? '';
+  ok(/did NOT reach your account|not reach your account/i.test(bad), 'a refused write says the account does not have it');
+  ok(/reinstall|another phone/i.test(bad), 'and what that costs the coach');
+}
+
+for (const o of ['saved', 'device-only', 'failed'] as const) {
+  const line = goalSaveLine(o);
+  ok(line === null || (!line.includes('undefined') && !line.includes('null')),
+    `${o} is either silent or a real sentence`);
+}
 
 if (errors.length) {
   console.error(`coachPrefs.test.ts — ${errors.length} failure(s):`);

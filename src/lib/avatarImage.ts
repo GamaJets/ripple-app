@@ -142,3 +142,18 @@ export const AVATAR_UPLOAD_FAILED_NOTE =
 /** What to say when the build has no server behind it. */
 export const AVATAR_NO_SERVER_NOTE =
   'This build has no server, so a photo has nowhere to go and would not reach your coach.';
+
+/**
+ * The same thing said to a COACH whose stored photo is a device path.
+ *
+ * A separate sentence and not a parameterised one, because the two readers are
+ * in opposite positions. A member is told their coach has been looking at a
+ * blank circle; a coach is the person whose face is missing from every client's
+ * thread, from the booking screen and from the directory card that is supposed
+ * to win them work — and, like the member, they are the one person who cannot
+ * see it, because their own handset opens its own file.
+ */
+export const DEVICE_AVATAR_NOTE_COACH =
+  'Your photo was saved as a file on the phone that chose it, so nobody else has ever been able to see it — '
+  + 'your clients, your booking screen and your directory card have all been showing a blank circle. '
+  + 'Choose it again and it will be uploaded properly this time.';

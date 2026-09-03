@@ -4,6 +4,13 @@
 //   supabase functions deploy nutrition-parse
 // Request JSON:  { text: string }
 // Response JSON: { items: [{ name, kcal, protein, carbs, fat }] }
+//
+// Signed-in users only, for the reason written out at length in
+// supabase/functions/coach-chat: `verify_jwt` proves the bearer token was
+// signed by this project, and the public anon key is such a token. Without the
+// check below, anybody who unpacked the app could spend Repple's Anthropic
+// quota through this endpoint with no account at all.
+import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -30,6 +37,15 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   const key = Deno.env.get('ANTHROPIC_API_KEY');
   if (!key) return json({ error: 'ANTHROPIC_API_KEY not set' }, 500);
+
+  // Signed-in users only — this spends a metered quota. See the header.
+  const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  let userId = '';
+  try {
+    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    userId = data?.user?.id || '';
+  } catch { /* stays empty, and the refusal below is the answer */ }
+  if (!userId) return json({ error: 'Sign in to Repple to log food this way.' }, 401);
 
   let text = '';
   try { text = String((await req.json()).text || '').slice(0, 500); }

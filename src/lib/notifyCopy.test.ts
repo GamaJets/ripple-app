@@ -37,6 +37,7 @@ import {
   classOffBuckets, classOffConfirmation, classOffNotification, classStartsIn, clip,
   coachAnswerConfirmation, coachAnswerNotification,
   deliverySummary, invoiceNotification, noticeNotification, pushConsequence,
+  PUSH_PARTIAL_NOTE, pushPartialNote,
 } from './notifyCopy';
 import { inboxDecision, safeRoute } from './notifyInbox';
 import type { CoachInvoice } from './coachInvoice';
@@ -199,6 +200,70 @@ ok(/did not go out/i.test(deliverySummary({ recipients: 3, recorded: 3, push: 'f
   'a failed push with no reason still says it failed');
 ok(/no push/i.test(deliverySummary({ recipients: 3, recorded: 3, push: 'off' })),
   'not pushing is stated too — silence about it would read as a push');
+
+/* ── a send that was accepted and did not reach everybody ─────────────────
+ *
+ * send-push pages its recipient list and returns `partial: true` when a chunk
+ * of it could not be read, so `sent` is a floor. Nothing in the app read that
+ * flag: `sendPushChecked` discarded the function's response and every caller
+ * took `ok: true` for "it went to everybody" — the truncation-as-total defect
+ * one layer out from the one send-push's paging fixed.
+ */
+
+const partial = deliverySummary({ recipients: 900, recorded: 900, push: 'queued', pushPartial: true });
+ok(/not all of the recipient list could be read/i.test(partial),
+  'a partly-read recipient list is said out loud rather than reported as a send that went out');
+ok(/notifications/i.test(partial),
+  'and the inbox rows, which DID all land, are still credited — the two halves are different facts');
+ok(!/\bdelivered\b/i.test(partial), 'still nothing claims delivery');
+// The ordinary queued sentence must not appear as well: two sentences about
+// the same push, one of them reassuring, is worse than either alone.
+ok(!/only people on a push-enabled build/i.test(partial),
+  'the partial sentence REPLACES the ordinary one rather than being appended to it');
+ok(!/not all of the recipient list/i.test(deliverySummary({ recipients: 3, recorded: 3, push: 'queued' })),
+  'and a send with nothing wrong carries no warning — an absent flag is not a truncation');
+ok(!/not all of the recipient list/i.test(deliverySummary({ recipients: 3, recorded: 3, push: 'queued', pushPartial: false })),
+  'nor does an explicit false');
+
+/* ── a fan-out that ran into the ceiling inside notify_users() ───────────── */
+//
+// supabase/parts/122 ends its recipient CTE with `limit 2000` and returns the
+// number of rows written, so past two thousand recipients the answer is a floor
+// wearing a count's clothes. An owner announcing a closure to 2,400 members was
+// told "2,000 people have it", and the four hundred who were skipped were
+// counted out of the sentence they were missing from.
+
+const atCap = deliverySummary({ recipients: 2400, recorded: 2000, push: 'off', recordedAtCap: true });
+ok(/at least/i.test(atCap), 'a floor is stated as a floor');
+ok(atCap.includes('2,000'), 'the rows that were written are still counted, with their separator');
+ok(!atCap.includes('2,400'), 'and the number addressed is not stated beside it');
+// 2400 − 2000 is not the number of people who were skipped: `notify_users`
+// also drops recipients the caller may not reach, so the difference conflates
+// two causes. Neither figure may be presented as the shortfall.
+ok(!atCap.includes('400'), 'and the difference is never presented as the number missed');
+ok(!/send it again/i.test(atCap),
+  'no remedy is offered — the ceiling has no ORDER BY, so a second send would address an arbitrary two thousand');
+ok(!/\bdelivered\b/i.test(atCap), 'and still nothing claims delivery');
+ok(!/at least/i.test(deliverySummary({ recipients: 40, recorded: 38, push: 'off' })),
+  'an ordinary fan-out under the ceiling says nothing about one');
+
+/* ── a recipient list that was itself capped ─────────────────────────────── */
+//
+// src/ui/announcements.tsx read the coach's roster with `capLimit()` and then
+// used every row it got, probe row included, as the number of people addressed.
+// `recipients` under this flag is a floor, so the sentence states neither it
+// nor a comparison against it.
+
+const cappedList = deliverySummary({ recipients: 1001, recorded: 998, push: 'off', recipientsTruncated: true });
+ok(/more people to address than this app could read/i.test(cappedList),
+  'a capped roster admits that the list is not the whole roster');
+// 998 rows were counted by notify_users and may be stated. 1001 is the probe
+// row plus the cap — a floor nobody counted — and must appear nowhere, in
+// particular not as the second half of "998 of 1,001", which invites the author
+// to go looking for three people who are not the ones missing.
+ok(cappedList.includes('998'), 'the rows that were actually written are still counted');
+ok(!cappedList.includes('1,001'), 'and the floor is never stated as a total');
+ok(!/\bof\b/.test(cappedList.split('.')[0]), 'nor compared against, when one of the two is not a count');
 
 /* ── the control that wakes people up says so ──────────────────────────── */
 
@@ -424,6 +489,55 @@ eq(classStartsIn(Infinity, T0), '', 'infinity is not a start time');
   }
   ok(classOffConfirmation(1, 1, 1).includes('1 class was'), 'one is singular');
   ok(classOffConfirmation(9, 1, 1).includes('9 classes were'), 'nine is not');
+}
+
+/* ── a room that was only partly reached ───────────────────────────────────
+ *
+ * send-push pages `push_tokens` and says `partial` when it could not read all
+ * of them. app/(trainer)/classes.tsx threw that away, so a send that resolved
+ * an unknown fraction of a full class was reported as "a push was queued to
+ * all of them" — the sentence a coach reads and then does not ring anybody.
+ */
+{
+  const whole = classOffConfirmation(1, 12, 12, true);
+  ok(!/all of them/i.test(whole),
+    'a partly-read handset list withdraws exactly the claim that everybody got one');
+  ok(whole.includes(PUSH_PARTIAL_NOTE),
+    'and says why in the one wording this product has for it, not a fifth');
+  ok(/tell them yourself/i.test(whole), 'and leaves the coach with something to do about it');
+  ok(!/in their notifications/i.test(whole), 'still nothing claims a row this app did not write');
+
+  const some = classOffConfirmation(1, 12, 8, true);
+  ok(some.includes('8 of them'), 'the number that WAS handed over is still stated');
+  ok(some.includes(PUSH_PARTIAL_NOTE), 'with the same clause after it');
+  ok(!/couldn\u2019t reach the rest/i.test(some),
+    'and not the confident "we could not reach the rest", which names a set nobody counted');
+
+  // A partly-read list is not a failed send: some of the room was woken up.
+  ok(!/couldn\u2019t reach any of their phones/i.test(classOffConfirmation(1, 12, 12, true)),
+    'a partial send is never collapsed into the nobody-was-told branch');
+  // And an absent flag changes nothing, so every existing caller keeps its
+  // sentence.
+  ok(classOffConfirmation(1, 12, 12) === classOffConfirmation(1, 12, 12, false),
+    'an explicit false is the same as saying nothing');
+  ok(!classOffConfirmation(1, 12, 12).includes(PUSH_PARTIAL_NOTE),
+    'and a send with nothing wrong carries no warning');
+}
+
+/* ── one wording, and its one-person form ────────────────────────────────── */
+{
+  // The five screens that state a delivery count all say this, and they say it
+  // with the same words. `deliverySummary` is the one that had it first.
+  ok(deliverySummary({ recipients: 900, recorded: 900, push: 'queued', pushPartial: true })
+    .includes(PUSH_PARTIAL_NOTE),
+    'the summary that owned this sentence now shares the constant rather than a copy of it');
+  ok(pushPartialNote(4) === PUSH_PARTIAL_NOTE, 'a crowd gets the crowd wording');
+  ok(pushPartialNote() === PUSH_PARTIAL_NOTE, 'and so does an unstated number');
+  const one = pushPartialNote(1);
+  ok(one !== PUSH_PARTIAL_NOTE, 'one recipient is not "more people"');
+  ok(!/more people/i.test(one), 'which is the half that would have been false');
+  ok(one.startsWith('Not all of the recipient list could be read'),
+    'and the CAUSE — the half a reader can act on — is word for word the same');
 }
 
 if (errors.length) {

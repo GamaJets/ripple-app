@@ -40,10 +40,14 @@
 // answered is the commonest thing an owner wants and there was no second
 // message anywhere in the product.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchPlans, type MembershipPlan } from '@lib/gymRecord';
+import { gymDateText } from '@lib/gymWhen';
+import { parseGymZone } from '@lib/gymZone';
 import {
   fetchInvites, createInvite, createInvites, extendInvite, revokeInvite,
   inviteState, daysUntilExpiry, inviteBlocker, screenInvites, summariseInvites,
@@ -78,8 +82,14 @@ const STATE_COLOUR: Record<MemberInviteState, string> = {
 
 export default function Invites() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymNameUnread, setGymNameUnread] = useState(false);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
 
   // Null is "not read yet, or the read failed"; [] is "read, and the gym has
   // none". They are different facts and nothing below renders them the same
@@ -108,6 +118,10 @@ export default function Invites() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) { setInvites([]); setPlans([]); return; }
       // supabase-js resolves with { data, error } on a database error rather
@@ -116,10 +130,15 @@ export default function Invites() {
       // a claim about the owner's account, in the branch where the account
       // demonstrably has a tenant.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        // `timezone` joins `name` because the list below stamps a date on every
+        // invitation, and which day an invitation was written down is a fact
+        // about the gym rather than about whoever opens this page.
+        .from('tenants').select('name, timezone').eq('id', who.tenantId).single();
       if (live) {
         setGymName(tErr ? null : ((t as any)?.name ?? null));
         setGymNameUnread(!!tErr);
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
       await load(who.tenantId);
     })();
@@ -137,8 +156,11 @@ export default function Invites() {
     [invites],
   );
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -248,7 +270,7 @@ export default function Invites() {
         openTo={openTo} listRead={!unread} onChange={refresh}
       />
       <TheList
-        invites={invites} readErr={invitesErr} gymName={gymName}
+        invites={invites} readErr={invitesErr} gymName={gymName} zone={zone}
         tenantId={tenantId} onChange={refresh}
       />
     </Shell>
@@ -328,10 +350,14 @@ function InviteOne({ tenantId, me, plans, plansErr, openTo, listRead, onChange }
         <button type="submit" disabled={busy} style={primaryBtn}>{busy ? 'Recording…' : 'Invite'}</button>
       </form>
       {blocker && !writeErr ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>{blocker}</p>
       ) : null}
       {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
-      {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {/* Announced. `writeErr` beside it was already bannered; `msg` carries
+          the clipboard refusal — "your browser would not let this page use the
+          clipboard" — which is the moment somebody thinks the link was
+          copied. */}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
     </Section>
   );
 }
@@ -458,7 +484,7 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
       {screened && screened.rejected.length ? (
         <div style={{ padding: '0 14px 14px' }}>
           {screened.rejected.slice(0, 20).map(({ row, reason }) => (
-            <div key={row.line} style={{ fontSize: 12.5, color: '#f0c04e' }}>
+            <div key={row.line} style={{ fontSize: 12.5, color: 'var(--warn)' }}>
               line {row.line}: {row.email || '(blank)'} — {reason}
             </div>
           ))}
@@ -475,7 +501,7 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
 
       {result ? (
         <div style={{ padding: '0 14px 14px' }}>
-          <p style={{ margin: '0 0 6px', fontSize: 13, color: result.sent ? 'var(--ink2)' : '#ef8080' }}>
+          <p style={{ margin: '0 0 6px', fontSize: 13, color: result.sent ? 'var(--ink2)' : 'var(--crit)' }}>
             {result.sent === 0
               ? 'Nothing was recorded.'
               : `${result.sent} invitation${result.sent === 1 ? '' : 's'} recorded.`}
@@ -484,7 +510,7 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
               : ''}
           </p>
           {result.rejected.slice(0, 20).map((r) => (
-            <div key={`${r.line}:${r.email}`} style={{ fontSize: 12.5, color: '#ef8080' }}>
+            <div key={`${r.line}:${r.email}`} style={{ fontSize: 12.5, color: 'var(--crit)' }}>
               line {r.line}: {r.email || '(blank)'} — {r.reason}
             </div>
           ))}
@@ -496,9 +522,12 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
 
 /* ── the list ──────────────────────────────────────────────────────────────── */
 
-function TheList({ invites, readErr, gymName, tenantId, onChange }: {
+function TheList({ invites, readErr, gymName, zone, tenantId, onChange }: {
   invites: MemberInvite[] | null; readErr: string | null;
-  gymName: string | null; tenantId: string; onChange: () => void;
+  gymName: string | null;
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
+  tenantId: string; onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -628,7 +657,7 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
     // reading "Sent 14 Aug" beside an address believed a message went out that
     // day. What happened that day is that they typed it in.
     { key: 'written', header: 'Written down', value: (i) => i.createdAt,
-      render: (i) => new Date(i.createdAt).toLocaleDateString() },
+      render: (i) => gymDateText(i.createdAt, zone) ?? <span className="dash">not stated</span> },
     // The second fact, and the only one this console can observe: what this
     // browser did. Never "not sent" for an absent note — the owner may well
     // have sent it from their phone or read it down the telephone, and a
@@ -708,7 +737,7 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
       sub="Withdrawn, never deleted: “we never invited them” and “we invited them and changed our mind” are different answers to a member standing at the desk."
     >
       {err ? <Banner tone="crit">{err}</Banner> : null}
-      {msg ? <p style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
 
       <div style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '12px 14px 0', flexWrap: 'wrap' }}>
         <input
@@ -775,7 +804,7 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
           </div>
         ) : <Loading />
       ) : (
-        <DataTable
+        <DataTable noun="invites"
           rows={shown} columns={cols} rowKey={(i) => i.id}
           // The filtered case has its own sentence. `shown` is what survived
           // the search box, so typing a name that does not match printed
@@ -801,7 +830,9 @@ function PlanPicker({ plans, plansErr, value, onChange }: {
   value: string; onChange: (v: string) => void;
 }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ ...field, flex: 2, minWidth: 170 }}>
+    // Named. The first option reads like a label until somebody chooses, and
+    // then the control has no name at all.
+    <select aria-label="Which plan the invite opens" value={value} onChange={(e) => onChange(e.target.value)} style={{ ...field, flex: 2, minWidth: 170 }}>
       {/* A picker holding nothing but "No plan" looks like a gym that sells
           nothing. Say which it is, so nobody invites two hundred people onto no
           plan believing there was none to choose. */}
@@ -854,18 +885,3 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

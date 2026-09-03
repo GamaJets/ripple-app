@@ -74,7 +74,7 @@ addEventListener('DOMContentLoaded', function () {
   <div class="wrap">
     <div class="hero-grid">
       <div>
-        <div class="eyebrow">Support · updated 26 August 2026</div>
+        <div class="eyebrow">Support · updated 3 September 2026</div>
         <h1 class="display">Something not<br>working?</h1>
         <p class="lede" style="margin-top:24px">
           One address reaches a person: <strong>support@repplefitness.com</strong>. Below it are the
@@ -204,8 +204,11 @@ addEventListener('DOMContentLoaded', function () {
     <div class="lead-in wide">
       <h2 class="hd">Signing in and confirming your email</h2>
       <p class="lede">
-        Creating an account takes a name, an email and a password of at least six characters. Then
-        one step people do not expect: you have to confirm the address before you can sign in.
+        Creating an account takes a name, an email and a password of at least eight characters that
+        also has a lowercase letter, an uppercase letter, a number and a symbol in it. A password
+        that has appeared in a public data breach is refused as well, and that check can only run
+        when you save. Then one step people do not expect: you have to confirm the address before
+        you can sign in.
       </p>
     </div>
 
@@ -478,8 +481,8 @@ addEventListener('DOMContentLoaded', function () {
           </tr>
           <tr>
             <td><strong>Fitbit</strong></td>
-            <td>Steps, heart rate, sleep and calories.</td>
-            <td>Same — Fitbit's own sign-in page, then back to the app.</td>
+            <td>Nothing yet.</td>
+            <td>The Repple side is written, but we have not finished registering the app with Fitbit, so there is nothing for you to sign in to and the row says so. Nothing is wrong with your Fitbit account. A Fitbit that already writes into Apple Health or Health Connect reaches Repple by that route in the meantime.</td>
           </tr>
           <tr>
             <td><strong>Garmin</strong></td>
@@ -488,8 +491,8 @@ addEventListener('DOMContentLoaded', function () {
           </tr>
           <tr>
             <td><strong>Google&nbsp;Fit / Health&nbsp;Connect</strong></td>
-            <td>Nothing yet.</td>
-            <td>Android only, and not live in the current build. On anything other than Android the row tells you it is Android-only.</td>
+            <td>Steps, heart rate, calories, workouts and sleep — Android's own health store, which is where a Garmin, a Fitbit, a Polar or a phone writes on that platform. Blood sugar is asked for separately, on the Blood Sugar screen.</td>
+            <td>Android only. Tap Connect and grant the Health Connect permission. It also needs an Android build that declares those permissions, which not every build does — where yours cannot ask, Connect fails with a sentence naming both reasons rather than a blank screen. On anything other than Android the row tells you it is Android-only.</td>
           </tr>
           <tr>
             <td><strong>Spotify</strong></td>
@@ -755,10 +758,12 @@ addEventListener('DOMContentLoaded', function () {
         <h3>What can a coach see once we are linked?</h3>
         <div>
           <p>Your training, and your nutrition and check-ins where you use those features together.
-             Not your device connections, not your account settings, and not your progress photos &mdash;
-             a coach has no access to those at all. Their access is read-only and it ends when the link
-             does. The full account is in <a href="/privacy">Privacy</a>, and the row-by-row version is
-             in <a href="/security">Security &amp; data</a>.</p>
+             Not your device connections and not your account settings. Progress photos are the
+             exception that works the other way round: a coach has no access to them by default, and
+             sees one only where you have shared that specific photograph, which you can withdraw.
+             Their access is read-only and it ends when the link does &mdash; including every photo
+             you had shared. The full account is in <a href="/privacy">Privacy</a>, and the row-by-row
+             version is in <a href="/security">Security &amp; data</a>.</p>
         </div>
       </div>
     </div>
@@ -825,11 +830,16 @@ addEventListener('DOMContentLoaded', function () {
         <h3>What is in the export?</h3>
         <div>
           <p>Your profile, your client record, workouts, food logs, measurements, check-ins, habit
-             logs, scans, messages, coach nutrition plans, assigned programs, class bookings,
-             referrals and feedback.</p>
-          <p>What it does not include is anything the gym holds about you as a member — membership
-             records, invoices, payments, door-log visits. Those belong to the gym's own records. Ask
-             us and we will get them for you.</p>
+             logs, scans, progress photo records, messages, coach nutrition plans, assigned programs,
+             class bookings, referrals, feedback and your waivers and signed agreements. The gym-side
+             records are in it too — membership, invoices, payments, charges, passes and door-log
+             visits.</p>
+          <p>Two things it does not carry. Any note a coach wrote about you while you were a lead of
+             theirs, which is their working note rather than your record. And the files themselves:
+             the bundle lists every photograph, injury document, message attachment and avatar held
+             for you, and you save those one at a time from the same screen. Where a table could not
+             be read, the export says so in place of the rows rather than handing you an empty list
+             that reads like &ldquo;you had none&rdquo;.</p>
         </div>
       </div>
 

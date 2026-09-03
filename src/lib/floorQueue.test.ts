@@ -11,8 +11,8 @@
 //   · a refused write kept in the queue forever, retried on every launch and
 //     counted as "waiting to send" for the life of the install.
 import {
-  actLine, dropSent, enqueueAct, floorPendingNote, floorQueueKey, flushResultLine,
-  keptOfflineLine, readFloorQueue, refusedLine, registerVisibilityLine, supersedeKey,
+  FLOOR_CAP, actLine, dropSent, enqueueAct, floorFullLine, floorPendingNote, floorQueueKey,
+  flushResultLine, keptOfflineLine, readFloorQueue, refusedLine, registerVisibilityLine, supersedeKey,
   type FloorAct, type QueuedAct,
 } from './floorQueue';
 
@@ -26,7 +26,7 @@ const TICK = (userId: string, present: boolean): FloorAct =>
   ({ kind: 'class-attendance', classId: 'c1', userId, memberName: 'Sam', present });
 const LOG = (clientId: string, n: number, stamp = '2026-09-01T18:00:00.000Z'): FloorAct =>
   ({ kind: 'session-log', clientId, clientName: 'Sam', entries: Array.from({ length: n }, (_, i) => ({ i, t: stamp })) });
-const OUTCOME = (sessionId: string, outcome: string): FloorAct =>
+const OUTCOME = (sessionId: string, outcome: string | null): FloorAct =>
   ({ kind: 'session-outcome', sessionId, clientName: 'Sam', outcome });
 
 /* ── the key is per account ─────────────────────────────────────────────── */
@@ -64,9 +64,9 @@ eq(supersedeKey(LOG('u1', 3)), supersedeKey(LOG('u1', 3)),
   'the same session offered twice is one session');
 
 let queue: QueuedAct[] = [];
-queue = enqueueAct(queue, q('1', TICK('u1', true)));
-queue = enqueueAct(queue, q('2', TICK('u2', true)));
-queue = enqueueAct(queue, q('3', TICK('u1', false), '2026-09-01T10:05:00.000Z'));
+queue = enqueueAct(queue, q('1', TICK('u1', true))).queue;
+queue = enqueueAct(queue, q('2', TICK('u2', true))).queue;
+queue = enqueueAct(queue, q('3', TICK('u1', false), '2026-09-01T10:05:00.000Z')).queue;
 eq(queue.length, 2, 'ticking one member twice queues one decision, not two');
 eq(queue[0].id, '3', 'and it is the latest one');
 // Position is when the decision was first made, so a trainer working down a
@@ -76,12 +76,63 @@ eq(queue[1].act.kind === 'class-attendance' && queue[1].act.userId, 'u2',
 eq(queue[0].act.kind === 'class-attendance' && queue[0].act.present, false, 'the last answer wins');
 
 let logs: QueuedAct[] = [];
-logs = enqueueAct(logs, q('1', LOG('u1', 3)));
-logs = enqueueAct(logs, q('2', LOG('u1', 4)));
+logs = enqueueAct(logs, q('1', LOG('u1', 3))).queue;
+logs = enqueueAct(logs, q('2', LOG('u1', 4))).queue;
 eq(logs.length, 2, 'two sessions for one client stay two sessions');
-logs = enqueueAct(logs, q('3', LOG('u1', 3)));
+logs = enqueueAct(logs, q('3', LOG('u1', 3))).queue;
 eq(logs.length, 2, 'and the same session offered again does not become a third');
 eq(logs[0].id, '3', 'the re-offer takes the place of the one it repeats');
+
+/* ── the queue is bounded, and a supersede is never what fills it ───────── */
+//
+// This was the only queue in the app without a cap, and it holds the largest
+// payloads: a session log is an entire hour of training and it APPENDS, where a
+// tick and an outcome fold onto their own supersede keys. src/lib/outbox.ts
+// states the hazard for its own two hundred — "AsyncStorage on Android is one
+// SQLite row per key and a runaway queue is a write that starts failing" — and
+// here the failure is silent: `persist` catches, the coach's afternoon looks
+// fine, and the next launch reads back the last write that succeeded.
+
+{
+  let full: QueuedAct[] = [];
+  for (let i = 0; i < FLOOR_CAP; i++) full = enqueueAct(full, q(`f${i}`, LOG(`u${i}`, 3))).queue;
+  eq(full.length, FLOOR_CAP, 'the cap is reached exactly');
+
+  const past = enqueueAct(full, q('late', LOG('u999', 3)));
+  eq(past.added, false, 'PAST THE CAP IT REFUSES — a coach can be told that, and an eviction is silent loss');
+  eq(past.queue.length, FLOOR_CAP, 'and the queue is unchanged');
+  eq(past.queue[0].id, 'f0', 'so Monday morning is still on the phone rather than pushed out by Friday');
+  ok(!past.queue.some((e) => e.id === 'late'), 'the act that was refused is the one that was not kept');
+
+  // The load-bearing half. A correction to something already queued does not
+  // make the queue longer, and refusing one at the cap would mean a trainer who
+  // fixed a mark watched the WRONG one go up — the exact failure `supersedeKey`
+  // exists to prevent.
+  let ticks: QueuedAct[] = [];
+  for (let i = 0; i < FLOOR_CAP; i++) ticks = enqueueAct(ticks, q(`t${i}`, TICK(`m${i}`, true))).queue;
+  const corrected = enqueueAct(ticks, q('fix', TICK('m0', false)));
+  eq(corrected.added, true, 'A SUPERSEDE IS ALWAYS ALLOWED, CAP OR NO CAP — it replaces rather than grows');
+  eq(corrected.queue.length, FLOOR_CAP, 'and the queue is the same length afterwards');
+  eq(corrected.queue[0].act.kind === 'class-attendance' && corrected.queue[0].act.present, false,
+    'with the trainer’s corrected answer in it, not the one they changed their mind about');
+
+  // A retraction at the cap is the sharpest case of the same thing: it must
+  // never be the one act that cannot be kept.
+  let outcomes: QueuedAct[] = [];
+  for (let i = 0; i < FLOOR_CAP; i++) outcomes = enqueueAct(outcomes, q(`o${i}`, OUTCOME(`s${i}`, 'no_show'))).queue;
+  const undone = enqueueAct(outcomes, q('undo', OUTCOME('s0', null)));
+  eq(undone.added, true, 'a coach taking back a "no show" is never refused for want of room');
+  eq((undone.queue[0]?.act as { outcome: string | null }).outcome, null, 'and it is the retraction that is left');
+
+  // What the coach is told when nothing was kept. Three different facts, three
+  // different sentences, and none of them may be mistaken for another.
+  const said = floorFullLine('This session');
+  ok(/not saved/i.test(said) && /not waiting to send/i.test(said),
+    'the full line says plainly that nothing was kept and nothing is coming');
+  ok(!/server/i.test(said), 'and never claims a server read it — no server has seen this');
+  ok(said !== refusedLine('This session', null), 'it is not the refusal sentence');
+  ok(said !== keptOfflineLine('This session'), 'and it is not the kept-on-this-phone sentence, which promises a send');
+}
 
 /* ── a sent act leaves by its id ────────────────────────────────────────── */
 
@@ -180,6 +231,50 @@ eq(actLine({ kind: 'class-attendance', classId: 'c', userId: 'u', memberName: ' 
 eq(actLine(OUTCOME('s1', 'no_show')), 'Sam’s session marked no show', 'an outcome reads as words, not as a column value');
 eq(actLine({ kind: 'session-outcome', sessionId: 's', clientName: null, outcome: 'completed' }), 'A session marked completed',
   'and names the session when it cannot name the client');
+
+/* ── the outcome a coach took back ──────────────────────────────────────── */
+//
+// The defect: marking went through this queue and the undo went straight to the
+// server. Offline — the condition the queue exists for — the undo threw and the
+// queue then flushed the "no show" the coach had retracted in front of the
+// client, onto their record and onto payroll.
+
+eq(supersedeKey(OUTCOME('s1', null)), 'session:s1',
+  'a retraction keys on the same session as the mark it takes back');
+
+{
+  // Offline: the mark is queued, then taken back. Nothing false may be left to
+  // send, and the queue must not grow a second entry for one session.
+  const marked = enqueueAct([], q('a', OUTCOME('s1', 'no_show'))).queue;
+  const taken = enqueueAct(marked, q('b', OUTCOME('s1', null))).queue;
+  eq(taken.length, 1, 'taking it back replaces the queued mark rather than queueing behind it');
+  eq((taken[0]?.act as { outcome: string | null }).outcome, null,
+    'and what is left on the phone is the retraction, not the "no show"');
+  ok(!taken.some((e) => (e.act as { outcome: string | null }).outcome === 'no_show'),
+    'the outcome the coach retracted is not waiting to be sent');
+}
+
+{
+  // A retraction for a session with nothing queued is an act in its own right:
+  // the mark reached the server, and the clear has to as well.
+  const only = enqueueAct([q('a', OUTCOME('s2', 'completed'))], q('b', OUTCOME('s1', null))).queue;
+  eq(only.length, 2, 'a retraction of a sent mark is queued rather than dropped');
+}
+
+{
+  // It comes back off the device as something this build can send. Stored as
+  // null and read back as null — not as an act to be silently discarded.
+  const raw = JSON.stringify([q('a', OUTCOME('s1', null))]);
+  const back = readFloorQueue(raw);
+  eq(back.read, true, 'a stored retraction is readable');
+  eq(back.acts.length, 1, 'and survives the round trip through the device');
+  eq((back.acts[0]?.act as { outcome: string | null }).outcome, null, 'still as a retraction');
+}
+
+eq(actLine(OUTCOME('s1', null)), 'Sam’s session — outcome taken back',
+  'and the pending list says it was taken back, never "marked null"');
+eq(actLine({ kind: 'session-outcome', sessionId: 's', clientName: null, outcome: null }),
+  'A session — outcome taken back', 'with the session named when the client cannot be');
 
 /* ── what a pressed send button reports ─────────────────────────────────── */
 

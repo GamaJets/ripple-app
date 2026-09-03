@@ -17,13 +17,23 @@
 //
 // ── The injury note is the part that breaks a written rule ─────────────────
 //
-// `candidateNote` in src/lib/injuryExtract.ts seeds a proposed injury's note
-// with `c.evidence` — THE LINE OFF THE DOCUMENT. A member who photographs a
-// physiotherapy report, taps Add This, and never edits the note has the
-// report's own words stored in `clients.injuries[].note`. That is intended for
-// the coach, who the member chose. It was then also being posted to a language
-// model, which they did not, and src/ui/injuryDocs.ts states the rule it
-// breaks: the coach sees the extracted injury, never the document.
+// An injury note can contain the words off a member's medical document, and for
+// a long time it did so BY DEFAULT: `candidateNote` in src/lib/injuryExtract.ts
+// seeded a proposed injury's note with `c.evidence`, the line lifted off the
+// document, so a member who photographed a physiotherapy report, tapped Add
+// This and never touched the field had the report's own words stored in
+// `clients.injuries[].note`. That default is gone — `candidateNote` returns ''
+// and argues at length why — but the FIELD has not changed: the evidence is
+// still printed above it on app/(client)/injury-doc.tsx, because the member is
+// being asked to agree with a reading of their own document and must see the
+// reading, and copying any of it across is one gesture away.
+//
+// So a note is still the one part of an injury that may carry a clinician's
+// sentence, and it is now there because the member PUT it there — for their
+// coach, who they chose. Posting it to a language model is still the same
+// breach of the same written rule, and src/ui/injuryDocs.ts states it: the
+// coach sees the extracted injury, never the document. The note not going is
+// not contingent on what `candidateNote` happens to return this month.
 //
 // So the injury summary sent to a model is area and severity and nothing else.
 // `sharedInjuries` below is that summary. There is no toggle for the note; it
@@ -248,6 +258,32 @@ export const SENT_WITH_PERMISSION: string[] = [
   'the focus areas read off your progress photos',
 ];
 
+/**
+ * What never reaches the model, and the scope of that word.
+ *
+ * "Never sent" here means never sent TO THE AI COACH, which is what this whole
+ * module is about and what the screen printing this list is asking permission
+ * for. It is true: `shareableContext` builds from the allowlists above and no
+ * branch of it can reach a document, a photograph or a printout.
+ *
+ * It is NOT a claim about the app as a whole, and for a while the app made it
+ * read like one. There are four other doors, each with a different recipient, a
+ * different purpose and therefore a question of its own — and every one of them
+ * had none until somebody went looking:
+ *
+ *   an uploaded injury document  → OCR.space   src/lib/injuryDocConsent.ts
+ *   a photo of a gym machine     → Anthropic   src/lib/photoAI.ts
+ *   a photo of a meal            → Anthropic   src/lib/photoAI.ts
+ *   a body-composition printout  → both        src/lib/scanSheetConsent.ts
+ *
+ * Until each had a consent question of its own, a member could reasonably have
+ * taken this line as covering it. They all have one now, asked before anything
+ * leaves. None of those answers is this one and this one is none of theirs.
+ *
+ * The wording stays as it is because it is accurate about the thing it is
+ * printed under. Anything added here must be true of THIS destination and must
+ * not be worded so that it sounds like a promise about every destination.
+ */
 export const NEVER_SENT: string[] = [
   'your name, your email or anything else that says who you are',
   'the words of an injury note, or anything from a document you uploaded',
@@ -346,18 +382,30 @@ export const NOT_MEDICAL_ADVICE =
  *
  * ── What was already going out ────────────────────────────────────────────
  *
- * Two coach screens call `askCoach`, the unfiltered door, and both of them
- * name the client:
+ * Two places on app/(trainer)/dashboard.tsx CALLED `askCoach` — the unfiltered
+ * door, which took a free-form context object and no consent argument — and
+ * both of them named the client:
  *
- *   app/(trainer)/dashboard.tsx · draftNudge   { name, goal, adherence, reason }
- *   app/(trainer)/dashboard.tsx · genSummary   { name, goal, adherence,
- *                                                recentMeals, composition }
+ *   draftNudge   { name, goal, adherence, reason }
+ *   genSummary   { name, goal, adherence, recentMeals, composition }
  *
- * `composition` is `visceralFat`, `inbodyScore`, `leanMassKg`, `fatMassKg` and
- * a left/right limb imbalance — a body-composition scan — and `recentMeals` is
+ * `composition` was `visceralFat`, `inbodyScore`, `leanMassKg`, `fatMassKg` and
+ * a left/right limb imbalance — a body-composition scan — and `recentMeals` was
  * a list of what a named person ate. Nothing on either screen said any of this
  * was leaving the phone. The member answered a consent question about their own
- * coach chat, on their own device, and it has never governed this path.
+ * coach chat, on their own device, and it never governed this path.
+ *
+ * `askCoach` NO LONGER EXISTS. It was deleted rather than left in place for
+ * some future caller, and src/lib/coach.ts says why at length: a door with no
+ * filter and no consent parameter, kept "for its remaining callers", is a
+ * fourth caller waiting to be written. Both call sites now go through
+ * `askAboutClient`, which cannot be reached except through `clientAskContext`
+ * below — so the name, the composition and the meal list are dropped by an
+ * allowlist rather than by whoever last edited the screen.
+ *
+ * The rest of this half is therefore a description of the RULE, not of a
+ * defect still standing. It is kept because the rule is the thing that is easy
+ * to undo, and the argument for it is the only reason not to.
  *
  * ── The difference, and why it decides the design ─────────────────────────
  *
@@ -373,8 +421,11 @@ export const NOT_MEDICAL_ADVICE =
  * can send their own, and does — but because the only person entitled to answer
  * is not being asked. If the answer is ever moved to a column both sides can
  * read, `clientAskContext` gains a consent parameter and `COACH_CLIENT_HEALTH`
- * below becomes reachable; until then it is documented and unused, which is a
- * better record of the decision than an absent list.
+ * below becomes reachable; until then it is NEVER SENT and exists only to be
+ * asserted against, which is a better record of the decision than an absent
+ * list. src/lib/coachAsk.test.ts states that every key in it survives no filter
+ * — a much stronger claim than silence, and one that fails the day somebody
+ * adds one of them to `COACH_CLIENT_KEYS` without reading this header.
  *
  * ── And the name does not go at all, in any state ─────────────────────────
  *
@@ -387,10 +438,12 @@ export const NOT_MEDICAL_ADVICE =
  * than two.
  *
  * The injury NOTE does not go either, by the same rule and for the stronger
- * reason: `candidateNote` seeds it with the line off the member's uploaded
- * document, and src/ui/injuryDocs.ts states the rule — the coach sees the
- * extracted injury, never the document. A coach forwarding that to a model is
- * the document leaving by a second door.
+ * reason: a note may carry the line off the member's uploaded document — no
+ * longer as a default, since `candidateNote` returns '', but because the
+ * evidence is shown beside the field and copying it across is one gesture — and
+ * src/ui/injuryDocs.ts states the rule, that the coach sees the extracted
+ * injury and never the document. A coach forwarding that to a model is the
+ * document leaving by a second door.
  * ══════════════════════════════════════════════════════════════════════════ */
 
 /**

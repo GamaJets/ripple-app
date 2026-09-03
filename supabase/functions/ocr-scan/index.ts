@@ -13,6 +13,31 @@
 // base64 image and gets back the parsed text; nothing about the key reaches the
 // device. Parsing the text into weight / body-fat / muscle stays in the app,
 // where the InBody-specific rules already live.
+//
+// ── WHAT LEAVES, AND WHAT IS NOT ASKED OF THE VENDOR ─────────────────────
+//
+// This function is no longer only the InBody path. app/(client)/injury-doc.tsx
+// sends physiotherapy reports, scan results and doctors' notes through it, so
+// what goes over the wire below can be a person's clinical record.
+//
+// Exactly five form fields are posted to https://api.ocr.space/parse/image:
+// `apikey`, `OCREngine=2`, `scale=true`, `base64Image` — the WHOLE page, every
+// page of a PDF — and `filetype=PDF` when it is one. There is no sixth. In
+// particular NOTHING HERE ASKS OCR.SPACE NOT TO RETAIN THE UPLOAD, and nothing
+// anywhere else in this repository does either.
+//
+// Whether their API offers such a parameter at all is NOT ESTABLISHED by
+// anything in this codebase, and no claim is made in either direction — not
+// here, and not in the copy the member reads. src/lib/injuryDocConsent.ts tells
+// them the one thing that is verifiable: a copy leaves, and this app does not
+// ask for it back. If somebody establishes that a retention control exists, it
+// is one `form.set(...)` below plus a rewrite of `CONSENT_RETENTION`.
+//
+// The member is now ASKED before any of this happens, per document, and the
+// answer is recorded before the invoke (supabase/parts/1000-*.sql). That gate
+// is entirely on the client side and deliberately so: the subject of the data
+// and the operator of the client are the same person, so there is nobody for a
+// server-side check to protect. Nothing below has changed for it.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };

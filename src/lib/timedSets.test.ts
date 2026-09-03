@@ -20,6 +20,7 @@
 import {
   isTimedSet, hasTimedSet, prescribedSeconds, isTimedPrescription, readHold,
   holdLabel, timedSetLabel, entryHoldSeconds, holdRecords, MAX_HOLD_SECONDS,
+  setChipLabel, setListLabel,
 } from './timedSets';
 import { entryTonnage, repRecords, type BodyweightHistory } from './bodyweightSets';
 import { personalRecords, weekStats } from './streaks';
@@ -213,6 +214,56 @@ const HISTORY: BodyweightHistory = [{ t: at('2026-01-10'), v: 80 }];
     'an absent flag is sent as null rather than omitted, so an edit can clear it');
   eq(rowToEntry({ performed_at: at('2026-06-05'), exercise: 'Row', sets: [[10, 40]] }).timed, undefined,
     'and a row from before the column reads back as nobody having been asked');
+}
+
+/* ── how a SAVED set reads back ────────────────────────────────────────────
+ *
+ * The draft chip knew. The saved row did not: a plank the app itself asked for
+ * in seconds came back as "45×— kg", which is forty-five repetitions of nothing
+ * on the member's own record — and on the coach's.
+ */
+{
+  // The caller's own renderer: kilograms as written, and an em-dash for a
+  // figure there is none of, which is this app's convention.
+  const lbl = (kg: number | null) => (kg == null ? '—' : String(kg));
+
+  const plank: WorkoutEntry = { t: '2026-03-01T09:00:00.000Z', exercise: 'Plank', sets: [[45, 0]], timed: [true] };
+  eq(setChipLabel(plank, 0, lbl, 'kg'), '45 s', 'a hold is a clock, not "45×—"');
+  ok(!setChipLabel(plank, 0, lbl, 'kg').includes('×'), 'and carries no multiplication sign at all');
+  ok(!setChipLabel(plank, 0, lbl, 'kg').includes('—'), 'nor a dash implying a missing weight');
+
+  const longHold: WorkoutEntry = { t: '2026-03-01T09:00:00.000Z', exercise: 'Plank', sets: [[90, 0]], timed: [true] };
+  eq(setChipLabel(longHold, 0, lbl, 'kg'), '1:30', 'past a minute it reads as a clock');
+
+  const weighted: WorkoutEntry = { t: '2026-03-01T09:00:00.000Z', exercise: 'Plank', sets: [[45, 10]], timed: [true] };
+  eq(setChipLabel(weighted, 0, lbl, 'kg'), '45 s × 10 kg',
+    'a load on a hold is what was held on top, stated beside the time');
+
+  const lift: WorkoutEntry = { t: '2026-03-01T09:00:00.000Z', exercise: 'Bench', sets: [[8, 60]] };
+  eq(setChipLabel(lift, 0, lbl, 'kg'), '8×60 kg', 'a lift is unchanged');
+  const bwLift: WorkoutEntry = { t: '2026-03-01T09:00:00.000Z', exercise: 'Pull-up', sets: [[8, 0]], bw: [true] };
+  eq(setChipLabel(bwLift, 0, lbl, 'kg'), '8×— kg', 'and a set with no load still shows the dash it always did');
+
+  // The strip: unit once, and only when something on the line is a load.
+  const mixed: WorkoutEntry = {
+    t: '2026-03-01T09:00:00.000Z', exercise: 'Circuit',
+    sets: [[8, 60], [45, 0], [8, 60]], timed: [false, true, false],
+  };
+  eq(setListLabel(mixed, lbl, 'kg'), '8×60  45 s  8×60 kg', 'the hold sits in the line as a clock');
+  const allHolds: WorkoutEntry = {
+    t: '2026-03-01T09:00:00.000Z', exercise: 'Plank', sets: [[45, 0], [60, 0]], timed: [true, true],
+  };
+  eq(setListLabel(allHolds, lbl, 'kg'), '45 s  1:00',
+    'an entry of nothing but holds does not end in a unit it never used');
+  eq(setListLabel({ sets: [] }, lbl, 'kg'), '', 'no sets is no line');
+
+  // The whole point, stated as the thing that must not come back.
+  for (const e of [plank, weighted, allHolds]) {
+    for (let i = 0; i < (e.sets?.length ?? 0); i++) {
+      ok(!/^\d+×/.test(setChipLabel(e, i, lbl, 'kg')),
+        'no hold anywhere reads as a rep count times a weight');
+    }
+  }
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

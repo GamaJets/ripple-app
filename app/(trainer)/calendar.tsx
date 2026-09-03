@@ -19,7 +19,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Field, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
-import { insideNoticeWindow, feeAmountLine, noticeLabel, openSlotWindow, slotWindowLine, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
+import { insideNoticeWindow, feeAmountLine, unstatedCurrencyCoach, noticeLabel, openSlotWindow, slotWindowLine, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
 // "I work Tuesdays 7 to 7", said once instead of forty-eight times. See that
 // file's header for why trainer_availability was empty: offering 07:00–19:00 in
 // quarters meant forty-eight separate additions for ONE day.
@@ -51,6 +51,7 @@ import { hitSlopFor, MIN_TARGET } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { useNow } from '../../src/ui/today';
 // Who is actually in an hour. `roster.find(…)?.name ?? 'Open slot'` presented a
 // booked hour whose client the roster read never returned as a free one, on the
 // screen where a coach decides what to give away. See the module header.
@@ -136,31 +137,54 @@ import {
   LINK_NOTES, NO_CALENDAR_LINK, REMOTE_SCOPE_NOTE, WRITE_PRIVACY_NOTE,
   type BusySourceState, type CalendarLink, type SyncSource,
 } from '../../src/lib/calendarSync';
+// What the coach is told after a slot goes round the roster, and why the count
+// in it is the server's rather than the size of the list we sent.
+import { reofferConfirmation } from '../../src/lib/reofferCopy';
 import {
   CALENDAR_SYNC_CONFIGURED, connectGoogleCalendar, disconnectGoogleCalendar,
   pushAgainSoon, pushIsDue, pushSessions, readCalendarLink, readRemoteBusy,
   setCalendarWrite, type RemoteBusyRead,
 } from '../../src/ui/calendarSync';
 import { BRAND } from '../../src/lib/brands';
-import { fmtDay } from '../../src/lib/format';
+import { fmtDay, fmtTime, monthNames, monthNamesShort, weekdayNameShort } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
 
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+// ── the weekday, the month and the clock, in the reader's own language ─────
+//
+// All three were this file's own and all three were English: `DOW` and `MON`
+// were hardcoded arrays read at roughly twenty sites, and `timeLabel` hand-built
+// a 12-hour clock with no 24-hour form at all — so a coach in Berlin read every
+// hour of their working week as "7pm". app/(trainer)/classes.tsx removed the
+// identical three helpers from itself and says why in its own header; this is
+// the screen with ten times the traffic, and it kept them.
+//
+// Four of the sites are PUSHES. A booking confirmation and a cancellation leave
+// the coach's phone and arrive on a client's, so the English weekday reached
+// somebody who never chose this app — and `scripts/check-locale.mjs` cannot see
+// a hand-built table, which is why it passed the whole time.
+//
+// Computed once at module scope: `appLocale()` is resolved at launch and does
+// not change while the app runs (src/lib/locale.ts).
+const DOW = Array.from({ length: 7 }, (_, i) => weekdayNameShort(i));
+const MON = monthNames();
+/** The abbreviated months. NOT `MON_SHORT[m]`, which was what this file
+ *  did — three characters off a month name is an abbreviation in English and
+ *  nothing at all in most other languages. */
+const MON_SHORT = monthNamesShort();
 
 function dayKey(iso: string) {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
-function timeLabel(iso: string) {
-  const d = new Date(iso); let h = d.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
-  const m = d.getMinutes(); return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`;
-}
-/** "Tue 8 Sep" — the way every other date on this screen is written. */
-function dateLabel(iso: string) {
-  const d = new Date(iso);
-  return `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()].slice(0, 3)}`;
-}
+/** The reader's own clock — 24-hour where they use one. See src/lib/format.ts. */
+const timeLabel = (iso: string) => fmtTime(iso);
+/** "Tue 8 Sep", written the way the reader's locale writes it. */
+const dateLabel = (iso: string) => fmtDay(iso);
+/** The same, for a `Date` that is not a stored instant — the day the coach has
+ *  selected on the grid. Never `${d.getDate()}/${d.getMonth() + 1}`: a coach in
+ *  the United States reads that month-first, so "Wed 9/12" is 9 December here
+ *  and 12 September there, and it was the last sentence before a cancellation. */
+const dateOfLabel = (d: Date) => `${DOW[d.getDay()]} ${d.getDate()} ${MON_SHORT[d.getMonth()]}`;
 
 /**
  * A selectable pill. Takes the theme as a prop rather than calling useTheme —
@@ -265,7 +289,26 @@ let SEQ = 5000;
 
 export default function TrainerSchedule() {
   const t = useTheme();
-  const now = new Date();
+  /* `useNow`, not a bare `new Date()` in the render body.
+   *
+   * A bare call is right at the instant something else happens to redraw, and
+   * nothing here redraws for the clock: this tab is never unmounted, and there
+   * was no midnight timer and no AppState listener behind this value. `now`
+   * feeds `todayKey` — the ring the grid draws around today — and
+   * `viewingPastMonth`, which decides whether the coverage warning treats the
+   * month on screen as behind or ahead. A schedule left open overnight kept
+   * ringing yesterday and kept judging the month boundary against it.
+   *
+   * `useNow` (src/ui/today.ts) settles on local midnight, on the app coming
+   * back to the foreground, and on focus — the three moments this can go
+   * stale. Six sibling screens already use it; this one is the tab it matters
+   * on most, because the ring is what a coach reads the day off.
+   *
+   * Nothing on this screen keys an effect off `now`, so the extra settle costs
+   * one render. The three `useState` initialisers below read it once at mount
+   * and are deliberately not moved by it — the month the coach has scrolled to
+   * is theirs, not the clock's. */
+  const now = useNow();
   const router = useRouter();
   const { sessions, status: sessionsStatus, addSession, releaseSession, removeSession, refresh, rescheduleClientSession } = useSessions();
   // ── The empty diary that was not empty ───────────────────────────────────
@@ -1712,13 +1755,13 @@ export default function TrainerSchedule() {
     const clash = classClashes(s.startsAt, s.durationMin, gymClasses, coachId);
     if (clash.mine.length > 0) {
       Alert.alert('You are teaching then',
-        `${clash.mine[0].title} runs across ${timeLabel(s.startsAt)} on ${DOW[selDate.getDay()]} ${selD}/${selM + 1}, and you are the coach on it. Pick another time, or call the class off from the Classes screen first.`,
+        `${clash.mine[0].title} runs across ${timeLabel(s.startsAt)} on ${dateOfLabel(selDate)}, and you are the coach on it. Pick another time, or call the class off from the Classes screen first.`,
         [{ text: 'OK' }]);
       return;
     }
     const res = addSession(s);
     if (!res.ok) {
-      Alert.alert('Time not available', `You already have a session that overlaps ${timeLabel(s.startsAt)} on ${DOW[selDate.getDay()]} ${selD}/${selM + 1}. Pick another time.`, [{ text: 'OK' }]);
+      Alert.alert('Time not available', `You already have a session that overlaps ${timeLabel(s.startsAt)} on ${dateOfLabel(selDate)}. Pick another time.`, [{ text: 'OK' }]);
       return;
     }
     setAddOpen(false);
@@ -1770,8 +1813,23 @@ export default function TrainerSchedule() {
     toldClient: boolean;
     promoted: string | null;
     promotedTold: boolean | null;
-    offered: boolean | null;
-    others: string[];
+    /**
+     * The re-offer, as the SERVER answered it — never as a count of the list
+     * we handed over. Null when no re-offer was made at all, which is either
+     * because somebody was promoted off the waitlist or because the roster is
+     * not whole; `rosterWhole` is what separates those two.
+     */
+    offer: {
+      asked: number;
+      recorded: number | null;
+      inboxKept?: boolean;
+      partial?: boolean;
+      ok: boolean;
+    } | null;
+    /** Whether the roster the re-offer decision was taken from is the whole
+     *  roster. Under anything else "you have no other clients" is a claim
+     *  about a read that did not happen. */
+    rosterWhole: boolean;
   }
 
   /**
@@ -1783,13 +1841,21 @@ export default function TrainerSchedule() {
    * order is not arbitrary and the comments below are the reason.
    */
   async function cancelOne(s: TrainingSession): Promise<CancelOutcome> {
-    const others = roster.filter((c) => c.id !== s.clientId).map((c) => c.name);
+    // Whether the book this hour is about to be offered round IS the book.
+    // `reoffer()` two hundred lines below refuses outright on anything but a
+    // whole read and says why; this path made the same fan-out and asked
+    // nothing. Under 'error' the provider hands back `[]`, so the list of
+    // people to offer it to was empty and the coach — who has just cancelled
+    // on somebody — was told "You have no other clients to offer it to."
+    // Under 'partial' the hour went silently to whichever fraction of the
+    // roster had loaded, and the clients missing from that read never heard.
+    const rosterWhole = isWhole(rosterStatus);
     // Free the slot first, and only say so if the server actually freed it.
     // This was fired and forgotten, and the roster was then pushed "first to
     // book it gets it" about a session that was still booked — so the quickest
     // client to respond was the one turned away.
     const freed = await releaseSession(s.id);
-    if (!freed) return { freed: false, toldClient: false, promoted: null, promotedTold: null, offered: null, others };
+    if (!freed) return { freed: false, toldClient: false, promoted: null, promotedTold: null, offer: null, rosterWhole };
 
     // The queue, before anybody is broadcast at. A client's own cancellation
     // hands the slot over inside the transaction that frees it; a coach frees
@@ -1806,17 +1872,32 @@ export default function TrainerSchedule() {
     // Exactly one of these. Where somebody was waiting, one person is told the
     // slot is theirs; where nobody was, the old broadcast stands.
     let promotedTold: boolean | null = null;
-    let offered: boolean | null = null;
+    let offer: CancelOutcome['offer'] = null;
     if (promoted) {
       promotedTold = (await sendPushChecked([promoted], 'The slot you were waiting for is yours', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} freed up and you were next on the list — it is booked for you.`, { route: '/(client)/calendar' })).ok;
-    } else {
+    } else if (rosterWhole) {
       const openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
-      offered = openTo.length
-        ? (await sendPushChecked(openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' })).ok
-        : null;
+      if (openTo.length) {
+        // What the SERVER did with it, not the size of the list handed over.
+        // `sendPushChecked` returns `recorded` — the row count `notify_users`
+        // itself reports — plus `inboxKept` (this title is one the inbox
+        // deliberately does not keep, so `recorded` is 0 by policy on every
+        // re-offer and reading that as "nobody was told" is wrong) and
+        // `partial` (send-push could only part-read the handset list, so
+        // whatever went out is a floor). All three were discarded here and all
+        // three are what `reofferConfirmation` needs to say a true sentence.
+        const push = await sendPushChecked(openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' });
+        offer = {
+          asked: openTo.length,
+          recorded: push.recorded,
+          inboxKept: push.inboxKept,
+          partial: push.partial,
+          ok: push.ok,
+        };
+      }
     }
 
-    return { freed: true, toldClient: toldClient.ok, promoted, promotedTold, offered, others };
+    return { freed: true, toldClient: toldClient.ok, promoted, promotedTold, offer, rosterWhole };
   }
 
   async function doCancel(s: TrainingSession) {
@@ -1829,7 +1910,8 @@ export default function TrainerSchedule() {
       );
       return;
     }
-    const { toldClient, promoted, promotedTold, offered, others } = r;
+    const { toldClient, promoted, promotedTold, offer, rosterWhole } = r;
+    const when = `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]}`;
     Alert.alert(
       'Session cancelled',
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
@@ -1839,10 +1921,14 @@ export default function TrainerSchedule() {
       (promoted
         ? `The hour went straight to the next client on its waitlist${promotedTold === false ? ', though we couldn’t notify them — tell them yourself.' : ' and they have been told. Nobody had to race for it.'}`
         : `The slot is open again on your calendar. ` +
-          (offered === null
+          (!rosterWhole
+            ? 'Your clients could not all be read just now, so it has NOT been offered round — that is a connection problem and not an empty book. Use Offer It Round once the list has loaded.'
+            : offer === null
             ? 'You have no other clients to offer it to.'
-            : offered
-            ? `Your ${others.length} other client${others.length === 1 ? '' : 's'} ${others.length === 1 ? 'was' : 'were'} told it is free (${others.slice(0, 3).join(', ')}${others.length > 3 ? '…' : ''}) — first to book takes it.`
+            : offer.ok
+            // The server's own sentence, the same one the Offer It Round
+            // control prints, so one hour cannot be described two ways.
+            ? reofferConfirmation({ offered: offer.asked, recorded: offer.recorded, inboxKept: offer.inboxKept, partial: offer.partial }, when)
             : `We couldn’t tell your other clients about it, so it is open but nobody has been asked.`)) +
       // Nothing is charged, and this sentence used to say the opposite.
       //
@@ -1862,9 +1948,14 @@ export default function TrainerSchedule() {
   }
   function confirmWaive(c: { id: string; clientId: string; amount: number | null; currency: string | null; waivedAt: string | null }) {
     const sum = c.amount == null ? 'this fee' : feeAmountLine(c.amount, c.currency);
+    // src/lib/booking.ts:190 writes the rule down: a value SLOT may print the
+    // figure alone, because a column heading carries the doubt; a SENTENCE may
+    // not. All three sentences below are prose, and all three printed a bare
+    // number — on the one list in the app that says what a client owes.
+    const unit = c.amount == null ? '' : unstatedCurrencyCoach(c.currency);
     const who = nameOf(c.clientId);
     if (c.waivedAt) {
-      Alert.alert('Reinstate this fee?', `${sum} against ${who} would go back to outstanding.`, [
+      Alert.alert('Reinstate this fee?', `${sum} against ${who} would go back to outstanding.${unit}`, [
         { text: 'Leave waived', style: 'cancel' },
         { text: 'Reinstate', onPress: async () => {
           const ok = await unwaiveFee(c.id);
@@ -1873,14 +1964,14 @@ export default function TrainerSchedule() {
       ]);
       return;
     }
-    Alert.alert('Waive this fee?', `${sum} against ${who} would be marked as forgiven. The record stays — it shows as waived rather than disappearing — and neither of you owes anything on it.`, [
+    Alert.alert('Waive this fee?', `${sum} against ${who} would be marked as forgiven. The record stays — it shows as waived rather than disappearing — and neither of you owes anything on it.${unit}`, [
       { text: 'Keep it', style: 'cancel' },
       { text: 'Waive', onPress: async () => {
         // A zero-row update is a success in PostgREST. `waiveFee` counts the
         // rows it changed, so a coach is never told they forgave a fee that
         // is still standing against their client.
         const ok = await waiveFee(c.id);
-        if (!ok) Alert.alert('Not waived', `That did not save, so ${sum} is still outstanding against ${who}. Try again.`, [{ text: 'OK' }]);
+        if (!ok) Alert.alert('Not waived', `That did not save, so ${sum} is still outstanding against ${who}. Try again.${unit}`, [{ text: 'OK' }]);
       } },
     ]);
   }
@@ -1988,7 +2079,11 @@ export default function TrainerSchedule() {
 
   function confirmCancel(s: TrainingSession) {
     const d = new Date(s.startsAt);
-    Alert.alert('Cancel this session?', `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} on ${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}.`, [
+    // The last sentence before a destructive, client-facing act, and it used to
+    // end `${d.getDate()}/${d.getMonth() + 1}` — two readings three months
+    // apart, under a weekday that makes it look unambiguous enough to tap
+    // through.
+    Alert.alert('Cancel this session?', `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} on ${dateOfLabel(d)}.`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Cancel session', style: 'destructive', onPress: () => doCancel(s) },
     ]);
@@ -2015,9 +2110,27 @@ export default function TrainerSchedule() {
       );
       return;
     }
+    // The count is the SERVER's. This said `All ${ids.length} of your clients
+    // were sent a notification`, and `ids.length` is the size of the list we
+    // handed over rather than a count of anything that happened —
+    // `sendPushChecked` hands back `recorded`, the number `notify_users`
+    // itself returns, and it was thrown away. See src/lib/reofferCopy.ts for
+    // the sentences and why they are separate.
+    //
+    // `inboxKept` and `partial` are the two things `recorded` and `ok` cannot
+    // say between them. This title is 'A slot just opened', which notifyInbox
+    // refuses to keep, so `recorded` is 0 by policy on every re-offer and the
+    // coach was reading a working send as "recorded for nobody". `partial` is
+    // send-push saying it could only part-read the handsets, so however many
+    // phones lit up is a floor.
     Alert.alert(
       'Slot re-offered',
-      `All ${ids.length} of your client${ids.length === 1 ? '' : 's'} ${ids.length === 1 ? 'was' : 'were'} sent a notification that ${when} is free — first to book takes it. Delivery depends on their notification settings.`,
+      reofferConfirmation({
+        offered: ids.length,
+        recorded: push.recorded,
+        inboxKept: push.inboxKept,
+        partial: push.partial,
+      }, when),
       [{ text: 'Done' }],
     );
   }
@@ -2349,7 +2462,7 @@ export default function TrainerSchedule() {
         <Section>
           <SectionHead title="Manage" />
           <ListRow icon="plus" title="Add a Session"
-            note={`Book a client or open a slot on ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}`}
+            note={`Book a client or open a slot on ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`}
             onPress={() => { setAddClient(null); setAddOpen(true); }} />
           {/* Three notes, not two. "Set the times you offer every week" is an
               instruction, and giving it to a coach whose week we simply could
@@ -2363,7 +2476,7 @@ export default function TrainerSchedule() {
                 : 'Set the times you offer every week'}
             onPress={() => setAvailOpen(true)} />
           <ListRow icon="clock" title="Block Out Time"
-            note={`Mark ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)} as unavailable so nobody can book it`}
+            note={`Mark ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]} as unavailable so nobody can book it`}
             onPress={() => setBlockOpen(true)} />
           {/* The row is offered on every build, including the ones that cannot
               do it. HAS_NATIVE_CALENDAR is false on every install made before
@@ -2472,7 +2585,7 @@ export default function TrainerSchedule() {
 
         {/* ── the selected day ───────────────────────────────────────────── */}
         <Section>
-          <SectionHead title={`${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}`} note="Add"
+          <SectionHead title={`${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`} note="Add"
             onPress={() => { setAddClient(null); setAddOpen(true); }} />
 
           {selDaySessions.length === 0 ? (
@@ -2876,7 +2989,25 @@ export default function TrainerSchedule() {
                   {g.slots.map((sl) => (
                     <Pressable
                       key={sl.id}
-                      onPress={() => { void removeAvail(sl.id); }}
+                      /* The two bulk removals above both count what the
+                         server confirmed and say when it fell short; the
+                         single-slot chip discarded the answer entirely.
+                         `useAvailability` drops the slot from state and from
+                         AsyncStorage before the request goes out, so a refused
+                         delete took the chip off this sheet and left the row on
+                         the server generating open slots — the coach is
+                         bookable at an hour they watched themselves close. */
+                      onPress={() => {
+                        void (async () => {
+                          if (await removeAvail(sl.id)) return;
+                          await reloadAvail();
+                          Alert.alert(
+                            'Still on your week',
+                            `${DOW[sl.dow]} ${avTime(sl.hour, sl.minute)} was not removed, so it is still there and still generating open slots. Try again when you have a connection.`,
+                            [{ text: 'OK' }],
+                          );
+                        })();
+                      }}
                       hitSlop={hitSlopFor(30)}
                       accessibilityRole="button"
                       accessibilityLabel={`Remove ${DOW[sl.dow]} ${avTime(sl.hour, sl.minute)}`}
@@ -3065,7 +3196,7 @@ export default function TrainerSchedule() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Block Out Time</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            {DOW[selDate.getDay()]} {selD} {MON[selM].slice(0, 3)} — nobody can book across this, and any open slots inside it are withdrawn.
+            {DOW[selDate.getDay()]} {selD} {MON_SHORT[selM]} — nobody can book across this, and any open slots inside it are withdrawn.
           </Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             <View style={{ flexDirection: 'row', gap: sp.sm, paddingBottom: sp.md }}>
@@ -3162,7 +3293,7 @@ export default function TrainerSchedule() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Block Time From Your Calendar</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            {`From ${DOW[selDate.getDay()]} ${selD} ${MON[selM].slice(0, 3)}, for the next ${busyDays} days.`}
+            {`From ${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}, for the next ${busyDays} days.`}
           </Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             {(() => {
@@ -3305,7 +3436,18 @@ export default function TrainerSchedule() {
           <ScrollView showsVerticalScrollIndicator={false}>
             {(() => {
               const state = linkState({ configured: CALENDAR_SYNC_CONFIGURED, connecting: syncBusy, link: syncLink });
-              const planned = syncLink.writeEnabled && syncLink.hasWriteCalendar ? plannedEvents().length : 0;
+              // `isWhole(sessionsStatus)`, not nothing at all. `plannedEvents`
+              // reads `sessions` with no status test, and under 'error' that
+              // list is empty for want of a read — so a coach with a full
+              // fortnight was told "there are 0 sessions in the next 28 days
+              // to send", beside a Send button that `pushLabel(0)` had quietly
+              // disabled with no reason given. Under 'partial' it was a
+              // plausible short number, which is worse. `doPush` twenty lines
+              // up already refuses this case and explains it at length; the
+              // sentence the coach actually reads was the only part that had
+              // not been told.
+              const plannedKnown = isWhole(sessionsStatus);
+              const planned = plannedKnown && syncLink.writeEnabled && syncLink.hasWriteCalendar ? plannedEvents().length : null;
               return (<>
                 {/* 'error' is its own sentence and comes first. Every state
                     below it is a claim about the connection, and under 'error'
@@ -3347,7 +3489,9 @@ export default function TrainerSchedule() {
                   ) : null}
                   {state === 'two-way' ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                      {`Your booked sessions go across on their own while this screen is open, and there ${planned === 1 ? 'is 1 session' : `are ${planned} sessions`} in the next ${PUSH_DAYS} days to send. Open slots and blocked time are never written.`}
+                      {planned == null
+                        ? `Your booked sessions go across on their own while this screen is open. Your Repple calendar could not be read in full just now, so this cannot say how many are waiting to go — that is a connection problem and not an empty diary. Open slots and blocked time are never written.`
+                        : `Your booked sessions go across on their own while this screen is open, and there ${planned === 1 ? 'is 1 session' : `are ${planned} sessions`} in the next ${PUSH_DAYS} days to send. Open slots and blocked time are never written.`}
                     </Text>
                   ) : null}
                 </>) : null}
@@ -3365,8 +3509,12 @@ export default function TrainerSchedule() {
               onPress={() => { void doConnectCalendar(); }} />
           ) : null}
           {syncLink.connected && syncLink.writeEnabled && syncLink.hasWriteCalendar ? (
-            <Cta wide disabled={pushBusy || pushLabel(plannedEvents().length) === null}
-              label={pushBusy ? 'Sending…' : (pushLabel(plannedEvents().length) ?? 'Send Sessions')}
+            /* Left LIVE when the sessions read is not whole, rather than
+               disabled on a count of nothing. A grey button is the one answer
+               that explains itself least; `doPush` refuses the tap and says
+               why in a sentence a coach can act on. */
+            <Cta wide disabled={pushBusy || (isWhole(sessionsStatus) && pushLabel(plannedEvents().length) === null)}
+              label={pushBusy ? 'Sending…' : (isWhole(sessionsStatus) ? (pushLabel(plannedEvents().length) ?? 'Send Sessions') : 'Send Sessions')}
               onPress={() => { void doPush(true); }} />
           ) : null}
           {syncLink.connected ? (<>
@@ -3422,10 +3570,11 @@ export default function TrainerSchedule() {
                   {moveTargets.map((o) => (
                     <Pressable key={o.id} disabled={moveBusy} onPress={() => confirmMove(moveFrom, o)}
                       accessibilityRole="button"
-                      accessibilityLabel={`Move to ${DOW[new Date(o.startsAt).getDay()]} ${new Date(o.startsAt).getDate()} ${MON[new Date(o.startsAt).getMonth()].slice(0, 3)} at ${timeLabel(o.startsAt)}`}
+                      accessibilityState={{ disabled: moveBusy, busy: moveBusy }}
+                      accessibilityLabel={`Move to ${DOW[new Date(o.startsAt).getDay()]} ${new Date(o.startsAt).getDate()} ${MON_SHORT[new Date(o.startsAt).getMonth()]} at ${timeLabel(o.startsAt)}`}
                       style={{ paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                       <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>
-                        {DOW[new Date(o.startsAt).getDay()]} {new Date(o.startsAt).getDate()} {MON[new Date(o.startsAt).getMonth()].slice(0, 3)}
+                        {DOW[new Date(o.startsAt).getDay()]} {new Date(o.startsAt).getDate()} {MON_SHORT[new Date(o.startsAt).getMonth()]}
                       </Text>
                       <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(o.startsAt)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>{o.durationMin}min</Text>
@@ -3445,7 +3594,9 @@ export default function TrainerSchedule() {
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, ...elevation.e2 }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: t.surface3, alignSelf: 'center', marginBottom: sp.lg }} />
             <Text style={{ ...ty.head, color: t.ink }}>Add Session</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>{DOW[selDate.getDay()]}, {MON[selM]} {selD}</Text>
+            {/* The month-first order was as English as the words were. `dateOfLabel`
+                writes the day the way the reader's locale does. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>{dateOfLabel(selDate)}</Text>
 
             {/* ── what is already on this day ──────────────────────────────
                 The sheet named the date and showed nothing that was on it, so

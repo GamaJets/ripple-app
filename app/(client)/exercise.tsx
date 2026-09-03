@@ -220,6 +220,12 @@ export default function ExerciseScreen() {
             // among them.
             title={videoStatus === 'loading' ? 'Looking for a clip…'
               : videoStatus === 'error' ? 'We couldn’t check for a clip'
+              // 'partial' used to fall through to "No demonstration yet", which
+              // is the same false claim the error arm below exists to refuse,
+              // reached from a read that succeeded. The log half of this very
+              // file already carries the third arm — see logStatus === 'partial'
+              // further down — and the video half did not.
+              : videoStatus === 'partial' ? 'We couldn’t check the whole library'
               : detail ? 'No demonstration yet' : signedOut ? 'Sign in to see this' : 'Not in our catalogue'}
             note={videoStatus === 'loading'
               ? 'Your coach’s video library is still being read.'
@@ -227,6 +233,10 @@ export default function ExerciseScreen() {
               // "Nobody has filmed this" is a claim about the coach's library,
               // and a failed read of that library is not evidence for it.
               ? 'Your coach’s video library could not be read, so we cannot say whether there is a clip for this movement. There may well be one. The written guide below is unaffected.'
+              : videoStatus === 'partial'
+              // A truncated read is not evidence for it either: the clip may be
+              // one row past where the read stopped.
+              ? 'There are more clips in your coach’s library than we can read at once, and none of the ones we read were for this movement. That is not a statement that nobody has filmed it. The written guide below is unaffected.'
               : detail
               ? 'Nobody has filmed this movement and the catalogue has no reference frames for it. Your coach can add a clip from their app.'
               // Not "this movement is not in our catalogue" — that is a claim

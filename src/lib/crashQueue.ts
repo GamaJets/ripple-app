@@ -181,6 +181,35 @@ export function inCrashOrder(list: readonly CrashReport[]): CrashReport[] {
 }
 
 /**
+ * Whose account the row may claim, given who is signed in when it finally goes.
+ *
+ * ── The refusal this exists to stop ───────────────────────────────────────
+ *
+ * `app_errors_insert` (supabase/parts/17) is
+ * `with check (user_id = auth.uid() or user_id is null)`, and this queue is
+ * deliberately NOT per account — the header says why, and the reason is good:
+ * a crash during launch or sign-in has no uid, and those are the crashes worth
+ * most. But the same property means a report recorded while one person was
+ * signed in can be flushed while somebody else is, which is the ordinary case
+ * on a shared gym phone. `user_id` then names an account that is not
+ * `auth.uid()`, the policy refuses the row, and it is refused every time it is
+ * offered for the life of the install.
+ *
+ * So attribution is dropped rather than the report. `null` is a value the
+ * policy accepts and the table was designed to hold, and an unattributed crash
+ * is worth incomparably more than a refused one — it still carries the moment,
+ * the stack, the platform and the build, which is everything anybody debugs
+ * from. Claiming somebody else's uid, meanwhile, would be attributing one
+ * person's crash to another.
+ *
+ * The uid is kept whenever it is the account actually doing the writing, which
+ * is the ordinary single-user phone.
+ */
+export function attributableTo(recorded: string | null, signedInAs: string | null): string | null {
+  return recorded !== null && recorded === signedInAs ? recorded : null;
+}
+
+/**
  * The `app_errors` row.
  *
  * `message` carries the moment it happened, because the table has no column for
@@ -188,12 +217,16 @@ export function inCrashOrder(list: readonly CrashReport[]): CrashReport[] {
  * crash queued on Monday and delivered on Thursday reads as a Thursday crash,
  * which is the one fact about it that must not be wrong: the whole point of
  * this queue is to describe the conditions the app was used in.
+ *
+ * `signedInAs` is who the app is signed in as AT THE MOMENT OF SENDING, and it
+ * is a required argument rather than an optional one so that no caller can
+ * forget the question — see `attributableTo`.
  */
-export function crashRow(c: CrashReport): {
+export function crashRow(c: CrashReport, signedInAs: string | null): {
   user_id: string | null; message: string; stack: string | null; platform: string; app_version: string;
 } {
   return {
-    user_id: c.userId,
+    user_id: attributableTo(c.userId, signedInAs),
     message: `[offline ${c.at}] ${c.message}`.slice(0, MAX_MESSAGE),
     stack: c.stack,
     platform: c.platform,

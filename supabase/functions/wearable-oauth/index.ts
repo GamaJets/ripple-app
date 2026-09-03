@@ -1,7 +1,9 @@
 // wearable-oauth — exchanges a vendor OAuth *code* for tokens using the vendor
 // client secret (server-side only) and stores the refresh token per user.
 // Secrets are Supabase env: <VENDOR>_CLIENT_ID / <VENDOR>_CLIENT_SECRET.
-// Request: { provider, code, code_verifier?, redirect_uri, user_id }
+// Request: { provider, code, code_verifier?, redirect_uri }
+// The caller is identified by the JWT and by nothing else. `user_id` is still
+// sent by the app and is deliberately ignored — see the block that reads it.
 //
 // Auth-method note: vendors differ on how the client credentials must be sent.
 // WHOOP (Ory Hydra) is registered for `client_secret_post` and REJECTS a request
@@ -37,16 +39,43 @@ Deno.serve(async (req) => {
   const clientSecret = Deno.env.get(`${provider.toUpperCase()}_CLIENT_SECRET`) || '';
   if (!clientId || !clientSecret) return fail(`Set ${provider.toUpperCase()}_CLIENT_ID and ${provider.toUpperCase()}_CLIENT_SECRET as Supabase secrets.`);
 
-  // Identify the caller from their JWT.
+  // ── Who is asking, from their JWT ALONE ──────────────────────────────────
+  //
+  // This used to be `let userId = String(body.user_id || '')` with the JWT only
+  // OVERWRITING it, and the catch below was commented "fall back to
+  // body.user_id". That is not a fallback, it is the authorisation.
+  //
+  // supabase-js `auth.getUser()` does not throw on a token it cannot resolve —
+  // it RESOLVES with `{ data: { user: null }, error }`. So the catch was almost
+  // never the path taken. The path taken was: no user came back, `userId` kept
+  // whatever the request body said, and the row below was written for that id.
+  // The project's anon key is a valid JWT that resolves to no user and is
+  // public by design (it is in the app bundle), so anybody holding it could
+  // POST `{ provider, code, user_id: <somebody else's uuid> }` and:
+  //
+  //   · upsert `wearable_tokens` on (user_id, provider), REPLACING that
+  //     person's real WHOOP / Oura / Fitbit credential — their recovery,
+  //     sleep and heart-rate readings stop, with nothing on any screen to say
+  //     why; and
+  //   · leave their own vendor tokens sitting under the victim's id, so
+  //     wearable-day then serves the attacker's body data to the victim's
+  //     coach as the victim's.
+  //
+  // Every other function in this directory says the rule in as many words —
+  // ads-oauth, ads-sync, ads-google, ads-tiktok, calendar-sync and
+  // instagram-publish all carry "never from the body". This one had the
+  // sentence in its header and the opposite in its code. `body.user_id` is now
+  // read nowhere; the app still sends it (src/lib/wearables/oauth.ts) and it is
+  // simply ignored, so no caller has to change for this to be safe.
   const authHeader = req.headers.get('Authorization') || '';
   const supaUrl = Deno.env.get('SUPABASE_URL')!;
   const service = createClient(supaUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-  let userId = String(body.user_id || '');
+  let userId = '';
   try {
     const jwt = authHeader.replace('Bearer ', '');
     const { data } = await service.auth.getUser(jwt);
-    if (data?.user?.id) userId = data.user.id;
-  } catch { /* fall back to body.user_id */ }
+    userId = data?.user?.id || '';
+  } catch { /* stays empty, and the refusal below is the answer */ }
   if (!userId) return fail('Not signed in — sign in to Repple and try connecting again.');
 
   const redirectUri = String(body.redirect_uri || '');

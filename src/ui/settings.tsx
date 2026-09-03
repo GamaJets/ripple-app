@@ -232,6 +232,10 @@ const isLengthUnit = (v: unknown): v is LengthUnit => v === 'cm' || v === 'in';
  * completed is how a member who switched notifications off goes on getting them.
  */
 async function tokenRowsPresent(tokens: string[]): Promise<boolean | null> {
+  // Not chunked. `handsetPushTokens()` returns at most two: the one this app
+  // remembered in AsyncStorage and the one the OS will name right now, deduped
+  // against each other. It is THIS handset's addresses, not a list read out of
+  // a table, so no gym and no account can make it longer.
   const { data, error } = await supabase.from('push_tokens').select('token').in('token', tokens);
   if (error) { reportError('settings.push.revoke.verify', error); return null; }
   return (data?.length ?? 0) > 0;

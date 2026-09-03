@@ -63,6 +63,22 @@ export interface PtSession {
   outcomeAt: string | null;
   /** The rate snapshotted at delivery, so a later fee change cannot rewrite it. */
   rateCents: number | null;
+  /**
+   * The currency `rateCents` is denominated in, as it stood at delivery.
+   *
+   * `rate_cents` was snapshotted for five parts without one, and an integer of
+   * minor units names no money on its own: every reader supplied the unit from
+   * `tenants.currency`, the gym's currency TODAY. A gym that changes it — which
+   * this product lets an owner do from /settings and from their phone —
+   * relabelled its entire PT history in one write, and `recordSettlement`
+   * stamped the new code onto a permanent payment row. supabase/parts/1010 adds
+   * the column and records the unit at the moment the rate is written.
+   *
+   * NULL means the unit was never recorded, which is every session delivered
+   * before that part. It must be read as UNKNOWN and never as the gym's current
+   * currency — that substitution is the defect, not the fallback for it.
+   */
+  rateCurrency: string | null;
   /** The payroll run that paid for this session. Null means still outstanding —
    *  which is what keeps a late-marked session out of an already-settled period
    *  and stops it being paid twice. */
@@ -466,7 +482,7 @@ export async function fetchSessions(
     (from, to) => {
       let q = sb
         .from('sessions')
-        .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
+        .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, rate_currency, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
         .eq('tenant_id', tenantId)
         .gte('starts_at', sinceIso);
       if (untilIso) q = q.lte('starts_at', untilIso);
@@ -494,6 +510,7 @@ function rowToSession(r: any, names: Map<string, string>): PtSession {
     outcome: r.outcome ?? null,
     outcomeAt: r.outcome_at ?? null,
     rateCents: r.rate_cents ?? null,
+    rateCurrency: r.rate_currency ?? null,
     settlementId: r.settlement_id ?? null,
     packDrawnKind: (r.pack_drawn_kind ?? null) as PtSession['packDrawnKind'],
     packDrawnAt: r.pack_drawn_at ?? null,
@@ -526,15 +543,43 @@ export async function fetchAwaitingOutcome(
  * `tenant_id is not null and is_owner_of(tenant_id)` and `sessions_trainer`
  * requires `trainer_id = auth.uid()`, so a session belonging to neither, or one
  * cancelled from the phone while the board was open, simply matches nothing.
+ *
+ * ── the rate arrives as a PAIR or not at all ──────────────────────────────
+ *
+ * `rateCents` was a lone `number | null | undefined` and the unit it was
+ * denominated in went nowhere: `sessions.rate_cents` had no companion column
+ * until supabase/parts/1010, so a figure written here was read back with
+ * whatever `tenants.currency` said on the day somebody looked. One argument of
+ * two fields rather than two optional arguments, because two optionals is how
+ * one of them comes to be passed without the other — which is the same shape
+ * that let `recordSettlement` be called with a method nobody stated.
+ *
+ * `undefined` still means "leave the rate exactly as it is", which is not the
+ * same as null: a coach with no rate set must not have a zero written in, and a
+ * session already snapshotted must not be re-priced by a later marking.
  */
+export interface SnapshotRate {
+  /** Minor units, converted by the places `currency` actually has. Null is
+   *  "there is no rate", never zero. */
+  cents: number | null;
+  /** What `cents` is denominated in. Null only when nothing named one — never
+   *  a code substituted in on the caller's behalf. */
+  currency: string | null;
+}
+
 export async function markOutcome(
   sb: Queryable,
   sessionId: string,
   outcome: SessionOutcome,
-  rateCents?: number | null,
+  rate?: SnapshotRate,
 ): Promise<void> {
   const patch: Record<string, unknown> = { outcome };
-  if (rateCents !== undefined) patch.rate_cents = rateCents;
+  if (rate !== undefined) {
+    patch.rate_cents = rate.cents;
+    // Written together. A currency with no rate beside it is refused by
+    // `sessions_rate_currency_needs_rate`, so clearing the rate clears the unit.
+    patch.rate_currency = rate.cents == null ? null : rate.currency;
+  }
   const r = await sb.from('sessions').update(patch, { count: 'exact' }).eq('id', sessionId);
   assertWrote('That outcome', r);
 }
@@ -611,6 +656,18 @@ export async function recordSettlement(
     reimbursementCents?: number | null;
   },
 ): Promise<string> {
+  // Deduplicated ONCE, at the top, and used for both writes.
+  //
+  // `sessions_count` on the settlement row and the total the stamp is measured
+  // against have to be the same number, and it has to be a count of ROWS rather
+  // than a count of mentions. An id listed twice is one session: counted as two
+  // it overstates what the run covered on a permanent payment record, and
+  // measured as two it reports a complete stamp as a partial one and sends an
+  // owner chasing a double payment that has not happened. This is the same
+  // reasoning `stampAll` in src/lib/gymPay.ts sets out for the other half of
+  // the same run.
+  const sessionIds = uniqueIds(run.sessionIds);
+
   const { data, error } = await sb.from('payroll_settlements').insert({
     tenant_id: tenantId,
     trainer_id: run.trainerId,
@@ -618,7 +675,7 @@ export async function recordSettlement(
     period_to: run.periodTo,
     amount_cents: run.amountCents,
     reimbursement_cents: run.reimbursementCents ?? null,
-    sessions_count: run.sessionIds.length,
+    sessions_count: sessionIds.length,
     method: run.method,
     note: run.note ?? null,
     currency: run.currency,
@@ -626,7 +683,7 @@ export async function recordSettlement(
   if (error) throw error;
 
   const id = (data as any)?.id as string;
-  if (run.sessionIds.length) {
+  if (sessionIds.length) {
     // The rows changed are counted — see src/lib/wroteRows.ts — and this is the
     // write in the whole console where a silent no-op costs the most money.
     //
@@ -638,23 +695,91 @@ export async function recordSettlement(
     // therefore existed with NOT ONE session stamped: the run appeared under
     // "Already paid" while every session in it stayed in "Owed now", payable
     // again, by an owner who had just been told the trainer was settled.
-    const r2 = await sb.from('sessions')
-      .update({ settlement_id: id }, { count: 'exact' })
-      .in('id', run.sessionIds);
-    assertWrote('The sessions this settlement covers', r2);
-    if ((r2 as { count?: number | null }).count !== run.sessionIds.length) {
+    //
+    // ── Why the ids are chunked ────────────────────────────────────────────
+    //
+    // This was one `.in('id', run.sessionIds)`, and `settleableSessions()` puts
+    // no ceiling on how many ids that is: a first run at a gym that has been
+    // recording sessions for a season carries the whole backlog on one coach's
+    // row. A uuid costs about 39 bytes inside a PostgREST `in.("…","…")` list,
+    // so past roughly two hundred of them the request line is over the 8KB
+    // nginx and most CDNs allow, and the answer is a 414 with no relation to
+    // the code that caused it.
+    //
+    // It arrives at the worst possible moment. The settlement row is ALREADY
+    // WRITTEN by the time this runs — deliberately, see the note above the
+    // function — so the run is recorded and paid while not one session is
+    // stamped. Every session in it stays in "Owed now" and is settled again
+    // next month, and the only sign is one error toast on a run that looked
+    // like it worked. This is the identical shape that was just fixed in
+    // `stampRunExtras` for the class-pay lines and the adjustments; the
+    // sessions are the third list on the same run and were left behind.
+    //
+    // Chunked updates are not one transaction, so the counts are SUMMED ACROSS
+    // CHUNKS and compared against the deduplicated whole — what the server
+    // confirmed, never what was sent — and a chunk that fails part way through
+    // is reported as the partial stamp it is rather than as a bare HTTP error.
+    let stamped = 0;
+    for (const chunk of chunkIds(sessionIds)) {
+      const w = await sb.from('sessions')
+        .update({ settlement_id: id }, { count: 'exact' })
+        .in('id', chunk);
+      const r2 = w as { error?: unknown | null; count?: number | null };
+      // Thrown with the running total attached rather than raw: a settlement
+      // that is recorded and half-stamped is a different thing to tell somebody
+      // than a request that was refused, and the half already stamped will not
+      // be stamped again by a retry.
+      if (r2.error) {
+        throw new Error(
+          `The settlement was recorded, but stamping the sessions against it failed after ${stamped} of `
+          + `${sessionIds.length}: ${(r2.error as { message?: string }).message ?? 'the write was refused'}. `
+          + 'The rest are still shown as unpaid and could be settled twice. Reload before settling this trainer again.',
+        );
+      }
+      if (r2.count == null) {
+        // Not "zero rows" — NOBODY COUNTED, which is the distinction
+        // src/lib/wroteRows.ts exists to keep. Added in as a zero it would
+        // report a stamp that may well have landed as a partial one, and send
+        // an owner to settle a trainer who has already been paid.
+        throw new Error(
+          `The settlement was recorded, but the server did not say how many sessions it stamped against it, `
+          + `so ${sessionIds.length - stamped} of ${sessionIds.length} cannot be confirmed either way. `
+          + 'Reload before settling this trainer again.',
+        );
+      }
+      stamped += r2.count;
+    }
+    if (stamped !== sessionIds.length) {
       // A PARTIAL stamp is its own outcome and worse than none, because the
       // unstamped remainder is silently payable a second time. The settlement
       // row is deliberately left standing — it is a payment that was made — so
       // this says exactly what is on the record and what is not.
       throw new Error(
-        `The settlement was recorded, but only ${(r2 as { count?: number | null }).count ?? 0} of `
-        + `${run.sessionIds.length} sessions were stamped against it. The rest are still shown as unpaid `
+        `The settlement was recorded, but only ${stamped} of `
+        + `${sessionIds.length} sessions were stamped against it. The rest are still shown as unpaid `
         + 'and could be settled twice. Reload before settling this trainer again.',
       );
     }
   }
   return id;
+}
+
+/**
+ * A NOT NULL money column, read as itself.
+ *
+ * See the call sites: both of these were `?? 0`, and a zero on a settlement row
+ * is a claim that somebody was paid nothing. Throwing is the honest answer to a
+ * column the schema says cannot be null coming back null — the screens above
+ * all render a thrown read as "this could not be read", which is true, rather
+ * than as a payroll history with a free month in it.
+ */
+function requireAmount(v: unknown, what: string, id: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  throw new Error(
+    `A payroll settlement came back with no ${what} recorded (row ${String(id)}). `
+    + 'That column cannot be null, so this read cannot be trusted — nothing is shown rather than '
+    + 'showing a run as having paid nothing.',
+  );
 }
 
 /**
@@ -700,12 +825,25 @@ export async function fetchSettlements(
     trainerId: r.trainer_id,
     periodFrom: r.period_from,
     periodTo: r.period_to,
-    amountCents: r.amount_cents ?? 0,
+    // NOT `?? 0`, which is what this was.
+    //
+    // `payroll_settlements.amount_cents` and `sessions_count` are both NOT NULL
+    // (supabase/parts/36), so neither coalesce could fire against a healthy
+    // database — and that is exactly what made them dangerous. A zero here is
+    // the claim that a coach was handed nothing, on the row /accounting,
+    // /close, /sessions and /coach/earnings all read back as a payment that was
+    // made; `?? 0` on an amount is the one default this codebase refuses
+    // everywhere else, and a silent zero in a payroll total is wrong in the
+    // direction nobody checks.
+    //
+    // A null from a NOT NULL column means the read returned something the
+    // schema forbids. That is not a row to render, in any shape.
+    amountCents: requireAmount(r.amount_cents, 'amount', r.id),
     // Null through, never coerced. `money()` withholds an amount whose currency
     // nobody chose, which is the whole point of it taking the currency as a
     // required argument; coercing here defeated that before it was ever called.
     currency: r.currency ?? null,
-    sessionsCount: r.sessions_count ?? 0,
+    sessionsCount: requireAmount(r.sessions_count, 'session count', r.id),
     // 'other', not 'transfer'. The column is NOT NULL with a four-way check, so
     // this branch does not fire against a healthy database — but a value this
     // module does not recognise must not be read back as the specific claim

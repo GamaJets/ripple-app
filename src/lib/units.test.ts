@@ -15,6 +15,7 @@ import {
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, weightDeltaIn,
   kgToLb, lbToKg, cmToIn, inToCm, convertedNote, plain,
   liftIn, liftLabel, liftToKg, liftDeltaIn, est1RMIn, volumeIn, volumeHeadline, readLift,
+  readBodyWeight,
   readNumber,
 } from './units';
 // The documents a client SHARES are the last thing TF-37 reached, and they are
@@ -455,4 +456,41 @@ if (errors.length) {
   if (errors.length > 20) console.error(`  … and ${errors.length - 20} more`);
   process.exit(1);
 }
+/* ── a body weight has a bound, and it is named in the unit on screen ──────
+ *
+ * app/(client)/profile.tsx — the main place a member edits their own weight —
+ * read it through `weightToKg`, which has no bound at all. 1800 for 180 went
+ * onto the health record permanently and from there into the calorie target,
+ * every chart, and the pricing of every bodyweight set in the log.
+ */
+{
+  const empty = readBodyWeight('', 'kg');
+  ok(empty.ok && empty.kg === null, 'an empty box is no weight typed, not a refusal and not a zero');
+  ok(readBodyWeight(null, 'lb').ok, 'and so is nothing at all');
+
+  const good = readBodyWeight('82.4', 'kg');
+  ok(good.ok && good.kg === 82.4, 'an ordinary weight goes through as typed');
+
+  const slipped = readBodyWeight('1800', 'kg');
+  ok(!slipped.ok, 'and 1,800 kg does not');
+  ok(!slipped.ok && /20 and 400 kg/.test(slipped.reason), `the range is quoted in kilograms, got ${!slipped.ok ? slipped.reason : ''}`);
+
+  // The bound is checked BEFORE conversion, against the number on screen. 180 lb
+  // is an ordinary weight and must not be judged against a metric range; 900 lb
+  // is not, and must be refused in pounds.
+  const lbOk = readBodyWeight('180', 'lb');
+  ok(lbOk.ok, '180 lb is a perfectly ordinary weight');
+  ok(lbOk.ok && lbOk.kg != null && Math.abs(lbOk.kg - 81.6) < 0.1, `and is stored as ~81.6 kg, got ${lbOk.ok ? lbOk.kg : ''}`);
+  const lbBad = readBodyWeight('2000', 'lb');
+  ok(!lbBad.ok, '2,000 lb is not');
+  ok(!lbBad.ok && /lb/.test(lbBad.reason) && !/kg/.test(lbBad.reason),
+    'and the refusal is worded in pounds, never in a metric range they never see');
+
+  // The other end. 15 kg is not a person.
+  ok(!readBodyWeight('15', 'kg').ok, 'a weight below the human range is refused too');
+  ok(readBodyWeight('20', 'kg').ok && readBodyWeight('400', 'kg').ok, 'and the bounds themselves are inside it');
+  ok(!readBodyWeight('abc', 'kg').ok, 'text that is not a number is refused rather than coerced');
+  ok(!readBodyWeight('-80', 'kg').ok, 'and so is a negative');
+}
+
 console.log('units.test.ts — ok');

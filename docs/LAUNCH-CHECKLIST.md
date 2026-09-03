@@ -364,10 +364,26 @@ Two days in which no workout saved for anybody, from any app, and nothing said
 so. `workoutLog.persist` does report the error — that part works — but nobody
 was reading a phone at the moment it happened.
 
-**Nothing in the repo catches this.** `tsc` passes: the TypeScript is correct.
-The assertions pass: `workoutRow`'s round-trip only checks the code agrees with
-itself. `expo export` passes: it is a runtime rejection, not a build one. Only
-an actual insert against the actual database fails.
+**Nothing in the repo caught this, on the day it happened.** `tsc` passes: the
+TypeScript is correct. The assertions pass: `workoutRow`'s round-trip only
+checks the code agrees with itself. `expo export` passes: it is a runtime
+rejection, not a build one. On 27 Aug 2026 only an actual insert against the
+actual database failed.
+
+That is what the **AUTOMATED** heading on this item now means, and the
+paragraph above is kept because it is the argument for the automation rather
+than a live warning. `check:schema` — the LIVE probe, `node
+scripts/check-schema.mjs` with no `--offline` — compares the columns the repo
+declares against the database in both directions and reports a
+declared-but-missing column as "a migration has not been run", which is exactly
+this failure, named. Be precise about WHERE it runs: `npm run check:all`
+contains only `check:schema:offline`, which never asks the database anything.
+The live probe runs in `npm run preflight` and in `scripts/publish.sh`, so a
+green `check:all` is still not evidence that a part has been applied.
+
+The last paragraph of this item stands unchanged either way: a column can exist
+and a write still be refused for a policy reason, and only a real insert finds
+that.
 
 So before any release, and after adding any migration, check the parts are
 really applied. Not "did I paste setup.sql", which is the step that was missed

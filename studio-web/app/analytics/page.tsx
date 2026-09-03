@@ -66,7 +66,10 @@
 // rate rather than quietly printing the smaller one. See `churnMonths` in
 // src/lib/memberChurn.ts, which the owner’s phone now calls as well.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 // The console's banner, with the live region it never had. The local copy of
 // this component that used to sit at the bottom of this file — and still sits
@@ -116,7 +119,6 @@ const VISIT_DAYS = 30;
  * this month" are both lies about a query that errored — and an owner acts on
  * the second one, by concluding the gym is holding when it is not.
  */
-type Unread = 'loading' | 'failed' | null;
 
 /** Rows plus which of the three states they are in. Rows are null unless the
  *  read actually returned; a failed read is never []. */
@@ -126,12 +128,6 @@ const reading = <T,>(): Read<T> => ({ rows: null, state: 'loading' });
 const returned = <T,>(rows: T[]): Read<T> => ({ rows, state: null });
 const refused = <T,>(): Read<T> => ({ rows: null, state: 'failed' });
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 const settled = <T,>(res: PromiseSettledResult<T[]>): Read<T> =>
   res.status === 'fulfilled' ? returned(res.value) : refused<T>();
@@ -158,6 +154,10 @@ interface BucketRow {
 
 export default function Analytics() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // Whether the gym's NAME could not be READ, as distinct from there being no
   // gym. The read below still drops the error into a `no-error-ok:` — no figure
@@ -249,6 +249,10 @@ export default function Analytics() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) {
         setMemberships(returned([])); setVisits(returned([])); setClasses(returned([]));
@@ -600,8 +604,11 @@ export default function Analytics() {
     return [...visitsByMember.keys()].filter((id) => !active.has(id)).length;
   }, [visitsCounted, memberships.state, roster, visitsByMember]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -969,7 +976,7 @@ function MoneyTable({ series, named }: { series: MoneySeries; named: boolean }) 
           ) : null}
         </div>
       ) : null}
-      <DataTable
+      <DataTable noun="months of revenue"
         rows={series.months} columns={cols} rowKey={(m) => m.key}
         empty="No payment has been recorded in thirteen months. That is not the same as no income — it is the same as nobody having entered one."
       />
@@ -1030,7 +1037,7 @@ function ByHour({ rows, state, doorState, doorNote }: {
               {busiest.visits === 1 ? 'y' : 'ies'} in 30 days.
             </p>
           ) : null}
-          <DataTable rows={rows} columns={cols} rowKey={(r) => String(r.hour)} empty="—" />
+          <DataTable noun="hours of the day" rows={rows} columns={cols} rowKey={(r) => String(r.hour)} empty="—" />
         </>
       ) : null}
     </Section>
@@ -1088,7 +1095,7 @@ function Joiners({ months, state, undatedJoins }: {
       ) : null}
       {state === null && months ? (
         <>
-          <DataTable
+          <DataTable noun="months of joiners and leavers"
             rows={months} columns={cols} rowKey={(m) => m.key}
             empty="No month to draw."
           />
@@ -1179,7 +1186,7 @@ function Cohorts({ rows, state, doorState, doorNote, undatedJoins, now }: {
       ) : null}
       {state === null ? (
         <>
-          <DataTable
+          <DataTable noun="cohorts"
             rows={rows} columns={cols} rowKey={(c) => c.label}
             empty="No member on the roster carries a usable join date, so there are no cohorts to draw. That is a gap in the record, not a gym with no history."
           />
@@ -1281,7 +1288,7 @@ function Frequency({ buckets, rosterSize, rosterState, anonVisits, seenNotOnRost
       title="How often members come"
       sub="Every active membership placed in a band by its door-log visits over the last 30 days. A gym holding its headcount while everybody halves their visits is losing, and the member count will not say so for another six months."
     >
-      <DataTable
+      <DataTable noun="visit-frequency bands"
         rows={buckets} columns={cols} rowKey={(b) => b.key}
         empty="—"
       />
@@ -1487,21 +1494,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note, tone }: {
-  label: string; text: string | null; note?: string; tone?: 'good' | 'crit';
-}) {
-  const colour = text == null ? 'var(--ink3)' : tone ? `var(--${tone})` : 'var(--ink)';
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: colour }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
 function Failed({ what, cost }: { what: string; cost?: string }) {
   return (
     <div style={{
@@ -1531,6 +1523,3 @@ function Unreadable({ what, cost }: { what: string; cost: string }) {
   );
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

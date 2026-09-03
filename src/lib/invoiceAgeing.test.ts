@@ -35,6 +35,7 @@ import {
   type CoachInvoice,
   type InvoiceDraft,
 } from './coachInvoice';
+import { fmtPointDay } from './format';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -205,7 +206,10 @@ ok(/1 time/.test(chaseHistoryLine(inv({ reminderCount: 1, remindedAt: '2026-08-2
   'one chase is singular');
 ok(/4 times/.test(chaseHistoryLine(inv({ reminderCount: 4, remindedAt: '2026-08-20T09:00:00Z' }))!),
   'four is plural, so a coach can see they have already sent four');
-ok(/20 Aug 2026/.test(chaseHistoryLine(inv({ reminderCount: 2, remindedAt: '2026-08-20T09:00:00Z' }))!),
+// Derived, not pinned: the line renders the day in the reader's own language
+// now, so a literal here asserted the formatter and not this module. What is
+// still being claimed is that the date shown is the LAST reminder's.
+ok(chaseHistoryLine(inv({ reminderCount: 2, remindedAt: '2026-08-20T09:00:00Z' }))!.includes(fmtPointDay(2026, 7, 20)),
   'and the last one is dated');
 
 /* ── 7. the shortcut arithmetic ─────────────────────────────────────────── */
@@ -252,8 +256,9 @@ const issuer = { status: 'ready' as const, name: 'Sam Whitfield', brand: 'Ironha
   // On the DOCUMENT, not only on the coach's list. A date the coach chases
   // against that the person being chased has never been shown is a term nobody
   // agreed to, and the first they would hear of it is the reminder.
-  ok(d.html.includes('15 Sep 2026'), 'a stated due date is printed on the document');
-  ok(d.text.includes('15 Sep 2026'), 'and in the text fallback, which some builds are all a client gets');
+  const due = fmtPointDay(2026, 8, 15);
+  ok(d.html.includes(due), 'a stated due date is printed on the document');
+  ok(d.text.includes(due), 'and in the text fallback, which some builds are all a client gets');
 }
 
 {
@@ -303,7 +308,7 @@ ok(!/overdue/i.test(coachInvoiceDoc({ invoice: inv({ dueOn: '2026-06-01' }), iss
   const doc = coachInvoiceDoc({ invoice: paid, issuer });
   ok(doc.text.includes('The issuer states this amount is being requested.'),
     'and the reprinted document still carries the claim it was issued with');
-  ok(doc.text.includes('the issuer states this was paid on 20 Aug 2026'),
+  ok(doc.text.includes(`the issuer states this was paid on ${fmtPointDay(2026, 7, 20)}`),
     'beside the new fact, dated, as the issuer’s own statement');
   ok(!doc.text.includes('VOIDED'), 'and nothing about it is voided');
 

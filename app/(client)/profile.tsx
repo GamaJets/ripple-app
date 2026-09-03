@@ -29,7 +29,7 @@ import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, weightToKg, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, readNumber, type WeightUnit, type LengthUnit } from '../../src/lib/units';
+import { weightIn, weightLabel, weightToKg, readBodyWeight, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, readNumber, type WeightUnit, type LengthUnit } from '../../src/lib/units';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { uploadMyAvatar } from '../../src/ui/avatarUpload';
@@ -405,7 +405,14 @@ export default function Profile() {
 
   // What is in the fields right now, back in the metric the record stores.
   // null means the field is empty or unreadable — NOT zero.
-  const enteredKg = weightToKg(weightVal, wu);
+  // Through `readBodyWeight`, which BOUNDS it. `weightToKg` has no bound of any
+  // kind, and this sheet is the main place a member edits their own weight: a
+  // slipped keypress put 1,800 kg on the health record permanently, and from
+  // there into the macro calculator, the goal projection, every chart, and the
+  // pricing of every bodyweight set in the training log. There is no delete on
+  // that series. The body-fat box two fields down has been bounded all along.
+  const weightRead = readBodyWeight(weightVal, wu);
+  const enteredKg = weightRead.ok ? weightRead.kg : null;
   const enteredCm = heightToCm(heightVal, lu, heightInVal);
   // What the two height boxes hold when they are showing the record untouched.
   const heightFieldOfRecord = lu === 'cm' ? asText(shownHeight) : (shownParts ? String(shownParts.feet) : '');
@@ -431,6 +438,14 @@ export default function Profile() {
     // displayed figure would round an 81.63 kg scan reading down to the 81.6 kg
     // its "180 lb" display converts back to, and would turn a measurement into
     // a manual override, every time this sheet was opened for any reason.
+    // Refused out loud, and NOTHING ELSE ON THE SHEET IS SAVED either: a member
+    // who mistyped their weight and had their name change go through would have
+    // no reason to look at the weight again. The sentence names the range in the
+    // unit they are typing in.
+    if (!weightRead.ok && weightVal !== asText(shownWeight)) {
+      Alert.alert('Check that weight', weightRead.reason);
+      return;
+    }
     if (enteredKg != null && weightVal !== asText(shownWeight)) cd.setWeightKg(enteredKg);
     if (enteredCm != null && (heightVal !== heightFieldOfRecord || heightInVal !== heightInchFieldOfRecord)) cd.setHeightCm(enteredCm);
     // `readNumber`, so a decimal comma reads as a decimal point — this box is
@@ -542,7 +557,7 @@ export default function Profile() {
             <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>{statsLine}</Text>
           </Pressable>
           <Ghost icon="pencil" onPress={openEdit} />
-          <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityRole="button"
+          <Pressable onPress={changePhoto} disabled={photoBusy} accessibilityState={{ disabled: photoBusy }} accessibilityRole="button"
             accessibilityLabel={photoBusy ? 'Uploading your profile photo' : 'Change your profile photo'}>
             {/* `avatarSource`, not `cd.photo`. A row still holding a device path
                 from before the upload existed would otherwise draw here — and

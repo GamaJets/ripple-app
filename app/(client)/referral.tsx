@@ -41,12 +41,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useBrand } from '../../src/ui/brand';
-import { myReferralCode, myReferrals, myReferralSummary } from '../../src/lib/referrals';
+import { myReferralCode, myReferrals, myReferralSummary, REFERRAL_ROW_CAP } from '../../src/lib/referrals';
 import { referralLink, referralMessage } from '../../src/lib/referralLink';
 import { copyToClipboard, HAS_NATIVE_CLIPBOARD } from '../../src/ui/nativeModules';
 import {
   CONVERSION_RULE, REFERRAL_PRIVACY_NOTE, rewardNote, friendLine, shapeReferrals,
-  summaryLine, type ReferralRow,
+  summaryLine, invitesCutLine, type ReferralRow,
 } from '../../src/lib/referralCredit';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { Rule, Section, SectionHead, Card, Cta, Ghost } from '../../src/ui/kit';
@@ -62,6 +62,18 @@ export default function Referral() {
   const [joined, setJoined] = useState<number | null>(null);
   const [converted, setConverted] = useState<number | null>(null);
   const [status, setStatus] = useState<LoadStatus>('loading');
+  /**
+   * Whether the LIST came back at the server's ceiling, held apart from
+   * `status` on purpose.
+   *
+   * `my_referrals()` ends `limit 200` inside the function body, where
+   * src/lib/rowCap.ts cannot reach it — the server will never answer with 201,
+   * so `capped()` sees a full page and a cut one as the same thing. The two
+   * counts above the list come from `my_referral_summary()`, which part 128
+   * computes over every row, so they stay exact under a cut list and this must
+   * not drag them down to 'partial' with it.
+   */
+  const [listCut, setListCut] = useState(false);
 
   const load = useCallback(async () => {
     setStatus('loading');
@@ -73,6 +85,7 @@ export default function Referral() {
     const [list, sum] = await Promise.all([myReferrals(), myReferralSummary()]);
     if (!c || !sum) { setStatus('error'); return; }
     setRows(shapeReferrals(list));
+    setListCut((list?.length ?? 0) >= REFERRAL_ROW_CAP);
     setJoined(sum.joined);
     setConverted(sum.converted);
     // A null list with a good summary is still a failed read of the list, and
@@ -252,6 +265,18 @@ export default function Referral() {
               </View>
             </View>
           )) : null}
+
+          {/* The list ends where the server's `limit 200` ends, and until this
+              line existed nothing said so — a referrer scrolling to the bottom
+              of two hundred names simply found no more names. The counts in the
+              card above are untouched by it and stay exact, which is why this
+              is a sentence under the list rather than a 'partial' over the
+              screen. */}
+          {status === 'ready' && listCut && invitesCutLine(rows.length, REFERRAL_ROW_CAP) ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {invitesCutLine(rows.length, REFERRAL_ROW_CAP)}
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />

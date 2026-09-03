@@ -33,7 +33,8 @@
 // written and there are `EXPORT_PARTS.length` now; the count is deliberately
 // not repeated in prose, because it has been wrong here twice.)
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { zip } from '@/lib/zip';
@@ -49,6 +50,13 @@ import { readByIds } from '@lib/idLookup';
 import { sliceLoading, sliceReady, sliceFailed } from '@lib/memberView';
 import { fetchMemberRecords } from '@lib/gymMembers';
 import { attributionOf } from '@lib/gymSigning';
+// The gym's own name, currency and clock in one read. The clock is what the
+// period presets below are computed on: a bundle's period is a claim about
+// calendar days, and the only calendar that means anything to the gym's
+// accountant is the gym's.
+import { readTenant } from '@/lib/currency';
+import { gymDay } from '@lib/gymZone';
+import { isoDate } from '@lib/format';
 import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 import {
   windowFromDays, windowBlocker, describeWindow, isBounded, presetDays,
@@ -157,7 +165,15 @@ const EMPTY: Reads = {
 
 export default function ExportPage() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. The period
+   *  presets below fill in a calendar day, and the only calendar that means
+   *  anything on an accountant's bundle is the gym's. */
+  const [zone, setZone] = useState<string | null>(null);
   const [reads, setReads] = useState<Reads>(PENDING);
   const [readAt, setReadAt] = useState<string | null>(null);
   // The two days somebody typed, held as typed. Blank on both sides is the
@@ -261,13 +277,23 @@ export default function ExportPage() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) { setReads(EMPTY); setReadAt(new Date().toISOString()); return; }
-      const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+      // `readTenant`, not a hand-written `select('name')`. It reads the
+      // timezone in the same round trip, and the period presets below need it:
+      // "This month" pressed at 09:00 on 1 September in Auckland was computing
+      // August, because `presetDays` is given an instant and reads UTC's day off
+      // it. That is a bundle labelled August, holding August, produced by an
+      // owner who asked for September — on the screen whose entire purpose is
+      // handing a defensible record to somebody outside the building.
+      const t = await readTenant(supabase, who.tenantId);
       // Checked, not assumed: a null name here means "not read", not "the gym
       // has no name" — and the gym's name ends up in every filename.
-      if (live) setGymName(tErr ? null : t?.name ?? null);
+      if (live) { setGymName(t.name); setZone(t.zone); }
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -302,8 +328,11 @@ export default function ExportPage() {
   // is missing rows that exist and nothing in it would know.
   const bundle = useMemo(() => (input && readAt ? buildGymExport(input) : null), [input, readAt]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -392,7 +421,7 @@ export default function ExportPage() {
       <Period
         fromDay={fromDay} toDay={toDay}
         setFromDay={setFromDay} setToDay={setToDay}
-        error={periodError} window={window}
+        error={periodError} window={window} zone={zone}
       />
       <Parts input={input} window={window} />
       <Files bundle={bundle} blocker={blocker} me={me} />
@@ -422,17 +451,39 @@ export default function ExportPage() {
  * preset doing the same job differently: two spellings of the same request is
  * how a screen ends up with a state nobody tested.
  */
-function Period({ fromDay, toDay, setFromDay, setToDay, error, window }: {
+function Period({ fromDay, toDay, setFromDay, setToDay, error, window, zone }: {
   fromDay: string; toDay: string;
   setFromDay: (v: string) => void; setToDay: (v: string) => void;
   error: string | null; window: ExportWindow;
+  /** `tenants.timezone`. Which calendar "this month" means. */
+  zone: string | null;
 }) {
   const bounded = isBounded(window);
   const narrowed = EXPORT_PARTS.filter((p) => EXPORT_DATE_FIELD[p]);
   const whole = EXPORT_PARTS.filter((p) => !EXPORT_DATE_FIELD[p]);
 
   const preset = (id: PresetId) => {
-    const d = presetDays(id, new Date().toISOString());
+    // The GYM's day, handed in as a bare `YYYY-MM-DD`.
+    //
+    // It was `new Date().toISOString()` — an instant — and `presetDays` reads
+    // UTC's day off whatever it is given, deliberately and for a good reason:
+    // its own header explains that everything inside is UTC so the function is
+    // pure and answers the same under six timezones. That purity is not the
+    // problem; WHICH day is handed to it is, and the header says so too —
+    // "`today` is passed in rather than read from the clock". Passing the
+    // instant made the answer UTC's day; passing the gym's day as a calendar
+    // string makes `instantOf` parse it at UTC midnight and the UTC getters
+    // read the same three numbers back out, so the gym's day survives intact.
+    //
+    // The cost of the old form: "This month" pressed at 09:00 on 1 September in
+    // Auckland filled the boxes with August, and "This year" pressed on 1
+    // January filled them with last year. Both are a bundle whose filename,
+    // manifest and README name a period the owner did not ask for.
+    //
+    // With no zone set, the reader's own calendar day — not UTC's, which is
+    // nobody's; a person pressing a button called "This month" at 6pm on the
+    // 31st in Los Angeles means the month they are standing in.
+    const d = presetDays(id, gymDay(Date.now(), zone) ?? isoDate(new Date()));
     setFromDay(d.from);
     setToDay(d.to);
   };
@@ -465,7 +516,7 @@ function Period({ fromDay, toDay, setFromDay, setToDay, error, window }: {
             half-bounded by whichever date was readable.
           </p>
         ) : (
-          <p style={{ margin: 0, color: bounded ? '#f0c04e' : 'var(--ink3)' }}>
+          <p style={{ margin: 0, color: bounded ? 'var(--warn)' : 'var(--ink3)' }}>
             {bounded
               ? <>This export will cover <strong>{describeWindow(window)}</strong>. That is a SLICE of the
                   record, not the record — the dates go in every filename and the README opens with
@@ -509,8 +560,11 @@ interface PartRow {
   part: ExportPart;
   label: string;
   cost: string;
-  state: 'loading' | 'ready' | 'failed';
+  state: 'loading' | 'ready' | 'partial' | 'failed';
   rows: number | null;
+  /** How many rows were accepted, when the read came back at its ceiling. Null
+   *  on every other state — a cap is only a fact about a truncated read. */
+  cap: number | null;
   reason: string | null;
   /** The column the period narrowed this part by, or null when it left it
    *  whole. Null on an unbounded export too — nothing was narrowed. */
@@ -531,7 +585,12 @@ function Parts({ input, window }: { input: GymExportInput | null; window: Export
       label: EXPORT_LABEL[part],
       cost: EXPORT_COST[part],
       state: s.state,
+      // Counted under 'ready' only. A truncated read HAS a row count and it is
+      // the count of the prefix, and printing it in a column headed "Rows" over
+      // a download button would state the size of the file as the size of the
+      // record. The cap goes in the sentence beside it instead.
       rows: s.state === 'ready' ? (s.rows as unknown[]).length : null,
+      cap: s.state === 'partial' ? s.cap : null,
       reason: s.state === 'failed' ? s.reason : null,
       by: bounded ? EXPORT_DATE_FIELD[part] : null,
     };
@@ -545,6 +604,10 @@ function Parts({ input, window }: { input: GymExportInput | null; window: Export
       render: (r) =>
         r.state === 'loading' ? <span style={{ color: 'var(--ink3)' }}>reading…</span>
         : r.state === 'failed' ? <span style={{ color: 'var(--crit)' }}>failed</span>
+        // Its own word, not 'read'. A truncated part is in the bundle and the
+        // bundle is not the record, which is a different thing to know from
+        // either a failure or a clean read.
+        : r.state === 'partial' ? <span style={{ color: 'var(--warn)' }}>cut off</span>
         : <span>read</span>,
     },
     {
@@ -562,6 +625,11 @@ function Parts({ input, window }: { input: GymExportInput | null; window: Export
             </span>
           : r.state === 'loading'
             ? <span style={{ color: 'var(--ink3)' }}>Not read yet.</span>
+            : r.state === 'partial'
+            ? <span style={{ color: 'var(--ink2)' }}>
+                <strong>Only the first {r.cap ?? 0} rows.</strong> {capitalise(r.cost)} is in the
+                bundle as a PREFIX, not in full — a total taken over this file would be a subtotal.
+              </span>
             : r.rows === 0
               // Under a period, an empty file has a THIRD reading nobody would
               // guess: read fine, and nothing inside your dates. Saying "there
@@ -577,7 +645,7 @@ function Parts({ input, window }: { input: GymExportInput | null; window: Export
       key: 'period', header: 'Period', value: (r: PartRow) => r.by ?? '',
       render: (r: PartRow) => (r.by
         ? <span style={{ color: 'var(--ink3)', fontSize: 12.5 }}>narrowed by <span className="mono">{r.by}</span></span>
-        : <span style={{ color: '#f0c04e', fontSize: 12.5 }}>whole — not narrowed</span>),
+        : <span style={{ color: 'var(--warn)', fontSize: 12.5 }}>whole — not narrowed</span>),
     } as Column<PartRow>] : []),
   ];
 
@@ -588,7 +656,7 @@ function Parts({ input, window }: { input: GymExportInput | null; window: Export
         ? 'Counted over the period set above. Each part is read on its own; a read that fails is reported here and named in the bundle, and never becomes an empty file.'
         : 'Each part is read on its own. A read that fails is reported here and named in the bundle — it never becomes an empty file.'}
     >
-      <DataTable rows={rows} columns={cols} rowKey={(r) => r.part} empty="Nothing to export." />
+      <DataTable noun="parts of the record" rows={rows} columns={cols} rowKey={(r) => r.part} empty="Nothing to export." />
     </Section>
   );
 }
@@ -696,7 +764,7 @@ function Files({ bundle, blocker, me }: {
       </div>
       {bundle === null
         ? <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Reading the record…</div>
-        : <DataTable rows={bundle.files} columns={cols} rowKey={(f) => f.name} empty="Nothing to download." />}
+        : <DataTable noun="files" rows={bundle.files} columns={cols} rowKey={(f) => f.name} empty="Nothing to download." />}
     </Section>
   );
 }
@@ -874,7 +942,7 @@ function MemberRecord({ input, blocker, readAt, me }: {
         ) : null}
       </div>
       {blocker ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>
           {blocker} The same refusal applies here: a member export built over a read that has not
           finished is missing rows that exist, and nothing in the file would know.
         </p>

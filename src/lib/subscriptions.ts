@@ -14,6 +14,7 @@ import { appLink } from './deepLink';
 import { supabase } from './supabase';
 import { reportError } from './reportError';
 import { capLimit, capped } from './rowCap';
+import { readByIds } from './idLookup';
 import { minorMoney } from './coachMoney';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -217,12 +218,31 @@ export async function fetchMySubscribers(): Promise<{ rows: Subscriber[]; status
     const page = capped((data as ClientSubscription[]) ?? []);
     const ids = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
     const names = new Map<string, string>();
-    if (ids.length) {
-      // Bounded by `ids`, which the cap above already holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read stays null and renders as a dash; the subscription it labels is still real and still charging
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
-      (profs ?? []).forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
-    }
+    try {
+      // Chunked, and the limit being argued about here is the REQUEST LINE, not
+      // the row cap. `ids` is bounded by the `capLimit()` read above, so a coach
+      // with a full page of subscribers sends a thousand uuids; at ~39 bytes
+      // each inside `in.("…","…")` that is ~39KB against the 8KB request line
+      // nginx and most CDNs enforce by default. Past roughly two hundred ids
+      // the proxy answers 414, supabase-js does not reject on it, and it
+      // arrives as `data: null` — which reads exactly like no names.
+      //
+      // no-error-ok (about the ROW ceiling, which one row per id across chunks
+      // of 150 cannot reach): a name we cannot read stays null and renders as a
+      // dash; the subscription it labels is still real and still charging. The
+      // 414 is a different event and that argument never covered it — it is
+      // EVERY name at once, so a coach's recurring-income list becomes a column
+      // of dashes and there is nobody on it to cancel, chase or thank.
+      const profs = await readByIds<any>(
+        ids,
+        // `.order('id')` on a primary-key lookup is total, which is the
+        // contract `readAll` requires of every page it is handed.
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the clients subscribed to you',
+      );
+      profs.forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
+    } catch { /* a name that will not read is a dash; the subscription is still listed */ }
     const rows: Subscriber[] = page.rows.map((r) => ({ ...r, client_name: (r.client_id && names.get(r.client_id)) || null }));
     return { rows, status: page.truncated ? 'partial' : 'ready' };
   } catch (e) { reportError('subscriptions.fetchMySubscribers', e); return { rows: [], status: 'error' }; }
@@ -320,12 +340,26 @@ export async function fetchMySubscriptionPayments(): Promise<{ rows: Subscriptio
     // name rather than a renewal that did not happen.
     const clientIds = [...new Set(page.rows.map((r) => r.client_id).filter(Boolean))] as string[];
     const names = new Map<string, string>();
-    if (clientIds.length) {
-      // Bounded by `clientIds`, which the cap above already holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read stays null and renders as a dash; the renewal it labels was still paid and can still be refunded
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', clientIds).limit(capLimit());
-      (profs ?? []).forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
-    }
+    try {
+      // Chunked for the request line, exactly as in `fetchMySubscribers` above:
+      // a thousand `capLimit()`-bounded ids is a ~39KB `in.(…)` against an 8KB
+      // request line, refused at roughly two hundred with a 414 that arrives as
+      // `data: null`.
+      //
+      // no-error-ok (about the ROW ceiling — one row per id, chunks of 150): a
+      // name we cannot read stays null and renders as a dash; the renewal it
+      // labels was still paid and can still be refunded. The 414 is the case
+      // that argument does not reach: this is the list a coach refunds FROM,
+      // and every row unnamed at once means picking between three invoice ids
+      // with money attached to them.
+      const profs = await readByIds<any>(
+        clientIds,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'the names of the clients these renewals were charged to',
+      );
+      profs.forEach((p: any) => { if (p?.id) names.set(p.id, (p.full_name || '').trim()); });
+    } catch { /* a name that will not read is a dash; the renewal is still listed */ }
     const rows: SubscriptionPayment[] = page.rows.map((r) => ({
       ...r,
       client_name: (r.client_id && names.get(r.client_id)) || null,

@@ -28,6 +28,7 @@ import {
   type StatementInput, type StatementInvoice, type StatementCharge, type StatementPayout,
   type StatementRefund, type StatementDispute, type StatementCost, type StatementPeriod,
 } from './coachStatement';
+import { fmtPointDay } from './format';
 import { COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE } from './coachCosts';
 import { escapeHtml } from './coachInvoice';
 import type { TakenRow } from './coachMoney';
@@ -203,11 +204,16 @@ for (const p of [calendarYear(2026), calendarQuarter(2026, 3), calendarMonth(202
   eq(periodBoundsIso({ from: 'x', to: 'y', label: 'x' }), null, 'and there are no bounds for a period that cannot be read');
 }
 
-eq(dayLabel('2026-08-01'), '1 Aug 2026', 'a date-only value reads as its own day, west of Greenwich included');
+// Derived, not pinned — this renders in the reader's own language now. The
+// claim in the message is about the ZONE, not the wording: a bare '2026-08-01'
+// must read as the 1st everywhere, and the three dash cases below are what
+// stop an unreadable value becoming an undefined month name.
+eq(dayLabel('2026-08-01'), fmtPointDay(2026, 7, 1), 'a date-only value reads as its own day, west of Greenwich included');
 eq(dayLabel('not a date'), '—', 'and an unreadable one is a dash');
 eq(dayLabel('2026-13-01'), '—', 'a month number past December is a dash, not an undefined month name');
 eq(dayLabel('2026-00-01'), '—', 'and so is a month number below January');
-eq(periodSentence(Y26), '1 Jan 2026 to 31 Dec 2026 inclusive', 'the period is spelled out at both ends and says inclusive');
+eq(periodSentence(Y26), `${fmtPointDay(2026, 0, 1)} to ${fmtPointDay(2026, 11, 31)} inclusive`,
+  'the period is spelled out at both ends and says inclusive');
 
 /* ── 3. an undated row is in NO period, and is counted ────────────────────
    Sweeping it into the current one would put money in a year it may not belong

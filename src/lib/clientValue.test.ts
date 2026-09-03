@@ -19,6 +19,7 @@
 import {
   clientValue, paidOnly, rankByValue, currenciesIn, unattributedReceipts,
   unattributedLine, valueSpanLine, valueEmptyLine, valueStatus,
+  paymentsCounted, paymentsFloorLine,
   VALUE_IS_PAST, VALUE_NEEDS_YOUR_RECORDS,
   type ValuePurchase, type ValueRenewal, type ValueReceipt, type RankedClient,
 } from './clientValue';
@@ -172,6 +173,29 @@ ok(/forecast|projected/i.test(VALUE_IS_PAST),
   '"lifetime value" means a projection everywhere else, so this says plainly that it is not one');
 ok(/cash|transfer/i.test(VALUE_NEEDS_YOUR_RECORDS), 'and that the cash half depends on the coach recording it');
 ok(/floor/i.test(VALUE_NEEDS_YOUR_RECORDS), 'and that until they do, every figure is a floor');
+
+/* ── the count beside the withheld total ────────────────────────────────── */
+//
+// "Payments 4" was printed a finger's width from "Worth —", so the dash read as
+// "we cannot price these four" rather than "we do not know there were four".
+
+eq(paymentsCounted(ana), 4, 'a whole ledger may state how many payments there were');
+eq(paymentsFloorLine(ana), null, 'and says nothing extra about it');
+
+eq(paymentsCounted(noCash), null,
+  'a ledger missing its cash half states NO count — four rows out of an unknown number is not four payments');
+{
+  const floor = paymentsFloorLine(noCash) ?? '';
+  ok(/at least 4 payments/i.test(floor), 'the count survives as a floor, which is the useful half of it');
+  ok(/floor and not a count/i.test(floor), 'and is named as one');
+}
+
+{
+  // Nothing arrived at all. "At least 0 payments" is not a sentence.
+  const empty = clientValue('nobody', [], [], [], { ...ALL_READY, receipts: 'error' });
+  eq(paymentsCounted(empty), null, 'and no count is stated');
+  eq(paymentsFloorLine(empty), null, 'and no floor either');
+}
 
 if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);

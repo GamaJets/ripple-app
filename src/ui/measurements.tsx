@@ -13,6 +13,13 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { classifyWrite } from '../lib/offlineQueue';
+// The id each measurement row carries, minted on the device so that a queued
+// insert offered twice cannot become two mornings with a tape. See
+// `entryToRows`.
+import { newRowId } from '../lib/outbox';
+// The half of an optimistic insert that was missing: taking the row back when
+// the account refuses it.
+import { settleOptimistic } from '../lib/optimisticList';
 import { useOutbox } from './outbox';
 import { useAuthRevision } from './authRevision';
 import { dateParts } from '../lib/localDate';
@@ -47,7 +54,9 @@ export interface MeasureEntry {
  * mirror in src/lib/clientMeasurements.ts is kept in step by hand for the
  * reason its own comment gives.
  */
-export const METRICS: { key: keyof Omit<MeasureEntry, 'id' | 'at'>; label: string }[] = [
+export type MetricKey = keyof Omit<MeasureEntry, 'id' | 'at'>;
+
+export const METRICS: { key: MetricKey; label: string }[] = [
   { key: 'waist', label: 'Waist' },
   { key: 'chest', label: 'Chest' },
   { key: 'shoulders', label: 'Shoulders' },
@@ -93,9 +102,35 @@ function rowsToEntries(rows: any[]): MeasureEntry[] {
   }
   return Object.values(byDate).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
+/**
+ * The rows one tape measurement becomes — one per site, each carrying its own
+ * id.
+ *
+ * ── Why the id is minted here rather than by the server ──────────────────
+ *
+ * `measurements` has a uuid primary key and NO unique index on
+ * (user_id, taken_at, kind) — supabase/parts/02, and it is right not to have
+ * one, because a member correcting a figure on the same day is an ordinary
+ * thing to do. The consequence is that nothing at all makes this write
+ * idempotent, and this is a QUEUED write: the insert reaches Postgres, the rows
+ * are written, and the response is lost on the way back. `classifyWrite`
+ * correctly calls that 'unsent', the measurement stays in the outbox, and the
+ * next flush offers it again — filing a second set of rows for one morning with
+ * a tape.
+ *
+ * They are invisible, which is the part that makes this worth fixing rather
+ * than tolerating: `rowsToEntries` groups by `taken_at` and the last row of a
+ * kind wins, so the screen draws one entry either way and nobody can see the
+ * duplicate to delete it. It eats the read's cap, and an edit of that day has
+ * two rows to choose between.
+ *
+ * The id costs nothing on the way in and makes the second offer a 23505 on the
+ * primary key, which the handler reads for what it is. Same fix, same reason,
+ * as `ScanIntent` and `GlucoseIntent`.
+ */
 function entryToRows(uid: string, e: MeasureEntry) {
   const rows: any[] = [];
-  for (const { key } of METRICS) { const v = e[key]; if (typeof v === 'number') rows.push({ user_id: uid, taken_at: dateOf(e.at), kind: key, value: v }); }
+  for (const { key } of METRICS) { const v = e[key]; if (typeof v === 'number') rows.push({ id: newRowId(), user_id: uid, taken_at: dateOf(e.at), kind: key, value: v }); }
   return rows;
 }
 
@@ -132,6 +167,34 @@ interface MeasureValue {
    * with no way to ask again.
    */
   reload: () => void;
+  /**
+   * Correct one figure on one day.
+   *
+   * ── Why this exists ───────────────────────────────────────────────────
+   *
+   * `addEntry` and `reload` were the whole of this provider's surface. A tape
+   * measurement is the hero figure of its screen, the baseline every "since"
+   * is computed against, a row in the summary a member hands a clinician, and
+   * one of the things a coach programmes from — and a waist typed as 8.4
+   * instead of 84 was permanent. The member's only options were to leave it or
+   * to log a second wrong figure to average it out. The scans screen next door
+   * has had `updateScan` and `deleteScan` all along.
+   *
+   * The DATE is preserved, because that is the whole point: re-logging puts a
+   * corrected figure on today and leaves the trend bent around the day the
+   * mistake was actually made.
+   *
+   * Resolves false when the write did not land, so no caller can report a
+   * correction the server does not hold.
+   */
+  updateMetric: (at: string, key: MetricKey, cm: number) => Promise<boolean>;
+  /**
+   * Take one figure off one day.
+   *
+   * Per METRIC and not per day: a member correcting a slipped decimal on their
+   * waist must not lose the chest and hips they measured in the same minute.
+   */
+  removeMetric: (at: string, key: MetricKey) => Promise<boolean>;
   /**
    * Record a measurement.
    *
@@ -177,6 +240,22 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
       if (!Array.isArray(rows) || !rows.length) return 'refused';
       try {
         const { data, error } = await supabase.from('measurements').insert(rows).select('id');
+        // ── The one refusal that is not a refusal ────────────────────────
+        //
+        // The rows carry the ids `entryToRows` minted, so an insert whose rows
+        // landed and whose answer was lost comes back 23505 on the second
+        // offer. `classifyWrite` reads that as 'refused', which is right for a
+        // write that failed and wrong here: the measurement is in the table.
+        // One INSERT is one statement, so a 23505 means the whole batch is
+        // already there rather than half of it — there is no partial landing to
+        // reason about. Same as `sendScan` and `sendGlucose`; nothing else in
+        // the 23 class is reinterpreted.
+        //
+        // Only when every row actually carries an id. A payload queued by a
+        // build that had none would be colliding on something else, and reading
+        // that as 'stored' would be inventing a measurement.
+        if (error && (error as { code?: string }).code === '23505'
+          && rows.every((r: any) => typeof r?.id === 'string' && r.id)) return 'stored';
         return classifyWrite(error as any, data ? data.length : 0);
       } catch { return 'unsent'; }
     });
@@ -234,16 +313,35 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
     if (Object.keys(clean).length === 0) return 'refused';
     const entry: MeasureEntry = { id: 'm' + SEQ++, at: new Date().toISOString(), ...clean };
     setEntries((p) => [entry, ...p].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)));
-    if (!USE_SUPABASE || !uid) return 'refused';
+    /**
+     * The other half of the optimistic insert above, which did not exist.
+     *
+     * A row drawn before the server answered has to be taken back when the
+     * answer is a refusal. Nothing did that: the screen raised the honest alert
+     * ("could not be sent to your account, so they will be gone at the next
+     * launch") and left the row in place, where it stayed `latest` — the hero
+     * waist figure, the "Measured …" line, the change since last time, part of
+     * the entry count — until the app was killed. `app/(client)/scans.tsx`
+     * hands the same list to `clientReportDoc`, so a figure this account
+     * refused to store was printed in the summary a physiotherapist reads.
+     *
+     * 'queued' and 'unsent' rows stay: those are unreachable, not refused, and
+     * the outbox intends to send them. See src/lib/optimisticList.ts.
+     */
+    const settle = (out: MeasureOutcome): MeasureOutcome => {
+      setEntries((p) => settleOptimistic(p, entry.id, out));
+      return out;
+    };
+    if (!USE_SUPABASE || !uid) return settle('refused');
     const rows = entryToRows(uid, entry);
     /** Keep it for the next time this phone can reach us. */
     const keep = async (): Promise<MeasureOutcome> => {
-      if (!outbox) return 'refused';
+      if (!outbox) return settle('refused');
       // `at` is the moment it was TAKEN. The rows already carry their own
       // `taken_at` date, so the send cannot drift; this is what orders the
       // outbox and what a screen would show it under.
       const { result } = await outbox.enqueue('measurement', { rows }, { at: entry.at });
-      return result === 'queued' ? 'queued' : 'refused';
+      return settle(result === 'queued' ? 'queued' : 'refused');
     };
     try {
       // `.select('id')` and a row COUNT, not just `error`. An insert PostgREST
@@ -252,14 +350,65 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
       // read was `return !error`.
       const { data, error } = await supabase.from('measurements').insert(rows).select('id');
       const out = classifyWrite(error as any, data ? data.length : 0);
-      if (out === 'stored') return 'stored';
-      // A refusal offered again gets the same refusal, so it is not kept.
-      if (out === 'refused') return 'refused';
+      if (out === 'stored') return settle('stored');
+      // A refusal offered again gets the same refusal, so it is not kept — and
+      // it does not stay on the screen either.
+      if (out === 'refused') return settle('refused');
       return keep();
     } catch { return keep(); }
   };
 
-  return <Ctx.Provider value={{ entries, status, addEntry, reload }}>{children}</Ctx.Provider>;
+  /**
+   * The two corrections, sharing one shape.
+   *
+   * Optimistic like the insert above and settled the same way: the row on
+   * screen is put back exactly as it was when the server does not confirm,
+   * because a figure a member watched disappear and then saw return has been
+   * told two different things about their own record.
+   *
+   * `.select('id')` on both, and the COUNT is what is read. An update or a
+   * delete that PostgREST narrows to zero rows under a policy does not fail —
+   * it succeeds having changed nothing — so `!error` is not evidence that
+   * anything happened. Same rule as src/lib/wroteRows.ts.
+   *
+   * `.eq('user_id', uid)` alongside the date and kind: RLS already scopes this
+   * to the signed-in account, so it permits nothing new. It is there so a bug
+   * handing this somebody else's row matches nothing rather than leaving the
+   * policy as the only thing in the way.
+   */
+  const writeMetric = async (at: string, key: MetricKey, cm: number | null): Promise<boolean> => {
+    const day = dateOf(at);
+    const before = entries;
+    const target = before.find((e) => dateOf(e.at) === day);
+    // Nothing on screen to correct. Not an error, and not a success either: a
+    // caller must not report a change to a row this device does not have.
+    if (!target || target[key] == null) return false;
+    if (cm != null && (!Number.isFinite(cm) || cm <= 0)) return false;
+
+    const applied = before
+      .map((e) => (dateOf(e.at) === day ? { ...e, [key]: cm ?? undefined } : e))
+      // A day whose last figure has been taken off is not a day with no
+      // measurements on it — it is a day that is no longer in the history.
+      .filter((e) => METRICS.some(({ key: k }) => e[k] != null));
+    setEntries(applied);
+    const undo = () => { setEntries(before); return false; };
+
+    if (!USE_SUPABASE || !uid) return undo();
+    try {
+      const { data, error } = cm == null
+        ? await supabase.from('measurements').delete()
+            .eq('user_id', uid).eq('taken_at', day).eq('kind', key).select('id')
+        : await supabase.from('measurements').update({ value: cm })
+            .eq('user_id', uid).eq('taken_at', day).eq('kind', key).select('id');
+      if (error || !data || data.length === 0) return undo();
+      return true;
+    } catch { return undo(); }
+  };
+
+  const updateMetric = (at: string, key: MetricKey, cm: number) => writeMetric(at, key, cm);
+  const removeMetric = (at: string, key: MetricKey) => writeMetric(at, key, null);
+
+  return <Ctx.Provider value={{ entries, status, addEntry, updateMetric, removeMetric, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useMeasurements(): MeasureValue {

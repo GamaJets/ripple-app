@@ -10,6 +10,7 @@ import { sp, radius, hairline, elevation, type as ty } from '../theme/scale';
 import type { HrSample } from '../lib/hr';
 import { PROVIDERS } from '../lib/wearables/registry';
 import { reportError } from '../lib/reportError';
+import { fmtDay, fmtTime } from '../lib/format';
 
 export function SessionHrSheet({ visible, onClose, title, startISO, durationMin, age }: {
   visible: boolean; onClose: () => void; title: string; startISO: string; durationMin: number; age?: number | null;
@@ -39,11 +40,25 @@ export function SessionHrSheet({ visible, onClose, title, startISO, durationMin,
     return () => { cancelled = true; };
   }, [visible, startISO, durationMin, age]);
 
+  // The line under the title, and all three parts of it were this file's own
+  // and all three were wrong for most readers:
+  //
+  //   · a hardcoded English weekday array, so "Wed" for somebody whose phone is
+  //     in German;
+  //   · `${d.getDate()}/${d.getMonth() + 1}` — "9/12" is 9 December in Britain
+  //     and 12 September in the United States, over a session the member is
+  //     looking at their own heart rate for;
+  //   · a 12-hour clock hand-built in English, with no 24-hour form at all, so
+  //     a member in Berlin read "7pm".
+  //
+  // All three are the reader's now. `fmtDay` and `fmtTime` in src/lib/format.ts
+  // are the shared answers — `fmtClock` inside `fmtTime` asks Intl whether this
+  // reader's locale is a 12- or 24-hour one rather than assuming, which is the
+  // distinction en-GB and en-AU disagree on.
   const when = (() => {
     const d = new Date(startISO);
     if (isNaN(d.getTime())) return '';
-    let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
-    return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1} · ${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap} · ${Math.max(10, Math.round(durationMin) || 45)} min`;
+    return `${fmtDay(startISO)} · ${fmtTime(startISO)} · ${Math.max(10, Math.round(durationMin) || 45)} min`;
   })();
 
   return (

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Repple — security &amp; data</title>
   <link rel="canonical" href="https://www.repplefitness.com/security">
-<meta name="description" content="How access is enforced in Repple: row-level rules per gym, exactly what a coach can and cannot see, why progress photos are deliberately closed to coaches, how deletion works, and where the data is held.">
+<meta name="description" content="How access is enforced in Repple: row-level rules per gym, exactly what a coach can and cannot see, why a progress photo reaches a coach only when you share that photo, how deletion works, and where the data is held.">
 <meta property="og:title" content="Repple — security &amp; data">
 <meta property="og:description" content="Row-level rules per gym, what a coach can and cannot see, and what deletion actually removes.">
 <meta property="og:url" content="https://www.repplefitness.com/security">
@@ -77,8 +77,8 @@ addEventListener('DOMContentLoaded', function () {
       <p class="lede after">
         Not by what a screen chooses to render. Every table in Repple carries row-level rules
         keyed to the account asking and, where it matters, to the gym that account belongs to.
-        This page is the mechanism &mdash; who can read what, why a coach cannot see your progress
-        photos, and what deletion actually removes. The policy version of the same ground is in
+        This page is the mechanism &mdash; who can read what, why a coach sees a progress photo only
+        when you share that one photo, and what deletion actually removes. The policy version of the same ground is in
         <a href="/privacy">Privacy</a>.
       </p>
       <ul class="jump">
@@ -161,7 +161,7 @@ addEventListener('DOMContentLoaded', function () {
           <tr>
             <td><strong>Progress photos</strong></td>
             <td>Read and write</td>
-            <td><strong>No</strong> &mdash; deliberately, at both layers</td>
+            <td><strong>No</strong>, unless you share one &mdash; per photo, withdrawable, at both layers</td>
             <td><strong>No</strong></td>
           </tr>
           <tr>
@@ -221,8 +221,8 @@ addEventListener('DOMContentLoaded', function () {
         </div>
         <div class="card">
           <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c5 0 9 4.5 9 7a11 11 0 0 1-2.2 3.4M6.5 6.6C4.2 8.1 3 10.3 3 12c0 2.5 4 7 9 7a9.6 9.6 0 0 0 3.9-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></div>
-          <h3>No coach access, and it was removed on purpose</h3>
-          <p>A read permission for the linked coach existed and has been taken out. It is not an oversight waiting to be corrected, and the reasoning is written into the schema so nobody re-adds it by copying the pattern from the tables either side of it.</p>
+          <h3>No coach access by default, and a grant you make per photo</h3>
+          <p>A blanket read permission for the linked coach existed and was taken out. Nothing replaced it with another blanket rule: a coach sees a photo only where you have granted that specific photo, and the reasoning against re-adding a standing permission is written into the schema so nobody restores it by copying the pattern from the tables either side of it.</p>
         </div>
       </div>
 
@@ -237,20 +237,22 @@ addEventListener('DOMContentLoaded', function () {
         </p>
         <ul class="ticks">
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>There is no consent step yet.</strong> No per-photo sharing control, no indicator that anyone else can see them, no way to take it back. Access without those means people upload believing it is private and are wrong.</span></li>
+            <span><strong>The consent step now exists, and it is per photo.</strong> Nothing is shared because of who your coach is. You grant one photograph at a time, you can see which ones you have granted, and you can withdraw a grant.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Sharing has to be something you do.</strong> Not something that is quietly true because of who your coach is.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>It bought nothing.</strong> Nothing in the coach app displays a client's progress photos, so the permission granted access no screen was using &mdash; a standing exposure with no feature behind it.</span></li>
+            <span><strong>Only you can create the grant.</strong> A coach can read a grant and cannot make one, cannot make one for a photo that is not yours, and cannot make one where the coaching link is not live. Those are four separate conditions on the write, not a button that is hidden from them.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Latent access is worse than open access.</strong> The day somebody adds a coach-side viewer, the photos would have become visible with no review of consent, because the hard part already looked done.</span></li>
+            <span><strong>Ending the link ends the grants.</strong> They are not a copy a coach keeps. Stop working with them and the photographs you had shared stop resolving along with the rest of their access.</span></li>
         </ul>
         <div class="callout">
           <p>
-            When per-photo sharing is built, it needs three things together: a flag on the photo,
-            a read rule gated on that flag, and a matching rule on the file itself &mdash; because
-            the record and the image are granted separately. Until all three exist, the answer is
-            no at both layers.
+            This page used to say that per-photo sharing would need three things together: a record
+            of the grant, a read rule gated on it, and a matching rule on the file itself, because
+            the record and the image are granted separately. All three are now built, and the rule
+            on the file is written in terms of the rule on the row so the two cannot drift apart.
+            One thing to know before you share: the grant is for the photo&rsquo;s whole record, so the
+            weight and body-fat figure stored alongside that photograph go with it.
           </p>
         </div>
       </div>
@@ -336,12 +338,12 @@ addEventListener('DOMContentLoaded', function () {
     <figure class="chart">
       <div class="chart-hd">
         <div>
-          <span class="chart-k">Counted from the live catalogue</span>
+          <span class="chart-k">Counted from the live catalogue, 3 September 2026</span>
           <h3>What deleting an account reaches</h3>
         </div>
       </div>
       <div class="chart-scroll">
-        <svg viewBox="0 0 740 214" width="740" height="214" role="img" aria-label="Horizontal bar chart of how far account deletion reaches in the database. 28 tables are deleted along with the person, across 32 columns. 13 tables keep their rows with the person detached from them, across 17 columns. Following the cascade all the way down, 42 tables are reached in total.">
+        <svg viewBox="0 0 740 214" width="740" height="214" role="img" aria-label="Horizontal bar chart of how far account deletion reaches in the database. 66 tables are deleted along with the person, across 74 columns. 50 tables keep their rows with the person detached from them, across 69 columns. Following the cascade all the way down, 106 tables are reached in total.">
           <line class="cx-grid" x1="372.8" y1="34" x2="372.8" y2="176"/>
           <line class="cx-grid" x1="485.6" y1="34" x2="485.6" y2="176"/>
           <line class="cx-grid" x1="598.4" y1="34" x2="598.4" y2="176"/>
@@ -349,27 +351,27 @@ addEventListener('DOMContentLoaded', function () {
           <line class="cx-base" x1="260" y1="34" x2="260" y2="176"/>
 
           <text class="cx-lab" x="250" y="56" text-anchor="end">Deleted with you</text>
-          <text class="cx-ax" x="250" y="72" text-anchor="end">32 columns</text>
-          <rect class="f-hi" x="260" y="40" width="293.3" height="26" rx="3"/>
-          <text class="cx-val" x="563.3" y="58">28 tables</text>
+          <text class="cx-ax" x="250" y="72" text-anchor="end">74 columns</text>
+          <rect class="f-hi" x="260" y="40" width="248.2" height="26" rx="3"/>
+          <text class="cx-val" x="518.2" y="58">66 tables</text>
 
           <text class="cx-lab" x="250" y="104" text-anchor="end">Kept, with you detached</text>
-          <text class="cx-ax" x="250" y="120" text-anchor="end">17 columns</text>
-          <rect class="f-lo" x="260" y="88" width="146.7" height="26" rx="3"/>
-          <text class="cx-val" x="416.7" y="106">13 tables</text>
+          <text class="cx-ax" x="250" y="120" text-anchor="end">69 columns</text>
+          <rect class="f-lo" x="260" y="88" width="188" height="26" rx="3"/>
+          <text class="cx-val" x="458" y="106">50 tables</text>
 
           <text class="cx-lab" x="250" y="152" text-anchor="end">Reached in total</text>
           <text class="cx-ax" x="250" y="168" text-anchor="end">following the chain down</text>
-          <rect class="ch-c" x="260" y="136" width="440" height="26" rx="3"/>
-          <text class="cx-val" x="710" y="154" text-anchor="end">42 tables</text>
+          <rect class="ch-c" x="260" y="136" width="398.6" height="26" rx="3"/>
+          <text class="cx-val" x="648.6" y="154" text-anchor="end">106 tables</text>
 
           <line class="cx-base" x1="260" y1="176" x2="711.2" y2="176"/>
           <g class="cx-ax">
             <text x="260" y="196" text-anchor="middle">0</text>
-            <text x="372.8" y="196" text-anchor="middle">10</text>
-            <text x="485.6" y="196" text-anchor="middle">20</text>
-            <text x="598.4" y="196" text-anchor="middle">30</text>
-            <text x="711.2" y="196" text-anchor="middle">40</text>
+            <text x="372.8" y="196" text-anchor="middle">30</text>
+            <text x="485.6" y="196" text-anchor="middle">60</text>
+            <text x="598.4" y="196" text-anchor="middle">90</text>
+            <text x="711.2" y="196" text-anchor="middle">120</text>
           </g>
         </svg>
       </div>
@@ -379,6 +381,10 @@ addEventListener('DOMContentLoaded', function () {
         tax and legal reasons to keep. Invoices and memberships are <em>not</em> in that set: they
         point at the person and go when the person does. A gym with a retention obligation needs
         to know that before it presses the button, so it is stated rather than assumed.
+        These are not estimates: they come from one query over the database&rsquo;s own foreign keys &mdash;
+        every table whose rows are deleted when the account is, then every table reached by following
+        those deletions down. That means they move whenever a table is added, and they have moved
+        before, so they are re-counted rather than remembered.
       </figcaption>
     </figure>
 
@@ -421,8 +427,22 @@ addEventListener('DOMContentLoaded', function () {
       <li>
         <span class="no">6</span>
         <div>
-          <h3>The files are chased separately, and confirmed</h3>
-          <p>Deleting a database row does not delete an image in object storage &mdash; there is no cascade between the two. So the file's location is recorded before the row is gone, a delete is sent for it, and it is marked done only on a reply that actually says the object is no longer there. Nothing is marked deleted because it asked nicely.</p>
+          <h3>The files are chased separately, and every store that holds a person&rsquo;s file is chased</h3>
+          <p>Deleting a database row does not delete an image in object storage &mdash; there is no cascade between the two. So the gap is closed in software, and the same way each time: the object&rsquo;s location is recorded before the row is gone, a delete is sent for it on a schedule, and the entry is marked done only on a reply that actually says the object is no longer there. Nothing is marked deleted because it asked nicely. That now covers seven stores across two queues &mdash; progress photographs, injury documents, message attachments, profile photos, and on the coaching side a coach's logo, published documents and exercise clips. One is left out on purpose: a gym's own filing cabinet is keyed to the building rather than to a person, so an individual erasure cannot even enumerate it, and how long a gym must keep a document about a former member is a legal question with a different answer in each country. That decision has not been made, so those files stay and the outstanding ones are listed for the gym that will have to make it. Both apps say all of this at the moment you ask for deletion rather than leaving you to find out.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">7</span>
+        <div>
+          <h3>The queue is drained on a schedule, and an alarm fires when an entry stops moving</h3>
+          <p>The drain runs every five minutes and records that it ran; recording that it ran is not recording that it removed anything. So a second scheduled job reads both queues once a day and fails on purpose if anything has been outstanding for more than a day, naming the bucket, the path and the last thing storage said about it. A failed scheduled run is a red row in the log of runs, which is a signal in a place already read &mdash; and it is worth being exact about the size of that, because it is a failing job in a log rather than a page or an email to anybody. What it rules out is the failure this had already had once: a drain reporting success every five minutes for three days while one entry, a test row as it turned out, never moved.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">8</span>
+        <div>
+          <h3>Only one route can remove an acceptance, and it is the coach&rsquo;s own erasure</h3>
+          <p>A coach can publish a document their clients accept, and an acceptance is locked to its document so neither can be altered without the other. That lock is a foreign key that refuses deletion, and it is unchanged: no admin screen, no cleanup script and no policy can delete an accepted document. What exists alongside it is a single named exception &mdash; when the coach who owns the document is erased, the acceptances are released first and the erasure completes. Until that was built, a coach anybody had ever agreed with could not be deleted at all; the attempt raised a constraint error and rolled the whole thing back, including the record that it had been attempted. The exception costs something, so it is written down rather than smoothed over: erasing a coach takes the record that their clients accepted their document with it. The alternative was keeping a person&rsquo;s name, file and paperwork indefinitely because their clients ticked a box, which is a refusal to erase wearing retention&rsquo;s clothes.</p>
         </div>
       </li>
     </ol>
@@ -447,7 +467,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <div class="stat-n">TLS</div>
-        <div class="lbl"><strong>Encrypted in transit and at rest.</strong> Both ends of it, for the database and for the file store.</div>
+        <div class="lbl"><strong>Encrypted in transit, and at rest by the platform.</strong> Every connection to the database and the file store is over TLS. Encryption at rest is Supabase&rsquo;s disk encryption underneath both &mdash; it is real, and it is theirs rather than something Repple adds on top. No individual column is separately encrypted by this application, so anyone holding a valid database credential reads plain values; what stands between an account and somebody else&rsquo;s row is the row-level rules on this page, not a second key.</div>
       </div>
       <div>
         <div class="stat-n">Stripe</div>
@@ -455,7 +475,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <div class="stat-n">Export</div>
-        <div class="lbl"><strong>Yours to take out.</strong> Anyone with an account can export everything Repple holds about them from Settings, without asking a person for it. A gym can ask us to export everything held for the gym.</div>
+        <div class="lbl"><strong>Yours to take out.</strong> Anyone with an account can export their record from Settings as a JSON file, without asking a person for it &mdash; forty-odd tables including the gym-side ones, plus a list of every file held for them, which you then save one at a time. Where a table could not be read, the export says so in place of the rows rather than writing an empty list. A gym can ask us to export everything held for the gym.</div>
       </div>
     </div>
     <p class="tiny after-sm">
@@ -529,8 +549,8 @@ addEventListener('DOMContentLoaded', function () {
         <div class="a"><p>Every rule is keyed to the specific gym a row belongs to, and being an owner somewhere is not the same as being the owner of your gym. That distinction is the single most common way a system like this leaks, and it is why every rule tests the second thing rather than the first.</p></div>
       </details>
       <details>
-        <summary>Will you ever let coaches see progress photos?</summary>
-        <div class="a"><p>Only behind a control you operate, per photo, that you can withdraw. Anything less is people uploading in the belief it is private and being wrong, which is the outcome the current answer exists to prevent. Until that control is built, the answer is no.</p></div>
+        <summary>Can coaches see progress photos?</summary>
+        <div class="a"><p>Only behind a control you operate, per photo, that you can withdraw &mdash; and that control now exists. Nothing is visible to a coach because of who they are; a photograph reaches them because you granted that photograph, and ending the coaching link ends every grant with it. Anything less would be people uploading in the belief it is private and being wrong, which is the outcome this design exists to prevent.</p></div>
       </details>
       <details>
         <summary>Does deleting my account delete my gym's records of me?</summary>

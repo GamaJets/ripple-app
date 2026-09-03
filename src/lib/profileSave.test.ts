@@ -2,6 +2,7 @@
 // was a screen that could not tell a stored profile from a refused one.
 import {
   IDLE_SAVE, saveLine, hasUnsavedWork, leaveWarning, afterWrite, markPending,
+  profileWriteFailure,
   type SaveStatus,
 } from './profileSave';
 
@@ -92,6 +93,53 @@ for (const st of ['idle', 'pending', 'saved', 'failed'] as SaveStatus['state'][]
   const line = saveLine(s, T0 + 1000);
   ok(line === null || (line.length > 0 && !line.includes('undefined') && !line.includes('null')),
     `${st} produces either nothing or a real sentence`);
+}
+
+/* ── the row count, not the absence of an error ─────────────────────────── */
+//
+// The defect: both statements come back `error: null` having matched NO ROWS,
+// which is what a coach with no `trainers` row and a coach an RLS policy
+// refuses both actually get, and the screen printed "Saved." over it.
+
+const OK = { error: null, count: 1 };
+
+eq(profileWriteFailure(OK, OK), null, 'two writes that each changed a row are a save');
+
+{
+  const why = profileWriteFailure(OK, { error: null, count: 0 });
+  ok(why !== null, 'a trainers update that matched no rows is NOT a save');
+  ok(!!why && why.includes('bio, rate and listing'), 'and it names which half did not land');
+  ok(!!why && !why.includes('name and photo'), 'without blaming the half that did');
+}
+
+{
+  const why = profileWriteFailure({ error: null, count: 0 }, OK);
+  ok(!!why && why.includes('name and photo'), 'a profiles update that matched no rows names that half');
+}
+
+{
+  const why = profileWriteFailure({ error: null, count: 0 }, { error: null, count: 0 });
+  ok(!!why && why.includes('name and photo') && why.includes('bio, rate and listing'),
+    'both halves are named when both matched nothing');
+}
+
+{
+  // The trap this closes for the NEXT call site: no `{ count: 'exact' }` means
+  // nobody counted, which is not evidence that anything was written.
+  const why = profileWriteFailure(OK, { error: null });
+  ok(why !== null, 'a missing count is not a pass');
+  ok(!!why && why.includes('did not say'), 'and it says the server never answered the question');
+}
+
+{
+  const why = profileWriteFailure({ error: { message: 'refused' }, count: null }, OK);
+  ok(why !== null, 'an error is still a failure');
+}
+
+// Whatever it says, it has to survive being read by a person.
+for (const [a, b] of [[OK, { error: null, count: 0 }], [{ error: null }, OK], [{ error: null, count: 0 }, { error: null, count: 0 }]] as const) {
+  const why = profileWriteFailure(a, b);
+  ok(!!why && !why.includes('undefined') && !why.includes('null'), 'no failure sentence leaks a field name');
 }
 
 if (errors.length) {

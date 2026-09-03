@@ -21,14 +21,21 @@
 // under 'error' an empty list means we could not find out what this member's
 // history is, never that they have none.
 //
-// ── Ahead of the migration ────────────────────────────────────────────────
+// ── The migration, which has since landed ─────────────────────────────────
 //
-// Part 720 has not been applied. A read against a table that does not exist
-// comes back 42P01, which lands in the `error` branch below — so today the
-// screen shows tonight's figure with no trend beside it and says the history
-// could not be read, which is honest and is roughly what a member's first week
-// looks like anyway. Nothing here throws and nothing renders a baseline of
-// zero.
+// This block used to open "Part 720 has not been applied", and described the
+// screen a member got while that was true: a read against a table that does
+// not exist comes back 42P01, which lands in the `error` branch below, so the
+// screen showed tonight's figure with no trend beside it and said the history
+// could not be read.
+//
+// `public.device_hrv_nights` exists on this project now (counted live, 3 Sep
+// 2026), so that is no longer the ordinary path — a member with kept nights
+// gets a real baseline and a real trend. The 42P01 handling stays exactly as
+// it is, because it is what a deployment that has not run part 720 still
+// deserves, and because the branch it lands in is the same one a refused or
+// unreachable read lands in. Nothing here throws and nothing renders a
+// baseline of zero: an empty history is "no nights kept yet", never 0 ms.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -60,7 +67,7 @@ export interface DeviceHrvValue {
   /** How many kept nights are behind the baseline, for the sentence a member
    *  without one is shown. */
   nightsKept: number;
-  /** Read the kept nights again. A real re-read of `hrv_nights` — the status
+  /** Read the kept nights again. A real re-read of `device_hrv_nights` — the status
    *  goes back through whatever the server says — so the one screen that
    *  prints HRV can refresh the baseline and the trend along with everything
    *  else on it. */

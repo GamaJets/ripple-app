@@ -46,7 +46,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
-import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -78,7 +78,7 @@ import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode
 import { fetchMyCoach, type CoachRef } from '../../src/lib/photoShare';
 import { endCoaching, leaveCoachPrompt, leaveOutcome, coachLabel, replaceCoachNote } from '../../src/lib/endCoaching';
 import type { LoadStatus } from '../../src/ui/loadStatus';
-import { fetchCredentials, fetchRatingSummaries, fetchReviews, todayKey } from '../../src/ui/reviews';
+import { fetchCredentials, fetchRatingSummaries, fetchReviews } from '../../src/ui/reviews';
 import {
   credentialBadge, credentialLine, credentialState, expiryLine, sortCredentials,
   credentialsSummaryLine, insuranceClaim, insuranceLine, CLAIM_NOTE, type Credential,
@@ -94,7 +94,74 @@ import {
 import { wholeMoney } from '../../src/lib/coachMoney';
 import { currencyGapOfStatus, currencyGapLineAbout } from '../../src/lib/currencyGap';
 import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type SessionFee } from '../../src/lib/sessionFee';
+// What may be drawn as somebody's photo, and what may not. `avatarSource`
+// returns null for a device path — `file:`, `ph:`, `/var/…` — which is a URL
+// only on the phone that chose it and resolves to nothing anywhere else. Part
+// 961 nulled the ones already stored and src/ui/coachProfile.tsx stopped
+// writing them, but a value that has been in a column once can be in it again,
+// and a broken circle in a directory reads as a coach who has not bothered.
+import { avatarSource } from '../../src/lib/avatarImage';
+import { useToday } from '../../src/ui/today';
 import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
+
+// `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
+// the `String(null)` mistake in another costume: any run of two spaces yields
+// an empty part, `''[0]` is undefined, and `join` spells that out — so
+// "Sam  Rivera" was drawn on the avatar as "SundefinedR". Dropping the empty
+// parts is the fix; a name that leaves nothing falls back to a dash.
+const initials = (n: string) => n.split(/\s+/).filter(Boolean).map((x) => x[0].toUpperCase()).join('') || '—';
+
+/**
+ * A coach's face, or their monogram — in the directory row and again on the
+ * profile sheet the row opens.
+ *
+ * The directory drew a monogram for everybody, which is the one screen where a
+ * photo is doing actual work: this is a member choosing between strangers, and
+ * the thing they are choosing on is largely whether the person looks like
+ * somebody they want in a room with them. The photos existed — part 961 put
+ * them in a bucket and the coach app has been uploading them — and nothing here
+ * had ever asked for the column.
+ *
+ * ── why the monogram is still here ────────────────────────────────────────
+ *
+ * Three ways there is no photo to draw, and all three land on the monogram
+ * rather than on a grey disc:
+ *
+ *   · the coach has not set one — `photo` is null;
+ *   · what is stored is a device path, which is a URL only on the phone that
+ *     chose it. `avatarSource` returns null for those;
+ *   · the fetch fails — the object was deleted out of the bucket, or the phone
+ *     is on a captive-portal wifi that answers every request with a login page.
+ *     That is the `onError` below, and it is the reason this is a component
+ *     with state rather than a ternary at each call site.
+ *
+ * The broken URL is remembered rather than a boolean flag, because the sheet
+ * keeps ONE instance of this component across every coach a member taps: a
+ * boolean set by the first coach whose photo failed would have monogrammed
+ * every coach opened afterwards.
+ */
+function CoachFace({ photo, name, size, mono }: { photo: string | null; name: string; size: number; mono: number }) {
+  const t = useTheme();
+  const [brokenUri, setBrokenUri] = useState<string | null>(null);
+  const uri = avatarSource(photo);
+  const box = { width: size, height: size, borderRadius: radius.pill, backgroundColor: t.surface2 };
+  if (uri && brokenUri !== uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={box}
+        resizeMode="cover"
+        accessibilityIgnoresInvertColors
+        onError={() => setBrokenUri(uri)}
+      />
+    );
+  }
+  return (
+    <View style={{ ...box, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ ...value(mono), color: t.brand }}>{initials(name)}</Text>
+    </View>
+  );
+}
 
 interface Coach {
   id: string;
@@ -106,6 +173,10 @@ interface Coach {
    *  row below renders a zero as no fee at all. */
   sessionFee: SessionFee;
   bio: string;
+  /** The coach's photo as a URL other accounts can fetch, or null. Null is
+   *  also what a device path and a failed name read leave here — see
+   *  `avatarSource`. Never a device path, and never the string 'null'. */
+  photo: string | null;
 }
 
 /**
@@ -160,7 +231,13 @@ export default function FindTrainer() {
   // ratings that does not is a real, common state, and the coaches must still
   // be shown — with no rating beside them rather than a fabricated "no reviews
   // yet", which is a sentence about somebody's reputation.
-  const today = useMemo(() => todayKey(), []);
+  // `useMemo(() => todayKey(), [])` froze this at the moment the screen mounted.
+  // It is the date every credential on this directory is judged expired-or-not
+  // against, and a phone that has this screen open at midnight — or in a pocket
+  // for a day, which is the ordinary case — went on telling a member that a
+  // lapsed insurance certificate was current. `useToday()` re-reads at the local
+  // day boundary and on return from the background. See src/ui/today.ts.
+  const today = useToday();
   const [ratings, setRatings] = useState<Record<string, RatingSummary>>({});
   const [ratingStatus, setRatingStatus] = useState<LoadStatus>('loading');
   const [creds, setCreds] = useState<Record<string, Credential[]> | null>(null);
@@ -454,7 +531,7 @@ export default function FindTrainer() {
         // `.in(ids)` with at most `ROW_CAP` ids can itself come back at the
         // cap, and a name that did not arrive drops its coach from the list
         // below — so this one is capped too and its truncation counts.
-        const { data: profs, error: profsErr } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
+        const { data: profs, error: profsErr } = await supabase.from('profiles').select('id, full_name, avatar').in('id', ids).limit(capLimit());
         if (cancelled) return;
         // Names live in `profiles`, not in `trainers`, and a coach we cannot name
         // is dropped below as an unfinished profile. So a failure here does not
@@ -465,6 +542,12 @@ export default function FindTrainer() {
         if (profsErr) throw profsErr;
         const profPage = capped((profs ?? []) as any[]);
         const nameById = new Map<string, string>(profPage.rows.map((p: any) => [p.id, p.full_name]));
+        // Read from the same page as the names, so a coach whose row was cut by
+        // the cap loses their name and their face together rather than arriving
+        // as a face with nobody behind it.
+        const photoById = new Map<string, string | null>(
+          profPage.rows.map((p: any) => [p.id, typeof p.avatar === 'string' ? p.avatar : null]),
+        );
 
         const list: Coach[] = rows
           .filter((r: any) => ids.includes(r.id))
@@ -475,6 +558,7 @@ export default function FindTrainer() {
             specialties: Array.isArray(r.specialties) ? r.specialties : [],
             sessionFee: readSessionFee(r.session_fee),
             bio: typeof r.bio === 'string' ? r.bio : '',
+            photo: photoById.get(r.id) ?? null,
           }))
           // A coach with no name has not set up a profile — don't show a blank card.
           .filter((c) => c.name.length > 0);
@@ -746,12 +830,6 @@ export default function FindTrainer() {
     credStatus === 'ready' && creds ? (creds[id] ?? []) : null;
 
   const G = layout.gutter;
-  // `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
-  // the `String(null)` mistake in another costume: any run of two spaces yields
-  // an empty part, `''[0]` is undefined, and `join` spells that out — so
-  // "Sam  Rivera" was drawn on the avatar as "SundefinedR". Dropping the empty
-  // parts is the fix; a name that leaves nothing falls back to a dash.
-  const initials = (n: string) => n.split(/\s+/).filter(Boolean).map((x) => x[0].toUpperCase()).join('') || '—';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -962,9 +1040,7 @@ export default function FindTrainer() {
               {i > 0 ? <Rule inset={46} /> : null}
               <Pressable onPress={() => setSel(c)} accessibilityRole="button" accessibilityLabel={c.name}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ ...value(13), color: t.brand }}>{initials(c.name)}</Text>
-                </View>
+                <CoachFace photo={c.photo} name={c.name} size={34} mono={13} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
                   {c.tagline ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>{c.tagline}</Text> : null}
@@ -1048,9 +1124,7 @@ export default function FindTrainer() {
           {sel && (
             <ScrollView contentContainerStyle={{ padding: G, paddingBottom: sp.xxl }} showsVerticalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
-                <View style={{ width: 58, height: 58, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ ...value(20), color: t.brand }}>{initials(sel.name)}</Text>
-                </View>
+                <CoachFace photo={sel.photo} name={sel.name} size={58} mono={20} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.title, color: t.ink }}>{sel.name}</Text>
                   {sel.tagline ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 2 }}>{sel.tagline}</Text> : null}

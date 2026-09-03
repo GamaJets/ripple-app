@@ -46,6 +46,7 @@ import {
   classLine, gapNote, walkInsKnown, TAUGHT_SCOPE_NOTE,
 } from '../../src/lib/coachRegister';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { useNow } from '../../src/ui/today';
 
 /** The three windows, in days. Rolling, and the labels come from the module so
  *  the heading and the query cannot disagree about which one is on screen. */
@@ -79,7 +80,32 @@ export default function MyRegister() {
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [tick, setTick] = useState(0);
 
-  const window = useMemo(() => rollingWindow(new Date(), range), [range, tick]);
+  /* ── the window moves with the clock, and it did not ──────────────────
+   *
+   * This was `rollingWindow(new Date(), range)` memoised on `[range, tick]`.
+   * An empty dependency on the date fixes both bounds at the moment of the
+   * MOUNT, and this screen is registered `href: null` in
+   * app/(trainer)/_layout.tsx — mounted once, never torn down, and with no
+   * focus effect anywhere on it. There was nothing at all that could move the
+   * window except changing the chip or pulling the list down.
+   *
+   * So a coach who opened Your Register on Monday and came back on Thursday
+   * was reading Monday's thirty days under a chip that says "30 days". The two
+   * classes they taught on Tuesday and Wednesday were outside the query, and
+   * the sentence at the bottom of this screen — "No classes are recorded
+   * against you in this window" — was drawn from a window that had quietly
+   * stopped being the last thirty days. On a register screen, the reading a
+   * coach takes from that is that the door ticks did not save.
+   *
+   * `useNow` (src/ui/today.ts) moves on the three moments this can go stale:
+   * local midnight, the app coming back to the foreground, and the screen
+   * being focused. The third is the one that matters most here — the register
+   * is often written at the door on another handset, which is exactly what
+   * this screen's own header says it exists to check — and it also gives the
+   * screen the focus re-read it never had.
+   */
+  const now = useNow();
+  const window = useMemo(() => rollingWindow(now, range), [now, range, tick]);
 
   useEffect(() => {
     let cancelled = false;

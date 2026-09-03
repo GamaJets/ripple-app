@@ -83,6 +83,7 @@ import { isoToday } from '../../src/lib/dayPlan';
 import { kgToLb, lengthLabel, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
+import { localDate } from '../../src/lib/localDate';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
@@ -92,8 +93,26 @@ const MEAS_COLS = 'taken_at, kind, value';
 
 const EMPTY_SERIES: ClientSeries = { weight: [], bodyfat: [], muscle: [] };
 
-const shortDate = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+/**
+ * A goal's date as a short day, read as the day it says.
+ *
+ * `new Date(iso)` was wrong for the value this is called with. Both callers
+ * below pass `goal_targets.target_date`, which is a bare Postgres `date`, and
+ * `new Date('2026-09-01')` is UTC midnight — which every local getter and
+ * `toLocaleDateString` then reads back in the coach's own zone, so a coach in
+ * Los Angeles was shown "Aug 31" over a target their client typed as the 1st,
+ * and the overdue line read "Target date passed (Aug 31)" about a date that
+ * does not exist anywhere in this record.
+ *
+ * `localDate` builds a bare date at LOCAL midnight and leaves a real timestamp
+ * — `achievedAtISO` is a timestamptz — as the instant it is. One function for
+ * both because the two callers below pass one of each. src/lib/clientBrief.ts
+ * fixed exactly this for exactly this column; this screen was the other half.
+ */
+const shortDate = (iso: string) => {
+  const d = localDate(iso);
+  return d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—';
+};
 
 /** The client's trend in a sentence, addressed to their coach, or null when
  *  there is no honest one to write. Every branch here is a named member of
@@ -501,7 +520,7 @@ export default function ClientGoals() {
 
             <Section>
               <SectionHead title="Client" />
-              {r.roster.length === 0 && r.status !== 'error' ? (
+              {r.roster.length === 0 && isWhole(r.status) ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   Nobody is on your book yet, so there are no goals to look at.
                 </Text>

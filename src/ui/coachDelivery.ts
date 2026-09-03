@@ -40,6 +40,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
 import { reportError } from '../lib/reportError';
+import { writeFailure } from '../lib/wroteRows';
 import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
 import { readCoachedModeOrNull, type CoachedMode } from '../lib/types';
@@ -131,8 +132,23 @@ export function CoachDeliveryProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) { setDeclared(mode); return true; }
     if (VARIANT !== 'trainer' || !uid) return false;
     try {
-      const { error } = await supabase.from('trainers').update({ delivery_mode: mode }).eq('id', uid);
-      if (error) { reportError('coachDelivery.write', error); return false; }
+      // COUNTED, not merely un-errored — the same shape the three other writes
+      // to `trainers` in this folder use (coachBrand.ts, coachLogo.ts,
+      // coachProfile.tsx). PostgREST answers an UPDATE that matched NOTHING
+      // with 204 and a null error, and the read above has already established
+      // that a signed-in coach with no `trainers` row is a case that happens —
+      // `maybeSingle` returns null rows for exactly that person and this
+      // provider calls it a real answer. For them `.eq('id', uid)` matches zero
+      // rows, `error` is null, and on `!error` this returned true, moved
+      // `declared` and set 'ready': DeliveryModeChoice told them their choice
+      // was saved, the app reshaped itself around it, and the next hydrate put
+      // it back. The count is the only thing that can tell those two apart.
+      const res = await supabase.from('trainers')
+        .update({ delivery_mode: mode }, { count: 'exact' })
+        .eq('id', uid);
+      if (res.error) { reportError('coachDelivery.write', res.error); return false; }
+      const why = writeFailure('How you coach', res);
+      if (why) { reportError('coachDelivery.write', new Error(why)); return false; }
       // Moved only after the server took it. A local value that ran ahead of a
       // refused write is a setting the coach believes they changed.
       setDeclared(mode);

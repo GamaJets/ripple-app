@@ -36,7 +36,8 @@
 // names it, so the first person to open this page does not go looking for a
 // broken query.
 import { useEffect, useState } from 'react';
-import { loadMe, type Me } from '@/lib/supabase';
+import { loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
 import { Shell } from '@/components/Shell';
 // See studio-web/components/Banner.tsx: the shared banner carries the live
 // region every local copy of this component was missing.
@@ -71,6 +72,10 @@ const DASH = '—';
 
 export default function Platform() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [admin, setAdmin] = useState<AdminCheck | null>(null);
   const [book, setBook] = useState<PlatformBook | null>(null);
 
@@ -79,6 +84,10 @@ export default function Platform() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who) return;
       const check = await isPlatformAdmin();
@@ -95,8 +104,11 @@ export default function Platform() {
     return () => { live = false; };
   }, []);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   const shell = (children: React.ReactNode) => (
     <Shell me={me} gymName={null} platformAdmin={admin === 'yes'} current="/platform">{children}</Shell>

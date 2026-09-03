@@ -119,7 +119,12 @@ export default function ShareSessionClip() {
 
         {/* ── share ──────────────────────────────────────────────────────── */}
         <Section>
+          {/* `opacity: 0.7` while the share sheet is being prepared is the
+              whole of what a sighted coach is told, and a screen reader was
+              told nothing at all — so a second tap landed on a control that
+              was already working. */}
           <Pressable onPress={share} disabled={busy} accessibilityRole="button" accessibilityLabel="Share this clip"
+            accessibilityState={{ disabled: busy, busy }}
             style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm, opacity: busy ? 0.7 : 1, borderWidth: hairline, borderColor: t.brand }}>
             {busy ? <ActivityIndicator color={t.brandInk} /> : <Icon name="share" size={16} color={t.brandInk} />}
             <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{busy ? 'Opening…' : 'Share this clip'}</Text>

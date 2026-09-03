@@ -45,7 +45,7 @@ import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/t
 import { useClientData } from '../../src/ui/clientData';
 import { INJURY_AREAS, areaLabel, newInjuryId, type Injury, type InjurySeverity } from '../../src/lib/injuries';
 import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle } from '../../src/lib/injuryEdit';
-import { ackState } from '../../src/lib/injuryGate';
+import { ackState, programmeChoiceState } from '../../src/lib/injuryGate';
 import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fmtDay, num } from '../../src/lib/format';
@@ -85,7 +85,12 @@ export default function Injuries() {
   // The coach's side asks the same function. Two screens, one definition of
   // "read": a confirmation covers the disclosures it was made against, so a
   // client who has added one since is told it is waiting rather than read.
-  const coachRead = ackState(mine.status, active, mine.read?.keys ?? null);
+  // mine.readStatus, not mine.status: the acknowledgement read and the
+  // programme read fail independently, and the folded figure made this
+  // sentence disclaim an answer that had come back perfectly.
+  const coachRead = ackState(mine.readStatus, active, mine.read?.keys ?? null);
+  // The second fact, with its own status and its own failure sentence.
+  const choices = programmeChoiceState(mine.choicesStatus, mine.choices.length);
 
   const closeSheet = () => { setNote(''); setSev('moderate'); setArea('knee'); setEditing(null); setOpen(false); };
 
@@ -259,7 +264,14 @@ export default function Injuries() {
                   a disclosure into a programme on purpose — that is their
                   judgement — but not without saying so, and this is where the
                   saying-so is addressed to the person it is about. */}
-              {mine.choices.length > 0 ? (
+              {choices === 'unknown' ? (
+                /* A different sentence from the one above it, on purpose. The
+                   two reads are two facts, and this one failing must not be
+                   drawn as "your coach assigned nothing over your injuries". */
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+                  We couldn't load what your coach has assigned since. Pull down to try again.
+                </Text>
+              ) : choices === 'none' ? null : (
                 <View style={{ marginTop: sp.lg, gap: sp.md }}>
                   <Text style={{ ...ty.micro, color: t.ink3 }}>Assigned knowing about these</Text>
                   {mine.choices.slice(0, 5).map((ch, i) => (
@@ -271,11 +283,18 @@ export default function Injuries() {
                       </Text>
                     </View>
                   ))}
+                  {choices === 'partial' ? (
+                    /* Truncated, so the list is real but not the whole of it —
+                       shown, never summed, and never presented as all of them. */
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>
+                      These are the most recent. There are more than we can show here.
+                    </Text>
+                  ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3 }}>
                     If any of these hurt, stop and tell your coach.
                   </Text>
                 </View>
-              ) : null}
+              )}
             </Section>
           </View>
         ) : null}

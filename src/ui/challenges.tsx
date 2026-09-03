@@ -39,7 +39,7 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import {
-  shapeBoard, shapeChallenges, type BoardRow, type ChallengeRow,
+  boardTruncated, shapeBoard, shapeChallenges, type BoardRow, type ChallengeRow,
   type RawBoardRow, type RawChallenge,
 } from '../lib/challenges';
 
@@ -162,7 +162,19 @@ export function ChallengesProvider({ children }: { children: ReactNode }) {
       // board" from "this board is empty". The message is the server's and is
       // shown as-is for the one case the client can do something about.
       if (error) return { rows: [], status: 'error', message: error.message || null };
-      return { rows: shapeBoard(data as RawBoardRow[] | null), status: 'ready', message: null };
+      const raw = (data as RawBoardRow[] | null) ?? [];
+      // 'partial' when the board came back at `challenge_board()`'s own
+      // `limit 200`. The rows are real and the screen shows them; what it may
+      // no longer do is count them, because "of 200" on a board of four hundred
+      // is a figure over a page presented as a figure over a set — and
+      // `my_challenges()` was printing the true head count two lines above it.
+      // See BOARD_CAP in src/lib/challenges.ts for why the probe row this
+      // codebase normally uses is not available through this door.
+      return {
+        rows: shapeBoard(raw),
+        status: boardTruncated(raw.length) ? 'partial' : 'ready',
+        message: null,
+      };
     } catch {
       return { rows: [], status: 'error', message: null };
     }

@@ -394,11 +394,13 @@ export default function TrainerPayments() {
   // from an account that does not exist. The status is held beside it and the
   // pair is resolved by `payoutStage`.
   const [connRead, setConnRead] = useState<LoadStatus>('loading');
-  // null is not []. [] is a trainer who sells nothing; null is a price list we
-  // could not read, and telling someone they have no packages when they do is
-  // how a duplicate price list gets built.
-  const [pkgs, setPkgs] = useState<TrainerPackage[] | null>(null);
-  const [pkgErr, setPkgErr] = useState(false);
+  // 'ready' with nothing is not 'error'. Nothing under 'ready' is a trainer who
+  // sells nothing; 'error' is a price list we could not read, and telling
+  // someone they have no packages when they do is how a duplicate price list
+  // gets built. 'partial' is the third — more packages than one read returns,
+  // on which the number beside the heading is a floor and not a total.
+  const [pkgs, setPkgs] = useState<TrainerPackage[]>([]);
+  const [pkgRead, setPkgRead] = useState<LoadStatus>('loading');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState('');
@@ -495,7 +497,7 @@ export default function TrainerPayments() {
   const load = useCallback(async () => {
     setLoading(true);
     const [c, p, s, cur, b, r, pr, dp] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), fetchMyCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes(), fetchMyDisputes()]);
-    setConn(c); setConnRead(c === null ? 'error' : 'ready'); setPkgs(p); setPkgErr(p === null);
+    setConn(c); setConnRead(c === null ? 'error' : 'ready'); setPkgs(p.rows); setPkgRead(p.status);
     setSubs(s.rows); setSubsStatus(s.status);
     setCurrency(cur.currency); setCurrencyGap(cur.gap); setCurrencyFrom(cur.from);
     setBuys(b.rows); setBuysStatus(b.status);
@@ -513,6 +515,12 @@ export default function TrainerPayments() {
   // failure, on the one question where being wrongly reassured costs the
   // whole amount while a deadline goes past.
   const pull = usePullToRefresh(load);
+
+  /** What the coach currently sells. Derived once because it was filtered four
+   *  separate times in the markup — the heading count, the empty state, the
+   *  list, and the promo-code targets — and four copies of one predicate is
+   *  four places for the count and the list to stop agreeing. */
+  const activePkgs = pkgs.filter((p) => p.active);
 
   const onboard = async () => { setBusy(true); const r = await startTrainerOnboarding(); setBusy(false); if (!r.ok) Alert.alert('Payouts setup', r.error || 'Could not start setup. Make sure Stripe Connect is enabled.'); };
 
@@ -742,8 +750,7 @@ export default function TrainerPayments() {
    * question. `pkgMoney` is not involved — this is the raw minor-unit figure
    * the arithmetic runs on.
    */
-  const promoTargets: PromoTarget[] = (pkgs ?? [])
-    .filter((p) => p.active)
+  const promoTargets: PromoTarget[] = activePkgs
     .map((p) => ({ id: p.id, name: p.name, billingInterval: p.billing_interval, active: p.active, priceCents: p.price_cents }));
 
   const promoTarget = promoTargets.find((p) => p.id === promoPkg) ?? null;
@@ -1713,6 +1720,7 @@ export default function TrainerPayments() {
                       {refundBlocker(target.rule) === null ? (
                         <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
                           disabled={refundBusy === b.id}
+                          accessibilityState={{ disabled: refundBusy === b.id, busy: refundBusy === b.id }}
                           accessibilityLabel={`Refund the sale to ${b.client_name || 'this client'}`}
                           style={{ paddingVertical: sp.xs }}>
                           <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === b.id ? t.ink3 : t.brand }}>
@@ -1739,6 +1747,7 @@ export default function TrainerPayments() {
                       {!gone && Number(b.sessions_used ?? 0) > 0 ? (
                         <Pressable onPress={() => confirmCredit(b, 1)} hitSlop={8} accessibilityRole="button"
                           disabled={creditBusy === b.id}
+                          accessibilityState={{ disabled: creditBusy === b.id, busy: creditBusy === b.id }}
                           accessibilityLabel={`Put a session credit back on the pack for ${b.client_name || 'this client'}`}
                           style={{ paddingVertical: sp.xs }}>
                           <Text style={{ ...ty.label, fontWeight: '500', color: creditBusy === b.id ? t.ink3 : t.brand }}>
@@ -1749,6 +1758,7 @@ export default function TrainerPayments() {
                       {!gone && left != null && left > 0 ? (
                         <Pressable onPress={() => confirmCredit(b, -1)} hitSlop={8} accessibilityRole="button"
                           disabled={creditBusy === b.id}
+                          accessibilityState={{ disabled: creditBusy === b.id, busy: creditBusy === b.id }}
                           accessibilityLabel={`Take a session credit off the pack for ${b.client_name || 'this client'}`}
                           style={{ paddingVertical: sp.xs }}>
                           <Text style={{ ...ty.label, fontWeight: '500', color: creditBusy === b.id ? t.ink3 : t.ink3 }}>
@@ -1766,16 +1776,22 @@ export default function TrainerPayments() {
 
             {/* ── what clients can buy ───────────────────────────────────── */}
             <Section>
-              <SectionHead title="Your Packages" note={(pkgs ?? []).filter((p) => p.active).length ? String((pkgs ?? []).filter((p) => p.active).length) : undefined} />
-              {pkgErr ? (
+              {/* The number beside the heading is only ever drawn over a read
+                  that came back WHOLE. Under 'partial' it would be the count of
+                  what fitted in one read, printed as the size of the coach's
+                  price list, and the note below says so in words instead. */}
+              <SectionHead title="Your Packages" note={pkgRead === 'ready' && activePkgs.length ? String(activePkgs.length) : undefined} />
+              {pkgRead === 'error' ? (
                 <Flag tone={t.crit}>
                   Your packages could not be read, so this is not a list of what you sell. Do not add
                   them again from here — reopen the screen once you have signal.
                 </Flag>
-              ) : (pkgs ?? []).filter((p) => p.active).length === 0 ? (
+              ) : pkgRead === 'partial' ? (
+                <PartialRead what="packages" shown={activePkgs.length} onPress={() => { void load(); }} />
+              ) : activePkgs.length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>No packages yet. Add one below — a monthly membership or a pack of sessions.</Text>
               ) : null}
-              {(pkgs ?? []).filter((p) => p.active).map((p, i) => (
+              {activePkgs.map((p, i) => (
                 <View key={p.id} style={{
                   flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
                   borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
@@ -2029,6 +2045,7 @@ export default function TrainerPayments() {
                     {refundBlocker(target.rule) === null ? (
                       <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
                         disabled={refundBusy === p.id}
+                        accessibilityState={{ disabled: refundBusy === p.id, busy: refundBusy === p.id }}
                         accessibilityLabel={`Refund the renewal paid by ${target.who || 'this client'}`}
                         style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
                         <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === p.id ? t.ink3 : t.brand }}>
@@ -2104,6 +2121,7 @@ export default function TrainerPayments() {
                         {state === 'live' ? (
                           <Pressable onPress={() => withdrawPromo(p)} hitSlop={8} accessibilityRole="button"
                             disabled={promoBusy} accessibilityLabel={`Withdraw the code ${p.code}`}
+                            accessibilityState={{ disabled: promoBusy, busy: promoBusy }}
                             style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
                             <Text style={{ ...ty.label, fontWeight: '500', color: promoBusy ? t.ink3 : t.brand }}>Withdraw</Text>
                           </Pressable>
@@ -2366,12 +2384,33 @@ export default function TrainerPayments() {
               {/* Whose balance it leaves, read off THIS CHARGE. A coach who has
                   since moved to direct charges still has older sales and older
                   renewals on the platform, and the two sentences say opposite
-                  things. */}
-              {refunding ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  {refundBalanceNote(accountForObject({ stripe_account_id: refunding.account }) ? 'direct' : 'destination')}
-                </Text>
-              ) : null}
+                  things.
+
+                  THREE states, not two. This was
+                  `accountForObject(…) ? 'direct' : 'destination'` — the exact
+                  expression `confirmRefund` documents at length as the defect
+                  it was fixed for, and which was fixed there and not here. An
+                  absent account is not evidence of a platform charge: the
+                  column is nullable and nothing backfills it, so a
+                  STANDARD-account coach whose row simply carries no account
+                  was read this sheet's "the refund leaves Repple's balance and
+                  your next payout is smaller by that amount" while Stripe was
+                  about to debit THEIR balance and, if it was short, their
+                  bank. One refund, two sentences about whose money it is —
+                  the sheet asserting one and the confirm dialog two taps later
+                  correctly saying nothing. Only a legacy Express account can
+                  make a platform charge certain; anything else says nothing,
+                  which is `refundBalanceNote`'s own null branch. */}
+              {refunding ? (() => {
+                const note = refundBalanceNote(
+                  accountForObject({ stripe_account_id: refunding.account })
+                    ? 'direct'
+                    : accountTypeOf(conn) === 'express' ? 'destination' : null,
+                );
+                return note ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{note}</Text>
+                ) : null;
+              })() : null}
               <Flag tone={t.warn} style={{ marginTop: sp.md }}>{REFUND_IS_FINAL}</Flag>
             </ScrollView>
             <View style={{ height: sp.md }} />

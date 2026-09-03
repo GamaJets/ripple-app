@@ -35,9 +35,13 @@
 // source of truth and a way for a not-yet-loaded tenant to render an empty
 // queue that looks exactly like the good state.
 import { useCallback, useEffect, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
+import { type Unread } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { Fetched, useFetched } from '@/components/Fetched';
 import { readTenant } from '@/lib/currency';
 import { noGymNote } from '@lib/gymLink';
 import { readAll } from '@lib/rowCap';
@@ -67,7 +71,6 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 /** A read that holds no rows: still in flight, or refused. */
-type Unread = 'loading' | 'failed' | null;
 
 /** A timestamp as the day it happened. Never the string "null". */
 const day = (iso: string | null): string => {
@@ -77,6 +80,10 @@ const day = (iso: string | null): string => {
 
 export default function Deletions() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymErr, setGymErr] = useState<string | null>(null);
 
@@ -90,10 +97,16 @@ export default function Deletions() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     // The two reads fail INDEPENDENTLY, deliberately. A gym that cannot read
     // its own history still has to see who is waiting, so a broken audit trail
     // must not blank the queue beside it.
+    // Whether each half came back. The stamp under the tiles is the age of the
+    // last read that came back WHOLE, so a refresh in which the queue failed
+    // must not move it — the rows on screen are still the earlier ones.
+    let queueWhole = false;
+    let logWhole = false;
+
     const [q, l] = await Promise.allSettled([
       supabase
         .from('pending_deletions')
@@ -128,6 +141,7 @@ export default function Deletions() {
         daysRemaining: typeof r.days_remaining === 'number' ? r.days_remaining : null,
       })));
       setQueueWhy(null);
+      queueWhole = true;
     } else {
       setQueue(null);
       const why = q.status === 'rejected' ? q.reason?.message : (q.value as any).error?.message;
@@ -143,17 +157,45 @@ export default function Deletions() {
         note: r.note ?? null,
       })));
       setLogWhy(null);
+      logWhole = true;
     } else {
       setLog(null);
       setLogWhy(`The record of erasures already carried out did not come back${l.reason?.message ? `: ${l.reason.message}` : '.'}`);
     }
+    return queueWhole && logWhole;
   }, []);
+
+  /*
+   * The statutory clock, kept running.
+   *
+   * `days_remaining` is computed by the `pending_deletions` view AT READ TIME,
+   * so before this every figure on this screen was frozen at the instant the
+   * tab opened: "Soonest due 3d" stayed 3d all morning, "Past thirty days"
+   * stayed at whatever it was, the amber and red bands never moved, and a
+   * member who submitted an erasure request an hour after the page loaded never
+   * appeared at all. The only reload was `run()`, after an erasure.
+   *
+   * This is the one screen in the product where that is a legal exposure rather
+   * than an inconvenience — the paragraph at the top of the page offers "how
+   * long is left of the thirty days this product promises them in its store
+   * listing", a sentence that is true when the tab opens and quietly stops
+   * being true on a screen an owner works through over a morning.
+   *
+   * Five minutes, plus every return to the tab. A day is 288 of these and the
+   * queue is small; the cost is nothing and the alternative is a clock that
+   * does not tick.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(load, { everyMs: 5 * 60_000 });
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       // An account with no gym never ran `load()`, so `queue` stayed null with
       // `queueWhy` null and `unread` resolved to 'loading' — a statutory
@@ -164,13 +206,20 @@ export default function Deletions() {
       const t = await readTenant(supabase, who.tenantId);
       if (!live) return;
       setGymName(t.name); setGymErr(t.error);
-      await load();
+      // Through `refresh` rather than `load` directly, so the first read stamps
+      // the same way every later one does. A stamp that only appeared after a
+      // manual refresh would be worse than none: the figures would go from
+      // unlabelled to labelled without changing.
+      refresh();
     })();
     return () => { live = false; };
-  }, [load]);
+  }, [load, refresh]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -240,7 +289,7 @@ export default function Deletions() {
       // store listing promises are already spent.
       render: (p) => p.daysRemaining == null
         ? <span className="dash">unknown</span>
-        : <span style={{ color: p.daysRemaining <= 0 ? 'var(--crit)' : p.daysRemaining <= 7 ? '#f0c04e' : 'var(--ink2)' }}>
+        : <span style={{ color: p.daysRemaining <= 0 ? 'var(--crit)' : p.daysRemaining <= 7 ? 'var(--warn)' : 'var(--ink2)' }}>
             {p.daysRemaining <= 0 ? 'Overdue' : `${p.daysRemaining}d`}
           </span> },
     { key: 'act', header: '', value: () => 0, align: 'right',
@@ -289,6 +338,13 @@ export default function Deletions() {
         <Kpi label="Erased to date" text={log ? String(log.length) : null}
              note={log ? 'every one on record, not the last fifty' : undefined} />
       </div>
+
+      {/* The age of every figure above, and the only control in this console
+          that re-reads a screen without throwing away the page. `days_remaining`
+          is computed by the view at READ time, so without this line the clock
+          on the tiles is the clock at the moment the tab was opened. */}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="the erasure queue" style={{ margin: '-14px 0 22px' }} />
 
       {confirming ? (
         <div style={{
@@ -339,11 +395,14 @@ export default function Deletions() {
 
       <Section title="Waiting" sub="Oldest request first, because that is the one closest to its deadline.">
         {unread ? (
-          <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
+          // Announced, and polite: the crit banner above has already
+          // interrupted with the database's own sentence. This one says which
+          // SECTION has no rows, which is the part that was silent.
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
             {unread === 'loading' ? 'Loading…' : 'Could not read the queue. The banner above says why.'}
           </div>
         ) : (
-          <DataTable
+          <DataTable noun="erasure requests"
             rows={rows} columns={cols} rowKey={(p) => p.subjectId}
             empty="Nobody has asked to be erased. That is the good state rather than a blank screen — this read came back, and it came back empty."
           />
@@ -356,11 +415,11 @@ export default function Deletions() {
       >
         {logWhy ? <Banner tone="crit">{logWhy}</Banner> : null}
         {log === null ? (
-          <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
             {logWhy ? 'Could not read the record of erasures already carried out.' : 'Loading…'}
           </div>
         ) : (
-          <DataTable
+          <DataTable noun="erasures carried out"
             rows={log} columns={logCols} rowKey={(a) => a.id}
             empty="No erasure has been carried out on this gym yet."
           />
@@ -391,18 +450,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
       </div>
       {children}
     </section>
-  );
-}
-
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
   );
 }
 

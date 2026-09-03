@@ -107,6 +107,7 @@
 // new decision and belongs in that header first.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { assertRootFloors } from './gate-floor.mjs';
 
 const ROOT = process.cwd();
 const ROOTS = ['app', 'src/ui'];
@@ -293,7 +294,16 @@ function positionedNear(lines, i) {
 }
 
 const files = [];
-for (const r of ROOTS) walk(join(ROOT, r), files);
+/* Counted per ROOT, not just in total. A single total threshold cannot notice a
+ * root going missing, because the other roots cover for it — see
+ * scripts/gate-floor.mjs for the arithmetic and why 150-of-781 was not a guard. */
+const perRoot = new Map();
+for (const r of ROOTS) {
+  const before = files.length;
+  walk(join(ROOT, r), files);
+  perRoot.set(r, files.length - before);
+}
+assertRootFloors('check:rtl', perRoot);
 
 // A check that inspects no files passes every time. check-reads.mjs shipped
 // once having read nothing and reported success; the same guard, for the same

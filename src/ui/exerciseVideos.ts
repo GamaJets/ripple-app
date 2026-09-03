@@ -39,6 +39,10 @@ import { USE_SUPABASE } from '../lib/config';
 import { exerciseSlug } from '../lib/exerciseId';
 import { writeFailure } from '../lib/wroteRows';
 import { reportError } from '../lib/reportError';
+import {
+  VIDEO_BUCKET, exerciseVideoPath, videoUploadFailureLine, videoUploadRefusal,
+  type VideoUploadRefusal,
+} from '../lib/exerciseVideoUpload';
 
 /** Who the trainer decided may watch a clip. Mirrors the CHECK constraint on
  *  exercise_videos.visibility; 'private' still reaches anyone named in
@@ -70,6 +74,12 @@ const KEY = 'repple.exerciseVideos';
 const SIGNED_TTL = 60 * 60; // an hour is longer than any set, shorter than a share
 let SEQ = 1;
 
+/** Eight characters of randomness beside the millisecond, the same shape
+ *  coachLogo.ts, injuryDocs.ts and progressPhotos.ts already use. */
+function newToken(): string {
+  return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+}
+
 /** Video upload is available whenever the backend is on (storage + table). */
 export const videoUploadAvailable = () => USE_SUPABASE;
 
@@ -79,23 +89,64 @@ export const videoUploadAvailable = () => USE_SUPABASE;
  * It used to return a public URL, which is what made the bucket public and the
  * permission model decorative. The path is what gets stored; the URL is minted
  * per viewer, per hour, by playbackUrl().
+ *
+ * ── Why this no longer upserts ────────────────────────────────────────────
+ *
+ * This was `${uid}/${Date.now()}.mp4` with `upsert: true`, and it was the only
+ * `upsert: true` against storage anywhere in the repository — injuryDocs.ts,
+ * messaging.ts, avatarUpload.ts and coachLogo.ts all pass `upsert: false`.
+ * `upsert: true` sends `x-upsert`, which makes the write an
+ * `insert … on conflict do update`: a REPLACEMENT of the bytes behind a key
+ * that a named client may already hold a grant and a signed URL for, with no
+ * version, no checksum and no modified-at anywhere downstream that could show
+ * it happened. supabase/parts/1150 removes `exvid_object_u` — the only UPDATE
+ * policy on `storage.objects` in the project — and names this as its follow-up.
+ *
+ * So the write asks for a NEW object every time, and the key is built to be new
+ * every time: `exerciseVideoPath()` puts a random token beside the millisecond,
+ * the way coachLogoPath() and coachDocPath() already do. A millisecond alone is
+ * not a unique key — two taps inside one millisecond collide, and `Date.now()`
+ * is not monotonic across a clock correction on a phone.
+ *
+ * ── And a refused upload now says which refusal it was ────────────────────
+ *
+ * The failure path was `if (error) return null` with nothing else: no report,
+ * and no way for the screen to tell "you are signed out" from "that key is
+ * taken" from "the network died". `onFailure` is handed the sentence for the
+ * actual cause, and the cause is reported either way — so a refusal that
+ * reaches nobody's eyes still reaches the error log rather than vanishing.
  */
-export async function uploadExerciseVideo(uri: string): Promise<string | null> {
+export async function uploadExerciseVideo(
+  uri: string,
+  onFailure?: (line: string) => void,
+): Promise<string | null> {
   if (!USE_SUPABASE || !uri) return null;
+  const fail = (reason: VideoUploadRefusal, detail: unknown): null => {
+    const line = videoUploadFailureLine(reason);
+    reportError('exerciseVideos.uploadExerciseVideo', detail ?? new Error(line), { reason });
+    onFailure?.(line);
+    return null;
+  };
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id;
-    if (!uid) return null;
+    // Not a silent null. A coach whose session lapsed while the picker was open
+    // is the commonest way to arrive here, and "check your connection" is the
+    // one piece of advice that cannot fix it.
+    if (!uid) return fail('signed-out', new Error('no signed-in user'));
     const ab = await (await fetch(uri)).arrayBuffer();
     // The folder is the uploader's id: that is the whole of the storage write
     // rule (exvid_object_w), so a path shaped any other way is rejected.
-    const path = `${uid}/${Date.now()}.mp4`;
+    const path = exerciseVideoPath(uid, Date.now(), newToken());
     const { error } = await supabase.storage
-      .from('exercise-videos')
-      .upload(path, ab, { contentType: 'video/mp4', upsert: true });
-    if (error) return null;
+      .from(VIDEO_BUCKET)
+      .upload(path, ab, { contentType: 'video/mp4', upsert: false });
+    if (error) return fail(videoUploadRefusal(error), error);
     return path;
-  } catch { return null; }
+  } catch (e) {
+    // fetch() on the local file, or the upload with no reply at all.
+    return fail(videoUploadRefusal(e), e);
+  }
 }
 
 /**
@@ -112,7 +163,7 @@ export async function playbackUrl(v: Pick<VideoItem, 'url' | 'path'>): Promise<s
   if (!v.path || !USE_SUPABASE) return null;
   try {
     const { data, error } = await supabase.storage
-      .from('exercise-videos')
+      .from(VIDEO_BUCKET)
       .createSignedUrl(v.path, SIGNED_TTL);
     if (error) return null;
     return data?.signedUrl ?? null;
@@ -376,7 +427,17 @@ export function useExerciseVideos() {
       const why = writeFailure('That clip', r);
       if (why) { reportError('exerciseVideos.removeVideo', new Error(why), { id }); return false; }
       if (target?.path) {
-        try { await supabase.storage.from('exercise-videos').remove([target.path]); } catch { /* the row is gone; a stray file is not worth failing the delete */ }
+        // Swallowed on purpose, and the reason is stronger than it used to be.
+        // This read "the row is gone; a stray file is not worth failing the
+        // delete", which was a shrug at bytes nobody would chase. There is no
+        // stray file now: the row delete above fires `trg_exercise_video_deleted`
+        // (supabase/parts/1152), which queues `exercise-videos` + this path into
+        // `object_purge` in the same transaction, and the drain sends the DELETE.
+        // So this call is the fast path, not the only path — it clears the object
+        // immediately when it works, and when it does not, the queue still has it.
+        // A double delete is expected and handled: the drain treats 404 as
+        // 'already absent' rather than as a failure.
+        try { await supabase.storage.from(VIDEO_BUCKET).remove([target.path]); } catch { /* the queue has this path; see above */ }
       }
       setRemote((p) => p.filter((x) => x.id !== id));
       return true;

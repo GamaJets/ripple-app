@@ -23,7 +23,11 @@ import { useFoodLog } from '../../src/ui/foodLog';
 // governed the meal planner and nothing else, and this screen offered prawns
 // with a plus button beside them.
 import { useClientData } from '../../src/ui/clientData';
-import { dishAllergens, dishAllergenMark, DISH_MARK_CAVEAT } from '../../src/lib/foodAllergens';
+// `dishMarkNotice`, not `cd.avoid.length`. An empty exclusion list and an
+// exclusion list that could not be read are the same value on this provider,
+// and drawing them the same way took the marks AND the caveat off the screen
+// together — which is the picture of a checked, clear menu.
+import { dishAllergens, dishAllergenMark, dishMarkNotice } from '../../src/lib/foodAllergens';
 import { Flag } from '../../src/ui/kit';
 import { CUISINES, PORTIONS, searchDishes, estimateDish, type Dish } from '../../src/lib/restaurant';
 import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
@@ -43,6 +47,10 @@ export default function Restaurant() {
     const base = searchDishes(q, 200);
     return cuisine ? base.filter((d) => d.cuisine === cuisine) : base;
   }, [q, cuisine]);
+
+  // Whether this screen knows the member's exclusions, and what it must say
+  // when it does not. `cd.profileStatus` is the read that fills `cd.avoid`.
+  const marks = dishMarkNotice(cd.profileStatus, cd.avoid.length);
 
   const est = sel ? estimateDish(sel, portion) : null;
   const logIt = async () => {
@@ -106,9 +114,15 @@ export default function Restaurant() {
           {/* The standing sentence, above the rows. Marks with no caveat read
               the wrong way round: an allergic member takes an unmarked row as
               cleared, and nothing here has cleared anything. */}
-          {cd.avoid.length ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{DISH_MARK_CAVEAT}</Flag> : null}
+          {marks.text ? (
+            <Flag tone={marks.state === 'unknown' ? t.crit : marks.state === 'checking' ? t.ink3 : t.warn}
+              style={{ marginBottom: sp.md }}>{marks.text}</Flag>
+          ) : null}
           {results.map((d, i) => {
-            const inIt = dishAllergens(d.name, cd.avoid);
+            // Only when the exclusions were actually read. Marking against a
+            // list that is empty because nothing came back would put a mark on
+            // nothing and leave every other row looking cleared.
+            const inIt = marks.marked ? dishAllergens(d.name, cd.avoid) : [];
             const mark = dishAllergenMark(inIt);
             return (
             <View key={d.id}>
@@ -153,9 +167,17 @@ export default function Restaurant() {
               <Text style={{ ...ty.title, color: t.ink, marginTop: 4, marginBottom: sp.lg }}>{sel.name}</Text>
               {/* On the sheet with the Add button on it, not only in the list.
                   This is the moment the dish goes into the member's day. */}
-              {dishAllergenMark(dishAllergens(sel.name, cd.avoid)) ? (
+              {marks.marked && dishAllergenMark(dishAllergens(sel.name, cd.avoid)) ? (
                 <Flag tone={t.crit} style={{ marginBottom: sp.lg }}>
-                  {dishAllergenMark(dishAllergens(sel.name, cd.avoid))} — one of the things you asked to avoid. {DISH_MARK_CAVEAT}
+                  {dishAllergenMark(dishAllergens(sel.name, cd.avoid))} — one of the things you asked to avoid. {marks.text}
+                </Flag>
+              ) : !marks.marked ? (
+                /* The sheet is the moment the dish goes into the member's day,
+                   so the absence of a mark here is the absence that matters
+                   most. Under an unread exclusion list it says so rather than
+                   showing a sheet with nothing on it. */
+                <Flag tone={marks.state === 'unknown' ? t.crit : t.ink3} style={{ marginBottom: sp.lg }}>
+                  {marks.text}
                 </Flag>
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Portion</Text>

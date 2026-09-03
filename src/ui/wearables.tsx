@@ -72,6 +72,21 @@ interface Value {
   syncAll: () => void;
   /** Combined "today" roll-up across every connected device (for the dashboard). */
   today: { activeKcal: number | null; totalKcal: number | null; steps: number | null; heartRateAvg: number | null; heartRateLatest: number | null };
+  /**
+   * Which device each figure on `today` actually came from — the provider id,
+   * or null where there is no figure.
+   *
+   * Every field above picks ONE device's number, and the screen that renders
+   * them names the device beside each one. It had no way to ask which, so
+   * app/(client)/devices.tsx named the first CONNECTED provider that published
+   * the field — and `appleHealth` is element zero of the registry, so a member
+   * wearing an Apple Watch in the day and a WHOOP overnight saw WHOOP's figure
+   * attributed to the Apple Watch. They open Apple Health, find a different
+   * number, and stop believing the screen — which is the exact failure the
+   * `Math.max` note below was written to end, arriving one line later. The
+   * figure was honest and the sentence beside it was not.
+   */
+  todayFrom: { activeKcal: string | null; totalKcal: string | null; steps: string | null; heartRateAvg: string | null; heartRateLatest: string | null };
 }
 
 const Ctx = createContext<Value | null>(null);
@@ -151,7 +166,28 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(async (id: ProviderId) => {
     const p = providerById(id);
-    if (p) { try { await p.disconnect(); } catch (e) { reportError('wearables.disconnect', e, { provider: id }); } }
+    // A failed disconnect is not a disconnect, and everything below this line
+    // acts as though it were one: the state goes to 'disconnected', the metrics
+    // are cleared and the measured nights are deleted. That was survivable
+    // while `disconnectVendor` could not tell anybody it had failed — it could
+    // not, because supabase-js resolves on a database error and the delete's
+    // `error` was never read — and it stopped being survivable the moment it
+    // could. A member refused by the server was shown Disconnected over a token
+    // that was still on their account, and since launch asks the SERVER first,
+    // the watch came back the next morning.
+    //
+    // Rethrown rather than reported, so the screen can say so. Nothing here
+    // runs on the way out: the sleep this device measured is deleted a few
+    // lines down and is not recoverable, and deleting it over a connection that
+    // is still live would take the nights AND leave the watch.
+    if (p) {
+      try {
+        await p.disconnect();
+      } catch (e) {
+        reportError('wearables.disconnect', e, { provider: id });
+        throw e;
+      }
+    }
     setState(id, 'disconnected');
     setMetrics((prev) => ({ ...prev, [id]: null }));
     // Cleared, not left at whatever the last read said. A device that has been
@@ -285,20 +321,47 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(timer);
   }, [syncAll, sync, liveMode]);
 
-  const connectedMetrics = PROVIDERS
+  // The connected providers WITH their ids, so a figure can say which device it
+  // came from. It used to be the metrics alone, which is why nothing
+  // downstream could answer that question and the screen guessed.
+  const connectedPairs = PROVIDERS
     .filter((p) => states[p.meta.id] === 'connected')
-    .map((p) => metrics[p.meta.id])
-    .filter(Boolean) as DailyMetrics[];
+    .map((p) => ({ id: p.meta.id as string, m: metrics[p.meta.id] }))
+    .filter((x): x is { id: string; m: DailyMetrics } => !!x.m);
+  const connectedMetrics = connectedPairs.map((x) => x.m);
 
   const pick = (key: keyof DailyMetrics) => {
     const vals = connectedMetrics.map((m) => m[key]).filter((v) => typeof v === 'number') as number[];
     return vals.length ? vals : null;
+  };
+  /** The highest value for this field and the device that reported it. Ties go
+   *  to the first in registry order, which is stable and arbitrary — but the id
+   *  it returns is always a device that really published that number. */
+  const highest = (key: keyof DailyMetrics): { v: number; id: string } | null => {
+    let best: { v: number; id: string } | null = null;
+    for (const { id, m } of connectedPairs) {
+      const v = m[key];
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+      if (!best || v > best.v) best = { v, id };
+    }
+    return best;
   };
   const kcals = pick('activeKcal');
   const totals = pick('totalKcal');
   const steps = pick('steps');
   const hrs = pick('heartRateAvg');
   const hrl = pick('heartRateLatest');
+  const kcalTop = highest('activeKcal');
+  const totalTop = highest('totalKcal');
+  const stepTop = highest('steps');
+  const hrTop = highest('heartRateAvg');
+  // The LAST reading rather than the highest, so its source is the last device
+  // in the list that published one — the same one `heartRateLatest` takes.
+  const hrlLast = (() => {
+    let last: string | null = null;
+    for (const { id, m } of connectedPairs) if (typeof m.heartRateLatest === 'number') last = id;
+    return last;
+  })();
   const today = {
     activeKcal: kcals ? Math.max(...kcals) : null,
     // Kept apart from activeKcal rather than folded into it. WHOOP publishes
@@ -327,6 +390,15 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     heartRateAvg: hrs ? Math.round(Math.max(...hrs)) : null,
     heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,
   };
+  // Computed from the same pass that chose each figure, so the name beside a
+  // number and the number cannot come from two different devices.
+  const todayFrom = {
+    activeKcal: kcalTop?.id ?? null,
+    totalKcal: totalTop?.id ?? null,
+    steps: stepTop?.id ?? null,
+    heartRateAvg: hrTop?.id ?? null,
+    heartRateLatest: hrlLast,
+  };
 
   // How much of that row is current. A provider that is connected and has never
   // answered is 'loading' rather than absent, because a roll-up missing one of
@@ -338,7 +410,7 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     return worstStatus(...live.map((p) => syncStatus[p.meta.id] ?? 'loading'));
   }, [states, syncStatus]);
 
-  return <Ctx.Provider value={{ states, metrics, busy, lastSync, syncStatus, todayStatus, connect, disconnect, sync, syncAll, today, liveMode, setLiveMode }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ states, metrics, busy, lastSync, syncStatus, todayStatus, connect, disconnect, sync, syncAll, today, todayFrom, liveMode, setLiveMode }}>{children}</Ctx.Provider>;
 }
 
 export function useWearables(): Value {

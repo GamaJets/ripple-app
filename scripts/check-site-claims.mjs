@@ -1,0 +1,717 @@
+#!/usr/bin/env node
+// The public site is the one surface with no gate on it, and it has been wrong
+// about the product three times this week.
+//
+// ── what was actually wrong, and what it cost ─────────────────────────────
+//
+// `web/` is about twenty static pages. It is the last thing a stranger reads
+// before they sign up, the thing a gym owner reads before they pay, and the
+// thing a regulator reads if anybody ever asks. It is also the only part of
+// this repo that no check has ever looked at. It was audited once and corrected
+// twice on the same day, and BOTH audits found it stating things the code had
+// stopped doing months earlier:
+//
+//   · `web/signup.html` promised "At least 6 characters" and carried
+//     `minlength="6"` on the box. `PASSWORD_MIN` is 8, and Supabase then wants
+//     a lowercase letter, an uppercase letter, a digit and a symbol on top. A
+//     tester typed six characters, was refused, and was then refused once more
+//     per unmet class. Two of the people who could not get in that week were on
+//     the password screens. The sweep that fixed the same sentence in
+//     `app/welcome.tsx`, `app/reset-password.tsx`, `src/ui/components.tsx` and
+//     `web/reset-password.html` missed the ACCOUNT-CREATION page — the first
+//     password anybody types.
+//
+//   · `web/pricing.html` said nothing is charged. `DEFAULT_FEE_PCT` is 10 and
+//     it is applied to every Connect charge. "We take nothing" is not a stale
+//     number, it is a false statement about money on the page whose entire job
+//     is money.
+//
+//   · `web/privacy.html` named the processors that receive personal data and
+//     did not name `api.anthropic.com` or `api.ocr.space`. Both are called from
+//     `supabase/functions/**` today. Anthropic receives what a client types to
+//     the coach, their meal photographs and — behind a switch — their injury
+//     areas; OCR.space receives the WHOLE of a physiotherapy report. Two live
+//     processors of health data, undisclosed. That is the finding this file
+//     exists for, and it is the one that is not merely embarrassing.
+//
+//   · `web/client.html` offered "WHOOP, Oura, Fitbit, Garmin — connect the ones
+//     you use." Fitbit has an empty client id in every build profile and Garmin
+//     is `special: 'partnership'`, so neither can be connected by anybody. The
+//     app's own catalogue says so in `src/lib/wearables/registry.ts`, whose
+//     header records the same promise being removed from the DEVICE SCREEN for
+//     the same reason — and the marketing page kept making it.
+//
+//   · `web/security.html` described a consent step as unbuilt when all three
+//     layers of it existed, and its deletion chart read 42 tables when the live
+//     catalogue said 106.
+//
+// ── why this is a gate and not five more corrections ──────────────────────
+//
+// Every one of those was fixed by hand, and nothing stops the sixth. The
+// failure mode is not that somebody writes a lie; it is that somebody changes a
+// constant in `src/` and the sentence describing it, three directories away in
+// a file that no build step reads, keeps saying the old thing. Every other
+// invariant in this repo has a gate. The page a stranger reads before signing
+// up had none.
+//
+// ── the rule every check here obeys ───────────────────────────────────────
+//
+// A check may only exist if it can PARSE its truth out of the code. Nothing
+// below hardcodes 8, or 10, or 14, or the list of processors: each is read from
+// the file that decides it, so changing the code moves the gate rather than
+// creating a second thing to update. Where the truth could not be parsed the
+// claim is NOT gated — see "what this deliberately does not check" — because a
+// gate with false positives gets suppressed and then ignored, which is worse
+// than no gate at all.
+//
+//   A · Password minimum      web prose + minlength  vs  PASSWORD_MIN
+//                                                        src/lib/passwordRules.ts
+//   B · Platform fee          web prose              vs  DEFAULT_FEE_PCT
+//                                                        src/lib/directCharges.ts
+//   C · Trial length          web prose              vs  TRIAL_DAYS
+//                                                        src/lib/trialGate.ts
+//   D · Named processors      privacy.html           vs  every host literally
+//                                                        contacted from
+//                                                        supabase/functions/**
+//   E · Connectable wearables a marked claim         vs  the cloud vendors that
+//                                                        have an OAuth entry, no
+//                                                        partnership gate and a
+//                                                        non-empty client id in
+//                                                        app.json or eas.json
+//   F · The deletion figure   security.html's chart is internally consistent
+//                             and carries a parseable provenance date
+//
+// ── what this deliberately does NOT check ─────────────────────────────────
+//
+//   · THE DELETION COUNTS THEMSELVES (66 / 74 / 106). They come from one query
+//     over the live database's foreign keys. This gate runs offline, in CI,
+//     with no credentials — by deliberate design, see the `//check:all` note in
+//     package.json — so it cannot know the true number and must not pretend to.
+//     What it CAN do is check the things that go wrong when somebody edits
+//     those numbers by hand, and those are check F: the screen-reader label
+//     repeating a figure the visible chart no longer shows, a bar drawn to the
+//     old value, and a provenance date that quietly stops being a date. The
+//     numbers stay a human job; re-run the catalogue query, update all three
+//     places, and move the stamp. Check F makes a partial edit fail loudly.
+//
+//   · WHETHER A PROCESSOR IS DESCRIBED CORRECTLY. Check D asserts presence of
+//     the name and nothing about the sentence around it. "Is this an accurate
+//     account of what Anthropic receives" is not a machine question.
+//
+//   · THE DEVICE TABLE ON support.html. It lists every device including the
+//     ones that cannot be connected, each with its own explanation, so there is
+//     no set for a gate to compare against. If Fitbit is ever registered, that
+//     table needs a human. Check E will fail on that day and this is the note
+//     that says where else to look.
+//
+//   · PRICES, DATES OTHER THAN THE ONE IN CHECK F, AND EVERY OTHER SENTENCE ON
+//     THE SITE. Not because they cannot be wrong, but because no file in this
+//     repo decides them, so there is nothing to compare them to.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { join, relative, extname } from 'node:path';
+
+const ROOT = new URL('..', import.meta.url).pathname;
+const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
+
+/**
+ * Violations that could not be cleared on the day this gate was written.
+ *
+ * A RATCHET, not an exemption: the count per page may fall and may never rise,
+ * and a count that has fallen without somebody lowering the number here is
+ * itself a failure — otherwise the list becomes a licence rather than a debt.
+ *
+ * Empty, because everything this found was fixed in the same change. It stays
+ * because the next person to find three violations they cannot clear needs
+ * somewhere to put them that is not a suppression.
+ */
+const KNOWN = new Map([
+  // ['web/example.html', { count: 1, why: 'why it is still there and what clears it' }],
+]);
+
+const problems = [];
+const fatal = [];
+const note = (page, line, claim, truth) => problems.push({ page, line, claim, truth });
+
+/* ── the source of truth, parsed ─────────────────────────────────────────── */
+
+/**
+ * `export const NAME = <number>;` out of a real source file.
+ *
+ * Fails the whole run when it cannot find it. A gate that cannot locate its
+ * source of truth must fail loudly rather than pass quietly: silently skipping
+ * check A because somebody renamed `PASSWORD_MIN` is exactly how the six came
+ * back the first time.
+ */
+function numericConstant(rel, name) {
+  if (!existsSync(join(ROOT, rel))) {
+    fatal.push(`${rel} does not exist, so the value of ${name} cannot be read. This gate refuses to pass without it.`);
+    return null;
+  }
+  const re = new RegExp(`export\\s+const\\s+${name}\\s*(?::[^=]+)?=\\s*(\\d+(?:\\.\\d+)?)\\s*;`);
+  const m = re.exec(read(rel));
+  if (!m) {
+    fatal.push(`${rel} no longer declares \`export const ${name} = <number>\`. Either it moved or it is now computed — either way the site claim that mirrors it is now ungated. Point this gate at the new home.`);
+    return null;
+  }
+  return Number(m[1]);
+}
+
+const PASSWORD_MIN = numericConstant('src/lib/passwordRules.ts', 'PASSWORD_MIN');
+const FEE_PCT = numericConstant('src/lib/directCharges.ts', 'DEFAULT_FEE_PCT');
+const TRIAL_DAYS = numericConstant('src/lib/trialGate.ts', 'TRIAL_DAYS');
+
+/* ── the pages ───────────────────────────────────────────────────────────── */
+
+function walk(dir, out = []) {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else if (extname(e.name) === '.html') out.push(p);
+  }
+  return out;
+}
+
+const PAGES = walk(join(ROOT, 'web')).map((p) => relative(ROOT, p)).sort();
+
+// The empty-set guard. There are twenty-odd pages under web/; a run that finds
+// a handful has been pointed at the wrong tree, and a run that finds none would
+// otherwise print "ok" and a count of zero.
+if (PAGES.length < 15) {
+  fatal.push(`only ${PAGES.length} pages found under web/, which cannot be right — the site has about twenty. Refusing to pass.`);
+}
+
+/** Entities the site actually uses, so prose matching sees the sentence a reader sees. */
+const ENTITIES = [
+  [/&nbsp;/g, ' '], [/&amp;/g, '&'], [/&mdash;/g, '—'], [/&ndash;/g, '–'],
+  [/&rsquo;/g, "'"], [/&lsquo;/g, "'"], [/&ldquo;/g, '"'], [/&rdquo;/g, '"'],
+  [/&rarr;/g, '→'], [/&hellip;/g, '…'], [/&lt;/g, '<'], [/&gt;/g, '>'],
+  [/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d))],
+];
+
+/** Tags out, entities in, curly apostrophes flattened so one pattern matches both. */
+function text(html) {
+  let s = String(html).replace(/<[^>]*>/g, ' ');
+  for (const [re, to] of ENTITIES) s = s.replace(re, to);
+  return s.replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+/** The whole page as a reader sees it: script and style bodies dropped as well. */
+function pageText(html) {
+  return text(String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' '));
+}
+
+/** The words a person writes a small number in. Both forms are claims. */
+const WORD_NUMBERS = new Map(Object.entries({
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19, twenty: 20, thirty: 30, forty: 40, sixty: 60, ninety: 90,
+}));
+const NUM = '\\d+|' + [...WORD_NUMBERS.keys()].join('|');
+const asNumber = (s) => (/^\d+$/.test(s) ? Number(s) : WORD_NUMBERS.get(s.toLowerCase()));
+
+/**
+ * The escape hatch: `site-claim-ok: <reason>` in the unbroken comment run
+ * DIRECTLY above the line it excuses.
+ *
+ * Directly above, and only there, so it excuses one line rather than a file —
+ * and with a written reason, so the next reader learns why rather than that
+ * somebody once wanted a green run. A bare marker with nothing after it is not
+ * a reason and does not count.
+ */
+const COMMENT = /^\s*(?:<!--|\/\/|\*|\/\*)/;
+function excused(lines, i) {
+  for (let j = i - 1; j >= 0; j--) {
+    const t = lines[j].trim();
+    if (t === '') return false;
+    if (!COMMENT.test(t)) return false;
+    const m = /site-claim-ok:\s*(\S.*?)\s*(?:-->|\*\/)?\s*$/.exec(t);
+    if (m && m[1].length >= 8) return true;
+  }
+  return false;
+}
+
+/* ── A · the password minimum ────────────────────────────────────────────── */
+//
+// Three shapes, all of which have appeared on these pages: the prose
+// ("at least eight characters"), the checklist item ("8 characters or more")
+// and the browser's own `minlength`, which was 6 while the sentence beside it
+// said 6 and the server said 8.
+//
+// Scoped to pages that mention a password at all, so a length stated about
+// something else — a join code, a gym name — is not dragged in. And every page
+// with an `autocomplete="new-password"` field, which is to say every page where
+// somebody CHOOSES a password, must state the minimum somewhere: silence on
+// those two pages is the original bug wearing a different face.
+
+const PW_CLAIMS = [
+  new RegExp(`(?:at least|minimum of|no fewer than|a minimum)\\s+(${NUM})\\s+characters`, 'i'),
+  new RegExp(`(${NUM})\\s+characters or (?:more|longer)`, 'i'),
+];
+
+function checkPasswords(page, raw, lines) {
+  if (!/password/i.test(raw)) return;
+  let stated = 0;
+  lines.forEach((line, i) => {
+    if (COMMENT.test(line)) return;              // prose about the old bug, not the bug
+    const t = text(line);
+    for (const re of PW_CLAIMS) {
+      const m = re.exec(t);
+      if (!m) continue;
+      stated++;
+      const said = asNumber(m[1]);
+      if (said !== PASSWORD_MIN && !excused(lines, i)) {
+        note(page, i + 1, `states a password minimum of ${m[1]} — "${m[0]}"`,
+          `PASSWORD_MIN is ${PASSWORD_MIN} (src/lib/passwordRules.ts, established by probing the signup endpoint)`);
+      }
+    }
+    const ml = /minlength="(\d+)"/.exec(line);
+    if (ml && /type="password"/.test(line)) {
+      stated++;
+      if (Number(ml[1]) !== PASSWORD_MIN && !excused(lines, i)) {
+        note(page, i + 1, `a password field carries minlength="${ml[1]}"`,
+          `PASSWORD_MIN is ${PASSWORD_MIN} — the browser would accept a password the server then refuses`);
+      }
+    }
+  });
+  if (/autocomplete="new-password"/.test(raw) && stated === 0) {
+    note(page, 1, 'sets a new password and states no minimum length at all',
+      `PASSWORD_MIN is ${PASSWORD_MIN}. A page that asks somebody to choose a password has to say what will be accepted, or they find out one refusal at a time.`);
+  }
+}
+
+/* ── B · the platform fee ────────────────────────────────────────────────── */
+//
+// A percentage only counts as a fee claim when fee language sits within a line
+// of it. That is INCLUSION rather than exclusion, on purpose: the cost of the
+// rule being narrow is a fee claim phrased in some entirely new way going
+// unchecked, and the cost of it being wide is `width:100%`, "50–60% of max HR"
+// and every other percentage on the site turning this gate into noise. The
+// empty-set guard below is what stops the narrowness becoming silence.
+
+const FEE_CUES = /Repple keeps|Repple takes|platform fee|takes today|of anything sold|of what you sell|through Repple|Repple's (?:own )?checkout|goes back with it/i;
+
+function checkFee(page, lines, seen) {
+  lines.forEach((line, i) => {
+    if (COMMENT.test(line)) return;
+    const here = text(line);
+    if (!/%/.test(here)) return;
+    const window = [lines[i - 1], line, lines[i + 1]].filter(Boolean).map(text).join(' ');
+    if (!FEE_CUES.test(window)) return;
+    for (const m of here.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
+      seen.count++;
+      if (Number(m[1]) !== FEE_PCT && !excused(lines, i)) {
+        note(page, i + 1, `states a platform fee of ${m[1]}% — "${here.slice(Math.max(0, m.index - 40), m.index + 40).trim()}"`,
+          `DEFAULT_FEE_PCT is ${FEE_PCT} (src/lib/directCharges.ts), applied to every Connect charge`);
+      }
+    }
+  });
+}
+
+/* ── C · the trial length ────────────────────────────────────────────────── */
+//
+// Deliberately without an empty-set guard, and this is the one place the
+// asymmetry is right: the coach app's countdown gates nothing, so the sentence
+// describing it may legitimately disappear when the counter does. What must not
+// happen is the sentence outliving the constant.
+
+const TRIAL_CLAIMS = [
+  new RegExp(`(${NUM})[- ]day (?:free )?(?:trial|countdown)`, 'i'),
+  new RegExp(`(?:trial|countdown) (?:of|lasts|runs for) (${NUM}) days`, 'i'),
+  new RegExp(`(${NUM}) free days`, 'i'),
+];
+
+function checkTrial(page, lines) {
+  lines.forEach((line, i) => {
+    if (COMMENT.test(line)) return;
+    const t = text(line);
+    for (const re of TRIAL_CLAIMS) {
+      const m = re.exec(t);
+      if (!m) continue;
+      const said = asNumber(m[1]);
+      if (said !== TRIAL_DAYS && !excused(lines, i)) {
+        note(page, i + 1, `states a trial length of ${m[1]} — "${m[0]}"`,
+          `TRIAL_DAYS is ${TRIAL_DAYS} (src/lib/trialGate.ts)`);
+      }
+    }
+  });
+}
+
+/* ── D · the processors ──────────────────────────────────────────────────── */
+//
+// Every host literally named in a request from an edge function, mapped to the
+// company that answers it, and that company's name must appear on privacy.html.
+//
+// Presence, and nothing more. Whether the sentence around the name is a fair
+// account of what that company receives is a human question — but a company
+// that is CONTACTED and NOT NAMED is a mechanical question with one answer, and
+// it is the one that was wrong: Anthropic and OCR.space were both live and both
+// absent until the day this was written.
+//
+// The important half is the failure on an UNKNOWN host. A new `fetch` to a host
+// nobody has classified fails this gate until somebody decides whether it is a
+// processor and, if it is, discloses it. That is what makes this track the code
+// instead of tracking a list somebody has to remember to extend.
+
+const HOST_OWNERS = new Map([
+  ['api.anthropic.com', 'Anthropic'],
+  ['api.ocr.space', 'OCR.space'],
+  ['exp.host', 'Expo'],
+  ['api.prod.whoop.com', 'WHOOP'],
+  ['developer.whoop.com', 'WHOOP'],
+  ['api.ouraring.com', 'Oura'],
+  ['cloud.ouraring.com', 'Oura'],
+  ['api.fitbit.com', 'Fitbit'],
+  ['dev.fitbit.com', 'Fitbit'],
+  ['oauth2.googleapis.com', 'Google'],
+  ['www.googleapis.com', 'Google'],
+  ['googleads.googleapis.com', 'Google'],
+  ['graph.facebook.com', 'Meta'],
+  ['business-api.tiktok.com', 'TikTok'],
+]);
+
+/** Ours. Contacting our own site is not a disclosure. */
+const FIRST_PARTY = new Set(['www.repplefitness.com', 'repplefitness.com']);
+
+/** Reached, but no personal data goes there — each with the reason it is exempt. */
+const NOT_PROCESSORS = new Map([
+  ['esm.sh', 'a module CDN. It serves the edge function its own JavaScript at cold start; nothing about a person is sent to it.'],
+]);
+
+function edgeFunctionHosts() {
+  const dir = join(ROOT, 'supabase/functions');
+  const files = [];
+  (function w(d) {
+    let es; try { es = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of es) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) w(p);
+      else if (/\.tsx?$/.test(e.name)) files.push(p);
+    }
+  })(dir);
+  const hosts = new Map();                       // host → "rel:line" first seen
+  for (const f of files) {
+    const rel = relative(ROOT, f);
+    readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+      // A URL in a comment is documentation, not a request. `wearable-day`
+      // cites developer.whoop.com and dev.fitbit.com in its header for exactly
+      // that reason, and neither is a call.
+      if (COMMENT.test(line)) return;
+      for (const m of line.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)) {
+        const h = m[1].toLowerCase();
+        if (!hosts.has(h)) hosts.set(h, `${rel}:${i + 1}`);
+      }
+    });
+  }
+  return hosts;
+}
+
+function checkProcessors() {
+  const hosts = edgeFunctionHosts();
+  if (hosts.size < 8) {
+    fatal.push(`only ${hosts.size} hosts found across supabase/functions — the edge functions call more than that. Something is wrong with the scan; refusing to pass.`);
+    return;
+  }
+  const privacy = 'web/privacy.html';
+  if (!existsSync(join(ROOT, privacy))) {
+    fatal.push(`${privacy} does not exist. The processor disclosure has no home; refusing to pass.`);
+    return;
+  }
+  const disclosed = pageText(read(privacy));
+  if (disclosed.length < 3000) {
+    fatal.push(`${privacy} reads as only ${disclosed.length} characters of text, which cannot be the privacy policy. Refusing to pass.`);
+    return;
+  }
+  const missing = new Map();
+  for (const [host, where] of [...hosts].sort()) {
+    if (FIRST_PARTY.has(host) || NOT_PROCESSORS.has(host)) continue;
+    const owner = HOST_OWNERS.get(host);
+    if (!owner) {
+      fatal.push(`${where} contacts ${host}, and nothing here says who that is.\n`
+        + `      Decide, then record the decision in scripts/check-site-claims.mjs:\n`
+        + `        · a processor of personal data → add it to HOST_OWNERS *and* name that company on ${privacy}\n`
+        + `        · one of ours                  → FIRST_PARTY\n`
+        + `        · reached, but no personal data goes there → NOT_PROCESSORS, with the reason\n`
+        + `      Undisclosed processors is how api.anthropic.com and api.ocr.space came to be reading\n`
+        + `      injury reports and meal photographs while the privacy policy did not mention either.`);
+      continue;
+    }
+    // Word-boundary and case-sensitive: "Meta" must not be satisfied by
+    // "metabolic", and a <meta> tag is stripped before this runs.
+    const named = new RegExp(`\\b${owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(disclosed);
+    if (!named) missing.set(owner, [...(missing.get(owner) ?? []), `${host} (${where})`]);
+  }
+  for (const [owner, hostList] of missing) {
+    note(privacy, 1, `does not name ${owner}, which the code contacts: ${hostList.join(', ')}`,
+      `A company reachable from supabase/functions is a company that receives data. Name it under "Services we rely on" — or, if it genuinely receives nothing about a person, say so in NOT_PROCESSORS with the reason rather than deleting it from the scan.`);
+  }
+}
+
+/* ── E · the connectable wearables ───────────────────────────────────────── */
+//
+// Marker-anchored, and that is a considered choice rather than a shortcut.
+//
+// "Fitbit appears on a page" is not a violation: privacy.html, support.html and
+// delete-account.html all name Fitbit and Garmin correctly, precisely in order
+// to say they cannot be connected, and a gate that failed on those would be
+// pushing the site towards saying LESS. What is a violation is a page listing a
+// vendor as one you can connect. That is a claim about a set, so the page
+// declares where it makes it, and the gate compares the set.
+//
+//     <!-- site-claim: wearables-connect -->
+//     <li>…WHOOP and Oura…</li>
+//
+// The block after the marker, up to its closing tag, must name exactly the
+// cloud vendors this build can connect — no more (the Fitbit bug) and no fewer
+// (a vendor going live and the page not saying so). Apple Health and Health
+// Connect are not cloud OAuth and are ignored entirely, so a block may mention
+// them freely.
+//
+// Its blast radius is one marked claim per page, and that is stated plainly
+// here so nobody mistakes it for a sweep of the whole site.
+
+function connectableVendors() {
+  const registry = read('src/lib/wearables/registry.ts');
+  const oauth = read('src/lib/wearables/oauthConfig.ts');
+
+  // Cloud rows only. `appleHealth` is a native module and the Health Connect
+  // row is the phone's own store; neither has a client id to be missing.
+  const cloud = [];
+  for (const m of registry.matchAll(/cloud\(\{\s*id:\s*'([a-z0-9]+)'\s*,\s*name:\s*'([^']+)'[^}]*?kind:\s*'([a-z-]+)'/g)) {
+    if (m[3] === 'cloud') cloud.push({ id: m[1], name: m[2] });
+  }
+  if (cloud.length < 2) {
+    fatal.push(`src/lib/wearables/registry.ts yielded ${cloud.length} cloud vendors, which cannot be right — the catalogue lists at least WHOOP, Oura, Garmin and Fitbit. The shape of that file has changed; re-point this parser before trusting check E.`);
+    return null;
+  }
+
+  // Where each vendor's client id comes from, read out of oauthConfig rather
+  // than guessed from its id — the env var name is stated there.
+  const configuredIn = [];
+  const app = JSON.parse(read('app.json'));
+  configuredIn.push(app?.expo?.extra ?? {});
+  if (existsSync(join(ROOT, 'eas.json'))) {
+    const eas = JSON.parse(read('eas.json'));
+    for (const profile of Object.values(eas?.build ?? {})) if (profile?.env) configuredIn.push(profile.env);
+  }
+  const hasValue = (key) => configuredIn.some((src) => typeof src[key] === 'string' && src[key].trim() !== '');
+
+  const out = [];
+  for (const v of cloud) {
+    const at = oauth.indexOf(`id: '${v.id}'`);
+    const slice = at < 0 ? '' : oauth.slice(at, oauth.indexOf("id: '", at + 8) < 0 ? oauth.length : oauth.indexOf("id: '", at + 8));
+    const envVar = /clientId:\s*env\('([A-Z0-9_]+)'\)/.exec(slice)?.[1];
+    const partnership = /special:\s*'partnership'/.test(slice);
+    const connectable = at >= 0 && !partnership && !!envVar && hasValue(envVar);
+    // The catalogue name may be two words ("Oura Ring") while the page writes
+    // one. The first word is the vendor; the rest is the product.
+    out.push({ ...v, token: v.name.split(/[\s/]+/)[0], connectable });
+  }
+  return out;
+}
+
+const MARKER = /<!--\s*site-claim:\s*wearables-connect\b[^>]*-->/g;
+
+function checkWearables(vendors, seen) {
+  if (!vendors) return;
+  const can = vendors.filter((v) => v.connectable);
+  if (can.length === 0) {
+    fatal.push('no cloud wearable vendor resolves as connectable, which cannot be right — WHOOP and Oura both carry client ids in app.json. The parser in connectableVendors() has gone stale; refusing to pass on a set this gate does not believe.');
+    return;
+  }
+  for (const page of PAGES) {
+    const raw = read(page);
+    for (const m of [...raw.matchAll(MARKER)]) {
+      seen.markers++;
+      const from = m.index + m[0].length;
+      const end = [...raw.slice(from).matchAll(/<\/(li|p|td|div|span)>/g)][0];
+      const block = text(raw.slice(from, end ? from + end.index : from + 600));
+      const line = raw.slice(0, m.index).split('\n').length;
+      const found = vendors.filter((v) => new RegExp(`\\b${v.token}\\b`).test(block)).map((v) => v.token);
+      const wantList = can.map((v) => v.token);
+      const extra = found.filter((t) => !wantList.includes(t));
+      const absent = wantList.filter((t) => !found.includes(t));
+      if (!extra.length && !absent.length) continue;
+      const lines = raw.split('\n');
+      if (excused(lines, line - 1)) continue;
+      const why = [];
+      if (extra.length) why.push(`offers ${extra.join(', ')} as connectable`);
+      if (absent.length) why.push(`omits ${absent.join(', ')}, which this build CAN connect`);
+      note(page, line, `a wearables-connect claim ${why.join(' and ')} — "${block.slice(0, 120)}"`,
+        `the vendors with an OAuth entry, no partnership gate and a client id in app.json or eas.json are: ${wantList.join(', ')}`
+        + ` (${vendors.filter((v) => !v.connectable).map((v) => v.token).join(', ')} cannot be connected by anybody)`);
+    }
+  }
+  if (seen.markers === 0) {
+    fatal.push('no `<!-- site-claim: wearables-connect -->` marker anywhere under web/, so check E compared nothing.\n'
+      + '      The marker sits directly above the sentence that lists the devices a client can connect —\n'
+      + '      web/client.html had one. If that sentence has moved, move the marker with it. If it has been\n'
+      + '      deleted, delete check E rather than leaving a check that silently inspects nothing.');
+  }
+}
+
+/* ── F · the deletion figure ─────────────────────────────────────────────── */
+//
+// The three counts on this chart come from a query over the live database's
+// foreign keys, which this gate cannot run. So it checks the things that go
+// wrong when a person updates them by hand, and every one of those has already
+// happened to a chart in this repo:
+//
+//   1. The provenance stamp stops being a date, or starts being in the future.
+//      "Counted from the live catalogue" with no readable date is worse than no
+//      claim at all — it is authority without a way to check it.
+//   2. The `aria-label` and the visible chart disagree. The label repeats every
+//      figure in prose for a screen reader, so a partial edit leaves a blind
+//      reader with the old number and no way to know.
+//   3. A bar keeps the width it was drawn at for the old value. The axis says
+//      what a pixel is worth, so this is arithmetic, not judgement.
+//
+// If this fails after a re-count, the fix is to finish the edit — all three
+// places and the stamp — not to relax the check.
+
+function checkDeletionFigure() {
+  const page = 'web/security.html';
+  if (!existsSync(join(ROOT, page))) { fatal.push(`${page} does not exist; check F has nothing to inspect.`); return; }
+  const raw = read(page);
+  const at = raw.indexOf('id="deletion"');
+  if (at < 0) { fatal.push(`${page} has no id="deletion" section, so the account-deletion figures could not be located. Refusing to pass.`); return; }
+  const section = raw.slice(at, raw.indexOf('</section>', at) + 10);
+  const lineOf = (idx) => raw.slice(0, at + idx).split('\n').length;
+
+  // 1 · the stamp
+  const stamp = /Counted from the live catalogue,\s*(\d{1,2} [A-Z][a-z]+ \d{4})/.exec(section);
+  if (!stamp) {
+    note(page, lineOf(0), 'the deletion figures carry no readable "Counted from the live catalogue, <D Month YYYY>" stamp',
+      'These numbers move whenever a cascading foreign key is added and cannot be checked offline. The date is the only thing that tells a reader how old they are, so it is the part that is gated.');
+  } else {
+    const when = new Date(`${stamp[1]} UTC`);
+    if (Number.isNaN(when.getTime())) {
+      note(page, lineOf(stamp.index), `the deletion figures are stamped "${stamp[1]}", which is not a date`,
+        'It must parse as `D Month YYYY`, e.g. "3 September 2026".');
+    } else if (when.getTime() > Date.now() + 86400000) {
+      note(page, lineOf(stamp.index), `the deletion figures are stamped "${stamp[1]}", which is in the future`,
+        'A count cannot have been taken from a catalogue that has not happened yet.');
+    }
+  }
+
+  // 2 · the screen reader and the eyes read the same chart
+  const svg = /<svg[\s\S]*?<\/svg>/.exec(section);
+  if (!svg) { fatal.push(`${page}'s deletion section contains no <svg>; the chart this gate checks has been replaced. Re-point check F or remove it.`); return; }
+  const label = /aria-label="([^"]*)"/.exec(svg[0]);
+  if (!label) {
+    note(page, lineOf(svg.index), 'the deletion chart has no aria-label', 'A chart that only exists as pixels is a chart a blind reader is told nothing by.');
+  }
+  const bag = (s) => [...String(s).matchAll(/(\d+)\s+(tables|columns)\b/g)].map((m) => `${m[1]} ${m[2]}`).sort();
+  const visible = bag([...svg[0].matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => text(m[1])).join(' | '));
+  const spoken = label ? bag(label[1]) : [];
+  if (label && (spoken.join(', ') !== visible.join(', '))) {
+    note(page, lineOf(label.index), `the deletion chart's aria-label says [${spoken.join(', ')}] and the chart itself says [${visible.join(', ')}]`,
+      'They are the same chart. A screen reader is being given a figure the page no longer shows — which is what a half-finished re-count looks like.');
+  }
+  if (visible.length < 3) {
+    fatal.push(`${page}'s deletion chart yielded only ${visible.length} labelled figures. It has been redrawn and check F is no longer reading it. Refusing to pass.`);
+    return;
+  }
+
+  // 3 · every bar is drawn to its own number
+  const attrs = (tag) => Object.fromEntries([...tag.matchAll(/([a-z-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+  const ticks = [...svg[0].matchAll(/<text[^>]*x="([\d.]+)"[^>]*>\s*(\d+)\s*<\/text>/g)].map((m) => ({ x: Number(m[1]), v: Number(m[2]) }));
+  if (ticks.length >= 2) {
+    const lo = ticks.reduce((a, b) => (b.v < a.v ? b : a));
+    const hi = ticks.reduce((a, b) => (b.v > a.v ? b : a));
+    if (hi.v > lo.v) {
+      const perUnit = (hi.x - lo.x) / (hi.v - lo.v);
+      const bars = [...svg[0].matchAll(/<rect[^>]*\/>/g)].map((m) => attrs(m[0]))
+        .filter((a) => a.width && a.y && a.x).sort((a, b) => Number(a.y) - Number(b.y));
+      const vals = [...svg[0].matchAll(/<text[^>]*class="cx-val"[^>]*>([^<]*)<\/text>/g)]
+        .map((m) => ({ y: Number(attrs(m[0]).y ?? 0), n: Number(/(\d+)/.exec(text(m[1]))?.[1]) }))
+        .sort((a, b) => a.y - b.y);
+      if (bars.length === vals.length) {
+        bars.forEach((bar, i) => {
+          const want = vals[i].n * perUnit;
+          if (Math.abs(Number(bar.width) - want) > 0.75) {
+            note(page, lineOf(svg.index), `a deletion bar is ${bar.width}px wide for a value of ${vals[i].n}`,
+              `the axis runs ${lo.v} at x=${lo.x} to ${hi.v} at x=${hi.x}, so ${vals[i].n} is ${want.toFixed(1)}px. The number was changed and the bar was not.`);
+          }
+        });
+      }
+    }
+  }
+}
+
+/* ── run ─────────────────────────────────────────────────────────────────── */
+
+const seen = { count: 0, markers: 0 };
+if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
+  for (const page of PAGES) {
+    const raw = read(page);
+    const lines = raw.split('\n');
+    checkPasswords(page, raw, lines);
+    checkFee(page, lines, seen);
+    checkTrial(page, lines);
+  }
+  // The narrowness guard for check B. The site states the platform fee today,
+  // in several places. Finding none means the detector went blind, and a blind
+  // detector prints the same "ok" as a clean site.
+  if (seen.count === 0) {
+    fatal.push('check B found no platform-fee percentage anywhere under web/. pricing.html states one — so either the page stopped saying what Repple takes, or FEE_CUES no longer matches the way it says it. Both need a person.');
+  }
+  checkProcessors();
+  checkWearables(connectableVendors(), seen);
+  checkDeletionFigure();
+}
+
+if (fatal.length) {
+  console.error('\ncheck-site-claims cannot run honestly:\n');
+  for (const f of fatal) console.error(`  · ${f}\n`);
+  console.error('A gate that cannot find its source of truth must fail loudly, not pass quietly.\n');
+  process.exit(1);
+}
+
+const byPage = new Map();
+for (const p of problems) byPage.set(p.page, [...(byPage.get(p.page) ?? []), p]);
+
+const fresh = [];
+const shrunk = [];
+for (const [page, list] of byPage) {
+  const known = KNOWN.get(page);
+  if (!known) { fresh.push(...list); continue; }
+  if (list.length > known.count) fresh.push(...list.slice(known.count));
+}
+for (const [page, known] of KNOWN) {
+  const now = byPage.get(page)?.length ?? 0;
+  if (now < known.count) shrunk.push({ page, was: known.count, now });
+}
+
+if (fresh.length) {
+  console.error('\nThe public site states something the code does not do:\n');
+  for (const f of fresh) {
+    console.error(`  ${f.page}:${f.line}`);
+    console.error(`    claim  ${f.claim}`);
+    console.error(`    code   ${f.truth}\n`);
+  }
+  console.error(`${fresh.length} claim${fresh.length === 1 ? '' : 's'} the code does not support.`);
+  console.error('Change the PAGE. Do not soften a disclosure to make this pass: if the page understates');
+  console.error('what leaves the product, the page is the thing that is wrong. Where a sentence is right');
+  console.error('and this gate is wrong, put `site-claim-ok: <reason>` in the comment run directly above');
+  console.error('the line — with the reason, which is the part that is worth anything.\n');
+  process.exit(1);
+}
+
+if (shrunk.length) {
+  console.error('\nKNOWN is out of date — the ratchet only counts down if somebody turns it:\n');
+  for (const s of shrunk) console.error(`  ${s.page}: KNOWN says ${s.was}, the page has ${s.now}`);
+  console.error('\nLower the count in scripts/check-site-claims.mjs.\n');
+  process.exit(1);
+}
+
+console.log(`check-site-claims — ok, ${PAGES.length} public pages; password minimum ${PASSWORD_MIN}, `
+  + `platform fee ${FEE_PCT}% (${seen.count} statement${seen.count === 1 ? '' : 's'}), trial ${TRIAL_DAYS} days, `
+  + `every host contacted from supabase/functions named on privacy.html, `
+  + `${seen.markers} wearables-connect claim${seen.markers === 1 ? '' : 's'} matching the connectable set, `
+  + `deletion chart internally consistent and dated.`);

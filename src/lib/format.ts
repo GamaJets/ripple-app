@@ -110,6 +110,42 @@ export function weekdayName(dow: number): string {
   } catch { return EN_DOW[i]; }
 }
 
+/**
+ * The same, abbreviated — "Tue", and whatever the reader's language writes for
+ * it.
+ *
+ * Built the same way as `weekdayName` above and indexed the same way, because
+ * the screens that need one need the other: app/(trainer)/calendar.tsx had a
+ * hardcoded `['Sun', 'Mon', …]` read at roughly twenty sites, four of which are
+ * pushes that leave the coach's phone for a client's.
+ */
+const EN_DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export function weekdayNameShort(dow: number): string {
+  const i = ((Math.trunc(dow) % 7) + 7) % 7;
+  try {
+    return new Intl.DateTimeFormat(appLocale(), { weekday: 'short', timeZone: 'UTC' })
+      .format(new Date(Date.UTC(2024, 0, 7 + i)));
+  } catch { return EN_DOW_SHORT[i]; }
+}
+
+/**
+ * The twelve month names in full, in the reader's own language.
+ *
+ * The long twin of `monthNamesShort`. A calendar header reading "September
+ * 2026" needs the whole word, and slicing three characters off the short one is
+ * not the same thing in any language that does not abbreviate that way.
+ */
+const EN_MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export function monthNames(locale: string = appLocale()): string[] {
+  try {
+    const f = new Intl.DateTimeFormat(locale, { month: 'long' });
+    // Day 15, for the reason `monthNamesShort` gives below.
+    return Array.from({ length: 12 }, (_, m) => f.format(new Date(2026, m, 15)));
+  } catch {
+    return EN_MON;
+  }
+}
+
 export function monthNamesShort(locale: string = appLocale()): string[] {
   try {
     const f = new Intl.DateTimeFormat(locale, { month: 'short' });

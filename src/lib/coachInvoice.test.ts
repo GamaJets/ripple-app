@@ -36,6 +36,7 @@ import {
   type CoachInvoiceInput,
   type InvoiceDraft,
 } from './coachInvoice';
+import { fmtPointDay } from './format';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -392,9 +393,20 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
    assertion that would fail in one of them. */
 
 {
-  eq(invoiceDayLabel('2026-01-01'), '1 Jan 2026', 'the first of January stays the first of January');
-  eq(invoiceDayLabel('2026-12-31'), '31 Dec 2026', 'and the last of December');
-  eq(invoiceDayLabel('2026-08-31T22:30:00Z'), '31 Aug 2026', 'a timestamp is cut to its calendar day, not shifted by one');
+  // Derived rather than pinned. `fmtPointDay` renders in the reader's own
+  // language now, so '1 Jan 2026' was asserting an English formatter's output
+  // and not this function's contract — and a coach on a Norwegian phone was
+  // shown an English month on every invoice so that this literal could stay
+  // short. What these three actually claim survives the change: the day is
+  // read out of the STRING'S OWN PARTS and never shifted by a timezone.
+  eq(invoiceDayLabel('2026-01-01'), fmtPointDay(2026, 0, 1), 'the first of January stays the first of January');
+  eq(invoiceDayLabel('2026-12-31'), fmtPointDay(2026, 11, 31), 'and the last of December');
+  // The load-bearing one, and it needs no formatter at all: 22:30 UTC on the
+  // 31st is the 1st in Auckland and the 31st in London. Comparing the timestamp
+  // against the bare date proves the day was cut, not parsed, in every zone.
+  eq(invoiceDayLabel('2026-08-31T22:30:00Z'), invoiceDayLabel('2026-08-31'),
+    'a timestamp is cut to its calendar day, not shifted by one');
+  eq(invoiceDayLabel('2026-08-31T22:30:00Z'), fmtPointDay(2026, 7, 31), 'and that day is the one the string names');
   eq(invoiceDayLabel(''), '—', 'an empty date is a dash');
   eq(invoiceDayLabel('31/08/2026'), '—', 'and an unparseable one is a dash rather than a guess');
   eq(invoiceDayLabel('2026-13-01'), '—', 'a month that does not exist is a dash');
@@ -473,7 +485,11 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
 
   ok(d.text.includes('The issuer states this amount is being requested.'),
     'the claim the document was issued with survives a settlement, word for word');
-  ok(d.text.includes('the issuer states this was paid on 20 Aug 2026'),
+  // The date half is derived for the same reason as the block above: the
+  // document renders it in the reader's own language. The sentence around it
+  // is still pinned word for word, because THAT is the claim the document
+  // makes and it must not drift — only the rendering of the day may.
+  ok(d.text.includes(`the issuer states this was paid on ${fmtPointDay(2026, 7, 20)}`),
     'and the settlement is printed beside it, dated');
   ok(d.text.includes('How the issuer says it arrived: Bank transfer'),
     'with the coach’s own words about how, where they gave any');

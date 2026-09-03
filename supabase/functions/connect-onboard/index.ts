@@ -215,7 +215,25 @@ Deno.serve(async (req) => {
 
     let acct: Stripe.Account;
     try {
-      acct = await stripe.accounts.create(params);
+      // ── the second connected account ─────────────────────────────────────
+      //
+      // Read the note under the upsert below before changing this. Stripe
+      // creates the account; the row that is the only link between it and this
+      // coach fails; the next call finds no row and CREATES ANOTHER ONE. The
+      // note calls that outcome "a real connected account that this database
+      // has never heard of" and then lets the next call happen anyway.
+      //
+      // It is worse here than for a Customer, because an account's type is
+      // permanent and its KYC is a person's passport and bank details. A coach
+      // who ends up with two has to be told which of them to finish, and
+      // nothing in the app can tell them.
+      //
+      // Keyed on the coach, so a repeat inside Stripe's 24-hour idempotency
+      // window returns the FIRST account rather than making a second — and that
+      // window is the one that matters: it is the coach tapping "Set up
+      // payments" again on the same afternoon. Only reached when no row exists,
+      // so it can never collide with the reuse path above.
+      acct = await stripe.accounts.create(params, { idempotencyKey: `repple-connect-account:${userId}` });
     } catch (e) { return stripeError('account creation', e); }
     acctId = acct.id;
 

@@ -493,7 +493,7 @@ const NOW = Date.parse('2026-08-25T12:00:00Z');
 const sess = (o: Partial<PtSession>): PtSession => ({
   id: 's', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
   startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
-  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
 });
 
 ok(isDelivered({ outcome: 'completed' }), 'completed is delivered');
@@ -1046,7 +1046,7 @@ const NOW2 = Date.parse('2026-08-25T12:00:00Z');
 const s2 = (o: Partial<PtSession>): PtSession => ({
   id: 'x', trainerId: 't1', trainerName: 'Marcus', clientId: 'c1', clientName: 'Elena',
   startsAt: '2026-08-20T09:00:00Z', durationMin: 60, status: 'booked',
-  outcome: 'completed', outcomeAt: null, rateCents: 5000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
+  outcome: 'completed', outcomeAt: null, rateCents: 5000, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, ...o,
 });
 
 const fresh = s2({ id: 'a' });
@@ -2150,7 +2150,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   const book = (bookingId: string, memberId: string, startsAt: string, attended: boolean, status = 'booked'): MemberBooking =>
     ({ bookingId, memberId, classId: 'c-' + bookingId, classTitle: 'Spin', startsAt, status, attendedAt: attended ? startsAt : null });
   const sess = (id: string, clientId: string, startsAt: string, outcome: PtSession['outcome']): PtSession =>
-    ({ id, trainerId: 't1', trainerName: 'Coach', clientId, clientName: null, startsAt, durationMin: 60, status: 'booked', outcome, outcomeAt: null, rateCents: 20000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, });
+    ({ id, trainerId: 't1', trainerName: 'Coach', clientId, clientName: null, startsAt, durationMin: 60, status: 'booked', outcome, outcomeAt: null, rateCents: 20000, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, });
   const pass = (id: string, holderId: string, total: number, spent: number): GymPass =>
     ({ id, passTypeId: 'pt1', passTypeName: '10-pack', kind: 'pack', covers: 'visit', holderId, holderName: null, hostMemberId: null, issuedOn: '2026-08-01', expiresOn: null, usesTotal: total, usesSpent: spent, paidCents: null, currency: 'AED', note: null });
 
@@ -2639,7 +2639,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     id, trainerId: 't1', trainerName: 'Alex', clientId: 'm1', clientName: 'Sara',
     startsAt: new Date(2026, 5, 10, 9, 0).toISOString(), durationMin: 60,
     status: 'booked', outcome, outcomeAt: outcome ? '2026-06-10T10:00:00.000Z' : null,
-    rateCents, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
+    rateCents, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
   });
   const rec = (over: Partial<CloseRecord> = {}): CloseRecord => ({
     payments: sliceReady([junePay('a', 30000), junePay('b', 20000)]),
@@ -2845,6 +2845,35 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(life.volumeKg === 840 + 480 + 1040 + 400, 'lifetime tonnage is the sum of the months that have one');
   ok(life.kcal === 300, 'and only the entries that actually carried calories');
   ok(life.lifts === 1 && life.firstAt === at('2026-01-10'), 'one lift, first logged in January');
+
+  // ── a hold is not repetitions, in any of the three loops in longView.ts ──
+  //
+  // All three multiplied a plank's SECONDS by a load. The grid month, the
+  // lifetime tonnage and — worst — the Milestones timeline, where est1RM over
+  // forty-five "reps" lands as a personal record no real set can ever beat.
+  {
+    const holdLog = [
+      { t: at('2026-02-10'), exercise: 'Plank', sets: [[45, 10]] as [number, number][], timed: [true] },
+      { t: at('2026-02-11'), exercise: 'Bench', sets: [[5, 100]] as [number, number][] },
+    ];
+    const hCell = monthlyHistory(holdLog, NOW).find((c) => c.trained && c.volumeKg != null)!;
+    ok(hCell.volumeKg === 500, `the grid month prices the bench and not the plank, got ${hCell.volumeKg}`);
+    ok(hCell.topLift === 'Bench', 'so the top lift of the month is the lift, not the hold');
+    ok(lifetimeTotals(holdLog)!.volumeKg === 500, 'lifetime tonnage says the same');
+    const marks = prTimeline(holdLog);
+    ok(marks.every((m) => m.exercise !== 'Plank'),
+      'and no plank reaches the Milestones timeline as an estimated one-rep max');
+    ok(marks.length === 1 && marks[0].exercise === 'Bench', 'the real lift still records one');
+
+    // The bodyweight half was already right and stays right: a hold is skipped,
+    // a pull-up is priced.
+    const bwLog = [{ t: at('2026-02-12'), exercise: 'Pull-up', sets: [[10, 0]] as [number, number][], bw: [true] }];
+    const bwHist = [{ t: at('2026-01-01'), v: 80 }];
+    ok(lifetimeTotals(bwLog, bwHist)!.volumeKg === 800, 'ten pull-ups at 80 kg is still 800 kg');
+    const bwHold = [{ t: at('2026-02-12'), exercise: 'Plank', sets: [[45, 0]] as [number, number][], timed: [true], bw: [true] }];
+    ok(lifetimeTotals(bwHold, bwHist)!.volumeKg === null,
+      'while a bodyweight plank is no tonnage at all, not 3,600 kg');
+  }
 }
 
 
@@ -2878,8 +2907,8 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     { bookingId: 'b2', memberId: 'u2', classId: 'c1', classTitle: 'Spin, 45min', startsAt: '2026-08-01T06:00:00.000Z', status: 'booked', attendedAt: null },
   ];
   const sessIn: PtSession[] = [
-    { id: 's1', trainerId: 't1', trainerName: 'Dana', clientId: 'u1', clientName: '"Bob" Smith', startsAt: '2026-08-03T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: '2026-08-03T11:00:00.000Z', rateCents: 20000, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
-    { id: 's2', trainerId: 't1', trainerName: 'Dana', clientId: 'u2', clientName: "O'Brien, Sean", startsAt: '2026-08-04T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: null, outcomeAt: null, rateCents: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+    { id: 's1', trainerId: 't1', trainerName: 'Dana', clientId: 'u1', clientName: '"Bob" Smith', startsAt: '2026-08-03T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: 'completed', outcomeAt: '2026-08-03T11:00:00.000Z', rateCents: 20000, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
+    { id: 's2', trainerId: 't1', trainerName: 'Dana', clientId: 'u2', clientName: "O'Brien, Sean", startsAt: '2026-08-04T10:00:00.000Z', durationMin: 60, status: 'booked', outcome: null, outcomeAt: null, rateCents: null, rateCurrency: null, settlementId: null, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, },
   ];
   const ptIn: PassType[] = [
     { id: 'pt1', name: 'Guest pass', kind: 'guest', priceCents: 0, currency: 'AED', uses: 1, validDays: null, covers: 'visit', active: true },
@@ -3124,7 +3153,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ): PtSession => ({
     id, trainerId, trainerName: trainerId, clientId: null, clientName: null,
     startsAt: at(daysAgo), durationMin: 60, status: 'booked',
-    outcome, outcomeAt: outcome ? at(daysAgo) : null, rateCents, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
+    outcome, outcomeAt: outcome ? at(daysAgo) : null, rateCents, rateCurrency: null, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null,
   });
 
   const shift = (id: string, trainerId: string, daysAgo: number, hours: number, status: 'scheduled' | 'cancelled' = 'scheduled'): Shift => ({
@@ -4655,7 +4684,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     id, trainerId: 't1', trainerName: 'Dana', clientId: null, clientName: null,
     startsAt: new Date(NOW - 5 * 86_400_000).toISOString(), durationMin: 60,
     status: 'booked', outcome: 'completed', outcomeAt: new Date(NOW - 5 * 86_400_000).toISOString(),
-    rateCents, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
+    rateCents, rateCurrency: null, settlementId, packDrawnKind: null, packDrawnAt: null, packDrawShortfallAt: null, 
   });
   const owed = (rows: PtSession[], fee: number | null) =>
     payrollTotal(payrollByTrainer(rows, PAY_DELIVERED_ONLY, fee, NOW)).cents;

@@ -188,6 +188,34 @@ ok(!readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '0', dist: '6', watts
 ok(!readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: 'six', watts: '', kcal: '' }).ok,
   'an unreadable distance must be refused');
 
+/* ── five miles logged as five kilometres ─────────────────────────────────
+ *
+ * The app opened every cardio log on kilometres for everybody until recently,
+ * so this is the field on a cardio entry most likely to be wrong — and it was
+ * the one field the correction sheet could not touch. `{ ...entry.cardio }`
+ * carried the original unit through whatever the sheet showed, so a five-mile
+ * run stayed 5 km in the distance total, the calorie estimate and every trend,
+ * and the only remedy was to delete the session — which also discards the
+ * heart-rate zones nobody can retype.
+ */
+{
+  const toMiles = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', distUnit: 'mi', watts: '', kcal: '' });
+  ok(toMiles.ok, 'a unit correction reads');
+  ok(toMiles.ok && toMiles.value.cardio?.unit === 'mi', 'and the unit actually changes');
+  ok(toMiles.ok && toMiles.value.cardio?.dist === 6, 'the number is not converted — the member is saying what it always was');
+  ok(toMiles.ok && toMiles.value.cardio?.hrAvg === 142,
+    'and the measured heart rate still survives a unit correction');
+
+  // An omitted unit keeps what the entry had. A caller with no unit control
+  // must not be able to rewrite the unit by leaving a field out.
+  const untouched = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', watts: '', kcal: '' });
+  ok(untouched.ok && untouched.value.cardio?.unit === 'km', 'an absent unit keeps the original');
+  const blank = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', distUnit: '   ', watts: '', kcal: '' });
+  ok(blank.ok && blank.value.cardio?.unit === 'km', 'and so does a blank one');
+  const same = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', distUnit: 'km', watts: '', kcal: '' });
+  ok(same.ok && same.value.cardio?.unit === 'km', 'and re-stating the same unit changes nothing');
+}
+
 /* ── report ──────────────────────────────────────────────────────────────── */
 
 if (errors.length) {

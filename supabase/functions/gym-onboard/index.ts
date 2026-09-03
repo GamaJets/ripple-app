@@ -139,6 +139,19 @@ Deno.serve(async (req) => {
         metadata: { tenant_id: tenantId, repple_kind: 'gym' },
         capabilities: { transfers: { requested: true }, card_payments: { requested: true } },
         type: 'standard',
+      }, {
+        // Keyed on the GYM, and it closes the window the note under the upsert
+        // below describes and then leaves open: Stripe creates the account, the
+        // row fails, and "the next call would create a second one" — which is
+        // the owner tapping "Set up payments" again a minute later. Inside
+        // Stripe's 24-hour idempotency window that repeat now returns the FIRST
+        // account instead of making a second, and outside it the log line is
+        // the remedy it always was.
+        //
+        // The tenant and not the owner: the account belongs to the gym, and an
+        // ownership change must not be able to produce a second one. Only
+        // reached when no row exists, so it cannot collide with the reuse path.
+        idempotencyKey: `repple-gym-account:${tenantId}`,
       });
     } catch (e) { return stripeError('account creation', e); }
     acctId = acct.id;

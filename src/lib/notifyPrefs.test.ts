@@ -16,6 +16,7 @@
 // `ok`/`eq` into an errors array and process.exit(1) — never node:assert.
 import {
   CATEGORIES, DEFAULT_NOTIFY_PREFS, allows, categoryDef, hourToDeliver,
+  timeToDeliver, deliveryMinute, movedNote,
   inQuietHours, prefsFromStored, quietLabel, whenToDeliver, type NotifyPrefs,
 } from './notifyPrefs';
 
@@ -144,6 +145,73 @@ const prefs = (over: Partial<NotifyPrefs> = {}): NotifyPrefs => ({ ...DEFAULT_NO
   eq(quietLabel(prefs({ quietFromHour: 22, quietToHour: 7 })), '10pm to 7am', 'the window reads in twelve-hour time');
   eq(quietLabel(prefs({ quietFromHour: 0, quietToHour: 12 })), '12am to 12pm', 'midnight and noon are 12, not 0');
   ok(!quietLabel(prefs()).endsWith('.'), 'no trailing full stop — the caller punctuates');
+}
+
+/* ── nothing lands on top of anything else ─────────────────────────────────
+ *
+ * Every quietable notification inside the window used to be set to
+ * `quietToHour, 0, 0, 0` — one instant, to the millisecond. reminderPlan emits
+ * a hydration nudge on the hour for every step of its window, so 22:00 and
+ * 23:00 both became 07:00:00.000; the OS collapses simultaneous banners and the
+ * member got one and lost the rest. The shift exists so a nudge is never
+ * dropped, and stacking is how it dropped them anyway.
+ */
+{
+  const p = { ...DEFAULT_NOTIFY_PREFS, quiet: true, quietFromHour: 22, quietToHour: 7 };
+
+  const ten = timeToDeliver(22, 0, 'reminders', p);
+  const eleven = timeToDeliver(23, 0, 'reminders', p);
+  eq(ten.hour, 7, 'a 10pm reminder arrives in the 7am hour');
+  eq(eleven.hour, 7, 'and so does an 11pm one');
+  ok(ten.minute !== eleven.minute, 'but NOT at the same minute — that is the whole bug');
+  ok(ten.minute < eleven.minute, 'and the earlier one arrives first: order is kept');
+
+  // Everything still lands inside the first hour the member is awake.
+  for (const h of [22, 23, 0, 1, 2, 3, 4, 5, 6]) {
+    const out = timeToDeliver(h, 0, 'reminders', p);
+    eq(out.hour, 7, `an ${h}:00 reminder is delivered in the 7am hour`);
+    ok(out.minute >= 0 && out.minute <= 59, 'and inside it');
+  }
+
+  // Monotonic all the way through the window: a whole night of hourly nudges
+  // arrives in the order it was set.
+  let last = -1;
+  for (const h of [22, 23, 0, 1, 2, 3, 4, 5, 6]) {
+    const m = timeToDeliver(h, 0, 'reminders', p).minute;
+    ok(m >= last, `minute does not go backwards at ${h}:00`);
+    last = m;
+  }
+  // And an hourly set of nine nudges produces at least eight distinct minutes,
+  // where it used to produce one.
+  const minutes = new Set([22, 23, 0, 1, 2, 3, 4, 5, 6].map((h) => timeToDeliver(h, 0, 'reminders', p).minute));
+  ok(minutes.size >= 8, `an hourly window spreads out, got ${minutes.size} distinct minutes`);
+
+  // Minutes within an hour are kept apart too.
+  ok(timeToDeliver(22, 0, 'reminders', p).minute !== timeToDeliver(22, 30, 'reminders', p).minute,
+    'two reminders half an hour apart do not collide either');
+
+  // Untouched cases are untouched, to the minute.
+  const outside = timeToDeliver(9, 15, 'reminders', p);
+  eq(outside.hour, 9, 'an hour outside the window is not moved');
+  eq(outside.minute, 15, 'and keeps its minute exactly');
+  const notQuietable = timeToDeliver(3, 20, 'sessions', p);
+  eq(notQuietable.hour, 3, 'a non-quietable category is never moved');
+  eq(notQuietable.minute, 20, 'nor is its minute');
+  const off = timeToDeliver(3, 20, 'reminders', { ...p, quiet: false });
+  eq(off.hour, 3, 'and nothing is moved when quiet hours are off');
+
+  // The boundaries of the mapping.
+  eq(deliveryMinute(22, 0, p), 0, 'the first minute of the window maps to the top of the hour');
+  ok(deliveryMinute(6, 59, p) <= 59, 'and the last stays inside it');
+
+  // The member is TOLD. The reminders screen echoed the typed time back beside
+  // the box and said nothing at all about it being moved.
+  const label = (h: number, m: number) => `${h}:${String(m).padStart(2, '0')}`;
+  const note = movedNote(23, 0, 'reminders', p, label);
+  ok(note != null && /quiet hours/i.test(note), 'a time inside quiet hours says so');
+  ok(note != null && /instead/.test(note), 'and says when it will actually arrive');
+  eq(movedNote(9, 0, 'reminders', p, label), null, 'a time outside them says nothing');
+  eq(movedNote(3, 0, 'sessions', p, label), null, 'and a non-quietable one is not warned about a move that will not happen');
 }
 
 if (errors.length) {

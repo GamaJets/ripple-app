@@ -16,7 +16,7 @@
 //     app has no basis for. Only 'ready' may say a person is not there.
 //
 // Compile with tsc then run with node, like assignPicker.test.ts.
-import { matchesRosterQuery, searchRoster, rosterSearchLine } from './rosterSearch';
+import { matchesRosterQuery, searchRoster, rosterSearchLine, rosterPickerLine } from './rosterSearch';
 import type { LoadStatus } from '../ui/loadStatus';
 
 const errors: string[] = [];
@@ -131,6 +131,37 @@ eq(rosterSearchLine({ status: 'ready', query: 'sarah', matched: 2, searched: 40 
   ok(!!miss, 'and when it found nobody');
   ok((hit ?? '').includes('1000') && (miss ?? '').includes('1000'),
     'both name how many rows were actually searched, because that is not the size of the book');
+}
+
+/* ── the line that tells a coach where the rest of the book is ──────────── */
+//
+// It printed "Showing 20 of your 20 clients — type a name to find the rest."
+// over a roster that came back short, so the coach typed the name, got nothing,
+// and concluded the client was not on their book.
+
+eq(rosterPickerLine({ status: 'ready', shown: 20, known: 84 }),
+  'Showing 20 of your 84 clients — type a name to find the rest.',
+  'a whole read may state the size of the book');
+
+{
+  const part = rosterPickerLine({ status: 'partial', shown: 20, known: 20 });
+  ok(/came back short/i.test(part), 'a truncated read says so');
+  ok(!/your 20 clients/i.test(part), 'and never states the page size as the size of the book');
+  ok(/may still be on your book/i.test(part), 'and says what that means for a name they cannot find');
+
+  const load = rosterPickerLine({ status: 'loading', shown: 8, known: 8 });
+  ok(/still arriving/i.test(load), 'a read in flight says so');
+  ok(!/your 8 clients/i.test(load), 'and claims no total');
+
+  const bad = rosterPickerLine({ status: 'error', shown: 3, known: 3 });
+  ok(/could not be read/i.test(bad), 'a failed read says so');
+  ok(/not a count of your book/i.test(bad), 'and refuses the count outright');
+}
+
+for (const st of ['loading', 'ready', 'partial', 'error'] as LoadStatus[]) {
+  const line = rosterPickerLine({ status: st, shown: 5, known: 9 });
+  ok(line.length > 0 && !line.includes('undefined') && !line.includes('null'),
+    `${st} produces a real sentence`);
 }
 
 if (errors.length) {

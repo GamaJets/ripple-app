@@ -17,11 +17,19 @@
 //      a sixteen-year-old is signed up and nothing records that a guardian ever
 //      agreed.
 //
-//   2. NOWHERE TO PUT A DOCUMENT. The six storage buckets in this project are
-//      photos, exercise-videos, exercise-demos, message-media, coach-docs and
-//      injury-docs. Not one is the gym's, so a signed contract, an insurance
-//      certificate, a service report or a photograph of a broken machine had no
-//      home in the product at all.
+//   2. NOWHERE TO PUT A DOCUMENT. The six storage buckets in the project AT
+//      THAT POINT were photos, exercise-videos, exercise-demos, message-media,
+//      coach-docs and injury-docs. Not one was the gym's, so a signed contract,
+//      an insurance certificate, a service report or a photograph of a broken
+//      machine had no home in the product at all.
+//
+//      That sentence was written in the present tense and is left here in the
+//      past, because both halves of it have moved: `gym-docs` (part 185) is
+//      that home and is what this screen files into, and `storage.buckets`
+//      holds ELEVEN today — the six above plus gym-docs, avatars (961),
+//      coach-logos (330), share-cards (400) and scans (empty and unused, part
+//      1122). Counted live on 3 Sep 2026. Anyone reaching for the number six
+//      from this paragraph is reading a fact about a day that has passed.
 //
 //   3. NO AUDIT OF WHO DID WHAT. `gym_events` carried five trigger-written
 //      kinds, all of them things that HAPPENED TO the gym — member joined,
@@ -54,10 +62,16 @@
 // "Given by the member" column and the How These Were Given panel show the
 // split, and the member's own path is app/(client)/agreements.tsx.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { type Unread, type Read, reading } from '@/lib/read';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships, money, type Membership } from '@lib/gymRecord';
+// The reader's locale, the GYM's zone. A signature date and a document's filing
+// date are evidence; the day they fall on is a fact about the gym, and this page
+// was drawing both on whichever laptop was open.
+import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
   fetchAgreements, fetchSignatures, publishAgreement, recordSignature,
@@ -72,7 +86,14 @@ import {
   type AttributionTally,
 } from '@lib/gymSigning';
 import { capLimit, readAll } from '@lib/rowCap';
+// The actor ids behind the filing feed are not bounded by the row cap — see
+// the note in `fetchFeed`. One chunk size, in src/lib/idLookup.ts.
+import { chunkIds, uniqueIds } from '@lib/idLookup';
 import { isoDate } from '@lib/format';
+// The gym's calendar day. A certificate's `expires_on` is a bare day somebody
+// entered on the gym's clock, so the "today" it is compared against is that
+// clock and not whichever laptop is open.
+import { gymDay } from '@lib/gymZone';
 import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 
 /**
@@ -83,10 +104,7 @@ import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
  * unless something separates them — and the first is a reason to stop trading
  * until people sign, while the second is a reason to reload.
  */
-type Unread = 'loading' | 'failed' | null;
 
-interface Read<T> { rows: T[] | null; state: Unread; why: string | null }
-const reading = <T,>(): Read<T> => ({ rows: null, state: 'loading', why: null });
 const landed = <T,>(res: PromiseSettledResult<T[]>, what: string): Read<T> =>
   res.status === 'fulfilled'
     ? { rows: res.value, state: null, why: null }
@@ -110,9 +128,15 @@ const DAY = 86400000;
 
 export default function Compliance() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [gymErr, setGymErr] = useState<string | null>(null);
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
 
   /**
    * How long this gym keeps a financial record, per its own jurisdiction.
@@ -183,19 +207,26 @@ export default function Compliance() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) return;
       const t = await readTenant(supabase, who.tenantId);
       if (!live) return;
-      setGymName(t.name); setCcy(t.currency); setGymErr(t.error);
+      setGymName(t.name); setCcy(t.currency); setZone(t.zone); setGymErr(t.error);
       await readRetention(who.tenantId);
       await load(who.tenantId);
     })();
     return () => { live = false; };
   }, [load, readRetention]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -246,11 +277,11 @@ export default function Compliance() {
       />
 
       <Documents
-        documents={documents} members={members} ccy={ccy}
+        documents={documents} members={members} ccy={ccy} zone={zone}
         tenantId={tenantId} me={me} onChange={refresh}
       />
 
-      <Feed feed={feed} />
+      <Feed feed={feed} zone={zone} />
     </Shell>
   );
 }
@@ -362,7 +393,7 @@ function Retention({ years, why, tenantId, onChange }: {
                       style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
             ) : null}
             {blocker && draft.trim() ? (
-              <span style={{ fontSize: 12.5, color: '#f0c04e', maxWidth: '60ch' }}>{blocker}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--warn)', maxWidth: '60ch' }}>{blocker}</span>
             ) : null}
           </>
         ) : (
@@ -521,7 +552,7 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
         </span>
       </form>
       {blocker && (title || body) ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>{blocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>{blocker}</p>
       ) : null}
 
       {signing ? (
@@ -540,7 +571,7 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
             cost="an owner asked for their waiver must not be told the gym publishes nothing over a query that errored"
           />
         ) : (
-          <DataTable
+          <DataTable noun="agreements"
             rows={live} columns={cols} rowKey={(a) => a.id}
             empty="This gym publishes nothing for anybody to sign. Nothing on this screen can then say who has agreed to what, because there is nothing to agree to."
           />
@@ -755,15 +786,17 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
         </button>
         <button onClick={onCancel} style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
       </div>
-      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: '#f0c04e', maxWidth: '70ch' }}>{blocker}</p> : null}
+      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '70ch' }}>{blocker}</p> : null}
     </div>
   );
 }
 
 /* ── the filing cabinet ────────────────────────────────────────────────────── */
 
-function Documents({ documents, members, ccy, tenantId, me, onChange }: {
+function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
   documents: Read<GymDocument>; members: Read<Membership>; ccy: TenantCurrency;
+  /** `tenants.timezone` — a filing date is a fact about the gym's day. */
+  zone: string | null;
   tenantId: string; me: Me; onChange: () => void;
 }) {
   const [kind, setKind] = useState<DocumentKind>('insurance');
@@ -790,7 +823,17 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
    */
   const [removing, setRemoving] = useState<GymDocument | null>(null);
 
-  const today = isoDate(new Date());
+  // The GYM's calendar day, not the reader's. It was `isoDate(new Date())`, and
+  // `expiring` in src/lib/gymDocs.ts is explicit that this is the caller's
+  // decision — "whose day `today` is remains the caller's decision, which is
+  // why it is a parameter" — because it is compared with `<=` against
+  // `expires_on`, a `date` column holding a bare gym day. Two calendars either
+  // side of that comparison is a public liability certificate drawn in red as
+  // expired on the morning of the day it is still valid, or left in black on
+  // the day it lapsed. `zone` is already a prop on this component for the
+  // filing dates below. The reader's day remains the fallback for a gym that
+  // has set no zone, which is what this line has always been.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
   const soon = documents.rows ? expiring(documents.rows, today) : null;
   const blocker = documentBlocker(title, file);
 
@@ -866,7 +909,7 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
         : <span style={{ color: 'var(--ink3)' }}>Staff</span> },
     { key: 'who', header: 'Filed by', value: (d) => d.uploadedByName },
     { key: 'when', header: 'Filed', value: (d) => d.uploadedAt,
-      render: (d) => new Date(d.uploadedAt).toLocaleDateString() },
+      render: (d) => gymDateText(d.uploadedAt, zone) ?? <span className="dash">not stated</span> },
     { key: 'act', header: '', value: () => 0, align: 'right',
       render: (d) => removing?.id === d.id ? (
         <span style={{ display: 'inline-flex', gap: 9, alignItems: 'baseline' }}>
@@ -956,7 +999,7 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
         nothing here invents a date. {ccy ? null : `This gym has not set its currency, so a cost cannot be recorded against a service report — ${NO_CURRENCY_NOTE}.`}
       </p>
       {blocker && (title || file) ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>{blocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>{blocker}</p>
       ) : null}
 
       {documents.state === 'loading' ? <Loading />
@@ -966,7 +1009,7 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
             cost="&ldquo;nothing is on file&rdquo; over a failed read is the sentence that stops somebody looking for the insurance certificate they need"
           />
         ) : (
-          <DataTable
+          <DataTable noun="documents"
             rows={documents.rows ?? []} columns={cols} rowKey={(d) => d.id}
             empty="Nothing is on file. Until this wave there was nowhere in the product to put a document at all, so an empty list here is expected rather than alarming — the first insurance certificate is the one worth adding."
           />
@@ -989,7 +1032,7 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
  * there is no MFA anywhere in this repo and no re-auth in front of the money
  * screens, so this records who was SIGNED IN, not who was at the keyboard.
  */
-function Feed({ feed }: { feed: Read<Activity> }) {
+function Feed({ feed, zone }: { feed: Read<Activity>; zone: string | null }) {
   const [kind, setKind] = useState('');
   const rows = (feed.rows ?? []).filter((e) => !kind || e.kind === kind);
   const kinds = useMemo(
@@ -999,7 +1042,7 @@ function Feed({ feed }: { feed: Read<Activity> }) {
 
   const cols: Column<Activity>[] = [
     { key: 'at', header: 'When', value: (e) => e.at,
-      render: (e) => new Date(e.at).toLocaleString() },
+      render: (e) => gymDateTimeText(e.at, zone) ?? <span className="dash">not stated</span> },
     { key: 'kind', header: 'What', value: (e) => e.kind,
       render: (e) => <span className="mono" style={{ fontSize: 11.5 }}>{e.kind}</span> },
     { key: 'summary', header: 'Detail', value: (e) => e.summary },
@@ -1037,7 +1080,7 @@ function Feed({ feed }: { feed: Read<Activity> }) {
           cost="telling an owner nothing has been recorded, and to go and check their database triggers, over a query that errored sends them to fix something that is not broken"
         />
       ) : feed.state === 'loading' ? <Loading /> : (
-        <DataTable
+        <DataTable noun="filing-record entries"
           rows={rows} columns={cols} rowKey={(e) => e.id}
           empty={`Nothing has been recorded in ${FEED_DAYS} days. On a gym that is being used, that is a database whose triggers have not been applied rather than a quiet quarter.`}
         />
@@ -1085,11 +1128,19 @@ async function fetchActivity(tenantId: string): Promise<Activity[]> {
   );
   if (!rows.length) return [];
 
-  const ids = [...new Set(rows.map((r: any) => r.actor_id).filter((x: any): x is string => !!x))];
+  /*
+   * CHUNKED, for the reason `fetchEvents` on /activity gives at length: the
+   * `gym_events` read above it PAGES, so the distinct actors behind it are no
+   * longer bounded by a row cap, and a couple of hundred uuids in one
+   * `in.("…","…")` is past the 8KB request line. The 414 arrives as a null
+   * `data`, the `no-error-ok` below swallows it, and every entry in the filing
+   * record loses its actor at once — on the screen an owner opens to show
+   * somebody who did what.
+   */
   const names = new Map<string, string>();
-  if (ids.length) {
+  for (const chunk of chunkIds(uniqueIds(rows.map((r: any) => r.actor_id)))) {
     // eslint-disable-next-line -- no-error-ok: an unreadable name renders as its own sentence beside the entry; the entry is still legible
-    const { data: ps } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
+    const { data: ps } = await supabase.from('profiles').select('id, full_name').in('id', chunk).limit(capLimit());
     for (const p of (ps ?? []) as any[]) {
       const n = (p.full_name || '').trim();
       if (n) names.set(p.id, n);
@@ -1151,9 +1202,6 @@ function Banner({ children, tone }: { children: React.ReactNode; tone?: BannerTo
   return <SharedBanner tone={tone} style={{ margin: '14px', background: 'var(--surface2)', maxWidth: '84ch' }}>{children}</SharedBanner>;
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}
 
 /**
  * A read that has not landed, said as which of the two it is.

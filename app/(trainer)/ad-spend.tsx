@@ -266,10 +266,35 @@ export default function TrainerAdSpend() {
         </Section>
 
         {/* Several ad accounts on one login. Picking for them would decide which
-            business's money the coach is shown, silently. */}
-        {choices && choices.accounts.length > 1 ? (
+            business's money the coach is shown, silently.
+
+            ── And the ONE-account case, which had no door at all ─────────────
+
+            `length > 1` was the only gate. supabase/functions/ads-oauth returns
+            `{ ok: true, connected: true, accounts, warning }` with NO `chosen`
+            when `choose_ad_account` errors — which happens on a single-account
+            login — and ads-google does the same. So `choices` was stored with
+            one account in it, the picker was withheld because one is not more
+            than one, and ChannelCard went on telling the coach to connect again
+            and pick one. They reconnect, get the same warning, reconnect again;
+            ad spend for that channel can never be collected and every
+            cost-per-enquiry figure downstream of it stays missing.
+            app/(trainer)/share-kit.tsx tests `pages?.length` for this identical
+            shape, so the two screens disagreed about what one item means. */}
+        {choices && choices.accounts.length > 0 ? (
           <Section>
-            <SectionHead title="Which ad account?" note={`This ${channelLabel(choices.channel)} login can see more than one`} />
+            <SectionHead
+              title={choices.accounts.length > 1 ? 'Which ad account?' : 'Confirm your ad account'}
+              note={choices.accounts.length > 1
+                ? `This ${channelLabel(choices.channel)} login can see more than one`
+                : `This ${channelLabel(choices.channel)} login found one, and it was not saved`} />
+            {choices.accounts.length === 1 ? (
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                Nothing is wrong with the connection — the account below simply was not stored when you
+                connected, and spend cannot be collected until it is. This is the tap that fixes it;
+                connecting again will not.
+              </Text>
+            ) : null}
             {choices.accounts.map((c) => (
               <View key={c.id} style={{ marginTop: sp.md }}>
                 <Card>

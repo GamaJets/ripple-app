@@ -14,6 +14,7 @@ import {
   referenceAllowed, CLAIM_NOTE, CLAIM_NOTE_COACH, EXPIRING_SOON_DAYS,
   MAX_TITLE, type Credential, type CredentialDraft,
 } from './coachCredentials';
+import { fmtPointDay } from './format';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -106,9 +107,13 @@ eq(expiryLine(cred({ expiresOn: '2026-08-30' }), TODAY), 'Expired 1 day ago', 'o
 // that shipped a database column into a sentence. "Valid to 2027-03-04 · Stated
 // by the coach" is what a client read under a coach's certification, three
 // siblings away from "Expires in 12 days".
-eq(expiryLine(cred({ expiresOn: '2027-03-04' }), TODAY), 'Valid to 4 Mar 2027',
+// The month name is derived, not pinned: this line renders in the reader's own
+// language now, so 'Mar' asserted an English formatter rather than this
+// function. The claim survives intact — and the assertion three lines below,
+// that no branch may print a YYYY-MM-DD, is the one doing the real work here.
+eq(expiryLine(cred({ expiresOn: '2027-03-04' }), TODAY), `Valid to ${fmtPointDay(2027, 2, 4)}`,
   'a current certification names its date in words, not as an ISO column');
-eq(expiryLine(cred({ expiresOn: '2027-12-25' }), TODAY), 'Valid to 25 Dec 2027',
+eq(expiryLine(cred({ expiresOn: '2027-12-25' }), TODAY), `Valid to ${fmtPointDay(2027, 11, 25)}`,
   'a two-digit day loses no leading zero and gains no padding');
 ok(!/\d{4}-\d{2}-\d{2}/.test(expiryLine(cred({ expiresOn: '2027-03-04' }), TODAY)),
   'and no branch of this function may print a YYYY-MM-DD at all');

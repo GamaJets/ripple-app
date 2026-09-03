@@ -61,7 +61,8 @@
 // which every one of these already renders honestly as null-not-empty — rather
 // than as a short set wearing the whole set's clothes.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
 import { Shell } from '@/components/Shell';
 import {
   recentWindow, summariseAdherence, setItemLine, dayLabel,
@@ -99,6 +100,10 @@ const LABEL_MAX = 80;
 
 export default function CoachChecklists() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
 
   const [clients, setClients] = useState<Client[] | null>(null);
@@ -129,6 +134,10 @@ export default function CoachChecklists() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) return;
       const { data, error } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
@@ -365,8 +374,11 @@ export default function CoachChecklists() {
     [clients, picked],
   );
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.role !== 'trainer' && me.role !== 'owner') {
     return (
@@ -441,8 +453,14 @@ export default function CoachChecklists() {
             </p>
           ) : null}
 
+          {/* ANNOUNCED. This is the only page file in the console that imports
+              no Banner at all, so every refusal on it — "Not saved, so it is
+              not on their list", "it is still on their list" — was a silent
+              colour change. A coach presses Add, hears nothing, and cannot
+              tell it from having worked. */}
           {writeErr ? (
-            <p style={{ marginTop: 12, color: 'var(--warn)' }}>{writeErr}</p>
+            <p role="alert" aria-live="assertive" aria-atomic="true"
+               style={{ marginTop: 12, color: 'var(--warn)' }}>{writeErr}</p>
           ) : null}
 
           {shown && shown.length === 0 && !itemsErr ? (

@@ -169,10 +169,8 @@ const CONSUMER_ROOTS = ['app', 'src', 'scripts', 'studio-web', 'supabase/functio
 const KNOWN = new Map([
   // ── the phone app's own unwired features ────────────────────────────────
   ['src/lib/classAttendance.ts', { count: 1, fix: 'setAttendance writes class_attendance and no screen calls it; the coach-side register reads through src/lib/classRegister.ts instead. Either the register saves through this or it goes.' }],
-  ['src/lib/coach.ts', { count: 1, fix: 'askCoach is the AI-coach round trip. the member\'s Coach screen builds its own call inline, so this is a second implementation nobody runs. Point the screen at it or delete it.' }],
   ['src/lib/connect.ts', { count: 1, fix: 'packageCurrencies reads which currencies a coach has priced packages in. Nothing asks. It is the check a coach\'s Connect payout screen needs before offering a currency.' }],
   ['src/lib/endCoaching.ts', { count: 1, fix: 'fetchEndRecord loads the permanent record of an ended coaching relationship. The end-coaching flow writes it and no screen reads it back.' }],
-  ['src/lib/gymSessions.ts', { count: 1, fix: 'fetchAwaitingOutcome lists sessions whose outcome nobody recorded. Nothing surfaces the list, so the backlog it exists to show is invisible.' }],
   ['src/lib/spotify.ts', { count: 1, fix: 'spotifyPlaylistTracks — the track list of a playlist the member already owns. The screen builds its own list from a search; nothing reads back what is in a saved playlist. (spotifyDevices and spotifyTransfer came off this list when app/(client)/music.tsx grew the device picker.)' }],
   ['src/lib/trainerSessions.ts', { count: 1, fix: 'markMyOutcome records a coach\'s own outcome for a session. The coach Sessions screen is where it belongs; that file is another lane\'s today.' }],
 
@@ -182,8 +180,8 @@ const KNOWN = new Map([
   ['src/ui/charts.tsx', { count: 2, fix: 'Sparkline and DeltaBadge. HrZoneChart and src/lib/chartAxis.ts are what the screens actually draw with.' }],
   ['src/ui/fetched.tsx', { count: 1, fix: 'useFetchedAt — the "last updated" timestamp hook. Screens print freshness through src/lib/freshness.ts instead.' }],
   ['src/ui/joinCode.ts', { count: 1, fix: 'fetchJoinCodeStats — how many times a join code has been used. The coach Join Code screen is where it belongs; that file is another lane\'s today.' }],
-  ['src/ui/pushNotifications.ts', { count: 1, fix: 'scheduleDailyReminder schedules the local daily nudge. The reminder preferences screen saves a time and nothing schedules against it.' }],
-  ['src/ui/seriesPause.ts', { count: 1, fix: 'pauseSeries pauses a recurring class series. The series screen can end a series and cannot pause one, which is the whole reason this was written.' }],
+  ['src/ui/pushNotifications.ts', { count: 1, fix: 'scheduleDailyReminder — the EVERY-DAY variant. The saved reminder plan IS scheduled, by scheduleWeeklyReminders out of src/ui/reminderSync.tsx on every launch; what nothing reaches is the daily-repeat trigger, so a member who picks all seven days gets seven weekly notifications instead of one daily one. Either reminderSync uses this for the all-days case or it goes.' }],
+  ['src/ui/seriesPause.ts', { count: 1, fix: 'pauseSeries — the pause-a-DATE-RANGE call (pause_my_session_series, from/to). Pausing itself is wired: app/(client)/standing.tsx:279 pauses through pauseSeriesForDays. Nothing offers the member a range, so the from/to entry point is unreachable. Give the sheet a range or delete this one.' }],
   ['src/ui/useMrrHistory.ts', { count: 1, fix: 'useMrrHistory. The three screens in that module\'s import list take useMonthlyHistory and useSessionsHistory from it; the MRR hook itself is drawn by nothing.' }],
 ]);
 

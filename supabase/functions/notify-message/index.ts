@@ -18,8 +18,36 @@ Deno.serve(async (req: Request) => {
 
   const clientId = b.client_id as string | undefined;
   const sender = String(b.sender || '');
-  const text = String(b.body || '').slice(0, 180);
-  if (!clientId || !text) return json({ ok: true, skipped: 'missing fields' });
+
+  // ── AN EMPTY BODY IS NOT AN EMPTY MESSAGE ────────────────────────────────
+  //
+  // This used to be `if (!clientId || !text) return { skipped: 'missing
+  // fields' }`, and the second half of that test threw away a whole class of
+  // message. `messages.body` is NOT NULL and an attachment-only message carries
+  // '' — supabase/parts/124 says so in as many words, and src/ui/messaging.ts
+  // writes exactly that shape whenever somebody sends a photo with no caption.
+  //
+  // What that cost: this function is the ONLY writer of the inbox row for a
+  // chat message. src/lib/notifyInbox.ts refuses to write a second one, on the
+  // correct grounds that the trigger writes the first. So a caption-less
+  // photograph produced no inbox row at all — and the two filters below then
+  // had a push to suppress with no record standing behind it. A client
+  // photographing the machine they are stuck on at eleven at night, to a coach
+  // with quiet hours set, reached that coach NOWHERE: no banner, no bell, no
+  // error, and their own screen said "Sent".
+  //
+  // The trigger fires AFTER INSERT. A call reaching this line is a message that
+  // exists, and the only thing that can make it unaddressable is having nobody
+  // to address it to. The words are src/lib/messagePreview.ts's — repeated here
+  // rather than imported because this runs under Deno, the same duplication
+  // `SendStage` in src/lib/readReceipt.ts carries, and messagePreview.test.ts
+  // asserts both strings so a reword there is a reword somebody notices.
+  const kind = String(b.attachment_kind || '');
+  const body = String(b.body || '').trim();
+  const text = (body
+    || (kind === 'image' ? 'Sent you a photo' : kind === 'video' ? 'Sent you a video' : 'Sent you a message')
+  ).slice(0, 180);
+  if (!clientId) return json({ ok: true, skipped: 'no thread key' });
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 
@@ -72,7 +100,42 @@ Deno.serve(async (req: Request) => {
   //
   // Rows written before this change keep that fallback and stay inert for
   // coaches; nothing here rewrites them.
-  try { await admin.from('notifications').insert({ user_id: recipient, icon: 'message', title, body: text, route }); } catch { /* ignore */ }
+  //
+  // The failure is LOGGED rather than ignored, and the reason is the two
+  // filters immediately below. Muting a channel and quiet hours both suppress
+  // the banner on the strength of this row existing — "muting is 'do not buzz
+  // me about this', not 'do not tell me'". If this insert fails and one of them
+  // then fires, the message reaches the recipient NOWHERE: no banner, no inbox
+  // row, and no error anywhere, because supabase-js resolves with `{ error }`
+  // rather than throwing and this `catch` never saw it. This function is called
+  // by a database trigger and answers nothing a person reads, so the log is the
+  // only place such a loss could ever be found.
+  // The `try` stays: a throw here must not take the PUSH below down with it,
+  // which is the one thing that still reaches the recipient when the row fails.
+  //
+  // ── AND THE LOG IS NOT THE FIX ───────────────────────────────────────────
+  //
+  // Logging it made the loss FINDABLE. It did not make it not happen, and
+  // nobody reads a function log at eleven at night. `recorded` below is the
+  // fix: the two filters are allowed to suppress the banner only when the row
+  // they are suppressing it in favour of actually landed. If it did not, the
+  // push is the last thing standing between this message and nobody, and a
+  // preference about how loudly to be told is not a preference to be told
+  // nothing at all.
+  //
+  // The direction is the same one part 251 chose for a failed preference read:
+  // err towards the notification. The cost of getting it wrong this way is one
+  // banner somebody had asked not to have; the cost the other way is the
+  // message.
+  let recorded = false;
+  try {
+    const { error: noteErr } = await admin.from('notifications')
+      .insert({ user_id: recipient, icon: 'message', title, body: text, route });
+    if (noteErr) console.error('notify-message: could not write the inbox row for ' + recipient + ', so the mute and quiet-hours filters are being skipped and this message is pushed regardless:', noteErr.message);
+    else recorded = true;
+  } catch (e) {
+    console.error('notify-message: the inbox row for ' + recipient + ' threw, so the mute and quiet-hours filters are being skipped and this message is pushed regardless:', (e as Error).message);
+  }
 
   // Expo push to the recipient's devices — best-effort.
   //
@@ -88,6 +151,12 @@ Deno.serve(async (req: Request) => {
   // The row above is the reason muting is safe to offer at all. A muted coach
   // still finds the message in their notifications list and in the thread; what
   // stops is the banner.
+  //
+  // `recorded &&` is the whole of it, and it is the same sentence as the
+  // paragraph above read backwards: muting is safe to offer BECAUSE the row
+  // exists. With no row there is nothing for the coach to find in the morning,
+  // and suppressing here would be reading "do not buzz me about this" as "do
+  // not tell me this happened".
   try {
     const { data: off, error: prefErr } = await admin
       .from('notify_channel_prefs')
@@ -96,7 +165,7 @@ Deno.serve(async (req: Request) => {
       .eq('channel', 'chat')
       .eq('enabled', false)
       .maybeSingle();
-    if (!prefErr && off) return json({ ok: true, muted: true });
+    if (recorded && !prefErr && off) return json({ ok: true, muted: true });
   } catch { /* a preference we cannot read is not a mute — fall through and send */ }
 
   // ── Quiet hours (part 530) ──────────────────────────────────────────────
@@ -124,7 +193,10 @@ Deno.serve(async (req: Request) => {
       .select('user_id')
       .eq('user_id', recipient)
       .maybeSingle();
-    if (!quietErr && quiet) return json({ ok: true, muted: true });
+    // `recorded &&`, for the reason given at the inbox row above: a quiet hour
+    // holds back a banner in favour of a record. With no record it would be
+    // holding back the only thing there is.
+    if (recorded && !quietErr && quiet) return json({ ok: true, muted: true });
   } catch { /* an hour we cannot read is not a quiet hour — fall through and send */ }
   try {
     const { data: toks } = await admin.from('push_tokens').select('token').eq('user_id', recipient);
@@ -132,10 +204,20 @@ Deno.serve(async (req: Request) => {
     if (tokens.length) {
       const msgs = tokens.map((to) => ({ to, title, body: text, sound: 'default', data: { route } }));
       for (let i = 0; i < msgs.length; i += 100) {
-        await fetch('https://exp.host/--/api/v2/push/send', {
+        // Expo's answer, read rather than discarded. This function is called by
+        // a database trigger and returns to nobody who reads it, so a refused
+        // batch — a rate limit, an outage, a malformed body — used to be
+        // completely invisible: the inbox row is written, the two filters above
+        // report `muted: false`, and the banner simply never happens. The log
+        // is the only place such a loss can be found, which is the same
+        // argument the inbox-row failure above is written up under.
+        const res = await fetch('https://exp.host/--/api/v2/push/send', {
           method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify(msgs.slice(i, i + 100)),
         });
+        if (!res.ok) {
+          console.error('notify-message: Expo refused the push to ' + recipient + ' with HTTP ' + res.status + ': ' + (await res.text()).slice(0, 300));
+        }
       }
     }
   } catch { /* ignore */ }

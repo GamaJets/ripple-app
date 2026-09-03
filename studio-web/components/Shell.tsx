@@ -172,6 +172,17 @@ export const NAV: NavItem[] = [
   // holds, every document it has filed, and the log of who did what to its
   // record.
   { href: '/compliance', label: 'Compliance', roles: ['owner'], context: 'gym' , group: 'System' },
+  // Directly after Compliance because that is where it was hiding. `gym_events`
+  // holds every payment, price change, cancellation, payroll run, month close
+  // and deleted cost this gym has produced — twenty-one kinds by
+  // supabase/parts/700 — and nothing in this rail named it. The only reader was
+  // a `<select>` beneath the waivers on /compliance, itself gated on the gym
+  // having done more than one kind of thing, so at a new gym the control did
+  // not exist. "Who changed this price", "who cancelled that membership" and
+  // "who deleted the September cost" are asked after something is already
+  // wrong, and the answers were filed under a heading nobody in that state
+  // would think to open.
+  { href: '/activity', label: 'Activity', roles: ['owner'], context: 'gym' , group: 'System' },
   // Directly after Compliance because it is the same obligation with a deadline
   // on it. `app/(owner)/deletions.tsx` was the only surface in the product that
   // read the erasure queue, so the console — where an owner does everything
@@ -282,6 +293,31 @@ export function Shell({
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
+      {/*
+       * The skip link, and why it is worth its own paragraph.
+       *
+       * The rail below is identical on all thirty-five routes and holds up to
+       * thirty links, so a person working the desk by keyboard paid thirty tab
+       * stops for every screen change — and every screen change in this console
+       * is a full document reload, so it was thirty every time, all day.
+       *
+       * It is visually hidden until focused, which is the only version that
+       * works: a permanently visible skip link is the first thing a sighted
+       * reader sees on a console they use forty times a day, and a
+       * `display: none` one is not focusable at all.
+       */}
+      <a
+        href="#main"
+        style={{
+          position: 'absolute', left: -9999, top: 0, zIndex: 10,
+          background: 'var(--surface)', color: 'var(--ink)',
+          border: '1px solid var(--ring)', padding: '8px 12px', fontSize: 13,
+        }}
+        onFocus={(e) => { e.currentTarget.style.left = '8px'; e.currentTarget.style.top = '8px'; }}
+        onBlur={(e) => { e.currentTarget.style.left = '-9999px'; }}
+      >
+        Skip to the page
+      </a>
       <aside
         style={{
           width: 184,
@@ -367,7 +403,10 @@ export function Shell({
           </div>
         )}
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+        {/* Named, because a screen reader listing the landmarks on this page
+            otherwise offers "navigation" and nothing else — and there are two
+            navigational regions on some routes. */}
+        <nav aria-label="Console sections" style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
           {groups.map(([group, ns]) => (
             <div key={group}>
               <div className="eyebrow" style={{ padding: '0 12px 4px' }}>{group}</div>
@@ -378,6 +417,18 @@ export function Shell({
                     key={n.href}
                     href={n.href}
                     className="mono"
+                    // Which of these thirty-five links is the page you are ON.
+                    // It was carried by ink colour, a surface tint and a 2px
+                    // left border and by nothing else — so a screen reader
+                    // walking this rail read thirty-five identical link names
+                    // on every route in the console, with no way to tell where
+                    // it already was. The site switcher fifteen lines above
+                    // this one has set `aria-current` since it was written.
+                    //
+                    // `page`, not `true`: this is a link to the page currently
+                    // shown, which is the token that exists for exactly that
+                    // and is what a reader announces as "current page".
+                    aria-current={active ? 'page' : undefined}
                     style={{
                       display: 'block',
                       padding: '3px 12px',
@@ -425,7 +476,11 @@ export function Shell({
         </div>
       </aside>
 
-      <main style={{ flex: 1, minWidth: 0, padding: 'var(--gutter)' }}>{children}</main>
+      {/* `id` for the skip link above, and `tabIndex={-1}` so the browser
+          actually moves focus here rather than only scrolling — without it the
+          next Tab goes back to the second rail link and the skip link achieves
+          nothing for the person it is for. */}
+      <main id="main" tabIndex={-1} style={{ flex: 1, minWidth: 0, padding: 'var(--gutter)', outline: 'none' }}>{children}</main>
     </div>
   );
 }

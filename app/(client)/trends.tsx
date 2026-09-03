@@ -28,6 +28,7 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { startOfWeek } from '../../src/lib/weekStart';
+import { fmtAxisDay } from '../../src/lib/format';
 
 const WEEKS = 10;
 
@@ -83,9 +84,17 @@ export default function Trends() {
       const end = new Date(start); end.setDate(start.getDate() + 7);
       const inWk = log.filter((e) => { const d = new Date(e.t); return d >= start && d < end; });
       const days = new Set(inWk.map((e) => new Date(e.t).toDateString()));
-      // `label` is the terse "12/8" the Best Week chip has always shown;
-      // `iso` is that same opening day as data, for the chart axis to format. Built
-      // from local getters, never from a string, so the week a member is
+      // `label` is the Best Week chip's "w/c …", and it was the terse "12/8" —
+      // twelve August to a member in London and unreadable to one in Chicago,
+      // where 12/8 is 8 December. Same defect as the four booking screens'
+      // `${d.getDate()}/${d.getMonth() + 1}`, on the one figure this screen
+      // asks a member to remember. `fmtAxisDay` is the shared renderer for a
+      // day and a short month in the reader's own language and order, and it
+      // takes the PARTS as numbers, so there is no string for `new Date()` to
+      // reinterpret as UTC midnight.
+      //
+      // `iso` is that same opening day as data, for the chart axis to format. Both
+      // are built from local getters, never from a string, so the week a member is
       // standing in is the week they are shown — see src/lib/localDate.ts.
       const iso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
       // The unpriced count travels with the tonnage, not beside it. A week of
@@ -93,7 +102,7 @@ export default function Trends() {
       // it and no load to put on that work, and a bare `vol` would state the
       // shortfall as a smaller number rather than as an unknown.
       const t = inWk.reduce<Tonnage>((a, e) => { const x = entryTonnage(e, weightSeries); return { kg: a.kg + x.kg, unknownSets: a.unknownSets + x.unknownSets }; }, { kg: 0, unknownSets: 0 });
-      out.push({ label: `${start.getDate()}/${start.getMonth() + 1}`, iso, vol: t.kg, unpriced: t.unknownSets, sessions: days.size });
+      out.push({ label: fmtAxisDay(start.getFullYear(), start.getMonth(), start.getDate()), iso, vol: t.kg, unpriced: t.unknownSets, sessions: days.size });
     }
     return out;
   }, [log, weightSeries]);

@@ -19,7 +19,7 @@
 //   3. That this agrees with the CASE in supabase/parts/710. The database is the
 //      authority; a renderer that disagrees with it is worse than no renderer.
 import {
-  parseGymZone, isZone, readerZone, gymDay, gymHour, sameGymDay, gymTimeLabel,
+  parseGymZone, isZone, readerZone, gymDay, gymHour, gymWeekday, sameGymDay, gymTimeLabel,
   gymMinutesAhead, zoneGapNote, gymDayBounds, zoneOptions, fetchGymZone,
   instantAtGym, gymWallValue, NO_ZONE_NOTE,
 } from './gymZone';
@@ -114,6 +114,8 @@ eq(gymDay(NOON, null), null, 'no zone, no day');
 eq(gymDay(NOON, ''), null, 'an empty zone is no zone');
 eq(gymDay(NOON, 'Europe/Londn'), null, 'and a zone this runtime cannot resolve is no zone');
 eq(gymHour(NOON, null), null, 'no zone, no hour — this is the door histogram’s whole finding');
+eq(gymWeekday(NOON, null), null, 'no zone, no weekday — the timetable does not get to guess whose Tuesday it is');
+eq(gymWeekday(NOON, 'Europe/Londn'), null, 'and an unresolvable zone is no zone here either');
 eq(gymTimeLabel(NOON, null), null, 'no zone, no clock');
 eq(gymDayBounds('2026-06-15', null), null, 'no zone, no day bounds — a query filtered on nothing returns nothing');
 eq(gymMinutesAhead(NOON, null, LONDON), null, 'no gym zone, no comparison');
@@ -318,3 +320,35 @@ const sbWith = (row: unknown, error: unknown = null) => ({
   }
   console.log('gymZone ok');
 })();
+
+/* ── whose Tuesday it is ───────────────────────────────────────────────────
+ *
+ * The finding this closes: /classes grouped every class into a repeating slot
+ * by `t.getDay()` and `t.getHours()`, so the same recurring class was two slots
+ * on two laptops and the fill rate was computed over the wrong set.
+ *
+ * A Monday 19:00 class in Los Angeles is already Tuesday in Dubai, which is the
+ * whole of it in one instant.
+ */
+{
+  // 2026-06-15 is a Monday. 19:00 in Los Angeles is 02:00 Dubai on the 16th.
+  const MON_EVENING_LA = '2026-06-16T02:00:00Z';
+  eq(gymWeekday(MON_EVENING_LA, LA), 1, 'Monday evening in Los Angeles is a Monday at a Los Angeles gym');
+  eq(gymWeekday(MON_EVENING_LA, DUBAI), 2, 'and the same instant is a Tuesday at a Dubai gym — one class, two slots, which is the defect');
+  eq(gymHour(MON_EVENING_LA, LA), 19, 'and the hour is the gym’s hour too');
+  eq(gymHour(MON_EVENING_LA, DUBAI), 6, 'in both directions');
+
+  // Agreement with gymDay is the invariant that matters: the weekday is derived
+  // from it, so a screen printing both can never show Tuesday beside a Monday
+  // date.
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  for (const z of [LONDON, DUBAI, LA]) {
+    for (let h = 0; h < 24; h++) {
+      const at = `2026-03-29T${String(h).padStart(2, '0')}:30:00Z`;
+      const d = gymDay(at, z)!;
+      const w = gymWeekday(at, z)!;
+      eq(days[w], days[new Date(`${d}T00:00:00.000Z`).getUTCDay()],
+        `the weekday agrees with the gym's own date at ${z} ${h}:30 — including the day the clocks move`);
+    }
+  }
+}

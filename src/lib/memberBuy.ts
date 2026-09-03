@@ -112,6 +112,7 @@ import { canTakeDirectCharges, type ConnectAccountRow } from './directCharges';
 import { expiryFor, type PassKind } from './gymPasses';
 import { minorMoney } from './coachMoney';
 import { localDate } from './localDate';
+import { capLimit, capped } from './rowCap';
 import { appLocale } from './locale';
 import type { MemberMembership, PlanInterval, Standing } from './memberRecord';
 
@@ -553,17 +554,47 @@ export async function fetchGymPassOffers(sb: Queryable): Promise<Read<GymPassOff
   }
 }
 
-/** The member's own orders, newest first. */
-export async function fetchMyGymOrders(sb: Queryable, uid: string): Promise<Read<GymOrder[]>> {
+/**
+ * How many of the member's own orders this screen reads.
+ *
+ * Fifty, as it always was — this is a phone screen and nobody scrolls a
+ * thousand receipts. What changed is that it is now asked for as `capLimit(50)`
+ * and the fifty-first row is used as a PROBE rather than shown, so a member
+ * with more than fifty can be told so.
+ */
+export const MY_ORDERS_CAP = 50;
+
+/** The member's own orders, newest first, and whether that is all of them.
+ *
+ *  `truncated` exists because of what this list feeds: the "Waiting On Stripe"
+ *  section of app/(client)/gym-plans.tsx, which is the one screen in the app
+ *  that tells somebody their card was charged and nothing was granted. A
+ *  drop-in buyer passes fifty orders inside a year, and before this the
+ *  fifty-first fell off the window with the header still printing a confident
+ *  count over the fifty that remained. A prefix rendered as a total is the
+ *  defect src/lib/rowCap.ts exists for; this is that module's rule applied to a
+ *  hand-set limit rather than to PostgREST's. */
+export interface MyGymOrders {
+  orders: GymOrder[];
+  /** True when the member has more orders than were read. The screen reports
+   *  'partial', never 'ready'. */
+  truncated: boolean;
+}
+
+export async function fetchMyGymOrders(sb: Queryable, uid: string): Promise<Read<MyGymOrders>> {
   if (!uid) return { ok: false, reason: 'Not signed in.' };
   try {
     const { data, error } = await sb.from('gym_orders')
       .select('id, kind, intent, status, amount_cents, currency, term_starts_on, term_ends_on, uses_total, expires_on, created_at, paid_at')
       .eq('member_id', uid)
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(capLimit(MY_ORDERS_CAP));
     if (error) return { ok: false, reason: error.message || 'The read was refused.' };
-    return { ok: true, value: ((data as any[]) ?? []).map((r): GymOrder => ({
+    // `capped` rather than a slice and a boolean: the probe row is not data and
+    // must not reach the screen, and the flag must not be computed anywhere the
+    // slice is not.
+    const page = capped((data as any[]) ?? [], MY_ORDERS_CAP);
+    return { ok: true, value: { truncated: page.truncated, orders: page.rows.map((r): GymOrder => ({
       id: r.id,
       kind: r.kind === 'pass' ? 'pass' : 'membership',
       intent: r.intent === 'renew' || r.intent === 'upgrade' ? r.intent : 'new',
@@ -576,7 +607,7 @@ export async function fetchMyGymOrders(sb: Queryable, uid: string): Promise<Read
       expiresOn: r.expires_on ?? null,
       createdAt: r.created_at,
       paidAt: r.paid_at ?? null,
-    })) };
+    })) } };
   } catch (e) {
     return { ok: false, reason: (e as Error).message || 'The read failed.' };
   }

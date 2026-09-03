@@ -68,20 +68,39 @@ import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { WEB_ORIGIN } from '../../src/lib/deepLink';
 
-/**
- * The currencies a gym can be priced in.
+/*
+ * The currencies a gym can be priced in — THE SHARED LIST, at last.
  *
- * A short list rather than every ISO code: this is a one-off setup question,
- * and a scroller of 180 options is a worse answer than eight and a note. It is
- * not a closed set in the database — `tenants.currency` is free text — so
- * adding one here is the whole of adding one.
+ * This was its own literal: `['AED', 'GBP', 'USD', 'EUR', 'SAR', 'AUD', 'CAD',
+ * 'ZAR']`. Eight codes, every one of them a hundredths currency, defended above
+ * as "a short list rather than every ISO code… a scroller of 180 options is a
+ * worse answer than eight and a note".
+ *
+ * The note was the problem. Ops is the ONLY place in this product a gym's
+ * currency can be set, so an owner in Japan, Korea, Kuwait, Bahrain or Oman had
+ * two options: pick money they do not charge in, or leave the gym unpriced —
+ * and unpriced blocks the payment form, the plan form, payroll and the close.
+ * "Adding one here is the whole of adding one" is true and it is not something
+ * an owner in Tokyo can do at eight in the morning.
+ *
+ * `CURRENCY_CHOICES` in src/lib/coachCurrency.ts is forty codes covering every
+ * member of `ZERO_DECIMAL` and `THREE_DECIMAL`, and its own header named this
+ * file and predicted this exact defect: "two pickers writing currencies into
+ * one product that offer different sets is a coach and their owner disagreeing
+ * about what money exists — and until it does, a gym owner in Tokyo has the
+ * same problem this list has just fixed for a coach." It does now.
+ *
+ * Forty rather than eight is not a scroller: they are pill chips in a wrapping
+ * row, alphabetical, the same control the coach's picker draws from the same
+ * constant. Alphabetical matters — any other order nominates a favourite, and
+ * the eight opened with AED for no reason except where this product was written.
  *
  * currency-ok: this is the list an owner CHOOSES from. Naming currencies is the
  * entire job of a currency picker, and it is the one place in the product where
  * an ISO code beside nothing is correct — nothing here is a figure, and nothing
  * here is applied to a gym until somebody taps it.
  */
-const CURRENCIES = ['AED', 'GBP', 'USD', 'EUR', 'SAR', 'AUD', 'CAD', 'ZAR'] as const;
+import { CURRENCY_CHOICES } from '../../src/lib/coachCurrency';
 import { capLimit, capped } from '../../src/lib/rowCap';
 
 /** How far back the gym's activity feed reaches. A BOUND — the screen says
@@ -546,7 +565,7 @@ export default function OwnerOps() {
                     : `Your gym has not told us what it charges in, so the field above is only labelled ${GYM_CURRENCY} as a placeholder. Set your currency once and every screen follows.`}
                 </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-                  {CURRENCIES.map((c) => {
+                  {CURRENCY_CHOICES.map((c) => {
                     const on = c === cur;
                     return (
                       <Pressable key={c} onPress={async () => {
@@ -664,7 +683,12 @@ export default function OwnerOps() {
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 Every member of your gym sees this in their notifications and on their Notices screen, where it stays after today.
               </Text>
-              <TextInput value={text} onChangeText={setText} placeholder="e.g. We are closed Monday for the public holiday…" placeholderTextColor={t.ink3} multiline
+              {/* Named. A placeholder disappears the moment somebody types, so
+                  it is not a label for anybody — and this is the box whose
+                  contents reach every member's phone. */}
+              <TextInput value={text} onChangeText={setText}
+                accessibilityLabel="The notice every member of your gym will see"
+                placeholder="e.g. We are closed Monday for the public holiday…" placeholderTextColor={t.ink3} multiline
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, minHeight: 80, textAlignVertical: 'top', marginBottom: sp.md }} />
 
               {/* The push is a separate decision with its consequence written
@@ -677,7 +701,14 @@ export default function OwnerOps() {
                   <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('gym', null)}</Text>
                 </View>
-                <Switch value={annPush} onValueChange={setAnnPush} />
+                {/* This switch is the difference between a note in the app and
+                    a push notification to every member of the gym, and it
+                    announced nothing at all: to a screen reader it was "switch,
+                    on" with no statement of what was on. The sentence beside it
+                    is sighted-only. */}
+                <Switch value={annPush} onValueChange={setAnnPush}
+                  accessibilityLabel="Also send this as a push notification to every member"
+                  accessibilityHint={pushConsequence('gym', null)} />
               </View>
 
               <View pointerEvents={annBusy ? 'none' : 'auto'} style={{ opacity: annBusy ? 0.6 : 1 }}>
@@ -841,7 +872,18 @@ export default function OwnerOps() {
               {evStatus === 'error' ? null : (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   Written by the database as things happen, so nothing here was typed by anyone and nothing
-                  can be missed by a screen forgetting to record it.{events.length ? ' The most recent hundred.' : ''}
+                  can be missed by a screen forgetting to record it.
+                  {/* Conditioned on the STATUS and not on the row count.
+                      "The most recent hundred" was printed whenever any row
+                      arrived, so a complete forty-row feed was described as a
+                      truncated one — and a genuinely truncated feed was
+                      described in exactly the same words as a complete one, so
+                      the sentence told a reader nothing either way. `partial`
+                      is the only state in which a hundred rows means there are
+                      more, and it is the only state that now says so. */}
+                  {evStatus === 'partial'
+                    ? ' There is more activity than fits in one read, so these are the most recent hundred and there are older entries this screen has not seen — which is why there is no count above it.'
+                    : ''}
                 </Text>
               )}
             </Section>

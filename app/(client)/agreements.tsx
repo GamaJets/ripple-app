@@ -51,7 +51,7 @@ import { reportError } from '../../src/lib/reportError';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { AGREEMENT_LABEL } from '../../src/lib/gymDocs';
 import {
-  forMember, waitingOn, waitingCount, signingBlocker, signAsMember,
+  forMember, outstanding, agreementSummary, signingBlocker, signAsMember,
   fetchGymAgreements, fetchMySignatures,
   SIGNING_RULE, NOT_REPPLE, type MemberAgreement,
 } from '../../src/lib/gymSigning';
@@ -175,7 +175,6 @@ export default function ClientGymAgreementsScreen() {
   }
 
   const ready = status === 'ready';
-  const waiting = waitingCount(rows);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -217,8 +216,7 @@ export default function ClientGymAgreementsScreen() {
                 {status === 'loading' ? 'Reading what your gym asks you to sign.'
                   : noGym ? 'You are not a member of a gym on Repple, so there is no gym paperwork to show you.'
                     : rows.length === 0 ? 'Your gym doesn’t publish anything for members to sign.'
-                      : waiting === 0 ? 'Nothing is waiting on you.'
-                        : `${waiting} document${waiting === 1 ? '' : 's'} waiting on you.`}
+                      : agreementSummary(rows)}
               </Text>
             )}
 
@@ -237,7 +235,11 @@ export default function ClientGymAgreementsScreen() {
                       >
                         <Text style={{
                           ...ty.body,
-                          fontWeight: waitingOn(a) ? '600' : '500',
+                          // `outstanding`, not `waitingOn`: a guardian consent
+                          // nobody has given yet is still an unsigned document,
+                          // and drawing it in the same grey as a signed one is
+                          // how it disappeared from the top of this screen.
+                          fontWeight: outstanding(a) ? '600' : '500',
                           color: t.ink,
                         }}>
                           {a.title}
@@ -246,8 +248,8 @@ export default function ClientGymAgreementsScreen() {
                             as caption ink is under AA on the light palettes.
                             Same reasoning as coach-documents.tsx. */}
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                          {waitingOn(a) ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-                          <Text style={{ ...ty.caption, color: waitingOn(a) ? t.ink2 : t.ink3, flex: 1 }}>
+                          {outstanding(a) ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                          <Text style={{ ...ty.caption, color: outstanding(a) ? t.ink2 : t.ink3, flex: 1 }}>
                             {AGREEMENT_LABEL[a.kind] ?? a.kind} · v{a.version} · {statusLine(a)}
                           </Text>
                         </View>
@@ -345,7 +347,10 @@ export default function ClientGymAgreementsScreen() {
  * this is where the person it is about gets to see it.
  */
 function statusLine(a: MemberAgreement): string {
-  if (a.refusal) return 'has to be given at the gym';
+  // The refusal is a property of the KIND, so it is still set once a guardian
+  // consent has actually been given at the desk. Read in that order this told a
+  // member a document already on file "has to be given at the gym".
+  if (a.refusal && !a.signedAt) return 'not signed yet — has to be given at the gym';
   if (!a.signedAt) return 'waiting on you';
   const on = day(a.signedAt);
   if (a.attribution === 'member') return `signed by you${on ? ` on ${on}` : ''}`;

@@ -29,6 +29,10 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+// A page of clients is up to ROW_CAP uuids, and five reads here used to put all
+// of them into one `.in()`. See the note above the profiles read below.
+import { readByIds } from '../lib/idLookup';
+import { readCappedByIds } from '../lib/cappedByIds';
 import { useAuthRevision } from './authRevision';
 import { endCoaching, endCoachingWithReason, type EndReason } from '../lib/endCoaching';
 import { reportError } from '../lib/reportError';
@@ -190,13 +194,40 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         const ids = linked.map((c: any) => c.id);
         const names: Record<string, string> = {};
         try {
-          // Bounded by `ids`, which the cap above holds at ROW_CAP or fewer, so
-          // one profile per id cannot reach the ceiling. The limit is written
-          // down anyway: the bound lives in another statement, and a later edit
-          // that widens the client read should not have to notice this one.
+          // ── Why this is chunked and the comment that was here was not ─────
+          //
+          // It read `.in('id', ids).limit(capLimit())` under a note reasoning
+          // about the ROW ceiling: one profile per id, ids capped at ROW_CAP,
+          // so the answer cannot truncate. That reasoning is correct and it is
+          // about the wrong limit. `ids` is up to ROW_CAP = 1000 uuids, and a
+          // uuid costs about 39 bytes inside a PostgREST `in.("…","…")` list —
+          // a ~39KB REQUEST LINE against the 8KB one nginx and most CDNs
+          // enforce by default, which is roughly two hundred ids. Past that the
+          // proxy refuses before the database ever sees the query, the refusal
+          // is a 414, supabase-js does not reject on it, and it arrives as
+          // `data: null`.
+          //
+          // `data: null` is the same shape as "no names came back", and the
+          // fallback three lines down turns that into the word 'Client'. So a
+          // coach with two hundred and fifty clients did not lose one name to
+          // RLS — which is what the `no-error-ok` below is about, and is
+          // genuinely fine — they opened their roster and found two hundred and
+          // fifty rows all called Client, with no error anywhere and nothing to
+          // pull to refresh into working. See src/lib/idLookup.ts.
+          //
+          // `readByIds` rather than `readCappedByIds`: this is one row per id
+          // by construction, the screen needs every one of them, and finishing
+          // a chunk costs nothing when a chunk of 150 ids answers with 150 rows.
           // no-error-ok: a name we cannot read falls back to 'Client'; the person is still on the roster
-          const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
-          (profs || []).forEach((p: any) => { names[p.id] = p.full_name || 'Client'; });
+          const profs = await readByIds<any>(
+            ids,
+            // `.order('id')` on a primary-key lookup is total, which is the
+            // contract `readAll` requires of every page it is handed.
+            (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+              .in('id', chunk).order('id', { ascending: true }).range(from, to),
+            'your clients’ names',
+          );
+          profs.forEach((p: any) => { names[p.id] = p.full_name || 'Client'; });
         } catch { /* a missing name falls back to 'Client'; the client is still listed */ }
         // When each linked client joined THIS coach's book. `clients` has no
         // created_at of its own, and the account's own creation date is the
@@ -210,11 +241,23 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // rows it did get on relationships that are over.
         const joined: Record<string, string> = {};
         try {
+          // Chunked for the same reason the names above are, and with the same
+          // cost of not being: a 414 on the whole list would put a dash in the
+          // "with you since" column of every client at once, which reads as a
+          // record that does not know when anybody joined.
           // no-error-ok: a join date we cannot read stays null and renders '—'; the client is listed either way
-          const { data: rel } = await supabase
-            .from('coaching_relationships').select('client_id, created_at')
-            .eq('coach_id', uid).in('client_id', ids).limit(capLimit());
-          (rel || []).forEach((r: any) => { if (r.created_at) joined[r.client_id] = r.created_at; });
+          const rel = await readByIds<any>(
+            ids,
+            // `.order('id')` and not `client_id`: unique (coach_id, client_id)
+            // makes client_id unique under this filter today, but the primary
+            // key is total whatever the constraint does next.
+            (chunk, from, to) => supabase
+              .from('coaching_relationships').select('id, client_id, created_at')
+              .eq('coach_id', uid).in('client_id', chunk)
+              .order('id', { ascending: true }).range(from, to),
+            'when your clients joined your book',
+          );
+          rel.forEach((r: any) => { if (r.created_at) joined[r.client_id] = r.created_at; });
         } catch { /* a missing join date is null, never a guessed one */ }
         // Real per-client stats (best-effort; RLS lets a trainer read linked clients' rows).
         // These are decorations on a row that exists either way, so a failure
@@ -244,16 +287,42 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // the row a newest-first cap drops first.
         let statsTruncated = false;
         let scansTruncated = false;
+        //
+        // ── And why all three are CHUNKED but still capped ────────────────
+        //
+        // `ids` is up to ROW_CAP = 1000 uuids and each of these was one
+        // `.in()`. A uuid costs about 39 bytes inside a PostgREST `in.(…)`
+        // list, so that is a ~39KB request line against the 8KB proxies allow —
+        // a 414 that supabase-js does not reject on, arriving as `data: null`.
+        // Every one of the three then reports exactly what a client with no
+        // history reports, and the paragraph above is the reason that matters:
+        // "no activity yet" is a claim about a PERSON, and a coach acts on it by
+        // chasing somebody who has been training all month.
+        //
+        // `readCappedByIds` and not `readByIds`: everything above about
+        // newest-first and a deliberate ceiling stays true, and finishing these
+        // reads would walk every scan two hundred clients have ever recorded to
+        // compute a "last active" the first page already answered. Chunking
+        // makes truncation less likely too — a thousand ids used to share one
+        // 1000-row ceiling and now seven chunks have one each — but the flag is
+        // still carried, because less likely is not never.
         try {
-          const { data: sc, error: scErr } = await supabase.from('scans')
-            .select('client_id, weight_kg, taken_at, metrics').in('client_id', ids)
-            .order('taken_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
+          const { rows: scRows, truncated: scCut, error: scErr } = await readCappedByIds<any>(
+            ids,
+            (chunk) => supabase.from('scans')
+              .select('client_id, weight_kg, taken_at, metrics').in('client_id', chunk)
+              .order('taken_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit()),
+          );
           // supabase-js resolves on a database error, so the catch below never
           // saw the failure that actually happens. Without this, a refused read
           // left every client reading "no activity yet" — which is a claim
           // about the client, and a coach acts on it by chasing them.
           if (scErr) partialFailure = true;
-          const scPage = capped(sc);
+          // Already trimmed to the cap, chunk by chunk. A client's rows are
+          // all in one chunk — the chunking is by client id — so the global
+          // reverse below still puts each client's own history oldest-first,
+          // which is the only ordering this loop depends on.
+          const scPage = { rows: scRows, truncated: scCut };
           if (scPage.truncated) { statsTruncated = true; scansTruncated = true; }
           const byC: Record<string, { w: number; t: number; m: any }[]> = {};
           // Back to oldest-first per client: the loop below reads arr[0] as the
@@ -264,21 +333,30 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           for (const id of ids) { const arr = byC[id]; if (arr && arr.length) { st[id].wDelta = arr.length > 1 ? Math.round((arr[arr.length - 1].w - arr[0].w) * 10) / 10 : null; st[id].last = Math.max(st[id].last, arr[arr.length - 1].t); for (let k = arr.length - 1; k >= 0; k--) { if (arr[k].m) { st[id].mx = arr[k].m; break; } } } }
         } catch { /* stats decorate a row that is listed regardless */ }
         try {
-          const { data: wo, error: woErr } = await supabase.from('workouts')
-            .select('user_id, performed_at').in('user_id', ids)
-            .order('performed_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
+          const { rows: woRows, truncated: woCut, error: woErr } = await readCappedByIds<any>(
+            ids,
+            (chunk) => supabase.from('workouts')
+              .select('user_id, performed_at').in('user_id', chunk)
+              .order('performed_at', { ascending: false }).order('id', { ascending: false }).limit(capLimit()),
+          );
           if (woErr) partialFailure = true;
-          const woPage = capped(wo);
+          const woPage = { rows: woRows, truncated: woCut };
           if (woPage.truncated) statsTruncated = true;
           woPage.rows.forEach((r: any) => { if (st[r.user_id]) st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.performed_at)); });
         } catch { /* as above */ }
         try {
-          const { data: ci, error: ciErr } = await supabase.from('check_ins')
-            .select('user_id, at, adherence').in('user_id', ids)
-            .order('at', { ascending: false }).order('id', { ascending: false }).limit(capLimit());
+          const { rows: ciRows, truncated: ciCut, error: ciErr } = await readCappedByIds<any>(
+            ids,
+            (chunk) => supabase.from('check_ins')
+              .select('user_id, at, adherence').in('user_id', chunk)
+              .order('at', { ascending: false }).order('id', { ascending: false }).limit(capLimit()),
+          );
           if (ciErr) partialFailure = true;
-          const ciPage = capped(ci);
+          const ciPage = { rows: ciRows, truncated: ciCut };
           if (ciPage.truncated) statsTruncated = true;
+          // `seen` is per client and the rows arrive newest-first WITHIN each
+          // chunk, which is all this needs: a client's rows are all in one
+          // chunk, so the first one seen for them is still their newest.
           const seen = new Set<string>();
           ciPage.rows.forEach((r: any) => { if (st[r.user_id]) { st[r.user_id].last = Math.max(st[r.user_id].last, Date.parse(r.at)); if (!seen.has(r.user_id) && typeof r.adherence === 'number') { seen.add(r.user_id); // check_ins.adherence is a 1-5 self-rating (see the Rating control on the client check-in screen), but every trainer surface renders this field as a PERCENTAGE and atRiskClient() flags anything under 80. Passing it through raw meant a client who rated themselves 4/5 showed as '4% adherence' and was flagged at risk. Convert.
             st[r.user_id].adh = Math.round((Math.max(1, Math.min(5, r.adherence)) / 5) * 100); } } });

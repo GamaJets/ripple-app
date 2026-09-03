@@ -73,10 +73,19 @@ export function DataTable<T>({
   rowKey,
   pageSize = PAGE_ROWS,
   /** What one row IS, plural, lower case: "members", "payments". Used in the
-   *  count line and in what a screen reader is told when the page changes.
-   *  Deliberately has a default rather than being required — forty existing
-   *  call sites do not pass one, and "rows" is honest where nothing better has
-   *  been said. */
+   *  count line, in the table's own caption, and in what a screen reader is
+   *  told when the page changes.
+   *
+   *  The default stays, and it is now the thing nothing reaches. It was written
+   *  as "'rows' is honest where nothing better has been said" — and ninety-six
+   *  of the ninety-nine call sites in this console said nothing, so the caption
+   *  argued for two paragraphs above ("eight anonymous tables of eight columns
+   *  each with nothing to tell them apart") shipped as eight tables all called
+   *  Rows. A default that every caller takes is not a default, it is the
+   *  behaviour. All ninety-nine now name their rows; the fallback is kept only
+   *  so that a table added in a hurry renders rather than fails to compile, and
+   *  a reviewer who sees "Rows" in a caption is looking at a call site that
+   *  forgot. */
   noun = 'rows',
 }: {
   rows: T[];
@@ -147,12 +156,42 @@ export function DataTable<T>({
   // scripts/check-locale.mjs. A gym in Dubai, one in London and one in Tokyo
   // run this same binary and there is no house separator that is not simply
   // wrong for two of them.
+  //
+  // The same argument applies to every DATE on the same page and was not made
+  // there: this console drew its counts in the reader's locale, its payment
+  // dates in the reader's ZONE, and its order stamps in raw UTC — three
+  // conventions, one of them on the line below this one. The dates have since
+  // moved to src/lib/gymWhen.ts (the reader's locale, the GYM's zone) and
+  // scripts/check-console-when.mjs is what stops a fourth appearing. This line
+  // is deliberately not part of that move: a ROW COUNT is a number, it has no
+  // clock, and the reader's locale is the whole of the right answer for it.
   const countLine = rowCountLine(w, sorted.length, noun, (n) => n.toLocaleString());
 
   return (
     <div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          {/*
+           * Which table this is.
+           *
+           * The component got everything else right — `aria-sort` on the header
+           * cell, a real `<button>` for the sort, a live count line — and
+           * rendered a bare `<table>`. /accounting draws eight of these on one
+           * page, so a person browsing that screen by table heard eight
+           * anonymous tables of eight columns each with nothing to tell them
+           * apart. The noun is already in this component for the count line;
+           * putting it on the table is the whole of it.
+           *
+           * Visually hidden rather than drawn: every one of these tables
+           * already sits under a `Section` heading that says the same thing to
+           * a sighted reader, and a second visible title would be noise.
+           */}
+          <caption style={{
+            position: 'absolute', width: 1, height: 1, overflow: 'hidden',
+            clip: 'rect(0 0 0 0)', clipPath: 'inset(50%)', whiteSpace: 'nowrap',
+          }}>
+            {noun[0].toUpperCase()}{noun.slice(1)}
+          </caption>
           <thead>
             <tr>
               {columns.map((c) => {

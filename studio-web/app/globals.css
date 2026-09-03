@@ -205,6 +205,9 @@ h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
     --ink: #111111; --ink2: #333333; --ink3: #555555;
     --ring: #bbbbbb; --ring2: #dddddd; --brand: #111111; --brand-ink: #ffffff;
   }
+  /* ink-hex-ok: the print ground is paper, not --bg, and this block exists to
+     say so — every token above it is redefined for the same reason. 18.88:1 on
+     white. A var() here would point back at the screen palette this overrides. */
   body { background: #fff; color: #111; }
   /* The rail carries navigation and a sign-out button and nothing that is part
    * of the record. It is the first thing a reader would cross out by hand. */
@@ -226,6 +229,8 @@ h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
   /* The URL of every link, once, so a printed page can be traced back. Only on
    * the ones that leave this console — an internal /accounting link printed as
    * "(/accounting)" beside its own text is noise. */
+  /* ink-hex-ok: printed on the same paper ground, 7.46:1, and lighter than the
+     body on purpose so a traced URL reads as an annotation rather than as text. */
   a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 9px; color: #555; }
 }
 

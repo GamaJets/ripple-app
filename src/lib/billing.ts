@@ -11,6 +11,8 @@ import { supabase } from './supabase';
 // there; coachStatement.ts and coachInvoice.ts already import it from there
 // rather than keeping their own, and so does this file now.
 import { ZERO_DECIMAL } from './coachMoney';
+import { capLimit, capped } from './rowCap';
+import type { LoadStatus } from '../ui/loadStatus';
 
 export interface Subscription { trainer_id: string; plan: string | null; status: string | null; current_period_end: string | null; cancel_at_period_end: boolean }
 export interface Invoice { id: string; trainer_id: string | null; amount_due: number | null; currency: string | null; status: string | null; attempt_count: number | null; hosted_invoice_url: string | null; created_at: string }
@@ -70,7 +72,8 @@ export async function fetchMySubscription(): Promise<{ sub: Subscription | null;
 /**
  * Owner dunning: invoices that failed or are unpaid, newest first.
  *
- * `[]` means nothing is outstanding. **`null` means we could not find out.**
+ * Empty rows under 'ready' means nothing is outstanding. **'error' means we
+ * could not find out.**
  *
  * This is the worst place in the app to conflate the two. The owner dashboard
  * renders the "Failed payments" callout only when this is non-empty, so a
@@ -78,13 +81,33 @@ export async function fetchMySubscription(): Promise<{ sub: Subscription | null;
  * owner sees a clean dashboard, concludes every payment went through, and
  * chases nobody. The money is missing and the screen that exists to say so is
  * the reason nobody looked.
+ *
+ * ── The third answer this read can give, which it could not say ────────────
+ *
+ * There was no `.limit()`, and no limit is not no ceiling: PostgREST applies
+ * its own 1000 and says nothing about having applied it. app/(trainer)/money.tsx
+ * prints this list's LENGTH as a sentence — "{n} invoices on your own account
+ * are outstanding" — so at a thousand and one unpaid invoices that sentence
+ * states a floor as a total, in the one place somebody is deciding how much
+ * they owe. `capLimit()` asks for one row past the ceiling and `capped()` turns
+ * the overflow into 'partial', which is a thing the screen can say out loud.
+ *
+ * `.in('status', …)` here is two string literals, not an id list, so this one
+ * carries no request-line risk however many invoices exist; the chunking that
+ * belongs on the uuid `.in()`s elsewhere in this repo would be noise here.
  */
-export async function fetchFailedInvoices(): Promise<Invoice[] | null> {
+export async function fetchFailedInvoices(): Promise<{ rows: Invoice[]; status: LoadStatus }> {
   try {
-    const { data, error } = await supabase.from('invoices').select('*').in('status', ['open', 'uncollectible']).order('created_at', { ascending: false });
-    if (error) return null;
-    return (data as Invoice[]) ?? [];
-  } catch { return null; }
+    const { data, error } = await supabase.from('invoices').select('*')
+      .in('status', ['open', 'uncollectible'])
+      // `.order('id')` behind the date, so which invoices the cap drops is the
+      // same on every read rather than whatever Postgres does with a tie.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(capLimit());
+    if (error) return { rows: [], status: 'error' };
+    const page = capped((data as Invoice[]) ?? []);
+    return { rows: page.rows, status: page.truncated ? 'partial' : 'ready' };
+  } catch { return { rows: [], status: 'error' }; }
 }
 
 /**

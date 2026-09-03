@@ -52,6 +52,7 @@
 //    weeks that had not happened yet, and it is exactly what this codebase means
 //    by inventing a figure.
 import { capLimit, capped } from './rowCap';
+import { readByIds } from './idLookup';
 import { dayIndexInWeek } from './weekStart';
 
 type Queryable = { from: (table: string) => any };
@@ -506,11 +507,28 @@ async function readAttendance(sb: Queryable, uid: string): Promise<Read<Attendan
     const classes = new Map<string, ClassDetail>();
     let classesComplete = true;
     if (classIds.length) {
-      const { data: rows, error } = await sb.from('gym_classes')
-        .select(CLASS_COLUMNS).in('id', classIds).limit(capLimit());
-      if (error) classesComplete = false;
-      else {
-        for (const r of capped((rows as any[]) ?? []).rows) {
+      // CHUNKED, about the REQUEST LINE and not the row ceiling. `classIds` is
+      // the union of two `capLimit()` reads, so up to two thousand uuids; at
+      // ~39 bytes each inside a PostgREST `in.("…","…")` list that is a ~78KB
+      // query string against the 8KB request line nginx and most CDNs enforce.
+      // Refused past roughly two hundred with a **414**, which supabase-js does
+      // not reject on and which arrives as `data: null`.
+      //
+      // Two hundred distinct classes is not a stress case: a member doing four
+      // classes a week crosses it inside a year, and this read is unwindowed.
+      // The consequence is a member's whole attendance history rendered as
+      // untitled, undated, uninstructed rows — `classesComplete` would not even
+      // have said so, because a 414 sets `error` to null.
+      try {
+        const rows = await readByIds<any>(
+          classIds,
+          // `.order('id')` on a primary-key lookup is total, which is the
+          // contract `readAll` requires of every page it is handed.
+          (chunk, from, to) => sb.from('gym_classes').select(CLASS_COLUMNS)
+            .in('id', chunk).order('id', { ascending: true }).range(from, to),
+          'the classes behind this attendance history',
+        );
+        for (const r of rows) {
           classes.set(String(r.id), {
             id: String(r.id),
             title: typeof r.title === 'string' ? r.title : '',
@@ -527,6 +545,14 @@ async function readAttendance(sb: Queryable, uid: string): Promise<Read<Attendan
         // class this member is no longer allowed to read, and the screen has a
         // sentence for it.
         if (classes.size < classIds.length) classesComplete = false;
+      } catch {
+        // `readByIds` throws a refused chunk rather than returning a short set,
+        // which is the point of it — a history assembled from the chunks that
+        // happened to work is one whose gaps are invisible. Caught here rather
+        // than allowed out, because the bookings and visits themselves READ
+        // fine and are worth showing; `classesComplete: false` is the sentence
+        // the screen already has for "these rows are real but unlabelled".
+        classesComplete = false;
       }
     }
 

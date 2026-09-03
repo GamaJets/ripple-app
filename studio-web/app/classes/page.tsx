@@ -74,7 +74,14 @@
 // page uses those and the shared rate maths from classRates.ts, which imports
 // nothing and is what classAttendance itself re-exports.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+// `Unresolved` comes from here rather than being declared at the bottom of
+// this file. Seven console screens held a byte-identical copy, every one of
+// them a plain `<div>` — so the sentence saying THIS section's rows could not
+// be read was never announced. One copy, with the live region on it.
+import { ConsoleGate, Unresolved } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { Banner as SharedBanner } from '@/components/Banner';
 import { DataTable, type Column } from '@/components/DataTable';
@@ -84,9 +91,17 @@ import {
   type GymClass, type RosterEntry,
 } from '@lib/gymSchedule';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+// The reader's locale, the gym's zone. `groupSlots` below already buckets on
+// the gym's weekday and hour; the tables were still printing each class on the
+// reader's clock, so the same 06:00 class read 02:00 in London and was grouped
+// under Tuesday while its own row said Monday.
+import { gymDateTimeText } from '@lib/gymWhen';
+import { parseGymZone, gymWeekday, gymHour, NO_ZONE_NOTE } from '@lib/gymZone';
 import { fetchTrainerOptions } from '@lib/gymPtSchedule';
 import { summariseClassRows, type ClassSummaryRow, type ClassRates } from '@lib/classRates';
 import { branchSpan, branchNote } from '@lib/ownedSites';
+// Escape, focus and the tab trap these dialogs never had.
+import { useDialog, dialogPanel } from '@/lib/dialog';
 
 const DAY = 86400000;
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -106,14 +121,7 @@ const WINDOWS = [
  * an owner acts on both of them — one by waiting, the other by cutting a class
  * off the timetable because the console told them nobody came to it.
  */
-type Unread = 'loading' | 'failed' | null;
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 interface Trainer { id: string; name: string | null }
 
@@ -168,6 +176,10 @@ function placeLabel(place: string): string {
 
 export default function Classes() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // Whether the gym's NAME could not be READ, as distinct from there being no
   // gym. The read below still drops the error into a `no-error-ok:` — no figure
@@ -175,6 +187,8 @@ export default function Classes() {
   // either, and that is a sentence about the owner's ACCOUNT produced by a
   // query that failed. Carrying this one bit is what lets the rail say which.
   const [gymNameUnread, setGymNameUnread] = useState(false);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [classes, setClasses] = useState<GymClass[] | null>(null);
   const [trainers, setTrainers] = useState<Trainer[] | null>(null);
   const [upcoming, setUpcoming] = useState<number | null>(null);
@@ -231,13 +245,23 @@ export default function Classes() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) { setClasses([]); setTrainers([]); setUpcoming(0); return; }
       // The error is now read off the result. Not because the name matters — it is
       // a label — but because "we could not ask" and "there is no gym" must not
       // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
-      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+      if (live) {
+        setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr);
+        // The gym's own wall clock. A timetable repeats by weekday and hour, and
+        // those are facts about the gym's week, not about whoever opened the tab.
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
+      }
       await load(who.tenantId, days);
     })();
     return () => { live = false; };
@@ -300,8 +324,11 @@ export default function Classes() {
     [classes, place],
   );
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -417,8 +444,15 @@ export default function Classes() {
 
       <div style={{ display: 'flex', gap: 7, margin: '18px 0 0', flexWrap: 'wrap' }}>
         {WINDOWS.map((w) => (
+            // `aria-pressed`, because which one is chosen was carried by a
+            // background colour and nothing else — so a screen reader read
+            // three identical buttons and no way to tell which window the
+            // figures below belong to. The hour strip on /timetable was
+            // already doing this ten lines from the day strip that was not.
           <button
             key={w.days}
+            type="button"
+            aria-pressed={w.days === days}
             onClick={() => setDays(w.days)}
             style={{
               ...field, cursor: 'pointer',
@@ -584,20 +618,20 @@ export default function Classes() {
         {q ? <button onClick={() => setQ('')} style={linkBtn}>clear</button> : null}
       </div>
 
-      <Waiting classes={classes === null ? null : shownClasses} unread={unread} nameOf={nameOf} onOpen={setOpen} />
-      <Empties rows={rows} unread={unread} query={q} />
-      <Unmarked classes={unmarked} unread={unread} nameOf={nameOf} nameUnread={nameUnread} onOpen={setOpen} />
+      <Waiting classes={classes === null ? null : shownClasses} unread={unread} nameOf={nameOf} zone={zone} onOpen={setOpen} />
+      <Empties rows={rows} unread={unread} query={q} zone={zone} />
+      <Unmarked classes={unmarked} unread={unread} nameOf={nameOf} nameUnread={nameUnread} zone={zone} onOpen={setOpen} />
       {/* Over `allRows`, not `rows`: the point of this table is the comparison,
           and a table that narrowed with the picker would show one row of the
           thing the picker was chosen to compare against. */}
       <ByPlace rows={allRows} unread={unread} show={span.kind === 'mixed'} />
       <ByCoach rows={rows} unread={unread} namesRead={trainers !== null} />
       <EveryClass
-        classes={shownClasses} rows={rows} unread={unread} query={q}
+        classes={shownClasses} rows={rows} unread={unread} query={q} zone={zone}
         nameOf={nameOf} nameUnread={nameUnread} onOpen={setOpen}
       />
 
-      {open ? <Roster gymClass={open} onClose={() => { setOpen(null); refresh(); }} /> : null}
+      {open ? <Roster gymClass={open} zone={zone} onClose={() => { setOpen(null); refresh(); }} /> : null}
     </Shell>
   );
 }
@@ -638,23 +672,45 @@ interface Slot {
  * by title and by the weekday-and-hour they run at, which is the thing that
  * actually repeats on a timetable, and the rate is taken over the group.
  */
-function groupSlots(rows: ClassSummaryRow[]): Slot[] {
+/*
+ * Grouped on the GYM's weekday and hour, not the browser's.
+ *
+ * This was `${r.title}|${t.getDay()}|${t.getHours()}`, and the label under it
+ * was drawn the same way. The reasoning above is right and the key was not the
+ * gym's: an owner opening this console from abroad, or a bookkeeper in another
+ * country, saw a timetable whose slots were named after their own morning — and
+ * worse, a 06:00 class either split into two buckets side by side or merged
+ * with the 07:00, so the fill rate this whole section exists to compute was
+ * taken over the wrong set of classes.
+ *
+ * A gym with no zone set gets ONE bucket per title with no weekday or hour in
+ * the key at all, and the label says so. That is deliberate: the alternative is
+ * the reader's own week, silently, which is exactly what was wrong. A slot list
+ * that says "we cannot say which morning this is" is usable; one that says
+ * Tuesday when the gym means Wednesday is not.
+ */
+function groupSlots(rows: ClassSummaryRow[], zone: string | null): Slot[] {
   const buckets = new Map<string, ClassSummaryRow[]>();
   for (const r of rows) {
     const t = new Date(r.startsAt);
     if (Number.isNaN(t.getTime())) continue;
-    const key = `${r.title}|${t.getDay()}|${t.getHours()}`;
+    const wd = gymWeekday(r.startsAt, zone);
+    const hr = gymHour(r.startsAt, zone);
+    const key = wd == null || hr == null ? `${r.title}|?` : `${r.title}|${wd}|${hr}`;
     const b = buckets.get(key);
     if (b) b.push(r); else buckets.set(key, [r]);
   }
   const out: Slot[] = [];
   buckets.forEach((group, key) => {
-    const t = new Date(group[0].startsAt);
     const rates = summariseClassRows(group);
+    const wd = gymWeekday(group[0].startsAt, zone);
+    const hr = gymHour(group[0].startsAt, zone);
     out.push({
       key,
       title: group[0].title,
-      when: `${DAY_NAMES[t.getDay()]} ${String(t.getHours()).padStart(2, '0')}:00`,
+      when: wd == null || hr == null
+        ? `all ${group.length} — ${NO_ZONE_NOTE}, so they cannot be split into slots`
+        : `${DAY_NAMES[wd]} ${String(hr).padStart(2, '0')}:00`,
       rates,
       // Null, not zero: a slot whose classes never recorded a capacity has an
       // unknown number of empty places, and unknown sorts to the bottom rather
@@ -670,10 +726,10 @@ function groupSlots(rows: ClassSummaryRow[]): Slot[] {
   });
 }
 
-function Empties({ rows, unread, query }: {
-  rows: ClassSummaryRow[]; unread: Unread; query: string;
+function Empties({ rows, unread, query, zone }: {
+  rows: ClassSummaryRow[]; unread: Unread; query: string; zone: string | null;
 }) {
-  const all = useMemo(() => groupSlots(rows), [rows]);
+  const all = useMemo(() => groupSlots(rows, zone), [rows, zone]);
   const slots = useMemo(() => searchRows(all, query, (s) => [s.title, s.when]), [all, query]);
   const note = searchNote(query, slots.length, all.length);
 
@@ -706,7 +762,7 @@ function Empties({ rows, unread, query }: {
           sentence before they read the blank. */}
       {note ? <p style={{ margin: 0, padding: '0 14px 10px', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p> : null}
       {unread ? <Unresolved state={unread} what="the classes" /> : (
-        <DataTable
+        <DataTable noun="class slots"
           rows={slots} columns={cols} rowKey={(s) => s.key}
           empty="No classes ran in this window, so there are no empty places to report — which is not the same as a full gym."
         />
@@ -729,18 +785,20 @@ function Empties({ rows, unread, query }: {
  * that without a section like this they are invisible: a class at 100% with
  * eleven people behind it looks exactly like a class at 100% with nobody.
  */
-function Waiting({ classes, unread, nameOf, onOpen }: {
+function Waiting({ classes, unread, nameOf, zone, onOpen }: {
   classes: GymClass[] | null; unread: Unread;
   nameOf: (c: GymClass) => string; onOpen: (c: GymClass) => void;
+  /** `tenants.timezone` — the clock the class actually runs on. */
+  zone: string | null;
 }) {
   const queued = (classes ?? []).filter((c) => c.waitlisted > 0);
   if (unread || queued.length === 0) return null;
 
   const cols: Column<GymClass>[] = [
     { key: 'when', header: 'When', value: (c) => c.startsAt,
-      render: (c) => new Date(c.startsAt).toLocaleString([], {
+      render: (c) => gymDateTimeText(c.startsAt, zone, {
         weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-      }) },
+      }) ?? <span className="dash">not stated</span> },
     { key: 'title', header: 'Class', value: (c) => c.title },
     { key: 'coach', header: 'Coach', value: (c) => nameOf(c) || null,
       render: (c) => nameOf(c) || <span className="dash">—</span> },
@@ -772,7 +830,7 @@ function Waiting({ classes, unread, nameOf, onOpen }: {
       title="Waiting lists"
       sub={`${total} ${total === 1 ? 'person' : 'people'} across ${queued.length} ${queued.length === 1 ? 'class' : 'classes'}. Demand the gym did not sell — deliberately out of the fill rate, and therefore invisible without this. A place freed at the desk is given away from the register; the app only promotes somebody when a member cancels on their own phone.`}
     >
-      <DataTable rows={queued} columns={cols} rowKey={(c) => c.id} empty="Nobody is waiting for a place." />
+      <DataTable noun="classes with a waiting list" rows={queued} columns={cols} rowKey={(c) => c.id} empty="Nobody is waiting for a place." />
     </Section>
   );
 }
@@ -789,16 +847,18 @@ function Waiting({ classes, unread, nameOf, onOpen }: {
  * the register can be marked from here, because the owner reading this is the
  * person who noticed.
  */
-function Unmarked({ classes, unread, nameOf, nameUnread, onOpen }: {
+function Unmarked({ classes, unread, nameOf, nameUnread, zone, onOpen }: {
   classes: GymClass[]; unread: Unread; nameOf: (c: GymClass) => string;
   nameUnread: (c: GymClass) => boolean;
   onOpen: (c: GymClass) => void;
+  /** `tenants.timezone` — the clock the class actually runs on. */
+  zone: string | null;
 }) {
   const cols: Column<GymClass>[] = [
     { key: 'when', header: 'When', value: (c) => c.startsAt,
-      render: (c) => new Date(c.startsAt).toLocaleString([], {
+      render: (c) => gymDateTimeText(c.startsAt, zone, {
         weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-      }) },
+      }) ?? <span className="dash">not stated</span> },
     { key: 'title', header: 'Class', value: (c) => c.title },
     { key: 'coach', header: 'Coach', value: (c) => nameOf(c) || null,
       render: (c) => nameOf(c)
@@ -824,7 +884,7 @@ function Unmarked({ classes, unread, nameOf, nameUnread, onOpen }: {
       title="Registers nobody marked"
       sub="These classes had bookings and nobody marked present. They are counted as 0 attended in the show rate above, which reads the same whether nobody came or nobody ticked."
     >
-      <DataTable rows={classes} columns={cols} rowKey={(c) => c.id} empty="Every register in this window has been marked." />
+      <DataTable noun="unmarked registers" rows={classes} columns={cols} rowKey={(c) => c.id} empty="Every register in this window has been marked." />
     </Section>
   );
 }
@@ -901,7 +961,7 @@ function ByPlace({ rows, unread, show }: {
       sub="Each place's own fill and show, over the same window as the tiles above — which are a total across all of them. Always the whole window, whatever the picker is set to, because this table is the comparison the picker narrows away from."
     >
       {unread ? <Unresolved state={unread} what="the classes" /> : (
-        <DataTable
+        <DataTable noun="places"
           rows={places} columns={cols} rowKey={(p) => p.key}
           empty="No classes ran in this window."
         />
@@ -969,7 +1029,7 @@ function ByCoach({ rows, unread, namesRead }: {
       sub="Whose room fills, and whose bookings turn up. Read it beside the number of classes each ran — one class is not a record."
     >
       {unread ? <Unresolved state={unread} what="the classes" /> : (
-        <DataTable
+        <DataTable noun="coaches"
           rows={coaches} columns={cols} rowKey={(c) => c.key}
           empty="No classes ran in this window."
         />
@@ -980,10 +1040,12 @@ function ByCoach({ rows, unread, namesRead }: {
 
 /* ── every class ───────────────────────────────────────────────────────────── */
 
-function EveryClass({ classes, rows, unread, query, nameOf, nameUnread, onOpen }: {
+function EveryClass({ classes, rows, unread, query, zone, nameOf, nameUnread, onOpen }: {
   classes: GymClass[]; rows: ClassSummaryRow[]; unread: Unread; query: string;
   nameOf: (c: GymClass) => string; nameUnread: (c: GymClass) => boolean;
   onOpen: (c: GymClass) => void;
+  /** `tenants.timezone` — the clock the class actually runs on. */
+  zone: string | null;
 }) {
   const rateOf = useMemo(() => {
     const m = new Map<string, ClassRates>();
@@ -1002,9 +1064,9 @@ function EveryClass({ classes, rows, unread, query, nameOf, nameUnread, onOpen }
 
   const cols: Column<GymClass>[] = [
     { key: 'when', header: 'When', value: (c) => c.startsAt,
-      render: (c) => new Date(c.startsAt).toLocaleString([], {
+      render: (c) => gymDateTimeText(c.startsAt, zone, {
         weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-      }) },
+      }) ?? <span className="dash">not stated</span> },
     { key: 'title', header: 'Class', value: (c) => c.title },
     { key: 'coach', header: 'Coach', value: (c) => nameOf(c) || null,
       render: (c) => nameOf(c)
@@ -1033,7 +1095,7 @@ function EveryClass({ classes, rows, unread, query, nameOf, nameUnread, onOpen }
     >
       {shownNote ? <p style={{ margin: 0, padding: '0 14px 10px', fontSize: 12.5, color: 'var(--ink3)' }}>{shownNote}</p> : null}
       {unread ? <Unresolved state={unread} what="the classes" /> : (
-        <DataTable
+        <DataTable noun="classes"
           rows={shown} columns={cols} rowKey={(c) => c.id}
           empty="No classes ran in this window."
         />
@@ -1044,7 +1106,7 @@ function EveryClass({ classes, rows, unread, query, nameOf, nameUnread, onOpen }
 
 /* ── the roster ────────────────────────────────────────────────────────────── */
 
-function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void }) {
+function Roster({ gymClass, zone, onClose }: { gymClass: GymClass; zone: string | null; onClose: () => void }) {
   const [rows, setRows] = useState<RosterEntry[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -1094,6 +1156,10 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
     }
   };
 
+  // Escape, initial focus, a tab trap, and focus back to the row that opened
+  // this. See lib/dialog.ts — this dialog had none of the four.
+  const panel = useDialog<HTMLDivElement>(onClose);
+
   const split = rows ? splitRoster(rows) : null;
   const present = rows ? rows.filter((r) => r.attendedAt).length : null;
   // Off the roster in hand rather than the window's snapshot: a place freed
@@ -1102,15 +1168,17 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
 
   return (
     <div
-      role="dialog"
-      aria-label={`Register for ${gymClass.title}`}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
         display: 'grid', placeItems: 'center', padding: 24, zIndex: 10,
       }}
       onClick={onClose}
     >
+      {/* `role="dialog"` and the label live on the PANEL now, with Escape, an
+          initial focus, a tab trap and focus return — see lib/dialog.ts. The
+          scrim keeps its click; it is no longer the only way out. */}
       <div
+        {...dialogPanel(panel, `Register for ${gymClass.title}`)}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 520, maxWidth: '100%', maxHeight: '80vh', overflow: 'auto',
@@ -1124,7 +1192,7 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
           <div>
             <h2>{gymClass.title}</h2>
             <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-              {new Date(gymClass.startsAt).toLocaleString()} · {split ? split.booked.length : gymClass.booked} booked
+              {gymDateTimeText(gymClass.startsAt, zone) ?? 'a start time that could not be read'} · {split ? split.booked.length : gymClass.booked} booked
               {gymClass.capacity > 0 ? ` of ${gymClass.capacity}` : ' · capacity not set'}
               {present == null ? '' : ` · ${present} marked present`}
               {split && split.waiting.length > 0 ? ` · ${split.waiting.length} waiting` : ''}
@@ -1134,10 +1202,16 @@ function Roster({ gymClass, onClose }: { gymClass: GymClass; onClose: () => void
         </div>
 
         {failed ? <Banner tone="crit">{failed}</Banner> : null}
-        {msg ? <p style={{ margin: '12px 16px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+        {/* Announced. `failed` — the roster READ — was already bannered; `msg`
+            is the WRITE result ("Could not save that check-in", "that place
+            was not given") and was not. */}
+        {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: '12px 16px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
 
         {rows === null ? (
-          <div style={{ padding: '26px 18px', color: 'var(--ink3)', fontSize: 13.5 }}>
+          // Announced. This sits inside a dialog somebody opened to mark a
+          // register; a reader who hears nothing after opening it has no way to
+          // tell a slow read from a refused one.
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '26px 18px', color: 'var(--ink3)', fontSize: 13.5 }}>
             {failed ? 'The roster did not come back, so nobody can be marked from here.' : 'Loading…'}
           </div>
         ) : rows.length === 0 ? (
@@ -1209,6 +1283,10 @@ function Line({ r, waiting, full, onToggle, onPromote }: {
         ) : null}
         <button
           onClick={() => onToggle(r)}
+          /* The same control on /timetable already carries this. Without it a
+             screen reader hears "Mark present, button" whether or not the
+             person is already marked. */
+          aria-pressed={!!r.attendedAt}
           style={{
             ...field, cursor: 'pointer', flex: 'none',
             background: r.attendedAt ? 'var(--surface3)' : 'var(--surface2)',
@@ -1252,24 +1330,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div
-        className="mono"
-        style={{
-          fontSize: 21, marginTop: 5, letterSpacing: '-0.02em',
-          color: text == null ? 'var(--ink3)' : 'var(--ink)',
-        }}
-      >
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
 // ── the seventh Banner, and why nobody found it ──────────────────────────
 //
 // A sweep migrated six console pages off their own local `function Banner` and
@@ -1295,10 +1355,4 @@ function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'c
  * could not ask" and "the gym ran no classes" were the same sentence — and the
  * second one gets a class cut off the timetable.
  */
-function Unresolved({ state, what }: { state: Exclude<Unread, null>; what: string }) {
-  return (
-    <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
-      {state === 'loading' ? 'Loading…' : `Could not read ${what}. The banner above says why.`}
-    </div>
-  );
-}
+

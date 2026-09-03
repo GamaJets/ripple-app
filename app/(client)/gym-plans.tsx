@@ -54,11 +54,12 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { appLink } from '../../src/lib/deepLink';
 import {
-  fetchMyMemberships, primaryMembership, standingOf, standingLabel, todayIso,
+  fetchMyMemberships, primaryMembership, standingOf, standingLabel,
   type MemberMembership,
 } from '../../src/lib/memberRecord';
+import { useToday } from '../../src/ui/today';
 import {
-  fetchGymPaymentFacts, fetchGymPlans, fetchGymPassOffers, fetchMyGymOrders, startGymCheckout,
+  fetchGymPaymentFacts, fetchGymPlans, fetchGymPassOffers, fetchMyGymOrders, startGymCheckout, MY_ORDERS_CAP,
   gymCanSell, offerFor, passNote, offerMoney, orderNote, orderIsLive, dayLabel,
   type GymAccountFacts, type GymPlan, type GymPassOffer, type GymOrder,
 } from '../../src/lib/memberBuy';
@@ -130,17 +131,32 @@ export default function GymPlans() {
     // Not cleared on failure, same as the memberships above: an order we read a
     // moment ago is still the last thing we knew, and the sentence below says
     // the list is short rather than pretending it is complete.
-    if (o.ok) { setOrders(o.value); setOrderStatus('ready'); }
+    //
+    // 'partial' when the member has more orders than the read's fifty. It is
+    // not 'ready': the count in the header below is a figure over a set, and a
+    // figure over a prefix is not a smaller figure, it is a wrong one — on the
+    // one screen where the difference is somebody's money.
+    if (o.ok) { setOrders(o.value.orders); setOrderStatus(o.value.truncated ? 'partial' : 'ready'); }
     else { reportError('gymPlans.orders', new Error(o.reason)); setOrderStatus('error'); }
   }, [uid, auth.loading]);
   useEffect(() => { void load(); }, [load]);
 
   const pull = usePullToRefresh(useCallback(() => load(), [load]));
 
-  // Recomputed per render rather than memoised on a date string: this screen
-  // can be open across midnight, and a term starting "today" must mean the day
-  // the member is actually in when they press the button.
-  const today = todayIso(new Date());
+  // This screen can be open across midnight, and a term starting "today" must
+  // mean the day the member is actually in when they press the button.
+  //
+  // `todayIso(new Date())` in the render body did not deliver that, and the
+  // comment it carried said so without noticing: a value recomputed per render
+  // is only right when a render happens, and this screen is registered
+  // `href: null` in app/(client)/_layout.tsx — mounted once, never torn down,
+  // and redrawing for nothing while it sits open. The button is the point: this
+  // is where a member buys a plan, so the stale day is not a stale label but
+  // the start date on something they are about to pay for.
+  //
+  // `useToday` (src/ui/today.ts) re-reads the day at the next local midnight
+  // and whenever the app returns to the foreground.
+  const today = useToday();
   const primary = primaryMembership(mships, today);
   const standing = primary ? standingOf(primary, today) : null;
 
@@ -365,7 +381,7 @@ export default function GymPlans() {
             rows in it. An empty `waiting` under 'error' means unknown, never
             "there is nothing pending", and this is the one screen in the app
             where that difference is somebody's money. */}
-        {waiting.length || orderStatus === 'error' ? (
+        {waiting.length || orderStatus === 'error' || orderStatus === 'partial' ? (
           <>
             <Rule />
             <Section>
@@ -373,6 +389,13 @@ export default function GymPlans() {
               {orderStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   We couldn’t read your purchases, so we can’t say whether any are still with Stripe. This is not a statement that none are. If you have paid for something that has not appeared, show your card statement to reception and they can put it right.
+                </Flag>
+              ) : orderStatus === 'partial' ? (
+                /* A different sentence from the failed one above, and drawn on
+                   its own even when nothing here is waiting: "none of your
+                   recent fifty is stuck" is not "nothing of yours is stuck". */
+                <Flag tone={t.warn}>
+                  You have more purchases than we can show here, so this covers your {MY_ORDERS_CAP} most recent only. Anything older that Stripe never finished is not counted above. If you have paid for something that has not appeared, show your card statement to reception and they can put it right.
                 </Flag>
               ) : null}
               {waiting.map((o, i) => (

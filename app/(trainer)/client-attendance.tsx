@@ -38,6 +38,7 @@ import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { isWhole } from '../../src/ui/loadStatus';
 import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { MIN_TARGET } from '../../src/lib/a11y';
@@ -255,10 +256,17 @@ export default function ClientAttendanceScreen() {
 
         <Section>
           <SectionHead title="Client" />
-          {r.roster.length === 0 && r.status !== 'error' ? (
+          {/* `isWhole`, not `!== 'error'`. The failed read is already announced
+              by the Notice above, so what this gate was really admitting was
+              'loading' — and "Nobody is on your book yet" is a claim about a
+              coach's own livelihood being made before anything has been read.
+              Loading, failed and genuinely empty are three sentences. */}
+          {r.roster.length === 0 && isWhole(r.status) ? (
             <Text style={{ ...ty.body, color: t.ink3 }}>
               Nobody is on your book yet, so there is no record to open.
             </Text>
+          ) : r.roster.length === 0 && r.status === 'loading' ? (
+            <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
           ) : (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {r.roster.map((c) => (

@@ -60,8 +60,9 @@ import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../
 import { memberNoFrom, MEMBER_NO_CHANGED_NOTE } from '../../src/lib/membership';
 import {
   amount, fetchMyMemberships, isCurrent, planStateOf, primaryMembership, renewalNote,
-  standingLabel, standingOf, todayIso, type MemberMembership,
+  standingLabel, standingOf, type MemberMembership,
 } from '../../src/lib/memberRecord';
+import { useToday } from '../../src/ui/today';
 import { localDate } from '../../src/lib/localDate';
 import { appLocale } from '../../src/lib/locale';
 import { END_ALIGN } from '../../src/ui/direction';
@@ -181,10 +182,23 @@ export default function Membership() {
     void loadMembership(); c.reload(); reloadLog();
   }, [loadMembership, c.reload, reloadLog]));
 
-  // Recomputed per render rather than memoised on a date string: the screen can
-  // be open across midnight, and a membership that expired at 00:00 should not
-  // still read "Active" because the component has not re-rendered for a new day.
-  const today = todayIso(new Date());
+  // The screen can be open across midnight, and a membership that expired at
+  // 00:00 must not still read "Active".
+  //
+  // This line used to be `todayIso(new Date())` in the render body, under a
+  // comment ending "because the component has not re-rendered for a new day" —
+  // which names the hole it left. Moving the call out of a `useMemo` changed a
+  // value frozen at MOUNT into one frozen at the LAST RENDER, and this screen
+  // is registered `href: null` in app/(client)/_layout.tsx, so it mounts once
+  // and is never torn down. Nothing here renders on a clock. A member who
+  // opened Membership on Sunday evening and came back to it on Wednesday was
+  // still being judged against Sunday, and "Active" is the single word on this
+  // screen they would act on — it is what tells them the door will open.
+  //
+  // `useToday` (src/ui/today.ts) holds the day as state and re-reads it at the
+  // next local midnight and on every return to the foreground, which is the
+  // render this line was already written to be correct in.
+  const today = useToday();
   const primary = primaryMembership(mships, today);
   const standing = primary ? standingOf(primary, today) : null;
   const planState = primary ? planStateOf(primary) : null;

@@ -39,6 +39,9 @@
 // Framework-agnostic like the rest of src/lib: the client arrives as an
 // argument, so the console and the phone can both use this.
 import { assertWhole, capLimit } from './rowCap';
+// The paragraph below names the responsible party, so it names the brand this
+// bundle actually is.
+import { BRAND } from './brands';
 import type { Agreement, AgreementKind } from './gymDocs';
 
 type Queryable = { from: (table: string) => any };
@@ -148,9 +151,20 @@ export const GUARDIAN_REFUSAL =
 export const SIGNING_RULE =
   'Signing records your name, the moment, and the exact wording above, against your account. It is kept as the gym’s evidence that you agreed and it cannot be edited or taken back afterwards — withdrawing consent later is a new record, not the quiet disappearance of this one.';
 
-/** Why the gym holds this rather than Repple, said once and shown on the screen. */
+/**
+ * Why the gym holds this rather than the app's publisher, said once and shown
+ * on the screen.
+ *
+ * Reads the brand. The heading above it on `app/(client)/agreements.tsx` always
+ * did — `Your gym’s, not ${BRAND.label}’s` — so on a white-label build the
+ * title named the member's own app and the sentence under it named a supplier
+ * they have never heard of. The entire purpose of this paragraph is to tell a
+ * member who to take a dispute to, and it was naming two different parties in
+ * consecutive lines.
+ */
 export const NOT_REPPLE =
-  'These are your gym’s own documents. Repple does not write them, check them or advise on them, and the release you agreed to when you joined the app is a different document owned by a different party.';
+  `These are your gym’s own documents. ${BRAND.label} does not write them, check them or advise on them, `
+  + 'and the release you agreed to when you joined the app is a different document owned by a different party.';
 
 /**
  * Everything this gym is currently asking for, joined to what this person has
@@ -208,6 +222,74 @@ export function waitingOn(a: MemberAgreement): boolean {
 
 export function waitingCount(rows: ReadonlyArray<MemberAgreement>): number {
   return rows.filter(waitingOn).length;
+}
+
+/**
+ * Unsigned, whoever is supposed to do something about it.
+ *
+ * `waitingOn` answers "may this member act on this row", which is the right
+ * question for a button and for the ordering. It is the WRONG question for the
+ * line at the top of the screen, and one function was answering both.
+ *
+ * A guardian consent carries `GUARDIAN_REFUSAL` — correct, because a minor may
+ * not give consent about themselves however it is worded — and that took the
+ * row out of the count as a side effect. So a sixteen-year-old whose guardian
+ * consent is unsigned opened the gym paperwork screen and read "Nothing is
+ * waiting on you", and supabase/parts/185 is explicit that the gym may not
+ * train them at all without it. They turn up and are either turned away at the
+ * desk or, worse, trained without it.
+ */
+export function outstanding(a: MemberAgreement): boolean {
+  return a.signedAt === null;
+}
+
+/** Unsigned AND not this member's to sign. Someone else has to act, and the
+ *  member still needs to know it has not happened. */
+export function blockedOn(a: MemberAgreement): boolean {
+  return a.signedAt === null && a.refusal !== null;
+}
+
+export interface AgreementStanding {
+  /** Unsigned and this member may sign it here. */
+  waiting: number;
+  /** Unsigned and somebody else has to give it. */
+  blocked: number;
+  /** Both together — what the gym is still missing. */
+  outstanding: number;
+}
+
+export function agreementStanding(rows: ReadonlyArray<MemberAgreement>): AgreementStanding {
+  const waiting = rows.filter(waitingOn).length;
+  const blocked = rows.filter(blockedOn).length;
+  return { waiting, blocked, outstanding: waiting + blocked };
+}
+
+/**
+ * The line at the top of the member's paperwork screen.
+ *
+ * Never says "nothing is waiting on you" while anything is unsigned. A document
+ * the member cannot sign is still a document the gym is missing, and the
+ * sentence names who has to give it rather than leaving a minor to discover it
+ * at the desk.
+ *
+ * Only called once the read has landed and there is something to report on —
+ * loading, failed and "your gym publishes nothing" are three other sentences
+ * that belong to the screen.
+ */
+export function agreementSummary(rows: ReadonlyArray<MemberAgreement>): string {
+  const { waiting, blocked } = agreementStanding(rows);
+  const docs = (n: number) => `${n} document${n === 1 ? '' : 's'}`;
+  const guardian = (n: number) =>
+    `${n === 1 ? 'it' : 'they'} can only be given by the adult responsible for you, in person at the gym`;
+  if (waiting === 0 && blocked === 0) return 'Nothing is waiting on you.';
+  if (waiting === 0) {
+    return `Nothing here is for you to sign, but ${docs(blocked)} your gym asks for `
+      + `${blocked === 1 ? 'is' : 'are'} still unsigned — ${guardian(blocked)}. `
+      + 'Your gym may not be able to train you until that is done.';
+  }
+  if (blocked === 0) return `${docs(waiting)} waiting on you.`;
+  return `${docs(waiting)} waiting on you, and ${blocked} more still unsigned — `
+    + `${guardian(blocked)}. Your gym may not be able to train you until that is done.`;
 }
 
 /**

@@ -25,9 +25,16 @@
 // has an unknown outcome, it sits in its own queue, and it stays out of every
 // delivered figure on this page until a human says what happened.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+// `Unresolved` comes from here rather than being declared at the bottom of
+// this file. Seven console screens held a byte-identical copy, every one of
+// them a plain `<div>` — so the sentence saying THIS section's rows could not
+// be read was never announced. One copy, with the live region on it.
+import { ConsoleGate, Unresolved } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
-import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import { readTenant, amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   isDelivered, isAwaitingOutcome, isPayable, sessionProfileIds, namesById,
@@ -37,7 +44,37 @@ import {
 // `money()` is reached through lib/currency's `amount()`: a session rate has no
 // currency of its own until payroll stamps one, so it inherits the gym's or is
 // not written at all.
-import { isoDate, fmtDay, fmtTime } from '@lib/format';
+import { isoDate } from '@lib/format';
+// ── whose clock this screen is on ────────────────────────────────────────
+//
+// This route drew every date and every time on it through `fmtDay` and
+// `fmtTime` from src/lib/format.ts, which are `toLocaleDateString` /
+// `getHours()` on the READER's machine. It was the last console route doing so,
+// and `scripts/check-console-when.mjs` could not see it: that gate reads
+// `studio-web` only, and both calls it forbids were happening one directory
+// over in `src/lib`, behind a helper name.
+//
+// It is the worst screen in the console to have it on. A coach opens this at
+// six in the morning to find out what is on TODAY and which finished sessions
+// still need marking, and the day a session is bucketed into decided both. A
+// gym in Dubai read from a laptop still set to London put every session before
+// 04:00 on the previous day — so a 06:00 client did not appear under Today at
+// all, and an unmarked session's "Waiting 2 days" was a day out on the queue
+// that blocks the coach's own pay.
+//
+// `gymTimeText` / `gymDateText` are the house answer: the reader's locale, the
+// gym's zone, and `NO_ZONE_NOTE` printed where the gym has set no zone so the
+// screen never claims a clock it has not got.
+import { gymDateText, gymTimeText, whoseClockNote } from '@lib/gymWhen';
+import { gymDay } from '@lib/gymZone';
+// Every read on this screen was a bare `.select()`. PostgREST answers an
+// unbounded request with a thousand rows and says nothing (src/lib/rowCap.ts),
+// and every figure on this page is a COUNT over one of them — so a coach past
+// the ceiling would have been shown a smaller book with nothing to say it was
+// smaller. Each of these is bounded by construction (one coach, one window, or
+// a list of ids already in hand), which is the shape `readAll` is written for.
+import { readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 import { COACHED_MODE_SHORT, readCoachedMode, type CoachedMode } from '@lib/types';
 import { Banner } from '@/components/Banner';
 
@@ -60,7 +97,6 @@ const QUIET_DAYS = 14;
  * order. A coach who reads "we could not check" goes and looks. Same blank
  * table, opposite consequences.
  */
-type Unread = 'loading' | 'failed' | null;
 
 const OUTCOME_LABEL: Record<SessionOutcome, string> = {
   completed: 'Delivered',
@@ -94,12 +130,6 @@ interface Approval {
   note: string | null;
 }
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 /**
  * This trainer's sessions, and nobody else's.
@@ -111,16 +141,24 @@ function failure(res: PromiseSettledResult<unknown>, what: string): string | nul
  * agree rather than one relying on the other.
  */
 async function fetchMySessions(trainerId: string, sinceIso: string, untilIso: string): Promise<PtSession[]> {
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
-    .eq('trainer_id', trainerId)
-    .gte('starts_at', sinceIso)
-    .lte('starts_at', untilIso)
-    .order('starts_at', { ascending: true });
-  if (error) throw error;
+  // A bounded set — one coach, one window — read to the end rather than
+  // refused, because the list is what the coach came here for. The order is
+  // closed on `id`: `starts_at` ties whenever two sessions start on the hour,
+  // and a tied order across separate page requests can drop or repeat a row.
+  const data = await readAll<any>(
+    (from, to) => supabase
+      .from('sessions')
+      .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, rate_currency, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
+      .eq('trainer_id', trainerId)
+      .gte('starts_at', sinceIso)
+      .lte('starts_at', untilIso)
+      .order('starts_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    'your sessions in this window',
+  );
 
-  return ((data ?? []) as any[]).map((r) => ({
+  return (data as any[]).map((r) => ({
     id: r.id,
     trainerId: r.trainer_id,
     trainerName: null,
@@ -132,6 +170,7 @@ async function fetchMySessions(trainerId: string, sinceIso: string, untilIso: st
     outcome: (r.outcome ?? null) as SessionOutcome | null,
     outcomeAt: r.outcome_at ?? null,
     rateCents: r.rate_cents ?? null,
+    rateCurrency: r.rate_currency ?? null,
     settlementId: r.settlement_id ?? null,
     // What the CLIENT paid with (supabase/parts/370), which is not the same
     // question as the settlement beside it — that is what the gym paid the
@@ -143,14 +182,20 @@ async function fetchMySessions(trainerId: string, sinceIso: string, untilIso: st
 }
 
 async function fetchMyRequests(trainerId: string): Promise<CoachRequest[]> {
-  const { data, error } = await supabase
-    .from('coach_requests')
-    .select('id, client_id, mode, status, source, via_code, created_at')
-    .eq('trainer_id', trainerId)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: true });
-  if (error) throw error;
-  return ((data ?? []) as any[]).map((r) => ({
+  // The screen prints how many requests are waiting. A capped read makes that
+  // number the cap, which reads as a queue that is under control.
+  const data = await readAll<any>(
+    (from, to) => supabase
+      .from('coach_requests')
+      .select('id, client_id, mode, status, source, via_code, created_at')
+      .eq('trainer_id', trainerId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    'the coaching requests waiting for you',
+  );
+  return (data as any[]).map((r) => ({
     id: r.id,
     clientId: r.client_id,
     clientName: null,
@@ -162,12 +207,19 @@ async function fetchMyRequests(trainerId: string): Promise<CoachRequest[]> {
 }
 
 async function fetchMyRoster(coachId: string): Promise<Roster[]> {
-  const { data, error } = await supabase
-    .from('coaching_relationships')
-    .select('client_id, status, created_at')
-    .eq('coach_id', coachId);
-  if (error) throw error;
-  return ((data ?? []) as any[]).map((r) => ({
+  // "N clients" on this page is `rost.length`. Unbounded, that figure stops at
+  // a thousand and stays there, which is a coach being told their book has
+  // stopped growing.
+  const data = await readAll<any>(
+    (from, to) => supabase
+      .from('coaching_relationships')
+      .select('client_id, status, created_at')
+      .eq('coach_id', coachId)
+      .order('client_id', { ascending: true })
+      .range(from, to),
+    'your client list',
+  );
+  return (data as any[]).map((r) => ({
     clientId: r.client_id,
     clientName: null,
     status: r.status ?? 'active',
@@ -184,16 +236,29 @@ async function fetchMyRoster(coachId: string): Promise<Roster[]> {
  */
 async function fetchApprovals(sessionIds: string[]): Promise<Map<string, Approval>> {
   if (!sessionIds.length) return new Map();
-  const { data, error } = await supabase
-    .from('session_approvals')
-    .select('session_id, approved_at, note')
-    .in('session_id', sessionIds);
-  if (error) throw error;
-  return new Map(((data ?? []) as any[]).map((r) => [r.session_id, { at: r.approved_at, note: r.note ?? null }]));
+  // `.in()` on a list that is itself a whole window's sessions is a read with
+  // no ceiling of its own: past a thousand approvals the rest come back absent,
+  // and an absent approval renders exactly like a session the client has not
+  // confirmed. `readByIds` chunks the id list and pages each chunk.
+  const rows = await readByIds<any>(
+    sessionIds,
+    (chunk, from, to) => supabase
+      .from('session_approvals')
+      .select('session_id, approved_at, note')
+      .in('session_id', chunk)
+      .order('session_id', { ascending: true })
+      .range(from, to),
+    'which sessions your clients have confirmed',
+  );
+  return new Map(rows.map((r) => [r.session_id, { at: r.approved_at, note: r.note ?? null }]));
 }
 
 export default function Coach() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // The gym's currency. A session rate has none of its own until payroll stamps
   // one, so every amount on this screen inherits the gym's or is not written.
@@ -204,6 +269,9 @@ export default function Coach() {
   // `no-error-ok` read while the row only supplied a sidebar label; it stopped
   // being one the moment a figure depended on it.
   const [gymErr, setGymErr] = useState<string | null>(null);
+  /** `tenants.timezone`, or null when the gym has not set one — in which case
+   *  every time below is the reader's own and the page says so once. */
+  const [zone, setZone] = useState<string | null>(null);
   const [sessions, setSessions] = useState<PtSession[] | null>(null);
   const [requests, setRequests] = useState<CoachRequest[] | null>(null);
   const [roster, setRoster] = useState<Roster[] | null>(null);
@@ -264,8 +332,17 @@ export default function Coach() {
     ]);
     if (ids.size) {
       // no-error-ok: an unreadable name renders as a labelled dash beside a row that is still shown and still actionable
-      const { data } = await supabase.from('profiles').select('id, full_name').in('id', [...ids]);
-      setNames(namesById((data ?? []) as Array<{ id: string; full_name?: string | null }>));
+      // Chunked and paged: `[...ids]` is one entry per person named by three
+      // reads, and a bare `.in()` over more than a thousand of them drops the
+      // tail — which renders as a row whose person has no name rather than as
+      // a lookup that ran short.
+      const rows = await readByIds<{ id: string; full_name?: string | null }>(
+        [...ids],
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name').in('id', chunk)
+          .order('id', { ascending: true }).range(from, to),
+        'the names on your book',
+      ).catch(() => [] as Array<{ id: string; full_name?: string | null }>);
+      setNames(namesById(rows));
     } else {
       setNames(new Map());
     }
@@ -287,15 +364,24 @@ export default function Coach() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who) return;
       if (who.tenantId) {
-        const { data: t, error: tErr } = await supabase
-          .from('tenants').select('name, currency').eq('id', who.tenantId).single();
+        // `readTenant`, not a hand-written `select('name, currency')`. The
+        // third column it reads is `timezone`, which this screen needs and was
+        // dropping on the floor — the same three facts six other console
+        // screens take from this one helper, so they cannot disagree about what
+        // an unparseable zone means.
+        const t = await readTenant(supabase, who.tenantId);
         if (live) {
-          setGymName(tErr ? null : ((t as any)?.name ?? null));
-          setCcy(tErr ? null : (((((t as any)?.currency ?? '') as string).trim().toUpperCase()) || null));
-          setGymErr(tErr ? (tErr.message || 'Your gym record could not be read.') : null);
+          setGymName(t.name);
+          setCcy(t.currency);
+          setZone(t.zone);
+          setGymErr(t.error);
         }
       }
       if (who.role !== 'trainer' && who.role !== 'owner') return;
@@ -305,12 +391,19 @@ export default function Coach() {
   }, [load]);
 
   const now = Date.now();
-  const today = isoDate(new Date());
+  // The GYM's day, and the gym's day for each session, so both sides of the
+  // comparison below are on one calendar. It was `isoDate(new Date())` against
+  // `isoDate(new Date(s.startsAt))` — self-consistent, and consistently the
+  // reader's, which is not the calendar a 06:00 class is on. The reader's day
+  // stays the fallback where the gym has set no zone, which is what this was.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
 
   /** Everything on today, in the order it happens. Already ascending. */
   const todays = useMemo(
-    () => sessions && sessions.filter((s) => isoDate(new Date(s.startsAt)) === today),
-    [sessions, today],
+    () => sessions && sessions.filter(
+      (s) => (gymDay(s.startsAt, zone) ?? isoDate(new Date(s.startsAt))) === today,
+    ),
+    [sessions, today, zone],
   );
 
   /**
@@ -384,8 +477,11 @@ export default function Coach() {
     return { cents, payable, withRate };
   }, [sessions]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   // Owners are let in because plenty of them still coach, and this is their own
   // book rather than the gym's. Everyone else gets a sentence, not four empty
@@ -506,27 +602,50 @@ export default function Coach() {
         />
       </div>
 
+      {/* Said once, at the top, rather than beside every cell. This is the
+          bargain the text-only forms in src/lib/gymWhen.ts are lent on: a
+          screen that draws its times with `gymTimeText` owes the reader one
+          sentence saying whose clock they are. Null when the gym has set a
+          zone, in which case there is nothing to admit. */}
+      {/* The shared sentence, capitalised and nothing else. It already ends
+          "days and hours here are your own device's, not the gym's", so a lead-in
+          saying that first would say it twice — and this is the note whose whole
+          value is that thirty screens word it identically. */}
+      {whoseClockNote(zone) ? (
+        <p style={{ color: 'var(--ink3)', fontSize: 12, margin: '0 0 14px' }}>
+          {whoseClockNote(zone)!.charAt(0).toUpperCase() + whoseClockNote(zone)!.slice(1)}.
+        </p>
+      ) : null}
+
       <Unmarked
         sessions={unmarked} unread={unread(unmarked)} approvals={approvals}
-        approvalsUnread={unread(approvals)} names={names} onMark={mark}
+        approvalsUnread={unread(approvals)} names={names} onMark={mark} zone={zone}
       />
-      <Today sessions={todays} unread={unread(todays)} approvals={approvals} names={names} onMark={mark} ccy={ccy} />
-      <Requests requests={requests} unread={unread(requests)} names={names} me={me} onChange={refresh} setErr={setErr} />
-      <Quiet rows={quiet} unread={unread(quiet)} names={names} />
+      <Today sessions={todays} unread={unread(todays)} approvals={approvals} names={names} onMark={mark} ccy={ccy} zone={zone} />
+      <Requests requests={requests} unread={unread(requests)} names={names} me={me} onChange={refresh} setErr={setErr} zone={zone} />
+      <Quiet rows={quiet} unread={unread(quiet)} names={names} zone={zone} />
     </Shell>
   );
 }
 
 /* ── the queue that blocks a coach's pay ───────────────────────────────────── */
 
-function Unmarked({ sessions, unread, approvals, approvalsUnread, names, onMark }: {
+function Unmarked({ sessions, unread, approvals, approvalsUnread, names, onMark, zone }: {
   sessions: PtSession[] | null; unread: Unread;
   approvals: Map<string, Approval> | null; approvalsUnread: Unread;
   names: Map<string, string>; onMark: (s: PtSession, o: SessionOutcome) => void;
+  /** `tenants.timezone` — the hour a session ran is the gym's hour. */
+  zone: string | null;
 }) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
-      render: (s) => `${fmtDay(s.startsAt)} · ${fmtTime(s.startsAt)}` },
+      // Null rather than "Invalid Date": a stamp that will not parse is drawn
+      // as the absence it is, which is the rule every other table here follows.
+      render: (s) => {
+        const d = gymDateText(s.startsAt, zone, { weekday: 'short', day: 'numeric', month: 'short' });
+        const t = gymTimeText(s.startsAt, zone, { hour: '2-digit', minute: '2-digit' });
+        return d && t ? `${d} · ${t}` : <span className="dash">a time that could not be read</span>;
+      } },
     { key: 'who', header: 'Client', value: (s) => (s.clientId && names.get(s.clientId)) ?? 'zzz',
       render: (s) => (s.clientId && names.get(s.clientId))
         ?? <span className="dash">name not readable</span> },
@@ -543,7 +662,13 @@ function Unmarked({ sessions, unread, approvals, approvalsUnread, names, onMark 
         if (approvalsUnread) return <span className="dash">not checked</span>;
         const a = approvals?.get(s.id);
         if (!a) return <span className="dash">not confirmed</span>;
-        return <span title={a.note ?? undefined}>{fmtDay(a.at)}{a.note ? ' · note' : ''}</span>;
+        return (
+          <span title={a.note ?? undefined}>
+            {gymDateText(a.at, zone, { weekday: 'short', day: 'numeric', month: 'short' })
+              ?? <span className="dash">a date that could not be read</span>}
+            {a.note ? ' · note' : ''}
+          </span>
+        );
       } },
     { key: 'mark', header: '', value: () => 0, align: 'right',
       render: (s) => (
@@ -566,7 +691,7 @@ function Unmarked({ sessions, unread, approvals, approvalsUnread, names, onMark 
       tone={n > 0 ? 'warn' : undefined}
     >
       {unread ? <Unresolved state={unread} what="your sessions" /> : (
-        <DataTable
+        <DataTable noun="unmarked sessions"
           rows={sessions ?? []} columns={cols} rowKey={(s) => s.id}
           empty="Nothing outstanding — every finished session has an outcome against it."
         />
@@ -584,16 +709,21 @@ function Unmarked({ sessions, unread, approvals, approvalsUnread, names, onMark 
 
 /* ── today ─────────────────────────────────────────────────────────────────── */
 
-function Today({ sessions, unread, approvals, names, onMark, ccy }: {
+function Today({ sessions, unread, approvals, names, onMark, ccy, zone }: {
   sessions: PtSession[] | null; unread: Unread;
   approvals: Map<string, Approval> | null;
   names: Map<string, string>; onMark: (s: PtSession, o: SessionOutcome) => void;
   ccy: TenantCurrency;
+  /** `tenants.timezone` — a class at six is six on the gym's wall, wherever
+   *  the coach is reading this. */
+  zone: string | null;
 }) {
   const now = Date.now();
 
   const cols: Column<PtSession>[] = [
-    { key: 'at', header: 'At', value: (s) => s.startsAt, render: (s) => fmtTime(s.startsAt) },
+    { key: 'at', header: 'At', value: (s) => s.startsAt,
+      render: (s) => gymTimeText(s.startsAt, zone, { hour: '2-digit', minute: '2-digit' })
+        ?? <span className="dash">not stated</span> },
     { key: 'for', header: 'For', value: (s) => s.durationMin, numeric: true,
       render: (s) => `${s.durationMin} min` },
     { key: 'who', header: 'Client', value: (s) => (s.clientId && names.get(s.clientId)) ?? 'zzz',
@@ -617,7 +747,8 @@ function Today({ sessions, unread, approvals, names, onMark, ccy }: {
       } },
     { key: 'ok', header: 'Confirmed', value: (s) => approvals?.get(s.id)?.at ?? '',
       render: (s) => (approvals?.get(s.id)
-        ? fmtTime(approvals.get(s.id)!.at)
+        ? (gymTimeText(approvals.get(s.id)!.at, zone, { hour: '2-digit', minute: '2-digit' })
+            ?? <span className="dash">confirmed, at a time that could not be read</span>)
         : <span className="dash">{approvals === null ? 'not checked' : 'not yet'}</span>) },
     { key: 'paid', header: 'Rate', value: (s) => s.rateCents ?? -1, numeric: true,
       // A session with no rate stamped on it is not a free session. It is one
@@ -641,7 +772,7 @@ function Today({ sessions, unread, approvals, names, onMark, ccy }: {
   return (
     <Section title="Today" sub="In the order it happens, from your own diary.">
       {unread ? <Unresolved state={unread} what="your sessions" /> : (
-        <DataTable
+        <DataTable noun="sessions today"
           rows={sessions ?? []} columns={cols} rowKey={(s) => s.id}
           empty="Nothing booked with you today."
         />
@@ -652,9 +783,11 @@ function Today({ sessions, unread, approvals, names, onMark, ccy }: {
 
 /* ── people asking to be coached by you ────────────────────────────────────── */
 
-function Requests({ requests, unread, names, me, onChange, setErr }: {
+function Requests({ requests, unread, names, me, onChange, setErr, zone }: {
   requests: CoachRequest[] | null; unread: Unread; names: Map<string, string>;
   me: Me; onChange: () => void; setErr: (s: string | null) => void;
+  /** `tenants.timezone` — the day somebody asked is the gym's day. */
+  zone: string | null;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -735,7 +868,9 @@ function Requests({ requests, unread, names, me, onChange, setErr }: {
         // make invented history indistinguishable from measured history.
         return <span className="dash">not recorded</span>;
       } },
-    { key: 'when', header: 'Asked', value: (r) => r.createdAt, render: (r) => fmtDay(r.createdAt) },
+    { key: 'when', header: 'Asked', value: (r) => r.createdAt,
+      render: (r) => gymDateText(r.createdAt, zone, { weekday: 'short', day: 'numeric', month: 'short' })
+        ?? <span className="dash">not stated</span> },
     { key: 'act', header: '', value: () => 0, align: 'right',
       render: (r) => (
         <span style={{ display: 'inline-flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -752,9 +887,11 @@ function Requests({ requests, unread, names, me, onChange, setErr }: {
       title="Asking to be coached by you"
       sub="Each one is a person waiting. From their side there is no difference between you not answering and you saying no."
     >
-      {msg ? <p style={{ margin: 14, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {/* Announced — `msg` here is the answer to Accept or Decline, including
+          the one that says the request was NOT marked answered. */}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: 14, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
       {unread ? <Unresolved state={unread} what="the coaching requests" /> : (
-        <DataTable
+        <DataTable noun="requests"
           rows={requests ?? []} columns={cols} rowKey={(r) => r.id}
           empty="Nobody is waiting on an answer."
         />
@@ -767,15 +904,18 @@ function Requests({ requests, unread, names, me, onChange, setErr }: {
 
 interface QuietRow extends Roster { lastAt: string | null; daysSince: number | null }
 
-function Quiet({ rows, unread, names }: {
+function Quiet({ rows, unread, names, zone }: {
   rows: QuietRow[] | null; unread: Unread; names: Map<string, string>;
+  /** `tenants.timezone` — the day of a last delivered session is the gym's. */
+  zone: string | null;
 }) {
   const cols: Column<QuietRow>[] = [
     { key: 'who', header: 'Client', value: (r) => names.get(r.clientId) ?? 'zzz',
       render: (r) => names.get(r.clientId) ?? <span className="dash">name not readable</span> },
     { key: 'last', header: 'Last delivered', value: (r) => r.lastAt ?? '',
       render: (r) => r.lastAt
-        ? fmtDay(r.lastAt)
+        ? (gymDateText(r.lastAt, zone, { weekday: 'short', day: 'numeric', month: 'short' })
+            ?? <span className="dash">a date that could not be read</span>)
         // Not "never". This screen looked back sixty days and found nothing;
         // whether they trained before that is a question it did not ask.
         : <span className="dash">none in {WINDOW_DAYS} days</span> },
@@ -783,7 +923,9 @@ function Quiet({ rows, unread, names }: {
       render: (r) => r.daysSince == null
         ? <span className="dash">—</span>
         : String(r.daysSince) },
-    { key: 'since', header: 'On your book since', value: (r) => r.since, render: (r) => fmtDay(r.since) },
+    { key: 'since', header: 'On your book since', value: (r) => r.since,
+      render: (r) => gymDateText(r.since, zone, { weekday: 'short', day: 'numeric', month: 'short' })
+        ?? <span className="dash">not stated</span> },
   ];
 
   return (
@@ -792,7 +934,7 @@ function Quiet({ rows, unread, names }: {
       sub={`Clients on your book with no session you have marked delivered in the last ${QUIET_DAYS} days. A booked-but-unmarked session does not count as training — which is the point.`}
     >
       {unread ? <Unresolved state={unread} what="your client list" /> : (
-        <DataTable
+        <DataTable noun="clients gone quiet"
           rows={rows ?? []} columns={cols} rowKey={(r) => r.clientId}
           empty="Everyone on your book has trained recently."
         />
@@ -839,26 +981,6 @@ function Section({ title, sub, tone, children }: {
   );
 }
 
-function Kpi({ label, text, note, tone }: {
-  label: string; text: string | null; note?: string; tone?: 'warn';
-}) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div
-        className="mono"
-        style={{
-          fontSize: 21, marginTop: 5, letterSpacing: '-0.02em',
-          color: text == null ? 'var(--ink3)' : tone === 'warn' ? 'var(--warn)' : 'var(--ink)',
-        }}
-      >
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
 /**
  * What stands in for a table whose rows are not known.
  *
@@ -866,10 +988,4 @@ function Kpi({ label, text, note, tone }: {
  * could not ask" and "you have none" the same sentence — and on the unmarked
  * queue that sentence costs the coach money.
  */
-function Unresolved({ state, what }: { state: Exclude<Unread, null>; what: string }) {
-  return (
-    <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
-      {state === 'loading' ? 'Loading…' : `Could not read ${what}. The banner above says why.`}
-    </div>
-  );
-}
+

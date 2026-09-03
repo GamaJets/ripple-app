@@ -6,6 +6,30 @@
 //
 // Request JSON: { messages: [{role:'user'|'assistant', content:string}], context: object }
 // Response JSON: { reply: string }
+//
+// ── WHO MAY SPEND THE ANTHROPIC KEY ───────────────────────────────────────
+//
+// A signed-in person, and nobody else. This function used to check nothing at
+// all, and `verify_jwt` at the platform gate is not the check people assume it
+// is: it verifies that the bearer token was signed by this project, and the
+// project's ANON KEY is exactly such a token. It is public by design — it is
+// inlined into the app bundle — so "verified by Supabase" and "a Repple user"
+// were two different sentences, and only the first was true here.
+//
+// supabase/functions/wearable-oauth spells the same fact out at length, and
+// supabase/functions/ocr-scan already refuses on it in one line ("Signed in
+// users only — this spends a metered quota"). This is that line. What it costs
+// an attacker to skip it was: unpack the app, take the anon key, and POST
+// arbitrary `messages` with an arbitrary `system` context to Repple's Anthropic
+// account, for as long as they like, on Repple's bill — a general-purpose
+// Claude proxy with no account, no rate limit and nothing in this database
+// naming who did it.
+//
+// It is deliberately only IDENTITY. The health context in the body is not read
+// from the database and never has been: the caller sends their own numbers, so
+// there is no other person's record for a server-side check to protect here.
+// What the check protects is the KEY.
+import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -52,6 +76,18 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   const key = Deno.env.get('ANTHROPIC_API_KEY');
   if (!key) return json({ error: 'ANTHROPIC_API_KEY not set' }, 500);
+
+  // Signed-in users only — this spends a metered quota on Repple's account.
+  // `getUser` RESOLVES with a null user for a token it cannot turn into a
+  // person (it does not throw), which is what the anon key does, so the answer
+  // is checked rather than the call being wrapped and forgotten.
+  const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  let userId = '';
+  try {
+    const { data } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
+    userId = data?.user?.id || '';
+  } catch { /* stays empty, and the refusal below is the answer */ }
+  if (!userId) return json({ error: 'Sign in to Repple to use the AI coach.' }, 401);
 
   let messages: any[] = [], context: any = {};
   try {

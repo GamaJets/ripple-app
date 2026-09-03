@@ -15,6 +15,7 @@ import { sp, radius, hairline, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { readByIds } from '../lib/idLookup';
 import { notifySuccess } from './haptics';
 import { readCoachedMode, COACHED_MODE_SHORT, type CoachedMode } from '../lib/types';
 import { capLimit, capped } from '../lib/rowCap';
@@ -78,10 +79,31 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
       setTruncated(page.truncated);
       const ids = page.rows.map((r: any) => r.client_id);
       if (ids.length === 0) { setReqs([]); return; }
-      // Bounded by `ids`, which the cap above holds at ROW_CAP or fewer.
-      // no-error-ok: a name we cannot read falls back to 'A client'; the request is still shown and actionable
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids).limit(capLimit());
-      const nameById = new Map<string, string>((profs ?? []).map((p: any) => [p.id, p.full_name]));
+      // CHUNKED, and the limit this is about is the REQUEST LINE, not the row
+      // ceiling. `ids` is bounded by the `capLimit()` read above, so up to a
+      // thousand uuids at ~39 bytes each inside `in.("…","…")` — a ~39KB query
+      // string against the 8KB nginx and most CDNs enforce by default. The
+      // proxy refuses past roughly two hundred with a 414, supabase-js does not
+      // reject on it, and it arrives as `data: null`.
+      //
+      // no-error-ok (about the ROW ceiling, which one row per id in chunks of
+      // 150 cannot reach): a name we cannot read falls back to 'A client'; the
+      // request is still shown and actionable. The 414 was never in that
+      // argument — it is EVERY name at once, so a coach opens the join flow and
+      // finds a column of people all called "A client", with no way to tell
+      // which of them they know.
+      const nameById = new Map<string, string>();
+      try {
+        const profs = await readByIds<any>(
+          ids,
+          // `.order('id')` on a primary-key lookup is total, which is the
+          // contract `readAll` requires of every page it is handed.
+          (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+            .in('id', chunk).order('id', { ascending: true }).range(from, to),
+          'the names of the people asking to be coached',
+        );
+        profs.forEach((p: any) => { if (p?.id) nameById.set(p.id, p.full_name); });
+      } catch { /* a name that will not read falls back to 'A client'; the request is still actionable */ }
       setReqs(page.rows.map((r: any) => ({
         id: r.id,
         clientId: r.client_id,
@@ -271,10 +293,29 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
             Asked for {COACHED_MODE_SHORT[r.mode].toLowerCase()} coaching. Accepting adds them to your roster.
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: 6 }}>
-            <Pressable disabled={busy === r.id} onPress={() => respond(r, false)} style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, opacity: busy === r.id ? 0.5 : 1 }}>
+            {/* Named, and the name is the person. Both buttons carried no
+                role and no label, so their only label was the word inside
+                them: a coach with three requests waiting heard "Decline,
+                Accept, Decline, Accept, Decline, Accept" and had no way to
+                tell whose was whose. Accepting is not a preference — it puts
+                somebody on the roster — and accepting the wrong one of three
+                identical buttons is the kind of mistake that has to be undone
+                by hand and by apology.
+
+                `accessibilityState.disabled` is the other half: while a
+                response is in flight the control is dimmed, and dimming is a
+                colour, not a sentence. */}
+            <Pressable disabled={busy === r.id} onPress={() => respond(r, false)}
+              accessibilityRole="button" accessibilityLabel={`Decline ${r.name}’s coaching request`}
+              accessibilityState={{ disabled: busy === r.id }}
+              style={{ flex: 1, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring, opacity: busy === r.id ? 0.5 : 1 }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Decline</Text>
             </Pressable>
-            <Pressable disabled={busy === r.id} onPress={() => respond(r, true)} style={{ flex: 2, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.brand, opacity: busy === r.id ? 0.5 : 1 }}>
+            <Pressable disabled={busy === r.id} onPress={() => respond(r, true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Accept ${r.name}’s coaching request — this adds them to your roster`}
+              accessibilityState={{ disabled: busy === r.id }}
+              style={{ flex: 2, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.brand, opacity: busy === r.id ? 0.5 : 1 }}>
               <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Accept</Text>
             </Pressable>
           </View>

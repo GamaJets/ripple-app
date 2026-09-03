@@ -161,5 +161,24 @@ eq(memberLine(member({ sentAt: '2026-08-30T09:00:00Z', acceptedAt: '2026-08-31T1
   'Accepted 2026-08-31',
   'an acceptance is the end of the story and replaces the line rather than appending to it');
 
+/* ── a read that stopped at the cap is not a smaller audience ───────────── */
+//
+// It is an unknown one, and the send under it cannot be undone. `isAddressed`
+// picks which of the two `sendWarning` sentences a coach reads BEFORE that tap,
+// and a recipient row beyond the cap makes it pick the wrong one.
+
+eq(sendBlock({ retired: false, members: three, read: 'truncated' }), 'part-read',
+  'a truncated audience blocks the picker rather than being offered as the whole one');
+eq(sendBlock({ retired: false, members: [], read: 'truncated' }), 'part-read',
+  'and is never reported as "you have no clients"');
+eq(sendBlock({ retired: true, members: three, read: 'truncated' }), 'retired',
+  'retirement still comes first — it is a fact about the document, not about the read');
+ok(!/no clients/i.test(sendBlockLine('part-read')),
+  'the truncated sentence never says the coach has nobody');
+ok(/more clients than this list could bring back/i.test(sendBlockLine('part-read')),
+  'it says what actually happened');
+ok(/cannot be undone|held/i.test(sendBlockLine('part-read')),
+  'and why sending is held rather than offered');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`coachDocAudience: ok (${three.length} in the audience, ${sentCount(three)} sent)`);

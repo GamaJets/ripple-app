@@ -64,6 +64,9 @@
 // Pure — no React, no Supabase, no clock of its own. Every function that needs
 // "now" is given it, so the whole of it is assertable under `npm test`.
 import { overlaps, type BusySpan } from './booking';
+// The one wording this product has for a push whose recipient list was only
+// partly read. Imported rather than reworded — see PUSH_PARTIAL_NOTE.
+import { pushPartialNote } from './notifyCopy';
 // A type only. Two of the sentences below are about the QUALITY of a read
 // rather than about a request, and `src/lib/bookingsRead.ts` takes the same
 // import for the same reason: the vocabulary for "is this all of it" lives in
@@ -489,6 +492,62 @@ export function answeredConfirmation(accepted: boolean, when: string): string {
   return accepted
     ? `${when} is in your calendar now as a booked session, and your client can see it.`
     : `You have said no to ${when}. Your client can see the answer and can ask for another time.`;
+}
+
+/** What `sendPushChecked` reported about telling the client, as the three facts
+ *  it hands back that are not the same fact. */
+export interface AnswerTold {
+  /** send-push accepted the call. NOT "they got it". */
+  ok: boolean;
+  /** Rows `notify_users()` wrote — 0 or 1 here, since this send has one
+   *  recipient. */
+  recorded: number;
+  /** False when the inbox refuses this kind on purpose; then `recorded` is 0 by
+   *  policy and measures nothing. This send IS kept (route
+   *  '/(client)/request-session'), so it is read defensively rather than
+   *  assumed. */
+  inboxKept?: boolean;
+  /** send-push could not read the whole handset list. */
+  partial?: boolean;
+}
+
+/**
+ * The line under the answer saying whether the client actually heard about it,
+ * or null when there is nothing to add.
+ *
+ * ── The two silences this ends ────────────────────────────────────────────
+ *
+ * app/(trainer)/sessions.tsx warned on `!ok` and on nothing else, so two
+ * outcomes it could see went unsaid — and both of them look, on screen,
+ * exactly like the one where everything worked:
+ *
+ *   · `ok` with `partial`. send-push accepted the call and could not read all
+ *     of `push_tokens`, so this client's handset may not be among the ones it
+ *     resolved. The coach reads "in your calendar now" and stops thinking
+ *     about it;
+ *   · `ok` with `recorded: 0`. The push was accepted and the ROW was not
+ *     written, so a client who misses the banner has nothing waiting for them
+ *     in the app. `notify_users` skips a recipient the caller may not reach —
+ *     an ex-client, a hand-added person with no account — and returns 0
+ *     without failing, which is precisely the case where the coach needs to
+ *     say it out loud rather than the case where nothing is wrong.
+ *
+ * A refused answer never reaches here: the screen returns on `!res.ok` from
+ * `answerRequest` before it sends anything.
+ */
+export function answerTellLine(told: AnswerTold): string | null {
+  if (!told.ok) {
+    return 'We couldn’t send them a notification, so they may not see this until they open the app.';
+  }
+  if (told.partial) {
+    // The one wording this product has for a partly-read recipient list, in
+    // its one-person form. See src/lib/notifyCopy.ts.
+    return `${pushPartialNote(1)} Message them if the time matters.`;
+  }
+  if (told.inboxKept !== false && told.recorded === 0) {
+    return 'Their phone was sent a notification, but nothing was written to their notifications — so if they miss the banner there is nothing in the app telling them. Message them if the time matters.';
+  }
+  return null;
 }
 
 /* ── the coach's queue, in one line ────────────────────────────────────── */

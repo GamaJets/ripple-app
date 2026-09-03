@@ -1,4 +1,5 @@
 import { capLimit, assertWhole } from './rowCap';
+import { assertWrote } from './wroteRows';
 // Progress photos — the persistence layer that app/(client)/scans.tsx was
 // missing. Until now that screen kept photos in useState: no upload, no
 // bucket, no row, gone at unmount. It said so out loud ("N on screen") because
@@ -347,6 +348,19 @@ export async function deleteProgressPhoto(photo: { id: string; path: string }): 
     }
   }
 
-  const { error: delErr } = await sb.from('progress_photos').delete().eq('id', photo.id);
-  if (delErr) throw delErr;
+  // COUNTED, and this is the write in this file where a silent zero costs the
+  // most. The storage object is ALREADY gone by the time this runs — that
+  // ordering is deliberate — so a DELETE that matches no row leaves a
+  // `progress_photos` row pointing at nothing: the photo stays in the client's
+  // history as a tile that will never load, and every `progress_photo_shares`
+  // grant hanging off it stays live, because those cascade FROM the row that
+  // was not deleted. The client is told the photograph is gone and their coach
+  // can still open the record of it.
+  //
+  // PostgREST reports that as a 204 with `error: null`, so `if (delErr) throw`
+  // never fired. `{ count: 'exact' }` is the only thing that can tell it from a
+  // delete that landed.
+  const del = await sb.from('progress_photos').delete({ count: 'exact' }).eq('id', photo.id);
+  if (del.error) throw del.error;
+  assertWrote('That photo', del);
 }

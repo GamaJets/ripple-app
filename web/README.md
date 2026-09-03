@@ -76,3 +76,32 @@ The reset flow spans three systems, and it only works if all three agree:
 - Both documents are drafts written from what the apps actually do. They are
   accurate to the code, not reviewed by a lawyer. The privacy policy must also
   match the App Privacy answers already filed in App Store Connect.
+
+## The gate on these pages
+
+`npm run check:site-claims` (in `check:all`) compares specific sentences here
+against the code that makes them true. It exists because this site was audited
+once and corrected twice in a day, and both times it was found stating things
+the code had stopped doing months earlier: a password minimum of six when the
+rule is eight, a pricing page saying nothing is charged while a 10% platform fee
+is applied to every Connect charge, a privacy policy that named neither of the
+two live processors of health data, and a device list offering Fitbit and Garmin
+as connectable when neither can be.
+
+It checks six things, and each parses its answer out of the code rather than
+holding a copy of it — `PASSWORD_MIN`, `DEFAULT_FEE_PCT`, `TRIAL_DAYS`, the
+hosts contacted from `supabase/functions/**`, the wearable vendors that have a
+client id, and the internal consistency of the deletion chart on `security.html`.
+The header of `scripts/check-site-claims.mjs` says what each one does, what it
+deliberately does not check, and why.
+
+Two things to know when editing these pages:
+
+- **`<!-- site-claim: wearables-connect -->`** sits directly above the sentence
+  in `client.html` listing the devices a client can connect. The block after it
+  must name exactly the connectable vendors. If that sentence moves, move the
+  marker with it — the gate refuses to pass when it cannot find one.
+- **`site-claim-ok: <reason>`** in the comment run directly above a line excuses
+  that one line, and needs a written reason. Use it when the gate is wrong. Do
+  not use it, and do not soften a sentence, to make a disclosure pass: if a page
+  understates what leaves the product, the page is the thing to change.

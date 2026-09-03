@@ -46,7 +46,7 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead } fro
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
 import { useRoster } from '../../src/ui/roster';
-import { isoToday } from '../../src/lib/dayPlan';
+import { useToday } from '../../src/ui/today';
 import { isQueryableId } from '../../src/lib/clientDrift';
 import { shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
 import {
@@ -170,7 +170,17 @@ export default function Invoices() {
   // The date the DEVICE is on, not the server's UTC date. A coach in Auckland
   // issuing at 10am would otherwise date their document yesterday. Part 138
   // allows a day's grace either side for exactly this.
-  const today = isoToday(new Date());
+  //
+  // And kept CURRENT, which `isoToday(new Date())` in the render body was not.
+  // A bare call is right at the instant something else redraws, and this screen
+  // is registered `href: null` in app/(trainer)/_layout.tsx — mounted once and
+  // never torn down. Left open across local midnight it kept yesterday's day
+  // feeding `ageingBook`, `invoiceAge`, `settleDayBlocker` and the chase-from
+  // default: every invoice one day less late than it is, which is the wrong
+  // side of a chasing decision, and a settle dated to yesterday. `useToday`
+  // returns the same local `YYYY-MM-DD` and settles it on midnight, on
+  // foreground and on focus. See src/ui/today.ts.
+  const today = useToday();
 
   // Aged against THE SAME `today`, which is the device's day and not the
   // server's UTC one. A coach in Auckland reading this at 10am would otherwise
@@ -426,6 +436,7 @@ export default function Invoices() {
           <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
             <Pressable onPress={() => { void onChase(inv); }} hitSlop={8} accessibilityRole="button"
               accessibilityLabel={`Chase invoice ${invoiceNumber(inv.seq)}`} disabled={busy}
+              accessibilityState={{ disabled: busy, busy }}
               style={{ paddingVertical: sp.xs }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>Chase it</Text>
             </Pressable>
@@ -436,6 +447,7 @@ export default function Invoices() {
                 across a document that was paid in full. */}
             <Pressable onPress={() => openSettle(inv)} hitSlop={8} accessibilityRole="button"
               accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
+              accessibilityState={{ disabled: busy, busy }}
               style={{ paddingVertical: sp.xs }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
             </Pressable>
@@ -471,11 +483,13 @@ export default function Invoices() {
         <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
           <Pressable onPress={() => openChaseFrom(inv)} hitSlop={8} accessibilityRole="button"
             accessibilityLabel={`Set a day to chase invoice ${invoiceNumber(inv.seq)} from`} disabled={busy}
+            accessibilityState={{ disabled: busy, busy }}
             style={{ paddingVertical: sp.xs }}>
             <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>Chase it from…</Text>
           </Pressable>
           <Pressable onPress={() => openSettle(inv)} hitSlop={8} accessibilityRole="button"
             accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
+            accessibilityState={{ disabled: busy, busy }}
             style={{ paddingVertical: sp.xs }}>
             <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
           </Pressable>
@@ -772,6 +786,7 @@ export default function Invoices() {
                   {!settleBlocker(inv) ? (
                     <Pressable onPress={() => openSettle(inv)} hitSlop={8} accessibilityRole="button"
                       accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
+                      accessibilityState={{ disabled: busy, busy }}
                       style={{ paddingVertical: sp.xs }}>
                       <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
                     </Pressable>
@@ -1066,6 +1081,7 @@ export default function Invoices() {
             {chaseTarget?.chaseFrom ? (
               <Pressable onPress={() => { void doChaseFrom(true); }} disabled={busy} hitSlop={8}
                 accessibilityRole="button" accessibilityLabel="Clear the day to chase this invoice from"
+                accessibilityState={{ disabled: busy, busy }}
                 style={{ paddingVertical: sp.md, alignItems: 'center' }}>
                 <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.ink2 }}>
                   Clear it — put this one back on the undated list

@@ -784,6 +784,15 @@ export function redemptionUndoBlocker(r: Pick<Redemption, 'sessionId'>): string 
 export async function undoRedemption(sb: Queryable, r: Redemption): Promise<void> {
   const blocked = redemptionUndoBlocker(r);
   if (blocked) throw new Error(blocked);
-  const { error } = await sb.from('gym_pass_redemptions').delete().eq('id', r.id);
-  if (error) throw error;
+  // COUNTED. PostgREST answers a DELETE that matched nothing with a 204 and
+  // `error: null`, so `if (error) throw` was true of a redemption another
+  // member of staff had already undone, of one RLS will not let this person
+  // touch, and of a stale id off a list drawn before a refresh. This function
+  // returns void, so "did not throw" is the entire report — and the caller
+  // then tells somebody at a door that the credit is back on the card and the
+  // visit reversed, both of which are the trigger's work on a row that was
+  // never deleted. The member is charged for a visit they did not make.
+  const r0 = await sb.from('gym_pass_redemptions').delete({ count: 'exact' }).eq('id', r.id);
+  if (r0.error) throw r0.error;
+  assertWrote('That redemption', r0);
 }

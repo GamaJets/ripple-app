@@ -44,8 +44,12 @@ import { useChallenges, type BoardResult, type ChallengeRow } from '../../src/ui
 import {
   BOARD_VISIBILITY_NOTE, SCORING_NOTE, canJoin, challengePhase, cohortLabel,
   rankLine, scoreText, standingLine, windowLine,
+  challengeActionsAllowed, staleChallengeNote,
 } from '../../src/lib/challenges';
 import { notifySuccess } from '../../src/ui/haptics';
+// This sentence sits where the Join/Leave control was, at the trailing edge of
+// the row, so it follows the reading direction rather than a physical side.
+import { END_ALIGN } from '../../src/ui/direction';
 
 const EMPTY_BOARD: BoardResult = { rows: [], status: 'loading', message: null };
 
@@ -192,7 +196,17 @@ export default function Challenges() {
                     </Pressable>
                     <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{windowLine(c)}</Text>
-                      {c.joined ? (
+                      {/* The rows below a "we couldn’t check" banner are the
+                          last thing that was true, and they stay — hiding them
+                          would say the gym is running nothing, which is the
+                          claim the provider deliberately refuses to make. What
+                          comes off is the pair of controls that CHANGE a state
+                          the screen has just said it cannot see. */}
+                      {!challengeActionsAllowed(ch.status) ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, flexShrink: 1, textAlign: END_ALIGN }}>
+                          {staleChallengeNote(ch.status)}
+                        </Text>
+                      ) : c.joined ? (
                         // "Joined" is a STATUS, and this control does not
                         // report it — it removes the member from the
                         // leaderboard, with no confirmation. VoiceOver read it
@@ -290,7 +304,14 @@ export default function Challenges() {
                 </View>
               ) : null}
 
-              {board.status === 'ready' ? board.rows.map((r, i) => (
+              {/* The rows are drawn under 'partial' as well as under 'ready'.
+                  A truncated board is two hundred real athletes with real
+                  places, and withholding them would take the leaderboard away
+                  to protect a denominator nobody is being shown any more —
+                  `rankLine` already drops the "of N" on its own. What the
+                  member gets instead is the list plus the sentence saying it
+                  does not end where it appears to. */}
+              {board.status === 'ready' || board.status === 'partial' ? board.rows.map((r, i) => (
                 <View key={`${r.place}-${r.name}-${i}`}>
                   {i > 0 ? <Rule /> : null}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
@@ -309,10 +330,26 @@ export default function Challenges() {
                 </View>
               )) : null}
 
+              {/* Said at the FOOT of the list as well as at the head of it.
+                  The member who needs this sentence is the one who has just
+                  scrolled two hundred names looking for their own, and by then
+                  `rankLine` is far off the top of the sheet. */}
+              {board.status === 'partial' ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  This is the top of the board, not all of it. Everyone who
+                  entered is still on it and still being scored.
+                </Text>
+              ) : null}
+
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{BOARD_VISIBILITY_NOTE}</Text>
 
               <View style={{ marginTop: sp.lg }}>
-                {sheet.joined ? (
+                {/* Same rule as the row behind this sheet: a control that
+                    changes a state the screen has said it cannot see is not
+                    offered. */}
+                {!challengeActionsAllowed(ch.status) ? (
+                  <Flag tone={t.warn}>{staleChallengeNote(ch.status)}</Flag>
+                ) : sheet.joined ? (
                   <Ghost label="Leave Challenge" onPress={() => doLeave(sheet)} />
                 ) : (
                   <Cta label="Join Challenge" wide disabled={!canJoin(sheet)} onPress={() => doJoin(sheet)} />

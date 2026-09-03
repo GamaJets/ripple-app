@@ -43,6 +43,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
 import { fetchCoachPrefs, saveCoachPrefs } from '../lib/coachPrefsStore';
+// The three things that can become of a target, and the sentence for each.
+import type { GoalSaveOutcome } from '../lib/coachPrefs';
 
 export interface TrainerGoals { revenue: number; clients: number }
 const KEY = 'repple.trainer.goals';
@@ -148,7 +150,7 @@ export function useTrainerGoals() {
    * of one, and storing a literal zero would make a cleared target
    * indistinguishable from a target of nothing.
    */
-  const save = useCallback((next: Partial<TrainerGoals>) => {
+  const save = useCallback(async (next: Partial<TrainerGoals>): Promise<GoalSaveOutcome> => {
     const merged: TrainerGoals = {
       revenue: asGoal(next.revenue ?? latest.current.revenue),
       clients: asGoal(next.clients ?? latest.current.clients),
@@ -156,11 +158,23 @@ export function useTrainerGoals() {
     latest.current = merged;
     setGoals(merged);
     AsyncStorage.setItem(KEY, JSON.stringify(merged)).catch(() => { /* best-effort */ });
-    if (!writable.current) return;
-    void saveCoachPrefs({
+    // ── the two ways a target ends up on one handset for good ──────────────
+    //
+    // Both used to be silent. `writable` is false for the rest of the session
+    // after ANY failed prefs read, so the account write below is skipped
+    // entirely — correct, and invisible: the coach set a number, watched the
+    // bar move against it all month, and found it gone on the next phone. And
+    // the write itself was `void`-ed, so a refusal was discarded as well.
+    //
+    // `saveCoachPrefs` already counts its rows and answers a boolean; this
+    // hands that answer up rather than dropping it, and the caller has a
+    // sentence for each in src/lib/coachPrefs.ts.
+    if (!writable.current) return 'device-only';
+    const ok = await saveCoachPrefs({
       goalRevenue: merged.revenue > 0 ? merged.revenue : null,
       goalClients: merged.clients > 0 ? merged.clients : null,
     });
+    return ok ? 'saved' : 'failed';
   }, []);
 
   return { goals, setGoals: save, loaded, status, reload };

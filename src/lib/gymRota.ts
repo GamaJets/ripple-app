@@ -37,6 +37,7 @@
 // here, rather than in every screen.
 
 import { assertWhole, capLimit } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 import { startOfWeek } from './weekStart';
 // One reader for a typed money box: it asks the currency how many decimal
@@ -573,10 +574,16 @@ export async function fetchShifts(
 
   // Names live on `profiles`, not `trainers` — the trainers table carries the
   // gym-facing profile (bio, tagline, fee) and no name column.
+  // Chunked at 150. `rows` is a `capLimit()` read, so the shift list can be a
+  // thousand rows and — a gym chain running one tenant across several sites, or
+  // any gym whose window bound was widened — a thousand distinct trainers with
+  // it. A thousand uuids is a 39KB request line and the proxy answers 414 well
+  // before that; supabase-js reports the 414 as `data: null`, which this code
+  // would read as "no shift on this rota belongs to anybody we can name".
   const ids = [...new Set(rows.map((r: any) => r.trainer_id).filter(Boolean))];
   const names = new Map<string, string>();
-  if (ids.length) {
-    const { data: profs, error: pe } = await sb.from('profiles').select('id, full_name').in('id', ids);
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    const { data: profs, error: pe } = await sb.from('profiles').select('id, full_name').in('id', chunk);
     if (pe) throw pe;
     (profs ?? []).forEach((p: any) => {
       const n = (p.full_name || '').trim();
@@ -611,6 +618,24 @@ export async function fetchShifts(
  * A session counts as demand while it is `booked` and has not been cancelled.
  * A late cancellation still counts: the hour was held, and the rota question is
  * whether somebody needed to be there for it.
+ *
+ * ── Why both reads are capped, and why it matters more here than above ─────
+ *
+ * `fetchShifts` has been capped since it was written and says why. These two
+ * were not, and the asymmetry is the defect: `coverage()` compares SUPPLY
+ * against DEMAND, so a truncated demand read does not make the report smaller,
+ * it makes it WRONG IN THE REASSURING DIRECTION. Every demand block that fell
+ * off the end is an hour with work booked that the grid never hears about —
+ * uncovered goes down, idle goes up, and app/(owner)/rota.tsx prints "Every
+ * booked hour this week has somebody on the rota" over a week that has nobody
+ * on it at all. That sentence is the reason the screen exists, and the one
+ * failure it must never produce is a false version of it.
+ *
+ * A week of one gym will not reach a thousand classes or a thousand booked
+ * one-to-ones, which is exactly the argument `fetchShifts` makes for its own
+ * cap: if it ever does, the window bound or the tenant filter has been lost in
+ * an edit, and the honest answer is a refused read rather than a comforting
+ * grid computed over whatever fitted.
  */
 export async function fetchDemand(
   sb: Queryable, tenantId: string, fromISO: string, toISO: string,
@@ -621,7 +646,8 @@ export async function fetchDemand(
     .eq('tenant_id', tenantId)
     .gte('starts_at', fromISO)
     .lt('starts_at', toISO)
-    .order('starts_at', { ascending: true });
+    .order('starts_at', { ascending: true })
+    .limit(capLimit());
   if (ce) throw ce;
 
   const { data: sessions, error: se } = await sb
@@ -631,10 +657,18 @@ export async function fetchDemand(
     .eq('status', 'booked')
     .gte('starts_at', fromISO)
     .lt('starts_at', toISO)
-    .order('starts_at', { ascending: true });
+    .order('starts_at', { ascending: true })
+    .limit(capLimit());
   if (se) throw se;
 
-  const out: DemandBlock[] = (classes ?? []).map((r: any) => ({
+  // Asserted BEFORE either is mapped, so a truncated week cannot reach the
+  // grid at all. Two separate noun phrases because the two reads truncate
+  // independently and an owner should be told which half of the week's work
+  // could not be read whole.
+  const classRows = assertWhole(classes as any[] | null, 'the classes booked this week');
+  const sessionRows = assertWhole(sessions as any[] | null, 'the one-to-ones booked this week');
+
+  const out: DemandBlock[] = classRows.map((r: any) => ({
     kind: 'class' as const,
     label: r.title || 'Class',
     startsAt: r.starts_at,
@@ -642,7 +676,7 @@ export async function fetchDemand(
     trainerId: r.trainer_id ?? null,
   }));
 
-  for (const r of sessions ?? []) {
+  for (const r of sessionRows) {
     if (r.outcome === 'cancelled') continue;
     out.push({
       kind: 'pt',

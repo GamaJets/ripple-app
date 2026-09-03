@@ -45,6 +45,13 @@ interface Event { at: string; icon: string; title: string; sub: string; route?: 
 
 function timeAgo(iso: string) {
   const ms = Date.now() - Date.parse(iso);
+  // A negative gap is an instant that has not happened. `Math.round(-604800000
+  // / 60000)` is a large negative, which fell straight through `< 1` and read
+  // as "just now" — so next week's booking sat at the top of the feed stamped
+  // as a moment ago. Nothing future is put in this feed any more, and this is
+  // the second line: a row that somehow gets here says what it is rather than
+  // claiming to have already happened.
+  if (ms < 0) return 'upcoming';
   const mins = Math.round(ms / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
@@ -129,9 +136,25 @@ export default function Activity() {
   for (const e of log) {
     const pr = prsKnown && isNewPR(log, e, bwHistory);
     if (e.sets) {
-      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map(setText).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: Math.max(20, e.sets.length * 4) } });
+      // The heart-rate window is the member's OWN testimony about how long the
+      // session ran, or there is no window and no chart.
+      //
+      // It used to be `Math.max(20, e.sets.length * 4)` — four minutes a set,
+      // floored at twenty. So a five-set session was exactly twenty minutes and
+      // a twelve-set session exactly forty-eight, whatever actually happened,
+      // and the chart's shape, its peak and its time-in-zone were all about an
+      // interval nobody measured, captioned with the name of a session that
+      // did. src/lib/mockData.ts says it in as many words about this very
+      // field: a strength session's length is otherwise unknowable, and a
+      // nominal figure "would be a fabricated figure sitting in a health
+      // record". `sessionMins` is the member's own answer and is the only one
+      // there is — where it is absent the button is simply not offered, which
+      // is what the app does everywhere else it has no figure.
+      const mins = typeof e.sessionMins === 'number' && Number.isFinite(e.sessionMins) && e.sessionMins > 0
+        ? Math.round(e.sessionMins) : null;
+      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map(setText).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: mins == null ? undefined : { title: e.exercise, startISO: e.t, durationMin: mins } });
     } else if (e.cardio) {
-      events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: { title: e.exercise, startISO: e.t, durationMin: e.cardio.mins || 30 } });
+      events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: e.cardio.mins > 0 ? { title: e.exercise, startISO: e.t, durationMin: e.cardio.mins } : undefined });
     }
   }
   // Streak milestone (as of now), off the ONE streak figure — see
@@ -139,12 +162,31 @@ export default function Activity() {
   // could pass a milestone on Home and not have it appear in their own feed.
   const streak = shownStreak(log);
   const milestone = prsKnown ? streakMilestone(streak) : null;
-  if (milestone) events.push({ at: new Date().toISOString(), icon: 'flame', title: 'Streak Milestone', sub: milestone, route: '/(client)/achievements' });
+  // Dated to the day the streak was last EXTENDED, not to the instant this
+  // component happened to render. `new Date().toISOString()` here was not
+  // memoised, so the row re-dated itself on every render and always read "just
+  // now" — a milestone passed a fortnight ago sat at the top of the feed
+  // claiming to have just happened, above entries that really had.
+  const lastTrainedMs = log.reduce((acc, e) => {
+    const ms = Date.parse(e.t);
+    return Number.isFinite(ms) && ms > acc ? ms : acc;
+  }, 0);
+  if (milestone && lastTrainedMs > 0) {
+    events.push({ at: new Date(lastTrainedMs).toISOString(), icon: 'flame', title: 'Streak Milestone', sub: milestone, route: '/(client)/achievements' });
+  }
   // Check-ins
   for (const c of checkins) events.push({ at: c.at, icon: 'pencil', title: 'Weekly Check-in Sent', sub: `${fig(weightLabel(c.weightKg, wu))} · Energy ${c.energy}/5 · Sleep ${c.sleep}/5`, route: '/(client)/checkin' });
   // My sessions
+  // A feed is a record of what has HAPPENED. A session that has not started
+  // yet is not part of one: it was pushed in on `startsAt` and the list sorts
+  // newest first, so the furthest-future booking opened the member's own
+  // history — a session they had not attended, at the top, stamped "just now",
+  // with real entries below it. Upcoming bookings are what My Bookings is for.
+  const nowMs = Date.now();
   for (const s of sessions) {
-    if (s.status === 'booked' && s.clientId === cd.id) events.push({ at: s.startsAt, icon: 'calendar', title: 'Session Booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
+    if (s.status === 'booked' && s.clientId === cd.id && Date.parse(s.startsAt) <= nowMs) {
+      events.push({ at: s.startsAt, icon: 'calendar', title: 'Session Booked', sub: `${timeLabel(s.startsAt)} · ${s.durationMin} min`, route: '/(client)/bookings' });
+    }
   }
 
   events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));

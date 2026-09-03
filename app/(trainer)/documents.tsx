@@ -46,11 +46,12 @@ import type { LoadStatus } from '../../src/ui/loadStatus';
 import { fmtDay } from '../../src/lib/format';
 import {
   COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_REACH_NOTE, DOC_MIME_TYPES, checkUpload,
-  coachDocPath, shapeDocs, sizeLabel, standingLine, uploadRefusalLine,
+  coachDocPath, shapeDocs, sizeLabel, standingLine, STANDING_ROW_CAP, STANDING_TRUNCATED_NOTE,
+  uploadRefusalLine,
   type CoachDoc, type RawCoachDoc,
 } from '../../src/lib/coachDocs';
 import {
-  SEND_IS_ONE_WAY, audienceLine, isAddressed, memberLine, sendBlock, sendBlockLine,
+  AUDIENCE_ROW_CAP, SEND_IS_ONE_WAY, audienceLine, isAddressed, memberLine, sendBlock, sendBlockLine,
   sendFailure, sendFailureLine, sendWarning, shapeAudience,
   type AudienceMember, type RawAudienceRow,
 } from '../../src/lib/coachDocAudience';
@@ -249,7 +250,16 @@ export default function CoachDocumentsScreen() {
     wantStanding.current = d.id;
     setStanding(null);
     setStandingStatus('loading');
-    const { data, error } = await supabase.rpc('coach_document_standing', { p_document: d.id });
+    // `.limit(capLimit())` and `capped()`, exactly as the document list on this
+    // screen does at `load` above and as src/ui/coachThreads.ts does for the
+    // sibling RPC. PostgREST stops at 1000 rows and says nothing, and the
+    // sentence this read feeds is not a figure on a dashboard — it is "All 12
+    // of your clients have accepted this", a claim about a signed waiver. A
+    // read that stopped at the cap can produce it out of twelve rows of
+    // nineteen, and the coach then trains the other seven believing they are
+    // covered.
+    const { data, error } = await supabase.rpc('coach_document_standing', { p_document: d.id })
+      .limit(capLimit());
     // The coach has closed this panel or opened another document's. There is
     // one `standing` list on this screen and one `standingStatus` beside it, so
     // without this check a slower answer for the waiver lands under the
@@ -257,12 +267,22 @@ export default function CoachDocumentsScreen() {
     // have never been shown.
     if (wantStanding.current !== d.id) return;
     if (error) { setStandingStatus('error'); return; }
-    setStanding((data ?? []).map((r: any) => ({
+    const page = capped(Array.isArray(data) ? data : []);
+    setStanding(page.rows.map((r: any) => ({
       clientId: String(r.client_id),
       name: (r.client_name && String(r.client_name).trim()) || 'A client',
       acceptedAt: r.accepted_at ? String(r.accepted_at) : null,
     })));
-    setStandingStatus('ready');
+    // 'partial' is not 'ready' (src/ui/loadStatus.ts): the names may be shown,
+    // the count over them may not.
+    //
+    // Two ceilings, and only one of them was ever visible. `capped()` catches
+    // PostgREST's silent 1000-row stop. STANDING_ROW_CAP catches the `limit
+    // 500` written INSIDE `coach_document_standing()`, which is the lower of
+    // the two and therefore the only one that has ever actually bitten — and
+    // which rowCap.ts is structurally unable to see, because it detects a cut
+    // by asking for one row more than the server is willing to give.
+    setStandingStatus(page.truncated || page.rows.length >= STANDING_ROW_CAP ? 'partial' : 'ready');
   }
 
   /* ── Sending one to a particular client ────────────────────────────────── */
@@ -286,7 +306,8 @@ export default function CoachDocumentsScreen() {
     setAudience(null);
     setSendOff(false);
     setAudienceStatus('loading');
-    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id });
+    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id })
+      .limit(capLimit());
     // As in `showStanding`: one audience list, one status, and the panel above
     // is headed by whichever document is open now. A stale answer landing here
     // would show who has and has not been sent the OTHER document, and every
@@ -302,8 +323,13 @@ export default function CoachDocumentsScreen() {
       setAudienceStatus('error');
       return;
     }
-    setAudience(shapeAudience((data ?? []) as RawAudienceRow[]));
-    setAudienceStatus('ready');
+    // Capped for the same reason as the standing read, and with more at stake:
+    // the sentence under this panel says who can open the document, and the
+    // picker under THAT performs a send that cannot be undone. See the
+    // 'part-read' arm of `sendBlock`.
+    const page = capped(Array.isArray(data) ? data : []);
+    setAudience(shapeAudience(page.rows as RawAudienceRow[]));
+    setAudienceStatus(page.truncated || page.rows.length >= AUDIENCE_ROW_CAP ? 'partial' : 'ready');
   }
 
   function sendTo(d: CoachDoc, m: AudienceMember, addressed: boolean) {
@@ -344,14 +370,34 @@ export default function CoachDocumentsScreen() {
 
   /** Re-read the audience for a document whose panel is already open. */
   async function openSendRefresh(d: CoachDoc) {
-    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id });
+    const { data, error } = await supabase.rpc('coach_document_audience', { p_document: d.id })
+      .limit(capLimit());
+    // The same guard `openSend` makes, for the same reason and with the send
+    // already behind it. This is called from inside `sendTo`, so the coach has
+    // just tapped Send and is free to close this panel and open another
+    // document's while the re-read is in flight — at which point this answer
+    // landed under the OTHER document's heading, and every name in it is a
+    // live Send control. One tap on it puts the wrong paperwork in front of a
+    // client, and SEND_IS_ONE_WAY means there is no taking it back.
+    if (wantAudience.current !== d.id) return;
     if (error) {
-      reportError('coachDocs.audience', error, { id: d.id });
+      // And the same three-way reading of the failure. Without it a build
+      // running against a database that has not had part 156 applied showed a
+      // generic error here and the correct "this needs an update" sentence in
+      // `openSend`, from the same RPC, seconds apart.
+      const why = sendFailure({ error, returned: true });
+      setSendOff(why === 'unavailable');
+      if (why !== 'unavailable') reportError('coachDocs.audience', error, { id: d.id });
       setAudienceStatus('error');
       return;
     }
-    setAudience(shapeAudience((data ?? []) as RawAudienceRow[]));
-    setAudienceStatus('ready');
+    // Capped for the same reason as the standing read, and with more at stake:
+    // the sentence under this panel says who can open the document, and the
+    // picker under THAT performs a send that cannot be undone. See the
+    // 'part-read' arm of `sendBlock`.
+    const page = capped(Array.isArray(data) ? data : []);
+    setAudience(shapeAudience(page.rows as RawAudienceRow[]));
+    setAudienceStatus(page.truncated || page.rows.length >= AUDIENCE_ROW_CAP ? 'partial' : 'ready');
   }
 
   /* ── The two things a coach may change ─────────────────────────────────── */
@@ -514,7 +560,8 @@ export default function CoachDocumentsScreen() {
                             const block = sendBlock({
                               retired: d.retired,
                               members: audience,
-                              read: audienceStatus === 'error' ? 'failed' : 'ok',
+                              read: audienceStatus === 'error' ? 'failed'
+                                : audienceStatus === 'partial' ? 'truncated' : 'ok',
                             });
                             if (audienceStatus === 'loading') {
                               return <Text style={{ ...ty.caption, color: t.ink3 }}>Reading who this is in front of.</Text>;
@@ -525,7 +572,7 @@ export default function CoachDocumentsScreen() {
                               // twelve clients told the second would go and
                               // re-add them.
                               return (
-                                <Flag tone={sendOff || block === 'unread' ? t.warn : t.ink3}>
+                                <Flag tone={sendOff || block === 'unread' || block === 'part-read' ? t.warn : t.ink3}>
                                   {sendOff ? sendFailureLine('unavailable') : sendBlockLine(block)}
                                 </Flag>
                               );
@@ -539,6 +586,12 @@ export default function CoachDocumentsScreen() {
                                   onPress={() => { if (m.sentAt == null) sendTo(d, m, addressed); }}
                                   disabled={m.sentAt != null || sendingTo != null}
                                   accessibilityRole="button"
+                                  /* Two reasons this can be refused and only
+                                     one of them was ever said: the label
+                                     covers "already has it", and a send in
+                                     flight to somebody else looked identical
+                                     to a live control. */
+                                  accessibilityState={{ disabled: m.sentAt != null || sendingTo != null, busy: sendingTo === m.clientId }}
                                   accessibilityLabel={m.sentAt != null
                                     ? `${m.name ?? 'A client'} already has ${d.title}`
                                     : `Send ${d.title} to ${m.name ?? 'this client'}`}
@@ -570,13 +623,21 @@ export default function CoachDocumentsScreen() {
                             <Flag tone={t.warn}>
                               That could not be read just now. Nobody’s acceptance has changed — this list simply isn’t it.
                             </Flag>
+                          ) : standingStatus === 'partial' ? (
+                            /* A mark, not coloured words: a truncated read is the
+                               one state on this panel where a coach must NOT take
+                               the sentence at a glance. */
+                            <Flag tone={t.warn}>{STANDING_TRUNCATED_NOTE}</Flag>
                           ) : (
                             <Text style={{ ...ty.caption, color: t.ink3 }}>
                               {standingStatus === 'loading' ? 'Reading who has accepted it.'
                                 : standingLine(accepted, standing?.length ?? 0) ?? 'You have no clients to ask yet.'}
                             </Text>
                           )}
-                          {standingStatus === 'ready' ? (standing ?? []).map((s) => (
+                          {/* The names are real under 'partial' and are still
+                              worth showing — it is the COUNT over them that
+                              cannot be stated. See src/ui/loadStatus.ts. */}
+                          {standingStatus === 'ready' || standingStatus === 'partial' ? (standing ?? []).map((s) => (
                             <View key={s.clientId} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
                               <Text style={{ ...ty.caption, color: t.ink }}>{s.name}</Text>
                               {/* "Not yet" is the words; warn is the dot beside them.

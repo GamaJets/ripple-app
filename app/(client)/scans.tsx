@@ -48,6 +48,11 @@ import * as ImageManipulator from 'expo-image-manipulator';
 // device that could not even keep it. See src/lib/outbox.ts for which writes
 // are allowed to wait and why this one is.
 import { useOutbox } from '../../src/ui/outbox';
+// The id the scan's row carries, minted on the device. It used to be a private
+// helper in this file; it is a rule about queued writes rather than about
+// scans, and a typed blood sugar reading and a tape measurement need the same
+// one, so it is in src/lib/outbox.ts beside the rest of them now.
+import { newRowId } from '../../src/lib/outbox';
 import { notKeptNote } from '../../src/lib/recordQueue';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
@@ -66,7 +71,7 @@ import { useToast } from '../../src/ui/toast';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
-import { fmtFullDay } from '../../src/lib/format';
+import { fmtFullDay, monthNamesShort } from '../../src/lib/format';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
@@ -87,7 +92,19 @@ import { useBrand } from '../../src/ui/brand';
 import { Rule, Section, SectionHead, Hero, KpiRow, ActionCard, Cta, Ghost, Spark, Field, fig, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
-import { analyzeInBody, analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
+import { analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
+// A picture of the printout goes to two named companies. The camera permission
+// this screen asks for is about the hardware; these are about the destination.
+import { readScanSheet, listScanSheetConsents, type SheetConsentRow } from '../../src/ui/scanSheets';
+import {
+  sheetSendLine,
+  scanSheetRecipients, scanConsentWho, scanConsentRetention, scanScreenPromise,
+  scanConsentSendA11y, SCAN_CONSENT_KICKER, SCAN_CONSENT_TITLE, SCAN_CONSENT_WHAT,
+  SCAN_CONSENT_IF_YOU_DECLINE, SCAN_CONSENT_SEND_LABEL, SCAN_CONSENT_TYPE_LABEL,
+  SCAN_CONSENT_CANCEL_LABEL, SCAN_CONSENT_TYPE_A11Y, SCAN_CONSENT_CANCEL_A11Y,
+  SCAN_REFUSED_TITLE, SCAN_REFUSED_NOTE, SCAN_RECORD_FAILED_TITLE, SCAN_RECORD_FAILED_NOTE,
+  type ScanSheetAnswer,
+} from '../../src/lib/scanSheetConsent';
 import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
@@ -121,7 +138,21 @@ import { areaLabel } from '../../src/lib/injuries';
 import { yearsAround } from '../../src/lib/scanYears';
 import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// The twelve month names, in the reader's own language, for the date WHEEL —
+// which is the one shape a formatted string cannot take, and is what
+// `monthNamesShort` exists for (src/lib/format.ts).
+//
+// This was a hardcoded English array, and `consentWhen` below was built from it
+// under a comment saying `toLocaleDateString` "names a locale and is what
+// scripts/check-locale.mjs refuses". That reads the gate backwards: it refuses a
+// locale named as a STRING LITERAL in the first argument, and passing nothing —
+// or `appLocale()`, which every helper in format.ts does — is precisely what it
+// asks for. So a check written to stop English being hardcoded was being cited
+// as the reason to hardcode English.
+//
+// Resolved once at module scope: `appLocale()` does not change while the app
+// runs, and this is read per cell of a scrolling wheel.
+const MONTHS = monthNamesShort();
 const ITEM_H = 42, VISIBLE = 5;
 const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
 
@@ -144,57 +175,57 @@ const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
 // src/lib/inbodySheet.ts, which reads the unit off the printout, and where
 // there is a test that a 180 lb sheet stops becoming 397.
 /**
- * The id the scan's row will carry, minted here on the device.
+ * When a consent decision was made, for the record list.
  *
- * `scans.id` is a uuid primary key, and choosing it on this side is what makes
- * a queued scan safe to replay: a row the server already holds comes back
- * 23505 instead of being filed as a second weigh-in on the same day. See
- * src/lib/recordQueue.ts · ScanIntent.
+ * `decided_at` is an INSTANT, not a calendar day, so a local Date is the right
+ * reading of it — unlike `scans.takenAt`, which is a bare `YYYY-MM-DD` and is
+ * sliced rather than parsed for the reason given at `exportRows`.
  *
- * ── Why not expo-crypto ──────────────────────────────────────────────────
- *
- * `expo-crypto` calls `requireNativeModule` at module scope, so importing it
- * throws while this file is LOADING on any install made before that dependency
- * landed — the whole Progress screen, not the one feature, and no `if` inside a
- * component runs early enough to help. That is what scripts/check-native.mjs
- * refuses, and it is right to: an over-the-air update carries the JavaScript
- * and never the native half.
- *
- * So: the platform's own `crypto.randomUUID` where the runtime has one, and
- * otherwise a v4 built from `Math.random`. `Math.random` is not a source of
- * secrets and this is not a secret — it is a primary key for a row about the
- * member's own body, and which rows they may write is decided by RLS and not by
- * anybody's ability to guess an id. What the id has to be is UNIQUE, and 122
- * random bits is unique enough that the app will never see two.
+ * `fmtFullDay`, which is the shared "14 Aug 2026" — the reader's own language
+ * and the reader's own order. It was assembled from a hardcoded English month
+ * array on the grounds that check:locale refuses `toLocaleDateString`; see the
+ * note on MONTHS above for why that is the gate read backwards. An unparseable
+ * value renders as nothing rather than as "Invalid Date" — the guard below is
+ * kept ahead of the formatter, because an empty cell in a record list and
+ * `fmtFullDay`'s own dash mean different things here.
  */
-function newScanId(): string {
-  const c = (globalThis as any).crypto;
-  if (typeof c?.randomUUID === 'function') {
-    try {
-      const id = c.randomUUID();
-      if (typeof id === 'string' && id) return id;
-    } catch { /* no usable platform uuid; the shape below is built by hand */ }
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
-    const r = (Math.random() * 16) | 0;
-    return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
+function consentWhen(iso: string): string {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '';
+  return fmtFullDay(iso);
 }
 
-/** Send the image to the edge function and parse whatever text comes back. */
-async function ocrInBody(b64?: string): Promise<SheetRead & { error?: string }> {
-  const nothing: SheetRead = { weight: null, bodyFatPct: null, muscle: null, unit: null, ok: false };
-  if (!b64) return { ...nothing, error: 'No image to read.' };
-  try {
-    const { data, error } = await supabase.functions.invoke('ocr-scan', { body: { imageBase64: b64 } });
-    if (error) { reportError('scans.ocr', error); return { ...nothing, error: 'Could not reach the scanning service.' }; }
-    if (!data?.ok) return { ...nothing, error: typeof data?.error === 'string' ? data.error : undefined };
-    return parseInBodySheet(String(data.text || ''));
-  } catch (e) {
-    reportError('scans.ocr', e);
-    return { ...nothing, error: 'Could not reach the scanning service.' };
-  }
-}
+/**
+ * The id the scan's row will carry.
+ *
+ * `scans.id` is a uuid primary key, and choosing it on this side is what makes
+ * a queued scan safe to replay: a row the server already holds comes back 23505
+ * instead of being filed as a second weigh-in on the same day. See
+ * src/lib/recordQueue.ts · ScanIntent, and src/lib/outbox.ts · `newRowId` for
+ * the minting itself and for why it is not expo-crypto.
+ *
+ * Named locally because "the scan's id" is what this file is talking about
+ * everywhere below.
+ */
+const newScanId = newRowId;
+
+// ── The two invokes that used to live here ────────────────────────────────
+//
+// `ocrInBody` was a local helper that posted the whole photographed page to
+// https://api.ocr.space/parse/image, and forty lines further down `pick` ran it
+// in parallel with `analyzeInBody`, which posts the same page to
+// https://api.anthropic.com. Two named companies, on every photograph, with
+// nothing in front of them but `ensureMediaPermission('camera', 'add a scan')`
+// — a question about the hardware.
+//
+// An InBody sheet carries the member's name, their age, the gym or clinic's
+// letterhead, and their whole body composition line by line. Both calls have
+// moved to src/ui/scanSheets.ts, behind `readScanSheet`, which takes the
+// member's answer as a REQUIRED argument with no default and no 'unasked'
+// member — so this screen cannot send a page it has not asked about without
+// failing to compile. The consent row is written before either invoke and the
+// send waits for it; see src/lib/scanSheetConsent.ts and
+// supabase/parts/1140-*.sql.
 
 /**
  * One scroll wheel of the scan-date picker.
@@ -359,7 +390,12 @@ export default function Scans() {
   const wlog = useWorkoutLog();
 
   const buildReport = () => {
-    const board = trainingBoard(sessionsOf(wlog.log), wlog.status);
+    // `cd.weightSeries` is passed, and it is the difference between a document
+    // that says a calisthenics member did almost no work and one that states
+    // what they actually moved: without a weigh-in history every pull-up, dip
+    // and press-up prices at nothing. This figure is read by a clinician
+    // deciding what this person may load.
+    const board = trainingBoard(sessionsOf(wlog.log, cd.weightSeries), wlog.status);
     const injuries: ReportInjury[] = cd.injuries.map((i) => ({
       // Labelled here rather than in the builder so the document names an area
       // exactly as the client's own Injuries screen names it.
@@ -541,6 +577,35 @@ export default function Scans() {
   const [cmp, setCmp] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState<string | null>(null);
+  /**
+   * How the last attempt at reading a sheet ended.
+   *
+   * Four outcomes and not a boolean, because they are four different facts and
+   * a member acts on them differently:
+   *
+   *   'read'           something came back and the boxes are filled
+   *   'unread'         it was sent and nothing usable came back
+   *   'refused'        the member said no. NOT an error, and not drawn as one
+   *   'record-failed'  they said yes, the agreement would not write, and
+   *                    therefore NOTHING WAS SENT. Our failure, not theirs
+   *
+   * Merging the last two into "could not read your scan" is how a decision gets
+   * reported to somebody as a fault.
+   */
+  const [sheetOutcome, setSheetOutcome] = useState<'read' | 'unread' | 'refused' | 'record-failed' | null>(null);
+  // Holds ONLY which button was pressed, while the question is on screen.
+  // Nothing has been photographed and nothing sent at that point, so every way
+  // out of the sheet is a real answer and dismissing it is a cancel.
+  const [askSheet, setAskSheet] = useState<{ fromCamera: boolean } | null>(null);
+  // Who is actually going to receive the page in THIS build — OCR.space always,
+  // Anthropic only where the vision reader is on. The question names them and
+  // the recorded row lists the same ones.
+  const sheetRecipients = scanSheetRecipients(visionAvailable());
+  // The member's own record of what has been sent. 'loading' and 'error' are
+  // separate from an empty list, because an empty list under a failed read
+  // would tell somebody they had never been asked.
+  const [consentRows, setConsentRows] = useState<SheetConsentRow[]>([]);
+  const [consentStatus, setConsentStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
   // What the client's own watch already holds for their weight.
   //
@@ -574,6 +639,21 @@ export default function Scans() {
   const [mxOpen, setMxOpen] = useState<string | null>(null);
   const [scanMx, setScanMx] = useState<ScanMetrics | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  // The record, read when the sheet that can add to it opens, and again after
+  // every decision so the row a member has just made is on screen where they
+  // made it. Back to 'loading' first: leaving the previous rows up under a read
+  // in flight would show a stale record as a current one.
+  useEffect(() => {
+    if (!showAdd) return;
+    let alive = true;
+    setConsentStatus('loading');
+    void listScanSheetConsents().then((r) => {
+      if (!alive) return;
+      setConsentStatus(r.status);
+      setConsentRows(r.rows);
+    });
+    return () => { alive = false; };
+  }, [showAdd, sheetOutcome]);
   // The targets the member set on the Goals screen. Read here so the screen
   // called Progress can say what progress is toward.
   const { goals, status: goalStatus, reload: reloadGoals } = useGoalTracker();
@@ -619,29 +699,63 @@ export default function Scans() {
   const pickedYear = years[dY] ?? now.getFullYear();
 
   const scanDateISO = () => { const y = pickedYear; const maxd = daysIn(dM, y); const dd = Math.min(dD, maxd - 1) + 1; return `${y}-${String(dM + 1).padStart(2, '0')}-${String(dd).padStart(2, '0')}`; };
-  const scanDateLabel = () => { const y = pickedYear; const maxd = daysIn(dM, y); return `${Math.min(dD, maxd - 1) + 1} ${MONTHS[dM]} ${y}`; };
+  const scanDateLabel = () => fmtFullDay(scanDateISO());
 
-  const pick = async (fromCamera: boolean) => {
+  /**
+   * The question, put BEFORE the camera opens.
+   *
+   * A picture of the sheet used to go to Anthropic and to OCR.space on every
+   * photograph, with nothing but a camera permission in front of it. That page
+   * has the member's name, their age, the gym or clinic's letterhead and their
+   * whole body composition on it. See src/lib/scanSheetConsent.ts for the
+   * argument, and for why this one is asked PER SHEET and recorded, where a
+   * meal photograph is asked once and remembered.
+   *
+   * Before the shutter, not after: a member who has already photographed the
+   * printout has already photographed it, and putting the question afterwards
+   * makes agreeing the way to stop having wasted the gesture.
+   */
+  const pick = async (fromCamera: boolean) => { setAskSheet({ fromCamera }); };
+
+  /**
+   * Photograph the sheet, and send it only on 'granted'.
+   *
+   * `consent` is passed straight through to `readScanSheet`, which requires it
+   * and will not invoke anything without it. Nothing on this path decides for
+   * the member: this function knows what they answered and does that.
+   */
+  const runSheetRead = async (fromCamera: boolean, consent: ScanSheetAnswer) => {
     if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a scan'))) return;
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, base64: true });
     if (!res.canceled && res.assets && res.assets[0]) {
-      const asset = res.assets[0]; const uri = asset.uri; setImg(uri); setReading(true); setOcrMsg(null); setScanMx(null);
+      const asset = res.assets[0]; const uri = asset.uri; setImg(uri); setOcrMsg(null); setScanMx(null); setSheetOutcome(null);
+      // Only while something is actually being read. On a refusal there is
+      // nothing in flight, and "Reading your scan…" over a photo that is going
+      // nowhere would be the screen describing a send that is not happening.
+      if (consent === 'granted') setReading(true);
       let b64 = asset.base64 || undefined;
       try { const mm = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) b64 = mm.base64; } catch { /* fall back to original */ }
-      // Both readers, together. They are two calls to the same backend against
-      // the same image, so running them in parallel costs no more wall time
-      // than the vision call alone did — and the text read is what carries the
-      // WORD the sheet printed next to the figure. Without it the vision path
-      // filed a US-configured printout's 180.4 lb as 180 kg: the exact defect
-      // src/lib/inbodySheet.ts was written to close, live on the path that
-      // actually runs, because this branch returned before the parser was
-      // reached. The OCR read is still the fallback when vision says nothing.
-      const [v, sheet] = await Promise.all([
-        visionAvailable() && b64 ? analyzeInBody(b64, 'image/jpeg') : Promise.resolve(null),
-        ocrInBody(b64),
-      ]);
+      // One door, and it takes the answer. Both readers run inside it against
+      // the same image — two calls in parallel cost no more wall time than the
+      // vision call alone did — and the text read is what carries the WORD the
+      // sheet printed next to the figure. Without it the vision path filed a
+      // US-configured printout's 180.4 lb as 180 kg: the exact defect
+      // src/lib/inbodySheet.ts was written to close. The OCR read is still the
+      // fallback when vision says nothing.
+      const read = await readScanSheet(b64, consent);
+      const v = read.vision;
+      const sheet = read.sheet;
+      setReading(false);
+      // The member said no. Not an error and not drawn as one: their sheet went
+      // nowhere, which is what they asked for, and the three numbers are on the
+      // page in their hand. SCAN_REFUSED_NOTE says exactly that.
+      if (consent === 'refused') { setSheetOutcome('refused'); return; }
+      // They agreed and the agreement could not be written down, so nothing was
+      // sent. This one IS a failure and is drawn as one — but as OUR failure,
+      // not as a refusal they made.
+      if (!read.recorded) { setSheetOutcome('record-failed'); return; }
       if (v && (v.weightKg != null || v.bodyFatPct != null || v.skeletalMuscleKg != null)) {
-        setReading(false);
+        setSheetOutcome('read');
         setScanMx(v.metrics ?? null);
         // What unit the model's masses are in, decided from the printed words
         // and from whether the model's number matches the printed figure or
@@ -661,7 +775,7 @@ export default function Scans() {
         return;
       }
       const r = sheet;
-      setReading(false);
+      setSheetOutcome(r.ok ? 'read' : 'unread');
       // The masses come off the sheet in the sheet's OWN unit, and it is read
       // off the printout rather than assumed. A US-configured InBody prints
       // pounds — 180.4 where a metric one prints 81.8 — and both figures sit
@@ -680,7 +794,13 @@ export default function Scans() {
         // like a misread and an assumed one looking like a certainty.
         const unitNote = r.unit === 'lb' ? ' ' + CONVERTED_FROM_LB_NOTE : r.unit == null ? ' ' + ASSUMED_METRIC_NOTE : '';
         setOcrMsg('Read from your scan: ' + [rw ? 'weight ' + rw + ' ' + wu : '', rbf ? 'body fat ' + rbf + '%' : '', rm ? 'muscle ' + rm + ' ' + wu : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.' + unitNote);
-      } else { setOcrMsg((r.error || 'Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '')) + ' Please type the numbers in.'); }
+      } else {
+        // `read.error` first: it is the door's own sentence about why nothing
+        // was read — no signed-in user, no image — and it is more specific than
+        // the reader's silence. The old wording is the fallback it always was.
+        setOcrMsg(read.error
+          || ((r.error || 'Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '')) + ' Please type the numbers in.'));
+      }
     }
   };
   const saveScan = async () => {
@@ -992,7 +1112,12 @@ export default function Scans() {
       Alert.alert(
         'Have a photo read?',
         'Two things can happen here and they are separate.\n\n'
-        + '· A copy of the photo leaves this phone to be read by an AI, which estimates body fat and picks out areas to work on. It is a guess from a picture, not a measurement, and it is not sent to your coach.\n\n'
+        // Named, like every other door in the app. "An AI" is a category; a
+        // member deciding whether to send a full-body photograph of themselves
+        // somewhere is entitled to know which company, and can then go and read
+        // that company's terms. Same rule as PHOTO_DESTINATION in
+        // src/lib/photoAI.ts and scanConsentWho in src/lib/scanSheetConsent.ts.
+        + '· A copy of the photo leaves this phone and goes to Anthropic, who run the model that reads it. It estimates body fat and picks out areas to work on. It is a guess from a picture, not a measurement, it is not part of your gym, and it is not sent to your coach.\n\n'
         + '· The photo can also be saved to your account as a progress photo. That is what puts it in the strip below and lets you compare it later. Only you can see it until you send it to your coach yourself.',
         [
           { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
@@ -1928,7 +2053,13 @@ export default function Scans() {
               <Text style={{ ...ty.title, color: t.ink }}>Add an InBody Scan</Text>
               <Ghost label="Close" onPress={() => setShowAdd(false)} />
             </View>
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Snap or upload your report, pick the scan date, enter the numbers.</Text>
+            {/* The standing sentence, replacing the silence. It does not promise
+                a sheet is never sent — for a member who says yes that would be
+                the same omission in a longer sentence — it says what is true of
+                every sheet, that reading one means sending it, and that the
+                question is put every time. See src/lib/scanSheetConsent.ts. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{scanScreenPromise(sheetRecipients)}</Text>
             <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
               <Pressable accessibilityLabel="Take a progress photo" accessibilityRole="button" onPress={() => pick(true)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="camera" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Take Photo</Text></Pressable>
               <Pressable accessibilityLabel="Add photo from library" accessibilityRole="button" onPress={() => pick(false)} style={{ flex: 1, backgroundColor: t.surface2, borderRadius: radius.md, paddingVertical: sp.lg, alignItems: 'center', gap: 5 }}><Icon name="plus" size={22} color={t.ink} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Upload scan</Text></Pressable>
@@ -1937,7 +2068,29 @@ export default function Scans() {
               <View style={{ marginBottom: sp.md }}>
                 <Image source={{ uri: img }} accessible accessibilityLabel="The scan you attached"
                   style={{ width: '100%', height: 180, borderRadius: radius.md, backgroundColor: t.surface2 }} resizeMode="cover" />
-                {reading ? <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginTop: 6 }}>Reading your scan…</Text> : <Text style={{ ...ty.caption, color: ocrMsg && ocrMsg.startsWith('Read') ? t.ink2 : t.ink3, marginTop: 6 }}>{ocrMsg || 'Scan attached — reading the numbers…'}</Text>}
+                {/* Four outcomes, four sentences. The refusal is deliberately
+                    NOT in the warning tone: it is the feature doing what the
+                    member asked, and drawing it as a fault teaches somebody
+                    that saying no broke something. The record failure IS a
+                    fault, and it is ours — so it says plainly that nothing was
+                    sent, which is the whole point of writing the row first. */}
+                {reading ? (
+                  <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2, marginTop: 6 }}>Reading your scan…</Text>
+                ) : sheetOutcome === 'refused' ? (
+                  <View style={{ marginTop: 6 }}>
+                    <Text style={{ ...ty.caption, fontWeight: '600', color: t.ink }}>{SCAN_REFUSED_TITLE}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{SCAN_REFUSED_NOTE}</Text>
+                  </View>
+                ) : sheetOutcome === 'record-failed' ? (
+                  /* A Flag, so the tone is a mark and the words stay in ink.
+                     The sentence already says it — colour is never the only
+                     channel, and warn as text ink does not clear 4.5:1. */
+                  <View style={{ marginTop: 6 }}>
+                    <Flag tone={t.warn}>{SCAN_RECORD_FAILED_TITLE}. {SCAN_RECORD_FAILED_NOTE}</Flag>
+                  </View>
+                ) : (
+                  <Text style={{ ...ty.caption, color: ocrMsg && ocrMsg.startsWith('Read') ? t.ink2 : t.ink3, marginTop: 6 }}>{ocrMsg || 'Scan attached — reading the numbers…'}</Text>
+                )}
               </View>
             )}
             <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Scan date</Text>
@@ -2012,6 +2165,38 @@ export default function Scans() {
                 <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
               </Pressable>
             ))}
+
+            {/* ── what has actually been sent, and to whom ─────────────────
+                The point of writing the answer down is that the member can go
+                and LOOK at it. A consent somebody has to take the app's word
+                for is one they cannot check, and this app's word on this exact
+                subject was nothing at all until the question existed.
+
+                Three states and three sentences. An empty list under a FAILED
+                read is not "you have never been asked" — that would be a new
+                false statement about the same subject — and an empty list under
+                a good read is not "nothing was ever sent" either: every sheet
+                photographed before this existed went to both companies unasked
+                and has no row. See sheetSendLine's 'no-record'. */}
+            <View style={{ marginTop: sp.xl }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Sheets you have been asked about</Text>
+              {consentStatus === 'loading' ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>Checking…</Text>
+              ) : consentStatus === 'error' ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                  We could not read your record just now, so this is not a list of nothing — it is a list we could not read.
+                </Text>
+              ) : consentRows.length === 0 ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                  Nothing on file yet. Any sheet read before this question existed was sent without being asked about, and there is no record of it either way.
+                </Text>
+              ) : consentRows.map((r) => (
+                <View key={r.readId} style={{ marginTop: sp.sm }}>
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>{sheetSendLine(r.decision, r.vendors)}</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: 1 }}>{consentWhen(r.decidedAt)}</Text>
+                </View>
+              ))}
+            </View>
           </ScrollView>
         </View>
               </KeyboardAvoidingView>
@@ -2043,6 +2228,53 @@ export default function Scans() {
         </View>
       </Modal>
       {/* ── end of the Add sheet, which the date wheel above sits inside ── */}
+      </Modal>
+
+      {/* ── the question, asked before the camera opens ────────────────────
+          Nothing has been photographed and nothing has been sent at the moment
+          this is on screen. `askSheet` holds which button was pressed and no
+          more, so every way out of it is a real answer:
+
+            Send It to Be Read     photograph it, record the agreement, send
+            I'll Type the Numbers  record the refusal, send nothing
+            Cancel / back          nothing at all happens
+
+          Dismissing it — the Android back button, a tap on the backdrop — is
+          Cancel and not a quiet yes, which is the whole difference between a
+          consent question and a notification.
+
+          Four paragraphs, in the order somebody decides in: who it goes to,
+          what actually goes, what we cannot promise once it has gone, and what
+          happens if the answer is no. The last is not a consolation at the
+          bottom — it is the half of the question that makes "no" an answer
+          somebody can afford to give.
+
+          Rendered after the Add sheet so it draws above it, and rendered from
+          src/lib/scanSheetConsent.ts rather than typed here, so what somebody
+          agrees to cannot drift from what is sent. */}
+      <Modal visible={askSheet != null} transparent animationType="slide"
+        onRequestClose={() => setAskSheet(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
+          accessibilityRole="button" accessibilityLabel={SCAN_CONSENT_CANCEL_A11Y}
+          onPress={() => setAskSheet(null)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: hairline, borderColor: t.ring, padding: 20, paddingBottom: 30, maxHeight: '88%' }}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>{SCAN_CONSENT_KICKER}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{SCAN_CONSENT_TITLE}</Text>
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{scanConsentWho(sheetRecipients)}</Text>
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{SCAN_CONSENT_WHAT}</Text>
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{scanConsentRetention(sheetRecipients)}</Text>
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{SCAN_CONSENT_IF_YOU_DECLINE}</Text>
+            <View style={{ marginTop: sp.xl, gap: sp.sm }}>
+              <Cta label={SCAN_CONSENT_SEND_LABEL} a11yLabel={scanConsentSendA11y(sheetRecipients)} wide
+                onPress={() => { const a = askSheet; if (!a) return; setAskSheet(null); void runSheetRead(a.fromCamera, 'granted'); }} />
+              <Ghost label={SCAN_CONSENT_TYPE_LABEL} a11yLabel={SCAN_CONSENT_TYPE_A11Y}
+                onPress={() => { const a = askSheet; if (!a) return; setAskSheet(null); void runSheetRead(a.fromCamera, 'refused'); }} />
+              <Ghost label={SCAN_CONSENT_CANCEL_LABEL} a11yLabel={SCAN_CONSENT_CANCEL_A11Y}
+                onPress={() => setAskSheet(null)} />
+            </View>
+          </ScrollView>
+        </View>
       </Modal>
 
       {/* ── Correcting or removing one scan ────────────────────────────────

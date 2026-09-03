@@ -15,17 +15,36 @@
 -- exactly as it does for every other figure it has not established. A NOT NULL
 -- default would simply move the invention into the schema.
 --
--- Existing rows are backfilled to AED because that is what they actually are —
--- the whole operating record around them is denominated in it — not because it
--- is a sensible fallback for the next tenant.
+-- ── THE BACKFILL THAT USED TO BE HERE, AND WHY IT IS GONE ────────────────
+--
+-- This file used to end with
+--
+--     update public.tenants set currency = 'AED' where currency is null;
+--
+-- justified, three paragraphs above, as "existing rows are backfilled to AED
+-- because that is what they actually are — the whole operating record around
+-- them is denominated in it". That sentence was true when it was written and
+-- is not true any more: there is no operating record. Every money-bearing
+-- table in this database is empty, counted rather than remembered, so nothing
+-- around those tenants is denominated in anything.
+--
+-- What the line still did was fire on EVERY re-run of setup.sql, against every
+-- tenant created since the last one — silently writing a currency onto gyms
+-- that had not chosen, which is the exact thing the paragraphs above this one
+-- forbid, in the file that establishes the rule. 35 of the 54 live tenants are
+-- null today and would have been stamped by the next paste.
+--
+-- Retired rather than edited into a WHERE clause: a one-off seed does not
+-- belong in an idempotent bundle at all. See
+-- supabase/parts/1121-the-line-that-put-dirhams-back-on-every-run.sql, which
+-- carries the full account and the standing assertion that stops it coming
+-- back.
 alter table public.tenants
   add column if not exists currency text;
 
 alter table public.tenants drop constraint if exists tenants_currency_is_iso;
 alter table public.tenants add constraint tenants_currency_is_iso
   check (currency is null or currency ~ '^[A-Z]{3}$');
-
-update public.tenants set currency = 'AED' where currency is null;
 
 comment on column public.tenants.currency is
   'ISO 4217, uppercase. NULL means the gym has not set one — render a dash and ask, never assume.';

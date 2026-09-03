@@ -86,6 +86,7 @@
 // rate. That is also the honest description of the coach's relationship to
 // them — they did not set those lines and are not owed a score against them.
 import { dateParts } from './localDate';
+import { fmtAxisDay } from './format';
 
 /** Four whole weeks. See the header for why not seven days and not ninety. */
 export const WINDOW_DAYS = 28;
@@ -225,22 +226,27 @@ const DERIVED_LABEL: Record<string, string> = {
   sleep: 'Their sleep goal',
 };
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /**
- * A window's end date as "29 Aug", for a section heading.
+ * A window's end date as the coach's own locale writes it — "29 Aug",
+ * "Aug 29", "8月29日".
  *
- * Built from the parts rather than through toLocaleDateString for the reason
- * src/lib/localDate.ts exists: `new Date('2026-08-29')` is UTC midnight, and
- * every local getter reads it back a day earlier west of Greenwich — so a coach
- * in New York would be told the window ends the day before the one it was
- * actually counted over. Deterministic for the same reason `thousands()` in
- * checklist.ts is: the string is asserted in tests and rendered in every locale
- * the app ships to.
+ * Still read out of the PARTS rather than out of a Date built from the string,
+ * for the reason src/lib/localDate.ts exists: `new Date('2026-08-29')` is UTC
+ * midnight, and every local getter reads it back a day earlier west of
+ * Greenwich — so a coach in New York would be told the window ends the day
+ * before the one it was actually counted over. `fmtAxisDay` takes the year,
+ * month index and day as NUMBERS for exactly that reason: there is nothing left
+ * to parse, and the only thing the locale decides is the writing.
+ *
+ * It used to hold its own English `MONTHS` array and assemble `${day} ${month}`,
+ * justified as "deterministic, because the string is asserted in tests". A
+ * determinism that makes half the readers of a coaching app read an English
+ * month is a test convenience paid for by the reader; the test now states the
+ * shape it wants instead.
  */
 export function dayLabel(day: string): string {
   const p = dateParts(day);
-  return p ? `${p[2]} ${MONTHS[p[1]]}` : '—';
+  return p ? fmtAxisDay(p[0], p[1], p[2]) : '—';
 }
 
 export interface AdherenceInput {

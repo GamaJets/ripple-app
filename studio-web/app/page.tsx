@@ -7,14 +7,20 @@
 // computed twice and nothing is estimated: where the gym has not recorded
 // something, this shows a dash and says what is missing.
 import { useEffect, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+import { Kpi } from '@/components/Kpi';
 import { DataTable, type Column } from '@/components/DataTable';
 import { PasswordField } from '@/components/PasswordField';
+import { ConsoleGate } from '@/components/Gate';
+import { failure } from '@/lib/read';
 import { Banner as SharedBanner } from '@/components/Banner';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
+import { gymDateText } from '@lib/gymWhen';
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
+// Whole units to minor units, by the places the gym's own money actually has.
+import { minorFromWhole } from '@lib/coachMoney';
 import { fetchMemberships, fetchPayments, fetchPlans, summarise, type Membership } from '@lib/gymRecord';
 import { fetchClasses, summariseAttendance, pct } from '@lib/gymSchedule';
 import { fetchVisits, summariseVisits, currentlyInside, OPEN_VISIT_HOURS } from '@lib/gymVisits';
@@ -52,14 +58,12 @@ interface Gym {
  *  so five tiles cannot word the same silence five ways. */
 const UNREAD = 'this read did not come back — unknown, not nil';
 
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
-
 export default function Overview() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined — nobody said who
+   *  this is — and this is what stops that reading as a spinner that never
+   *  resolves, on the console's own front door. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gym, setGym] = useState<Gym | null>(null);
   // Kept apart from `error`: that one is cleared by a successful rollup read
   // immediately afterwards, which would wipe this message off the screen.
@@ -139,6 +143,11 @@ export default function Overview() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts, and on THIS
+      // screen the wrong one puts a sign-in form in front of somebody who is
+      // already signed in and sends them to re-enter a working password.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
 
       // Before the tenant guard, because it is the read that says whether the
@@ -297,7 +306,10 @@ export default function Overview() {
     return () => { live = false; };
   }, []);
 
-  if (me === undefined) return <Splash>Loading…</Splash>;
+  // Three sentences, not one div and a form. See components/Gate.tsx: a
+  // question we could not ask is not the same fact as nobody being signed in.
+  if (authUnread) return <ConsoleGate me={undefined} failed />;
+  if (me === undefined) return <Splash>Reading your account…</Splash>;
   if (me === null) return <SignIn />;
 
   if (me.roleUnknown) {
@@ -374,7 +386,9 @@ export default function Overview() {
       key: 'since',
       header: 'Since',
       value: (t) => t.since,
-      render: (t) => (t.since ? new Date(t.since).toLocaleDateString() : <span className="dash">—</span>),
+      // `gym?.timezone`, not the reader's. A coach who joined at 22:00 on the
+      // 31st in Dubai joined in September, whichever laptop this is open on.
+      render: (t) => gymDateText(t.since, gym?.timezone ?? null) ?? <span className="dash">—</span>,
     },
   ];
 
@@ -457,7 +471,7 @@ export default function Overview() {
             and printing any of them over a read that did not is the defect this
             page carried: an owner reading "no payments recorded" goes and asks
             the desk why nobody took any money. */}
-        <Kpi label="Taken · 30d" text={hub && hub.recordRead ? amount(hub.revenueCents, takenCcy) : null}
+        <Kpi big label="Taken · 30d" text={hub && hub.recordRead ? amount(hub.revenueCents, takenCcy) : null}
              note={hub && !hub.recordRead ? UNREAD
                : hub && hub.revenueCents == null ? 'no payments recorded'
                : hub && !takenCcy
@@ -465,7 +479,7 @@ export default function Overview() {
                      ? 'these payments are in more than one currency, so there is no one total'
                      : NO_CURRENCY_NOTE)
                : undefined} />
-        <Kpi label="Recurring / mo" text={hub && hub.recordRead ? amount(hub.mrrCents, mrrCcy) : null}
+        <Kpi big label="Recurring / mo" text={hub && hub.recordRead ? amount(hub.mrrCents, mrrCcy) : null}
              note={hub && !hub.recordRead ? UNREAD
                : hub && hub.mrrCents == null ? 'no priced plan on an active membership'
                : hub && !mrrCcy
@@ -477,9 +491,9 @@ export default function Overview() {
             the one that must not carry a 0 out of a refused read. `summarise`
             already returns a number rather than a null here, so the guard has
             to be the read itself. */}
-        <Kpi label="Active members" value={hub && hub.recordRead ? hub.activeMembers : null}
+        <Kpi big label="Active members" value={hub && hub.recordRead ? hub.activeMembers : null}
              note={hub && !hub.recordRead ? UNREAD : undefined} />
-        <Kpi label="Class fill" text={hub && hub.classesRead ? pct(hub.fillRate) : null}
+        <Kpi big label="Class fill" text={hub && hub.classesRead ? pct(hub.fillRate) : null}
              note={hub && !hub.classesRead ? UNREAD
                : hub && hub.fillRate == null ? 'no capacity recorded'
                : 'booked ÷ capacity'} />
@@ -487,7 +501,7 @@ export default function Overview() {
             the gym has not set a timezone the count is still stated, and the
             note says whose day it was counted over rather than leaving an owner
             to assume it was theirs. */}
-        <Kpi label="In the building" value={hub && hub.doorRead ? hub.inNow : null}
+        <Kpi big label="In the building" value={hub && hub.doorRead ? hub.inNow : null}
              note={hub && !hub.doorRead ? UNREAD
                : hub?.visitsToday != null
                  ? `${hub.visitsToday} through the door today${hub.dayNote ? ` — ${hub.dayNote}` : ''}`
@@ -523,17 +537,24 @@ export default function Overview() {
           margin: '20px 0 24px',
         }}
       >
-        <Kpi label="Trainers" value={roll?.trainers} />
-        <Kpi label="Clients" value={roll?.clients} />
-        <Kpi label="Sessions 30d" value={roll?.sessions30} />
-        <Kpi
+        <Kpi big label="Trainers" value={roll?.trainers} />
+        <Kpi big label="Clients" value={roll?.clients} />
+        <Kpi big label="Sessions 30d" value={roll?.sessions30} />
+        <Kpi big
           label="Session value 30d"
-          // MAJOR units from payroll30For, so ×100 to reach the minor units
+          // WHOLE units from payroll30For, converted to the minor units
           // `amount` takes. It went out as a bare `value` before — a money
           // figure with nothing at all to say what money it was, on the tile an
           // owner reads first. Now it is either written in the gym's own
           // currency or not written.
-          text={roll?.payroll30 == null ? null : amount(Math.round(roll.payroll30 * 100), ccy)}
+          //
+          // And it was `Math.round(… * 100)`, which is the literal /close was
+          // mended for and this tile was not: a Tokyo gym's ¥630,000 of session
+          // value rendered as ¥63,000,000 on the first figure an owner reads.
+          // `minorFromWhole` asks `ccy` how many places its money has, and
+          // returns null when the gym has not said — which is a dash with the
+          // note beside it, not a number in no currency.
+          text={amount(minorFromWhole(roll?.payroll30, ccy), ccy)}
           // A dash with no explanation reads as a bug. Say which of the four
           // reasons it is: the gym could not be read, no fee is set, work is
           // still awaiting an outcome, or the gym has never said what money it
@@ -546,7 +567,7 @@ export default function Overview() {
                     ?? undefined
                   : undefined}
         />
-        <Kpi label="Awaiting an outcome" value={roll?.unmarked30 ?? null}
+        <Kpi big label="Awaiting an outcome" value={roll?.unmarked30 ?? null}
              note={roll && roll.unmarked30 > 0 ? 'payroll cannot settle over these' : undefined} />
         {/* Not "at risk". `atRiskCount` is everyone `trainerHealth` does not
             return 'ok' for, and that set includes `idle` — a trainer hired
@@ -557,7 +578,7 @@ export default function Overview() {
             it is the first number an owner sees. The set is deliberately the
             same one staffView calls `flagged` — the count is right, the word
             for it was wrong. */}
-        <Kpi label="Trainers needing a look" value={roll?.atRiskCount}
+        <Kpi big label="Trainers needing a look" value={roll?.atRiskCount}
              note={roll && roll.atRiskCount > 0 && roll.atRiskClients === 0
                ? 'nothing to assess yet — no clients between them'
                : undefined} />
@@ -574,9 +595,9 @@ export default function Overview() {
         </div>
         <div style={{ padding: '14px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {engage === undefined ? (
-            <div style={{ color: 'var(--ink3)', fontSize: 13 }}>Loading…</div>
+            <div role="status" aria-live="polite" aria-atomic="true" style={{ color: 'var(--ink3)', fontSize: 13 }}>Loading…</div>
           ) : engage === null || !engage.ok ? (
-            <div style={{ color: 'var(--ink3)', fontSize: 13, maxWidth: '68ch' }}>
+            <div role="status" aria-live="polite" aria-atomic="true" style={{ color: 'var(--ink3)', fontSize: 13, maxWidth: '68ch' }}>
               {engage?.error
                 ?? 'These figures could not be read. That is unknown rather than nil — nobody has said your members have stopped training.'}
             </div>
@@ -617,14 +638,14 @@ export default function Overview() {
         {trainers === null && error ? (
           // Not the DataTable's empty state: that sentence claims the gym has
           // no trainers, and this branch is reached precisely when nobody knows.
-          <div style={{ padding: '28px 20px', color: 'var(--ink3)', fontSize: 13 }}>
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '28px 20px', color: 'var(--ink3)', fontSize: 13 }}>
             The roster could not be read, so this is not an empty gym — it is an unread one.
             The figures above that come from the roster are missing for the same reason.
           </div>
         ) : trainers === null ? (
-          <div style={{ padding: '28px 20px', color: 'var(--ink3)' }}>Loading…</div>
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '28px 20px', color: 'var(--ink3)' }}>Loading…</div>
         ) : (
-          <DataTable
+          <DataTable noun="trainers"
             rows={trainers}
             columns={cols}
             rowKey={(t) => t.id}
@@ -633,26 +654,6 @@ export default function Overview() {
         )}
       </section>
     </Shell>
-  );
-}
-
-function Kpi({ label, value, text, note }: {
-  label: string; value?: number | null; text?: string | null; note?: string;
-}) {
-  // `text` carries an already-formatted figure — money, a percentage. Null
-  // means the same thing it means for `value`: not recorded, render a dash.
-  const missing = text !== undefined ? text == null : value == null;
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div
-        className="mono"
-        style={{ fontSize: 25, marginTop: 5, color: missing ? 'var(--ink3)' : 'var(--ink)', letterSpacing: '-0.02em' }}
-      >
-        {missing ? '—' : (text ?? value!.toLocaleString())}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
   );
 }
 
@@ -733,8 +734,10 @@ function SignIn() {
         <input id="email" type="email" autoComplete="email" required value={email}
                onChange={(e) => setEmail(e.target.value)} style={{ ...field, margin: '6px 0 14px' }} />
         <PasswordField label="Password" value={password} onChange={setPassword} required />
-        {err ? <div style={{ color: 'var(--crit)', fontSize: 13, marginBottom: 12 }}>{err}</div> : null}
-        {sent ? <div style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 12 }}>{sent}</div> : null}
+        {/* Announced. This is the first interaction anybody has with the
+            console, and a wrong password produced a visual-only sentence. */}
+        {err ? <div role="alert" aria-live="assertive" aria-atomic="true" style={{ color: 'var(--crit)', fontSize: 13, marginBottom: 12 }}>{err}</div> : null}
+        {sent ? <div role="status" aria-live="polite" aria-atomic="true" style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 12 }}>{sent}</div> : null}
         <button type="submit" disabled={busy}
                 style={{ ...field, background: 'var(--brand)', color: 'var(--brand-ink)',
                          fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1 }}>

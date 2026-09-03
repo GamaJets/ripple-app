@@ -88,6 +88,10 @@ import { minorMoney, readMinorAmount, sumTaken, type Taken, type TakenRow, type 
 // cannot validate, which is what makes "no logo" and "an unreadable logo"
 // produce the same document rather than a broken image on somebody's invoice.
 import { LOGO_CSS, logoImgHtml } from './coachLogo';
+// The date formatter, for the same reason the money formatter above is
+// imported rather than rewritten: an invoice is the last place in this app that
+// may have a second opinion about how a date is written.
+import { fmtPointDay } from './format';
 
 /* ── what the caller hands over ───────────────────────────────────────────── */
 
@@ -435,16 +439,24 @@ export const kindLabel = (kind: InvoiceKind): string =>
  *
  * `new Date('2026-08-01')` is UTC midnight, which is 31 July for anybody west
  * of Greenwich — so a naive format dates an invoice the day before it was
- * issued for a third of the world. The parts are formatted from the string.
+ * issued for a third of the world. The parts are read off the string and handed
+ * to `fmtPointDay` as NUMBERS, which is the whole reason that helper takes
+ * numbers: nothing is parsed, so nothing can shift a day.
+ *
+ * In the reader's own language, not in English. This label is not an internal
+ * note — it is the issue date on the face of an invoice, and that document is
+ * rendered for the CLIENT as well as for the coach who wrote it. It used to
+ * assemble `${day} ${MONTHS[i]} ${year}` out of a hardcoded English array, so a
+ * client in Milan was sent a bill dated "1 Aug 2026" by a coach whose every
+ * other figure on the page was already in their own locale.
  */
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export function invoiceDayLabel(iso: string | null | undefined): string {
   const s = String(iso ?? '').slice(0, 10);
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return '—';
   const mi = Number(m[2]) - 1;
   if (mi < 0 || mi > 11) return '—';
-  return `${Number(m[3])} ${MONTHS[mi]} ${m[1]}`;
+  return fmtPointDay(Number(m[1]), mi, Number(m[3]));
 }
 
 /* ── how late it is, which is never a stored fact ─────────────────────────── */

@@ -145,6 +145,23 @@ async function sendDayPlan(item: OutboxItem): Promise<WriteOutcome> {
  * Thursday sits on Tuesday's chart beside Tuesday's lunch. `source` is 'manual'
  * and `external_id` is null, which is what keeps it clear of
  * `glucose_external_once` — the unique index the import writes against.
+ *
+ * ── The one refusal that is not a refusal ─────────────────────────────────
+ *
+ * The row carries the id the device minted, so a replay of one the server
+ * already holds comes back 23505. `classifyWrite` reads that as 'refused',
+ * which is right for a write that failed and wrong here: the reading is in the
+ * table, and reporting a refusal would take it out of the queue while telling
+ * nobody anything. A duplicate key is 'stored' — the same reading the same
+ * handler already sent, offered twice because the first answer was lost. Same
+ * as `sendScan` and `sendCoachDocAccept`, and nothing else in the 23 class is
+ * reinterpreted: a 23514 really is a figure `mmol_l`'s CHECK will not take.
+ *
+ * A reading queued by a build that did not mint an id has none to send, and the
+ * server fills the key in as it always did. There is nothing for a replay of
+ * one of those to collide with, so it duplicates exactly as it always did — see
+ * `GlucoseIntent`. The `id` field is omitted rather than sent as null, which
+ * would be a null primary key rather than an absent one.
  */
 async function sendGlucose(item: OutboxItem): Promise<WriteOutcome> {
   const r = asGlucoseIntent(item.payload);
@@ -153,9 +170,13 @@ async function sendGlucose(item: OutboxItem): Promise<WriteOutcome> {
   if (!uid) return 'unsent';
   try {
     const { data, error } = await supabase.from('glucose_readings').insert({
+      ...(r.id ? { id: r.id } : {}),
       client_id: uid, taken_at: r.at, mmol_l: r.mmol, external_id: null, source: 'manual',
     }).select('id');
-    if (error) reportError('recordOutbox.glucose', error);
+    if (error) {
+      if (r.id && (error as { code?: string }).code === '23505') return 'stored';
+      reportError('recordOutbox.glucose', error);
+    }
     return classifyWrite(error as any, data ? data.length : 0);
   } catch { return 'unsent'; }
 }

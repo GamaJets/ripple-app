@@ -97,7 +97,9 @@
 // no error and this sheet would otherwise say "Saved" over a row that did not
 // move.
 import { useCallback, useEffect, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate } from '@/components/Gate';
+import { type Unread } from '@/lib/read';
 import { Shell } from '@/components/Shell';
 import {
   fetchGymProfile, saveGymProfile, parseTenantCurrency, parseBrandColor,
@@ -127,10 +129,13 @@ import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
  * direction: a screen that cannot see the stored value and can still replace it
  * is how a policy somebody set months ago becomes something else.
  */
-type Unread = 'loading' | 'failed' | null;
 
 export default function Settings() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gym, setGym] = useState<GymProfile | null>(null);
   const [readErr, setReadErr] = useState<string | null>(null);
 
@@ -199,6 +204,10 @@ export default function Settings() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) return;
       await load(who.tenantId);
@@ -206,8 +215,11 @@ export default function Settings() {
     return () => { live = false; };
   }, [load]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -342,7 +354,7 @@ export default function Settings() {
       {saved ? <Banner>{saved}</Banner> : null}
 
       {state === 'loading' ? (
-        <div style={{ padding: '26px 2px', color: 'var(--ink3)' }}>Loading…</div>
+        <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '26px 2px', color: 'var(--ink3)' }}>Loading…</div>
       ) : (
         <form onSubmit={save} style={{ maxWidth: 620, marginTop: 20 }}>
           <Field
@@ -604,7 +616,7 @@ export default function Settings() {
             <button type="submit" disabled={busy || !!blocker || state === 'failed'} style={primaryBtn}>
               {busy ? 'Saving…' : 'Save'}
             </button>
-            {blocker ? <span style={{ fontSize: 12.5, color: '#f0c04e' }}>{blocker}</span> : null}
+            {blocker ? <span style={{ fontSize: 12.5, color: 'var(--warn)' }}>{blocker}</span> : null}
           </div>
 
           {/* Where each of these lands, so an owner knows what they have just
@@ -793,8 +805,13 @@ function CardPayments({ tenantId }: { tenantId: string }) {
         </>
       )}
 
+      {/* Announced. Everything else on this page goes through Banner; the
+          Stripe onboarding failures — "Stripe setup could not be opened",
+          "your browser blocked the new tab" — did not, and both are the
+          outcome of a button the reader just pressed. */}
       {msg ? (
-        <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--crit)', maxWidth: '64ch' }}>{msg}</p>
+        <p role="alert" aria-live="assertive" aria-atomic="true"
+           style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--crit)', maxWidth: '64ch' }}>{msg}</p>
       ) : null}
       {manualUrl ? (
         <p style={{ margin: '6px 0 0', fontSize: 12.5, maxWidth: '64ch' }}>
@@ -862,7 +879,7 @@ function Bad({ children, tone }: { children: React.ReactNode; tone?: 'warn' }) {
   return (
     <p style={{
       margin: '8px 0 0', fontSize: 12.5, maxWidth: '64ch',
-      color: tone === 'warn' ? '#f0c04e' : 'var(--crit)',
+      color: tone === 'warn' ? 'var(--warn)' : 'var(--crit)',
     }}>{children}</p>
   );
 }

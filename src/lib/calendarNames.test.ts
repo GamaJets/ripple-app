@@ -90,10 +90,20 @@ if (FULL_ICU) {
 
 // Keyed on the tag, so a handset whose locale changes is not answered with the
 // names it had at launch.
-eq(monthNamesLong('en-GB')[5], monthNamesLong('en-GB')[5], 'the same locale answers the same twice');
-if (FULL_ICU) {
-  ok(monthNamesLong('es-ES')[0] !== monthNamesLong('en-GB')[0],
-    'and a second locale asked after the first is not handed the first one’s names');
+// This compared `monthNamesLong('en-GB')[5]` to itself — two calls, but the
+// same locale asked twice in a row, which is true of a cache keyed on the tag,
+// a cache keyed on nothing, and no cache at all. What has to hold is that the
+// tag is the KEY: the locales are interleaved below, so a cache that answers
+// from whichever tag it saw first fails here rather than in somebody's hands.
+{
+  const en = monthNamesLong('en-GB');
+  eq(monthNamesLong('en-GB'), en, 'the same locale is answered with the one array rather than a rebuilt copy');
+  if (FULL_ICU) {
+    const es = monthNamesLong('es-ES');
+    ok(es[0] !== en[0], 'a second locale asked after the first is not handed the first one’s names');
+    ok(es !== en, 'and the two are two arrays, not one shared between every tag');
+    eq(monthNamesLong('en-GB'), en, 'and asking for the second neither evicts nor overwrites the first');
+  }
 }
 
 // One array is shared by every caller for the life of the process, so a caller

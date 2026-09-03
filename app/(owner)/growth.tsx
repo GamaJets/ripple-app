@@ -468,7 +468,11 @@ export default function OwnerGrowth() {
               reads aloud when explaining a promotion to somebody. */}
           <SectionHead title="Promo & Referral Codes" note="Redeemed by members" />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-            <TextInput value={code} onChangeText={setCode} placeholder="CODE" placeholderTextColor={t.ink3}
+            {/* Named. `CODE` is a placeholder, and a placeholder is gone the
+                moment somebody types into it. */}
+            <TextInput value={code} onChangeText={setCode}
+              accessibilityLabel="The promo or referral code to create"
+              placeholder="CODE" placeholderTextColor={t.ink3}
               autoCapitalize="characters" autoCorrect={false}
               style={{ ...ty.body, fontWeight: '500', letterSpacing: 1, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 }} />
             <Cta label="Create" onPress={create} />

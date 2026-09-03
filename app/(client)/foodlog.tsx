@@ -34,6 +34,16 @@ import { useGoalTracker } from '../../src/ui/goalTracker';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
+// The camera permission this screen already asked for is about the hardware.
+// These are about where the frame goes, which is a different question with a
+// different answer, and for a long time only the first one was ever put.
+import {
+  mayAnalyzePhoto, PHOTO_ASK_KICKER, PHOTO_ASK_TITLE, PHOTO_DESTINATION_BY_SUBJECT,
+  PHOTO_SENT_BY_SUBJECT, PHOTO_NOT_SENT_BY_SUBJECT, PHOTO_IF_YOU_DECLINE,
+  PHOTO_SEND_LABEL, PHOTO_DECLINE_LABEL, PHOTO_SEND_A11Y, PHOTO_DECLINE_A11Y,
+  PHOTO_REFUSED_NOTE, PHOTO_UNREAD_NOTE, PHOTO_OFF_NOTE,
+} from '../../src/lib/photoAI';
+import { usePhotoAI } from '../../src/ui/photoAI';
 import { parseFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
 import { searchProducts, type OffProduct } from '../../src/lib/openfoodfacts';
 import { searchCommonFoods } from '../../src/lib/foods';
@@ -71,7 +81,7 @@ import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWearables } from '../../src/ui/wearables';
-import { Rule, Section, SectionHead, Hero, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Cta, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
@@ -225,6 +235,16 @@ export default function FoodLog() {
  // the shutter reads as a button that did not work.
  const [reading, setReading] = useState(false);
  const [photoUri, setPhotoUri] = useState<string | null>(null);
+ // The member's answer about sending a photograph of their food to a language
+ // model. Its own subject and its own stored key: agreeing to photograph a gym
+ // machine is not agreeing to photograph the table you are sitting at. See
+ // src/lib/photoAI.ts.
+ const photoAI = usePhotoAI('meal');
+ // Holds ONLY which button was pressed, while the question is on screen.
+ // Nothing has been photographed and nothing has been sent at this point, so
+ // every way out of the sheet is a real answer and dismissing it is a cancel
+ // rather than a quiet yes.
+ const [askPhoto, setAskPhoto] = useState<{ fromCamera: boolean } | null>(null);
 
  // Every write in this provider resolves true only once the row is on the
  // server, and this screen used to throw all of them away. A refused insert and
@@ -524,17 +544,66 @@ export default function FoodLog() {
  // caption.
  const remK = target ? caloriesLeft(target.kcal, tot.k, burned, burn?.budgeted ?? 0, burn?.kind).net : null;
 
+ /**
+  * The question, put BEFORE the camera opens.
+  *
+  * A meal photograph went to api.anthropic.com — through `analyzeMeal`, the
+  * `vision-analyze` edge function, and nothing else — on the strength of a
+  * camera permission reading "log a meal by photo". That describes the
+  * hardware. It says nothing about the destination, and a plate is
+  * photographed at a table: whoever is sitting round it and whatever room it
+  * is goes with the food. See src/lib/photoAI.ts.
+  *
+  * Asked before the shutter, not after it, for the reason
+  * app/(client)/scan-machine.tsx gives: a member who has already taken the
+  * photo has already taken it, and putting the question afterwards makes
+  * agreeing the way to stop having wasted the gesture. That is a nudge, not a
+  * question.
+  */
  const takeMealPhoto = async (fromCamera: boolean) => {
+  const gate = mayAnalyzePhoto(photoAI.consent, visionAvailable());
+  if (gate.block === 'unknown') {
+   // Still reading the stored answer. Not a refusal and not a yes, and the
+   // one honest thing to do with it is wait.
+   Alert.alert('One moment', 'Still checking your answer about photos. Try that again in a moment.');
+   return;
+  }
+  // 'unasked' and 'refused' both put the question, so somebody who said no
+  // can change their mind in the same place they said it.
+  if (gate.block === 'unasked' || gate.block === 'refused') { setAskPhoto({ fromCamera }); return; }
+  // 'off' is not a refusal and gets no question: there is no reader on this
+  // build, so there is nothing to agree to. The photo is still taken and the
+  // meal is still logged, by hand, which is what this screen did before any
+  // reader existed.
+  await runMealPhoto(fromCamera, gate.allowed ? 'send' : 'off');
+ };
+
+ /**
+  * Take the photograph, and send it only on 'send'.
+  *
+  * The outcome is passed in rather than re-derived, and it has three members
+  * rather than a boolean because the sheet has to say WHY nothing was read.
+  * "You said no", "this build has no reader" and "the reader gave nothing
+  * back" are three different facts and the member's next move differs for
+  * each; collapsing them into one sentence is the thing this screen is
+  * otherwise careful about everywhere else.
+  */
+ const runMealPhoto = async (fromCamera: boolean, outcome: 'send' | 'refused' | 'off') => {
  if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'log a meal by photo'))) return;
  const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
  if (res.canceled || !res.assets?.[0]) return;
  const asset = res.assets[0];
  setPhotoUri(asset.uri);
- setReading(true);
- // Real vision read when the backend is live; otherwise an empty sheet the
- // member fills in. Nothing is estimated by this screen either way.
+ // Only while something is actually being read. On the two branches that send
+ // nothing there is nothing to wait for, and a "Reading your meal…" overlay
+ // over a photo that is going nowhere would be the screen describing a send
+ // that is not happening.
+ if (outcome === 'send') setReading(true);
+ // Real vision read when the backend is live AND the member has agreed;
+ // otherwise an empty sheet the member fills in. Nothing is estimated by this
+ // screen either way.
  let read: { name: string; kcal: number; protein: number | null; carbs: number | null; fat: number | null } | null = null;
- if (visionAvailable() && asset.base64) {
+ if (outcome === 'send' && visionAvailable() && asset.base64) {
   let mb = asset.base64;
   try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) mb = mm.base64; } catch {}
   read = await analyzeMeal(mb, 'image/jpeg');
@@ -549,9 +618,15 @@ export default function FoodLog() {
  // is read from, shown while the figures are typed, and gone when the sheet
  // closes. Saying so is the fix — the alternative is a promise the product
  // does not keep about the one thing a member cannot re-take.
+ //
+ // The refusal branch is deliberately NOT worded or styled as a failure. It is
+ // the feature doing what the member asked: the photo is on screen, it went
+ // nowhere, and the meal logs the same. See PHOTO_REFUSED_NOTE.
  setPendingNote(read
   ? 'Read from your photo — check every figure before logging it. The picture itself is not kept: it is here to read the meal from and to check against, and the numbers are what go into your log.'
-  : 'Nothing could be read from your picture, so nothing has been estimated from it. Enter the calories and macros and they go into your log. The picture itself is not kept — it is here to check against while you type.');
+  : outcome === 'refused' ? PHOTO_REFUSED_NOTE.meal
+  : outcome === 'off' ? PHOTO_OFF_NOTE.meal
+  : PHOTO_UNREAD_NOTE.meal);
  // A blank sheet rather than a zeroed one. Every box the reader did not fill
  // is empty, and src/ui/LogFoodSheet.tsx will not log until a person has.
  setPending(read
@@ -948,6 +1023,67 @@ export default function FoodLog() {
 
  </ScrollView>
 
+ {/* ── the question, asked before the camera opens ───────────────────
+     Nothing has been photographed and nothing has been sent at the moment
+     this is on screen. `askPhoto` holds which button was pressed and no
+     more, so every way out of the sheet is a real answer:
+
+       Send the Photo to Be Read   take it, send it, read the meal from it
+       No — I'll Type It Myself    take it, send nothing, type the figures
+       Cancel / back               nothing at all happens
+
+     Dismissing it — the Android back button, a tap on the backdrop — is
+     Cancel and not a quiet yes, which is the whole difference between a
+     consent question and a notification. The two answers are RECORDED
+     (photoAI.answer) rather than merely acted on: a dismissal asks again on
+     the next tap, and that is how a question becomes a nag.
+
+     A sheet rather than an Alert, for the reason app/(client)/injury-doc.tsx
+     gives: Alert.alert cannot show four paragraphs, truncates its buttons on
+     Android and orders them however the platform likes, and "Send" must not
+     be the button a thumb is already resting on.
+
+     Every sentence is rendered from src/lib/photoAI.ts rather than typed
+     here, so what somebody agrees to cannot drift from what is sent. */}
+ <Modal visible={askPhoto != null} transparent animationType="slide"
+   onRequestClose={() => setAskPhoto(null)}>
+  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
+    accessibilityRole="button" accessibilityLabel="Do not take a meal photo at all"
+    onPress={() => setAskPhoto(null)} />
+  <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '88%', ...elevation.e2 }}>
+   <ScrollView showsVerticalScrollIndicator={false}>
+    <Text style={{ ...ty.micro, color: t.ink3 }}>{PHOTO_ASK_KICKER.meal}</Text>
+    <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{PHOTO_ASK_TITLE.meal}</Text>
+    <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{PHOTO_DESTINATION_BY_SUBJECT.meal}</Text>
+
+    <View style={{ marginTop: sp.lg, gap: sp.xs }}>
+     <Text style={{ ...ty.micro, color: t.ink3 }}>What is sent</Text>
+     {PHOTO_SENT_BY_SUBJECT.meal.map((line) => (
+      <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>&bull; {line}</Text>
+     ))}
+     <View style={{ height: sp.sm }} />
+     <Text style={{ ...ty.micro, color: t.ink3 }}>What is not</Text>
+     {PHOTO_NOT_SENT_BY_SUBJECT.meal.map((line) => (
+      <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>&bull; {line}</Text>
+     ))}
+    </View>
+
+    {/* Not a consolation at the bottom — it is the half of the question that
+        makes "no" an answer somebody can afford to give. */}
+    <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{PHOTO_IF_YOU_DECLINE.meal}</Text>
+
+    <View style={{ marginTop: sp.xl, gap: sp.sm }}>
+     <Cta label={PHOTO_SEND_LABEL.meal} a11yLabel={PHOTO_SEND_A11Y.meal} wide
+       onPress={() => { const a = askPhoto; if (!a) return; photoAI.answer('yes'); setAskPhoto(null); void runMealPhoto(a.fromCamera, 'send'); }} />
+     <Ghost label={PHOTO_DECLINE_LABEL.meal} a11yLabel={PHOTO_DECLINE_A11Y.meal}
+       onPress={() => { const a = askPhoto; if (!a) return; photoAI.answer('no'); setAskPhoto(null); void runMealPhoto(a.fromCamera, 'refused'); }} />
+     <Ghost label="Cancel" a11yLabel="Do not take a meal photo at all"
+       onPress={() => setAskPhoto(null)} />
+    </View>
+   </ScrollView>
+  </View>
+ </Modal>
+
  {/* ── the meal is being read ──────────────────────────────────────── */}
  {/* Its own small modal rather than a state inside the sheet: the sheet does
      not open until there is something to put in it, and two seconds of
@@ -988,7 +1124,7 @@ export default function FoodLog() {
  </Field>
  ))}
  </View>
- <Pressable onPress={saveEdit} disabled={edBusy} accessibilityRole="button"
+ <Pressable onPress={saveEdit} disabled={edBusy} accessibilityState={{ disabled: edBusy }} accessibilityRole="button"
  style={{ backgroundColor: edBusy ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
  {edBusy ? <ActivityIndicator color={t.ink2} /> : <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>Save the correction</Text>}
  </Pressable>

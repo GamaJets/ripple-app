@@ -18,6 +18,7 @@ import { useSettings } from '../../src/ui/settings';
 import { est1RMIn, liftLabel, convertedNote } from '../../src/lib/units';
 import { personalRecords } from '../../src/lib/streaks';
 import { repRecords, bodyweightSetLabel } from '../../src/lib/bodyweightSets';
+import { holdRecords, holdLabel, timedSetLabel } from '../../src/lib/timedSets';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
 import { Rule, Section, SectionHead, Hero, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
@@ -72,7 +73,15 @@ export default function Records() {
  // A movement whose best set is already the hero of the board above is not
  // repeated down here as a lesser record of itself.
  const repsOnly = reps.filter((r) => !prs.some((p) => p.exercise === r.exercise && p.bodyweight));
- const nothing = prs.length === 0 && repsOnly.length === 0;
+ // The third board. `holdRecords` has existed, ranked and tie-broken, with its
+ // only importer its own test — the app asks for holds, stores them properly,
+ // and refuses (correctly) to count them as tonnage or as an estimated max.
+ // Having taken them off every board they do not belong on, it never put them
+ // on the one they do: a member whose plank has gone from forty seconds to
+ // three minutes had no screen anywhere that said so, and their timed work read
+ // back as work that produced no record of any kind.
+ const holds = holdRecords(log);
+ const nothing = prs.length === 0 && repsOnly.length === 0 && holds.length === 0;
  const dstr = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
  /**
   * What a row SAYS, as one sentence.
@@ -94,6 +103,12 @@ export default function Records() {
   if (one != null) parts.push(`estimated one rep max ${one} ${wu}`);
   parts.push(`best set ${best}`, `on ${dstr(pr.at)}`);
   return parts.join(', ');
+ };
+ /** The same, for the hold board. The seconds are the record; a load is what
+  *  was held on top and is never presented as the whole of it. */
+ const holdSpoken = (h: { exercise: string; secs: number; loadKg: number; bodyweight: boolean; at: string }): string => {
+  const added = h.loadKg > 0 ? liftLabel(h.loadKg, wu) : null;
+  return `${h.exercise}, ${timedSetLabel(h.secs, added != null ? `${added} ${wu}` : null, h.bodyweight)}, on ${dstr(h.at)}`;
  };
  /** The same, for the reps board. Reps are always known there, so the only
   *  withholdable clause is the belt. */
@@ -179,7 +194,7 @@ export default function Records() {
     <Text style={{ ...ty.body, color: t.ink2 }}>
      {logStatus === 'partial'
       ? 'You have logged more sessions than this screen can read in one go, and there were no sets among the ones it read that could set a record. This is not a statement that you have no records.'
-      : 'No records yet — log a strength workout to set your first PR. Pull-ups, dips and press-ups count: tick Bodyweight when you log the set.'}
+      : 'No records yet — log a strength workout to set your first PR. Pull-ups, dips and press-ups count: tick Bodyweight when you log the set. So do planks and hangs: log them as a hold and your longest one gets a board of its own.'}
     </Text>
    </Section>
   </>) : (<>
@@ -274,6 +289,41 @@ export default function Records() {
        : cd.scansStatus === 'loading'
         ? 'Ranked by reps in a single set. Still reading your weight history — these join the board above with an estimated max once it lands.'
         : 'Ranked by reps in a single set. Your weight history could not be read, so these cannot be priced against your own bodyweight just now — that is this screen, not a gap in your record. Pull down to try again.'}
+     </Text>
+    </Section>
+   </>) : null}
+
+   {/* ── the third board: how long you held it ─────────────────────────── */}
+   {/* Seconds, not reps and not kilograms. A hold's record is its duration —
+       everything else in this app deliberately refuses to price one, and this
+       is the screen where it is finally stated in its own units. Load breaks a
+       tie, so a 60-second plank with a plate is never shown as the same
+       achievement as a bare 60. */}
+   {holds.length ? (<>
+    <Rule />
+    <Section>
+     <SectionHead title="Longest Holds" note={logStatus === 'partial' ? undefined : `${holds.length} movement${holds.length === 1 ? '' : 's'}`} />
+     {holds.map((h, i) => (
+      <View key={h.exercise} accessible accessibilityRole="text"
+       accessibilityLabel={holdSpoken(h)}
+       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+       <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{h.exercise}</Text>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
+         {/* delta-ok: the plus is a plate on a belt, not a change in anything. */}
+         {h.loadKg > 0
+          ? `${h.bodyweight ? 'At bodyweight +' : '+'}${fig(liftLabel(h.loadKg, wu))} ${wu} · `
+          : h.bodyweight ? 'At bodyweight · ' : ''}{dstr(h.at)}
+        </Text>
+       </View>
+       <View style={{ alignItems: 'flex-end' }}>
+        <Text style={{ ...value(17), color: t.ink }}>{holdLabel(h.secs)}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>held</Text>
+       </View>
+      </View>
+     ))}
+     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+      Ranked by how long a single set was held. A hold is never counted as reps or as tonnage, so it does not appear on the boards above.
      </Text>
     </Section>
    </>) : null}

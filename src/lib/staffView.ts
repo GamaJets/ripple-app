@@ -168,6 +168,37 @@ export function loadingStaffParts(rec: StaffRecord): StaffPart[] {
   return STAFF_PARTS.filter((p) => rec[p].state === 'loading');
 }
 
+/** The parts that came back, and came back short. */
+export function truncatedStaffParts(rec: StaffRecord): StaffPart[] {
+  return STAFF_PARTS.filter((p) => rec[p].state === 'partial');
+}
+
+/**
+ * The sentence to put above a staff page whose reads came back SHORT, or null
+ * when nothing was truncated.
+ *
+ * Its own sentence, not folded into `staffWarning`. On this page in particular
+ * the two are acted on differently: a failed roster read is a fault to chase,
+ * and a truncated one is a set of named people who are simply not on a payroll
+ * screen — which reads as a gym with fewer coaches rather than as a read that
+ * ran short.
+ */
+export function staffTruncationWarning(rec: StaffRecord): string | null {
+  const cut = truncatedStaffParts(rec);
+  if (!cut.length) return null;
+  const names = cut.map((p) => STAFF_LABEL[p]);
+  const one = cut.length === 1;
+  const list = one
+    ? names[0]
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  const costs = cut.map((p) => STAFF_COST[p]).join('; ');
+  return (
+    `Read the first rows of ${list} and there are more. ${one ? 'That part is' : 'Those parts are'} ` +
+    `a PREFIX, not the whole record — ${costs}. Every figure over ${one ? 'it' : 'them'} is withheld ` +
+    `rather than shown as a subtotal.`
+  );
+}
+
 /**
  * Whether this page is entitled to present itself as a whole picture.
  *
@@ -175,9 +206,13 @@ export function loadingStaffParts(rec: StaffRecord): StaffPart[] {
  * failed the screen is incomplete no matter what else is still arriving, and
  * saying "loading" would promise a completeness that is not coming.
  */
-export function staffCompleteness(rec: StaffRecord): 'whole' | 'loading' | 'broken' {
+export function staffCompleteness(rec: StaffRecord): 'whole' | 'loading' | 'truncated' | 'broken' {
   if (brokenStaffParts(rec).length) return 'broken';
-  return loadingStaffParts(rec).length ? 'loading' : 'whole';
+  if (loadingStaffParts(rec).length) return 'loading';
+  // 'truncated' rather than 'whole', which is what this returned before the
+  // fourth state existed: a page built on a prefix was reporting itself as a
+  // whole picture, which is the one answer it must never give.
+  return truncatedStaffParts(rec).length ? 'truncated' : 'whole';
 }
 
 /**
@@ -408,6 +443,10 @@ export interface StaffView {
   offRoster: PayrollLine[] | null;
   /** The banner above the whole screen when a part failed. */
   warning: string | null;
+  /** The banner above the whole screen when a part came back SHORT. Its own
+   *  field, not folded into `warning`, because a fault to chase and a figure to
+   *  stop quoting are two different things to do next. */
+  truncated: string | null;
   /** Why the page cannot judge everybody, in one line, or null. */
   caveat: string | null;
 }
@@ -476,6 +515,7 @@ export function buildStaff(rec: StaffRecord, opts: StaffOptions): StaffView {
     rollup: rollupOf(members, clientRows, sessionRows, classRows),
     offRoster,
     warning: staffWarning(rec),
+    truncated: staffTruncationWarning(rec),
     caveat: caveatOf(members),
   };
 }

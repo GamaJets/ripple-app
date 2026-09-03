@@ -22,7 +22,9 @@
 // come back Unknown with a sentence saying which kind of nothing it is — never
 // a green dot, and never buried under the healthy rows.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { Banner as SharedBanner, Announce } from '@/components/Banner';
@@ -49,14 +51,21 @@ import {
 } from '@lib/gymRota';
 // Minor units → the major-unit string a person types, through the currency's
 // own number of decimal places rather than a hardcoded hundred.
-import { majorFromMinor } from '@lib/coachMoney';
+import { majorFromMinor, minorFromWhole } from '@lib/coachMoney';
 import { money } from '@lib/gymRecord';
 import { readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { wrote, refused, sayText, sayTone, type Said } from '@lib/consoleSay';
 import { fetchClientActivity, DRIFT_LABEL, DEFAULT_WINDOWS, type Drift } from '@lib/clientDrift';
-import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
+import { sliceLoading, sliceReady, sliceFailed, sliceNote, type Slice } from '@lib/memberView';
+// `week` and `day` below are `YYYY-MM-DD` CALENDAR DATES, not instants. Parsing
+// them with `new Date(`${d}T00:00:00`)` is LOCAL midnight, so the label under a
+// rota drawn on the gym's clock could name the day before it for a reader far
+// enough east. A calendar date has no zone, and this renders it as one.
+import { calendarDateText, gymDateText, gymDateTimeText, gymTimeText } from '@lib/gymWhen';
+// Escape, focus and the tab trap this dialog never had.
+import { useDialog, dialogPanel } from '@/lib/dialog';
 import {
   buildStaff, bandTitle, bandNote, STAFF_RANK, STAFF_STATUS_LABEL,
   type StaffRecord, type StaffView, type StaffMember, type StaffTrainer,
@@ -78,6 +87,10 @@ const EMPTY: StaffRecord = {
 
 export default function Staff() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
   // `tenants.currency`. Every figure on this page is priced from the gym's own
@@ -158,6 +171,10 @@ export default function Staff() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) {
         setRec({
@@ -199,13 +216,19 @@ export default function Staff() {
 
   const view: StaffView = useMemo(() => buildStaff(rec, {
     policy,
-    // The gym's fee is in major units; everything downstream is minor units.
-    fallbackRateCents: sessionFee == null ? null : Math.round(sessionFee * 100),
+    // The gym's fee is in whole units; everything downstream is minor units.
+    // It was `Math.round(sessionFee * 100)` — the same literal /close was
+    // mended for, where a ¥6,000 fee became 600,000 minor units. This is the
+    // figure every unpriced session on this screen is costed at.
+    fallbackRateCents: minorFromWhole(sessionFee, ccy),
     windowDays: WINDOW_DAYS,
-  }), [rec, policy, sessionFee]);
+  }), [rec, policy, sessionFee, ccy]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -262,6 +285,7 @@ export default function Staff() {
       </div>
 
       {view.warning ? <Banner tone="crit">{view.warning}</Banner> : null}
+      {view.truncated ? <Banner tone="crit">{view.truncated}</Banner> : null}
       {feeRead === 'failed' ? (
         <Banner tone="crit">
           The gym&rsquo;s session fee could not be read, so any session without its
@@ -478,7 +502,7 @@ function Roster({ view, rec, sel, onPick, ccy, query, onQuery }: {
       {note ? <p style={{ margin: 0, padding: '8px 14px 0', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p> : null}
       <Part slice={rec.trainers} what="the staff roster">
         {view.members ? (
-          <DataTable
+          <DataTable noun="coaches"
             rows={shown} columns={cols} rowKey={(m) => m.trainerId}
             empty="No trainer is attached to this gym yet. Invite one from the Repple Studio app and this page fills in."
           />
@@ -554,7 +578,7 @@ function Person({ m, rec, onClose, ccy, zone }: {
               // where the page is read, which is the sort of one-day
               // disagreement that only ever shows up in an argument about a
               // month's pay.
-              : m.since ? `since ${new Date(m.since).toLocaleDateString(undefined, { timeZone: zone ?? undefined })}`
+              : m.since ? `since ${gymDateText(m.since, zone) ?? 'a date that could not be read'}`
               : 'no join date on file'
           }
         />
@@ -689,7 +713,7 @@ function Book({ m, rec }: { m: StaffMember; rec: StaffRecord }) {
               {bandNote(m.drifting ? 'at_risk' : m.unknownClients ? 'idle' : 'on_track')}
             </p>
           ) : null}
-          <DataTable
+          <DataTable noun="clients"
             rows={m.book} columns={cols} rowKey={(d) => d.clientId}
             empty="Nobody is assigned to this trainer. Their delivery is real work; it is just not against a book."
           />
@@ -877,7 +901,7 @@ function Roles({ tenantId, actorId, clients, zone, onChanged }: {
                     23:50 is dated a day apart for two colleagues otherwise, and
                     this is the column somebody reads in an argument. */}
                 <span className="mono">
-                  {new Date(g.grantedAt).toLocaleDateString(undefined, { timeZone: zone ?? undefined })}
+                  {gymDateText(g.grantedAt, zone) ?? 'a date that could not be read'}
                 </span>
               </>
             ) : null}
@@ -924,7 +948,7 @@ function Roles({ tenantId, actorId, clients, zone, onChanged }: {
       {staff === null ? (
         readErr ? null : <Loading />
       ) : (
-        <DataTable
+        <DataTable noun="staff"
           rows={staff} columns={cols} rowKey={(p) => p.id}
           empty="Nobody, which cannot be right — you are signed in as this gym’s owner. Reload; an empty staff list here is far more likely to be a refused read than a gym with no staff."
         />
@@ -1009,7 +1033,7 @@ function Roles({ tenantId, actorId, clients, zone, onChanged }: {
             roster row, a place in payroll and a book of other people's health
             records. */}
         {role ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)', maxWidth: '78ch' }}>{STAFF_ROLE_NOTE[role]}</p> : null}
-        {addBlocker && who ? <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>{addBlocker}</p> : null}
+        {addBlocker && who ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--warn)' }}>{addBlocker}</p> : null}
         {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
         <p style={{ margin: 0, fontSize: 12, color: 'var(--ink3)', maxWidth: '78ch' }}>
           This console can only list accounts already in this gym — the database shows an owner
@@ -1159,9 +1183,9 @@ function Rota({ tenantId, trainers, ccy, zone }: {
       // 03:00 looks exactly like a 06:00.
       render: (sh) => (
         <span style={{ opacity: isLive(sh) ? 1 : 0.55 }}>
-          {new Date(sh.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: zone ?? undefined })}
+          {gymDateTimeText(sh.startsAt, zone, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) ?? 'a time that could not be read'}
           {' – '}
-          {new Date(sh.endsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: zone ?? undefined })}
+          {gymTimeText(sh.endsAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? '—'}
         </span>
       ) },
     { key: 'who', header: 'Who', value: (sh) => sh.trainerName,
@@ -1227,7 +1251,7 @@ function Rota({ tenantId, trainers, ccy, zone }: {
         <button style={ghostBtn} onClick={() => setWeek(weekStartOf())} disabled={week === weekStartOf()}>This week</button>
         <button style={ghostBtn} onClick={() => setWeek((w) => shiftWeek(w, 1))}>Next →</button>
         <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
-          week of {new Date(`${week}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}
+          week of {calendarDateText(week, { day: 'numeric', month: 'long' }) ?? '—'}
         </span>
       </div>
 
@@ -1281,7 +1305,7 @@ function Rota({ tenantId, trainers, ccy, zone }: {
             <select value={day} onChange={(e) => setDay(e.target.value)} style={{ ...field, minWidth: 140 }} aria-label="Which day">
               {days.map((d) => (
                 <option key={d} value={d}>
-                  {new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                  {calendarDateText(d, { weekday: 'short', day: 'numeric', month: 'short' }) ?? d}
                 </option>
               ))}
             </select>
@@ -1315,7 +1339,7 @@ function Rota({ tenantId, trainers, ccy, zone }: {
           the gym record and the cost column fills in.
         </p>
       ) : null}
-      {blocker ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
+      {blocker ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>{blocker}</p> : null}
       {msg ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
 
       {/* Whose clock the column below is in. Stated always, in both states,
@@ -1341,13 +1365,15 @@ function Rota({ tenantId, trainers, ccy, zone }: {
       </p>
 
       {shifts === null ? (
-        <div style={{ padding: '26px 20px', color: 'var(--ink3)', fontSize: 13.5 }}>
+        // Announced: the text that replaces "Loading…" here carries the
+        // database's own refusal, and it is the only place this section says it.
+        <div role="status" aria-live="polite" aria-atomic="true" style={{ padding: '26px 20px', color: 'var(--ink3)', fontSize: 13.5 }}>
           {readErr
             ? `The rota could not be read, so this week is unknown rather than empty: ${readErr}`
             : 'Loading…'}
         </div>
       ) : (
-        <DataTable rows={shifts} columns={cols} rowKey={(sh) => sh.id}
+        <DataTable noun="shifts" rows={shifts} columns={cols} rowKey={(sh) => sh.id}
                    empty="Nobody is rostered this week. That is a rota nobody has written, not a gym with nobody in it." />
       )}
 
@@ -1445,11 +1471,16 @@ function EditShift({ shift, ccy, zone, onClose }: {
     } finally { setBusy(false); }
   };
 
+  // Escape, initial focus, a tab trap, and focus back to whatever opened this.
+  const panel = useDialog<HTMLDivElement>(() => onClose(false));
+
   return (
-    <div role="dialog" aria-label="Edit this shift"
+    <div
          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', padding: 24, zIndex: 10 }}
          onClick={() => onClose(false)}>
-      <div onClick={(e) => e.stopPropagation()}
+      {/* The dialog is the PANEL, not the scrim — see lib/dialog.ts. */}
+      <div {...dialogPanel(panel, 'Edit this shift')}
+           onClick={(e) => e.stopPropagation()}
            style={{ width: 480, maxWidth: '100%', background: 'var(--surface)', border: '1px solid var(--ring)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ring)' }}>
           <h2>{shift.trainerName ?? 'This shift'}</h2>
@@ -1478,7 +1509,7 @@ function EditShift({ shift, ccy, zone, onClose }: {
             inputMode="decimal" aria-label="What this shift costs"
             style={{ ...field, opacity: cur ? 1 : 0.5 }}
           />
-          {blocker ? <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
+          {blocker ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--warn)' }}>{blocker}</p> : null}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="submit" disabled={busy || !!blocker} style={btn}>{busy ? 'Saving…' : 'Save'}</button>
             <button type="button" onClick={() => onClose(false)} style={ghostBtn}>Cancel</button>
@@ -1531,7 +1562,7 @@ function OffRoster({ view, ccy }: { view: StaffView; ccy: TenantCurrency }) {
         insert one, and a button that the database would refuse is worse than this sentence. Send
         them the join code, and the rows below fold into the roster on their next visit.
       </p>
-      <DataTable rows={rows} columns={cols} rowKey={(l) => l.trainerId} empty="—" />
+      <DataTable noun="off-roster session lines" rows={rows} columns={cols} rowKey={(l) => l.trainerId} empty="—" />
     </Section>
   );
 }
@@ -1559,11 +1590,25 @@ async function slice<T>(run: () => Promise<T[]>): Promise<Slice<T>> {
  * `.error` is checked on both queries. Without it a failed roster read arrives
  * as `data: null`, falls through `?? []`, and this page reports a gym with no
  * staff — which looks exactly like a gym with no staff problems.
+ *
+ * ── Why this pages ────────────────────────────────────────────────────────
+ *
+ * It was a bare `.select('id')` with no ceiling, and `fetchPeople` two
+ * functions down had already been paged for exactly this with the argument
+ * written out. The roster is what every per-coach figure on this screen is
+ * grouped by AND is itself the "coaches" count, so a truncated read does not
+ * make one figure smaller — it removes named people from a payroll page, which
+ * reads as a gym with fewer coaches rather than as a read that ran short.
  */
 async function fetchTrainers(tenantId: string): Promise<StaffTrainer[]> {
-  const { data, error } = await supabase
-    .from('trainers').select('id').eq('tenant_id', tenantId);
-  if (error) throw error;
+  // `readAll`, and ordered on `id` — the primary key, which is total by
+  // definition, so no two pages can tie.
+  const data = await readAll<{ id: string }>(
+    (from, to) => supabase
+      .from('trainers').select('id').eq('tenant_id', tenantId)
+      .order('id', { ascending: true }).range(from, to),
+    "this gym's coaching roster",
+  );
 
   const ids = (data ?? []).map((r: any) => r.id).filter(Boolean);
   if (!ids.length) return [];
@@ -1778,8 +1823,34 @@ function Part<T>({ slice: s, what, children }: {
     <>
       {s.state === 'loading' ? <Loading /> : null}
       {s.state === 'failed' ? <Failed reason={s.reason} what={what} /> : null}
+      {s.state === 'partial' ? <Truncated what={what} cap={s.cap} /> : null}
       {s.state === 'ready' ? children : null}
     </>
+  );
+}
+
+
+/**
+ * The banner over a section whose read came back at its ceiling.
+ *
+ * The rows are real and there are more of them, so this is neither the failure
+ * banner nor the empty sentence. It does not draw the table beneath it: every
+ * figure on this screen is computed through `rowsOf`, which is null for a
+ * truncated read on purpose, so the table under this banner would be an empty
+ * one — "cut off" over "nothing recorded" is a worse page than the banner
+ * alone. A section that means to LIST a prefix reads its rows through
+ * `rowsToShow` and says so itself.
+ */
+function Truncated({ what, cap }: { what: string; cap: number }) {
+  return (
+    <div style={{
+      padding: '16px 14px', margin: '14px', borderRadius: 0,
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
+      background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
+    }}>
+      Read the first {cap} rows of {what}, and there are more. This section is a{' '}
+      <strong>prefix</strong>, not the whole record, so nothing here is counted or totalled.
+    </div>
   );
 }
 
@@ -1797,12 +1868,14 @@ function Failed({ reason, what, cost }: { reason: string; what: string; cost?: s
   );
 }
 
-/** A table cell that keeps "not read", "not loaded" and "nothing there" apart. */
+/** A table cell that keeps "not read", "not loaded", "part read" and "nothing
+ *  there" apart — four states, four cells. */
 function Cell({ state, value, empty }: {
   state: Slice<unknown>['state']; value: number | null; empty: string;
 }) {
   if (state === 'loading') return <span className="dash">…</span>;
   if (state === 'failed') return <span className="dash">not read</span>;
+  if (state === 'partial') return <span className="dash">part read</span>;
   if (value == null) return <span className="dash">{empty}</span>;
   if (value === 0) return <span className="dash">{empty}</span>;
   return <>{value}</>;
@@ -1811,9 +1884,10 @@ function Cell({ state, value, empty }: {
 /** The note under a KPI whose figure is missing — which of the three states it
  *  is missing for. */
 function stateNote(s: Slice<unknown>, what: string): string | undefined {
-  if (s.state === 'failed') return `${what} could not be read`;
-  if (s.state === 'loading') return `reading ${what}…`;
-  return undefined;
+  // `sliceNote` in src/lib/memberView.ts, so the fourth state cannot fall into
+  // the 'reading…' arm this function used to end with — which would have had a
+  // finished, truncated read claiming to still be in flight.
+  return sliceNote(s, what) ?? undefined;
 }
 
 /* ── shared bits (same shapes as the Members and Close screens) ────────────── */
@@ -1854,18 +1928,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
 // The banner is the shared one now: studio-web/components/Banner.tsx. This
 // page's copy rendered into a plain <div>, so every "the write was refused and
 // nothing was saved" it said was a silence for a screen reader. The shared one
@@ -1875,6 +1937,3 @@ function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'c
   return <SharedBanner tone={tone} live={live}>{children}</SharedBanner>;
 }
 
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

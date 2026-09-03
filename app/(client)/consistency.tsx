@@ -21,6 +21,9 @@ import { WEEK_DAYS, startOfWeek } from '../../src/lib/weekStart';
 import { Icon } from '../../src/ui/Icon';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 import { MIN_TARGET } from '../../src/lib/a11y';
+// The day this screen judges against, kept live across midnight. See the
+// note at `useNow()` below.
+import { useNow } from '../../src/ui/today';
 
 const WEEKS = 12;
 /** The grid's rows, in the order src/lib/weekStart.ts draws a week. */
@@ -48,6 +51,13 @@ export default function Consistency() {
   // app can tell someone — and then corrected itself once the read landed. A
   // figure that is wrong for a second is read as an answer, because it looks
   // exactly like one.
+  // whole-ok: 'partial' is admitted here on purpose, and the note under this
+  // line is the argument. A capped read (src/lib/rowCap.ts) holds the NEWEST
+  // thousand sessions, because the provider orders `performed_at` descending
+  // before it caps, so the twelve-week grid and the current streak — both of
+  // which only ever look at recent days — are drawn from real, complete rows
+  // and stay true under it. The figures that a prefix WOULD falsify, the
+  // all-time totals, are gated on `countable` below, which is `isWhole`.
   const known = logStatus !== 'error' && logStatus !== 'loading';
   // The banner is about a FAILED read specifically. A read still in flight has
   // nothing to apologise for; it says so under the hero instead.
@@ -71,7 +81,19 @@ export default function Consistency() {
 
   // Build a grid: columns = weeks (oldest→newest), rows = the seven days of a
   // week in DOW's order.
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  // `useNow()`, copied before it is written through. The twelve-week grid below
+  // is built backwards from `thisWeek`, and every square's date comes off it —
+  // so a screen left open across midnight keeps drawing yesterday's grid, with
+  // the "today" square in the wrong place, on the screen whose whole subject is
+  // whether the member trained today. Not the frozen-at-mount shape
+  // check:frozen-day catches; the other half of it, which src/ui/today.ts
+  // describes: correct on every redraw, and nothing here redraws at midnight.
+  //
+  // `new Date(now)` because `setHours` below mutates, and `now` is state. The
+  // hook call is on its own line rather than inlined into the `new Date(…)`:
+  // hooks read better where a reviewer counts them.
+  const now = useNow();
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
   const thisWeek = startOfWeek(today);
   const cols: Date[][] = [];
   for (let w = WEEKS - 1; w >= 0; w--) {

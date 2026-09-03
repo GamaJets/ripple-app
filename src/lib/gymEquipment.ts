@@ -15,6 +15,7 @@
 // says why — it never reports 0, which would tell a gym its class cannot run.
 
 import { assertWrote } from './wroteRows';
+import { isoDay } from './weekStart';
 import { readAll } from './rowCap';
 // One reader for a typed money box, which asks the currency how many decimal
 // places it has and refuses `12,50` rather than guessing which side of the
@@ -66,6 +67,13 @@ function addDays(iso: string, days: number): string | null {
   const d = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return null;
   d.setUTCDate(d.getUTCDate() + days);
+  // utc-day-ok: nobody's calendar day is being read out of an instant here.
+  // A day string goes in at UTC midnight, the shift is `setUTCDate`, and the
+  // same day string comes back out — UTC is the carrier and it cancels, which
+  // is the property the line above wants and the reason it says so. Using a
+  // local day at either end would reintroduce the shift this exists to avoid:
+  // "ninety days after the last service" must be the same date for the owner
+  // reading it in Sydney and the technician reading it in Denver.
   return d.toISOString().slice(0, 10);
 }
 
@@ -464,7 +472,18 @@ export async function setStatus(
     // machine reported again by a second member of staff must not have its
     // clock reset to today, because the number this column exists to produce is
     // how long it has been broken.
-    patch.out_of_service_since = new Date().toISOString().slice(0, 10);
+    // The reader's own day, not UTC's. This was
+    // `new Date().toISOString().slice(0, 10)`, which is the same defect
+    // app/(owner)/equipment.tsx carries a written note about having removed
+    // from ITS half — a machine taken out of service at 5pm in Los Angeles was
+    // stamped tomorrow, and the number this column exists to produce is how
+    // many days a machine has been out. Reported on the evening of the 3rd it
+    // read as broken since the 4th, so "out of service 2 days" was 1 the
+    // morning after, and the register the gym answers an injury claim with
+    // disagreed with the day the staff member remembers standing there. The
+    // service date written a few lines down goes in as the local day too, and
+    // two columns of one row in two different calendars is its own bug.
+    patch.out_of_service_since = isoDay(new Date());
   } else {
     // Back in service, or retired. Both clear the reason and the clock —
     // leaving them would make a working machine read as out of action on every
@@ -522,7 +541,13 @@ export async function recordService(
     recordedBy?: string | null;
   },
 ): Promise<void> {
-  const day = onIso ?? new Date().toISOString().slice(0, 10);
+  // The same correction as `setStatus` above, on the default. Callers that know
+  // the day pass `onIso` — app/(owner)/equipment.tsx passes its own `todayIso`,
+  // which is local for the reasons its header sets out — and this is what a
+  // caller that does not gets. It was UTC's day, so a service logged on a
+  // weekday evening west of Greenwich was filed on the following day and the
+  // next-due date derived from it came out a day late on every screen.
+  const day = onIso ?? isoDay(new Date());
 
   if (entry) {
     await addLogEntry(sb, entry.tenantId, {

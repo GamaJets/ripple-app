@@ -116,6 +116,36 @@ export function friendLine(r: ReferralRow): string {
 }
 
 /**
+ * The sentence under a list of invites that stopped at the server's own ceiling.
+ *
+ * `my_referrals()` ends `limit 200` (supabase/parts/128-a-cohort-and-a-credit
+ * .sql), and that limit is inside the function body, so nothing on this side
+ * can see it: src/lib/rowCap.ts detects truncation by asking for one row more
+ * than it will accept, and the server cannot answer with 201 however the client
+ * phrases the request. A referrer with two hundred and fifty friends on the
+ * code was therefore handed two hundred of them under 'ready', with no sentence
+ * anywhere saying the list ended before their friends did.
+ *
+ * A line under the LIST rather than a 'partial' over the whole screen, and the
+ * distinction is the whole point. `my_referral_summary()` counts every row
+ * server-side — part 128 says so in as many words — so "250 joined · 90 have
+ * started training" is exact and stays exact. Turning the screen 'partial'
+ * would withdraw two true figures in order to report one cut list, which is the
+ * opposite trade to the one worth making.
+ *
+ * Null when there is nothing to say, so the caller draws nothing rather than an
+ * empty line where a sentence would be.
+ */
+export function invitesCutLine(shown: number, cap: number): string | null {
+  if (!Number.isFinite(shown) || !Number.isFinite(cap) || cap <= 0) return null;
+  if (shown < cap) return null;
+  // The order is `created_at desc`, so what is missing is the oldest — said
+  // out loud, because "some are missing" leaves a referrer wondering whether
+  // it is the friend they invited this morning.
+  return `Only your ${num(cap)} most recent invites are listed here. The counts above cover everyone who has used your code.`;
+}
+
+/**
  * The two counts, or an honest refusal to state them.
  *
  * Under anything but 'ready' this states no figure and, critically, does not

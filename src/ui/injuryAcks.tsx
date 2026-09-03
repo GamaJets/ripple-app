@@ -160,9 +160,15 @@ export interface ProgrammeChoice {
 }
 
 export interface MyInjuryAcks {
-  /** The worse of the two reads. Under anything but 'ready' the client is told
-   *  nothing about their coach either way — see ackState. */
+  /** The worse of the two reads, for a caller that wants one figure — a
+   *  pull-to-refresh spinner, say. NOT for the sentences: the two reads fail
+   *  independently and folding them made a screen disclaim the one that
+   *  worked. Gate each sentence on the status of the read behind it. */
   status: LoadStatus;
+  /** How the read of `read` went, on its own. */
+  readStatus: LoadStatus;
+  /** How the read of `choices` went, on its own. */
+  choicesStatus: LoadStatus;
   read: CoachRead | null;
   choices: ProgrammeChoice[];
   /**
@@ -179,7 +185,10 @@ export interface MyInjuryAcks {
 
 export function useMyInjuryAcks(): MyInjuryAcks {
   const [state, setState] = useState<Omit<MyInjuryAcks, 'reload'>>({
-    status: USE_SUPABASE ? 'loading' : 'ready', read: null, choices: [],
+    status: USE_SUPABASE ? 'loading' : 'ready',
+    readStatus: USE_SUPABASE ? 'loading' : 'ready',
+    choicesStatus: USE_SUPABASE ? 'loading' : 'ready',
+    read: null, choices: [],
   });
   const authRev = useAuthRevision();
   const [readTick, setReadTick] = useState(0);
@@ -196,7 +205,7 @@ export function useMyInjuryAcks(): MyInjuryAcks {
         const { data: sess } = await supabase.auth.getSession();
         if (cancelled) return;
         const uid = sess?.session?.user?.id;
-        if (!uid) { setState({ status: 'ready', read: null, choices: [] }); return; }
+        if (!uid) { setState({ status: 'ready', readStatus: 'ready', choicesStatus: 'ready', read: null, choices: [] }); return; }
 
         const [ackRes, progRes] = await Promise.all([
           supabase.from('injury_acknowledgements')
@@ -212,18 +221,24 @@ export function useMyInjuryAcks(): MyInjuryAcks {
         ]);
         if (cancelled) return;
 
-        // Reported separately and folded into one status, because a client
-        // shown "your coach has read these" off a half-failed pair would be
-        // being told something on the strength of a read that did not happen.
+        // Reported separately AND kept separate. These are two tables, two
+        // policies and two failures: whether a coach has confirmed reading a
+        // disclosure, and what they then assigned over it. Folded into one
+        // status they became one sentence, and a client whose acknowledgement
+        // read came back perfectly was told "we couldn't check whether your
+        // coach has read these" because the OTHER read had failed — while the
+        // block that had actually failed drew as an empty result and said
+        // nothing. Each fact now carries how its own read went.
         if (ackRes.error) reportError('injuryAcks.mine.read', ackRes.error);
         if (progRes.error) reportError('injuryAcks.mine.choices', progRes.error);
 
         const ackRows = capped(ackRes.data ?? []);
         const progRows = capped(progRes.data ?? []);
-        const status = worstStatus(
-          ackRes.error ? 'error' : ackRows.truncated ? 'partial' : 'ready',
-          progRes.error ? 'error' : progRows.truncated ? 'partial' : 'ready',
-        );
+        const readStatus: LoadStatus =
+          ackRes.error ? 'error' : ackRows.truncated ? 'partial' : 'ready';
+        const choicesStatus: LoadStatus =
+          progRes.error ? 'error' : progRows.truncated ? 'partial' : 'ready';
+        const status = worstStatus(readStatus, choicesStatus);
 
         // The most recent coach's, not a merge of every coach who ever had
         // them. Merging would let a previous coach's confirmation cover a
@@ -243,11 +258,16 @@ export function useMyInjuryAcks(): MyInjuryAcks {
           }))
           .filter((c) => c.at && c.movements.length);
 
-        setState({ status, read: ackRes.error ? null : read, choices: progRes.error ? [] : choices });
+        setState({
+          status, readStatus, choicesStatus,
+          read: ackRes.error ? null : read,
+          choices: progRes.error ? [] : choices,
+        });
       } catch (e) {
         if (cancelled) return;
         reportError('injuryAcks.mine', e);
-        setState({ status: 'error', read: null, choices: [] });
+        // The throw is around both awaits, so neither fact is known here.
+        setState({ status: 'error', readStatus: 'error', choicesStatus: 'error', read: null, choices: [] });
       }
     })();
     return () => { cancelled = true; };

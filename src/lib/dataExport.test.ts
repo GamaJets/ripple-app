@@ -7,7 +7,7 @@
 // everything, so a confident sentence over a short read is not a cosmetic bug.
 import {
   fileSizeLabel, filesRowNote, saveFileFailure, incompleteExportLine,
-  coachDataFilename, DELETION_FILES_NOTE, EXPORT_ROW_NOTE,
+  coachDataFilename, COACH_DELETION_FILES_NOTE, DELETION_FILES_NOTE, EXPORT_ROW_NOTE,
 } from './dataExport';
 
 const errors: string[] = [];
@@ -95,15 +95,93 @@ ok(/progress photographs/.test(DELETION_FILES_NOTE), 'the photographs are named'
 ok(/messages/.test(DELETION_FILES_NOTE), 'and the message attachments');
 ok(/injury documents/.test(DELETION_FILES_NOTE), 'and the injury documents, which are the ones only they can see');
 
-// The awkward half, stated rather than smoothed over. Saying nothing is what
-// leaves somebody believing their physiotherapy report went with their account.
-ok(/not all of that is automatic/.test(DELETION_FILES_NOTE),
-  'it does not claim an automatic purge this product does not have for two of the three stores');
-ok(/on request/.test(DELETION_FILES_NOTE), 'and says how those two are actually cleared');
+// The one this sentence used to leave out. Since parts 1120 and 1152 were
+// applied it is in the same position as the message attachments and the injury
+// documents — on the queue — but naming two of the three would still read as a
+// claim about the third, so all four stay named.
+ok(/profile photo/.test(DELETION_FILES_NOTE), 'and the profile photo, which used to have no mechanism at all');
+
+// Parts 1120 and 1152 are applied. `object_purge`'s check constraint, read live
+// on 3 Sep 2026, names six buckets — injury-docs, message-media, avatars,
+// coach-logos, coach-docs, exercise-videos — and `purge-account-files` drains
+// it at `2-59/5 * * * *`. So "queued" is now the true word where "on request"
+// used to be.
+ok(/on a queue/.test(DELETION_FILES_NOTE), 'and says what actually happens to them now — a queue, not an email');
+ok(/queued for deletion the moment the account goes/.test(DELETION_FILES_NOTE),
+  'and when they join it, which is before the profile row is gone rather than whenever somebody gets round to it');
+
+// The whole point of the rewrite. A queued row is a request that has been SENT.
+// `purged_at` is stamped only from a Storage reply that says the object is
+// absent, so the note may claim the confirmation and must not claim the deletion.
+ok(/until the file store confirms/.test(DELETION_FILES_NOTE),
+  'the queue is described by what it actually confirms');
+ok(/asked to be deleted and deleted are not the same claim/.test(DELETION_FILES_NOTE),
+  'and the difference between sending a delete and having one is said out loud, not implied');
+
+// The alarm (part 1153, `4 9 * * *`) RAISES, which makes a stalled queue a red
+// run in cron.job_run_details. It emails nobody. "We are alerted" would be the
+// overclaim; "somewhere we look" is what is true.
+ok(/more than a day/.test(DELETION_FILES_NOTE), 'a stalled queue is said to be checked, with the threshold named');
+ok(/somewhere we look/.test(DELETION_FILES_NOTE),
+  'and the check is described as a log we read, not as an alert that reaches a person');
+ok(!/we are alerted|we are notified|alerts us|notifies us|paged/i.test(DELETION_FILES_NOTE),
+  'because nobody is paged and the note must not suggest otherwise');
+
+// `gym-docs` is NOT in object_purge's check constraint and is not going to be
+// until somebody makes a per-country retention decision (part 1152 § 6;
+// gym_documents.member_id is `on delete set null`, so the erasure severs the
+// only link to the member). Omitting it would make the sentence above read as
+// "every file of yours goes", which is the overclaim this whole note exists to
+// avoid.
+ok(/stays with the gym/.test(DELETION_FILES_NOTE),
+  'the one store that is NOT purged is named rather than left out of a sentence about your files');
+ok(/differs by country/.test(DELETION_FILES_NOTE),
+  'and it is named as an undecided retention question rather than as a policy');
+
 ok(/Export and save your files first/.test(DELETION_FILES_NOTE),
   'and tells them the one thing they can do before it is too late');
 ok(!/immediately deleted|permanently erased at once/.test(DELETION_FILES_NOTE),
   'and promises no erasure it cannot perform');
+
+/* ── and the coach's version, which has one fact that is not a file ────── */
+
+// A coach holds four file stores a member does not. Part 1152 is applied and
+// all four are now on the queue — three by name in object_purge's check
+// constraint, and their half of message-media because
+// queue_account_object_purges() matches the second path segment too. They stay
+// named one by one: a coach reading this wants to see their own clips in it.
+for (const thing of ['logo', 'document you published', 'exercise clip', 'profile photo']) {
+  ok(COACH_DELETION_FILES_NOTE.includes(thing), `the coach note names their ${thing}`);
+}
+ok(/on a queue/.test(COACH_DELETION_FILES_NOTE), 'and says those go on the same queue rather than by email');
+ok(/until the file store confirms/.test(COACH_DELETION_FILES_NOTE),
+  'and holds the same line about what is confirmed as the member note');
+
+// The consequential one. Verified against the live catalogue on 3 Sep 2026:
+// coach_document_acceptances.document_id and coach_document_recipients
+// .document_id are STILL ON DELETE RESTRICT onto coach_documents — part 1151
+// deliberately did not touch them. What it added is
+// trg_profiles_release_coach_documents, a BEFORE DELETE trigger on profiles,
+// which is now the only thing that can release an acceptance.
+ok(/accepted/.test(COACH_DELETION_FILES_NOTE),
+  'and it says what an accepted document does to the deletion');
+ok(/completes on its own/.test(COACH_DELETION_FILES_NOTE),
+  'in the words of what actually happens now — it runs, rather than raising 23503 and rolling back');
+ok(/the only thing that can release those acceptances/.test(COACH_DELETION_FILES_NOTE),
+  'and says it is the ONE route, because the RESTRICT keys still refuse every other caller');
+ok(/takes the record that your clients accepted your document with it/.test(COACH_DELETION_FILES_NOTE),
+  'and states the cost of that route rather than only its convenience');
+
+// Neither note may turn a queued send into a completed deletion. `purged_at` is
+// stamped only from a Storage reply that confirms the object is absent (parts
+// 1120 § 4 and 1152 § 4), so an unqualified "your files are automatically
+// deleted" is a claim about the reply, not about the request.
+for (const note of [DELETION_FILES_NOTE, COACH_DELETION_FILES_NOTE]) {
+  ok(!/(are|is) (automatically|immediately) (removed|deleted|erased)|(removed|deleted|erased) (automatically|immediately)/i.test(note),
+    `no note turns a sent delete into a finished one — ${note.slice(0, 60)}`);
+  ok(/not the same claim/.test(note),
+    `and both say which of the two they are making — ${note.slice(0, 60)}`);
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('dataExport.test.ts — ok');

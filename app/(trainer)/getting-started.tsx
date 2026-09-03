@@ -45,7 +45,7 @@ import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale'
 import { useCoachSetup } from '../../src/ui/coachSetup';
 import { useCoachDelivery, useDeliveryFact } from '../../src/ui/coachDelivery';
 import { DeliveryModeChoice } from '../../src/ui/DeliveryModeChoice';
-import { deliveryNote } from '../../src/lib/coachDelivery';
+import { deliveryAskLine, deliveryNote } from '../../src/lib/coachDelivery';
 import {
   coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, NOT_YOUR_SETUP,
   type CoachSetupRow,
@@ -170,8 +170,15 @@ export default function CoachGettingStarted() {
         <Section>
           <SectionHead title="How Do You Coach?" />
           <DeliveryModeChoice onPicked={() => { void reload(); }} />
+          {/* The ASK, until it has been answered, and the state afterwards.
+              `deliveryAskLine` was written for this and imported by nothing —
+              so the checklist counted the unanswered question against the coach
+              while `deliveryNote` described a state rather than requesting an
+              answer, and the coach was left to work out for themselves which
+              control fills the row in. On the screen whose entire job is to say
+              what is left. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {deliveryNote(delivery)}
+            {deliveryAskLine(delivery) ?? deliveryNote(delivery)}
           </Text>
         </Section>
 

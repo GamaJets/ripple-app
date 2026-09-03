@@ -34,9 +34,12 @@
 // of the guard the header of dayPlan.ts asks for: there is no input to this
 // module that makes it say a plan was kept.
 //
-// Pure and dependency-free apart from dayPlan and localDate, so the window
-// arithmetic can be run under the three zones the repo tests in.
+// Pure and dependency-free apart from dayPlan, localDate and the app's own date
+// formatters, so the window arithmetic can be run under the six zones the repo
+// tests in. format.ts is pure too: it reads a locale and writes a string, and
+// touches no clock, no zone and no storage.
 import { dateParts } from './localDate';
+import { fmtAxisDay, weekdayNameShort } from './format';
 import {
   compareIsoDays, planConflict, planOutcome, DAY_TYPE_LABEL,
   type PlanConflict, type PlanOutcome, type PlannedDay, type PlannedDayType,
@@ -225,20 +228,27 @@ export function coachWeek(
 
 /* ── the same sentences, addressed to the coach ────────────────────────────── */
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
 /**
- * 'Thu 3 Sep'. Assembled rather than handed to `toLocaleDateString`, for the
- * reason `thousands` in src/lib/checklist.ts is assembled: this string is
- * asserted in a test and rendered on devices in every locale the app ships to,
- * and a formatter that changes underneath both makes the test meaningless.
+ * 'Thu 3 Sep' — and 'Do 3 Sep', '木 9月3日', in the coach's own language.
+ *
+ * The date is still read out of its PARTS and never out of `new Date(dateISO)`:
+ * `dateParts` and `weekdayOf` are what make this the client's own calendar day
+ * in every zone, and `fmtAxisDay` takes year, month index and day as numbers so
+ * there is nothing left to parse. What has gone is the pair of English arrays
+ * this used to assemble from.
+ *
+ * The old header argued the other way — "assembled rather than handed to
+ * toLocaleDateString ... this string is asserted in a test, and a formatter
+ * that changes underneath both makes the test meaningless". The test was the
+ * thing that needed changing: a coach reading a Norwegian phone was shown an
+ * English weekday over every day of their week so that a literal in a test file
+ * could stay short. The test now derives the shape it expects.
  */
 export function dayHeading(dateISO: string): string {
   const p = dateParts(dateISO);
   if (!p) return '—';
   const wd = weekdayOf(dateISO);
-  return `${wd == null ? '' : WEEKDAYS[wd] + ' '}${p[2]} ${MONTHS[p[1]]}`;
+  return `${wd == null ? '' : weekdayNameShort(wd) + ' '}${fmtAxisDay(p[0], p[1], p[2])}`;
 }
 
 /** 'Today', 'Tomorrow', 'In 4 days', 'Yesterday', '5 days ago'. Which side of

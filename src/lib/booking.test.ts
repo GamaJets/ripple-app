@@ -20,7 +20,7 @@
 import {
   CANCEL_WINDOW_HOURS, DEFAULT_NOTICE_HOURS,
   isLateCancellation, insideNoticeWindow, noticeHoursOf, lateCancelFee,
-  feeAmountLine, unstatedCurrency, noticeLabel, cancelWarningLine, feeRecordedLine,
+  feeAmountLine, unstatedCurrency, unstatedCurrencyCoach, noticeLabel, cancelWarningLine, feeRecordedLine,
   waitlistOrder, nextWaitlistClaim, waitlistPosition, waitlistLine, ordinal,
   openSlotWindow, slotWindowLine, SLOT_WARN_DAYS,
   classClashes, classCheckCaveat, overlaps,
@@ -414,6 +414,23 @@ eq(ordinal(22), '22nd', '22nd');
   ok(overlaps(SIX, 60, [{ startsAt: SIX, durationMin: 45 }]), 'a bare span overlaps');
   ok(!overlaps(SIX, 60, []), 'and an empty diary never does');
 }
+
+/* ── the same clause, said to the coach ─────────────────────────────────── */
+//
+// The three waive/reinstate confirmations on the coach's calendar printed a
+// bare figure in PROSE — "25 against Ana would be marked as forgiven" — on the
+// one list in the app that says what clients owe. `unstatedCurrency` could not
+// be used there: it tells the reader to ask their coach.
+
+eq(unstatedCurrencyCoach('AED'), '', 'a stated currency needs no clause, so it can be appended blindly');
+eq(unstatedCurrencyCoach(null).length > 0, true, 'an unset one gets a sentence');
+ok(!/ask them|your coach/i.test(unstatedCurrencyCoach(null)),
+  'and never tells the coach to go and ask their coach');
+ok(/you have not set a currency/i.test(unstatedCurrencyCoach(null)),
+  'it addresses the person who can fix it');
+ok(/settings/i.test(unstatedCurrencyCoach(null)), 'and says where');
+ok(unstatedCurrencyCoach(null).startsWith(' '),
+  'it begins with a space, because it is appended to a finished sentence');
 
 if (errors.length) {
   console.error(`booking.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);

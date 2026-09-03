@@ -46,6 +46,8 @@ import { jsDayForIndex } from '../../src/lib/weekStart';
 // The slop that brings a small control up to 44pt. See the Remove button on
 // each of the member's own reminders.
 import { hitSlopFor } from '../../src/lib/a11y';
+import { movedNote } from '../../src/lib/notifyPrefs';
+import { useNotifyPrefs } from '../../src/ui/notifyPrefs';
 import { FORWARD_ICON } from '../../src/ui/direction';
 
 const two = (n: number) => String(n).padStart(2, '0');
@@ -55,6 +57,9 @@ const newId = () => 'r_' + Math.random().toString(36).slice(2, 8);
 export default function Reminders() {
   const t = useTheme();
   const router = useRouter();
+  // The member's own quiet hours, so this screen can say when a time it is
+  // being given will not be the time the reminder arrives.
+  const notify = useNotifyPrefs();
   const [hydration, setHydration] = useState(true);
   const [every, setEvery] = useState(3);      // hours between hydration nudges
   const [startH, setStartH] = useState(9);
@@ -215,6 +220,17 @@ export default function Reminders() {
   const suppEcho = suppOk
     ? `Reminds you every day at ${fmt(suppH, suppM)}.`
     : 'Use a 24-hour time — 20:30 is half past eight in the evening.';
+  // ── the other half of the echo ─────────────────────────────────────────
+  //
+  // The echo above says what was typed. It said nothing about what will
+  // actually be scheduled, and those are not the same time: every reminder here
+  // is 'reminders', which is quietable, so a time inside the member's own quiet
+  // hours is MOVED. Somebody who set a supplement reminder for 11pm saw 11pm
+  // echoed back beside the box and found out it was a morning reminder by never
+  // being reminded at night. The only mention of quiet hours on this screen was
+  // a link at the bottom.
+  const movedFor = (h: number, m: number) => movedNote(h, m, 'reminders', notify.prefs, fmt);
+  const suppMoved = suppOk ? movedFor(suppH, suppM) : null;
   const num = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, width: 54, textAlign: 'center' } as const;
 
   return (
@@ -348,6 +364,9 @@ export default function Reminders() {
                           evening types 8 and is woken by it otherwise. */}
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, flex: 1, paddingBottom: 13 }}>{fmt(f.hour, f.minute)}</Text>
                     </View>
+                    {movedFor(f.hour, f.minute) ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{movedFor(f.hour, f.minute)}</Text>
+                    ) : null}
                     <DayPicker days={f.days} label={label} onToggle={(d) => setFixedFor(k, { days: toggleDay(f.days, d) })} />
                     {f.days.length === 0 ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
@@ -410,6 +429,7 @@ export default function Reminders() {
             </Field>
           </View>
           <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 6 }}>{suppEcho}</Text>
+          {suppMoved ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{suppMoved}</Text> : null}
           <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
             <Ghost label="Add Reminder" icon="plus" onPress={addSupp} />
           </View>

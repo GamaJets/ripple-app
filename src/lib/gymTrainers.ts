@@ -13,6 +13,7 @@
 // The only import here, and deliberately a pure one — no Supabase, no front
 // end — so this module stays testable from either app.
 import { assertWhole, capLimit } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -46,19 +47,55 @@ type Queryable = {
 export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise<GymTrainer[]> {
   // Trainers in this tenant. RLS (trainers_owner_r) already scopes this to the
   // caller's tenant; the filter makes the intent explicit.
-  const { data: trs, error } = await sb.from('trainers').select('id').eq('tenant_id', tenantId);
+  //
+  // Bounded at cap + 1 like every other read below it. This one was the last
+  // unbounded read in the file, and it is the one that decides the SHAPE of all
+  // three reads under it: `ids` comes off this list, and every figure on the
+  // roster is keyed by it. Truncated here, a gym does not get understated
+  // figures — it gets a roster that silently stops, with the trainers past the
+  // ceiling absent from the screen, absent from `payroll30For`'s total, and
+  // absent from `payrollBlocker`'s count of what is still unmarked. Payroll
+  // then prices out cleanly, and is short by however many coaches fell off the
+  // end. A refused read is the honest answer; the screen already renders one.
+  const { data: trs, error } = await sb.from('trainers').select('id')
+    .eq('tenant_id', tenantId).limit(capLimit());
   if (error) throw error;
 
-  const ids: string[] = (trs ?? []).map((r: any) => r.id);
+  const ids: string[] = assertWhole(trs as any[] | null, "this gym's trainers").map((r: any) => r.id);
   if (!ids.length) return [];
 
   // Names come from profiles, which the owner may read for their own tenant
   // (profiles_owner_tenant_r).
-  // no-error-ok: an unreadable name falls back to 'Trainer'; every figure beside it is still real
-  const { data: profs } = await sb.from('profiles').select('id, full_name, created_at').in('id', ids);
-  const meta = new Map<string, { name: string; since: string | null }>(
-    (profs ?? []).map((p: any) => [p.id, { name: (p.full_name || '').trim(), since: p.created_at ?? null }]),
-  );
+  //
+  // This read used to discard `error` under a `no-error-ok:` saying "an
+  // unreadable name falls back to 'Trainer'; every figure beside it is still
+  // real". Half of that was true. `full_name` does fall back, and a name is
+  // cosmetic beside the numbers. But this read also carries `since`, and `since`
+  // ALREADY MEANS something specific: `GymTrainer.since` is documented as "null
+  // if the profile has no created_at". A refusal silenced here borrows that
+  // meaning and reports, of every coach on the roster at once, that the record
+  // does not say when they joined — which is a claim about people, made by code
+  // that never managed to ask. Thrown now, on the same reasoning as the three
+  // reads around it, and the screen already renders a thrown read as the error
+  // it is rather than as a roster of anonymous coaches who joined on no date.
+  //
+  // Chunked, along with the two reads under it, and all three for one reason:
+  // `ids` is bounded only by `capLimit()`, so it can be a thousand uuids, and a
+  // thousand uuids inside `in.("…","…")` is a 39KB request line. nginx and most
+  // CDNs stop at 8KB — about two hundred — and answer 414. supabase-js does not
+  // reject on that: it resolves with `data: null` and an error whose shape says
+  // nothing about ids, so the honest-looking `throw` below fires on a query
+  // that was never run, and on the only gyms big enough to reach it. 150 at a
+  // time (src/lib/idLookup.ts) cannot get near the limit.
+  const meta = new Map<string, { name: string; since: string | null }>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    const { data: profs, error: profErr } = await sb.from('profiles')
+      .select('id, full_name, created_at').in('id', chunk);
+    if (profErr) throw profErr;
+    for (const p of ((profs ?? []) as any[])) {
+      meta.set(p.id, { name: (p.full_name || '').trim(), since: p.created_at ?? null });
+    }
+  }
 
   // Client counts: one query for the whole tenant rather than N queries.
   //
@@ -70,13 +107,20 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
   // a thousand clients is ordinary, and PostgREST would have handed back the
   // first thousand with no indication there were more — every trainer's book
   // understated, silently, by however many rows fell off the end.
-  const { data: cls, error: clsErr } = await sb.from('clients').select('trainer_id')
-    .in('trainer_id', ids).limit(capLimit());
-  if (clsErr) throw clsErr;
+  //
+  // Each chunk keeps its own `capLimit()` and its own `assertWhole`, so the
+  // refusal this paragraph describes still happens — it just now happens per
+  // 150 trainers rather than per thousand clients across all of them, which is
+  // strictly more room, not less.
   const clientCount = new Map<string, number>();
-  assertWhole(cls, "this gym's clients").forEach((c: any) => {
-    if (c.trainer_id) clientCount.set(c.trainer_id, (clientCount.get(c.trainer_id) ?? 0) + 1);
-  });
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    const { data: cls, error: clsErr } = await sb.from('clients').select('trainer_id')
+      .in('trainer_id', chunk).limit(capLimit());
+    if (clsErr) throw clsErr;
+    assertWhole(cls, "this gym's clients").forEach((c: any) => {
+      if (c.trainer_id) clientCount.set(c.trainer_id, (clientCount.get(c.trainer_id) ?? 0) + 1);
+    });
+  }
 
   // Sessions delivered: booked and already started.
   const since = new Date(Date.now() - 30 * DAY).toISOString();
@@ -84,31 +128,39 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
   // failure here does not merely understate a dashboard figure — every trainer
   // shows 0 delivered, nothing is left unmarked, and payroll prices out at
   // exactly zero owed. A refused read must never be able to say that.
-  const { data: sess, error: sessErr } = await sb
-    .from('sessions')
-    .select('trainer_id, outcome')
-    .in('trainer_id', ids)
-    .eq('status', 'booked')
-    .gte('starts_at', since)
-    .lte('starts_at', new Date().toISOString())
-    .limit(capLimit());
-  if (sessErr) throw sessErr;
   const sessionCount = new Map<string, number>();
   const deliveredCount = new Map<string, number>();
   const unmarkedCount = new Map<string, number>();
-  // The paragraph above worries about a read that FAILS. A read that is merely
-  // truncated is worse: it succeeds, so nothing throws, and payroll prices out
-  // at whatever fraction of the month happened to fit under the limit.
-  assertWhole(sess, 'sessions in the last 30 days').forEach((s: any) => {
-    if (!s.trainer_id) return;
-    sessionCount.set(s.trainer_id, (sessionCount.get(s.trainer_id) ?? 0) + 1);
-    if (s.outcome === 'completed') {
-      deliveredCount.set(s.trainer_id, (deliveredCount.get(s.trainer_id) ?? 0) + 1);
-    } else if (s.outcome == null) {
-      // Null is "nobody has said yet", which is neither delivered nor cancelled.
-      unmarkedCount.set(s.trainer_id, (unmarkedCount.get(s.trainer_id) ?? 0) + 1);
-    }
-  });
+  // Chunked like the two above it. This is the one where the 414 would be
+  // silent AND expensive: `data: null` on a refused request line reaches
+  // `assertWhole` as an empty set, which is not truncated, so nothing throws —
+  // every trainer shows 0 delivered and payroll prices out at exactly zero
+  // owed, which is the sentence the paragraph over the read says must never be
+  // sayable by a read that failed.
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    const { data: sess, error: sessErr } = await sb
+      .from('sessions')
+      .select('trainer_id, outcome')
+      .in('trainer_id', chunk)
+      .eq('status', 'booked')
+      .gte('starts_at', since)
+      .lte('starts_at', new Date().toISOString())
+      .limit(capLimit());
+    if (sessErr) throw sessErr;
+    // The paragraph above worries about a read that FAILS. A read that is merely
+    // truncated is worse: it succeeds, so nothing throws, and payroll prices out
+    // at whatever fraction of the month happened to fit under the limit.
+    assertWhole(sess, 'sessions in the last 30 days').forEach((s: any) => {
+      if (!s.trainer_id) return;
+      sessionCount.set(s.trainer_id, (sessionCount.get(s.trainer_id) ?? 0) + 1);
+      if (s.outcome === 'completed') {
+        deliveredCount.set(s.trainer_id, (deliveredCount.get(s.trainer_id) ?? 0) + 1);
+      } else if (s.outcome == null) {
+        // Null is "nobody has said yet", which is neither delivered nor cancelled.
+        unmarkedCount.set(s.trainer_id, (unmarkedCount.get(s.trainer_id) ?? 0) + 1);
+      }
+    });
+  }
 
   return ids
     .map((id) => ({

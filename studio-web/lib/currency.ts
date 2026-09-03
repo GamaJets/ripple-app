@@ -34,6 +34,7 @@
 // person to act on it would have gone looking for a default that is no longer
 // there.
 import { money } from '@lib/gymRecord';
+import { parseGymZone } from '@lib/gymZone';
 
 /** ISO 4217 as the gym set it, or null when the gym has not set one. The two
  *  are different facts and only one of them may be printed. */
@@ -88,16 +89,28 @@ export async function readTenant(
   // console holds.
   sb: { from: (t: string) => any },
   tenantId: string,
-): Promise<{ name: string | null; currency: TenantCurrency; error: string | null }> {
+): Promise<{ name: string | null; currency: TenantCurrency; zone: string | null; error: string | null }> {
   // supabase-js resolves on a database error rather than rejecting, so the
   // error is read off the result. Without it a refused read arrives as
   // `data: null` and the rail says "No gym linked" — a claim about the owner's
   // account, in the branch where the account demonstrably has a tenant.
-  const { data, error } = await sb.from('tenants').select('name, currency').eq('id', tenantId).single();
+  // `timezone` joins `name` and `currency` because it answers the same class of
+  // question and every caller that needs one needs the others. It is the gym's
+  // own wall clock (`tenants.timezone`, supabase/parts/710), and it is what a
+  // screen must seed a date field from: `new Date().toISOString().slice(0, 10)`
+  // is UTC's day and `new Date()` is the reader's, and neither is the gym's. A
+  // cost entered at 09:00 on 1 September in Auckland was offered August by
+  // default; a membership opened at 5pm in Los Angeles was filed as starting
+  // tomorrow.
+  const { data, error } = await sb.from('tenants').select('name, currency, timezone').eq('id', tenantId).single();
   if (error) {
-    return { name: null, currency: null, error: (error as { message?: string }).message || 'The gym record could not be read.' };
+    return { name: null, currency: null, zone: null, error: (error as { message?: string }).message || 'The gym record could not be read.' };
   }
-  const raw = (data as { name?: string | null; currency?: string | null } | null) ?? null;
+  const raw = (data as { name?: string | null; currency?: string | null; timezone?: string | null } | null) ?? null;
   const ccy = (raw?.currency ?? '').trim().toUpperCase();
-  return { name: raw?.name ?? null, currency: ccy || null, error: null };
+  // Parsed rather than passed through: `parseGymZone` refuses an abbreviation
+  // and an offset, so a stored value this build cannot resolve reads as NO zone
+  // — which prints no gym date at all, rather than the reader's own.
+  const z = parseGymZone(raw?.timezone);
+  return { name: raw?.name ?? null, currency: ccy || null, zone: z.kind === 'zone' ? z.zone : null, error: null };
 }

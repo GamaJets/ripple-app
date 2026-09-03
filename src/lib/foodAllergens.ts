@@ -28,6 +28,9 @@
 // Without the caveat the marks are worse than nothing: an allergic member reads
 // an unmarked row as cleared, and this app has no basis for clearing anything.
 import { mealAllergens, allergenLabel, type Allergen } from './meals';
+// The marks are only worth anything if the exclusions behind them were read —
+// see `dishMarkNotice` at the foot of this file.
+import { isWhole, type LoadStatus } from '../ui/loadStatus';
 
 /**
  * The exclusions a dish's NAME says it contains.
@@ -72,3 +75,70 @@ export const DISH_MARK_CAVEAT =
  *  other members' own entries rather than from a menu. */
 export const SEARCH_MARK_CAVEAT =
   'Marks are read off the name of the food. An unmarked result has not been checked against your exclusions.';
+
+/* ── whether the exclusions are known at all ─────────────────────────────── */
+
+/**
+ * What a screen showing the marks must say, given how the read of the member's
+ * exclusions went.
+ *
+ * ── The defect this exists for ────────────────────────────────────────────
+ *
+ * `app/(client)/restaurant.tsx` read `cd.avoid` and never `cd.profileStatus`.
+ * That list starts `[]` under a 'loading' status and stays `[]` when the read
+ * fails, so "this member excludes nothing" and "we have not been told what this
+ * member excludes" were the same value — and the screen drew them the same way.
+ *
+ * Both safeguards came off together. The caveat above the list is rendered on
+ * `avoid.length`, so it vanished; and every row rendered with no mark on it.
+ * A member who excluded shellfish, opening Eating Out on a fresh install or on
+ * bad signal, saw prawn toast and sushi unmarked with no sentence above them —
+ * a picture identical to an all-clear, on the one screen in this app where
+ * being wrong is a medical event.
+ *
+ * The module header already states the rule: "an allergic member reads an
+ * unmarked row as cleared, and this app has no basis for clearing anything."
+ * An unread exclusion list is the case with the least basis of all.
+ *
+ * The four answers are four different sentences, and the middle two are the
+ * ones that did not exist:
+ *
+ *   'marks'    the read landed and there are exclusions. The rows are marked
+ *              and the standing caveat sits above them.
+ *   'checking' the read is in flight. Nothing is marked YET, and the screen
+ *              says so rather than implying a checked, clear list.
+ *   'unknown'  the read failed, or came back truncated. Nothing is marked and
+ *              nothing can be, and the absence of marks means nothing at all.
+ *   'none'     the read landed and this member excludes nothing. There is
+ *              nothing to mark against and nothing to say.
+ *
+ * 'partial' is 'unknown' and not a softer thing: a truncated profile read may
+ * be missing the one exclusion that matters, and half an allergen list is not a
+ * basis for drawing the other half as clear.
+ */
+export type DishMarkState = 'marks' | 'checking' | 'unknown' | 'none';
+
+export interface DishMarkNotice {
+  state: DishMarkState;
+  /** The sentence to render above the rows, or null when there is none. */
+  text: string | null;
+  /** Whether the marks on the rows mean anything. False under 'checking' and
+   *  'unknown', where an unmarked row is unmarked because nothing was read. */
+  marked: boolean;
+}
+
+/** The read is in flight. Not "no exclusions" and not "we could not find out". */
+export const DISH_MARK_LOADING =
+  'Reading your exclusions — nothing below is marked against them yet.';
+
+/** The read failed. The strongest of the four, because this is the one that
+ *  used to be drawn as a clear list. */
+export const DISH_MARK_UNKNOWN =
+  'Your exclusions could not be read, so nothing below is marked against them. An unmarked dish here has not been checked against anything — pull down to try again, and ask the kitchen if it matters.';
+
+export function dishMarkNotice(status: LoadStatus, avoidCount: number): DishMarkNotice {
+  if (status === 'loading') return { state: 'checking', text: DISH_MARK_LOADING, marked: false };
+  if (!isWhole(status)) return { state: 'unknown', text: DISH_MARK_UNKNOWN, marked: false };
+  if (avoidCount > 0) return { state: 'marks', text: DISH_MARK_CAVEAT, marked: true };
+  return { state: 'none', text: null, marked: true };
+}

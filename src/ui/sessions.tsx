@@ -42,8 +42,20 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+// A capped page of sessions is up to ROW_CAP uuids, and the approvals lookup
+// used to put all of them into one `.in()`. See the note at that read.
+import { readByIds } from '../lib/idLookup';
+import { readCappedByIds } from '../lib/cappedByIds';
+// The reader's own weekday and the reader's own clock, for the three pushes
+// below. See the note above `at`/`dow` in `cancelBookedSession`.
+import { fmtClock, weekdayNameShort } from '../lib/format';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../lib/readCache';
 import { classifyWrite } from '../lib/offlineQueue';
+// Whether the autosaved cancellation policy actually landed. The write here had
+// both of the defects src/lib/profileSave.ts was written for: a discarded
+// outcome, and a debounce cancelled by leaving the screen.
+import { IDLE_SAVE, markPending, afterWrite, type SaveStatus } from '../lib/profileSave';
+import { writeFailure } from '../lib/wroteRows';
 import { useOutbox } from './outbox';
 import { useLive } from './realtime';
 
@@ -341,11 +353,31 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
           // ceiling and silently dropped approvals off sessions that had them —
           // showing delivered, client-confirmed work as still awaiting sign-off.
           // Scoped this way it cannot exceed the session count, which is capped.
+          //
+          // And CHUNKED, which the sentence above was one limit short of. The
+          // session read directly above ends `.limit(capLimit())`, so `rows` is
+          // up to ROW_CAP = 1000 ids, and all thousand went into one `.in()` —
+          // about 39 bytes of query string per uuid, so a ~39KB request line
+          // against the 8KB nginx and most CDNs allow. The proxy refuses it
+          // before the database sees it, supabase-js does not reject on a 414,
+          // and it arrives as `data: null`. Which is `appr?.length` false, which
+          // is every session on the calendar rendering as awaiting sign-off:
+          // the exact outcome the paragraph above was written to prevent,
+          // reached through the other limit. A coach then chases a month of
+          // clients who have already confirmed. See src/lib/idLookup.ts.
           // no-error-ok: an unread approval leaves the session showing as not-yet-approved, which is what it shows before anyone approves it; the sessions themselves are the point of this screen
-          const { data: appr } = await supabase.from('session_approvals')
-            .select('session_id, approved_at, note, state, disputed_at, dispute_kind')
-            .in('session_id', rows.map((r) => r.id))
-            .limit(capLimit());
+          const appr = await readByIds<any>(
+            rows.map((r) => r.id),
+            // One approval per session (supabase/parts/22), so a chunk of 150
+            // ids is one round trip. `.order('session_id')` is total here for
+            // that reason, and `readAll` requires a total order of every page.
+            (chunk, from, to) => supabase.from('session_approvals')
+              .select('session_id, approved_at, note, state, disputed_at, dispute_kind')
+              .in('session_id', chunk)
+              .order('session_id', { ascending: true })
+              .range(from, to),
+            'which of your sessions have been signed off',
+          );
           if (appr?.length) {
             const byId = new Map(appr.map((a: any) => [String(a.session_id), a]));
             rows = rows.map((r) => {
@@ -858,10 +890,18 @@ export async function cancelBookedSession(
   const noticeHours = noticeHoursOf(policy);
   const lateWhenAsked = insideNoticeWindow(session.startsAt, noticeHours, now);
   const start = new Date(session.startsAt);
-  let h = start.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
-  const mm = start.getMinutes();
-  const at = `${h}${mm ? ':' + String(mm).padStart(2, '0') : ''}${ap}`;
-  const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][start.getDay()];
+  // Both of these leave this handset and arrive on somebody else's. The day was
+  // a hardcoded `['Sun', …][getDay()]` and the time was a hand-rolled 12-hour
+  // clock with an English am/pm glued on — so a member whose phone is in
+  // Spanish, Arabic or German was pushed "Thu 7pm", and a member in a 24-hour
+  // locale was pushed a form of the clock their country does not write. Neither
+  // is a formatting nicety: this is the notification that tells somebody when
+  // the session they are being offered actually is, and they act on it.
+  // `weekdayNameShort` and `fmtClock` are the reader's own language and the
+  // reader's own clock, and both fall back to exactly these two English forms
+  // on a Hermes build with no Intl, so nothing regresses where nothing can ask.
+  const at = fmtClock(start.getHours(), start.getMinutes());
+  const dow = weekdayNameShort(start.getDay());
 
   const res = await cancelOnServer(session.id);
   if (!res.freed) {
@@ -897,7 +937,15 @@ export async function cancelBookedSession(
     offeredTo = others.length || null;
     offerPushed = others.length === 0
       ? null
-      : (await sendPushChecked(others, 'A PT slot just opened', `${at} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
+      // `dow` as well as `at`. This is the one of the three pushes that goes to
+      // the WHOLE roster, and it was the only one that named a time without a
+      // day: "7pm with your coach just opened up — first to book it gets it."
+      // A member reads that on Tuesday evening, assumes tonight, and opens the
+      // app to race for a slot that is on Thursday — or does not open it at all
+      // because tonight is impossible for them, and never learns the slot was
+      // on a day they were free. The other two pushes in this function already
+      // carried the day; this one is the one that most needed it.
+      : (await sendPushChecked(others, 'A PT slot just opened', `${dow} ${at} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
   }
 
   // `refundSession` answers ok:false both when there is no pack to credit and
@@ -1058,6 +1106,19 @@ export interface MyCancellationPolicy {
    *  the policy on screen is the empty default and NOT the coach's own, so a
    *  screen stating a fee needs a way to ask a second time. */
   reload: () => void;
+  /**
+   * Whether the last edit actually reached the server.
+   *
+   * The write here ended `.then(() => {}, () => {})` — both arms empty, both
+   * outcomes discarded — behind a 600 ms debounce whose cleanup was
+   * `clearTimeout`. React runs that cleanup on unmount as well as on every
+   * dependency change, so a coach who typed a fee and tapped Back inside half a
+   * second had the write CANCELLED: never attempted, with nothing on screen
+   * having suggested anything was in flight. src/ui/coachProfile.tsx had both
+   * defects and src/lib/profileSave.ts is the answer it grew; this is the same
+   * answer for the one setting in this app a client can be held to.
+   */
+  save: SaveStatus;
 }
 
 export function useMyCancellationPolicy(): MyCancellationPolicy {
@@ -1124,21 +1185,68 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
     ? 'Set an amount before switching the policy on — a fee of nothing is a policy that does not apply.'
     : null;
 
+  const [save, setSave] = useState<SaveStatus>(IDLE_SAVE);
+  // The values the next write should carry, in a ref so the unmount flush can
+  // fire without being in anybody's dependency array.
+  const latest = useRef({ applies, noticeHours, fee, uid });
+  latest.current = { applies, noticeHours, fee, uid };
+  /** An edit that has not reached the server. Cleared only by a write that came
+   *  back confirmed, so a refused one stays dirty and is flushed again. */
+  const dirty = useRef(false);
+
+  /**
+   * Write the policy, and count what the server changed.
+   *
+   * `{ count: 'exact' }`, because a PostgREST update that matched no rows is not
+   * an error — it is the state a coach whose `trainers` row an RLS policy
+   * refuses actually gets, and `!error` said it saved. This is the fee a coach
+   * charges somebody for not turning up, and the profile screen quoting it tells
+   * them Repple records it and never collects it. Over a value that may never
+   * have been sent, that sentence is worse than nothing.
+   */
+  const flushPolicy = useCallback(async (): Promise<void> => {
+    const v = latest.current;
+    if (!USE_SUPABASE || VARIANT !== 'trainer' || !v.uid) return;
+    try {
+      const r = await supabase.from('trainers').update({
+        late_cancel_applies: v.applies,
+        late_cancel_notice_hours: v.noticeHours,
+        late_cancel_fee: v.fee,
+      }, { count: 'exact' }).eq('id', v.uid);
+      const why = writeFailure('Your cancellation policy', r);
+      if (why) {
+        if (r.error) reportError('cancellationPolicy.persist', r.error);
+        // Left dirty: the policy is still only on this handset, and the next
+        // edit or the unmount flush should try it again.
+        setSave((prev) => afterWrite(prev, false, Date.now(), why));
+        return;
+      }
+      dirty.current = false;
+      setSave((prev) => afterWrite(prev, true, Date.now()));
+    } catch (e) {
+      reportError('cancellationPolicy.persist', e);
+      setSave((prev) => afterWrite(prev, false, Date.now(), null));
+    }
+  }, []);
+
   useEffect(() => {
     if (!USE_SUPABASE || VARIANT !== 'trainer' || !uid || !synced || blocker) return;
-    const timer = setTimeout(() => {
-      try {
-        supabase.from('trainers').update({
-          late_cancel_applies: applies,
-          late_cancel_notice_hours: noticeHours,
-          late_cancel_fee: fee,
-        }).eq('id', uid).then(() => {}, () => {});
-      } catch { /* the next edit tries again */ }
-    }, 600);
+    dirty.current = true;
+    setSave(markPending);
+    const timer = setTimeout(() => { void flushPolicy(); }, 600);
     return () => clearTimeout(timer);
-  }, [applies, noticeHours, fee, uid, synced, blocker]);
+  }, [applies, noticeHours, fee, uid, synced, blocker, flushPolicy]);
 
-  return { applies, noticeHours, fee, currency, status, blocker, setApplies, setNoticeHours, setFee, reload: reloadPolicy };
+  // ── the write that used to be cancelled on the way out ────────────────────
+  //
+  // Mount-only, so its cleanup runs ONLY on unmount and cannot defeat the
+  // debounce above. Not awaited, because a component coming apart cannot be held
+  // open; the request outlives it either way, and `dirty` means this is reached
+  // only when there is something that has genuinely not landed. The same shape
+  // src/ui/coachProfile.tsx uses, for the same gesture: type a fee, tap Back.
+  useEffect(() => () => { if (dirty.current) void flushPolicy(); }, [flushPolicy]);
+
+  return { applies, noticeHours, fee, currency, status, blocker, setApplies, setNoticeHours, setFee, reload: reloadPolicy, save };
 }
 
 /* ── The waitlist, from the client's side ──────────────────────────────────
@@ -1175,6 +1283,29 @@ export interface MyWaitlistRow {
   stillTaken: boolean;
 }
 
+/**
+ * The ceiling `waitlistable_slots()` takes, mirrored here because nothing on
+ * this side can see it.
+ *
+ * `limit 500` is inside the function body
+ * (supabase/parts/126-the-late-fee-and-the-waitlist.sql), so src/lib/rowCap.ts
+ * cannot find it: `capped()` detects a cut by asking for one row more than it
+ * will accept, and the server will never answer with 501.
+ *
+ * It is reachable, which is the part that matters. The function returns one
+ * coach's booked hours over the whole window this hook asks for — sixty days by
+ * default — so a coach running eight or nine sessions a day passes five hundred
+ * inside it. And the order is `starts_at asc`, so what a cut list loses is the
+ * FAR END: app/(client)/calendar.tsx draws "Nothing on this day" from
+ * `selDayTaken.length === 0`, and under a silent cut that sentence is printed
+ * over a day that is really full, to a member who would have joined the
+ * waitlist for it.
+ *
+ * `>= cap` and not `> cap`, as in src/lib/challenges.ts: five hundred rows back
+ * from a `limit 500` is already the ceiling and there is no probe row to find.
+ */
+const SLOTS_ROW_CAP = 500;
+
 export function useSlotWaitlist(daysAhead: number = 60): {
   taken: TakenSlot[];
   mine: MyWaitlistRow[];
@@ -1197,6 +1328,16 @@ export function useSlotWaitlist(daysAhead: number = 60): {
       const to = new Date(Date.now() + daysAhead * 86_400_000).toISOString();
       const [slots, queue] = await Promise.all([
         supabase.rpc('waitlistable_slots', { p_from: from, p_to: to }),
+        // sql-cap-ok: my_waitlist() ends `limit 500` on the caller's OWN
+        // waitlist entries — the queues one member has personally joined. The
+        // slots read above shares that ceiling and is checked against it,
+        // because it covers a whole coach's diary over sixty days and gets
+        // there; this one would need one person to be waiting on five hundred
+        // separate hours, and joining a queue is a deliberate act taken one
+        // slot at a time. The two figures on each row, `queue_position` and
+        // `waiting`, are counted server-side over the full table rather than
+        // over this page, so neither is a total taken from a prefix; and
+        // app/(client)/bookings.tsx lists these rows without counting them.
         supabase.rpc('my_waitlist'),
       ]);
       // Either read failing makes this a fragment, and a fragment must not be
@@ -1218,7 +1359,13 @@ export function useSlotWaitlist(daysAhead: number = 60): {
         waiting: toNum(r.waiting) ?? 0,
         stillTaken: !!r.still_taken,
       })));
-      setStatus('ready');
+      // The slots read has a ceiling of its own, below PostgREST's, and it had
+      // never been looked at — see SLOTS_ROW_CAP above. 'partial' rather than
+      // 'ready', so the screens gate their emptiness sentences on it.
+      //
+      // `my_waitlist` on the line above is capped too and is deliberately not
+      // tested: see the sql-cap-ok note on its call.
+      setStatus(((slots.data as any[]) ?? []).length >= SLOTS_ROW_CAP ? 'partial' : 'ready');
     } catch { setStatus('error'); }
   }, [daysAhead]);
 
@@ -1299,19 +1446,36 @@ export function useSessionWaitlistCounts(sessionIds: string[]): {
     const ids = key ? key.split(',') : [];
     if (!ids.length) { setCounts(new Map()); setStatus('ready'); return; }
     try {
-      const { data, error } = await supabase.from('session_waitlist')
-        .select('session_id').in('session_id', ids).limit(capLimit());
+      // Chunked, and the ceiling being argued about is the REQUEST LINE.
+      // `sessionIds` is one id per booked session the calendar is drawing, off
+      // a `capLimit()` read with no date window on it — so a full-time coach
+      // crosses two hundred inside a few months and up to a thousand arrive. A
+      // uuid costs about 39 bytes inside a PostgREST `in.("…","…")` list, so
+      // that is a ~39KB query string against the 8KB request line nginx and
+      // most CDNs enforce by default. The refusal is a 414, supabase-js does
+      // not reject on it, and it lands as `data: null` — which means
+      // `setStatus('error')` never fires and every session on the calendar
+      // reports an empty waiting list. A coach with people queued for a slot is
+      // told nobody wants it.
+      //
+      // `readCappedByIds` and not `readByIds`: the cap is what 'partial' is
+      // reported off, and a queue counted off a fraction of the rows must
+      // render as a dash rather than as a smaller number.
+      const { rows, truncated, error } = await readCappedByIds<any>(
+        ids,
+        (chunk) => supabase.from('session_waitlist')
+          .select('session_id').in('session_id', chunk).limit(capLimit()),
+      );
       if (error) { setStatus('error'); return; }
-      const page = capped(data ?? []);
       const m = new Map<string, number>();
-      for (const r of page.rows as any[]) {
+      for (const r of rows) {
         const id = String(r.session_id);
         m.set(id, (m.get(id) ?? 0) + 1);
       }
       setCounts(m);
       // A truncated read undercounts every queue in it. The screen must not
       // print "2 waiting" off a fraction of the rows, so it goes to a dash.
-      setStatus(page.truncated ? 'partial' : 'ready');
+      setStatus(truncated ? 'partial' : 'ready');
     } catch { setStatus('error'); }
   }, [key]);
 

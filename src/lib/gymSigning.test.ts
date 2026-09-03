@@ -15,6 +15,7 @@
 //     seen, which is the exact thing versions exist to prevent.
 import {
   attributionOf, tallyAttribution, forMember, waitingOn, waitingCount,
+  outstanding, blockedOn, agreementStanding, agreementSummary,
   signingBlocker, signAsMember, fetchGymAgreements, fetchMySignatures,
   ATTRIBUTION_LABEL, ATTRIBUTION_NOTE, GUARDIAN_REFUSAL, SIGNING_RULE,
   type MemberAgreement, type SignatureAttribution,
@@ -107,6 +108,50 @@ const gave = (agreementId: string, attribution: SignatureAttribution = 'member')
   eq(waitingOn(rows[0]), false,
     'and it is not counted as waiting on them: there is no button, so counting it sends somebody hunting for one');
   eq(waitingCount(rows), 0, 'nothing here is waiting on this member');
+
+  // …and the line at the top of the screen must not say so. This is the one
+  // that mattered: a sixteen-year-old read "Nothing is waiting on you" while
+  // the consent supabase/parts/185 says the gym may not train them without was
+  // unsigned, and turned up expecting to train.
+  eq(outstanding(rows[0]), true, 'IT IS STILL AN UNSIGNED DOCUMENT THE GYM IS MISSING');
+  eq(blockedOn(rows[0]), true, 'and it is unsigned by somebody other than this member');
+  eq(JSON.stringify(agreementStanding(rows)), JSON.stringify({ waiting: 0, blocked: 1, outstanding: 1 }),
+    'the count and the button are two different questions and now have two answers');
+  const line = agreementSummary(rows);
+  ok(!/Nothing is waiting on you/.test(line),
+    'A MINOR IS NEVER TOLD THEY ARE CLEAR WHILE THE GUARDIAN CONSENT IS UNSIGNED');
+  ok(/still unsigned/.test(line), 'the line says the document is unsigned');
+  ok(/adult responsible for you/.test(line), 'and says who has to give it');
+  ok(/in person at the gym/.test(line), 'and where');
+
+  // Once it has actually been given at the desk, it is not outstanding at all.
+  const given = forMember([g], [gave('g1', 'staff')]);
+  eq(outstanding(given[0]), false, 'a guardian consent on file is not missing');
+  eq(blockedOn(given[0]), false, 'and nobody is being waited on for it');
+  eq(agreementSummary(given), 'Nothing is waiting on you.', 'so the screen may say so');
+}
+
+{
+  // The three other shapes of the summary line.
+  const g = agree({ id: 'g1', kind: 'guardian_consent', title: 'Guardian consent' });
+  const w = agree({ id: 'w1', title: 'Liability waiver' });
+
+  eq(agreementSummary(forMember([w], [gave('w1')])), 'Nothing is waiting on you.',
+    'everything signed, and nobody else owes anything');
+  eq(agreementSummary(forMember([w], [])), '1 document waiting on you.',
+    'one the member can sign themselves reads as it always did');
+  const both = agreementSummary(forMember([w, g], []));
+  ok(/1 document waiting on you/.test(both), 'with both kinds outstanding, the member’s own is named first');
+  ok(/1 more still unsigned/.test(both), 'and the one they cannot sign is named too');
+  eq(JSON.stringify(agreementStanding(forMember([w, g], []))), JSON.stringify({ waiting: 1, blocked: 1, outstanding: 2 }),
+    'and the standing is the two of them');
+
+  // Plurals, because this line is read by somebody deciding whether to turn up.
+  const g2 = agree({ id: 'g2', kind: 'guardian_consent', title: 'Photo consent (guardian)' });
+  ok(/2 documents your gym asks for are still unsigned/.test(agreementSummary(forMember([g, g2], []))),
+    'two of them read as two');
+  ok(/they can only be given/.test(agreementSummary(forMember([g, g2], []))),
+    'and the pronoun follows the count');
 }
 
 {

@@ -58,7 +58,7 @@ import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useAuth } from '../../src/ui/auth';
 import { useFloorQueue } from '../../src/ui/floorQueue';
 import {
-  floorPendingNote, flushResultLine, keptOfflineLine, refusedLine, registerVisibilityLine,
+  floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine, refusedLine, registerVisibilityLine,
 } from '../../src/lib/floorQueue';
 import { countRegister, registerArc, registerLine } from '../../src/lib/classRegister';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -303,6 +303,13 @@ export default function ClassCheckin() {
       ));
       return;
     }
+    // Nothing was kept, so the row does not move either. A tick drawn against a
+    // change this phone refused to hold is the same lie as one drawn against a
+    // change the server refused, and it is the lie a trainer is paid on.
+    if (out === 'full') {
+      setSaveFailed(floorFullLine(`${m.name} is still marked ${m.attended ? 'present' : 'absent'} — that change`));
+      return;
+    }
     setRoster((p) => (p ?? []).map((x) => (x.userId === m.userId ? { ...x, attended: next } : x)));
     setSaveFailed(out === 'unsent' ? keptOfflineLine(`${m.name} marked ${next ? 'present' : 'absent'}`) : null);
   };
@@ -413,7 +420,13 @@ export default function ClassCheckin() {
 
         {/* ── the roster ─────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Members" note={roster?.length ? String(roster.length) : undefined} />
+          {/* `counted` is the same fact the body under this header spells out
+              in words. On a thrown re-read the previous rows are deliberately
+              kept and `readFailed` is set, so a header taken from
+              `roster.length` asserted that twelve members are known directly
+              above a Flag saying the roster could not be read — while the coach
+              is standing at the door of a full room. */}
+          <SectionHead title="Members" note={counted && roster?.length ? String(roster.length) : undefined} />
           {unlinked ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               This screen was opened without a class. Nothing can be read or checked in here — open a

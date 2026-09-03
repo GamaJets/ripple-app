@@ -21,11 +21,21 @@
 //                       prose in the message. It used to be an `askCoach` call
 //                       carrying `{ week, name }` and the whole fact list, with
 //                       no consent question anywhere on the screen.
-//   askCoach            the older, unfiltered call. Its remaining callers are
-//                       the coach's own screens — app/(trainer)/dashboard.tsx
-//                       and app/(trainer)/analytics.tsx, where the subject is a
-//                       client the coach already has the record of.
+//   askAboutMyBusiness  the coach's own aggregate question. Filtered here.
+//   askAboutClient      the coach's question about one client. Filtered here.
+//
+// There is no unfiltered door. There WAS — `askCoach`, taking a free-form
+// context object and no consent argument — and it was kept "for its remaining
+// callers" long after it had none: app/(trainer)/dashboard.tsx and
+// analytics.tsx moved to the two filtered doors above and name the old one
+// only to say they are not it. An exported function that reaches
+// api.anthropic.com with anything a caller hands it, sitting under a comment
+// saying consent is handled on that path, is a fourth caller waiting to be
+// added in good faith. It is deleted. Anything new goes through a door that
+// takes a consent answer or a filter, and adding one back means writing the
+// filter first.
 import { supabase } from './supabase';
+import { visionAvailable } from './vision';
 import { shareableContext, weeklyFacts, businessAskContext, clientAskContext, type ShareConsent } from './coachShare';
 
 export type ChatMsg = { role: 'user' | 'assistant'; content: string };
@@ -46,9 +56,13 @@ export type CoachAnswer =
   | { ok: true; reply: string }
   | { ok: false; reason: 'no-consent' | 'unavailable' | 'failed' };
 
-/** AI features are on once the vision flag is set (same backend). */
+/** AI features are on once the vision flag is set (same backend).
+ *
+ *  Delegated to `visionAvailable` rather than re-reading the environment here,
+ *  because two copies of the condition is how the photograph path came to be
+ *  open on builds where this one was off. One answer. */
 export function coachAvailable(): boolean {
-  return process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
+  return visionAvailable();
 }
 
 /** The transport, and nothing else. Both doors below go through it so there is
@@ -141,26 +155,13 @@ export async function askAboutMyWeek(
   return reply == null ? { ok: false, reason: 'failed' } : { ok: true, reply };
 }
 
-/**
- * The unfiltered call. See the header for who still uses it and why.
- *
- * Unchanged in signature and behaviour on purpose: two coach screens outside
- * this change call it, and breaking them to make a point would be a worse
- * outcome than leaving them to their own lane. Its client-side caller —
- * app/(client)/report.tsx — is gone: it now goes through `askAboutMyWeek`.
- */
-export async function askCoach(messages: ChatMsg[], context: Record<string, unknown>): Promise<string | null> {
-  if (!coachAvailable()) return null;
-  return invoke(messages, context);
-}
-
 /* ── the coach's own doors ─────────────────────────────────────────────────
  *
- * `askCoach` above is the unfiltered call and its remaining callers are coach
- * screens. That was defensible for the digest, which is aggregate, and it was
- * never defensible for the two that pass a client: `draftNudge` and
- * `genSummary` in app/(trainer)/dashboard.tsx post a named person's adherence,
- * their body-composition scan and a list of what they have eaten to
+ * There used to be an unfiltered call here, and coach screens used it. That
+ * was defensible for the digest, which is aggregate, and it was never
+ * defensible for the two that pass a client: `draftNudge` and `genSummary` in
+ * app/(trainer)/dashboard.tsx posted a named person's adherence, their
+ * body-composition scan and a list of what they have eaten to
  * api.anthropic.com. The member consented to their COACH seeing all of that.
  * Nobody asked them about a model, and nobody in the room can answer for them.
  *
@@ -169,10 +170,9 @@ export async function askCoach(messages: ChatMsg[], context: Record<string, unkn
  * screen cannot skip it and a field added to a context object without anybody
  * reading src/lib/coachShare.ts is simply not transmitted.
  *
- * `askCoach` is deliberately left in place and unchanged. Its remaining callers
- * are two coach screens belonging to a different change; changing its signature
- * to make a point about screens it does not belong to would cost more than it
- * is worth.
+ * The unfiltered door is gone rather than deprecated. A deprecated export is
+ * still an export, and this one had three comments around the tree telling the
+ * next reader its callers were fine.
  */
 
 /**

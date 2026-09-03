@@ -344,6 +344,12 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
 
     // A failed run attributed nothing and listed nothing, by design — asking
     // for its rows would be asking a question it did not answer.
+    //
+    // Not chunked, and the bound is `AD_CHANNELS`. `states` is keyed by channel
+    // and seeded from that tuple, `isAdChannel` drops anything else `my_ad_runs`
+    // names, and each state holds at most one run — so this is at most three
+    // ids however much a coach has spent or how long they have been running
+    // ads. The two `.in('run_id', …)` reads below cannot grow a request line.
     const okRunIds = [...states.values()]
       .filter((s) => s.run?.status === 'ok')
       .map((s) => s.run!.id);

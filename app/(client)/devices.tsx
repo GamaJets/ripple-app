@@ -318,8 +318,24 @@ export default function Devices() {
  // "reconnect WHOOP" in front of somebody who has just removed WHOOP on
  // purpose. `disconnectVendor` does this for the cloud providers; Apple Health
  // does not go through it, so it is done here for all of them.
+ //
+ // And it can fail. `disconnectVendor` deletes a row, the server can refuse
+ // that, and until recently nothing here could tell — supabase-js resolves on a
+ // database error, so a refused delete arrived looking exactly like a
+ // successful one. The member was shown Disconnected over a watch that was
+ // still connected to their account and that reappeared on the next launch.
+ // `forgetLink` is deliberately inside the success path: forgetting the link
+ // locally while the token survives is what makes the two disagree.
  const onDisconnect = async (p: WearableProvider) => {
-  await w.disconnect(p.meta.id);
+  try {
+   await w.disconnect(p.meta.id);
+  } catch (e: any) {
+   Alert.alert(
+    p.meta.name,
+    e?.message || `${p.meta.name} could not be disconnected just now, so it is still connected. Try again in a moment.`,
+   );
+   return;
+  }
   forgetLink(p.meta.id);
  };
 
@@ -426,8 +442,19 @@ export default function Devices() {
   * vendor's own app by the person it is about, which is the complaint the sleep
   * section four rules down already answers in as many words.
   */
- const named = (key: 'activeKcal' | 'totalKcal' | 'heartRateAvg' | 'steps') =>
-  connected.find((p) => typeof w.metrics[p.meta.id]?.[key] === 'number')?.meta.name ?? 'your device';
+ //
+ // `w.todayFrom`, not "the first connected provider that publishes this field".
+ // That guess named `appleHealth` — element zero of the registry — for every
+ // figure, so a member wearing an Apple Watch in the day and a WHOOP overnight
+ // saw WHOOP's number captioned with the Apple Watch. They open Apple Health to
+ // check it, find something else, and disbelieve the whole screen. The promise
+ // four rules below this one is that a figure is "the figure one device
+ // actually reported" and is NAMED; the figure kept that promise and the name
+ // did not.
+ const named = (key: 'activeKcal' | 'totalKcal' | 'heartRateAvg' | 'steps') => {
+  const id = w.todayFrom[key];
+  return (id ? PROVIDERS.find((p) => p.meta.id === id)?.meta.name : null) ?? 'your device';
+ };
  /**
   * The line above the Live row when what is on it is not a current reading.
   *

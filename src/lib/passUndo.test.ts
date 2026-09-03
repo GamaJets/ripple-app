@@ -41,19 +41,31 @@ const red = (over: Partial<Redemption> = {}): Redemption => ({
 
 /** A stand-in for the supabase-js builder, recording the delete it was asked
  *  for. `error` is RESOLVED rather than thrown, which is how supabase-js
- *  reports a refusal and how this codebase's reads have gone wrong before. */
-function fakeSb(error: unknown = null) {
+ *  reports a refusal and how this codebase's reads have gone wrong before.
+ *
+ *  `count` is what the SERVER said it deleted, and `opts` records whether the
+ *  count was even asked for. A delete that matches no row is not an error in
+ *  PostgREST — it is a 204 with `error: null` — so a fake that only ever
+ *  answered with an error could not exercise the case that actually happens at
+ *  a front desk: somebody else already undid it, or this member of staff is not
+ *  allowed to. */
+function fakeSb(error: unknown = null, count: number | null = 1) {
   const deleted: string[] = [];
+  const opts: unknown[] = [];
   return {
     deleted,
+    opts,
     sb: {
       from: (_t: string) => ({
-        delete: () => ({
-          eq: (_col: string, id: string) => {
-            deleted.push(id);
-            return Promise.resolve({ data: null, error });
-          },
-        }),
+        delete: (o?: unknown) => {
+          opts.push(o);
+          return {
+            eq: (_col: string, id: string) => {
+              deleted.push(id);
+              return Promise.resolve({ data: null, error, count });
+            },
+          };
+        },
       }),
     } as any,
   };
@@ -70,6 +82,8 @@ async function main() {
     await undoRedemption(f.sb, red());
     eq(f.deleted.length, 1, 'the redemption row is deleted — part 31’s trigger recomputes `uses_spent` from what survives');
     eq(f.deleted[0], 'r1', 'and it is the row that was asked for');
+    eq(JSON.stringify(f.opts[0]), JSON.stringify({ count: 'exact' }),
+      'and the server is asked HOW MANY rows it deleted — without that there is no answer to read');
   }
 
   /* ── a credit that paid for a one-to-one is refused ─────────────────────── */
@@ -96,6 +110,38 @@ async function main() {
     try { await undoRedemption(f.sb, red()); } catch { threw = true; }
     ok(threw,
       'supabase-js RESOLVES on a database error, so a refused delete has to be read off the result — otherwise the desk is told a visit went back that is still spent');
+  }
+
+  /* ── and neither is a delete that matched NOTHING ───────────────────────────
+   *
+   * The half the error check could never see. A DELETE that matches no row is
+   * PostgREST's ordinary success: 204, `error: null`, nothing to catch. Every
+   * way that happens at a desk is a way somebody gets told the wrong thing —
+   * a colleague already undid it, the id came off a list drawn before the last
+   * refresh, or `gym_pass_redemptions_staff` will not let this person touch
+   * another gym's row.
+   *
+   * This function returns void, so "it did not throw" IS the report. The
+   * consequence is a member standing at the desk being told the visit is back
+   * on their card by a trigger that never ran, with the credit still spent. */
+  {
+    const f = fakeSb(null, 0);
+    let threw: string | null = null;
+    try { await undoRedemption(f.sb, red()); } catch (e: any) { threw = e?.message ?? ''; }
+    ok(threw !== null,
+      'A DELETE THAT MATCHED NO ROW IS NOT AN UNDO — 204 with no error is what a refusal looks like here');
+    ok(/matched no rows/.test(threw ?? ''),
+      `and the reason says the server matched nothing rather than blaming the network — got ${JSON.stringify(threw)}`);
+  }
+
+  {
+    // A result with no count at all is not a pass either. It is what a call
+    // site that forgot `{ count: 'exact' }` produces, and treating it as
+    // success would quietly re-admit the whole class of bug above.
+    const f = fakeSb(null, null);
+    let threw = false;
+    try { await undoRedemption(f.sb, red()); } catch { threw = true; }
+    ok(threw, 'a result nobody counted is reported as not-confirmed, never as done');
   }
 
   if (errors.length) {

@@ -44,6 +44,7 @@
 //    is not a total. There is no default currency in this file and no symbol
 //    table; an amount whose currency did not come back says so.
 import { capLimit, capped } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 // The zero-decimal list and the one function that knows how to turn minor units
 // into a printable figure. Imported rather than re-derived: a second copy of
 // that list is a second thing to forget a currency in, and this file used to
@@ -397,10 +398,18 @@ export async function fetchMyMemberships(sb: Queryable, uid: string): Promise<Re
 
     const planIds = [...new Set(rows.map((r) => r.plan_id).filter(Boolean))] as string[];
     const plans = new Map<string, MemberPlan>();
-    if (planIds.length) {
+    // Chunked. The memberships read above is `capLimit()`, so `planIds` is
+    // bounded at a thousand rather than by anything about this member, and past
+    // roughly two hundred uuids the `in.("…","…")` list overruns the 8KB
+    // request line. The 414 comes back as `data: null` with an error, which the
+    // `if (!planErr)` below correctly declines to fail on — and then EVERY
+    // membership renders 'unreadable' beside a non-null planId, which is the
+    // screen saying, of a member's whole history at once, that their plan could
+    // not be read. That sentence is meant for one plan RLS refused.
+    for (const chunk of chunkIds(uniqueIds(planIds))) {
       const { data: planRows, error: planErr } = await sb.from('membership_plans')
         .select('id, name, price_cents, currency, interval, active')
-        .in('id', planIds);
+        .in('id', chunk);
       // Reported by leaving the plan off, not by failing the membership. The
       // membership is a fact whether or not its price came back.
       if (!planErr) {

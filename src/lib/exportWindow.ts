@@ -257,20 +257,29 @@ export function presetDays(id: PresetId, today: string): { from: string; to: str
   const d = new Date(t);
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth();
-  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-  const todayDay = iso(t);
+  // `utcIso` rather than `iso`, because every one of its arguments below is a
+  // `Date.UTC(...)` and `instantOf` builds `t` the same way — UTC goes in and
+  // the same UTC day comes back out, which is what makes this pure and what the
+  // note above is describing when it says the suite gets one answer under six
+  // timezones. Reading these back with the LOCAL getters, which is the usual
+  // repair for `toISOString().slice(0, 10)`, would be the actual bug here: the
+  // first of the month built at UTC midnight reads back as the last day of the
+  // month before for every laptop west of Greenwich, and an accountant would
+  // get a file labelled September holding a payment from August.
+  const utcIso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const todayDay = utcIso(t);
   switch (id) {
     case 'thisMonth':
-      return { from: iso(Date.UTC(y, m, 1)), to: todayDay };
+      return { from: utcIso(Date.UTC(y, m, 1)), to: todayDay };
     case 'lastMonth':
       // Day 0 of a month is the last day of the one before it, which is the
       // only spelling of "the end of last month" that is right in February.
-      return { from: iso(Date.UTC(y, m - 1, 1)), to: iso(Date.UTC(y, m, 0)) };
+      return { from: utcIso(Date.UTC(y, m - 1, 1)), to: utcIso(Date.UTC(y, m, 0)) };
     case 'last90':
-      return { from: iso(t - 89 * 86_400_000), to: todayDay };
+      return { from: utcIso(t - 89 * 86_400_000), to: todayDay };
     case 'thisYear':
-      return { from: iso(Date.UTC(y, 0, 1)), to: todayDay };
+      return { from: utcIso(Date.UTC(y, 0, 1)), to: todayDay };
     case 'lastYear':
-      return { from: iso(Date.UTC(y - 1, 0, 1)), to: iso(Date.UTC(y - 1, 11, 31)) };
+      return { from: utcIso(Date.UTC(y - 1, 0, 1)), to: utcIso(Date.UTC(y - 1, 11, 31)) };
   }
 }

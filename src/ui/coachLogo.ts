@@ -284,6 +284,21 @@ export interface MyCoachLogo {
   /** The picture, ready to draw or embed. Null when there is none, when it
    *  could not be read, or while it is still being fetched. */
   dataUri: string | null;
+  /**
+   * Which of those three nulls this is.
+   *
+   * `dataUri: null` was the same value for "no logo" and "the file would not
+   * download", and a screen that publishes cannot tell them apart from it. The
+   * coach had done the work, the record said the logo was set, and the card
+   * that went out under their name was unbranded — with the failure visible on
+   * no surface at all, least of all the permanent one.
+   *
+   *   'ready'   — there is nothing more to fetch: either no logo is set, or the
+   *               picture is here.
+   *   'loading' — a key is set and the file is on its way.
+   *   'error'   — a key is set and the file did not arrive.
+   */
+  pictureStatus: LoadStatus;
   reload: () => void;
 }
 
@@ -300,6 +315,7 @@ export function useMyCoachLogo(): MyCoachLogo {
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [path, setPath] = useState<string | null>(null);
   const [dataUri, setDataUri] = useState<string | null>(null);
+  const [pictureStatus, setPictureStatus] = useState<LoadStatus>('loading');
   const [nonce, setNonce] = useState(0);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
@@ -307,6 +323,7 @@ export function useMyCoachLogo(): MyCoachLogo {
   useEffect(() => {
     let live = true;
     setStatus('loading');
+    setPictureStatus('loading');
     (async () => {
       let key: string | null = null;
       try {
@@ -315,19 +332,27 @@ export function useMyCoachLogo(): MyCoachLogo {
         // A failed read is not "this coach has no logo". One told that would
         // set one again, over the top of whatever is really there.
         reportError('coachLogo.load', e);
-        if (live) { setStatus('error'); setPath(null); setDataUri(null); }
+        if (live) { setStatus('error'); setPath(null); setDataUri(null); setPictureStatus('error'); }
         return;
       }
       if (!live) return;
       setPath(key);
       setStatus('ready');
       setDataUri(null);
-      if (!key) return;
+      // No key is nothing to fetch, which is a finished answer and not a
+      // download in flight.
+      if (!key) { setPictureStatus('ready'); return; }
+      setPictureStatus('loading');
       const uri = await loadLogoDataUri(key);
-      if (live) setDataUri(uri);
+      if (!live) return;
+      setDataUri(uri);
+      // `loadLogoDataUri` answers null for every way the file did not arrive —
+      // the signature, the fetch, the bytes — and each of them leaves a coach
+      // with a logo set and no picture of it.
+      setPictureStatus(uri ? 'ready' : 'error');
     })();
     return () => { live = false; };
   }, [nonce]);
 
-  return { status, path, dataUri, reload };
+  return { status, path, dataUri, pictureStatus, reload };
 }

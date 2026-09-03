@@ -16,12 +16,14 @@
 // Nothing about the fallback changes. `status` simply says which copy you are
 // looking at: 'ready' means the server confirmed these slots, 'error' means
 // these came off this device and could not be checked.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+import { writeFailure } from '../lib/wroteRows';
+import { settleRemoval } from '../lib/optimisticList';
 import { useAuthRevision } from './authRevision';
 import { shapeSeries, type RecurringSeries, type RawSeries } from '../lib/recurring';
 
@@ -60,6 +62,22 @@ let SEQ = 1;
 export function useAvailability() {
   const authRev = useAuthRevision();
   const [slots, setSlots] = useState<AvailSlot[]>([]);
+  // The list as it stands RIGHT NOW, which `slots` is not.
+  //
+  // `slots` is a render value, and the writes below are awaited in a loop by a
+  // caller holding one render's worth of callbacks: app/(trainer)/calendar.tsx
+  // removes a whole day one `await removeAvail(id)` at a time. Every one of
+  // those calls closed over the SAME `slots` array, so each `filter` started
+  // again from the list as it was before any of them ran — removing Tuesday's
+  // four slots put three of them straight back, and the coach was left looking
+  // at a week that had lost exactly one hour out of the four they confirmed.
+  //
+  // A ref rather than a functional `setSlots` updater because the cache write
+  // has to happen with it, and AsyncStorage inside a state updater is a side
+  // effect React is entitled to run twice.
+  const slotsRef = useRef<AvailSlot[]>([]);
+  /** The one place `slots` is assigned, so the ref cannot drift from the state. */
+  const applySlots = (next: AvailSlot[]) => { slotsRef.current = next; setSlots(next); };
   const [uid, setUid] = useState<string | null>(null);
   // How many server rows carry no timezone, or null when the read did not
   // come back whole. Null is never folded into zero — see the header of
@@ -83,7 +101,7 @@ export function useAvailability() {
         const raw = await AsyncStorage.getItem(KEY);
         if (raw) {
           local = (JSON.parse(raw) as AvailSlot[]).map((sl) => ({ ...sl, minute: Number(sl.minute) || 0 }));
-          if (!cancelled) setSlots(local);
+          if (!cancelled) applySlots(local);
         }
       } catch { /* no cached copy; the server read below is the only source */ }
       // Local-only build: this device IS the store, so what is on screen is
@@ -130,7 +148,7 @@ export function useAvailability() {
           // Counted off the rows themselves rather than asked for separately,
           // so the count and the grid can never disagree about the same week.
           setZoneless(page.rows.filter((r: any) => r.tz == null).length);
-          setSlots(server.sort(byTime));
+          applySlots(server.sort(byTime));
           // Deliberately not cached when short. This copy is what the coach
           // sees offline, and writing a truncated grid over the good one would
           // turn a temporary gap into the device's idea of their week.
@@ -156,7 +174,7 @@ export function useAvailability() {
           if (cancelled) return;
           if (upErr || !up) { setStatus('error'); return; }
           const synced: AvailSlot[] = up.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur })).sort(byTime);
-          setSlots(synced);
+          applySlots(synced);
           // Counted off what came BACK, for the same reason the rows are: these
           // were just written with deviceZone(), which is null on a handset
           // that cannot name its zone, and assuming zero here would claim a
@@ -189,7 +207,7 @@ export function useAvailability() {
 
   const persist = (next: AvailSlot[]) => {
     const sorted = [...next].sort(byTime);
-    setSlots(sorted);
+    applySlots(sorted);
     try { AsyncStorage.setItem(KEY, JSON.stringify(sorted)); } catch { /* ignore */ }
   };
 
@@ -216,9 +234,15 @@ export function useAvailability() {
     // since the caller only sees false, which also means "saved on this phone
     // only". A unique index says the same thing server-side so two of their
     // devices cannot race past it.
-    if (slots.some((s) => s.dow === dow && s.hour === hour && s.minute === minute)) return 'duplicate';
+    //
+    // Read off the ref and not `slots`, for the reason on `slotsRef`: the
+    // range-add loop on the calendar awaits this forty-eight times in a row
+    // holding one render's callbacks, so `slots` there is the week as it was
+    // before the first of them ran and the duplicate check would have passed
+    // every slot the loop had itself just added.
+    if (slotsRef.current.some((s) => s.dow === dow && s.hour === hour && s.minute === minute)) return 'duplicate';
     const localId = 'av' + Date.now().toString(36) + SEQ++;
-    persist([...slots, { id: localId, dow, hour, minute, dur }]);
+    persist([...slotsRef.current, { id: localId, dow, hour, minute, dur }]);
     if (!USE_SUPABASE || !uid) return 'local';
     try {
       // The zone goes with the hour, because 07:00 is not an instant. Until
@@ -232,21 +256,61 @@ export function useAvailability() {
         .select('id').single();
       const sid = data?.id;
       if (error || !sid) return 'local';
-      setSlots((p) => p.map((sl) => (sl.id === localId ? { ...sl, id: String(sid) } : sl)));
+      // Through `persist`, so the server id reaches the CACHE as well as the
+      // ref. It used to go into state alone, which left the device's saved copy
+      // holding the local `av…` id — and `removeSlot` reads an id with no dash
+      // as one that never reached the server. Relaunch into signal and the
+      // server read corrects it; relaunch into a basement and the coach is
+      // working from the cached copy, where deleting that slot takes it off the
+      // phone and leaves the row generating sessions. Same failure the
+      // push-up branch above was fixed for, at the other end of the hook.
+      persist(slotsRef.current.map((sl) => (sl.id === localId ? { ...sl, id: String(sid) } : sl)));
       return 'saved';
     } catch { return 'local'; }
   };
-  /** Resolves true only when the slot is gone server-side. A refused delete
-   *  leaves the coach bookable at an hour they thought they had closed. */
+  /**
+   * Resolves true only when the slot is gone server-side. A refused delete
+   * leaves the coach bookable at an hour they thought they had closed.
+   *
+   * That sentence was the doc comment before it was the behaviour. Two halves
+   * were missing, and each is a way the promise was false:
+   *
+   * · **Nobody counted.** PostgREST answers a DELETE that matched NOTHING with
+   *   a 204 and `error: null` — the event src/lib/wroteRows.ts exists about —
+   *   so `!error` was equally true for a row RLS refused, a row the coach's
+   *   other phone had already removed, and an id the screen was holding from
+   *   before a refresh. `{ count: 'exact' }` is the only thing that can tell
+   *   those apart from a delete that landed, and `writeFailure` is the rule
+   *   for reading the answer, including the case where the count is absent.
+   * · **The phone had already let it go.** `persist` above drops the slot from
+   *   state AND from AsyncStorage before the request is even sent. A refusal
+   *   reported as success therefore took the hour off the coach's week on this
+   *   device while the row went on generating bookable sessions server-side —
+   *   invisible from the app, and visible to every client looking for a slot.
+   *   `settleRemoval` puts it back, which is what makes `false` something the
+   *   caller's "some are still there" alert actually matches on screen.
+   */
   const removeSlot = async (id: string): Promise<boolean> => {
-    persist(slots.filter((s) => s.id !== id));
+    const removed = slotsRef.current.find((s) => s.id === id) ?? null;
+    persist(slotsRef.current.filter((s) => s.id !== id));
     // A local id never reached the server, so dropping it locally is the whole
     // of the removal.
     if (!USE_SUPABASE || !id.includes('-')) return true;
+    // Restored into the list as it stands WHEN THE ANSWER ARRIVES, never into
+    // the copy this call started from: the caller clears a whole day one await
+    // at a time, and reinstating a snapshot would resurrect the slots it had
+    // already removed.
+    const restore = () => persist(settleRemoval(slotsRef.current, removed, false));
     try {
-      const { error } = await supabase.from('trainer_availability').delete().eq('id', id);
-      return !error;
-    } catch { return false; }
+      const { error, count } = await supabase.from('trainer_availability')
+        .delete({ count: 'exact' }).eq('id', id);
+      // The sentence is discarded rather than shown: this returns a boolean the
+      // calendar turns into its own count ("3 of 4 were removed"), and one
+      // alert per slot over a day the coach cleared in one tap is four alerts.
+      // The RULE is what is shared, not the wording.
+      if (writeFailure('That weekly slot', { error, count })) { restore(); return false; }
+      return true;
+    } catch { restore(); return false; }
   };
 
   /**
@@ -369,8 +433,18 @@ const toNum = (v: unknown): number => {
  * because the two numbers have to agree and only one of them is in this file —
  * if the function's limit ever changes, this is the constant that changes with
  * it, and the mismatch that would otherwise report every full page as partial.
+ *
+ * SERIES_LIMIT is the number the SQL actually ends on and is the half that was
+ * never written down. The comment above described the arrangement correctly and
+ * left the 501 living only in part 143, where nothing on this side could be
+ * checked against it — which is the shape check:sql-caps exists to catch, and
+ * the reason `challenge_board()` shipped a leaderboard that said "you are #147
+ * of 200" under a heading reading "400 athletes". SERIES_CAP is derived from it
+ * rather than written twice, so the probe row cannot go missing from one of the
+ * two numbers.
  */
-const SERIES_CAP = 500;
+const SERIES_LIMIT = 501;
+const SERIES_CAP = SERIES_LIMIT - 1;
 
 /**
  * Every standing appointment the signed-in person is a party to.

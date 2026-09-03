@@ -211,7 +211,14 @@ export default function OwnerTrainers() {
             them and either re-invites somebody they already invited, or stops
             chasing a hire. Every other unread state on this screen gets a
             sentence; this one got a disappearance. */}
-        {pending.length > 0 || invitesUnread ? (<>
+        {/* `!invitesWhole` joins the gate for the same reason `invitesUnread`
+            did. Under a truncated read the sentence below — "more invitations
+            than fit in one read" — sat INSIDE a section that only rendered
+            when the prefix happened to contain a pending row. A gym whose open
+            invitations are all older than the newest rows that came back got no
+            section, no count and no sentence: the disclosure was hidden by the
+            very condition it exists to explain. */}
+        {pending.length > 0 || invitesUnread || !invitesWhole ? (<>
           <Rule />
           <Section>
             <SectionHead title="Pending Invites" note={invitesWhole && pending.length ? String(pending.length) : undefined} />

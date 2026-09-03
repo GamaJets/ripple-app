@@ -25,6 +25,11 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   if (!Object.is(a, b)) errors.push(`${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 };
 
+/** The name of a month, written out, in whatever language the runner is in.
+ *  Day 15 for the reason src/lib/format.ts gives: a day-1 date can fall into a
+ *  neighbouring month in a non-Gregorian calendar. */
+const monthWord = (m: number) => new Date(2026, m, 15).toLocaleDateString(undefined, { month: 'long' });
+
 /* ── 1. a quarter is three of this app's own months ───────────────────────
    Not a second opinion about where a month ends. If these ever drift, a return
    is filed to a boundary no close was ever signed off on. */
@@ -37,7 +42,12 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   eq(q!.lastDay, monthWindow('2026-09')!.lastDay, 'and ends where this app says September ends');
   eq(q!.fromIso, monthWindow('2026-07')!.fromIso, 'the same instants, not a recomputation of them');
   eq(q!.toIso, monthWindow('2026-09')!.toIso, 'with the upper bound exclusive, as everywhere else');
-  ok(q!.label.includes('July') && q!.label.includes('September'),
+  // Derived, not typed. The contract is "the label NAMES the two end months",
+  // not "the label contains the English word July" — a gym filing in Milan
+  // reads "luglio" and the sentence is doing its job. Built here from the same
+  // two calendar months through the long-month field, so it stays true in every
+  // locale the runner may be set to.
+  ok(q!.label.includes(monthWord(6)) && q!.label.includes(monthWord(8)),
     'and the label names the months, because "Q3" alone is a fortnight out for half its readers');
 
   eq(taxPeriod('2026-Q1')!.months.join(','), '2026-01,2026-02,2026-03', 'Q1 is the first three');
@@ -91,7 +101,10 @@ const eq = (a: unknown, b: unknown, msg: string) => {
   ok(periodMovingNote(q, ['2026-07', '2026-08', '2026-09']) === null,
     'a settled quarter carries no warning');
   const note = periodMovingNote(q, ['2026-07'])!;
-  ok(note.includes('August 2026') && note.includes('September 2026'),
+  // Against the app's OWN month labels rather than against two English
+  // literals: the note is built by asking `monthWindow` what each month is
+  // called, so that is what "names the months" means here, in any language.
+  ok(note.includes(monthWindow('2026-08')!.label) && note.includes(monthWindow('2026-09')!.label),
     'and an unsettled one NAMES the months, because a count sends somebody to look at three');
   ok(note.includes('Close screen'), 'and says where to go');
   ok(periodMovingNote(q, ['2026-07', '2026-08'])!.includes('has not been closed'),

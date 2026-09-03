@@ -18,6 +18,7 @@
 import {
   wrapLines, charsPerLine, scrubName, weekCard, resultCard, hoursLabel,
   assetFilename, firstName, lower, cardSize, CARD_SIZES,
+  BRAND_UNREAD_NOTE, LOGO_SET_NOT_FETCHED,
 } from './shareAsset';
 
 const errors: string[] = [];
@@ -310,6 +311,27 @@ ok(typedIntoHeadline.ok && typedIntoHeadline.card.headline === "My client's 12 w
   'the headline keeps its shape with the name replaced rather than being emptied');
 
 /* ── report ───────────────────────────────────────────────────────────────── */
+
+/* ── the two sentences about a card that must not go out wrong ──────────── */
+//
+// This screen composes something that gets POSTED PUBLICLY under the coach's
+// name, so both of these are about a mistake that cannot be taken back.
+
+ok(/could not be read/i.test(BRAND_UNREAD_NOTE), 'the brand refusal says the gym could not be read');
+ok(/not made rather than made with the wrong one/i.test(BRAND_UNREAD_NOTE),
+  'and says the card is withheld rather than built from a guess');
+ok(/cannot be taken back/i.test(BRAND_UNREAD_NOTE), 'and why that matters here and not elsewhere');
+ok(!/no gym|independent/i.test(BRAND_UNREAD_NOTE),
+  'and never states that the coach has no gym — that is the OTHER answer, and it is a correct one');
+
+ok(/logo is set/i.test(LOGO_SET_NOT_FETCHED), 'the logo sentence says the record is fine');
+ok(/could not be fetched/i.test(LOGO_SET_NOT_FETCHED), 'and that it is the picture that did not arrive');
+ok(!/have not added|no logo/i.test(LOGO_SET_NOT_FETCHED),
+  'and never reads as "you have not added one", which is what the null used to say');
+
+for (const line of [BRAND_UNREAD_NOTE, LOGO_SET_NOT_FETCHED]) {
+  ok(line.length > 0 && !line.includes('undefined') && !line.includes('null'), 'a real sentence');
+}
 
 if (errors.length) {
   console.error(`shareAsset: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);

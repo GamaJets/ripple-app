@@ -103,6 +103,9 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+// The month window's instant, recomputed at midnight, on foreground and on
+// focus — never frozen at mount. See src/ui/today.ts.
+import { useNow } from '../../src/ui/today';
 import { Rule, Section, SectionHead, Ghost, Notice, Flag, ListRow, PartialRead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { minorMoney, wholeMoney, since, monthStart, type Taken, type TakenRow } from '../../src/lib/coachMoney';
@@ -141,6 +144,8 @@ import {
   type RankedClient,
 } from '../../src/lib/clientValue';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole } from '../../src/ui/loadStatus';
+import { localDate } from '../../src/lib/localDate';
 
 /** The month a period figure covers, in the words a person uses for it. */
 const monthName = (d: Date): string => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
@@ -156,7 +161,7 @@ export default function CoachMoney() {
   const [sales, setSales] = useState<{ rows: CoachPurchase[]; status: LoadStatus }>({ rows: [], status: 'loading' });
   const [renewals, setRenewals] = useState<{ rows: SubscriptionPayment[]; status: LoadStatus }>({ rows: [], status: 'loading' });
   const [plan, setPlan] = useState<{ sub: Subscription | null; error: string | null } | null>(null);
-  const [dues, setDues] = useState<Invoice[] | null>(null);
+  const [dues, setDues] = useState<Invoice[]>([]);
   const [duesRead, setDuesRead] = useState<LoadStatus>('loading');
   const [codes, setCodes] = useState<CodeReturnsRead>({ status: 'loading', rows: [] });
   const [connect, setConnect] = useState<{ acct: ConnectStatus | null; read: LoadStatus }>({ acct: null, read: 'loading' });
@@ -198,12 +203,14 @@ export default function CoachMoney() {
     setSales(p);
     setRenewals(r);
     setPlan(sub);
-    setDues(inv);
-    // fetchFailedInvoices answers null for a failed read and [] for nothing
-    // outstanding. Collapsing those would tell a coach with an unpaid Repple
-    // invoice that their account is clear, which is the one sentence that stops
-    // them looking.
-    setDuesRead(inv == null ? 'error' : 'ready');
+    setDues(inv.rows);
+    // fetchFailedInvoices answers 'error' for a failed read and 'ready' with
+    // nothing for nothing outstanding. Collapsing those would tell a coach with
+    // an unpaid Repple invoice that their account is clear, which is the one
+    // sentence that stops them looking. 'partial' is the third: more unpaid
+    // invoices than one read returns, on which `owed.length` is a floor and not
+    // the number of invoices outstanding.
+    setDuesRead(inv.status);
     setCodes(cr);
     setConnect({ acct: ca, read: ca == null ? 'error' : 'ready' });
     setIssued({ count: docs.rows.length, status: docs.status });
@@ -226,7 +233,15 @@ export default function CoachMoney() {
 
   /* ── coming in ─────────────────────────────────────────────────────────── */
 
-  const now = useMemo(() => new Date(), []);
+  /* `useNow`, not `useMemo(() => new Date(), [])`. The comment that stood here
+     said `now` was fixed "for the render"; an empty dependency array fixes it
+     for the life of the MOUNT, and this screen is a tab that stays mounted for
+     as long as the app runs. Both bounds of the month window come from it, so a
+     coach who opened this on the 31st and came back on the 1st read last
+     month's figures under a heading saying this month — and a pull-to-refresh
+     re-read the server against the same wrong dates, which made the stale
+     figure look freshly confirmed. See src/ui/today.ts. */
+  const now = useNow();
   const from = monthStart(now);
 
   // A renewal is dated by Stripe's own `paid_at`, never by when the row landed
@@ -246,8 +261,30 @@ export default function CoachMoney() {
   // wrote the row down. A coach catching up on three weeks of cash on a Sunday
   // evening would otherwise have all of it land in that Sunday's month, which
   // is the one thing that would make this figure worse than not having it.
+  //
+  // And read as a CALENDAR DAY, which is what it is. `received_on` is a
+  // Postgres `date` and arrives as a bare `YYYY-MM-DD`; this handed that
+  // string straight to `since`, which parses it with `Date.parse` — and
+  // `Date.parse('2026-09-01')` is UTC midnight, while `monthStart` two dozen
+  // lines above is LOCAL midnight. West of Greenwich the first is EARLIER than
+  // the second, so `t >= fromMs` was false and every cash payment a coach
+  // recorded as received on the 1st fell straight out of "Coming In · this
+  // month". It was not counted as unpriced or unlabelled either — `since`
+  // drops it before `sumTaken` ever sees it — so `ledger()` reported the short
+  // figure as 'ready', with nothing on the screen to suggest a payment was
+  // missing. Invisible in the UTC+4 gym this was written for; present every
+  // month for every coach in the Americas.
+  //
+  // `localDate` is the module written for exactly this and its header names
+  // the same trap; src/ui/coachStatement.ts already compares these rows as
+  // days for the same reason. A day that does not parse becomes 'unknown',
+  // which keeps it out of every period rather than sweeping it into this one.
   const receiptRows = useMemo<TakenRow[]>(
-    () => receipts.rows.map((r) => ({ amount_cents: r.amountCents, currency: r.currency, created_at: r.receivedOn })),
+    () => receipts.rows.map((r) => ({
+      amount_cents: r.amountCents,
+      currency: r.currency,
+      created_at: localDate(r.receivedOn)?.toISOString() ?? 'unknown',
+    })),
     [receipts.rows],
   );
 
@@ -341,7 +378,7 @@ export default function CoachMoney() {
   /* ── going out ─────────────────────────────────────────────────────────── */
 
   const spend = useMemo(() => sumSpend(codes.rows), [codes.rows]);
-  const owed = dues ?? [];
+  const owed = dues;
 
   // What the coach recorded their own business costing them. Through
   // `costsTaken`, which is `sumTaken` under the same two rules everything else
@@ -508,11 +545,23 @@ export default function CoachMoney() {
             note="Who bought what, who is subscribed, and the price list they buy from"
             onPress={() => router.push('/(trainer)/payments')} />
           <ListRow icon="grid" title="Invoices"
+            /* `isWhole`, not `!== 'error'`. This is a count of the coach's
+               own gapless document sequence and an assertion that they have
+               issued none, and neither survives the other two statuses.
+               `issued` starts at `{ count: 0, status: 'loading' }` and the
+               read runs from `useFocusEffect`, so the third arm — "Issue a
+               document…" — was what a coach with forty invoices read every
+               single time they opened this screen. And `fetchMyInvoices` ends
+               `.limit(capLimit())`, so a truncated read arrives as 'partial'
+               and printed "1000 issued" as a fact. app/(trainer)/invoices.tsx
+               gates the same figure on `isWhole(status)` and says why. */
             note={issued.status === 'error'
               ? 'Your issued documents could not be counted just now'
-              : issued.count > 0
-                ? `${issued.count} issued — your own statement of a charge, never a payment receipt`
-                : 'Issue a document for what somebody paid you, including cash and transfers'}
+              : !isWhole(issued.status)
+                ? 'Your own statement of a charge, never a payment receipt'
+                : issued.count > 0
+                  ? `${issued.count} issued — your own statement of a charge, never a payment receipt`
+                  : 'Issue a document for what somebody paid you, including cash and transfers'}
             onPress={() => router.push('/(trainer)/invoices')} />
           {/* The document this whole screen is the working copy of.
               app/(trainer)/statement.tsx existed and was reachable from the
@@ -537,6 +586,17 @@ export default function CoachMoney() {
             </Flag>
           ) : fees.status === 'partial' ? (
             <PartialRead what="recorded fees" shown={fees.charges.length} onPress={fees.reload} />
+          ) : fees.status === 'loading' ? (
+            /* The one empty state on this screen whose copy is inlined rather
+               than coming from a pure module, and the one that skipped
+               'loading'. `useLateCancelCharges` starts at 'loading' and reads
+               in an effect, so "Nothing has been recorded against a client"
+               was the first thing drawn here on every mount and after every
+               auth revision — a flat denial that anybody owes the coach
+               anything, made before the read had come back. Every sibling
+               section says "Still reading." through `receiptsEmptyLine`,
+               `costsEmptyLine`, `payoutsEmptyLine` or `ledgerEmptyLine`. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>Still reading.</Text>
           ) : !standingFees.length ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nothing has been recorded against a client. A fee is only recorded when your policy is switched on and somebody cancels inside your notice window.
@@ -607,7 +667,14 @@ export default function CoachMoney() {
                   mark's contrast and not a text's — and an amount somebody owes
                   is the last thing on this page that should be hard to read. */}
               <Flag tone={t.crit}>
-                {owed.length} {plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding.
+                {/* 'partial' says the list came back at its ceiling, so
+                    `owed.length` is how many are ON THIS SCREEN and not how
+                    many are outstanding. A coach reading a bare number here is
+                    deciding what they owe, and a floor printed as a total is
+                    the one thing that stops them looking for the rest. */}
+                {duesRead === 'partial'
+                  ? `At least ${owed.length} ${plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding — there are more than fitted in one read, so this is a floor and not a count of them.`
+                  : `${owed.length} ${plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding.`}
               </Flag>
               {owed.map((i) => (
                 <View key={i.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 4 }}>

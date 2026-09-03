@@ -24,9 +24,10 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { trainerAccessNote } from '../../src/lib/trainerProfileAccess';
 import { useDeliveryFact } from '../../src/ui/coachDelivery';
 import { DeliveryModeChoice } from '../../src/ui/DeliveryModeChoice';
-import { deliveryNote, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
+import { deliveryAskLine, deliveryNote, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
 import { useMyCancellationPolicy } from '../../src/ui/sessions';
 import { feeAmountLine, noticeLabel } from '../../src/lib/booking';
 import { readNumber } from '../../src/lib/units';
@@ -34,6 +35,15 @@ import { readNumber } from '../../src/lib/units';
 // answer: the write discarded both outcomes, so a refused one looked exactly
 // like a stored one. See src/lib/profileSave.ts.
 import { saveLine } from '../../src/lib/profileSave';
+// A profile photo used to be stored as the picker's own path — a location
+// inside THIS handset, written into a row every client, the gym and the web
+// console read, where it drew as a blank circle for all of them. The coach was
+// the one person who could not see that it was broken, because their own
+// device could open its own file. The bytes now go to the `avatars` bucket
+// (supabase/parts/961) and the column holds the URL of the stored object —
+// the same route app/(client)/profile.tsx has taken since that part was run.
+import { uploadMyAvatar } from '../../src/ui/avatarUpload';
+import { avatarSource, isDeviceAvatar, DEVICE_AVATAR_NOTE_COACH, AVATAR_UPLOAD_FAILED_NOTE } from '../../src/lib/avatarImage';
 import { RepdbAttribution } from '../../src/ui/Attribution';
 import { HAS_NATIVE_CLIPBOARD, CLIPBOARD_UNAVAILABLE_NOTE, copyToClipboard } from '../../src/ui/nativeModules';
 import { BRAND } from '../../src/lib/brands';
@@ -87,6 +97,10 @@ export default function CoachProfile() {
   const t = useTheme();
   const router = useRouter();
   const auth = useAuth();
+  /** The signed-in coach, for the avatar upload. The bucket's policy scopes a
+   *  write by the first folder of the key being `auth.uid()`, so an empty id
+   *  here is refused with a sentence rather than a 403 nobody can read. */
+  const uid = auth.user?.id ?? null;
   /** Confirmed, because signing out of a coach account on a shared gym tablet
    *  by mis-tapping is a nuisance nobody can undo without the password. */
   const signOut = () => {
@@ -160,11 +174,12 @@ export default function CoachProfile() {
   // while there is something whose age matters.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    if (p.save.state !== 'saved') return;
+    if (p.save.state !== 'saved' && lc.save.state !== 'saved') return;
     const h = setInterval(() => setNowMs(Date.now()), 5_000);
     return () => clearInterval(h);
-  }, [p.save.state, p.save.savedAt]);
+  }, [p.save.state, p.save.savedAt, lc.save.state, lc.save.savedAt]);
   const saveNote = saveLine(p.save, nowMs);
+  const lcSaveNote = saveLine(lc.save, nowMs);
   const pageUrl = publicPageUrl(BRAND.joinOrigin, p.publicHandle);
   const draftProblem = handleProblem(normaliseHandle(pageHandle));
 
@@ -205,17 +220,33 @@ export default function CoachProfile() {
   };
   const initials = p.name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
 
+  // Uploaded FIRST, and the column is only ever pointed at something that is in
+  // the bucket. `setPhoto` used to be handed `res.assets[0].uri` straight —
+  // which is a path inside this phone, so the coach saw their face, every
+  // client saw a blank circle, and the app said it had saved.
+  const [photoBusy, setPhotoBusy] = useState(false);
   const pickPhoto = async (fromCamera: boolean) => {
+    if (photoBusy) return;
     if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'set your profile photo'))) return;
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] });
-    if (!res.canceled && res.assets && res.assets[0]) p.setPhoto(res.assets[0].uri);
+    if (res.canceled || !res.assets || !res.assets[0]) return;
+    setPhotoBusy(true);
+    const up = await uploadMyAvatar(uid ?? '', res.assets[0].uri);
+    setPhotoBusy(false);
+    if (!up.url) {
+      // Nothing is set. A photo the server never received must not sit on this
+      // screen as though it had been — that is the whole defect being closed.
+      Alert.alert('Photo not saved', up.error ?? AVATAR_UPLOAD_FAILED_NOTE);
+      return;
+    }
+    p.setPhoto(up.url);
   };
   const addOffer = () => { const v = newOffer.trim(); if (v) { p.setOffers([...p.offers, v]); setNewOffer(''); } };
   const addSpec = () => { const v = newSpec.trim(); if (v) { p.setSpecialties([...p.specialties, v]); setNewSpec(''); } };
 
   // Upload / Take Photo, plus Remove only when there is a photo to remove.
   const photoActions: { icon: IconName; label: string; onPress: () => void }[] = [
-    { icon: 'plus', label: 'Upload', onPress: () => pickPhoto(false) },
+    { icon: 'plus', label: photoBusy ? 'Uploading…' : 'Upload', onPress: () => pickPhoto(false) },
     { icon: 'camera', label: 'Take Photo', onPress: () => pickPhoto(true) },
   ];
   if (p.photo) photoActions.push({ icon: 'minus', label: 'Remove', onPress: () => p.setPhoto(null) });
@@ -234,11 +265,33 @@ export default function CoachProfile() {
           </View>
         </View>
 
-        {/* ── live preview: the one surface on this screen that groups ────── */}
+        {/* ── live preview: the one surface on this screen that groups ──────
+            Withheld until the read has settled, and that is not tidiness. This
+            Card is labelled as WHAT A CLIENT SEES, and `guardTrainerProfile`
+            hands back the frozen blank under 'loading' and 'signed-out' — so a
+            coach who spent an evening writing a bio opened their profile and
+            was shown their public page with the bio missing, under a line
+            telling them clients read it first. The editor below has always been
+            withheld until the read lands; the preview above it is the half that
+            makes a claim, and it was not. */}
+        {p.access !== 'ok' ? (
+          <Card style={{ marginBottom: sp.lg }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {trainerAccessNote(p.access) ?? 'There is no profile to preview on this app.'}
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              Nothing is shown here until then. An empty preview is not what a client sees — it is what
+              this screen knows so far, and the two are not the same page.
+            </Text>
+          </Card>
+        ) : (
         <Card style={{ marginBottom: sp.lg }}>
           <View style={{ flexDirection: 'row', gap: sp.lg, alignItems: 'center' }}>
-            {p.photo ? (
-              <Image source={{ uri: p.photo }} style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
+            {/* `avatarSource` and not `p.photo`: a row still carrying a device
+                path from before this was fixed draws as the monogram every
+                client sees, rather than as a photo only this phone can open. */}
+            {avatarSource(p.photo) ? (
+              <Image source={{ uri: avatarSource(p.photo) as string }} style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.surface2 }} />
             ) : (
               <View style={{ width: 64, height: 64, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ ...value(20), color: t.brand }}>{initials}</Text>
@@ -296,6 +349,7 @@ export default function CoachProfile() {
               : <Text style={{ ...value(20), color: t.ink }}>{p.sessionFee}<Text style={{ ...ty.caption, color: t.ink3 }}> / session</Text></Text>}
           </View>
         </Card>
+        )}
 
         <Rule />
 
@@ -306,7 +360,17 @@ export default function CoachProfile() {
             is worse than one that is not offered, so when the profile could not
             be read the editor is withheld and the reason is stated. Account and
             sign-out sit below this branch and stay reachable. */}
-        {p.access !== 'ok' ? (
+        {p.access === 'loading' ? (
+          /* NOT the warning below. `resolveTrainerAccess` returns 'loading'
+             until the read settles, and `trainerAccessNote('loading')` is
+             "Loading your profile…" — which was being printed as the note under
+             a headline saying the profile could not be opened, in the warning
+             tone. On a slow link a coach's public profile was announced as
+             broken for as long as it took to load, and the coach stops typing
+             and goes looking for support. */
+          <Notice tone={t.ink3} kicker="Profile" title="Reading your profile"
+            note="Nothing below is editable until it has arrived, so an edit cannot be made against fields that are not yours yet." />
+        ) : p.access !== 'ok' ? (
           <Section>
             <Notice tone={t.warn} kicker="Profile" title="Your profile could not be opened for editing"
               note={p.accessNote ?? 'We could not confirm this is your own coaching profile, so nothing typed here would be stored.'} />
@@ -333,6 +397,14 @@ export default function CoachProfile() {
         <Section>
           <SectionHead title="Photo" />
           <QuickRow items={photoActions} />
+          {/* Said to the one person who can fix it, and the one person who
+              cannot see the problem: their own device opens its own file
+              happily. Never "add a photo" — they did add one. */}
+          {isDeviceAvatar(p.photo) ? (
+            <View style={{ marginTop: sp.md }}>
+              <Flag tone={t.warn}>{DEVICE_AVATAR_NOTE_COACH}</Flag>
+            </View>
+          ) : null}
         </Section>
 
         <Rule />
@@ -380,8 +452,11 @@ export default function CoachProfile() {
         <Section>
           <SectionHead title="How You Coach" />
           <DeliveryModeChoice />
+          {/* The ask while it is unanswered — the setup checklist counts this
+              question and `deliveryNote` only ever described a state. See
+              `deliveryAskLine` in src/lib/coachDelivery.ts. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {deliveryNote(delivery)}
+            {deliveryAskLine(delivery) ?? deliveryNote(delivery)}
           </Text>
           {delivery.shape === 'remote' ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -453,6 +528,18 @@ export default function CoachProfile() {
           {lc.status === 'error' ? (
             <Notice tone={t.warn} kicker="Policy" title="We couldn’t read your cancellation policy"
               note="Nothing typed here would be stored, so the controls are withheld rather than accepting an edit that goes nowhere. Your existing policy is unchanged — clients are still held to whatever it already says." />
+          ) : lc.status === 'loading' ? (
+            /* Withheld for the same reason the error branch is, and it used to
+               fall straight through to the live control drawn from the empty
+               defaults — `applies: false`, `fee: null` — which prints a policy
+               that is ON as off, and tells the coach clients may cancel at any
+               time with nothing recorded against them. A tap in that window did
+               not survive either: the write in src/ui/sessions.tsx returns early
+               until the read has landed, and the read then overwrote what they
+               set. So they turned their own policy back on and watched it go
+               off again. */
+            <Notice tone={t.ink3} kicker="Policy" title="Reading your cancellation policy"
+              note="It is unchanged and still applies to your clients while this loads. The controls are withheld for a moment rather than showing a policy that is off before we know whether it is." />
           ) : (
           <>
           <Pressable
@@ -540,6 +627,15 @@ export default function CoachProfile() {
               Repple records the fee and never collects it. Your client sees what they owe and who to pay — you.
             </Text>
           )}
+          {/* The same answer the fields above this section get, for the same
+              reason: this is the one setting in the app a client can be held
+              to, and the sentence beside it states what Repple does with a fee
+              that may never have left the phone. See src/lib/profileSave.ts. */}
+          {lcSaveNote ? (
+            <View style={{ marginTop: sp.md }}>
+              <Flag tone={lc.save.state === 'failed' ? t.crit : lc.save.state === 'pending' ? t.ink3 : t.good}>{lcSaveNote}</Flag>
+            </View>
+          ) : null}
           </>
           )}
         </Section>

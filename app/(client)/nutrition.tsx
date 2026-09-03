@@ -29,6 +29,10 @@ import { hitSlopFor } from '../../src/lib/a11y';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
+import { useToday } from '../../src/ui/today';
+import { startOfWeek } from '../../src/lib/weekStart';
+import { dayKeyOfDate } from '../../src/lib/entryEdit';
+import { groceryTicksKey, readGroceryTicks } from '../../src/lib/groceryTicks';
 import { useWearables } from '../../src/ui/wearables';
 import { caloriesLeft, caloriesNote, dayBurn, macrosFor, applyCoachAdjust, maintenanceFor } from '../../src/lib/nutrition';
 import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type EnergyPlan } from '../../src/lib/goalEnergy';
@@ -46,6 +50,15 @@ import { useBrand } from '../../src/ui/brand';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
+// The camera permission is about the hardware. This is about where the frame
+// goes, which is a different question with a different answer.
+import {
+  mayAnalyzePhoto, PHOTO_ASK_KICKER, PHOTO_ASK_TITLE, PHOTO_DESTINATION_BY_SUBJECT,
+  PHOTO_SENT_BY_SUBJECT, PHOTO_NOT_SENT_BY_SUBJECT, PHOTO_IF_YOU_DECLINE,
+  PHOTO_SEND_LABEL, PHOTO_DECLINE_LABEL, PHOTO_SEND_A11Y, PHOTO_DECLINE_A11Y,
+  PHOTO_REFUSED_NOTE, PHOTO_UNREAD_NOTE, PHOTO_OFF_NOTE,
+} from '../../src/lib/photoAI';
+import { usePhotoAI } from '../../src/ui/photoAI';
 import { parseFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 // The same review sheet the Food Log tab uses. This tab's photo path COMMITTED
@@ -267,7 +280,34 @@ export default function Nutrition() {
   };
   const [showGrocery, setShowGrocery] = useState(false);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
-  useEffect(() => { AsyncStorage.getItem('repple.grocery.checked').then((r) => { if (r) { try { setChecked(JSON.parse(r)); } catch { /* ignore */ } } }); }, []);
+  // ── whose shop, and which week ─────────────────────────────────────────
+  //
+  // The ticks lived under one unqualified key, `repple.grocery.checked`, keyed
+  // by nothing at all. The item keys are department plus item name, so
+  // "Produce|Spinach" ticked three weeks ago was still ticked the next time
+  // spinach was on the list — the member opened the list in the shop and it
+  // said 12 of 30 in cart before they had picked anything up, with the progress
+  // bar agreeing. The twelve were last week's staples, which are exactly the
+  // things they still need.
+  //
+  // Account and week. `useToday` rolls the week over at midnight without the
+  // screen being reopened, and an account-scoped key is unreadable to the next
+  // person on a shared handset by construction — which is why this needs no
+  // entry in src/lib/signOutState.ts and the old key did.
+  const todayKeyNow = useToday();
+  const grocWeekKey = useMemo(() => dayKeyOfDate(startOfWeek(new Date(`${todayKeyNow}T12:00:00`))), [todayKeyNow]);
+  const grocKey = groceryTicksKey(c.id, grocWeekKey);
+  useEffect(() => {
+    // The ticks are re-read whenever the key changes, and CLEARED when there is
+    // no key: a trolley from another account or another week is not this one's
+    // starting point.
+    if (!grocKey) { setChecked({}); return; }
+    let live = true;
+    AsyncStorage.getItem(grocKey)
+      .then((r) => { if (live) setChecked(readGroceryTicks(r)); })
+      .catch(() => { if (live) setChecked({}); });
+    return () => { live = false; };
+  }, [grocKey]);
   // Persist the client's meal swaps so they survive leaving the tab / relaunch.
   useEffect(() => { AsyncStorage.getItem('repple.mealOverride').then((r) => { if (r) { try { setOverride(JSON.parse(r)); } catch { /* ignore */ } } setOvHydrated(true); }); }, []);
   useEffect(() => { if (!ovHydrated) return; AsyncStorage.setItem('repple.mealOverride', JSON.stringify(override)).catch(() => {}); }, [override, ovHydrated]);
@@ -309,6 +349,15 @@ export default function Nutrition() {
   useEffect(() => { setBatch(1); setCook(false); setCookStep(0); }, [recipe]);
   const [nl, setNl] = useState('');
   const [logBusy, setLogBusy] = useState(false);
+  // The member's answer about sending a photograph of their food to a language
+  // model — its own subject and its own stored key, because agreeing to
+  // photograph a gym machine is not agreeing to photograph the table you are
+  // sitting at. See src/lib/photoAI.ts.
+  const photoAI = usePhotoAI('meal');
+  // True only while the question is on screen. Nothing has been photographed
+  // and nothing sent at that point, so dismissing the sheet is a cancel and
+  // never a quiet yes.
+  const [askPhoto, setAskPhoto] = useState(false);
   const [bcOpen, setBcOpen] = useState(false);
   // Everything that is about to become a row in the food log goes through one
   // sheet, on this tab as on the other. See src/ui/LogFoodSheet.tsx.
@@ -327,15 +376,59 @@ export default function Nutrition() {
   // first is on screen, the rest wait behind it, and closing the sheet advances
   // the queue rather than discarding it.
   const [queue, setQueue] = useState<FoodFacts[]>([]);
+  /**
+   * The question, put BEFORE the camera opens.
+   *
+   * This path posted a photograph of the member's food to api.anthropic.com —
+   * `analyzeMeal`, the `vision-analyze` edge function — behind a camera
+   * permission reading "Allow camera to log a meal by photo". That describes
+   * the hardware and nothing else. A plate is photographed at a table, and
+   * whoever is sitting round it goes with the food; none of them are in the
+   * room when the question is put, which is why it has to be put at all.
+   *
+   * Before the shutter, not after: a member who has already taken the photo
+   * has already taken it, and asking afterwards makes agreeing the way to stop
+   * having wasted the gesture. Same rule and same wording source as
+   * app/(client)/foodlog.tsx and app/(client)/scan-machine.tsx — one module,
+   * src/lib/photoAI.ts, so the three cannot drift.
+   */
   const photoLog = async () => {
+    const gate = mayAnalyzePhoto(photoAI.consent, visionAvailable());
+    if (gate.block === 'unknown') {
+      Alert.alert('One moment', 'Still checking your answer about photos. Try that again in a moment.');
+      return;
+    }
+    if (gate.block === 'unasked' || gate.block === 'refused') { setAskPhoto(true); return; }
+    await runPhotoLog(gate.allowed ? 'send' : 'off');
+  };
+
+  /**
+   * Take the photograph, and send it only on 'send'.
+   *
+   * Three outcomes rather than a boolean, because the sheet has to say WHY
+   * nothing was read. "You said no", "this build has no reader" and "the
+   * reader gave nothing back" are three different facts.
+   *
+   * Every one of them now lands on the SHEET rather than an alert. The old
+   * "Could not read that photo" alert pointed at the Food Log and threw the
+   * picture away; on the refusal branch that would have drawn a member's own
+   * decision as a failure and left them nowhere. The sheet is the route the
+   * Food Log tab has always offered, and it is the thing that makes "no" leave
+   * the feature working: the photo is on screen, it went nowhere, and the
+   * figures are typed against it.
+   */
+  const runPhotoLog = async (outcome: 'send' | 'refused' | 'off') => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera to log a meal by photo.'); return; }
     const res = await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true });
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];
-    setLogBusy(true);
+    // Only while something is actually being read. Nothing is in flight on the
+    // two branches that send nothing, and a spinner over a photo that is going
+    // nowhere describes a send that is not happening.
+    if (outcome === 'send') setLogBusy(true);
     let nb = asset.base64; try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) nb = mm.base64; } catch {}
-    if (visionAvailable() && nb) {
+    if (outcome === 'send' && visionAvailable() && nb) {
       const r = await analyzeMeal(nb, 'image/jpeg');
       if (r) {
         // Through the sheet, like everything else that becomes a row. This
@@ -352,11 +445,17 @@ export default function Nutrition() {
       }
     }
     setLogBusy(false);
-    // Nothing is read, so nothing is offered. Guessing macros here would be
+    // Nothing was read, so nothing is estimated. Guessing macros here would be
     // worse than logging nothing — the member would be planning around a
-    // number the app invented. The Food Log's photo path opens an empty sheet
-    // in this case; this tab points at it rather than growing a second one.
-    Alert.alert('Could not read that photo', visionAvailable() ? 'Nothing was logged. Describe it below, or enter it yourself from the Food Log.' : 'Photo logging turns on with the AI backend. Describe it below, or enter it yourself from the Food Log.');
+    // number the app invented. A blank sheet, with the picture beside it and a
+    // sentence saying which of the three reasons this is.
+    setPendingVia('photo');
+    setPendingPhoto(asset.uri);
+    setPendingTitle('Enter This Meal');
+    setPendingNote(outcome === 'refused' ? PHOTO_REFUSED_NOTE.meal
+      : outcome === 'off' ? PHOTO_OFF_NOTE.meal
+      : PHOTO_UNREAD_NOTE.meal);
+    setPending({ name: '', kcal: NaN, protein: null, carbs: null, fat: null, basis: null });
   };
   const barcodeLog = () => setBcOpen(true);
   const describeLog = async () => {
@@ -511,7 +610,14 @@ export default function Nutrition() {
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
   const grocKeys = DEPTS.flatMap((d) => (groc.byDept[d] || []).map((it) => d + '|' + it.item));
   const grocChecked = grocKeys.filter((k) => checked[k]).length;
-  const toggleGroc = (k: string) => setChecked((prev) => { const n = { ...prev, [k]: !prev[k] }; AsyncStorage.setItem('repple.grocery.checked', JSON.stringify(n)); return n; });
+  const toggleGroc = (k: string) => setChecked((prev) => {
+    const n = { ...prev, [k]: !prev[k] };
+    // No key means no account yet, and a tick written without one is a tick the
+    // next person on the handset inherits. It still shows on screen for this
+    // session; it simply is not kept.
+    if (grocKey) AsyncStorage.setItem(grocKey, JSON.stringify(n)).catch(() => {});
+    return n;
+  });
   const shareGrocery = async () => {
     // The warning travels with the file. A list shared to a phone's notes app
     // or printed is read where none of this screen's flags exist.
@@ -1257,6 +1363,57 @@ export default function Nutrition() {
       </Modal>
 
       {/* ── what the three day types mean ────────────────────────────────── */}
+      {/* ── the question, asked before the camera opens ─────────────────
+          Nothing has been photographed and nothing has been sent while this is
+          on screen, so every way out of it is a real answer:
+
+            Send the Photo to Be Read   take it, send it, read the meal
+            No — I'll Type It Myself    take it, send nothing, type the figures
+            Cancel / back               nothing at all happens
+
+          Dismissing it is Cancel and never a quiet yes. The two answers are
+          RECORDED rather than merely acted on, because a dismissal asks again
+          on the next tap and that is how a question becomes a nag.
+
+          Every sentence comes from src/lib/photoAI.ts rather than being typed
+          here, so what somebody agrees to cannot drift from what is sent — and
+          so this tab and the Food Log tab cannot come to say different things
+          about the same photograph going to the same place. */}
+      <Modal visible={askPhoto} transparent animationType="slide" onRequestClose={() => setAskPhoto(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
+          accessibilityRole="button" accessibilityLabel="Do not take a meal photo at all"
+          onPress={() => setAskPhoto(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>{PHOTO_ASK_KICKER.meal}</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>{PHOTO_ASK_TITLE.meal}</Text>
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{PHOTO_DESTINATION_BY_SUBJECT.meal}</Text>
+            <View style={{ marginTop: sp.lg, gap: sp.xs }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>What is sent</Text>
+              {PHOTO_SENT_BY_SUBJECT.meal.map((line) => (
+                <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>&bull; {line}</Text>
+              ))}
+              <View style={{ height: sp.sm }} />
+              <Text style={{ ...ty.micro, color: t.ink3 }}>What is not</Text>
+              {PHOTO_NOT_SENT_BY_SUBJECT.meal.map((line) => (
+                <Text key={line} style={{ ...ty.caption, color: t.ink2 }}>&bull; {line}</Text>
+              ))}
+            </View>
+            {/* The half of the question that makes "no" an answer somebody can
+                afford to give, stated before the choice and not after it. */}
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{PHOTO_IF_YOU_DECLINE.meal}</Text>
+            <View style={{ marginTop: sp.xl, gap: sp.sm }}>
+              <Cta label={PHOTO_SEND_LABEL.meal} a11yLabel={PHOTO_SEND_A11Y.meal} wide
+                onPress={() => { photoAI.answer('yes'); setAskPhoto(false); void runPhotoLog('send'); }} />
+              <Ghost label={PHOTO_DECLINE_LABEL.meal} a11yLabel={PHOTO_DECLINE_A11Y.meal}
+                onPress={() => { photoAI.answer('no'); setAskPhoto(false); void runPhotoLog('refused'); }} />
+              <Ghost label="Cancel" a11yLabel="Do not take a meal photo at all"
+                onPress={() => setAskPhoto(false)} />
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
       <Modal visible={dayInfo} transparent animationType="slide" onRequestClose={() => setDayInfo(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDayInfo(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>

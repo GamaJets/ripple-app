@@ -46,9 +46,33 @@
 // sitting in the first argument — and that is the whole of its claim.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { assertRootFloors } from './gate-floor.mjs';
 
 const ROOT = process.cwd();
-const ROOTS = ['app', 'src/ui', 'src/lib'];
+/**
+ * Every tree that renders a date or a figure for a person to read.
+ *
+ * It was `['app', 'src/ui', 'src/lib']`, and the header above says the rule is
+ * about a white-label product where "a gym in Dubai, one in London and one in
+ * Tokyo run the same binary" — which is a sentence about the CONSOLE as much as
+ * the handset, and the console was not in the list. `scripts/check-console-when.mjs`
+ * happens to forbid `toLocaleDateString(` under `studio-web` for a different
+ * reason (whose CLOCK, not whose locale), so a hardcoded `'en-GB'` on a DATE in
+ * the console would be caught there by accident. Nothing at all was looking at
+ * `new Intl.NumberFormat('en-GB')` in a console file, which is the `num()` bug
+ * this gate exists for, in the tree an accountant reads money in.
+ *
+ * `supabase/functions` is here for the same reason: a receipt or an invite email
+ * composed on the server is read by whoever it is addressed to, not by us.
+ *
+ * Neither tree names a locale today. This closes the hole before it is used, and
+ * costs nothing to keep closed.
+ */
+const ROOTS = [
+  'app', 'src/ui', 'src/lib',
+  'studio-web/app', 'studio-web/components', 'studio-web/lib',
+  'supabase/functions',
+];
 
 /** The one file allowed to name a locale: it is the file that resolves them. */
 const ALLOWED = new Set(['src/lib/locale.ts']);
@@ -69,8 +93,11 @@ function walk(dir, out = []) {
 }
 
 const findings = [];
+const perRoot = new Map();
 for (const root of ROOTS) {
-  for (const file of walk(join(ROOT, root))) {
+  const inRoot = walk(join(ROOT, root));
+  perRoot.set(root, inRoot.length);
+  for (const file of inRoot) {
     const rel = relative(ROOT, file);
     if (ALLOWED.has(rel) || /\.test\.tsx?$/.test(rel)) continue;
     const lines = readFileSync(file, 'utf8').split('\n');
@@ -80,6 +107,15 @@ for (const root of ROOTS) {
     });
   }
 }
+
+/* ── the empty-set guard ───────────────────────────────────────────────────
+ *
+ * There was none: `walk` swallows a missing directory and returns `[]`, so a
+ * renamed root made this gate print "ok, no locale is named in the source" over
+ * a tree it had not opened. Counted per ROOT — see scripts/gate-floor.mjs for
+ * why a single total is not a guard.
+ */
+assertRootFloors('check:locale', perRoot);
 
 if (findings.length) {
   console.error('A locale is named in the source instead of read from the reader:\n');

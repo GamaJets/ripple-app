@@ -28,6 +28,8 @@ import { supabase } from './supabase';
 import { USE_SUPABASE } from './config';
 import { reportError } from './reportError';
 import type { LoadStatus } from '../ui/loadStatus';
+import type { Diet, Goal } from './types';
+import { asOwnDiet, asOwnGoal } from './coachMacros';
 
 /** The row, in the app's own vocabulary. Every field nullable: null means the
  *  coach has not set that one, which is not zero. */
@@ -124,6 +126,9 @@ export async function saveCoachPrefs(patch: Partial<{
   goalRevenue: number | null;
   goalClients: number | null;
   nudgeCooldownDays: number | null;
+  ownGoal: Goal | null;
+  ownDiet: Diet | null;
+  ownActivity: number | null;
 }>): Promise<boolean> {
   if (!USE_SUPABASE) return false;
   try {
@@ -135,6 +140,9 @@ export async function saveCoachPrefs(patch: Partial<{
     if ('goalRevenue' in patch) row.goal_revenue = patch.goalRevenue;
     if ('goalClients' in patch) row.goal_clients = patch.goalClients;
     if ('nudgeCooldownDays' in patch) row.nudge_cooldown_days = patch.nudgeCooldownDays;
+    if ('ownGoal' in patch) row.own_goal = patch.ownGoal;
+    if ('ownDiet' in patch) row.own_diet = patch.ownDiet;
+    if ('ownActivity' in patch) row.own_activity = patch.ownActivity;
     // Nothing to say. Not a failure, but not a write either, and reporting it
     // as success would let a caller claim it saved something it never sent.
     if (Object.keys(row).length <= 2) return false;
@@ -154,5 +162,54 @@ export async function saveCoachPrefs(patch: Partial<{
   } catch (e) {
     reportError('coachPrefs.write', e);
     return false;
+  }
+}
+
+/* ── the coach's own macro answers ─────────────────────────────────────────
+ *
+ * A SEPARATE read, and that is the whole design of it. `own_goal`, `own_diet`
+ * and `own_activity` arrive with supabase/parts/1020, and a column PostgREST
+ * cannot find fails the whole SELECT it appears in — so folding these three
+ * into `fetchCoachPrefs` above would have taken the class rate and the monthly
+ * targets down with them on every install running against a database where
+ * that part has not been applied yet. One unapplied part must cost exactly the
+ * feature it belongs to and nothing beside it.
+ *
+ * The same reasoning does NOT apply to the write: an upsert only names the
+ * columns it is given, so `saveCoachPrefs` carries all seven safely.
+ */
+export async function fetchOwnMacroInputs(): Promise<{
+  goal: Goal | null; diet: Diet | null; activity: number | null; status: LoadStatus;
+}> {
+  const NONE = { goal: null, diet: null, activity: null };
+  if (!USE_SUPABASE) return { ...NONE, status: 'ready' };
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id;
+    if (!uid) return { ...NONE, status: 'ready' };
+    const { data, error } = await supabase
+      .from('coach_prefs')
+      .select('own_goal, own_diet, own_activity')
+      .eq('user_id', uid)
+      .maybeSingle();
+    if (error) {
+      reportError('coachPrefs.readOwnMacros', error);
+      return { ...NONE, status: 'error' };
+    }
+    const row = (data ?? null) as { own_goal?: unknown; own_diet?: unknown; own_activity?: unknown } | null;
+    // Narrowed rather than cast. A value outside the three goals or the five
+    // diets does not fail in `macrosFor` — it falls through to whatever its
+    // last branch is and produces a plausible number for a diet nobody
+    // follows, which is the same class of defect as the defaults these columns
+    // replace.
+    return {
+      goal: asOwnGoal(row?.own_goal),
+      diet: asOwnDiet(row?.own_diet),
+      activity: num(row?.own_activity),
+      status: 'ready',
+    };
+  } catch (e) {
+    reportError('coachPrefs.readOwnMacros', e);
+    return { ...NONE, status: 'error' };
   }
 }

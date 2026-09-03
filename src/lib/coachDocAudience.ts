@@ -36,6 +36,25 @@
 // 91 and 96). No function in this file names that, and none should.
 
 /** A row of `coach_document_audience()`, as PostgREST hands it over. */
+/**
+ * The ceiling `coach_document_audience()` takes, mirrored here for the same
+ * reason as STANDING_ROW_CAP in src/lib/coachDocs.ts and with more riding on
+ * it.
+ *
+ * `limit 500` inside the function body
+ * (supabase/parts/156-a-document-meant-for-one-client.sql), where
+ * src/lib/rowCap.ts cannot reach — the call site asks for 1001 rows from a
+ * function that will never return more than 500, so `capped()` has been
+ * reporting a full page as the whole audience.
+ *
+ * This is the read `audienceLine` counts and `sendBlock` judges, and the picker
+ * under it performs a send that cannot be undone (SEND_IS_ONE_WAY). A coach at
+ * a gym past five hundred, reading "9 of 500 have been sent this" over a list
+ * that is really a prefix, is deciding who still needs the agreement from a
+ * list missing the people who do.
+ */
+export const AUDIENCE_ROW_CAP = 500;
+
 export interface RawAudienceRow {
   client_id: string;
   client_name: string | null;
@@ -122,22 +141,32 @@ export const SEND_IS_ONE_WAY =
   + 'meant — everyone who accepted the old one keeps that record and can still read what they agreed to.';
 
 /** Why a document cannot be sent to anybody at all. */
-export type SendBlock = 'retired' | 'no-clients' | 'unread';
+export type SendBlock = 'retired' | 'no-clients' | 'unread' | 'part-read';
 
 /**
  * Whether the picker may be offered, and why not when it may not.
  *
- * `status` is the read behind `members`. 'unread' is deliberately its own
- * answer rather than folding into 'no-clients': a coach with twelve clients and
- * a failed read must not be told they have nobody to send to.
+ * `read` is the read behind `members`. Three of the four answers are about not
+ * knowing, and they are kept apart because they are different facts:
+ *
+ *   · 'unread' — the read failed. A coach with twelve clients and a failed read
+ *     must not be told they have nobody to send to.
+ *   · 'part-read' — the read came back AT ITS ROW LIMIT (src/lib/rowCap.ts), so
+ *     the rows are real and there are more of them. That is not a smaller
+ *     audience, it is an unknown one, and it disqualifies the picker for a
+ *     reason particular to this screen: `isAddressed` decides which of the two
+ *     `sendWarning` sentences a coach reads before a ONE-WAY action, and a
+ *     recipient row beyond the cap makes it choose the wrong one. So the send
+ *     is blocked rather than offered under a warning that may not be true.
  */
 export function sendBlock(o: {
   retired: boolean;
   members: AudienceMember[] | null | undefined;
-  read: 'ok' | 'failed';
+  read: 'ok' | 'failed' | 'truncated';
 }): SendBlock | null {
   if (o.retired) return 'retired';
   if (o.read === 'failed' || !o.members) return 'unread';
+  if (o.read === 'truncated') return 'part-read';
   if (!o.members.length) return 'no-clients';
   return null;
 }
@@ -150,6 +179,9 @@ export function sendBlockLine(block: SendBlock): string {
       return 'You have no clients to send this to yet. Anybody who joins you with your code can be sent it from here.';
     case 'unread':
       return 'Your clients could not be read just now, so there is nobody to choose from. This is not a statement that you have none.';
+    case 'part-read':
+      return 'You have more clients than this list could bring back, so it cannot be said who this document is currently in front of. '
+        + 'Sending is held until that can be read in full, because the warning shown before a send depends on it and sending cannot be undone.';
   }
 }
 

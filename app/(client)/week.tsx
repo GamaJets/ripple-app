@@ -132,6 +132,18 @@ export default function ThisWeek() {
             <Notice tone={t.warn} kicker="This week" title="We couldn’t read your training log"
               note="Days you have already trained may not be marked below. Nothing has been lost — this screen just can't see it right now." />
           </View>
+        ) : logStatus === 'partial' ? (
+          /* The other status that produces the same unmarked week, and the one
+             that used to fall through this gate in silence. A truncated log is
+             short of exactly the entries the cap dropped, and the dots go
+             missing with nothing on screen to explain them — which is the same
+             cost as a failed read, arrived at from a read that succeeded. Its
+             own sentence, because "we could not read it" and "we could not read
+             all of it" are two different things to be told. */
+          <View style={{ marginTop: sp.lg }}>
+            <Notice tone={t.warn} kicker="This week" title="We couldn’t read your whole training log"
+              note="You have more history than we can read at once, so some days you trained may not be marked below. Nothing has been lost." />
+          </View>
         ) : null}
 
         <Section>

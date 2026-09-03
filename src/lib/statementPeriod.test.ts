@@ -24,6 +24,7 @@ import {
   CALENDAR_YEAR_START,
   YEAR_START_IS_YOURS,
 } from './coachStatement';
+import { fmtPointDay } from './format';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -142,7 +143,14 @@ eq(fiscalQuarter(2026, 0, { month: 4, day: 6 }).label, 'Q1 2026/27', 'and one be
   ok(!!p, 'two readable dates in order are a period');
   eq(p.from, '2026-03-01', 'the first is the start');
   eq(p.to, '2026-05-31', 'the second is the end');
-  ok(p.label.includes('1 Mar 2026') && p.label.includes('31 May 2026'), 'and the label spells both out rather than saying "custom"');
+  // Derived rather than pinned: the label renders each day in the reader's own
+  // language now, so the literals were asserting the formatter's English. The
+  // claim that matters is unchanged — BOTH ends are spelled out, so the label
+  // never collapses to the word "custom" and leaves a coach guessing at the
+  // window a statement covers.
+  ok(p.label.includes(fmtPointDay(2026, 2, 1)) && p.label.includes(fmtPointDay(2026, 4, 31)),
+    'and the label spells both out rather than saying "custom"');
+  ok(!/custom/i.test(p.label), 'and never falls back to the word itself');
 }
 ok(!!customRange('2026-03-01', '2026-03-01'), 'a single day is a period');
 

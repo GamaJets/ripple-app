@@ -38,7 +38,7 @@
 // only — the empty state shows no hero of zeros), the bordered KPI grid became
 // hairline-divided KPI rows, the flag boxes became a hairline-divided list with
 // a tone dot beside ink-coloured text, and the Georgia serif header is gone.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Alert, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -54,6 +54,14 @@ import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { readNumber } from '../../src/lib/units';
+// A minor-unit integer from the register, as the whole-unit number the owner
+// typed into the form beside it — scaled by the currency, never by a hundred.
+import { wholeFromMinor, NO_CURRENCY_CHECK_NOTE } from '../../src/lib/wholeUnits';
+// `tenants.timezone`, and the one function that turns it into a calendar day.
+// The "joined this month" check compares against `memberships.started_on`,
+// which app/(owner)/members.tsx writes on the gym's own calendar.
+import { fetchGymZone, gymDay } from '../../src/lib/gymZone';
+import { isoDate } from '../../src/lib/format';
 // When the register was read, whether the phone can reach us, and a way to ask
 // again — the three things nineteen of the twenty owner screens did without.
 import { Fetched } from '../../src/ui/fetched';
@@ -168,6 +176,28 @@ export default function Financials() {
    *  this screen are that local figure against the register, and the register
    *  is the half that can be out of date. */
   const reread = useCallback(() => setAgain((n) => n + 1), []);
+
+  /**
+   * `tenants.timezone`, held in a ref rather than in state.
+   *
+   * A ref because nothing on this screen RENDERS the zone — it is used once,
+   * inside the read effect, to cut one calendar day. Putting it in state would
+   * add a second render pass and a dependency that re-runs the register read
+   * every time the zone read lands, for a value that changes what the effect
+   * computes and nothing that is drawn. Null covers a gym with no zone, a read
+   * that failed and a read still in flight, and `gymDay` answers all three the
+   * same way: null, which falls back to the reader's day at the call site.
+   */
+  const zoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const id = tenant?.id;
+    if (!id) { zoneRef.current = null; return; }
+    fetchGymZone(supabase, id)
+      .then((z) => { if (live) zoneRef.current = z.zone; })
+      .catch((e) => { reportError('financials.zone', e); if (live) zoneRef.current = null; });
+    return () => { live = false; };
+  }, [tenant?.id]);
   const pull = usePullToRefresh(reread);
 
   useEffect(() => {
@@ -217,7 +247,8 @@ export default function Financials() {
          * asks for the window it always wanted, which is a bounded set that
          * cannot outgrow the cap the way "all of history" does.
          */
-        const since = new Date(Date.now() - 30 * 86400000).toISOString();
+        const sinceMs = Date.now() - 30 * 86400000;
+        const since = new Date(sinceMs).toISOString();
         const [plans, memberships, payments] = await Promise.all([
           fetchPlans(supabase, tenant.id),
           fetchMemberships(supabase, tenant.id),
@@ -228,7 +259,22 @@ export default function Financials() {
         // summarise returns null when no active membership sits on a priced
         // plan. Passed straight through: "not known" must not become a zero
         // that makes an owner doubt a figure they are right about.
-        setDerivedMrr(sum.mrrCents == null ? null : Math.round(sum.mrrCents / 100));
+        // `wholeFromMinor`, not `/ 100`. The factor is a property of the
+        // currency and it is 1, 100 or 1000 — see src/lib/wholeUnits.ts. This
+        // line said `Math.round(sum.mrrCents / 100)`, so a gym billing in yen
+        // had a real ¥500,000 of recurring revenue reported back to it as
+        // 5,000, flagged as disagreeing with the figure the owner had entered
+        // correctly, and offered under a "Use It" button that writes it into
+        // their own numbers — after which the health score, the grade and the
+        // net-profit sentence are all computed from a figure a hundred times
+        // too small. In Kuwaiti dinar it was ten times too big, which is the
+        // direction that reads as a good month.
+        //
+        // Null when the gym has not set a currency, because the stored integer
+        // could then be hundredths of something or whole units of it and the
+        // decimal point itself would be a guess. The form says so instead —
+        // NO_CURRENCY_CHECK_NOTE, below.
+        setDerivedMrr(wholeFromMinor(sum.mrrCents, cur));
         setDerivedMembers(memberships.length ? sum.activeMembers : null);
 
         // `since` above is thirty days back in whole days, so the window does
@@ -242,9 +288,36 @@ export default function Financials() {
         // withholds the check rather than comparing a typed figure against a
         // number made of two moneys.
         const oneMoney = recent.length > 0 && new Set(recent.map((p) => p.currency)).size === 1;
-        setDerivedRevenue(oneMoney ? Math.round(recent.reduce((a, p) => a + p.amountCents, 0) / 100) : null);
+        // Scaled by the currency the rows actually agree on, not by the gym's
+        // current setting: `oneMoney` has just established that every payment
+        // in the window states the same currency, and a gym that changed its
+        // currency last month has a ledger whose older rows are still in the
+        // old one. Using `cur` here would divide yen by a hundred the moment
+        // the gym switched to GBP.
+        setDerivedRevenue(oneMoney
+          ? wholeFromMinor(recent.reduce((a, p) => a + p.amountCents, 0), recent[0].currency)
+          : null);
 
-        const sinceDay = since.slice(0, 10);
+        /**
+         * The cut-off day, on the GYM's calendar — not UTC's.
+         *
+         * This was `since.slice(0, 10)`, which is a UTC date slice by another
+         * name: `since` is an ISO instant, so its first ten characters are
+         * Greenwich's day whatever the gym's is. `memberships.startedOn` is
+         * written by app/(owner)/members.tsx as the GYM's calendar day, so the
+         * two sides of this `>=` were being cut on different calendars — a
+         * member who joined on the boundary day is counted or not depending on
+         * which side of Greenwich the gym is, and nothing on the screen says
+         * which. The comparison is a string compare on `YYYY-MM-DD`, so both
+         * halves have to be the same kind of day or it is not a comparison.
+         *
+         * `gymDay` returns null for a gym that has not set a zone, for a zone
+         * this runtime cannot resolve, and while the zone read is in flight.
+         * All three fall back to the reader's own calendar day — the same
+         * fallback `gymTodayWindow` makes, and the same one `members.tsx` was
+         * writing the start dates with — so the two sides still agree.
+         */
+        const sinceDay = gymDay(sinceMs, zoneRef.current) ?? isoDate(new Date(sinceMs));
         setDerivedNew(memberships.length ? memberships.filter((m) => m.startedOn >= sinceDay).length : null);
         setDerivedFailed(false);
         setFetchedAt(Date.now());
@@ -433,7 +506,19 @@ export default function Financials() {
                     : derivedNew;
                   const asMoney = f.key === 'mrr' || f.key === 'revenue';
                   const fmtv = (n: number) => (asMoney ? money(n) : n.toLocaleString());
-                  const note = reconcileNote(chk, f.label.toLowerCase(), fmtv);
+                  // With no currency the two MONEY checks have a null derived
+                  // figure, and `reconcile` reads that as 'no_record' — which
+                  // renders "Nothing recorded yet, so your recurring membership
+                  // revenue cannot be checked against the register". That
+                  // sentence sends an owner looking through memberships they
+                  // entered correctly. The register is fine; one field in Ops
+                  // is blank, and this says which. The COUNT checks are
+                  // unaffected — a member count needs no currency — so they
+                  // keep their own wording.
+                  const currencyBlind = asMoney && !cur;
+                  const note = currencyBlind
+                    ? NO_CURRENCY_CHECK_NOTE
+                    : reconcileNote(chk, f.label.toLowerCase(), fmtv);
                   if (!note) return null;
                   return (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 6 }}>
@@ -444,7 +529,13 @@ export default function Financials() {
                       <Text style={{ ...ty.caption, color: chk.state === 'differs' ? t.ink2 : t.ink3, flex: 1 }}>
                         {note}
                       </Text>
-                      {val != null ? (
+                      {/* No "Use It" under the currency-blind sentence: there
+                          is no figure to use, and `val` is null there anyway —
+                          the condition is written out so the two cannot drift.
+                          This button WRITES the derived figure into the owner's
+                          own numbers, which is what made the scaling bug above
+                          more than a display fault. */}
+                      {val != null && !currencyBlind ? (
                         <Ghost label="Use It" onPress={() => setDraft((d) => ({ ...d, [f.key]: String(val) }))} />
                       ) : null}
                     </View>

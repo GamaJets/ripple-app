@@ -38,6 +38,7 @@
 // `trialFrom` therefore returns null for an unread start, and every caller has
 // to handle null rather than being handed a plausible number.
 import type { LoadStatus } from '../ui/loadStatus';
+import { isoDay } from './weekStart';
 
 /** The length of the free trial, in days. One copy, and it is a constant rather
  *  than a column — see the header. Kept equal to `TRIAL_DAYS` in trial.ts by
@@ -77,7 +78,14 @@ export function trialFrom(startedAt: string | null | undefined, now: number): Tr
   // phone is a day fast should not be shown an error about their account.
   const daysLeft = Math.max(0, Math.min(TRIAL_DAYS, TRIAL_DAYS - elapsed));
   return {
-    startedOn: new Date(t).toISOString().slice(0, 10),
+    // The coach's own day, not UTC's. `daysLeft` above is counted from the
+    // start INSTANT and is unaffected either way, but `startedOn` is the date
+    // this is shown as — "your trial started on the 3rd" — and a coach who
+    // signed up at 5pm in Los Angeles was told the 4th. They then read a
+    // countdown that had already spent a day they could not account for, on the
+    // one screen whose whole job is to say honestly how much time is left
+    // before they are asked for money.
+    startedOn: isoDay(new Date(t)),
     daysLeft,
     expired: daysLeft <= 0,
   };

@@ -10,11 +10,27 @@
 // src/ui/injuryDocs.ts), so for that hour anybody holding any of those devices
 // can open somebody else's physiotherapy report by tapping a history entry.
 //
-// The whole design of this feature is that the file never leaves the member's
-// own account: a private bucket, own-folder storage policies with no trainer
+// The whole design of this feature is that NOBODY ELSE ON THIS PLATFORM gets
+// the file: a private bucket, own-folder storage policies with no trainer
 // branch, and a screen that tells the member out loud that their coach cannot
 // see it (supabase/parts/91-injury-documents.sql). A promise kept at the
 // database and broken by the Open button is not kept.
+//
+// That paragraph used to open "the file never leaves the member's own account",
+// which was the wording the whole product used and which was not true even
+// then. Reading a document means sending a copy of it to OCR.space; the member
+// is now asked, per document, before it goes, and the answer is written to a
+// ledger — src/lib/injuryDocConsent.ts and supabase/parts/1000. `SCREEN_PROMISE`
+// there is the sentence that replaced it, and it deliberately does not promise
+// the document is never sent.
+//
+// None of that weakens the rule THIS file holds, and it is worth being exact
+// about why. The consented send is one POST to one named vendor, made by an
+// edge function, that the member agreed to that minute. What `Linking.openURL`
+// did was hand a live signed URL to another app on the device and leave it in
+// that app's history, synced across every device on the account, for an hour,
+// with nobody asked about anything. A disclosed send to one recipient and an
+// undisclosed leak to any number of them are not the same act.
 //
 // ── Why the answer depends on the file and not on the screen ──────────────
 //

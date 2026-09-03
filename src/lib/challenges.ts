@@ -241,6 +241,56 @@ export const myBoardRow = (board: BoardRow[]): BoardRow | null =>
   board.find((r) => r.isMe) || null;
 
 /**
+ * How many rows `challenge_board()` will ever hand back.
+ *
+ * ── Why this number is here and not only in the SQL ────────────────────────
+ *
+ * The function ends `limit 200` (supabase/parts/128-a-cohort-and-a-credit.sql).
+ * That is a deliberate product decision — a leaderboard past two hundred names
+ * is not a leaderboard — and it is NOT the PostgREST row cap, so nothing in
+ * src/lib/rowCap.ts sees it. A gym-wide challenge with four hundred entrants
+ * therefore returned two hundred real rows, with no error and no flag, and the
+ * provider reported 'ready' over them.
+ *
+ * What that printed is the reason this constant now exists. `my_challenges()`
+ * carries the TRUE head count, so one sheet said both of these at once:
+ *
+ *     400 athletes on this board          ← standingLine, from head_count
+ *     You are #147 of 200                 ← rankLine, counting the page
+ *
+ * and a member ranked 250th — a member who had joined, and whose score the
+ * server had computed — opened the board, could not find themselves on it, and
+ * was given no sentence saying why.
+ *
+ * ── Why `capped()` cannot be used here ────────────────────────────────────
+ *
+ * src/lib/rowCap.ts detects truncation by asking for one row MORE than it will
+ * accept, so a full page and a cut-off one stop looking alike. That probe is
+ * not available through this door: the limit lives inside the function, the
+ * client's own `.limit()` can only narrow it further, and the server will never
+ * answer with 201. So the test is `>= BOARD_CAP` — the same shape
+ * src/ui/glucoseData.ts already uses against the PostgREST cap for the same
+ * reason.
+ *
+ * That is deliberately conservative: a challenge with exactly two hundred
+ * entrants reports 'partial' and its rank loses a denominator it was entitled
+ * to. One board in that exact position saying less than it could is a far
+ * smaller wrong than every larger board stating a denominator that is not true.
+ */
+export const BOARD_CAP = 200;
+
+/**
+ * Whether a board came back at the server's own ceiling, and so is a prefix.
+ *
+ * Counts the RAW rows the server sent, not the shaped ones. `shapeBoard` drops
+ * a row with no place or no score, so a truncated page carrying one unusable
+ * row would arrive here as 199 and be waved through as complete — the read was
+ * cut off either way, and a row we could not draw does not make the rest of the
+ * board the whole of it.
+ */
+export const boardTruncated = (rawRowCount: number): boolean => rawRowCount >= BOARD_CAP;
+
+/**
  * A score with its unit, for a screen.
  *
  * Tonnage keeps a decimal (4.0 t is a different claim from 4 t after a week of
@@ -302,18 +352,72 @@ export function standingLine(status: LoadStatus, c: ChallengeRow): string {
 /**
  * The line above the board itself, once it has been fetched.
  *
- * `board` is the whole page of rows, so a rank stated here is a rank within
- * what came back. That is only the true rank when the read was whole, which is
- * why 'partial' says nothing — the server's `place` column is computed over
- * every participant, but "of 12" would be counting the page.
+ * `board` is the whole page of rows, so a DENOMINATOR stated here is a count of
+ * the page. That is only the whole board when the read was whole, which is why
+ * "of N" appears under 'ready' and nowhere else.
+ *
+ * ── the half of 'partial' that is not missing ─────────────────────────────
+ *
+ * The place itself is a different matter and this line used to throw it away.
+ * `challenge_board()` computes `place` with `rank() over (order by score desc)`
+ * across every participant BEFORE it applies its own `limit 200`, so a member
+ * sitting at #147 of four hundred is told #147 by the server and that number is
+ * simply correct — it is the denominator, and only the denominator, that the
+ * page cannot supply. Refusing the whole sentence over the wrong half left a
+ * member who had joined, and whose score had been computed, with no answer at
+ * all to the one question the sheet is for.
+ *
+ * So under 'partial' the rank is stated bare. And when the member is NOT in the
+ * page — the case that has no honest figure anywhere — the line says that in
+ * words, rather than leaving them to conclude from an unfamiliar list that the
+ * gym has forgotten they entered.
  */
 export function rankLine(status: LoadStatus, board: BoardRow[]): string {
   if (status === 'loading') return 'Loading the board…';
   if (status === 'error') return 'The board could not be read.';
-  if (status === 'partial') return 'This board is longer than we could read.';
   const me = myBoardRow(board);
+  if (status === 'partial') {
+    return me
+      ? `You are #${num(me.place)} · this board is longer than we can show`
+      : 'This board is longer than we can show, and your place is past the part of it we can see.';
+  }
   if (!me) return `${num(board.length)} on the board`;
   return `You are #${num(me.place)} of ${num(board.length)}`;
+}
+
+/**
+ * Whether the Join and Leave controls on a challenge row mean anything.
+ *
+ * ── The defect this exists for ────────────────────────────────────────────
+ *
+ * `src/ui/challenges.tsx` keeps the previous list on purpose when a read fails
+ * — "Clearing it here would tell a client their gym is running nothing" — which
+ * is the right call in a provider. The screen did not finish it: it drew the
+ * banner ("We couldn’t check which challenges are running. This is a connection
+ * problem, not an empty gym.") and then mapped over every stale row underneath,
+ * each with a live Leave control.
+ *
+ * So the screen says it does not know the state of these challenges, and offers
+ * to change that state in the same breath. A member reads the banner, sees a
+ * challenge they believe they have already finished, taps Leave, and withdraws
+ * from a board whose current standing the app has just said it cannot see.
+ *
+ * Either the rows carry the caveat or the controls come off. They may not do
+ * neither, and the cheapest correct answer is both: the rows stay — they are
+ * the last thing that was true and hiding them WOULD say the gym is running
+ * nothing — and the controls wait for a read.
+ */
+export function challengeActionsAllowed(status: LoadStatus): boolean {
+  return status === 'ready';
+}
+
+/** Why the controls are not there, or null when they are. One sentence, on the
+ *  row, next to where the button was. */
+export function staleChallengeNote(status: LoadStatus): string | null {
+  if (status === 'loading') return 'Checking this one…';
+  if (status === 'error') return 'Last read — joining and leaving are off until this can be checked.';
+  if (status === 'partial') return 'Part of this list came back — joining and leaving are off until all of it does.';
+  return null;
 }
 
 /**

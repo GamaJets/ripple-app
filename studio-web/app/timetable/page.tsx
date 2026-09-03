@@ -15,7 +15,17 @@
 // adds the other thing an owner cannot otherwise see: where their trainers
 // actually are.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+// The reader's locale, the GYM's zone for instants; no zone at all for the
+// calendar days the week strip is built from. Both were the reader's clock,
+// which is how a 06:00 class on a Dubai timetable read 02:00 — and, for a
+// reader far enough west, under the previous day's heading.
+import { gymDateTimeText, gymTimeText, calendarDateText } from '@lib/gymWhen';
+// Escape, focus and the tab trap these dialogs never had.
+import { useDialog, dialogPanel } from '@/lib/dialog';
+import { parseGymZone } from '@lib/gymZone';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
@@ -48,10 +58,16 @@ interface Board { classes: GymClass[]; slots: PtSlot[] }
 
 export default function Timetable() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // Kept separate from `err`: load() clears that on a successful timetable
   // read moments later, which would wipe this message off the screen.
   const [gymNameErr, setGymNameErr] = useState<string | null>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [raw, setRaw] = useState<Board | null>(null);
   const [openClass, setOpenClass] = useState<GymClass | null>(null);
   // The class being corrected. There was no edit-a-class path in the product at
@@ -131,6 +147,10 @@ export default function Timetable() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) { setRaw({ classes: [], slots: [] }); return; }
       // supabase-js resolves with { data, error } rather than rejecting, so a
@@ -139,10 +159,12 @@ export default function Timetable() {
       // the error leaves the sidebar saying "No gym linked", which the owner reads
       // as a fact about their account: they go off to re-link a gym that was
       // linked all along and never learn the read is what broke.
-      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
       if (live) {
         setGymName(tErr ? null : (t?.name ?? null));
         setGymNameErr(tErr ? (tErr.message ?? 'Could not read which gym this account is linked to.') : null);
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
       // The roster, independently of the board: it is not week-scoped, and a
       // membership read that fails must not empty the timetable with it.
@@ -172,8 +194,11 @@ export default function Timetable() {
   // have been reading for months without saying so.
   const classSum = useMemo(() => (raw ? summariseAttendance(raw.classes) : null), [raw]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
   if (me.roleUnknown) {
     return (
       <Shell me={me} gymName={gymName} current="/timetable">
@@ -235,7 +260,11 @@ export default function Timetable() {
   // showing.
   const lastDayLabel = new Date(weekOpened);
   lastDayLabel.setDate(weekOpened.getDate() + 6);
-  const weekLabel = `${weekOpened.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${lastDayLabel.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
+  // Calendar days, not instants: both Dates are LOCALLY built midnights, so
+  // drawing them in any zone at all could name the day before.
+  const dayOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const short = { day: 'numeric', month: 'short' } as const;
+  const weekLabel = `${calendarDateText(dayOf(weekOpened), short) ?? '—'} – ${calendarDateText(dayOf(lastDayLabel), short) ?? '—'}`;
 
   const classFor = (id: string) => raw?.classes.find((x) => x.id === id) ?? null;
 
@@ -302,9 +331,9 @@ export default function Timetable() {
 
   const cols: Column<TimetableEntry>[] = [
     { key: 'when', header: 'When', value: (e) => e.startsAt,
-      render: (e) => new Date(e.startsAt).toLocaleString(undefined, {
+      render: (e) => gymDateTimeText(e.startsAt, zone, {
         weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-      }) },
+      }) ?? <span className="dash">not stated</span> },
     { key: 'what', header: 'What', value: (e) => e.title,
       render: (e) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -449,7 +478,7 @@ export default function Timetable() {
              } />
       </div>
 
-      {conflicts.length ? <Clashes rows={conflicts} /> : null}
+      {conflicts.length ? <Clashes rows={conflicts} zone={zone} /> : null}
 
       <FloorCover board={board} weekOpened={weekOpened} />
 
@@ -486,22 +515,22 @@ export default function Timetable() {
             Not shown — the board could not be read in full.
           </div>
         ) : board === null ? <Loading /> : (
-          <DataTable rows={board} columns={cols} rowKey={(e) => e.key}
+          <DataTable noun="timetable entries" rows={board} columns={cols} rowKey={(e) => e.key}
             empty="Nothing on the timetable this week — no classes and no one-to-ones. Add one below." />
         )}
       </section>
 
-      {owner ? <CalledOff classes={calledOff} onPutBack={putBack} /> : null}
+      {owner ? <CalledOff classes={calledOff} onPutBack={putBack} zone={zone} /> : null}
 
       {openClass ? (
         <Roster
-          gymClass={openClass} canEdit={staff} members={members} membersErr={membersErr}
+          gymClass={openClass} canEdit={staff} members={members} membersErr={membersErr} zone={zone}
           onClose={() => { setOpenClass(null); refresh(); }}
         />
       ) : null}
       {editing ? (
         <EditClass
-          gymClass={editing} tenantId={tenantId}
+          gymClass={editing} tenantId={tenantId} zone={zone}
           onClose={(changed) => { setEditing(null); if (changed) refresh(); }}
         />
       ) : null}
@@ -522,8 +551,10 @@ export default function Timetable() {
  * facts about the same empty slot, and both are gone in three months without a
  * column to keep them in.
  */
-function CalledOff({ classes, onPutBack }: {
+function CalledOff({ classes, onPutBack, zone }: {
   classes: GymClass[] | null; onPutBack: (c: GymClass) => void;
+  /** `tenants.timezone` — the hour a cancelled class was due to run. */
+  zone: string | null;
 }) {
   if (!classes || classes.length === 0) return null;
   return (
@@ -543,7 +574,7 @@ function CalledOff({ classes, onPutBack }: {
             display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 13,
           }}>
             <span className="mono" style={{ color: 'var(--ink3)', fontSize: 11.5 }}>
-              {new Date(c.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              {gymDateTimeText(c.startsAt, zone, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) ?? '—'}
             </span>
             <span style={{ color: 'var(--ink)' }}>{c.title}</span>
             <span style={{ color: 'var(--ink2)' }}>
@@ -591,8 +622,11 @@ function localInputValue(iso: string): string {
  * twelve classes on one Tuesday evening, and `updateSeriesFrom` refuses the
  * field outright rather than trusting this form not to send it.
  */
-function EditClass({ gymClass, tenantId, onClose }: {
-  gymClass: GymClass; tenantId: string; onClose: (changed: boolean) => void;
+function EditClass({ gymClass, tenantId, zone, onClose }: {
+  gymClass: GymClass; tenantId: string;
+  /** `tenants.timezone` — the hour this class runs at the gym. */
+  zone: string | null;
+  onClose: (changed: boolean) => void;
 }) {
   const [title, setTitle] = useState(gymClass.title);
   const [when, setWhen] = useState(localInputValue(gymClass.startsAt));
@@ -649,17 +683,23 @@ function EditClass({ gymClass, tenantId, onClose }: {
     } finally { setBusy(false); }
   };
 
+  // Escape, initial focus, a tab trap, and focus back to whatever opened this.
+  const panel = useDialog<HTMLDivElement>(() => onClose(false));
+
   return (
-    <div role="dialog" aria-label={`Edit ${gymClass.title}`}
+    <div
          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', padding: 24, zIndex: 10 }}
          onClick={() => onClose(false)}>
-      <div onClick={(e) => e.stopPropagation()}
+      {/* The dialog is the PANEL, not the scrim — see lib/dialog.ts, which also
+          brings Escape, an initial focus, a tab trap and focus return. */}
+      <div {...dialogPanel(panel, `Edit ${gymClass.title}`)}
+           onClick={(e) => e.stopPropagation()}
            style={{ width: 560, maxWidth: '100%', maxHeight: '85vh', overflow: 'auto', background: 'var(--surface)', border: '1px solid var(--ring)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ring)', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <div>
             <h2>Edit this class</h2>
             <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-              {new Date(gymClass.startsAt).toLocaleString()} · {gymClass.booked} booked
+              {gymDateTimeText(gymClass.startsAt, zone) ?? 'a start time that could not be read'} · {gymClass.booked} booked
               {inSeries ? ' · part of a weekly series' : ' · a one-off'}
             </p>
           </div>
@@ -667,13 +707,16 @@ function EditClass({ gymClass, tenantId, onClose }: {
         </div>
 
         <form onSubmit={save} style={{ display: 'grid', gap: 9, padding: 14 }}>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Class name" style={field} />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Class name" aria-label="Class name" style={field} />
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {/* A datetime-local has no placeholder to borrow a name from, so
+                with no label it was announced as a bare date field. The three
+                beside it lose their placeholder the moment somebody types. */}
             <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)}
-                   disabled={scope === 'series'}
+                   disabled={scope === 'series'} aria-label="When it starts"
                    style={{ ...field, flex: 2, minWidth: 190, opacity: scope === 'series' ? 0.5 : 1 }} />
-            <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
-            <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
+            <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" aria-label="How many minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
+            <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" aria-label="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
             <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 120 }} />
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -719,7 +762,10 @@ function EditClass({ gymClass, tenantId, onClose }: {
             <button type="submit" disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
             <button type="button" onClick={() => onClose(false)} style={ghostBtn}>Cancel</button>
           </div>
-          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+          {/* Announced. On success this form calls `onClose(true)`, so the only
+              state that ever reaches here is a refusal — drawn, until now, in
+              the same grey as the hint text beside it. */}
+          {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
         </form>
       </div>
     </div>
@@ -788,7 +834,9 @@ function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; wee
         </div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {DAY_NAMES.map((d, i) => (
-            <button key={d} onClick={() => setDayIdx(i)}
+            /* `aria-pressed`, matching the hour strip ten lines below, which
+               already had it. */
+            <button key={d} type="button" aria-pressed={i === dayIdx} onClick={() => setDayIdx(i)}
               style={{ ...ghostBtn, padding: '5px 9px',
                        background: i === dayIdx ? 'var(--brand)' : 'var(--surface2)',
                        color: i === dayIdx ? 'var(--brand-ink)' : 'var(--ink2)' }}>{d}</button>
@@ -842,7 +890,12 @@ function FloorCover({ board, weekOpened }: { board: TimetableEntry[] | null; wee
 }
 
 function SliceDetail({ slice, hour, day }: { slice: FloorSlice | null; hour: number; day: Date }) {
-  const when = `${day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })} at ${String(hour).padStart(2, '0')}:00`;
+  // `day` is a LOCALLY built midnight — a calendar day, not an instant — and the
+  // hour beside it is the grid's own column, already chosen. Neither is an
+  // instant, so neither takes a zone: rendering this heading in one could name
+  // the day before it for a reader far enough from the gym.
+  const dayIso = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+  const when = `${calendarDateText(dayIso, { weekday: 'long', day: 'numeric', month: 'short' }) ?? dayIso} at ${String(hour).padStart(2, '0')}:00`;
   if (!slice) return <Loading />;
 
   if (!slice.entries.length) {
@@ -888,7 +941,7 @@ function SliceDetail({ slice, hour, day }: { slice: FloorSlice | null; hour: num
   );
 }
 
-function Clashes({ rows }: { rows: ReturnType<typeof clashes> }) {
+function Clashes({ rows, zone }: { rows: ReturnType<typeof clashes>; zone: string | null }) {
   return (
     <section style={{ border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
@@ -907,17 +960,17 @@ function Clashes({ rows }: { rows: ReturnType<typeof clashes> }) {
             padding: '10px 14px', borderTop: i ? '1px solid var(--ring)' : 'none', fontSize: 13,
           }}>
             <span style={{
-              color: c.reason === 'room-shared' ? '#f0c04e' : 'var(--crit)',
+              color: c.reason === 'room-shared' ? 'var(--warn)' : 'var(--crit)',
               fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase',
             }}>
               {c.reason === 'room' ? 'Room' : c.reason === 'trainer' ? 'Trainer' : 'Shared'}
             </span>
             <span style={{ color: 'var(--ink)', marginLeft: 8 }}>{c.what}</span>
             <span style={{ color: 'var(--ink3)', marginLeft: 8 }}>
-              {new Date(c.a.startsAt).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+              {gymDateTimeText(c.a.startsAt, zone, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) ?? '—'}
               {' — '}{c.a.title}{c.a.withName ? ` (${c.a.withName})` : ''}
               {' overlaps '}{c.b.title}{c.b.withName ? ` (${c.b.withName})` : ''}
-              {' at '}{new Date(c.b.startsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+              {' at '}{gymTimeText(c.b.startsAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? '—'}
             </span>
           </li>
         ))}
@@ -1111,7 +1164,7 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
       </div>
       <form onSubmit={add} style={{ display: 'flex', gap: 8, padding: '12px 14px', flexWrap: 'wrap', alignItems: 'center' }}>
         {trainersErr ? (
-          <span style={{ fontSize: 12.5, color: 'var(--crit)' }}>{trainersErr}</span>
+          <span role="alert" aria-live="assertive" aria-atomic="true" style={{ fontSize: 12.5, color: 'var(--crit)' }}>{trainersErr}</span>
         ) : trainers === null ? (
           <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Loading trainers…</span>
         ) : trainers.length === 0 ? (
@@ -1119,14 +1172,14 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
             No trainers on your roster yet — invite one first and they will appear here.
           </span>
         ) : (
-          <select value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, minWidth: 150 }}>
+          <select aria-label="Which coach" value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, minWidth: 150 }}>
             <option value="">Which trainer?</option>
             {trainers.map((t) => (
               <option key={t.id} value={t.id}>{t.name ?? 'Unnamed trainer'}</option>
             ))}
           </select>
         )}
-        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} style={{ ...field, flex: 2, minWidth: 190 }} />
+        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} aria-label="When it starts" style={{ ...field, flex: 2, minWidth: 190 }} />
         <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
         {/* Disabled rather than hidden while the hour is held: the two are a
@@ -1150,14 +1203,14 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
         </label>
         <button type="submit" disabled={busy || !trainers?.length} style={primaryBtn}>Add</button>
       </form>
-      {blocker ? <div style={{ padding: '0 14px 12px', color: '#f0c04e', fontSize: 12.5 }}>{blocker}</div> : null}
+      {blocker ? <div style={{ padding: '0 14px 12px', color: 'var(--warn)', fontSize: 12.5 }}>{blocker}</div> : null}
       {membersErr ? (
-        <div style={{ padding: '0 14px 12px', color: '#f0c04e', fontSize: 12.5 }}>
+        <div style={{ padding: '0 14px 12px', color: 'var(--warn)', fontSize: 12.5 }}>
           The member list could not be read, so this slot can only go up open: {membersErr}. That is
           a failed query, not a gym with no members — book it to somebody once the page reloads.
         </div>
       ) : null}
-      {msg ? <div style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
+      {msg ? <div role="alert" aria-live="assertive" aria-atomic="true" style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
     </section>
   );
 }
@@ -1279,7 +1332,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
       </div>
       <form onSubmit={add} style={{ display: 'flex', gap: 8, padding: '12px 14px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Class name" style={{ ...field, flex: 2, minWidth: 140 }} />
-        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} style={{ ...field, flex: 2, minWidth: 190 }} />
+        <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} aria-label="When it starts" style={{ ...field, flex: 2, minWidth: 190 }} />
         <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Minutes" inputMode="numeric" style={{ ...field, width: 90 }} />
         <input value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Capacity" inputMode="numeric" style={{ ...field, width: 96 }} />
         <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="Room" style={{ ...field, width: 110 }} />
@@ -1315,7 +1368,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
           /staff. A class with no coach attached is not a broken class — it is
           a class no per-coach figure can ever count. */}
       {trainersErr ? (
-        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>
+        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>
           Your coaches could not be read, so this class can only carry a typed name: {trainersErr}.
           That is a failed query, not a gym with no coaches — a class saved now will not appear in
           anybody&rsquo;s class hours on Staff, and its own coach will not be able to edit it.
@@ -1329,7 +1382,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
         </div>
       ) : null}
       {kitErr && needs.trim() ? (
-        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>
+        <div style={{ padding: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)' }}>
           The equipment register could not be read, so this capacity is unchecked rather than
           checked and found fine: {kitErr}. Adding the class is still allowed — the check is a
           warning, not a gate.
@@ -1337,7 +1390,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
       ) : null}
       {check ? (
         <div style={{ padding: '0 14px 12px', fontSize: 12.5,
-                      color: check.supported === false ? '#f0c04e' : 'var(--ink3)' }}>
+                      color: check.supported === false ? 'var(--warn)' : 'var(--ink3)' }}>
           {check.supported === false
             ? `${check.note} Adding it anyway is allowed — the register may simply be out of date, and a stale inventory should not stop a class reaching the timetable.`
             : check.supported === null
@@ -1345,7 +1398,7 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
               : `${check.usable} available — enough for ${check.limit}.`}
         </div>
       ) : null}
-      {msg ? <div style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
+      {msg ? <div role="alert" aria-live="assertive" aria-atomic="true" style={{ padding: '0 14px 12px', color: 'var(--ink3)', fontSize: 12.5 }}>{msg}</div> : null}
     </section>
   );
 }
@@ -1368,9 +1421,11 @@ function AddClass({ tenantId, onChange }: { tenantId: string; onChange: () => vo
  * desk handles — the member who rings up, the no-show at 06:05 whose bike is
  * free, the coach who says one more can squeeze in — had no path at all.
  */
-function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
+function Roster({ gymClass, canEdit, members, membersErr, zone, onClose }: {
   gymClass: GymClass; canEdit: boolean;
   members: Membership[] | null; membersErr: string | null;
+  /** `tenants.timezone` — the hour this class runs at the gym. */
+  zone: string | null;
   onClose: () => void;
 }) {
   const [rows, setRows] = useState<RosterEntry[] | null>(null);
@@ -1501,17 +1556,22 @@ function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
     </li>
   );
 
+  // Escape, initial focus, a tab trap, and focus back to whatever opened this.
+  const panel = useDialog<HTMLDivElement>(onClose);
+
   return (
     <div
-      role="dialog"
-      aria-label={`Check in for ${gymClass.title}`}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
         display: 'grid', placeItems: 'center', padding: 24, zIndex: 10,
       }}
       onClick={onClose}
     >
+      {/* The dialog is the PANEL, not the scrim — see lib/dialog.ts. This is
+          the register a coach works from standing in the room, and it was
+          unreachable from a keyboard except by tabbing through all of it. */}
       <div
+        {...dialogPanel(panel, `Check in for ${gymClass.title}`)}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 520, maxWidth: '100%', maxHeight: '80vh', overflow: 'auto',
@@ -1522,7 +1582,7 @@ function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
           <div>
             <h2>{gymClass.title}</h2>
             <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-              {new Date(gymClass.startsAt).toLocaleString()}
+              {gymDateTimeText(gymClass.startsAt, zone) ?? 'a start time that could not be read'}
               {/* Counted off the roster in hand, not off the board's snapshot.
                   Capacity of 0 is a class nobody sized, and "of 0" would read
                   as a class with no room in it. */}
@@ -1545,7 +1605,10 @@ function Roster({ gymClass, canEdit, members, membersErr, onClose }: {
             display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap',
             padding: '11px 16px', borderBottom: '1px solid var(--ring)', background: 'var(--surface2)',
           }}>
-            <label style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Add somebody at the desk</label>
+            {/* Not a <label>: it has no `htmlFor`, so clicking it did nothing
+                and it named no control. The select beside it carries its own
+                `aria-label`, which is what a screen reader was already using. */}
+            <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Add somebody at the desk</span>
             <select value={adding} onChange={(e) => { setAdding(e.target.value); setAddMsg(null); }}
                     style={{ ...field, flex: 2, minWidth: 200 }} aria-label="Who to put on this class">
               <option value="">
@@ -1658,18 +1721,3 @@ const linkBtn = {
   fontSize: 12.5, padding: 0, fontFamily: 'var(--sans)',
 } as const;
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

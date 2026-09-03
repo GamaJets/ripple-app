@@ -21,6 +21,8 @@ import { deloadCheck } from '../../src/lib/training';
 import { weekStats } from '../../src/lib/streaks';
 import { volumeHeadline } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
+import { useToday } from '../../src/ui/today';
+import { dayKeyOf } from '../../src/lib/entryEdit';
 
 export default function RestDay() {
   const t = useTheme();
@@ -44,15 +46,26 @@ export default function RestDay() {
   const known = isWhole(logStatus);
   const wu = useSettings().weightUnit;
 
+  // The clock is a DEPENDENCY, not a value captured at mount. This is the one
+  // screen in the app whose entire output answers "should I train today", and
+  // the memo below had `[log]` alone — so a phone left on it, or backgrounded
+  // and resumed the next morning, went on saying "take a rest day, you've
+  // trained 5 of the last 7 days" on a day the member had not trained at all.
+  // It was answering yesterday's question. `useToday` re-reads at the next
+  // local midnight and on every return to the foreground.
+  const today = useToday();
+
   const info = useMemo(() => {
     const dl = deloadCheck(log);
     const wk = weekStats(log);
-    const trainedToday = log.some((e) => new Date(e.t).toDateString() === new Date().toDateString());
+    // Compared as local day KEYS rather than through `toDateString`, so the
+    // day being asked about is the day the member is actually in.
+    const trainedToday = log.some((e) => dayKeyOf(e.t) === today);
     // Suggest a rest day if 3+ of the last 7 days trained and today already trained,
     // or if a deload is due.
     const restToday = dl.due || (wk.days >= 4 && trainedToday);
     return { dl, wk, trainedToday, restToday };
-  }, [log]);
+  }, [log, today]);
 
   const { dl, wk, restToday } = info;
   // Tonnes for a metric reader, pounds for an imperial one. See volumeHeadline.

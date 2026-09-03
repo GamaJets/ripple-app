@@ -20,6 +20,7 @@
 // a support ticket, so there is one implementation and the SQL mirrors it.
 
 import { assertWhole, capLimit } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
@@ -620,10 +621,25 @@ function toInvite(r: any, planNames: Map<string, string>): MemberInvite {
   };
 }
 
+/**
+ * Chunked, because `fetchInvites` above is a `capLimit()` read and the header
+ * on it says out loud that this is the read a gym realistically pushes past a
+ * thousand rows. Distinct plan ids off a thousand invites is bounded by how
+ * many plans the gym has ever sold, and nothing in the schema or this code
+ * bounds that below two hundred — a gym that reprices seasonally makes a new
+ * plan row each time and keeps the old ones for the members still on them.
+ * Past about two hundred uuids the `in.("…","…")` list crosses the 8KB request
+ * line, the proxy answers 414, and supabase-js reports that as `data: null` —
+ * which the `no-error-ok` below then reads as "none of these plans has a
+ * name", turning every invite in the list into a dash at once. One unreadable
+ * plan is what that marker was written for; all of them is not.
+ */
 async function planNamesFor(sb: Queryable, ids: string[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter(Boolean))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable plan name becomes null and renders as a dash; the invite is still listed
-  const { data } = await sb.from('membership_plans').select('id, name').in('id', unique);
-  return new Map((data ?? []).map((p: any) => [p.id, p.name]));
+  const out = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    // no-error-ok: an unreadable plan name becomes null and renders as a dash; the invite is still listed
+    const { data } = await sb.from('membership_plans').select('id, name').in('id', chunk);
+    for (const p of ((data ?? []) as any[])) out.set(p.id, p.name);
+  }
+  return out;
 }

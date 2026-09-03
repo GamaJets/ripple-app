@@ -24,6 +24,23 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 
+/**
+ * The ceiling `my_promo_redemptions()` takes, mirrored so a read that came back
+ * at it can be reported as a prefix.
+ *
+ * Inside the function body, which is what makes it invisible: src/lib/rowCap.ts
+ * detects truncation by asking for one row more than it will accept and the
+ * server can never answer with 201. `>= cap` rather than `> cap` for the reason
+ * src/lib/challenges.ts sets out — two hundred rows back from a `limit 200` is
+ * already the ceiling and there is no probe row to find.
+ *
+ * The order is `redeemed_at desc`, so what a cut list loses is the oldest
+ * codes. That matters here more than the count does: this list is what tells a
+ * member a code is already spent, and a code that fell off the end reads as one
+ * they have never used.
+ */
+const REDEMPTION_ROW_CAP = 200;
+
 interface Redeemed {
   code: string;
   /** The percentage off, or NULL when the row did not carry a number we could
@@ -68,10 +85,18 @@ export default function Offers() {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     const { data, error } = await supabase.rpc('my_promo_redemptions');
     if (error) { setStatus('error'); return; }
-    setMine((data ?? []).map((r: any) => ({
+    const rows = Array.isArray(data) ? data : [];
+    setMine(rows.map((r: any) => ({
       code: String(r.code), discount: discountOf(r.discount), redeemedAt: String(r.redeemed_at),
     })));
-    setStatus('ready');
+    // 'ready' was set over the page unconditionally, and the page has a ceiling
+    // this side could not see: `my_promo_redemptions()` ends `limit 200` inside
+    // the function body (supabase/parts/104-promo-redemptions.sql), so
+    // src/lib/rowCap.ts is blind to it — a cut list and a whole one arrive
+    // identically. The heading beside this list prints `mine.length` as a
+    // count, and 'partial' is what withholds it; the rows themselves are real
+    // and still shown. See src/ui/loadStatus.ts.
+    setStatus(rows.length >= REDEMPTION_ROW_CAP ? 'partial' : 'ready');
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -176,6 +201,17 @@ export default function Offers() {
               <Text style={{ ...ty.caption, color: t.ink3 }}>{when(r.redeemedAt)}</Text>
             </View>
           ))}
+
+          {/* The list stops where the server's `limit 200` stops, and nothing
+              said so. The count beside the heading is already withheld under
+              'partial'; this is the part the heading cannot say, which is that
+              the oldest codes are the ones missing — and an old code missing
+              from this list reads as a code never used. */}
+          {status === 'partial' ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Only your {REDEMPTION_ROW_CAP} most recent codes are listed here, so this is not all of them. A code you used long ago may be missing from it rather than unused.
+            </Text>
+          ) : null}
         </Section>
       </ScrollView>
     </SafeAreaView>

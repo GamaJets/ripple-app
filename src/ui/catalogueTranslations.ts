@@ -82,11 +82,20 @@ export function useCatalogueTranslations(): {
         .select('exercise_id, locale, name, description')
         .eq('locale', locale)
         .limit(capLimit());
-      // eslint-disable-next-line -- no-error-ok: the table may not exist yet (part 790 is unapplied), and a failure here must not
-      // take the library down. Every name falls back to English AND IS MARKED as
-      // English, which is what the reader saw before this read existed. Silently
-      // dropped rather than reported precisely because it is not a wrong answer:
-      // nothing on screen claims to be translated.
+      // eslint-disable-next-line -- no-error-ok: a failure here must not take the library down.
+      // Every name falls back to English AND IS MARKED as English, which is what
+      // the reader saw before this read existed. Silently dropped rather than
+      // reported precisely because it is not a wrong answer: nothing on screen
+      // claims to be translated.
+      //
+      // This used to say "the table may not exist yet (part 790 is unapplied)".
+      // Part 790 IS applied — `public.exercise_translations` exists on this
+      // project (counted live, 3 Sep 2026). What is still true is the OUTCOME,
+      // for a different reason: the table holds zero rows, because parts 791
+      // (German) and 792 (Spanish) have not been loaded. So this read succeeds
+      // and returns nothing, `byId` is empty, and every name renders as English
+      // and says so — the same screen, reached down a healthy path rather than
+      // an errored one. The 42P01 branch is kept for a deployment without 790.
       if (error) { setById(EMPTY); setSettled(true); return; }
       const page = capped(data);
       setById(indexTranslations(

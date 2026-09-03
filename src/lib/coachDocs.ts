@@ -31,6 +31,7 @@
 // retirement of the old one, which the immutability trigger in part 135
 // enforces whatever a screen believes.
 import { fmtDay } from './format';
+import { BRAND } from './brands';
 
 /** Matches the bucket's `file_size_limit` and `coach_documents_bytes_chk`. The
  *  device checks it BEFORE uploading, because a 413 from storage arrives as an
@@ -254,9 +255,12 @@ export const COACH_DOC_ACCEPT_RULE =
   'Accepting records the date against your name for your coach to see. It can’t be edited or withdrawn '
   + 'afterwards, by you or by them — that permanence is what makes it worth anything.';
 
-/** The distinction that must never blur. */
+/** The distinction that must never blur — and it blurs the moment the sentence
+ *  names a company that is not on the member's phone. Same reason as
+ *  `NOT_REPPLE` in src/lib/gymSigning.ts: this paragraph exists to say who is
+ *  responsible, so it has to name the party the member actually has. */
 export const COACH_DOC_NOT_REPPLE =
-  'This is your coach’s own paperwork, not Repple’s. Repple doesn’t write it, check it, or advise on it, '
+  `This is your coach’s own paperwork, not ${BRAND.label}’s. ${BRAND.label} doesn’t write it, check it, or advise on it, `
   + 'and the liability release you signed when you joined is a separate thing that your coach cannot read.';
 
 /** What a coach is told about editing. */
@@ -287,6 +291,68 @@ export const COACH_DOC_REACH_NOTE =
   'Only you and the clients you currently coach can open these. Nobody else at the gym can — and if a '
   + 'client moves to another coach they lose access to all of it, including anything they accepted. '
   + 'Their record of having accepted it stays.';
+
+/**
+ * The same fact, said to the person it happens to.
+ *
+ * `COACH_DOC_REACH_NOTE` above has exactly one importer, and it is the COACH's
+ * screen. On the member's own screen the only permanence they were told about
+ * was `COACH_DOC_ACCEPT_RULE` — that their acceptance cannot be withdrawn — and
+ * nothing at all about losing the ability to read the thing they accepted.
+ *
+ * `can_read_coach_doc` has no acceptance branch, so the grant follows
+ * `clients.trainer_id`: the day a member switches coach, every waiver, health
+ * questionnaire and policy they agreed to disappears from their app, while
+ * `coach_document_acceptances` keeps a document id and a timestamp against
+ * their name. They are left holding proof they agreed to something they can no
+ * longer read — the worst possible half of a record to keep, and the half
+ * nobody warned them about.
+ *
+ * It sits beside the acceptance rule rather than replacing it, because the two
+ * facts are what make each other matter: the acceptance is permanent and the
+ * access is not.
+ */
+export const COACH_DOC_ACCESS_ENDS_NOTE =
+  'You can open these while this coach is your coach. If you move to another coach, or your coaching '
+  + 'ends, they stop opening for you — including anything you have accepted, which is why it is worth '
+  + 'saving a copy of anything you may need later. Your record of having accepted it stays either way.';
+
+/**
+ * What to say instead of a count, when the acceptance read came back at its
+ * row limit.
+ *
+ * `standingLine` is not a number on a dashboard. "All 12 of your clients have
+ * accepted this" is a claim about a signed waiver, and a read that stopped at
+ * the cap (src/lib/rowCap.ts) can produce it out of twelve rows of nineteen —
+ * so the coach trains the other seven believing they are covered. A truncated
+ * read is strictly worse than a failed one, and this is the screen where that
+ * is most true, so nothing is counted over it.
+ */
+/**
+ * The ceiling `coach_document_standing()` takes, mirrored here because nothing
+ * on the client can see it.
+ *
+ * The limit is written inside the function body
+ * (supabase/parts/135-a-coachs-own-paperwork.sql), and that is what defeats
+ * src/lib/rowCap.ts: `capped()` finds truncation by asking for one row more
+ * than it will accept, and the server cannot answer with 501 however the
+ * request is phrased. The `.limit(capLimit())` on the call site is therefore
+ * asking for 1001 rows from a function that stops at 500 — it has been reading
+ * a full page as a whole set the entire time.
+ *
+ * `>= cap` rather than the `> cap` used elsewhere, for the reason
+ * src/lib/challenges.ts gives: 500 rows back from a `limit 500` IS the ceiling
+ * and there is no probe row to find. The coach with exactly five hundred
+ * clients is told the count cannot be stated when it could. That is the small
+ * wrong, and STANDING_TRUNCATED_NOTE is what they get instead — which, on a
+ * screen whose sentence is "all 12 of your clients have accepted this waiver",
+ * is the side to be wrong on.
+ */
+export const STANDING_ROW_CAP = 500;
+
+export const STANDING_TRUNCATED_NOTE =
+  'You have more clients than this list could bring back, so how many have accepted cannot be stated here. '
+  + 'The names below are real but they are not all of them — do not read this as everybody being covered.';
 
 /** "4 of 9 have accepted" — the coach's summary for one document.
  *

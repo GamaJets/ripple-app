@@ -228,7 +228,7 @@ export function BarcodeSheet({
               keyboardType="number-pad" returnKeyType="done" onSubmitEditing={() => void run(code, 'keyboard')} autoFocus={typing}
               accessibilityLabel="Barcode number"
               style={{ ...ty.head, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 13, letterSpacing: 1, marginBottom: sp.md }} />
-            <Pressable onPress={() => void run(code, 'keyboard')} disabled={busy} accessibilityRole="button" accessibilityLabel="Look up and log"
+            <Pressable onPress={() => void run(code, 'keyboard')} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Look up and log"
               style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', marginBottom: sp.sm }}>
               {busy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Look up &amp; log</Text>}
             </Pressable>

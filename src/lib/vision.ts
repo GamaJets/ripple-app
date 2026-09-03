@@ -3,11 +3,22 @@
 // Falls back gracefully (returns null) when the backend isn't configured yet,
 // so the UI keeps its editable-estimate path until you deploy the function.
 import { supabase } from './supabase';
-import { USE_SUPABASE } from './config';
 import type { ScanMetrics } from './inbodyMetrics';
-// Vision uses the deployed vision-analyze edge function. It's on whenever the
-// backend is on (USE_SUPABASE) OR the explicit EXPO_PUBLIC_ENABLE_VISION flag is
-// set — so an OTA that didn't carry the build flag still gets AI reading.
+// ── One switch for every door to the model ────────────────────────────────
+//
+// This used to read `USE_SUPABASE || EXPO_PUBLIC_ENABLE_VISION === '1'`, while
+// the AI Coach's door — `coachAvailable` in src/lib/coach.ts, the one that
+// asks the member first — read the flag alone. Two gates on two paths to the
+// same api.anthropic.com, and the looser one was on the path that asked
+// nothing: every build with a backend sent photographs, INCLUDING builds where
+// the door that does ask had been deliberately switched off. The unasked path
+// outlived the asked one, which is exactly the wrong way round.
+//
+// So it is the flag, and only the flag, and `coachAvailable` defers to this
+// function so there is one answer rather than two that can drift. Turning the
+// flag off now turns off every path to the model, which is what somebody
+// turning it off believes they are doing. Every published profile in eas.json
+// sets it, so nothing in the field changes.
 
 export interface MealVision {
   name: string;
@@ -24,9 +35,10 @@ export interface MealVision {
 }
 export interface InBodyVision { weightKg: number | null; bodyFatPct: number | null; skeletalMuscleKg: number | null; takenAt: string | null; metrics?: ScanMetrics }
 
-/** True when the vision function is reachable — backend on, or the flag is set. */
+/** True when the vision function is reachable. The single gate for every door
+ *  to the model — see the note above, and `coachAvailable`, which calls this. */
 export function visionAvailable(): boolean {
-  return USE_SUPABASE || process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
+  return process.env.EXPO_PUBLIC_ENABLE_VISION === '1';
 }
 
 // Coerce a model value to a number: accepts real numbers AND numeric strings

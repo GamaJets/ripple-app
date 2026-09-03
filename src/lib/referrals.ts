@@ -111,6 +111,28 @@ export async function myReferralCode(): Promise<string | null> {
  * an empty array here means the code has genuinely brought nobody in yet, and
  * those two must not share a rendering. See src/ui/loadStatus.ts.
  */
+/**
+ * The ceiling `my_referrals()` takes, mirrored here so a read that came back at
+ * it can be reported as a prefix rather than as the whole guest list.
+ *
+ * It is written INSIDE the function (supabase/parts/128-a-cohort-and-a-credit
+ * .sql, `limit 200`), which is what makes it invisible from this side:
+ * src/lib/rowCap.ts works by asking for one row more than it will accept, and
+ * the server can never answer with 201 no matter what `.limit()` says. So
+ * `capped()`, `assertWhole()` and `isTruncated()` are all blind to it and a
+ * cut list arrives looking exactly like a complete one.
+ *
+ * src/ui/coachReferrals.ts has mirrored this same number as `ROW_CAP` for the
+ * coach half of this feature since it was written — its comment even says "it
+ * is the same limit `my_referrals()` uses" — and the member half never got it.
+ * The test is `>= cap` and not the `> cap` used everywhere else, because 200
+ * rows back from a `limit 200` is already the ceiling: there is no probe row to
+ * find. That over-reports the member who has exactly two hundred, and telling
+ * them their list may go on when it does not is the small wrong. The big one is
+ * the other way round.
+ */
+export const REFERRAL_ROW_CAP = 200;
+
 export async function myReferrals(): Promise<RawReferral[] | null> {
   if (!USE_SUPABASE) return null;
   try {

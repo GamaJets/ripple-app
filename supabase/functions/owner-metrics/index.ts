@@ -45,6 +45,34 @@ const DAY = 86400000;
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 const isoDate = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().slice(0, 10);
 
+// ── How many decimal places a currency has ─────────────────────────────────
+//
+// Copied, deliberately, rather than imported. `ZERO_DECIMAL` and
+// `THREE_DECIMAL` live in src/lib/coachMoney.ts and that module imports
+// `./locale` — an extensionless relative specifier Deno cannot resolve — so an
+// edge function that imported it would throw on its first request. See the
+// leaf-module rule in scripts/check-functions.mjs. The two sets are Stripe's
+// own lists and do not change; if they ever do, both copies move together.
+//
+// The set that has no minor unit at all. There are no fils in a yen: an amount
+// Stripe reports as 50000 in JPY IS ¥50,000, and dividing it by a hundred
+// prints ¥500 — a gym owner's month reported as a hundredth of itself.
+const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf']);
+// The same mistake at the other end. A Kuwaiti dinar has a THOUSAND fils in it,
+// so 50000 minor units is KWD 50.000 and not KWD 500.00.
+const THREE_DECIMAL = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
+
+/** Minor units to major, for a currency that was actually stated. Null when it
+ *  was not — there is no default currency in this product and a guess here is a
+ *  figure the owner acts on. */
+const majorUnits = (minor: number, currency: string | null): number | null => {
+  const c = String(currency ?? '').trim().toLowerCase();
+  if (!c) return null;
+  if (ZERO_DECIMAL.has(c)) return Math.round(minor);
+  if (THREE_DECIMAL.has(c)) return Math.round(minor / 1000);
+  return Math.round(minor / 100);
+};
+
 // Reading a whole table when PostgREST will not give you one.
 //
 // PostgREST caps EVERY response at the project's "Max rows" setting, which
@@ -318,13 +346,62 @@ Deno.serve(async (req: Request) => {
   // source for that number; (2) a trainer who has left the tenant takes their
   // invoices with them, because trainerIds is a snapshot of today's roster.
   try {
-    const { rows: inv, error: invErr, truncated: invCut } = await pageAll((from, to) => admin.from('invoices').select('amount_due, status, created_at').in('trainer_id', trainerIds).gte('created_at', iso(30 * DAY)).range(from, to));
+    const { rows: inv, error: invErr, truncated: invCut } = await pageAll((from, to) => admin.from('invoices').select('amount_due, currency, status, created_at').in('trainer_id', trainerIds).gte('created_at', iso(30 * DAY)).range(from, to));
     // Revenue especially: a truncated read understates it, and an owner acts on
     // a revenue figure. No number beats a low one presented as the real total.
     if (!invErr && !invCut && inv.length) {
       const paid = inv.filter((r: any) => (r.status ?? 'paid') === 'paid');
-      const cents = paid.reduce((a: number, r: any) => a + Number(r.amount_due || 0), 0); // Stripe stores cents
-      if (cents > 0) set('revenue30', Math.round(cents / 100));
+
+      // ── ONE CURRENCY, OR NO NUMBER ──────────────────────────────────────
+      //
+      // This was `reduce((a, r) => a + Number(r.amount_due))` over every paid
+      // invoice, with `currency` not even selected, and then `/ 100`. Two
+      // separate ways of printing something that is not an amount of money:
+      //
+      //   ADDING UNLIKE UNITS. `invoices.currency` has existed since
+      //   20-billing.sql and the webhook writes Stripe's own value onto every
+      //   row. Repple is white-labelled, so a gym whose trainers are billed in
+      //   two currencies — a chain, or one coach who moved country — had them
+      //   summed. GBP 90 plus AED 600 is not 690 of anything. That is rule 1
+      //   of src/lib/coachMoney.ts, which every screen in the app obeys and
+      //   this endpoint did not.
+      //
+      //   DIVIDING BY A HUNDRED. True for most currencies and wrong for
+      //   twenty-one of them. A Tokyo gym's ¥480,000 month was reported as
+      //   4,800; a Kuwaiti gym's KWD 4,800.000 as 48,000. Both look entirely
+      //   plausible on a dashboard, which is what makes them dangerous — the
+      //   owner has no second figure to disagree with.
+      //
+      // So the currency is read, the pots are kept apart, and a month with
+      // more than one is OMITTED rather than flattened. `revenue30` stays a
+      // plain number in major units, because the portal renders it as one and
+      // that contract is not this function's to change; the unit travels
+      // beside it as `series.revenue30Currency` so nothing has to guess.
+      // Omitting a number is a state the portal already draws as a dash — the
+      // same trade `truncated` above makes, for the same reason.
+      const pots = new Map<string, number>();
+      let unstated = 0;
+      for (const r of paid as any[]) {
+        const cur = String(r.currency ?? '').trim().toLowerCase();
+        const amount = Number(r.amount_due || 0);
+        if (!Number.isFinite(amount)) continue;
+        // An amount with no unit on it is never added to one that has. It is
+        // counted, so the omission is visible rather than silently short.
+        if (!cur) { if (amount > 0) unstated++; continue; }
+        pots.set(cur, (pots.get(cur) ?? 0) + amount);
+      }
+      if (unstated > 0) series.revenue30Unstated = unstated;
+      if (pots.size > 1) {
+        console.warn('owner-metrics: tenant ' + tenantId + ' has paid invoices in ' + pots.size + ' currencies (' + [...pots.keys()].join(', ') + '), so revenue30 was omitted rather than summed across them.');
+        series.revenue30Currencies = [...pots.keys()].map((c) => c.toUpperCase());
+      } else if (pots.size === 1) {
+        const [cur, minor] = [...pots.entries()][0];
+        const major = majorUnits(minor, cur);
+        if (major != null && major > 0) {
+          set('revenue30', major);
+          series.revenue30Currency = cur.toUpperCase();
+        }
+      }
     }
   } catch { /* no invoices table */ }
   try {

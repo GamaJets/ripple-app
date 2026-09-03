@@ -17,12 +17,16 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { useWellness } from '../../src/ui/wellness';
+import { useWellness, sleepRefusal } from '../../src/ui/wellness';
+import { useToday } from '../../src/ui/today';
 // Hydration comes from the same place the home screen's water counter does.
 // These were two separate stores and adding a glass on one never reached the
 // other — reported twice, from both directions.
 import { useHabits } from '../../src/ui/habits';
 import { useClientData } from '../../src/ui/clientData';
+// Loading, failed and empty are three different sentences, and this hero had
+// two of the three.
+import { hydrationNote } from '../../src/lib/hydrationHero';
 import { HrZoneChart } from '../../src/ui/HrZoneChart';
 import { ageFromDob, type HrSample } from '../../src/lib/hr';
 import { useWearables } from '../../src/ui/wearables';
@@ -159,6 +163,17 @@ export default function Recovery() {
  const [hr, setHr] = useState<{ samples: HrSample[]; source: 'apple' | null; read: 'loading' | 'ready' | 'error' | 'unavailable' }>(
   { samples: [], source: null, read: 'loading' }
  );
+ // Two things this read needs and did not have: a way to be asked AGAIN, and a
+ // "today" that is today. Its dependency list was `[age]` alone, so the window
+ // was fixed at the midnight of whenever the screen was opened — a phone left
+ // on a recovery screen overnight, which is what a recovery screen is for, went
+ // on charting yesterday's samples under the word Today. And its own failure
+ // sentence ("this is our end, not your watch") invited a gesture that could
+ // not reach it: the pull-to-refresh was widened to six other reads and never
+ // to this one, so `read === 'error'` was a dead end for the life of the mount.
+ const hrDay = useToday();
+ const [hrTick, setHrTick] = useState(0);
+ const reloadHr = useCallback(() => setHrTick((n) => n + 1), []);
  useEffect(() => {
    let cancelled = false;
    (async () => {
@@ -185,7 +200,9 @@ export default function Recovery() {
      }
    })();
    return () => { cancelled = true; };
- }, [age]);
+   // `hrDay` rolls at the next local midnight and whenever the app comes back
+   // to the foreground; `hrTick` is the pull-to-refresh.
+ }, [age, hrDay, hrTick]);
 
  // WHOOP zone totals, straight off the wearables context (no extra round trip).
  const whoopMetrics = wear.metrics?.whoop ?? null;
@@ -302,7 +319,15 @@ export default function Recovery() {
  // Math.min clamps to a confident 100% — a full ring and "Goal met today —
  // nice." to somebody who has never set a goal — and zero glasses gives NaN,
  // which the arc draws from.
- const pct = goalCups != null ? Math.min(100, Math.round((cups / goalCups) * 100)) : null;
+ // Two reads, and the goal is not the one `waterStatus` is about: the count
+ // comes from `habits`, the goal is `clients.water_goal_glasses` and rides on
+ // `cd.profileStatus`. Both start at their empty value, so the first frame said
+ // the member had drunk nothing and had never set a target — and offered them a
+ // shortcut to set the goal they already had. See src/lib/hydrationHero.ts.
+ const hydration = hydrationNote(waterStatus, cd.profileStatus, cups, goalCups);
+ const pct = hydration.showRing && goalCups != null
+   ? Math.min(100, Math.round((cups / goalCups) * 100))
+   : null;
  // "Pull down to try again" is a sentence this screen has printed under its own
  // sleep list for as long as it has existed, over a ScrollView that had no
  // refresh control on it. Both reads it names are here: the watch data and the
@@ -312,8 +337,8 @@ export default function Recovery() {
  // the profile behind readiness — five more reads, none of which the gesture
  // touched, on the screen whose own copy says "pull down to try again".
  const pull = usePullToRefresh(useCallback(() => {
-   deviceSleep.refresh(); void wear.syncAll(); reloadSleep(); reloadHabits(); reloadLog(); cd.reload();
- }, [deviceSleep, wear, reloadSleep, reloadHabits, reloadLog, cd.reload]));
+   deviceSleep.refresh(); void wear.syncAll(); reloadSleep(); reloadHabits(); reloadLog(); cd.reload(); reloadHr();
+ }, [deviceSleep, wear, reloadSleep, reloadHabits, reloadLog, cd.reload, reloadHr]));
  /**
   * Take one night back out of the log.
   *
@@ -413,8 +438,10 @@ export default function Recovery() {
   {/* ── the hero: today's hydration ─────────────────────────────────── */}
   <Hero
    label="Hydration"
-   figure={fig(cups)}
-   unit={goalCups != null ? `of ${goalCups} glasses` : cups === 1 ? 'glass today' : 'glasses today'}
+   figure={fig(hydration.showCount ? cups : null)}
+   unit={hydration.showRing && goalCups != null ? `of ${goalCups} glasses`
+    : !hydration.showCount ? 'glasses today'
+    : cups === 1 ? 'glass today' : 'glasses today'}
    arc={pct == null ? undefined : pct / 100}
    // The ring is glasses drunk against the water goal, so that is what it is
    // announced as. It said "recovered", and Hero renders arcLabel as
@@ -427,12 +454,11 @@ export default function Recovery() {
    // caveat underneath admits may be missing glasses logged on another device
    // — so under a failed water read the qualification arrived after the claim
    // it qualifies. It now leads.
-   note={waterStatus === 'error'
-    ? 'Counted on this phone only — we couldn’t check it against your account.'
-    : goalCups == null
-    ? 'No daily goal set — set one on Daily habits and this fills against it.'
-    : cups >= goalCups ? 'Goal met today — nice.' : `${goalCups - cups} more to hit today's goal.`}
-   onPress={goalCups == null ? () => router.push('/(client)/habits') : undefined}
+   note={hydration.text}
+   // Only when we KNOW there is no goal. A hero that links to the goal editor
+   // because the goal read had not landed sends somebody to change a target on
+   // the strength of a number that had not arrived.
+   onPress={hydration.offerGoal ? () => router.push('/(client)/habits') : undefined}
   />
   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingBottom: layout.section }}>
    <Ghost icon="minus" onPress={removeCup} />
@@ -590,7 +616,29 @@ export default function Recovery() {
        the box is a decimal pad and the reader has to take the decimal comma
        a European keyboard puts on it. `parseFloat('7,5')` is 7, and half an
        hour a night is the whole of what this screen is being asked. */}
-   <Cta label="Log Sleep" wide disabled={!((readNumber(hrs) ?? 0) > 0) || q < 1} onPress={() => { addSleep(readNumber(hrs) ?? 0, q); setHrs(''); setQ(0); }} />
+   {/* The answer is read, and the boxes are cleared only when there is
+       something to have cleared them for. They used to be emptied whatever
+       happened — which is the universal sign that a figure was accepted — over
+       a provider that had already refused the night and filed nothing. */}
+   <Cta label="Log Sleep" wide disabled={!((readNumber(hrs) ?? 0) > 0) || q < 1} onPress={() => {
+    const h = readNumber(hrs) ?? 0;
+    const why = sleepRefusal(h, q);
+    if (why) { Alert.alert('That night was not logged', why); return; }
+    void (async () => {
+     const out = await addSleep(h, q);
+     if (out === 'refused') {
+      // The provider refused it after the check above passed, which the two
+      // agreeing about the range makes very unlikely — and "unlikely" is not
+      // "cannot", and a member whose night vanished is owed the sentence.
+      Alert.alert('That night was not logged', sleepRefusal(h, q) ?? 'That night could not be stored, so nothing has been logged.');
+      return;
+     }
+     setHrs(''); setQ(0);
+     if (out === 'unsent') {
+      Alert.alert('Saved on this phone', 'That night has not reached your account yet — there is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
+     }
+    })();
+   }} />
    {/* An empty list is three different sentences, and it used to be one.
        "No nights logged yet" is a claim about the client's own history, and
        under a failed read it is a claim nobody can make — the nights may be

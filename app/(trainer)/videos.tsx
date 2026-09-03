@@ -81,6 +81,7 @@ import { exerciseSlug } from '../../src/lib/exerciseId';
 import { num } from '../../src/lib/format';
 import { isAcademyClip } from '../../src/lib/exerciseId';
 import { supabase } from '../../src/lib/supabase';
+import { chunkIds, uniqueIds } from '../../src/lib/idLookup';
 import { USE_SUPABASE } from '../../src/lib/config';
 
 /**
@@ -170,9 +171,18 @@ function useGrantableClients(enabled: boolean) {
       // Names come from profiles, keyed on the same id. A list of uuids is not
       // a list a trainer can pick a person out of, so a failed name read is a
       // failed read of the whole control, not a cosmetic loss.
+      // CHUNKED, and not because the roster read above is capped — it is not
+      // capped at all. `ids` is every row of `clients` for this trainer, and a
+      // coach with two hundred people on their book sends two hundred uuids:
+      // about 7.8KB of `in.("…","…")`, past the 8KB request line nginx and most
+      // CDNs enforce by default. The proxy answers 414, supabase-js hands that
+      // back as `data: null` with no error this code can distinguish from an
+      // empty result, and the sheet then offers a picker with nobody in it to a
+      // trainer who has more clients than anyone else on the platform. 150 at a
+      // time (src/lib/idLookup.ts) cannot reach the limit.
       const names = new Map<string, string>();
-      if (ids.length) {
-        const { data: profs, error: nameErr } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+      for (const chunk of chunkIds(uniqueIds(ids))) {
+        const { data: profs, error: nameErr } = await supabase.from('profiles').select('id, full_name').in('id', chunk);
         if (nameErr) { setStatus('error'); return; }
         (profs ?? []).forEach((p: any) => names.set(p.id, (p.full_name || '').trim()));
       }
@@ -195,7 +205,21 @@ function useGrantableClients(enabled: boolean) {
 
   // Lazy on purpose: a library of thirty clips must not cost a roster read on
   // mount for the twenty-nine nobody opened.
-  useEffect(() => { if (enabled && status === 'idle') load(); }, [enabled, status, load]);
+  //
+  // But `status === 'idle'` made it lazy AND once. This hook is mounted at
+  // screen level, so that read happened the first time any sheet was opened and
+  // never again for the life of the screen: a coach who signed a client up on
+  // Monday spent the week unable to send them a form-check clip, because the
+  // only list that would name them was read before that client existed. The
+  // screen's pull-to-refresh does not include this list either, and nothing on
+  // the sheet says it is old — so the conclusion available to the coach is that
+  // the client did not join.
+  //
+  // `load` is stable, so this fires once per OPENING of a sheet and not once
+  // per render. Dropping the status guard also lets a previous failure be
+  // retried by closing the sheet and opening it again, which is what a person
+  // does anyway.
+  useEffect(() => { if (enabled) load(); }, [enabled, load]);
 
   return { status, people, handAdded, reload: load };
 }
@@ -389,7 +413,9 @@ export default function TrainerVideos() {
   // The grantable-client list is deliberately NOT in here. It is read per
   // sheet, only when a hosted clip is open, and it comes off `clients` and
   // not the roster — pulling the page down behind a closed sheet has no list
-  // to refresh, and opening the sheet reads it fresh either way.
+  // to refresh, and opening the sheet now genuinely reads it fresh (it used to
+  // read once for the life of the screen; see the effect in
+  // `useGrantableClients`).
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     reload(), cat.reload(), Promise.resolve(reloadTemplates()),
   ]), [reload, cat, reloadTemplates]));
@@ -460,8 +486,24 @@ export default function TrainerVideos() {
     // `url` field is for a coach who pointed at a video hosted somewhere else.
     let path: string | null = null;
     if (videoUploadAvailable()) {
-      path = await uploadExerciseVideo(pendUri);
-      if (!path) { setUpBusy(false); Alert.alert('Upload failed', 'Could not upload the clip right now. Check your connection and try again, or add it as a link.'); return; }
+      // One alert used to stand for four different refusals, and it told every
+      // one of them to check their connection. Two of the four are not about the
+      // connection at all: a coach whose session lapsed while the media picker
+      // was open is sent to check a network that is working, and so is a coach
+      // whose write the storage policy refused. `videoUploadFailureLine` in
+      // src/lib/exerciseVideoUpload.ts already knows which of the four happened
+      // — the sentence just had nowhere to go until this callback existed.
+      let why: string | null = null;
+      path = await uploadExerciseVideo(pendUri, (line) => { why = line; });
+      if (!path) {
+        setUpBusy(false);
+        // The fallback is for the one path that reports no cause: the early
+        // return on `!USE_SUPABASE || !uri`, which never calls the callback. It
+        // deliberately no longer names the connection, because that branch is
+        // not a network failure either.
+        Alert.alert('Clip not uploaded', why ?? 'Could not upload the clip right now. Try again in a moment, or add it as a link.');
+        return;
+      }
     }
     const chosen = upVis;
     const where = await addVideo({ name: upName.trim() || 'Exercise clip', group: upGroup.trim() || 'Uncategorised', path: path || undefined, visibility: chosen });

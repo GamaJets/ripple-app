@@ -30,6 +30,7 @@
 // is passed in rather than read. `new Date('2026-03-01')` is UTC by spec while
 // `new Date(2026, 2, 1)` is local, and mixing them puts the boundary a day out
 // for half the planet — npm test runs under three timezones for exactly this.
+import { fmtPointDay } from './format';
 
 export type CredentialKind = 'certification' | 'insurance';
 export type Verification = 'self_declared' | 'verified';
@@ -137,22 +138,26 @@ export function credentialLine(c: Pick<Credential, 'issuer' | 'reference'>): str
   return parts.join(' · ');
 }
 
-/** The three shapes MONTHS below draws, so the doc and the code agree: the
- *  docstring here used to promise "Expired 4 March 2026" and "Renews in 12
- *  days", and the function produced neither. */
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /**
- * A `YYYY-MM-DD` as a person writes it — "4 Mar 2027" — or null when it is not
- * one. Locale-free on purpose: this module is asserted against under plain
- * node, and `toLocaleDateString` would make the sentence depend on the device.
+ * A `YYYY-MM-DD` as the READER writes it — "4 Mar 2027", "Mar 4, 2027",
+ * "2027年3月4日" — or null when it is not one.
+ *
+ * The regex stays: this is still validation, and a month outside 1–12 is a dash
+ * rather than an invented month name. What has gone is the English `MONTHS`
+ * array underneath it, which was defended as "locale-free on purpose: this
+ * module is asserted against under plain node". That is a statement about the
+ * test runner, not about the person holding the phone — and this string is on
+ * the credential line a CLIENT reads when deciding whether to trust a coach
+ * with their body. `fmtPointDay` takes the year, month index and day as numbers,
+ * so nothing is parsed and no zone can shift the day; only the writing is the
+ * locale's.
  */
 function dateWords(iso: string | null | undefined): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? ''));
   if (!m) return null;
   const mo = Number(m[2]);
   if (mo < 1 || mo > 12) return null;
-  return `${Number(m[3])} ${MONTHS[mo - 1]} ${m[1]}`;
+  return fmtPointDay(Number(m[1]), mo - 1, Number(m[3]));
 }
 
 /** "Expired 12 days ago", "Expires in 12 days", "Valid to 4 Mar 2027",

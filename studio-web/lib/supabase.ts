@@ -61,17 +61,70 @@ export interface Me {
   roleUnknown: boolean;
 }
 
+/**
+ * "We could not tell." The fourth answer, and the one that was missing.
+ *
+ * `loadMe` opens with `supabase.auth.getUser()`, a NETWORK call. It rejects on
+ * a dropped connection, and thirty of the console's thirty-one callers awaited
+ * it inside an async IIFE with no `try` around it: the IIFE rejected unhandled,
+ * `setMe` never ran, `me` stayed `undefined` for ever, and twenty-nine routes
+ * sat on the word "Loading…" in a bare `<div>` — no rail, no gym name, no
+ * heading, nothing announced and nothing to press. A front desk on a dropping
+ * connection got nine characters and no way to tell whether the gym was down,
+ * they were signed out, or the tab was broken.
+ *
+ * Reported as a value rather than left as a rejection, and NOT collapsed into
+ * `null`. Null means "nobody is signed in", which is a statement about the
+ * person; this means "the question could not be asked", which is a statement
+ * about the connection. Telling somebody they are signed out because a request
+ * timed out sends them to re-enter a password that was never the problem —
+ * exactly the substitution `roleUnknown` was added to this file to stop one
+ * layer down.
+ */
+export const ME_UNREADABLE = 'unreadable' as const;
+
+/** What `loadMe` can answer: a person, nobody, or "we could not tell". */
+export type MeRead = Me | null | typeof ME_UNREADABLE;
+
 /** Who is signed in, and what the database says they are. */
-export async function loadMe(): Promise<Me | null> {
-  const { data: auth } = await supabase.auth.getUser();
-  const user = auth?.user;
+export async function loadMe(): Promise<MeRead> {
+  let user: { id: string; email?: string | null } | null | undefined;
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    user = auth?.user;
+  } catch {
+    // The one thing that must not happen here is a silent `null`. See
+    // ME_UNREADABLE above: signed out and unreachable are different facts and
+    // they send a person to two different places.
+    return ME_UNREADABLE;
+  }
   if (!user) return null;
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('full_name, role, tenant_id, weight_unit')
-    .eq('id', user.id)
-    .single();
+  let data: any;
+  let error: unknown;
+  try {
+    // The profile read handles its own `error` below — supabase-js resolves on
+    // a database refusal — but it is a second network call and it can reject
+    // for the same reason the first one can.
+    ({ data, error } = await supabase
+      .from('profiles')
+      .select('full_name, role, tenant_id, weight_unit')
+      .eq('id', user.id)
+      .single());
+  } catch {
+    // Here we DO know who they are, so this is not ME_UNREADABLE: it is the
+    // state this function already had a name for. Every screen renders "We
+    // could not read your account" for it, which is the true sentence.
+    return {
+      id: user.id,
+      email: user.email ?? null,
+      fullName: null,
+      role: null,
+      tenantId: null,
+      weightUnit: null,
+      roleUnknown: true,
+    };
+  }
 
   // Three outcomes, not two.
   //

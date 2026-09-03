@@ -110,6 +110,66 @@ const mixed = sessionsOf([
 eq(mixed[0].volumeKg, 500, 'a mixed session totals the loaded sets');
 eq(mixed[0].bodyweightSets, 1, 'and says how much of it the total does not cover');
 
+/* ── 1b. the volume line a clinician reads ────────────────────────────────
+ *
+ * This board is the training volume in the document a member exports and hands
+ * to a physiotherapist deciding what they may load. It was the only one of the
+ * app's four volume totals still doing `reps × set[1]` by hand.
+ */
+
+// Priced through `setLoadKg`, so a flagged bodyweight set is the member's own
+// weight on the day — not nothing.
+const bwHistory = [{ t: '2026-01-01T00:00:00.000Z', v: 80 }];
+const flagged = sessionsOf([
+  e({ t: T1, exercise: 'Pull-up', sets: [[10, 0]], bw: [true] }),
+], bwHistory);
+eq(flagged[0].volumeKg, 800, 'ten pull-ups by an 80 kg member is 800 kg, not nothing');
+eq(flagged[0].bodyweightSets, 0, 'and it is priced work, so it is not listed as unpriced');
+
+// Added load on top of bodyweight, the weighted-dip case.
+const weightedBw = sessionsOf([
+  e({ t: T1, exercise: 'Dip', sets: [[5, 10]], bw: [true] }),
+], bwHistory);
+eq(weightedBw[0].volumeKg, 450, 'a weighted dip is body plus plate, per rep');
+
+// Without a weigh-in there is nothing to price it at, and that is said rather
+// than guessed.
+const unpriced = sessionsOf([
+  e({ t: T1, exercise: 'Pull-up', sets: [[10, 0]], bw: [true] }),
+]);
+eq(unpriced[0].volumeKg, null, 'with no weigh-in behind it there is no figure, not a zero');
+eq(unpriced[0].bodyweightSets, 1, 'and the screen is told the total does not cover it');
+
+// A hold is not reps. 45 seconds under a 10 kg plate is not 450 kg, and 45
+// seconds of an 80 kg member's own plank is not 3,600 kg either.
+const holds = sessionsOf([
+  e({ t: T1, exercise: 'Plank', sets: [[45, 10]], timed: [true] }),
+  e({ t: T1, exercise: 'Plank', sets: [[45, 0]], timed: [true], bw: [true] }),
+], bwHistory);
+eq(holds[0].volumeKg, null, 'a session of holds has no tonnage at all');
+eq(holds[0].timedSets, 2, 'the holds are counted as holds');
+eq(holds[0].bodyweightSets, 0, 'and never as work the total could not price');
+eq(holds[0].sets, 2, 'they are still sets that happened');
+
+// A hold beside a real lift takes nothing away from it and adds nothing to it.
+const both = sessionsOf([
+  e({ t: T1, exercise: 'Squat', sets: [[5, 100]] }),
+  e({ t: T1, exercise: 'Plank', sets: [[60, 20]], timed: [true] }),
+], bwHistory);
+eq(both[0].volumeKg, 500, 'the plank adds no mass to the squat');
+eq(both[0].timedSets, 1, 'and is reported separately');
+
+// The day rollup carries the same fact, or a screen reading days rather than
+// sessions gets a different answer to the same question.
+{
+  const daysOut = trainingDaysOf(sessionsOf([
+    e({ t: T1, exercise: 'Plank', sets: [[45, 10]], timed: [true] }),
+    e({ t: T1, exercise: 'Squat', sets: [[5, 100]] }),
+  ], bwHistory));
+  eq(daysOut.days[0].timedSets, 1, 'the day says how many holds it held');
+  eq(daysOut.days[0].volumeKg, 500, 'and prices none of them');
+}
+
 /* ── energy and length are absent, never zero ─────────────────────────────── */
 
 eq(sessionsOf([e({ t: T1, exercise: 'Squat', sets: [[5, 100]] })])[0].kcal, null,

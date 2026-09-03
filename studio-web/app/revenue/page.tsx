@@ -34,7 +34,10 @@
 // would quietly shrink the forecast by exactly the amount nobody can see,
 // which is the one error on this screen an owner would never catch.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
@@ -50,6 +53,7 @@ import { readByIds } from '@lib/idLookup';
 // rather than a zero.
 import { sumTaken, combineTaken, minorMoney, type Taken } from '@lib/coachMoney';
 import { Banner } from '@/components/Banner';
+import { Fetched, useFetched } from '@/components/Fetched';
 
 /** The cash window. Ninety days is a quarter: long enough that a month with one
  *  odd week does not read as a trend, short enough to still be this year's gym. */
@@ -64,14 +68,7 @@ const DAY = 86400000;
  * "No payments taken in the last 90 days" are both lies about a query that
  * errored, and the second one tells an owner their gym has stopped selling.
  */
-type Unread = 'loading' | 'failed' | null;
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 /* ── the rows this screen reads for itself ─────────────────────────────────── */
 
@@ -174,6 +171,10 @@ interface Promo {
 
 export default function Revenue() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
 
   // A read that failed stays null, never []. [] is the gym saying it has none;
@@ -191,8 +192,6 @@ export default function Revenue() {
   const [packsErr, setPacksErr] = useState<string | null>(null);
   const [promosErr, setPromosErr] = useState<string | null>(null);
 
-  const since = useMemo(() => new Date(Date.now() - DAYS * DAY).toISOString(), []);
-
   /**
    * Five independent reads.
    *
@@ -201,8 +200,29 @@ export default function Revenue() {
    * price book, the memberships and the till alongside it, and the screen would
    * report a gym with no plans, no members and no income. One failed read may
    * cost its own section and nothing else.
+   *
+   * ── `since` is computed HERE, per read, and not held at mount ────────────
+   *
+   * It was `useMemo(() => new Date(Date.now() - DAYS * DAY).toISOString(), [])`
+   * with `load` depending on it. An empty dependency array does not fix a value
+   * for a render, it fixes it for the life of the MOUNT — and this is the one
+   * console in the building that is left open. It runs on a front-desk tablet
+   * that nobody reloads for days, and the page now refreshes itself (below), so
+   * the frozen bound was about to become live: three days open and every one of
+   * the five reads still asks for the ninety days ending on the day the tab was
+   * opened, while the heading under them says "the last 90 days". The figures
+   * are wrong by three days of takings at one end and by three days that have
+   * happened at the other, and each refresh returns the same wrong window,
+   * which is what makes it look confirmed rather than stale.
+   *
+   * A window bound belongs to the READ, not to the component. Computed inside
+   * `load` there is no value to go stale, no dependency for `useCallback` to
+   * carry, and no window in which state and query can disagree — every reader
+   * of this page, the mount, the tab coming back, the poll and the button, gets
+   * a bound relative to the moment it actually asked.
    */
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
+    const since = new Date(Date.now() - DAYS * DAY).toISOString();
     const [plRes, mRes, tRes, pkRes, prRes] = await Promise.allSettled([
       fetchPlans(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
@@ -222,13 +242,37 @@ export default function Revenue() {
     setTakingsErr(failure(tRes, 'the payments taken'));
     setPacksErr(failure(pkRes, 'the PT packs'));
     setPromosErr(failure(prRes, 'the promo codes'));
-  }, [since]);
+
+    // Whole means all five came back. `useFetched` stamps only on a whole read,
+    // so a refresh that lost the promo codes leaves the stamp where it was and
+    // the section's own banner is what says which read is missing — counting
+    // what the server confirmed rather than that a request was sent.
+    return [plRes, mRes, tRes, pkRes, prRes].every((r) => r.status === 'fulfilled');
+  }, []);
+
+  /*
+   * Kept current, and it says when it was last read.
+   *
+   * No poll. Nothing on this page is written while somebody stands at the desk
+   * the way /orders and /passes are — it is the price book, the memberships and
+   * the till — so the two triggers that matter are coming back to the tab and
+   * asking. The stamp is the part that was missing either way: "what actually
+   * arrived in the last 90 days" is a sentence about a window, and until now
+   * the page did not say which 90 days it meant or when it had asked.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
 
   useEffect(() => {
     let live = true;
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) {
         setPlans([]); setMembers([]); setTakings([]); setPacks({ packs: [], renewals: [] }); setPromos([]);
@@ -241,10 +285,21 @@ export default function Revenue() {
       const { data: t, error } = await supabase
         .from('tenants').select('name').eq('id', who.tenantId).single();
       if (live) setGymName(error ? null : ((t as any)?.name ?? null));
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+  }, []);
+
+  // The first read goes through `refresh` so that it stamps exactly like every
+  // later one, and it is keyed on the tenant id rather than fired at the end of
+  // the effect above. `useFetched` holds the reader in a ref that is assigned
+  // during RENDER, so calling `refresh()` in the same tick as `setMe(who)`
+  // would run the closure from the previous render — the one where `me` is
+  // still undefined — and the reader would answer `false` without reading
+  // anything. Waiting for the id to arrive in state is what makes the reader
+  // and the identity it needs the same generation.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+  }, [me?.tenantId, refresh]);
 
   const unread = (rows: unknown[] | null, e: string | null): Unread =>
     rows !== null ? null : e ? 'failed' : 'loading';
@@ -269,8 +324,11 @@ export default function Revenue() {
 
   const packSummary = useMemo(() => (packs ? buildPacks(packs) : null), [packs]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -322,6 +380,9 @@ export default function Revenue() {
         the till says actually arrived in the last {DAYS} days, and which plans
         are carrying it. Recorded in /money — only read here.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this gym’s money" style={{ margin: '2px 0 18px' }} />
 
       <Banner>
         <strong>Recurring is a forecast of billing, not money received.</strong>{' '}
@@ -626,7 +687,7 @@ function Recurring({ r, state }: { r: RecurringView | null; state: Unread }) {
             </div>
           ) : null}
 
-          <DataTable
+          <DataTable noun="recurring plans"
             rows={r.lines} columns={cols} rowKey={(l) => l.id}
             empty="The price book is empty. Until a gym prices something, there is no recurring revenue to forecast — which is different from a forecast of nothing."
           />
@@ -799,7 +860,7 @@ function Cash({ c, state }: { c: CashView | null; state: Unread }) {
               </>
             )}
           </p>
-          <DataTable
+          <DataTable noun="payment methods"
             rows={c.byMethod} columns={cols} rowKey={(b) => b.key}
             empty={`No payment was recorded in the last ${DAYS} days. That is not the same as no income — it is the same as nobody having entered one.`}
           />
@@ -973,7 +1034,7 @@ function Split({ s, state, packs, packsState }: {
             name on it is counted in the till and left unattributed rather than pushed
             into whichever bucket looks tidier.
           </p>
-          <DataTable
+          <DataTable noun="revenue purposes"
             rows={s.buckets} columns={cols} rowKey={(b) => b.key}
             empty={`No payment was recorded in the last ${DAYS} days, so there is nothing to attribute.`}
           />
@@ -1067,7 +1128,7 @@ function Promos({ rows, state }: { rows: Promo[] | null; state: Unread }) {
             not an amount — multiplying the two would produce a confident-looking
             figure for money the record cannot account for.
           </p>
-          <DataTable
+          <DataTable noun="promo codes"
             rows={rows} columns={cols} rowKey={(p) => p.id}
             empty="No promo code has been created. Nothing is discounting the price book."
           />
@@ -1307,7 +1368,10 @@ function Unresolved({ state, what, cost }: {
 }) {
   if (state === 'loading') return <Loading />;
   return (
-    <div style={{
+    // Announced. `Loading` above carries `role="status"` and this is the node
+    // that replaces it, so without one the transition from "still reading" to
+    // "this section is unknown" produced no event at all.
+    <div role="status" aria-live="polite" aria-atomic="true" style={{
       padding: '16px 14px', margin: '14px', borderRadius: 0,
       border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
       background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13,
@@ -1330,18 +1394,3 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}

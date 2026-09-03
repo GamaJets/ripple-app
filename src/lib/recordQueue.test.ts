@@ -130,6 +130,23 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
   eq(asGlucoseIntent({ mmol: 5.4 }), null, 'and one with no moment cannot be charted, so it is refused rather than filed under now');
   eq(asGlucoseIntent({ mmol: 0, at: '2026-09-01T08:00:00.000Z' }), null, 'zero is not a reading a monitor produces');
   eq(asGlucoseIntent({ mmol: 5.4, at: 'this morning' }), null, 'nor is an unreadable moment tolerated');
+
+  // The id is what makes a replay safe. `glucose_external_once` is partial on
+  // `external_id is not null` and supabase/parts/102 deliberately lets a
+  // hand-typed reading repeat, so the primary key is the only thing that can
+  // tell "the member typed 5.4 twice" apart from "we offered 5.4 twice because
+  // the first answer was lost". Without it a lost response is a second point on
+  // the chart for one finger-prick.
+  eq(asGlucoseIntent({ id: 'row-1', mmol: 5.4, at: '2026-09-01T08:00:00.000Z' })?.id, 'row-1',
+    'A READING CARRIES THE ROW ID THE DEVICE CHOSE — it is what a replay collides on');
+  eq(asGlucoseIntent({ id: '   ', mmol: 5.4, at: '2026-09-01T08:00:00.000Z' })?.id, null,
+    'a blank id is no id, never a key the insert would send as whitespace');
+  // A reading queued by a build that predates the id has none, and is still a
+  // reading. Refusing it would discard something a member typed in order to fix
+  // a duplicate they have not got.
+  eq(asGlucoseIntent({ mmol: 5.4, at: '2026-09-01T08:00:00.000Z' })?.id, null,
+    'and one queued before this field existed still drains rather than being refused');
+  eq(asGlucoseIntent({ mmol: 5.4, at: '2026-09-01T08:00:00.000Z' })?.mmol, 5.4, 'with its value intact');
 }
 
 /* ── 5 · the coach's paperwork ─────────────────────────────────────────── */
@@ -181,6 +198,12 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
   eq(asScanIntent({ ...(good as object), weightKg: undefined }), null, 'no weight is no scan');
   eq(asScanIntent({ ...(good as object), bodyFatPct: null }), null, 'and neither is no body fat');
   eq(asScanIntent({ ...(good as object), weightKg: 0 }), null, 'a zero weight is not a light member, it is a member nobody weighed');
+  // The same bound on the other column. Only the weight side of it was ever
+  // asserted, so the body-fat check could have been relaxed to `>= 0` with
+  // nothing to show for it — and a scan that reached the queue with a zero
+  // there is one the `scans` table refuses, retried on every reconnect for the
+  // life of the install because nothing on the device will ever take it out.
+  eq(asScanIntent({ ...(good as object), bodyFatPct: 0 }), null, 'and a zero body fat is a reading nobody took, not a member with none');
   eq(asScanIntent({ ...(good as object), takenAt: '14 August' }), null, 'a date that is not a date is refused rather than guessed at');
   eq(asScanIntent({ ...(good as object), takenAt: '2026-08-14T09:00:00Z' }), null,
     'and so is an instant: `scans.taken_at` is a date, and a timestamp moves the scan a day west of Greenwich');
@@ -189,6 +212,14 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
   // absent — never zero, which would draw as a real reading on the chart.
   eq(asScanIntent({ ...(good as object), skeletalMuscleKg: undefined })!.skeletalMuscleKg, null, 'no muscle reading is null');
   eq(asScanIntent({ ...(good as object), skeletalMuscleKg: 0 })!.skeletalMuscleKg, null, 'and a zero is treated as one');
+
+  // `metrics` is plain JSON bound for a jsonb column and the only thing asked
+  // of it is that it be an OBJECT. An array passes `typeof x === 'object'`, so
+  // the array check is the whole of the guard, and a scan carrying one would
+  // send a shape nothing downstream reads by key.
+  eq(asScanIntent({ ...(good as object), metrics: [1, 2] })!.metrics, null, 'a list is not an InBody breakdown');
+  eq(asScanIntent({ ...(good as object), metrics: 'visceral 7' })!.metrics, null, 'and neither is a line of text');
+  eq(asScanIntent({ ...(good as object), metrics: undefined })!.metrics, null, 'a printout that carried none says none');
 
   eq(asScanIntent(null), null, 'nothing is not an intent');
   eq(asScanIntent({ id: 'x' }), null, 'and neither is a fragment');
@@ -239,9 +270,23 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
     'and warns that the screen will not show it, because the screen is the evidence and it has not changed');
 
   const full = notKeptNote('reading', 'full');
+  const unavailable = notKeptNote('reading', 'unavailable');
   ok(/not saved/.test(full), 'a phone that is full says plainly that nothing was kept');
   ok(!/goes up next time/.test(full), 'and does not make this one the promise the kept line makes');
-  ok(/not saved/.test(notKeptNote('reading', 'unavailable')), 'and so does a device with no outbox to key');
+  ok(/not saved/.test(unavailable), 'and so does a device with no outbox to key');
+
+  // Both of the above are satisfied by either sentence, so between them they
+  // could not tell the two reasons apart — and these are two different things
+  // to do about it. A phone that is FULL needs signal so the backlog can drain;
+  // a phone with no outbox to key has nothing waiting at all, and telling that
+  // member to wait for the queue to clear sends them to look at an empty one.
+  ok(full !== unavailable, 'the two reasons are two sentences');
+  ok(/as much unsent work as it will hold/.test(full),
+    'the full phone is told what is actually wrong with it: the backlog, which is a thing signal will fix');
+  ok(!/as much unsent work as it will hold/.test(unavailable),
+    'and the phone with nowhere to keep it is NOT told it has a backlog it does not have');
+  ok(/Nothing was kept/.test(unavailable), 'it is told nothing was kept');
+  ok(full.includes('reading') && unavailable.includes('reading'), 'and both name the thing that was lost');
 }
 
 if (errors.length) {

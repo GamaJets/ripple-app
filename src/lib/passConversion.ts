@@ -61,6 +61,7 @@ import {
 import { summarise, type Membership, type MembershipPlan, type MembershipStatus } from './gymRecord';
 import type { Visit } from './gymVisits';
 import { rowsOf, type Slice } from './memberView';
+import { isoDay } from './weekStart';
 import { MIN_COHORT_FOR_RATE, pointsPerMember, rateOf } from './gymRetention';
 
 const DAY = 86_400_000;
@@ -303,7 +304,16 @@ export interface PassConversion {
 }
 
 export interface ConversionOptions {
-  /** Plain ISO date, the gym's own. Defaults to today in UTC. */
+  /**
+   * Plain ISO date, the gym's own — `gymDay(Date.now(), zone)`.
+   *
+   * The default was UTC's day, which is nobody's, and it is the default that
+   * every screen not passing this got. It is now the READER's day, which is the
+   * nearest true answer this module can reach on its own: it has no tenant and
+   * therefore no zone, and inventing UTC's calendar for a gym is one of the two
+   * wrong answers src/lib/gymZone.ts names by name. Pass the gym's day and this
+   * is exact.
+   */
   today?: string;
   /** Smallest decided group allowed a percentage. Defaults to the retention
    *  floor, deliberately shared so the two screens cannot disagree. */
@@ -314,7 +324,7 @@ export function buildPassConversion(
   rec: PassConversionRecord,
   opts: ConversionOptions = {},
 ): PassConversion {
-  const today = opts.today ?? new Date().toISOString().slice(0, 10);
+  const today = opts.today ?? isoDay(new Date());
   const minGroup = opts.minGroup ?? MIN_COHORT_FOR_RATE;
 
   const passRows = rowsOf(rec.passes);
@@ -698,6 +708,14 @@ export function dateOf(v: string | null | undefined): string | null {
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const t = Date.parse(s);
   if (Number.isNaN(t)) return null;
+  // utc-day-ok: the fallback, reached only by a value that is NOT already a
+  // bare day — the line above takes the string whole whenever it is one, which
+  // is what `pass.issued_on` and `pass.expires_on` actually hold, both being
+  // `date` columns. What lands here is a full timestamp, and every day this
+  // module then compares it against is UTC-anchored: `daysBetween` parses both
+  // ends at `T00:00:00Z`. Reading this one back locally would put it on a
+  // different calendar from the days it is subtracted from, which is a worse
+  // error than the one it would be fixing.
   return new Date(t).toISOString().slice(0, 10);
 }
 

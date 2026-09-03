@@ -24,12 +24,13 @@
 // Greenwich — the exact bug src/lib/localDate.ts exists for. Every date here
 // now goes through it, and every figure says how long ago it was taken.
 import { useState, useCallback } from 'react';
-import { View, Text, ScrollView, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useToast } from '../../src/ui/toast';
-import { useMeasurements, METRICS, type MeasureEntry } from '../../src/ui/measurements';
+import { useMeasurements, METRICS, type MeasureEntry, type MetricKey } from '../../src/ui/measurements';
+import { hitSlopFor } from '../../src/lib/a11y';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
@@ -54,7 +55,7 @@ export default function Measurements() {
  const t = useTheme();
  const toast = useToast();
  const router = useRouter();
- const { entries, status, addEntry, reload } = useMeasurements();
+ const { entries, status, addEntry, updateMetric, removeMetric, reload } = useMeasurements();
  // The member's own goal, purely so the mark beside a fall can stop claiming to
  // be good news for everybody. Nothing else on this screen reads it.
  const cd = useClientData();
@@ -90,6 +91,52 @@ export default function Measurements() {
   const v = lengthIn(latest?.[k], lu);
   return v == null ? null : plain(v);
  };
+ /* ── correcting one figure, without losing the day it was taken ──────────
+  *
+  * A slipped decimal is not a display glitch: this figure is the baseline every
+  * "since" on this screen is measured from, a row in the summary a member gives
+  * a clinician, and one of the things a coach programmes from. Re-logging the
+  * right number does not fix it — it puts a correct figure on TODAY and leaves
+  * the trend bent around the day the mistake was made — so the correction keeps
+  * the original date and the removal takes only the one site.
+  */
+ const [fixing, setFixing] = useState<{ at: string; key: MetricKey; label: string } | null>(null);
+ const [fixVal, setFixVal] = useState('');
+ const askAbout = (e: MeasureEntry, key: MetricKey, label: string) => {
+  const shown = lengthIn(e[key], lu);
+  setFixVal(shown == null ? '' : plain(shown));
+  setFixing({ at: e.at, key, label });
+ };
+ const saveFix = async () => {
+  if (!fixing) return;
+  const cm = lengthToCm(fixVal, lu);
+  if (cm == null || cm <= 0) { Alert.alert('Check that figure', `Type the ${fixing.label.toLowerCase()} measurement in ${lu}.`); return; }
+  const done = await updateMetric(fixing.at, fixing.key, cm);
+  setFixing(null);
+  // The answer is read. A correction reported over a write the server refused
+  // would leave the wrong figure on the record with the member believing it is
+  // gone — which is the failure this whole control exists to end, restated.
+  if (done) toast.say(`${fixing.label} corrected.`);
+  else Alert.alert('Not corrected', `That change did not reach your account, so your ${fixing.label.toLowerCase()} is still exactly as it was. Try again in a moment.`);
+ };
+ const removeFix = () => {
+  if (!fixing) return;
+  const f = fixing;
+  Alert.alert(
+   `Remove this ${f.label.toLowerCase()} figure?`,
+   'It comes off this date only. Everything else you measured that day stays, and so does every other date.',
+   [
+    { text: 'Keep it', style: 'cancel' },
+    { text: 'Remove', style: 'destructive', onPress: () => { void (async () => {
+      const gone = await removeMetric(f.at, f.key);
+      setFixing(null);
+      if (gone) toast.say(`${f.label} removed.`);
+      else Alert.alert('It is still there', `That figure could not be removed just now, so it has not been. Nothing has changed and you can try again in a moment.`);
+    })(); } },
+   ],
+  );
+ };
+
  const save = async () => {
  const parsed: Record<string, number> = {};
  // Typed in the client's unit, stored in centimetres. `parseFloat` alone read
@@ -262,10 +309,41 @@ export default function Measurements() {
          one of these a day early west of Greenwich. */}
      <Text style={{ ...ty.caption, color: t.ink3 }}>{dayLabel(e.at)}{agoLabel(e.at, today) ? ` · ${agoLabel(e.at, today)}` : ''}</Text>
      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg, marginTop: 5 }}>
+      {/* Every figure is tappable, because every figure is one keypress away
+          from being wrong for ever: this is the baseline every "since" on the
+          screen is measured against, and it is in the summary a member hands a
+          clinician. There was no row control of any kind here — no correction
+          and no delete — while the scans screen next door has had both.
+          MIN_TARGET through hitSlop: the label is caption-sized text. */}
       {METRICS.map(({ key, label }) => e[key] != null ? (
-       <Text key={key} style={{ ...ty.caption, color: t.ink3 }}>{label} <Text style={{ ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(lengthIn(e[key], lu))}</Text></Text>
+       <Pressable key={key}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} on ${dayLabel(e.at)}. Correct or remove this figure.`}
+        hitSlop={hitSlopFor(20)}
+        onPress={() => askAbout(e, key, label)}>
+        <Text style={{ ...ty.caption, color: t.ink3 }}>{label} <Text style={{ ...numeric, fontWeight: '500', color: t.ink2 }}>{fig(lengthIn(e[key], lu))}</Text></Text>
+       </Pressable>
       ) : null)}
      </View>
+     {fixing && fixing.at === e.at ? (
+      <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
+       <Text style={{ ...ty.caption, color: t.ink3 }}>
+        {fixing.label} on {dayLabel(e.at)} — the date stays as it is, so your trend is not bent around a correction.
+       </Text>
+       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+        <TextInput value={fixVal} onChangeText={setFixVal} keyboardType="decimal-pad"
+         accessibilityLabel={`${fixing.label} in ${lu}`}
+         placeholder={lu} placeholderTextColor={t.ink3} style={inp} />
+        <Text style={{ ...ty.caption, color: t.ink3 }}>{lu}</Text>
+       </View>
+       <View style={{ height: sp.sm }} />
+       <Cta label="Save Correction" wide onPress={() => { void saveFix(); }} />
+       <View style={{ height: sp.sm }} />
+       <Ghost label="Remove This Figure" onPress={removeFix} />
+       <View style={{ height: sp.sm }} />
+       <Ghost label="Cancel" onPress={() => setFixing(null)} />
+      </View>
+     ) : null}
     </View>
    ))}
   </Section>

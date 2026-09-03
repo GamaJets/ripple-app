@@ -66,7 +66,17 @@ export default function Standards() {
  const wu = useSettings().weightUnit;
  const liftsWhole = isWhole(logStatus);
  const prs = personalRecords(log, c.weightSeries);
- const bodyWhole = isWhole(c.profileStatus);
+ // `c.status`, not `c.profileStatus`. The bodyweight is not a profile field:
+ // `weightKg` is the most recent of a TYPED figure (profile) and the newest
+ // SCAN (scans), so its readability depends on both reads. Gating on the
+ // profile alone meant a member with a body-composition scan every Monday, on a
+ // phone whose scans read had failed or come back truncated, got `bw === null`
+ // under `bodyWhole === true` — and was told the app has never had a weight for
+ // them and sent off to add one, while every lift on the screen graded
+ // ungradable. `c.status` is `worstStatus(profileStatus, scansStatus)` and has
+ // been there the whole time; this screen's own header says the status gates
+ // are what stop exactly this.
+ const bodyWhole = isWhole(c.status);
  const bw = c.weightKg;
 
  const rows = LIFTS.map((lift) => {

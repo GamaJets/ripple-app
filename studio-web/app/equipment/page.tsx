@@ -18,7 +18,14 @@
 // whoever is standing next to the machine, and a register only trainers can
 // read but not write is a register that goes stale in a week.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+// `Unresolved` comes from here rather than being declared at the bottom of
+// this file. Seven console screens held a byte-identical copy, every one of
+// them a plain `<div>` — so the sentence saying THIS section's rows could not
+// be read was never announced. One copy, with the live region on it.
+import { ConsoleGate, Unresolved } from '@/components/Gate';
+import { type Unread, failure } from '@/lib/read';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
@@ -34,6 +41,13 @@ import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
 import { money } from '@lib/gymRecord';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+// The reader's locale, the GYM's zone. A class clash is an hour on the gym's
+// wall clock; drawn on the reader's it can name a different weekday entirely.
+import { gymDateTimeText } from '@lib/gymWhen';
+// The gym's calendar day. Every service deadline on this screen is a `date`
+// column somebody filled in on the gym's own clock, so the "today" it is
+// compared against has to be that clock too.
+import { gymDay } from '@lib/gymZone';
 import { Banner } from '@/components/Banner';
 
 const DAY = 86400000;
@@ -47,14 +61,7 @@ const DAY = 86400000;
  * act on both of them — one by waiting, the other by telling the owner every
  * machine in the building is fine.
  */
-type Unread = 'loading' | 'failed' | null;
 
-/** One settled read, as a line for the banner. Null when it came back fine. */
-function failure(res: PromiseSettledResult<unknown>, what: string): string | null {
-  if (res.status === 'fulfilled') return null;
-  const why = (res.reason as any)?.message;
-  return `Could not read ${what}${why ? `: ${why}` : '.'}`;
-}
 
 /** The words the screen uses for a service state. `serviceState` decides which. */
 const STATE_WORD: Record<ServiceState, string> = {
@@ -76,6 +83,10 @@ const STATUS_WORD: Record<EquipmentStatus, string> = {
 
 export default function EquipmentPage() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   // Whether the gym's NAME could not be READ, as distinct from there being no
   // gym. The read below still drops the error into a `no-error-ok:` — no figure
@@ -90,6 +101,8 @@ export default function EquipmentPage() {
   /** The gym's own currency, for the cost on a service entry. There is no
    *  fallback: what an engineer charged is a permanent record. */
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
@@ -126,6 +139,10 @@ export default function EquipmentPage() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) { setKit([]); setClasses([]); setLog([]); return; }
       // The error is read off the result. Not because the name matters — it is
@@ -134,14 +151,17 @@ export default function EquipmentPage() {
       // The currency comes with it now: a service entry can carry a cost, and
       // what an engineer charged is a permanent record that has to say in what.
       const t = await readTenant(supabase, who.tenantId);
-      if (live) { setGymName(t.name); setCcy(t.currency); setGymNameUnread(!!t.error); }
+      if (live) { setGymName(t.name); setCcy(t.currency); setZone(t.zone); setGymNameUnread(!!t.error); }
       await load(who.tenantId);
     })();
     return () => { live = false; };
   }, [load]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -168,11 +188,21 @@ export default function EquipmentPage() {
   const tenantId = me.tenantId!;
   const refresh = () => load(tenantId);
 
-  // The gym's own calendar day, not UTC's — the same date every service
-  // deadline on this screen is compared against. This product sells in AED,
-  // four hours ahead of UTC, so for four hours either side of local midnight a
-  // UTC date would have called a service due tomorrow overdue today.
-  const today = isoDate(new Date());
+  // The gym's own calendar day — the same date every service deadline on this
+  // screen is compared against. This product sells in AED, four hours ahead of
+  // UTC, so for four hours either side of local midnight a UTC date would have
+  // called a service due tomorrow overdue today.
+  //
+  // It SAID that and was `isoDate(new Date())`, which is the READER's calendar
+  // — the same defect one layer over, and one `check:console-when` cannot see
+  // because nothing on this line formats a Date. `zone` is already read into
+  // this component (`readTenant` supplies it), and every service due date on
+  // `gym_equipment` is a `date` column somebody entered as the gym's day, so
+  // comparing it against a laptop's day in another country marks a rower
+  // overdue a day early — or, worse, still in service on the morning it was
+  // due. The reader's day stays as the fallback for a gym that has not set a
+  // zone, which is exactly what this screen did before.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
 
   const sum = kit ? summariseRegister(kit, today) : null;
   const attention = kit ? needsAttention(kit, today) : null;
@@ -229,7 +259,7 @@ export default function EquipmentPage() {
 
       <OutOfAction rows={down} unread={unread(kit)} today={today} onChange={refresh} />
       <DueForService rows={attention} unread={unread(kit)} today={today} tenantId={tenantId} me={me} onChange={refresh} />
-      <CapacityAtRisk kit={kit} classes={classes} kitUnread={unread(kit)} classesUnread={unread(classes)} />
+      <CapacityAtRisk kit={kit} classes={classes} zone={zone} kitUnread={unread(kit)} classesUnread={unread(classes)} />
       <Register rows={kit} unread={unread(kit)} today={today} onChange={refresh} />
 
       <History
@@ -291,9 +321,11 @@ function OutOfAction({ rows, unread, today, onChange }: {
       title="Out of action"
       sub="Kit the gym owns and cannot use today. Every unit here is already subtracted from the capacity check below."
     >
-      {msg ? <p style={{ margin: 14, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {/* Announced. `msg` on this page only ever holds the outcome of a write
+          that was refused; `History` below already banners its own. */}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: 14, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
       {unread ? <Unresolved state={unread} what="the equipment register" /> : (
-        <DataTable
+        <DataTable noun="items out of action"
           rows={rows ?? []} columns={cols} rowKey={(e) => e.id}
           empty="Nothing is marked out of action."
         />
@@ -426,11 +458,11 @@ function History({ rows, kit, unread, today, ccy, tenantId, me, onChange }: {
         {ccy ? null : ` A cost cannot be recorded until this gym sets its currency — ${NO_CURRENCY_NOTE}.`}
       </p>
       {blocker && (findings || cost) ? (
-        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>{blocker}</p>
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>{blocker}</p>
       ) : null}
       {msg ? <Banner tone="crit">{msg}</Banner> : null}
       {unread ? <Unresolved state={unread} what="the maintenance log" /> : (
-        <DataTable
+        <DataTable noun="log entries"
           rows={rows ?? []} columns={cols} rowKey={(r) => r.id}
           empty="Nothing has been recorded. Until this wave the product kept one date per machine and deleted the note, so an empty log here is the state everything was in rather than a gym that has never serviced anything."
         />
@@ -511,9 +543,11 @@ function DueForService({ rows, unread, today, tenantId, me, onChange }: {
       title="Due for service"
       sub="Overdue first, then what falls due this week, then anything on a schedule that has never been serviced. Kit with no schedule at all is left out on purpose — that was a decision, not a gap."
     >
-      {msg ? <p style={{ margin: 14, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {/* Announced. `msg` on this page only ever holds the outcome of a write
+          that was refused; `History` below already banners its own. */}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: 14, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
       {unread ? <Unresolved state={unread} what="the equipment register" /> : (
-        <DataTable
+        <DataTable noun="items due for service"
           rows={rows ?? []} columns={cols} rowKey={(r) => r.item.id}
           empty="Nothing is due for service."
         />
@@ -533,8 +567,10 @@ function DueForService({ rows, unread, today, tenantId, me, onChange }: {
  * and "rower" would produce a confident, wrong sentence about a class that
  * needs neither.
  */
-function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
+function CapacityAtRisk({ kit, classes, zone, kitUnread, classesUnread }: {
   kit: Equipment[] | null; classes: GymClass[] | null;
+  /** `tenants.timezone` — the clock the classes below actually run on. */
+  zone: string | null;
   kitUnread: Unread; classesUnread: Unread;
 }) {
   const [category, setCategory] = useState('');
@@ -604,9 +640,9 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
 
   const cols: Column<Row>[] = [
     { key: 'when', header: 'When', value: (r) => r.c.startsAt,
-      render: (r) => new Date(r.c.startsAt).toLocaleString([], {
+      render: (r) => gymDateTimeText(r.c.startsAt, zone, {
         weekday: 'short', hour: '2-digit', minute: '2-digit',
-      }) },
+      }) ?? <span className="dash">not stated</span> },
     { key: 'title', header: 'Class', value: (r) => r.c.title },
     { key: 'room', header: 'Room', value: (r) => r.c.room ?? '',
       render: (r) => r.c.room ?? <span className="dash">—</span> },
@@ -650,7 +686,7 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
       ) : (
         <>
           <div style={formRow}>
-            <select value={chosen} onChange={(e) => setCategory(e.target.value)} style={{ ...field, flex: 2 }}>
+            <select aria-label="Category" value={chosen} onChange={(e) => setCategory(e.target.value)} style={{ ...field, flex: 2 }}>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
             <label style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--ink3)', fontSize: 12.5 }}>
@@ -706,7 +742,7 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
                 {clashingKit.map((g) => (
                   <li key={g.from} style={{ fontSize: 12.5, color: 'var(--ink2)', padding: '5px 0' }}>
                     <span className="mono" style={{ color: 'var(--ink)' }}>
-                      {new Date(g.from).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {gymDateTimeText(g.from, zone, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) ?? 'an hour that could not be read'}
                     </span>
                     {' — '}
                     {g.classes.map((c) => `${c.title} (${c.booked} of ${c.capacity})`).join(' and ')}
@@ -720,7 +756,7 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
                         {g.shortBooked} already booked would have no {chosen}.
                       </span>
                     ) : (
-                      <span style={{ color: '#f0c04e' }}>
+                      <span style={{ color: 'var(--warn)' }}>
                         Everyone booked so far is covered; {g.shortIfFull} would not be if both fill.
                       </span>
                     )}
@@ -732,7 +768,7 @@ function CapacityAtRisk({ kit, classes, kitUnread, classesUnread }: {
           {classes === null ? (
             <Unresolved state={classesUnread === 'failed' ? 'failed' : 'loading'} what="the coming week's classes" />
           ) : perOk ? (
-            <DataTable
+            <DataTable noun="classes"
               rows={rows} columns={cols} rowKey={(r) => r.c.id}
               empty="No classes on the timetable in the next seven days."
             />
@@ -859,9 +895,11 @@ function Register({ rows, unread, today, onChange }: {
           : undefined
       }
     >
-      {msg ? <p style={{ margin: 14, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {/* Announced. `msg` on this page only ever holds the outcome of a write
+          that was refused; `History` below already banners its own. */}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: 14, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
       {unread ? <Unresolved state={unread} what="the equipment register" /> : (
-        <DataTable
+        <DataTable noun="items of equipment"
           rows={rows ?? []} columns={cols} rowKey={(e) => e.id}
           empty="Nothing is registered yet. An empty register is not an empty gym — until it is filled in, no class capacity on this screen can be checked."
         />
@@ -929,7 +967,7 @@ function AddKit({ tenantId, onChange }: { tenantId: string; onChange: () => void
           {busy ? 'Adding…' : 'Add'}
         </button>
       </form>
-      {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {msg ? <p role="alert" aria-live="assertive" aria-atomic="true" style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
     </Section>
   );
 }
@@ -984,18 +1022,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
 /**
  * What stands in for a table whose rows are not known.
  *
@@ -1003,10 +1029,4 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
  * could not ask" and "the gym has none" were the same sentence on screen —
  * and here that sentence would have been "nothing is out of action".
  */
-function Unresolved({ state, what }: { state: Exclude<Unread, null>; what: string }) {
-  return (
-    <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>
-      {state === 'loading' ? 'Loading…' : `Could not read ${what}. The banner above says why.`}
-    </div>
-  );
-}
+

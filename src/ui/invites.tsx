@@ -27,6 +27,7 @@ import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
+import { writeFailure } from '../lib/wroteRows';
 
 /** Alias kept because half the app imports the invite's mode from here. The
  *  vocabulary itself is in src/lib/types.ts — an invite's delivery and a
@@ -241,13 +242,39 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
     } catch { return false; }
   };
 
+  /**
+   * Withdraw an invitation, and take the row off the list only once the server
+   * has said it is withdrawn.
+   *
+   * ── Two defects in four lines, and they compounded ────────────────────────
+   *
+   * The row was filtered out FIRST, and the update carried no `.select('id')`.
+   * A PostgREST update an RLS policy refuses does not raise: it matches zero
+   * rows and comes back with `error: null`, so `!error` was `true` for the one
+   * case that matters and the invitation was gone from the coach's screen while
+   * still live in the invitee's. src/ui/trainerInvites.tsx writes this exact
+   * argument out beside `revokeTrainerInvite`, which has counted its row since;
+   * this is the same shape one file along.
+   *
+   * An invitation is a live link into the coach's book. The coach who cancels
+   * one sent to the wrong address has no second place to check, because the
+   * list the row was in is the list that was just filtered.
+   */
   const revokeInvite: InvitesValue['revokeInvite'] = async (id) => {
-    setSent((p) => p.filter((i) => i.id !== id));
     // A local id never reached the server; dropping it here is the whole revoke.
-    if (!USE_SUPABASE || id.startsWith('local-')) return true;
+    if (!USE_SUPABASE || id.startsWith('local-')) {
+      setSent((p) => p.filter((i) => i.id !== id));
+      return true;
+    }
     try {
-      const { error } = await supabase.from('coach_invites').update({ status: 'revoked' }).eq('id', id);
-      return !error;
+      const { data, error } = await supabase.from('coach_invites')
+        .update({ status: 'revoked' }).eq('id', id).select('id');
+      // Exactly one row, counted rather than assumed. Nought is the refusal
+      // that raises nothing, and the row stays on screen where the coach can
+      // see it is still live.
+      if (error || !data || data.length !== 1) return false;
+      setSent((p) => p.filter((i) => i.id !== id));
+      return true;
     } catch { return false; }
   };
 
@@ -283,8 +310,15 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
     markDismissed(id);
     if (!USE_SUPABASE || !inv || id.startsWith('local-')) return true;
     try {
-      const { error } = await supabase.from('coach_invites').update({ status: 'revoked' }).eq('id', id);
-      return !error;
+      // COUNTED. PostgREST answers an UPDATE that matched nothing with a 204
+      // and `error: null`, so `!error` was equally true of an invitation RLS
+      // would not let this client revoke and of one the coach had already
+      // withdrawn. The local dismissal above stands either way — the comment
+      // there argues why, and that argument is unaffected — but the BOOLEAN
+      // this returns is a claim about the server, and it was not one.
+      const upd = await supabase.from('coach_invites')
+        .update({ status: 'revoked' }, { count: 'exact' }).eq('id', id);
+      return !writeFailure('That invitation', upd);
     } catch { return false; }
   };
 

@@ -79,7 +79,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import {
   recentWindow, summariseAdherence, setItemLine, dayLabel,
   type DayWindow, type TickRow, type AdherenceSummary,
@@ -91,6 +91,7 @@ import {
 import { bulkReport, selectAllOffer, type WriteOutcome } from '../../src/lib/bulkActions';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { hitSlopFor } from '../../src/lib/a11y';
 
 interface Item {
   id: string; label: string; icon: string; active: boolean; sort: number;
@@ -539,7 +540,7 @@ export default function CoachChecklists() {
 
         <Section>
           <SectionHead title="Client" />
-          {r.roster.length === 0 && r.status !== 'error' ? (
+          {r.roster.length === 0 && isWhole(r.status) ? (
             <Text style={{ ...ty.body, color: t.ink3 }}>
               Nobody is on your book yet, so there is no list to add to.
             </Text>
@@ -560,7 +561,15 @@ export default function CoachChecklists() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title={client?.name ?? 'Their List'} note={shown ? `${shown.filter((i) => i.active).length} showing` : undefined} />
+              {/* `isWhole(status)`, not `shown ?`. The array being non-null
+                  says a read RETURNED; it does not say it returned everything,
+                  and eleven lines below this header the same screen refuses to
+                  compute adherence for exactly that reason. A coach told "8
+                  showing" copies those eight onto three more clients through
+                  the bulk control, and the four the page cut off are silently
+                  not part of anybody's routine. */}
+              <SectionHead title={client?.name ?? 'Their List'}
+                note={shown && isWhole(status) ? `${shown.filter((i) => i.active).length} showing` : undefined} />
 
               {/* The caveats come BEFORE the figures they qualify. A coach who
                   reads "3 of 28" first and the reason it might not mean what it
@@ -600,20 +609,50 @@ export default function CoachChecklists() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
                     <Text style={{ ...ty.body }}>{it.icon || '•'}</Text>
                     <Text style={{ flex: 1, ...ty.body, color: t.ink2 }}>{it.label}</Text>
+                    {/* `opacity: 0.3` at the ends of the list is the whole of
+                        what says these two are refused, and opacity is exactly
+                        what a screen reader does not have. A coach using
+                        VoiceOver on the first line heard "Move Water up,
+                        button", tapped it, and got nothing — four times, with
+                        no sentence anywhere saying it was already at the top.
+                        `busy` is on it too: a reorder in flight refuses every
+                        one of these and looked identical. */}
+                    {/* Four controls in one 30pt row: `ty.micro` is a 14pt
+                        line inside 8pt of padding, so every one of them was
+                        about 30 x 35 — under the 44 in src/lib/a11y.ts, on the
+                        screen a coach uses standing next to a client. Slop and
+                        not size, because growing them would push the label off
+                        the row; VERTICAL slop only, because they sit 8pt apart
+                        and horizontal slop would have them fighting over the
+                        gap. Same shape as app/(trainer)/log-session.tsx. */}
                     <Pressable onPress={() => move(it, -1)} disabled={busy || i === 0} accessibilityRole="button" accessibilityLabel={`Move ${it.label} up`}
+                      accessibilityState={{ disabled: busy || i === 0, busy }}
+                      hitSlop={{ top: hitSlopFor(30), bottom: hitSlopFor(30), left: 0, right: 0 }}
                       style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, opacity: i === 0 ? 0.3 : 1 }}>
                       <Text style={{ ...ty.micro, color: t.ink3 }}>↑</Text>
                     </Pressable>
                     <Pressable onPress={() => move(it, 1)} disabled={busy || i === shown.length - 1} accessibilityRole="button" accessibilityLabel={`Move ${it.label} down`}
+                      accessibilityState={{ disabled: busy || i === shown.length - 1, busy }}
+                      hitSlop={{ top: hitSlopFor(30), bottom: hitSlopFor(30), left: 0, right: 0 }}
                       style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, opacity: i === shown.length - 1 ? 0.3 : 1 }}>
                       <Text style={{ ...ty.micro, color: t.ink3 }}>↓</Text>
                     </Pressable>
                     <Pressable onPress={() => setActive(it, !it.active)} disabled={busy} accessibilityRole="button"
+                      accessibilityState={{ disabled: busy, busy }}
                       accessibilityLabel={it.active ? `Take ${it.label} off their list` : `Put ${it.label} back on their list`}
+                      hitSlop={{ top: hitSlopFor(30), bottom: hitSlopFor(30), left: 0, right: 0 }}
                       style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
                       <Text style={{ ...ty.micro, color: t.ink2 }}>{it.active ? 'On' : 'Off'}</Text>
                     </Pressable>
-                    <Pressable onPress={() => remove(it)} disabled={busy} accessibilityRole="button" accessibilityLabel={`Remove ${it.label}`}
+                    {/* The label names the line but not what happens to it.
+                        `remove` confirms first and the sheet spells out that
+                        past ticks stop being readable, so the destruction IS
+                        said — but only after the tap. A reader arriving on a
+                        bare "✕" deserves it before. */}
+                    <Pressable onPress={() => remove(it)} disabled={busy} accessibilityRole="button" accessibilityLabel={`Delete ${it.label} from their list`}
+                      accessibilityHint="Asks first. Deleting also stops their past ticks for this line being readable."
+                      accessibilityState={{ disabled: busy, busy }}
+                      hitSlop={{ top: hitSlopFor(30), bottom: hitSlopFor(30), left: 0, right: 0 }}
                       style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
                       <Text style={{ ...ty.micro, color: t.ink3 }}>✕</Text>
                     </Pressable>

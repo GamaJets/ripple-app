@@ -122,6 +122,10 @@ import { payoutState } from './coachPayouts';
 // it was typed into, and a second copy of "nothing here is netted" is the copy
 // that gets softened on one surface and left alone on the other.
 import { COST_IS_YOUR_WORD, COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE } from './coachCosts';
+// Dates on this document are written by the same two helpers every other screen
+// in the app writes one with. A statement is read by the coach and handed to
+// their accountant; neither of them is guaranteed to read English months.
+import { fmtPointDay, fmtPointMonth } from './format';
 
 /* ── the period ───────────────────────────────────────────────────────────── */
 
@@ -139,8 +143,6 @@ export interface StatementPeriod {
   /** What the coach sees. Sentence-free — it is a label, not prose. */
   label: string;
 }
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const iso = (y: number, mIndex: number, d: number) => `${y}-${pad(mIndex + 1)}-${pad(d)}`;
@@ -165,7 +167,10 @@ export function calendarQuarter(y: number, q: number): StatementPeriod {
 /** One calendar month, `m` from 1 to 12. */
 export function calendarMonth(y: number, m: number): StatementPeriod {
   const mi = Math.min(11, Math.max(0, Math.floor(m) - 1));
-  return { from: iso(y, mi, 1), to: iso(y, mi, lastDay(y, mi)), label: `${MONTHS[mi]} ${y}` };
+  // The label is the reader's own — "Aug 2026", "Aug. 2026", "2026年8月". The
+  // KEY of the period is `from`/`to`, which are ISO and stay ISO; nothing is
+  // stored or matched on this string.
+  return { from: iso(y, mi, 1), to: iso(y, mi, lastDay(y, mi)), label: fmtPointMonth(y, mi) };
 }
 
 /* ── a year that does not start in January ────────────────────────────────── */
@@ -331,14 +336,16 @@ export const YEAR_START_IS_YOURS =
   'The day your year starts is one you set on this screen. This app does not know which tax year you file to, has not inferred one from your phone, your currency or where you are, and does not check that the one you chose is right for you.';
 
 /** `YYYY-MM-DD` as a person reads it, without going through `new Date(s)` —
- *  which is UTC midnight, and so the day before for anybody west of Greenwich. */
+ *  which is UTC midnight, and so the day before for anybody west of Greenwich.
+ *  The parts go to `fmtPointDay` as numbers: nothing to parse, nothing to
+ *  shift, and the words are the reader's rather than an English array's. */
 export function dayLabel(isoDay: string | null | undefined): string {
   const s = String(isoDay ?? '').slice(0, 10);
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return '—';
   const mi = Number(m[2]) - 1;
   if (mi < 0 || mi > 11) return '—';
-  return `${Number(m[3])} ${MONTHS[mi]} ${m[1]}`;
+  return fmtPointDay(Number(m[1]), mi, Number(m[3]));
 }
 
 /** The period spelled out, both ends, for the face of the document. */

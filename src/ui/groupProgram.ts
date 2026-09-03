@@ -29,6 +29,9 @@ import { programSignature, type GroupVersion } from '../lib/groupProgram';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
+// "Add everyone" is a button, so the verify read below can be handed a list far
+// past what one request line will carry. See the note at that read.
+import { readByIds } from '../lib/idLookup';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import { reportError } from '../lib/reportError';
@@ -300,9 +303,26 @@ export function useProgramGroups() {
       // with no account for the foreign key to find — is a silent no-op in
       // PostgREST, and telling the coach "added" for them is how somebody ends
       // up believing eight people are on a programme when six are.
-      const { data, error: readErr } = await supabase.from('program_group_members')
-        .select('client_id').eq('group_id', id).in('client_id', wanted).limit(capLimit());
-      if (readErr) { reportError('programGroups.addMembers.verify', readErr, { id }); return { added: [], failed: wanted }; }
+      //
+      // Chunked, because `wanted` is whatever the picker handed over and "add
+      // everyone" is a button. Past roughly two hundred uuids the `in.(…)` list
+      // makes a request line bigger than the 8KB nginx and most CDNs allow, the
+      // 414 comes back as an error, and the branch below then tells the coach
+      // that every one of the three hundred clients they just added FAILED —
+      // over an upsert that worked. They would do it again. See
+      // src/lib/idLookup.ts.
+      let data: any[];
+      try {
+        data = await readByIds<any>(
+          wanted,
+          // unique (group_id, client_id), and the group is fixed here, so
+          // client_id is a total order for this read.
+          (chunk, from, to) => supabase.from('program_group_members')
+            .select('client_id').eq('group_id', id).in('client_id', chunk)
+            .order('client_id', { ascending: true }).range(from, to),
+          'who is in this group',
+        );
+      } catch (readErr) { reportError('programGroups.addMembers.verify', readErr, { id }); return { added: [], failed: wanted }; }
       const there = new Set((data ?? []).map((r: any) => r.client_id as string));
       const added = wanted.filter((c) => there.has(c));
       if (added.length) {

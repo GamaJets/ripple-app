@@ -24,11 +24,11 @@
 // somebody and loses the record of it does not type it again — they remember it
 // wrong a week later, or they stop using the screen.
 //
-// ── The two rules the reference implementation is built on ─────────────────
+// ── The three rules the reference implementation is built on ───────────────
 //
 // src/ui/workoutLog.tsx was brought onto this queue earlier and its header
-// states both. They are restated here because every function below exists to
-// hold one of them:
+// states the first two. They are restated here because every function below
+// exists to hold one of them:
 //
 // 1. A QUEUED WRITE IS NEVER REPORTED AS SAVED. `classifyWrite` in
 //    offlineQueue.ts already separates "the server said no" from "nobody
@@ -42,6 +42,11 @@
 //    unread queue with one entry and every session already on the phone is
 //    gone. This is the same distinction `serverRows` holds for a read and
 //    `QueueRead` holds in src/lib/workoutQueue.ts.
+//
+// 3. A QUEUE IS BOUNDED. `FLOOR_CAP` is the number and `enqueueAct` refuses
+//    past it rather than evicting somebody's Monday — this was the only queue
+//    in the app without one, and it holds the largest payloads. See the
+//    constant for what an unbounded AsyncStorage key actually does to a coach.
 //
 // ── One queue and not three ────────────────────────────────────────────────
 //
@@ -79,8 +84,26 @@ export type FloorAct =
   /** What became of a PT session, and what it was worth at the moment of
    *  marking. `rateCents` is `undefined` for "do not touch the rate" and null
    *  for "clear it" — the distinction `markMyOutcome` already draws, and
-   *  flattening it here would write a zero that reads as a free session. */
-  | { kind: 'session-outcome'; sessionId: string; clientName: string | null; outcome: string; rateCents?: number | null };
+   *  flattening it here would write a zero that reads as a free session.
+   *
+   *  ── `outcome: null` is the coach taking it back ──────────────────────────
+   *
+   *  Marking a session went through this queue and the UNDO beside it went
+   *  straight to the server. Offline — which is the condition this queue exists
+   *  for, so the two halves were guaranteed to meet there — the undo threw, the
+   *  screen said so honestly, and then the queue flushed the "no show" the coach
+   *  had visibly retracted in front of the client. It landed on their record and
+   *  on payroll an hour later, and the only evidence it was ever undone was an
+   *  alert nobody kept.
+   *
+   *  So a retraction is an act like any other. It carries the same
+   *  `supersedeKey` as the mark it takes back, so offline it REPLACES the queued
+   *  mark in place and nothing false is ever sent; and when the mark had already
+   *  reached the server it is sent in its own right, which is the clear that was
+   *  always meant to happen. `rateCents` is left `undefined` on a retraction:
+   *  `clearMyOutcome` does not touch the snapshot either, and a rate is not
+   *  what the coach took back. */
+  | { kind: 'session-outcome'; sessionId: string; clientName: string | null; outcome: string | null; rateCents?: number | null };
 
 /** A queued act with the two things every queue entry needs: an id that says it
  *  has not been sent, and the instant it happened. Deliberately the same shape
@@ -166,24 +189,76 @@ function logBody(entries: readonly unknown[]): string | null {
 }
 
 /**
- * The queue after adding one act.
+ * How many acts one device will hold.
+ *
+ * ── Why there is a number here at all ─────────────────────────────────────
+ *
+ * There was not, and this was the only queue in the app without one.
+ * `src/lib/outbox.ts` states the reason for its two hundred and it applies here
+ * with more force, not less: "AsyncStorage on Android is one SQLite row per key
+ * and a runaway queue is a write that starts failing, which would take the whole
+ * outbox with it."
+ *
+ * More force because of what this queue holds. Two of the three acts are bounded
+ * by their own supersede keys — a class tick is one per (class, member) however
+ * many times a trainer changes their mind, and an outcome is one per session. A
+ * SESSION LOG is not: it is an event, it appends, and its payload is an entire
+ * hour of training, every set of every exercise, as `unknown[]`. It is by a wide
+ * margin the biggest thing any queue in this app stores, and a coach working a
+ * gym floor with no signal writes one after another all day.
+ *
+ * And the failure is silent in the worst way. `persist` catches, reports and
+ * carries on with a correct in-memory queue, so the coach's afternoon looks
+ * fine; the next launch reads back the last write that actually succeeded, and
+ * everything since is gone with only an `app_errors` row to say so. That is
+ * precisely the promise this module exists to keep, broken by a missing
+ * constant.
+ *
+ * A hundred, not the outbox's two hundred, because the unit is bigger: a
+ * hundred acts is more than a full working week of sessions and registers for
+ * one coach with no signal at all, and it is small enough that the whole thing
+ * stays one cheap read.
+ *
+ * REFUSES past the cap rather than evicting. Evicting the oldest is the obvious
+ * implementation and it is silent data loss chosen by a constant — the same
+ * argument `addItem` makes, and here the oldest act is somebody's session from
+ * Monday. A refusal is a thing a coach can be told before they walk away from
+ * the screen.
+ */
+export const FLOOR_CAP = 100;
+
+/**
+ * The queue after adding one act, and whether it was kept.
  *
  * An act with a supersede key replaces any earlier queued act carrying the same
  * one, IN PLACE — not appended to the end. Position is when the decision was
  * first made and the timestamp is refreshed to when it was last changed, so a
  * trainer working down a class list does not watch rows jump around while they
  * correct one.
+ *
+ * A supersede is always allowed, cap or no cap, and that is the load-bearing
+ * half of the bound. Replacing a queued tick is not growth — the queue is the
+ * same length afterwards — and refusing one at the cap would mean a trainer
+ * correcting a mark they had already made watched the WRONG one go up, which is
+ * the failure `supersedeKey` was written to prevent. Only an act that would make
+ * the queue longer can be refused.
+ *
+ * `added: false` leaves the queue exactly as it was, so the caller can say that
+ * nothing was kept rather than either of the two convenient lies.
  */
-export function enqueueAct(queue: readonly QueuedAct[], entry: QueuedAct): QueuedAct[] {
+export function enqueueAct(queue: readonly QueuedAct[], entry: QueuedAct): { queue: QueuedAct[]; added: boolean } {
   const key = supersedeKey(entry.act);
-  if (key === null) return [...queue, entry];
-  let replaced = false;
-  const next = queue.map((q) => {
-    if (replaced || supersedeKey(q.act) !== key) return q;
-    replaced = true;
-    return entry;
-  });
-  return replaced ? next : [...next, entry];
+  if (key !== null) {
+    let replaced = false;
+    const next = queue.map((q) => {
+      if (replaced || supersedeKey(q.act) !== key) return q;
+      replaced = true;
+      return entry;
+    });
+    if (replaced) return { queue: next, added: true };
+  }
+  if (queue.length >= FLOOR_CAP) return { queue: [...queue], added: false };
+  return { queue: [...queue, entry], added: true };
 }
 
 /** The queue after one act has reached the server. Matched on the queue id
@@ -227,8 +302,11 @@ function usableAct(v: unknown): v is FloorAct {
         && typeof a.userId === 'string' && !!a.userId
         && typeof a.present === 'boolean';
     case 'session-outcome':
+      // `outcome: null` is a RETRACTION and is as sendable as a mark — see the
+      // arm's docstring. Only `undefined`, or a value of some other shape, is
+      // an act this build cannot send.
       return typeof a.sessionId === 'string' && !!a.sessionId
-        && typeof a.outcome === 'string' && !!a.outcome;
+        && (a.outcome === null || (typeof a.outcome === 'string' && !!a.outcome));
     default:
       return false;
   }
@@ -285,7 +363,12 @@ export function actLine(a: FloorAct): string {
     }
     case 'session-outcome': {
       const who = a.clientName?.trim();
-      return `${who ? `${who}’s session` : 'A session'} marked ${a.outcome.replace(/_/g, ' ')}`;
+      const whose = who ? `${who}’s session` : 'A session';
+      // A retraction is its own sentence. "marked null" is what a shared branch
+      // would have produced, on the list a coach reads to see what this phone
+      // is still carrying.
+      if (a.outcome == null) return `${whose} — outcome taken back`;
+      return `${whose} marked ${a.outcome.replace(/_/g, ' ')}`;
     }
   }
 }
@@ -343,6 +426,23 @@ export function registerVisibilityLine(unsent: number, queueRead: boolean): stri
     return `${unsent} check-in${unsent === 1 ? '' : 's'} ${unsent === 1 ? 'is' : 'are'} still on this phone and your gym owner cannot see ${unsent === 1 ? 'it' : 'them'} yet. Everything that has reached the server is on their payroll and class analytics; the rest goes up next time this app has signal.`;
   }
   return 'Check-ins are saved as you tap. Your gym owner sees attendance per class for payroll and class analytics.';
+}
+
+/**
+ * What to say when this phone is already holding as much as it will hold.
+ *
+ * A fourth answer and deliberately not folded into `refusedLine`, because that
+ * sentence says "the server read it and declined" and no server has seen this.
+ * They also lead to different actions: a refusal is something about the act
+ * itself and doing it again changes nothing, while this one clears the moment
+ * the coach has signal, and saying so is the only useful thing to tell them.
+ *
+ * It states plainly that nothing was kept — which is what separates it from
+ * `keptOfflineLine`, and the whole reason `enqueueAct` refuses rather than
+ * evicting somebody's Monday.
+ */
+export function floorFullLine(what: string): string {
+  return `${what} was not saved and is not waiting to send. This phone is already holding as much unsent work as it will hold — get some signal so what is waiting can go up, then do this again.`;
 }
 
 /**

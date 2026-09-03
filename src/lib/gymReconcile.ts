@@ -37,6 +37,7 @@
 // month later nothing on screen could tell them apart.
 
 import { assertWhole, capLimit } from './rowCap';
+import { readByIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 
 type Queryable = { from: (table: string) => any };
@@ -201,12 +202,33 @@ export function partitionByMark<T extends { id: string }>(
   return { open, explained, flagged };
 }
 
+/**
+ * Who marked each answer, by id.
+ *
+ * CHUNKED, about the REQUEST LINE rather than the row ceiling. `fetchMarks`
+ * reads up to `capLimit()` marks, so up to a thousand `marked_by` ids reach
+ * here; at about 39 bytes per uuid inside `in.("…","…")` that is a ~39KB query
+ * string against the 8KB request line nginx and most CDNs enforce by default.
+ * Refused at roughly two hundred ids with a **414** that supabase-js does not
+ * reject on and that arrives as `data: null`.
+ *
+ * no-error-ok (about the ROW ceiling — one row per id, 150 ids a chunk): an
+ * unreadable name renders as a dash beside the answer; the answer itself is
+ * still there. The 414 is the case that argument does not cover: every marker
+ * unnamed at once, on the screen an owner uses to see which questions somebody
+ * has already dealt with and who to ask about them.
+ */
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name renders as a dash beside the answer; the answer itself is still there
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
+  let rows: any[] = [];
+  try {
+    rows = await readByIds<any>(
+      ids,
+      (chunk, from, to) => sb.from('profiles').select('id, full_name')
+        .in('id', chunk).order('id', { ascending: true }).range(from, to),
+      'the names of the people who answered these',
+    );
+  } catch { return new Map(); }
+  return new Map(rows
     .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
     .filter(([, n]: [string, string]) => !!n));
 }

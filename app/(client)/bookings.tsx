@@ -41,7 +41,7 @@ import type { PackBalance } from '../../src/lib/packDraw';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 // One definition of "today, locally", shared with the membership screen and
 // with the pass code itself — see the note on `todayISO` below.
-import { todayIso } from '../../src/lib/memberRecord';
+import { useToday } from '../../src/ui/today';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 // A class the gym called off. This screen listed one under Upcoming as a
@@ -207,7 +207,24 @@ export default function Bookings() {
   // expired at 00:00 should not still read Active because the component has not
   // re-rendered for a new day" — and the two are the same question about the
   // same member at the same desk.
-  const todayISO = todayIso(new Date());
+  //
+  // ── and the half of that argument the fix was missing ──────────────────
+  //
+  // Moving the call out of the `useMemo` and into the render body was only half
+  // of it, and the comment above says which half by accident: "because the
+  // component has not re-rendered for a new day". Nothing here made it. A value
+  // recomputed per render is right at the moment something else happens to
+  // redraw, and a screen sitting untouched at 23:59 — or a phone pocketed on
+  // Friday and opened on Monday, which is the ordinary case — redraws for
+  // nothing. The frozen `useMemo` was a value stuck at MOUNT; this was a value
+  // stuck at the LAST RENDER, which on a screen nobody is touching is the same
+  // pass listed as live on the same expired day.
+  //
+  // `useToday` (src/ui/today.ts) is what closes it: state, re-read on the next
+  // local midnight and again whenever the app comes back to the foreground, so
+  // a day that has actually changed causes the render that this line was
+  // already written to be correct in.
+  const todayISO = useToday();
   const coachLines = useMemo(() => (packs === undefined ? null : coachPackLines(packs?.lines ?? null)), [packs]);
   const gymLines = useMemo(() => (ptPasses === undefined ? null : gymPtLines(ptPasses, todayISO)), [ptPasses, todayISO]);
   const creditRoute = useMemo(
@@ -273,7 +290,17 @@ export default function Bookings() {
       }
     }
     return out.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
-  }, [classes, myStatus, sessions, coachName]);
+    // `cd.id` is IN the dependency list, and its absence was the whole defect.
+    // src/ui/clientData.tsx settles it to the literal 'unknown' until the auth
+    // read lands, so every `s.clientId === cd.id` above compared against a
+    // string no session carries — and if `sessions` had already settled, the
+    // memo had no reason to run again when the real id arrived. The member
+    // opened My Bookings, saw their classes and none of their personal
+    // training, and it stayed that way until an unrelated class change
+    // retriggered it. There is no sentence for that state because the code did
+    // not know it was in it: the list is not short, it is confidently complete
+    // and wrong.
+  }, [classes, myStatus, sessions, coachName, cd.id]);
 
   // The session being moved, or null. Held whole because the picker below has
   // to know whose coach's slots to offer and what the old time was.

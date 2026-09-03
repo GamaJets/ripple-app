@@ -173,4 +173,44 @@ if (errors.length) {
   for (const e of errors) console.error('  · ' + e);
   process.exit(1);
 }
+/* ── a plank is not four and a half thousand repetitions ──────────────────
+ *
+ * This file's own loop resolved a load and multiplied it by whatever was in the
+ * reps column. For a hold that column is SECONDS, so one 45-second plank by an
+ * 80 kg member scored 3,600 kg and unlocked One Tonne on its own. A few of them
+ * unlocked Ten Tonnes. Badges meant to mark a year of lifting were handed out
+ * in a week.
+ */
+{
+  const at = '2026-03-02T10:00:00.000Z';
+  const weighed = [{ t: '2026-03-01T00:00:00.000Z', v: 80 }];
+  const plank = badgeFigures(
+    [{ t: at, exercise: 'Plank', sets: [[45, 0]], timed: [true], bw: [true] } as any],
+    weighed,
+  );
+  eq(plank.totalVolumeKg, 0, 'one plank is not 3,600 kg of lifting');
+  ok(!earnedKeys(plank).includes('one-tonne'), 'so a first plank does not unlock One Tonne');
+  ok(!earnedKeys(plank).includes('ten-tonnes'), 'and three of them do not unlock Ten Tonnes');
+  eq(plank.unpricedBodyweightSets, 0,
+    'nor is a hold reported as work we could not price — it is work this total is not about');
+
+  // A weighted hold is the same answer: 45 seconds under a 10 kg plate is not
+  // 450 kg either.
+  const weighted = badgeFigures(
+    [{ t: at, exercise: 'Plank', sets: [[45, 10]], timed: [true] } as any],
+    weighed,
+  );
+  eq(weighted.totalVolumeKg, 0, 'a weighted hold prices at nothing here too');
+
+  // And a real lift beside it still counts for exactly what it is.
+  const both = badgeFigures(
+    [
+      { t: at, exercise: 'Plank', sets: [[60, 20]], timed: [true] } as any,
+      { t: at, exercise: 'Squat', sets: [[5, 100]] } as any,
+    ],
+    weighed,
+  );
+  eq(both.totalVolumeKg, 500, 'the hold takes nothing from the squat and adds nothing to it');
+}
+
 console.log('badges.test.ts — ok');

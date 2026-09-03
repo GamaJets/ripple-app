@@ -26,6 +26,10 @@
 //      preview line is indistinguishable from a thread with nothing in it.
 //
 //   3. THE ORDER. Most recent first — see `sortThreads`.
+//
+//   4. WHEN. Relative inside a week, a date beyond it — and the date is the
+//      READER's, not this file's. See `threadWhen`.
+import { fmtAxisDay } from './format';
 
 /** The sides of a thread, as `messages.sender` stores them. */
 export type ThreadSender = 'client' | 'coach';
@@ -260,7 +264,18 @@ export function threadWhen(iso: string | null, now: number): string | null {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d`;
   const d = new Date(t);
-  return `${d.getDate()}/${d.getMonth() + 1}`;
+  // Past a week this is a DATE, and it used to be `24/8` — which is 24 August
+  // to a coach in London and nothing at all to one in New York, where 8/24 is
+  // the same day written the only way that parses. A thread list is scanned,
+  // not read, so the one glance it gets has to land.
+  //
+  // `fmtAxisDay` rather than a formatter of its own: it is the shared renderer
+  // for exactly this shape — a day and a short month, in the reader's own
+  // language and the reader's own order — and it takes the parts as NUMBERS,
+  // so there is no string left for `new Date()` to reinterpret as UTC midnight
+  // and hand back as the day before. The local getters are read here, which is
+  // the coach's own clock and the clock the '15m' / '3h' / '2d' above are on.
+  return fmtAxisDay(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
 /**

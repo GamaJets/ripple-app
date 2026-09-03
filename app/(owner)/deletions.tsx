@@ -322,7 +322,14 @@ export default function OwnerDeletions() {
         <Rule />
 
         <Section>
-          <SectionHead title={loaded && queue.length ? `The queue · ${queue.length}` : 'The queue'} />
+          {/* The count is withheld under truncation, exactly as the hero and
+              the KPI row above already withhold it. `queueShort` means the read
+              came back at its cap, so `queue.length` is a prefix — and this
+              heading was stating it as a total on the one screen whose subject
+              is a statutory deadline, two lines under a hero showing a dash for
+              that same reason. A heading and a figure disagreeing about whether
+              a number is known is worse than either answer on its own. */}
+          <SectionHead title={loaded && !queueShort && queue.length ? `The queue · ${queue.length}` : 'The queue'} />
           {failed ? (
             <View style={{ marginBottom: loaded && queue.length ? sp.md : 0 }}>
               <Flag tone={t.crit}>
@@ -378,6 +385,13 @@ export default function OwnerDeletions() {
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Permanently delete the account of ${p.name ?? 'this member'}`}
+                    // The label and the role were here; the STATE was not. While
+                    // a deletion is running every other Delete on the queue is
+                    // inert, and the only sign of it was a border that changed
+                    // from crit to ring. `busy` on the row being deleted and
+                    // `disabled` on all of them is what a screen reader has to
+                    // go on, and this is the control that erases a person.
+                    accessibilityState={{ disabled: working, busy: working }}
                     style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7, borderWidth: hairline, borderColor: working ? t.ring : t.crit }}>
                     {/* The border is the mark now. crit as label text measures
                         3.03–4.05:1 on every palette, and this is the control

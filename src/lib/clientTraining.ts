@@ -58,6 +58,8 @@ import { dayKeyOf } from './entryEdit';
 import { type LoadStatus } from '../ui/loadStatus';
 import { dayLabel } from './adherence';
 import { type WeightUnit } from './units';
+import { setLoadKg, type BodyweightHistory } from './bodyweightSets';
+import { isTimedSet } from './timedSets';
 
 /** Who put a session into the client's record.
  *
@@ -94,10 +96,25 @@ export interface LoggedSession {
   /** Sets with a rep count above zero. A blank row somebody tabbed past is not
    *  a set of no reps and is not counted as one. */
   sets: number;
-  /** Sets that had reps but no load: chin-ups, press-ups, planks. Carried
-   *  separately so a screen can say the volume below covers only part of the
-   *  session rather than letting a small tonnage imply an easy hour. */
+  /** Sets that moved a load nobody could price: a bodyweight set logged by a
+   *  member whose weight is not on the account on or before that day, or a row
+   *  whose load box was left empty. Carried separately so a screen can say the
+   *  volume below covers only part of the session rather than letting a small
+   *  tonnage imply an easy hour.
+   *
+   *  A bodyweight set the app CAN price — press-ups by a member with a weigh-in
+   *  behind them — is not one of these any more. It is in `volumeKg`, where it
+   *  belongs: a calisthenics member's whole history used to be presented as
+   *  almost no work at all, on a document a clinician reads. */
   bodyweightSets: number;
+  /** Sets held rather than repeated: planks, hangs, wall sits.
+   *
+   *  Neither in `volumeKg` nor in `bodyweightSets`. A hold is not reps, so
+   *  seconds × kilograms is not a mass moved — 45 seconds under a 10 kg plate
+   *  is not 450 kg — and it is not unpriced work either, it is work this total
+   *  is not about. See src/lib/timedSets.ts, which states holds in their own
+   *  units. */
+  timedSets: number;
   /** Σ reps × load, in kilograms, over the sets that carried a load.
    *
    *  null, never 0, when no set in the session carried one. A bodyweight
@@ -146,7 +163,17 @@ const num = (v: unknown): number | null =>
  * of a parsing failure is the bug ownTraining.ts documents; here it would put
  * a session on the coach's screen dated to the moment they opened it.
  */
-export function sessionsOf(log: readonly WorkoutEntry[]): LoggedSession[] {
+export function sessionsOf(
+  log: readonly WorkoutEntry[],
+  /**
+   * The member's weigh-ins, so a bodyweight set can be priced at what they
+   * weighed ON THE DAY. Defaulted to empty rather than made required, because
+   * three coach screens call this and an empty history is the honest answer for
+   * a caller that has not read one: those sets come back as `bodyweightSets`
+   * and the screen says the volume does not cover them.
+   */
+  history: BodyweightHistory = [],
+): LoggedSession[] {
   const byAt = new Map<string, WorkoutEntry[]>();
   for (const e of log) {
     if (!e || typeof e.t !== 'string' || !e.t) continue;
@@ -157,7 +184,7 @@ export function sessionsOf(log: readonly WorkoutEntry[]): LoggedSession[] {
 
   const out: LoggedSession[] = [];
   for (const [at, entries] of byAt) {
-    let sets = 0, bodyweightSets = 0;
+    let sets = 0, bodyweightSets = 0, timedSets = 0;
     let volume = 0, anyVolume = false;
     let kcal = 0, anyKcal = false;
     let mins: number | null = null, minsDisagree = false;
@@ -189,14 +216,30 @@ export function sessionsOf(log: readonly WorkoutEntry[]): LoggedSession[] {
         amendedAt = e.amendedAt;
       }
 
-      for (const set of e.sets ?? []) {
+      // This loop used to read `set[1]` directly and total `reps × load` over
+      // anything above zero. It was the only one of the app's four volume
+      // totals still doing the arithmetic by hand, and it has the most serious
+      // reader: this figure is the volume line in the document a member exports
+      // and hands to a clinician deciding what they may load. Every pull-up,
+      // dip and press-up counted as nothing, and a weighted 45-second plank
+      // counted as seconds × kilograms — a mass nobody moved.
+      const rows = e.sets ?? [];
+      for (let i = 0; i < rows.length; i++) {
+        const set = rows[i];
         const reps = num(set?.[0]) ?? 0;
-        const load = num(set?.[1]) ?? 0;
         // Only a real rep count is a set. Everything else on this row is
         // conditioned on it, so a blank row contributes nothing anywhere.
         if (!(reps > 0)) continue;
         sets++;
-        if (load > 0) { volume += reps * load; anyVolume = true; }
+        // A hold is counted as a set and priced as neither volume nor unpriced
+        // work. Skipped before the load is resolved, so a weighted plank cannot
+        // reach the multiplication.
+        if (isTimedSet(e, i)) { timedSets++; continue; }
+        // `setLoadKg`, the resolver every other total in the app uses: the
+        // member's own weight on that day for a bodyweight set, the plate load
+        // for a barbell set, and null when it genuinely cannot say.
+        const load = setLoadKg(e, i, set, history, e.t);
+        if (load != null && load > 0) { volume += reps * load; anyVolume = true; }
         else bodyweightSets++;
       }
     }
@@ -213,6 +256,7 @@ export function sessionsOf(log: readonly WorkoutEntry[]): LoggedSession[] {
       exercises: names.size,
       sets,
       bodyweightSets,
+      timedSets,
       volumeKg: anyVolume ? Math.round(volume) : null,
       kcal: anyKcal ? Math.round(kcal) : null,
       mins,
@@ -297,6 +341,8 @@ export interface TrainingDay {
   sets: number;
   /** Of those, the ones that carried no load. */
   bodyweightSets: number;
+  /** Holds over the day. See `LoggedSession.timedSets`. */
+  timedSets: number;
   /** Σ reps × load over the day, in kilograms; null when nothing carried a
    *  load. Never 0 — see `LoggedSession.volumeKg`. */
   volumeKg: number | null;
@@ -336,13 +382,14 @@ export function trainingDaysOf(
   const days: TrainingDay[] = [];
   for (const [day, group] of byDay) {
     const names = new Set<string>();
-    let sets = 0, bodyweightSets = 0;
+    let sets = 0, bodyweightSets = 0, timedSets = 0;
     let volume = 0, anyVolume = false;
     let kcal = 0, anyKcal = false;
     let cardio = false;
     for (const sn of group) {
       sets += sn.sets;
       bodyweightSets += sn.bodyweightSets;
+      timedSets += sn.timedSets;
       if (sn.volumeKg != null) { volume += sn.volumeKg; anyVolume = true; }
       if (sn.kcal != null) { kcal += sn.kcal; anyKcal = true; }
       if (sn.cardio) cardio = true;
@@ -358,6 +405,7 @@ export function trainingDaysOf(
       exercises: names.size,
       sets,
       bodyweightSets,
+      timedSets,
       volumeKg: anyVolume ? Math.round(volume) : null,
       kcal: anyKcal ? Math.round(kcal) : null,
       cardio,

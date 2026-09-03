@@ -132,7 +132,11 @@ export default function Leaderboard() {
         <Rule />
 
         <Section>
-          <SectionHead title="Ranking" note={scored.length ? `${scored.length} client${scored.length === 1 ? '' : 's'}` : undefined} />
+          {/* `isWhole`, like the empty state below. A board read short is
+              still worth showing — the people on it are real — but how many
+              were ranked is a figure over an unknown fraction. */}
+          <SectionHead title="Ranking"
+            note={isWhole(status) && scored.length ? `${scored.length} client${scored.length === 1 ? '' : 's'}` : undefined} />
           {/* What the order is, said before anybody reads it as a score. There
               is no composite behind this board and nothing on it was measured
               by the app: it is what each client last said about themselves, and
@@ -218,7 +222,12 @@ export default function Leaderboard() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Not enough recorded to rank" note={`${unplaced.length}`} />
+              {/* The damaging one. "Not enough recorded to rank: 3" on a book
+                  of twenty-five, read short at twelve, tells a coach that
+                  twenty-two people are checking in — and finding who is NOT on
+                  the board is the whole point of a leaderboard. */}
+              <SectionHead title="Not enough recorded to rank"
+                note={isWhole(status) ? `${unplaced.length}` : undefined} />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 These clients have never submitted a check-in, so there is no adherence to compare.
                 That is not a low score — it is no score.

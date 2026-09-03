@@ -10,7 +10,13 @@
 // Before this, "delivered" was inferred as "booked, and the clock has passed" —
 // which counted no-shows and slots nobody cancelled, and then paid for them.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+// The reader's locale, the GYM's zone. A session's date decides which payroll
+// month it falls in, and it was being drawn on whichever desk this was open at.
+import { gymDateText, gymDateTimeText, calendarDateText } from '@lib/gymWhen';
+import { parseGymZone } from '@lib/gymZone';
+import { ConsoleGate, Loading } from '@/components/Gate';
+import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
@@ -23,6 +29,14 @@ import {
   type PtSession, type SessionOutcome, type PayPolicy, type SettlementMethod,
 } from '@lib/gymSessions';
 import { money } from '@lib/gymRecord';
+// The gym's session fee is stored in WHOLE units and every `*_cents` column is
+// minor units. The factor between them is not a hundred — sixteen currencies
+// have no minor unit and five have a thousandth — so it is asked for, never
+// assumed. `settleCurrencyBlocker` is the other half: a settlement is a
+// permanent payment row, and it must not be stamped with a currency the
+// sessions it covers were not priced in.
+import { minorFromWhole } from '@lib/coachMoney';
+import { settleCurrencyBlocker } from '@lib/gymRateCurrency';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 // What became of a past session, in one vocabulary shared with both phone apps.
 import { pastSessions, pastVerdict, tallyPast, PAST_STATE_LABEL } from '@lib/sessionHistory';
@@ -39,12 +53,18 @@ const OUTCOME_LABEL: Record<SessionOutcome, string> = {
 
 export default function Sessions() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  /** The auth call did not come back. `me` stays undefined, which is honest —
+   *  nobody said who this is — and this is what stops that reading as a
+   *  spinner that never resolves. */
+  const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
   // `tenants.currency`. Null means the gym has not said what money it charges
   // in, and every figure on this page is the gym's own session fee multiplied
   // out — none of them carries a currency of its own to fall back on.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  const [zone, setZone] = useState<string | null>(null);
   const [sessions, setSessions] = useState<PtSession[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -132,6 +152,10 @@ export default function Sessions() {
     (async () => {
       const who = await loadMe();
       if (!live) return;
+      // Not `null`. Signed out and unreachable are different facts and they
+      // send a person to two different places — see ME_UNREADABLE.
+      if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
+      setAuthUnread(false);
       setMe(who);
       if (!who?.tenantId) { setSessions([]); return; }
       // supabase-js resolves on a database error rather than rejecting, so the
@@ -141,13 +165,15 @@ export default function Sessions() {
       // owner "set a session fee" — sending him to check a setting that is
       // probably already correct, for a read he was never told had failed.
       const { data: t, error } = await supabase
-        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy, timezone').eq('id', who.tenantId).single();
       if (live) {
         setGymName(error ? null : (t?.name ?? null));
         setSessionFee(error ? null : (t?.session_fee ?? null));
         setPolicyCode(error ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
         setCcy(error ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
         setGymError(error ? (error.message || 'Could not read your gym.') : null);
+        const z = error ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
       }
       await load(who.tenantId);
     })();
@@ -178,10 +204,20 @@ export default function Sessions() {
   const awaiting = useMemo(() => sessions && sessions.filter((s) => isAwaitingOutcome(s)), [sessions]);
   const settled = useMemo(() => sessions && sessions.filter((s) => s.outcome !== null), [sessions]);
 
+  // The gym's session fee is in whole units; payroll works in minor units.
+  //
+  // It was `Math.round(sessionFee * 100)`, on all three lines of this screen
+  // that needed it. /close carries the same comment over the same repair: a
+  // ¥6,000 fee became 600,000 minor units and every unmarked session on it was
+  // priced a hundredfold, in the figure a coach is actually paid from.
+  // `minorFromWhole` asks the currency how many places its money has and
+  // returns null when nothing named one — which prices nothing rather than
+  // pricing it at zero.
+  const feeCents = useMemo(() => minorFromWhole(sessionFee, ccy), [sessionFee, ccy]);
+
   const lines = useMemo(
-    // The gym's session fee is in major units; payroll works in minor units.
-    () => sessions && payrollByTrainer(sessions, policy, sessionFee == null ? null : Math.round(sessionFee * 100)),
-    [sessions, policy, sessionFee],
+    () => sessions && payrollByTrainer(sessions, policy, feeCents),
+    [sessions, policy, feeCents],
   );
   // Totalling nothing gives zeros, which is fine here only because every place
   // that renders one of them checks `sessions` first and shows a dash instead.
@@ -197,7 +233,6 @@ export default function Sessions() {
   // on this page.
   const owed = useMemo(() => {
     if (sessions === null) return null;
-    const feeCents = sessionFee == null ? null : Math.round(sessionFee * 100);
     const byTrainer = new Map<string, { name: string | null; rows: PtSession[]; unmarked: number }>();
     for (const s of sessions) {
       const e = byTrainer.get(s.trainerId)
@@ -218,10 +253,16 @@ export default function Sessions() {
         blocker: settleBlocker(e.rows, e.unmarked)
           ?? (e.rows.length && !ccy
             ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
-            : null),
+            : null)
+          // What the sessions say they were priced in, against what this
+          // settlement is about to be stamped with. `sessions.rate_currency`
+          // (supabase/parts/1010) is what makes the comparison possible at all
+          // — before it, a gym that changed its currency relabelled its whole
+          // PT history and the settlement row took the new code silently.
+          ?? settleCurrencyBlocker(e.rows, ccy),
       }))
       .filter((x) => x.rows.length > 0 || x.unmarked > 0);
-  }, [sessions, policy, sessionFee, ccy]);
+  }, [sessions, policy, feeCents, ccy]);
 
   /* ── the record, one month at a time ──────────────────────────────────────
    *
@@ -283,8 +324,11 @@ export default function Sessions() {
     return () => { live = false; };
   }, [histTenant, histOwner, histWindow, histNonce]);
 
-  if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
-  if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
+  // Four states, not two: still reading, nobody signed in, a question this
+  // console could not ask, and a person. See components/Gate.tsx — this
+  // was a bare `Loading…` div and a Sign in link, with no third sentence
+  // and nothing announced to a screen reader.
+  if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   if (me.roleUnknown) {
     return (
@@ -344,8 +388,13 @@ export default function Sessions() {
       // "no rate" onto a session that has one. A read we could not make is not
       // a price of nothing; the only safe move is to leave the column untouched
       // and let a later marking, made with the fee in hand, set it.
+      // The rate and the money it is in, written together or not at all —
+      // `sessions.rate_cents` carried a figure and no unit for five parts, and
+      // every reader supplied one from the gym's currency today.
       await markOutcome(supabase, s.id, outcome,
-        s.rateCents ?? (gymError ? undefined : sessionFee == null ? null : Math.round(sessionFee * 100)));
+        s.rateCents != null
+          ? { cents: s.rateCents, currency: s.rateCurrency }
+          : gymError ? undefined : { cents: feeCents, currency: ccy });
       refresh();
       // The record below is the same rows seen a second way. Leaving it stale
       // would have the two halves of this page disagree about a session the
@@ -508,14 +557,14 @@ export default function Sessions() {
         </div>
       </Section>
 
-      <Awaiting sessions={awaiting} unread={unread} onMark={mark} />
+      <Awaiting sessions={awaiting} unread={unread} zone={zone} onMark={mark} />
       <Payroll lines={lines} unread={unread} ccy={ccy} />
       <Settle owed={owed} unread={unread} settling={settling} onSettle={settle}
               method={method} onMethod={setMethod} ccy={ccy} />
-      <Settled runs={settlements} error={settlementsError} />
-      <Marked sessions={settled} unread={unread} onClear={undo} ccy={ccy} />
+      <Settled runs={settlements} error={settlementsError} zone={zone} />
+      <Marked sessions={settled} unread={unread} onClear={undo} ccy={ccy} zone={zone} />
       <History
-        rows={hist} error={histErr} from={histWindow.from} offset={histOffset}
+        rows={hist} error={histErr} from={histWindow.from} offset={histOffset} zone={zone}
         onOffset={setHistOffset}
       />
     </Shell>
@@ -524,15 +573,17 @@ export default function Sessions() {
 
 /* ── the queue that unblocks payroll ───────────────────────────────────────── */
 
-function Awaiting({ sessions, unread, onMark }: {
+function Awaiting({ sessions, unread, zone, onMark }: {
   sessions: PtSession[] | null; unread: boolean;
   onMark: (s: PtSession, o: SessionOutcome) => void;
+  /** `tenants.timezone` — a session happened at the gym's hour, not the reader's. */
+  zone: string | null;
 }) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
-      render: (s) => new Date(s.startsAt).toLocaleString([], {
+      render: (s) => gymDateTimeText(s.startsAt, zone, {
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-      }) },
+      }) ?? <span className="dash">not stated</span> },
     { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName ?? '',
       render: (s) => s.trainerName ?? <span className="dash">—</span> },
     { key: 'client', header: 'Client', value: (s) => s.clientName ?? '',
@@ -571,7 +622,7 @@ function Awaiting({ sessions, unread, onMark }: {
           ? <Unread what="the session record could not be read, so nobody can say whether anything is waiting to be marked." />
           : <Loading />
       ) : (
-        <DataTable
+        <DataTable noun="sessions awaiting an outcome"
           rows={sessions} columns={cols} rowKey={(s) => s.id}
           empty="Nothing waiting — every finished session has an outcome."
         />
@@ -610,7 +661,7 @@ function Payroll({ lines, unread, ccy }: {
           ? <Unread what="the session record could not be read, so there is nothing here to price." />
           : <Loading />
       ) : (
-        <DataTable rows={lines} columns={cols} rowKey={(l) => l.trainerId} empty="No sessions in this period." />
+        <DataTable noun="payroll lines" rows={lines} columns={cols} rowKey={(l) => l.trainerId} empty="No sessions in this period." />
       )}
     </Section>
   );
@@ -766,7 +817,7 @@ function Settle({ owed, unread, settling, onSettle, method, onMethod, ccy }: {
 
 /* ── what has already been paid ────────────────────────────────────────────── */
 
-function Settled({ runs, error }: { runs: Settlement[] | null; error: string | null }) {
+function Settled({ runs, error, zone }: { runs: Settlement[] | null; error: string | null; zone: string | null }) {
   // Not read yet: nothing to show and nothing to say, as before.
   //
   // Read and refused: say so here rather than anywhere else, because this is the
@@ -776,7 +827,7 @@ function Settled({ runs, error }: { runs: Settlement[] | null; error: string | n
   if (runs === null && error === null) return null;
   const cols: Column<Settlement>[] = [
     { key: 'when', header: 'Paid', value: (r) => r.settledAt,
-      render: (r) => new Date(r.settledAt).toLocaleDateString() },
+      render: (r) => gymDateText(r.settledAt, zone) ?? <span className="dash">not stated</span> },
     { key: 'period', header: 'Covering', value: (r) => r.periodFrom,
       render: (r) => `${r.periodFrom} → ${r.periodTo}` },
     { key: 'n', header: 'Sessions', value: (r) => r.sessionsCount, numeric: true },
@@ -809,7 +860,7 @@ function Settled({ runs, error }: { runs: Settlement[] | null; error: string | n
           strength of this page. Reload first.
         </p>
       ) : (
-        <DataTable rows={runs} columns={cols} rowKey={(r) => r.id} empty="No payroll has been settled yet." />
+        <DataTable noun="settled runs" rows={runs} columns={cols} rowKey={(r) => r.id} empty="No payroll has been settled yet." />
       )}
     </Section>
   );
@@ -817,13 +868,15 @@ function Settled({ runs, error }: { runs: Settlement[] | null; error: string | n
 
 /* ── the marked history, so a mistake can be undone ────────────────────────── */
 
-function Marked({ sessions, unread, onClear, ccy }: {
+function Marked({ sessions, unread, onClear, ccy, zone }: {
   sessions: PtSession[] | null; unread: boolean; onClear: (id: string) => void;
   ccy: TenantCurrency;
+  /** `tenants.timezone` — a session happened at the gym's hour, not the reader's. */
+  zone: string | null;
 }) {
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
-      render: (s) => new Date(s.startsAt).toLocaleDateString([], { day: 'numeric', month: 'short' }) },
+      render: (s) => gymDateText(s.startsAt, zone, { day: 'numeric', month: 'short' }) ?? <span className="dash">not stated</span> },
     { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName ?? '' },
     { key: 'client', header: 'Client', value: (s) => s.clientName ?? '',
       render: (s) => s.clientName ?? <span className="dash">—</span> },
@@ -846,7 +899,7 @@ function Marked({ sessions, unread, onClear, ccy }: {
           ? <Unread what="the session record could not be read, so nothing can be listed here to undo." />
           : <Loading />
       ) : (
-        <DataTable rows={sessions} columns={cols} rowKey={(s) => s.id} empty="Nothing marked yet." />
+        <DataTable noun="marked sessions" rows={sessions} columns={cols} rowKey={(s) => s.id} empty="Nothing marked yet." />
       )}
     </Section>
   );
@@ -873,14 +926,22 @@ function Marked({ sessions, unread, onClear, ccy }: {
  * beside them would be a second, differently-scoped answer to "what does this
  * gym owe" with nothing on screen to say which is which.
  */
-function History({ rows, error, from, offset, onOffset }: {
+function History({ rows, error, from, offset, zone, onOffset }: {
   rows: PtSession[] | null;
   error: string | null;
   from: Date;
   offset: number;
+  /** `tenants.timezone`, or null when the gym has not set one. */
+  zone: string | null;
   onOffset: (fn: (n: number) => number) => void;
 }) {
-  const monthLabel = from.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  // `calendarDateText`, not the gym's zone and not the reader's. `from` is a
+  // LOCALLY built midnight of the 1st — a calendar month, not an instant — and
+  // rendering it in a zone far enough east would name the month before it.
+  const monthLabel = calendarDateText(
+    `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`,
+    { month: 'long', year: 'numeric' },
+  ) ?? '—';
   // Every row here is inside a month that is over, or inside this one up to
   // now, so the tally is over a whole read — `fetchSessions` refuses a
   // truncated one rather than handing back a prefix, which is what makes these
@@ -890,9 +951,9 @@ function History({ rows, error, from, offset, onOffset }: {
 
   const cols: Column<PtSession>[] = [
     { key: 'when', header: 'When', value: (s) => s.startsAt,
-      render: (s) => new Date(s.startsAt).toLocaleString(undefined, {
+      render: (s) => gymDateTimeText(s.startsAt, zone, {
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-      }) },
+      }) ?? <span className="dash">not stated</span> },
     { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName ?? '',
       render: (s) => s.trainerName ?? <span className="dash">—</span> },
     { key: 'client', header: 'Client', value: (s) => s.clientName ?? '',
@@ -913,9 +974,7 @@ function History({ rows, error, from, offset, onOffset }: {
         // A dash here means "nobody has said", which is exactly what the column
         // beside it already says in words — the two agree rather than one of
         // them implying the outcome was recorded at no particular time.
-        return v.at
-          ? new Date(v.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-          : <span className="dash">—</span>;
+        return gymDateText(v.at, zone, { day: 'numeric', month: 'short' }) ?? <span className="dash">—</span>;
       } },
   ];
 
@@ -963,7 +1022,7 @@ function History({ rows, error, from, offset, onOffset }: {
                 </>
               )}
           </div>
-          <DataTable
+          <DataTable noun="past sessions"
             rows={past} columns={cols} rowKey={(s) => s.id}
             empty="No one-to-one had finished in this month when it was read."
           />
@@ -1006,21 +1065,6 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Kpi({ label, text, note }: { label: string; text: string | null; note?: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', padding: '14px 16px' }}>
-      <div className="micro">{label}</div>
-      <div className="mono" style={{ fontSize: 21, marginTop: 5, letterSpacing: '-0.02em', color: text == null ? 'var(--ink3)' : 'var(--ink)' }}>
-        {text ?? '—'}
-      </div>
-      {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
-    </div>
-  );
-}
-
-function Loading() {
-  return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
-}
 
 /**
  * What a section shows when the read behind it did not come back.

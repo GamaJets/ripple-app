@@ -37,6 +37,7 @@ import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/t
 import { DEFAULT_PALETTE } from '../../src/theme/tokens';
 import { useBrand } from '../../src/ui/brand';
 import { useTenant } from '../../src/ui/tenant';
+import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { brandColorOf, parseGymName } from '../../src/lib/gymSettings';
 import { Icon } from '../../src/ui/Icon';
@@ -65,6 +66,20 @@ export default function OwnerBrand() {
   // first read failed, had no way to ask for it again. The name field is not
   // disturbed — `draft` is what the owner typed and `nameField` prefers it.
   const pull = usePullToRefresh(useCallback(() => { refresh(); }, [refresh]));
+
+  /* When the gym row was last read.
+   *
+   * This screen and app/(owner)/exercise.tsx were the only two of the owner
+   * app's eighteen reading screens with a pull-to-refresh and no stamp — a
+   * gesture that may or may not have re-read, with nothing on screen to say
+   * which. Brand is where an owner sets the gym's name and colour and then
+   * checks it took, so "did that pull do anything" is the exact question.
+   *
+   * `useTenant` carries no stamp of its own, so the screen keeps one — the same
+   * shape app/(owner)/library.tsx uses. 'error' deliberately does NOT move it:
+   * the name on screen is still the earlier read's. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => { if (status === 'ready') setFetchedAt(Date.now()); }, [status]);
 
   // The gym's colour, applied. `gymColor` is null for a gym that has not chosen
   // one — part 118 cleared the schema default precisely so that this cannot
@@ -144,6 +159,8 @@ export default function OwnerBrand() {
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>White-label Studio</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your gym's name and colour — saved to the gym, not to this phone</Text>
         </View>
+
+        <Fetched at={fetchedAt} onRefresh={() => { refresh(); }} busy={status === 'loading'} />
 
         {/* ── the gym's name ─────────────────────────────────────────────── */}
         <Section>

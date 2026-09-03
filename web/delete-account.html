@@ -67,7 +67,7 @@ addEventListener('DOMContentLoaded', function () {
 
 <main class="wrap page prose">
   <h1>Delete your account</h1>
-  <p class="updated">Updated 25 August 2026</p>
+  <p class="updated">Updated 3 September 2026</p>
 
   <p>This page covers the three apps published by Washateria LLC — <strong>Repple</strong>, <strong>Repple Coach</strong> and <strong>Repple Studio</strong>. They share one account and one database. Deleting the account deletes it in all three; there is no way to leave one and keep another.</p>
 
@@ -107,10 +107,12 @@ addEventListener('DOMContentLoaded', function () {
     <li>Afterwards the account no longer exists at sign-in. The email address is free again — signing up with it creates a new, empty account, not your old one.</li>
   </ul>
 
+  <p><strong>If you are a coach and somebody has accepted one of your documents.</strong> A coach can publish a document in Repple Coach &mdash; a waiver, a PAR-Q, a studio policy &mdash; and clients accept it or are sent it. An acceptance is deliberately locked to the document it is an acceptance of, so that neither can be altered afterwards without the other. That lock still refuses every ordinary route to removing an acceptance &mdash; no admin screen, no cleanup, no policy. There is now exactly one thing that can release one, and it is the erasure of the coach who owns the document. So the deletion runs to completion on its own; you do not have to ask us for anything. It used to be the other way round: until that route was built the attempt raised a database error and rolled back, taking even the record that it had been attempted with it. The consequence is stated here rather than discovered afterwards &mdash; when your account is erased, the record that your clients accepted your document goes with it. The alternative was keeping your name, your file and your paperwork indefinitely because somebody once ticked a box, and that is not retention.</p>
+
   <p><strong>How that 30 days actually runs.</strong> Nothing deletes you on a timer. Tapping the button records the request; a person then has to carry it out, and the database only lets your gym's owner do it. The Repple Studio screen that shows an owner the requests waiting on them is new and is not in every gym&rsquo;s build yet, so an in-app request can sit unseen — and if you are not a member of any gym, there is no owner to see it at all. So: <strong>email us as well as tapping the button</strong>. That request reaches us directly, does not depend on anyone else looking, and is the route we can hold to 30 days. If 30 days pass and you are still able to sign in, tell us and we will finish it.</p>
 
   <h2>What is deleted</h2>
-  <p>Deleting the account removes it from authentication. Every table holding your records hangs off it — forty-two of them as the database stands today — and they go with it:</p>
+  <p>Deleting the account removes it from authentication. Every table holding your records hangs off it — sixty-six directly, and a hundred and six once the chain is followed all the way down, as the database stands today — and they go with it:</p>
   <ul>
     <li><strong>Your identity</strong> — name, email address, profile photo.</li>
     <li><strong>Training</strong> — workouts, logged sets, cardio and calorie entries, personal records.</li>
@@ -121,11 +123,18 @@ addEventListener('DOMContentLoaded', function () {
     <li><strong>Class bookings.</strong></li>
     <li><strong>Your gym membership record and any invoices issued to you.</strong> Payments the gym recorded are handled differently — see below.</li>
     <li><strong>Push notification tokens</strong>, so notifications stop.</li>
-    <li><strong>Connected-service tokens</strong> for WHOOP, Oura, Fitbit, Garmin and Spotify. Those connections end.</li>
+    <li><strong>Injuries you recorded</strong>, and the record of any document you uploaded about one, including the record of your answer when we asked whether it could be sent to be read as text.</li>
+    <li><strong>Connected-service tokens</strong> for WHOOP, Oura and Spotify. Those connections end. Fitbit and Garmin cannot be connected yet, so there is no token for either.</li>
   </ul>
-  <p><strong>Progress photos, specifically.</strong> Progress photos are now stored, so they are now deleted &mdash; and that took more than deleting a row. The photo record and the image file are two different things in two different places, and removing a database row does not remove a file. So every deletion, whether you remove one photo or the whole account, records the file&rsquo;s path the moment the row goes, and the file is then deleted against that record. Nothing is marked deleted until the storage service confirms it. A file we could not remove stays visibly outstanding rather than being quietly written off.</p>
+  <p><strong>Progress photos, specifically.</strong> Progress photos are now stored, so they are now deleted &mdash; and that took more than deleting a row. The photo record and the image file are two different things in two different places, and removing a database row does not remove a file. So every deletion, whether you remove one photo or the whole account, records the file&rsquo;s path the moment the row goes, and the file is then deleted against that record. Nothing is marked deleted until the storage service confirms it: a reply that does not say the object has gone leaves the entry outstanding rather than closing it.</p>
 
-  <p>Nobody else can see them. Your coach cannot: progress photos are the one thing in Repple a coach has no read access to, deliberately and at both layers &mdash; the record and the file are locked separately. If sharing with a coach is ever offered it will be something you switch on for a specific photo, not something that is already true.</p>
+  <p><strong>And an alarm fires when an entry stops moving.</strong> A scheduled run reporting that it ran is not the same as reporting that it removed something, so a second job reads the queue once a day and fails on purpose if anything has been sitting in it for more than a day. A job that fails is a red line in the log of scheduled runs, naming the file and the last thing the storage service said about it. That is the honest size of it: a signal in a place we look, not a message that wakes somebody at three in the morning. What it rules out is the failure this queue had already had once &mdash; a drain reporting success every five minutes for three days while one entry, a test row as it turned out, never moved.</p>
+
+  <p><strong>The other files are on that mechanism now.</strong> Injury documents you uploaded, anything sent as an attachment in a message and your profile photo are recorded and queued the moment your account goes, exactly as a progress photograph is, and a scheduled job sends a delete for each of them within minutes. If you coach through Repple Coach, so are your logo, any document you published and any exercise clip you recorded. The same rule holds for all of them: an entry is closed only when the storage service confirms the object is no longer there. A file that has been asked for is not yet a file that has gone, and we record the second of those, not the first. Both apps say so on their own deletion screens at the moment you ask.</p>
+
+  <p><strong>One store is deliberately not on it: your gym&rsquo;s own filing cabinet.</strong> A gym can file a document against a member &mdash; a signed contract, an incident report, a photograph &mdash; and those are stored under the gym rather than under you. Deleting your account empties the link to you, so the document no longer names you in our database, but the file itself stays. That is not an oversight and it is not settled either: how long a gym must keep a record about a former member has a different answer in each country, and until that is decided per gym we would rather keep a file a gym may be legally required to hold than destroy it. If you want to know what your gym holds about you, ask them before you delete &mdash; afterwards the link that would find it is the thing the deletion emptied.</p>
+
+  <p>Nobody sees them unless you share that photo. Progress photos are the one thing in Repple a coach has no standing access to. There is no permission that comes with being your coach; there is a grant you make for one photograph at a time, which you can withdraw, and which ends by itself when the coaching link does. It is enforced at both layers &mdash; the record and the file are locked separately, and the rule on the file is written in terms of the rule on the record so the two cannot come apart. Sharing a photo also shares the weight and body-fat figure stored alongside it.</p>
 
   <p>Apple Health is a permission held on your iPhone, not data we store a key for. Deleting the account does not touch it. Revoke it in <strong>iOS Settings → Privacy &amp; Security → Health → Repple</strong>, or by removing the app. Anything imported from Health into your training log is deleted with the log.</p>
 
@@ -141,7 +150,7 @@ addEventListener('DOMContentLoaded', function () {
       <tr><td><strong>Guest passes issued or redeemed</strong></td><td>They were paid for and have to reconcile against takings.</td></tr>
       <tr><td><strong>Training packages you bought</strong></td><td>A purchase record. Kept for the same accounting reasons as a payment, with your name removed.</td></tr>
       <tr><td><strong>Feedback you submitted</strong></td><td>Kept so it still counts, no longer attributed to you.</td></tr>
-      <tr><td><strong>Crash and error reports</strong></td><td>Diagnostics we use to fix faults. They were never tied to your name.</td></tr>
+      <tr><td><strong>Crash and error reports</strong></td><td>Diagnostics we use to fix faults. The row stays and the pointer to your account is emptied, so what is left is the fault and not the person. While your account exists these are readable by your gym&rsquo;s owner and not by you, which is why they are not in your export.</td></tr>
     </tbody>
   </table>
   </div>
@@ -151,7 +160,7 @@ addEventListener('DOMContentLoaded', function () {
   <p>We apply no additional retention period on top of these. They are kept for as long as the gym's own accounting and legal obligations require, and are held under the same terms as everything else in <a href="/privacy">Privacy</a>. <a href="/security">Security &amp; data</a> shows how far the deletion reaches through the database, and why the files in storage have to be chased separately from the rows.</p>
 
   <h2>Take a copy first</h2>
-  <p>The app will export the records held against your account as a JSON file — <strong>Me → Settings → Your data → Export my data</strong>. It covers your profile, workouts, food logs, measurements, InBody scans, check-ins, habit logs, coach messages, coach nutrition plans, assigned programmes, class bookings, referrals and feedback. It does not reach the gym-side records — membership, invoices, payments and door-log visits — so ask us if you want those too. Do it before you request deletion. Afterwards there is nothing left to export, and we cannot produce one for you.</p>
+  <p>The app will export the records held against your account as a JSON file — <strong>Me → Settings → Your data → Export my data</strong>. It covers your profile, workouts, food logs, measurements, InBody scans, check-ins, habit logs, coach messages, coach nutrition plans, assigned programmes, class bookings, referrals and feedback. It now reaches the gym-side records too — membership, invoices, payments, charges, passes and door-log visits. Four things it does not carry: any note a coach wrote about you while you were a lead of theirs; the notifications the app has sent you; the push tokens that identify your handset; and the files themselves. The bundle lists every file held for you, and you save those one at a time from the same screen. Crash reports are not in it either, for the reason given in the table above &mdash; while your account exists they are not yours to read. Do it before you request deletion. Afterwards there is nothing left to export, and we cannot produce one for you.</p>
 
   <h2>Two things deletion does not do</h2>
   <ul>

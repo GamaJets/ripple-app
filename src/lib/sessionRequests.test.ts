@@ -14,10 +14,11 @@ import {
   COACH_ACCEPT_RULE, EXPIRY_RULE, NOT_A_BOOKING, NO_COACH_TO_ASK, OUTCOME_LABEL,
   REQUEST_HORIZON_DAYS,
   REQUEST_LIVE_CAP, REQUEST_NOTE_MAX, answerRefusalNote, askBlocker, askRefusalNote,
-  askedConfirmation, answeredConfirmation, asRequestState, coachQueue, coachQueueNote,
+  answerTellLine, askedConfirmation, answeredConfirmation, asRequestState, coachQueue, coachQueueNote,
   countByOutcome, isLive, myRequests, outcomeLine, outcomeOf, ownDiaryNote, shapeRequests,
   type RequestOutcome, type SessionRequest,
 } from './sessionRequests';
+import { pushPartialNote } from './notifyCopy';
 import type { LoadStatus } from '../ui/loadStatus';
 
 const errors: string[] = [];
@@ -175,6 +176,43 @@ ok(/^Your coach has been asked/.test(noName), 'and it still opens with a subject
 ok(/in your calendar/i.test(answeredConfirmation(true, WHEN)), 'a yes tells the coach a session now exists');
 ok(/ask for another time/.test(answeredConfirmation(false, WHEN)), 'and a no tells them the client can ask again');
 ok(answeredConfirmation(true, WHEN) !== answeredConfirmation(false, WHEN), 'the two answers do not share a sentence');
+
+/* ── whether the client actually heard about the answer ──────────────────
+ *
+ * app/(trainer)/sessions.tsx warned on `!ok` and on nothing else. Two other
+ * outcomes `sendPushChecked` reports look, on screen, exactly like the one
+ * where everything worked.
+ */
+
+eq(answerTellLine({ ok: true, recorded: 1, inboxKept: true }), null,
+  'a send that worked adds nothing — silence is the report');
+
+const failed = answerTellLine({ ok: false, recorded: 0 });
+ok(failed !== null && /couldn\u2019t send/i.test(failed), 'a refused send still says so');
+
+const partial = answerTellLine({ ok: true, recorded: 1, inboxKept: true, partial: true });
+ok(partial !== null && partial.includes(pushPartialNote(1)),
+  'a partly-read handset list is said in the one wording this product has for it');
+ok(partial !== null && !/more people/i.test(partial),
+  'in its one-person form — this send has exactly one recipient');
+ok(partial !== null && /Message them/i.test(partial), 'and leaves the coach something to do');
+
+const noRow = answerTellLine({ ok: true, recorded: 0, inboxKept: true });
+ok(noRow !== null && /nothing was written to their notifications/i.test(noRow),
+  'a push accepted with no row written is not silence — the client has nothing waiting in the app');
+ok(noRow !== partial, 'the two are different facts and do not share a sentence');
+
+// `recorded: 0` on a kind the inbox refuses is policy, not a fault. Nothing in
+// this product sends an answer through that path today, and the guard is here
+// so that a reword which moved it does not turn a working send into an alarm.
+eq(answerTellLine({ ok: true, recorded: 0, inboxKept: false }), null,
+  'a row that was never going to be written is not reported as one that failed');
+
+// Nothing here claims delivery. A push is queued with Expo; this app never
+// learns what became of it.
+for (const line of [failed, partial, noRow]) {
+  ok(line !== null && !/\bdelivered\b/i.test(line), 'no line claims delivery');
+}
 
 /* ── what the screen refuses before the server has to ──────────────────── */
 

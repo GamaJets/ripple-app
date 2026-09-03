@@ -11707,17 +11707,36 @@ comment on function public.set_code_spend is
 -- exactly as it does for every other figure it has not established. A NOT NULL
 -- default would simply move the invention into the schema.
 --
--- Existing rows are backfilled to AED because that is what they actually are —
--- the whole operating record around them is denominated in it — not because it
--- is a sensible fallback for the next tenant.
+-- ── THE BACKFILL THAT USED TO BE HERE, AND WHY IT IS GONE ────────────────
+--
+-- This file used to end with
+--
+--     update public.tenants set currency = 'AED' where currency is null;
+--
+-- justified, three paragraphs above, as "existing rows are backfilled to AED
+-- because that is what they actually are — the whole operating record around
+-- them is denominated in it". That sentence was true when it was written and
+-- is not true any more: there is no operating record. Every money-bearing
+-- table in this database is empty, counted rather than remembered, so nothing
+-- around those tenants is denominated in anything.
+--
+-- What the line still did was fire on EVERY re-run of setup.sql, against every
+-- tenant created since the last one — silently writing a currency onto gyms
+-- that had not chosen, which is the exact thing the paragraphs above this one
+-- forbid, in the file that establishes the rule. 35 of the 54 live tenants are
+-- null today and would have been stamped by the next paste.
+--
+-- Retired rather than edited into a WHERE clause: a one-off seed does not
+-- belong in an idempotent bundle at all. See
+-- supabase/parts/1121-the-line-that-put-dirhams-back-on-every-run.sql, which
+-- carries the full account and the standing assertion that stops it coming
+-- back.
 alter table public.tenants
   add column if not exists currency text;
 
 alter table public.tenants drop constraint if exists tenants_currency_is_iso;
 alter table public.tenants add constraint tenants_currency_is_iso
   check (currency is null or currency ~ '^[A-Z]{3}$');
-
-update public.tenants set currency = 'AED' where currency is null;
 
 comment on column public.tenants.currency is
   'ISO 4217, uppercase. NULL means the gym has not set one — render a dash and ask, never assume.';
@@ -49110,3 +49129,4966 @@ $$;
 -- nothing. Same convention as parts 38, 101 and 37.
 revoke execute on function public.my_gym_name() from public, anon;
 grant  execute on function public.my_gym_name() to authenticated;
+
+-- ▶ a-document-that-left-the-account-without-being-asked.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The answer a member gave before their medical document left their account.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- Part 91 built the injury-documents bucket private, own-folder at every verb,
+-- with no trainer branch, and app/(client)/injury-doc.tsx told the member so:
+-- "The document stays in your account and only you can open it."
+--
+-- The database kept that promise. The application did not. src/ui/injuryDocs.ts
+-- uploaded the file and then handed the same bytes to the `ocr-scan` edge
+-- function, which POSTs them to https://api.ocr.space/parse/image — a named
+-- company on the public internet — with no consent question anywhere on the
+-- path. A physiotherapy report carries a diagnosis, a clinician, a hospital
+-- number and a date of birth. All of it went, every time, unasked, under a
+-- sentence saying it did not.
+--
+-- The application-side fix is src/lib/injuryDocConsent.ts and the required
+-- `consent` argument on `readInjuryDocument`. This part is the half that makes
+-- the agreement a FACT rather than a claim.
+--
+-- ── WHY A ROW AND NOT A FLAG ─────────────────────────────────────────────
+--
+-- Because a consent nobody can produce afterwards is indistinguishable from no
+-- consent at all, and this codebase has refused that shape everywhere it has
+-- come up. Part 79 stores WHICH disclosures a coach acknowledged rather than a
+-- bare timestamp, because a timestamp is satisfied forever by one tap. Part 96
+-- makes the programme acknowledgement immutable, so neither party can revise
+-- what they knew on the day. Part 84's waiver is a record of a signature, not a
+-- boolean on a profile.
+--
+-- One row per document, therefore. Not a column on `clients`, which could only
+-- say "this person agreed to something once"; not a settings key, which is
+-- answered months before the document that matters exists and cannot know what
+-- is in it.
+--
+-- ── WHY IT NAMES THE DOCUMENT, AND PART 91 SAID NOT TO ───────────────────
+--
+-- Part 91 argued, deliberately, that an injury document has NO database row:
+-- "a table holding document paths is one join away from being read by something
+-- that should not read it." That argument was about the FILE — a row that
+-- exists so that something can find, list or reach the bytes. It is a good
+-- argument and it still stands: there is still no row describing a document,
+-- and nothing joins from here to storage.
+--
+-- This row describes a DECISION, and a decision has to say what it was about.
+-- A consent record that cannot answer "which of my documents did you send?" is
+-- not a record, it is a counter. The object path is the only identifier that
+-- exists — there is nothing else to name — and it is not new information: it is
+-- the same string `storage.objects` already holds for the same member under the
+-- same own-folder rule this file copies.
+--
+-- What must NEVER be added below, for the reasons part 91 gives at length: a
+-- trainer branch, an owner branch, a tenant branch, or any policy reached
+-- through `is_my_client(...)`. Access to a medical document is something a
+-- person does, once, per document — and access to the record of what they
+-- agreed to is theirs alone. A gym owner reading which of their members sent an
+-- oncology letter to an OCR vendor is not a feature this file may grow.
+--
+-- The row OUTLIVES the file, and that is deliberate. Deleting your copy does
+-- not un-send the vendor's, so the record of the send must not vanish with it.
+-- It goes when the account goes, and only then (`on delete cascade` from
+-- profiles, which is what 41-account-deletion.sql already walks).
+--
+-- ── WHY IT IS IMMUTABLE ──────────────────────────────────────────────────
+--
+-- There is no UPDATE policy and no DELETE policy, so neither exists for anyone
+-- coming through PostgREST. Same stance as `program_injury_acknowledgements` in
+-- part 96 and the waiver in part 84. A consent record that the app can rewrite
+-- is a consent record the app can manufacture, and the entire point of this
+-- table is that it cannot.
+--
+-- A member changing their mind does not edit the row. They upload the document
+-- again — every path carries its own millisecond and token, so it is a new
+-- document and a new question — or they delete the file. The old row keeps
+-- saying what was true on the day, which is the only thing a record is for.
+--
+-- ── WHAT THE ABSENCE OF A ROW MEANS, WHICH IS NOTHING ────────────────────
+--
+-- Every document uploaded before this part existed was sent to OCR.space
+-- without being asked, and has no row here. So "no row" means "no record either
+-- way", never "never sent", and src/lib/injuryDocConsent.ts carries that
+-- distinction as a fourth state with its own sentence. Backfilling a 'granted'
+-- row for those documents would be this table's first lie and would be worse
+-- than the defect it was written for.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.injury_doc_ocr_consents (
+  id            uuid        primary key default uuid_generate_v4(),
+  -- profiles, not clients. A trainer tracking their own training uses the
+  -- client screens and the client hooks, and has a profile but need not have a
+  -- clients row; keying on clients would have made the consent write fail —
+  -- and therefore, by the ordering in injuryDocs.ts, made the read fail — for
+  -- exactly the people who self-track.
+  client_id     uuid        not null references public.profiles(id) on delete cascade,
+  -- The storage key in `injury-docs` this decision was about, as
+  -- `<uid>/<millis>-<token>-<slug>.<ext>`.
+  object_path   text        not null,
+  -- 'granted' or 'refused'. Both are recorded: the refusal is what lets the
+  -- app say later that nothing from that document was ever sent and mean it.
+  decision      text        not null check (decision in ('granted', 'refused')),
+  -- Who it was agreed to go to, and exactly where. Written on the row rather
+  -- than assumed from today's code, so a row from today still says where the
+  -- document went if the vendor or the endpoint ever changes.
+  vendor        text        not null,
+  endpoint      text        not null,
+  decided_at    timestamptz not null default now(),
+  -- One decision per document. The path already carries a millisecond and a
+  -- random token, so two rows for one path could only be a double-write, and a
+  -- second row would make "what did I agree to for this document" ambiguous.
+  unique (client_id, object_path)
+);
+
+-- The member's own consents, read by the screen that lists their documents so
+-- the record is something they can SEE rather than something the app merely
+-- holds. Ordered reads land on (client_id, decided_at).
+create index if not exists injury_doc_ocr_consents_client_idx
+  on public.injury_doc_ocr_consents (client_id, decided_at desc);
+
+alter table public.injury_doc_ocr_consents enable row level security;
+
+-- auth.uid(), never current_user: under PostgREST every signed-in request runs
+-- as the shared `authenticated` role, so a policy built on current_user grants
+-- everything to everyone. Same note as part 79.
+drop policy if exists injury_doc_ocr_consent_own_read on public.injury_doc_ocr_consents;
+create policy injury_doc_ocr_consent_own_read on public.injury_doc_ocr_consents
+  for select
+  to authenticated
+  using (client_id = (select auth.uid()));
+
+-- Only the person the consent is about may record one, and only about
+-- themselves. A consent somebody else can write is not a consent.
+drop policy if exists injury_doc_ocr_consent_own_write on public.injury_doc_ocr_consents;
+create policy injury_doc_ocr_consent_own_write on public.injury_doc_ocr_consents
+  for insert
+  to authenticated
+  with check (client_id = (select auth.uid()));
+
+-- No UPDATE policy and no DELETE policy. Deliberate — see the header. If a
+-- later part adds one, it is adding the ability to manufacture or erase a
+-- record of consent to send a medical document to a third party, and that is
+-- the thing this file exists to make impossible.
+
+-- A path that does not belong to the member it is filed under is a row that
+-- claims a decision about somebody else's document. The RLS above stops the
+-- WRITER being wrong; this stops the ROW being wrong, including for the service
+-- role and for migrations, which RLS does not constrain at all.
+create or replace function public.injury_doc_consent_path_is_the_clients()
+returns trigger
+language plpgsql
+as $fn$
+begin
+  if split_part(new.object_path, '/', 1) <> new.client_id::text then
+    raise exception 'An injury document consent must name a document in that member''s own folder'
+      using errcode = '22023';
+  end if;
+  return new;
+end $fn$;
+
+drop trigger if exists injury_doc_consent_path_guard on public.injury_doc_ocr_consents;
+create trigger injury_doc_consent_path_guard
+  before insert on public.injury_doc_ocr_consents
+  for each row execute function public.injury_doc_consent_path_is_the_clients();
+
+-- ▶ a-rate-snapshotted-in-nothing.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A session snapshotted the rate and not the money it was in.
+--
+-- ── The hole ──────────────────────────────────────────────────────────────
+--
+-- Part 33 added `sessions.rate_cents` and stated its whole purpose in the
+-- comment above it:
+--
+--     "The rate at the moment of delivery. Snapshotted so that changing a
+--      trainer's fee next month does not silently rewrite what last month
+--      cost."
+--
+-- It snapshotted half the fact. `rate_cents` is an integer of minor units and
+-- nothing on the row says minor units OF WHAT. Every reader therefore supplies
+-- the unit from somewhere else, and the only somewhere else any of them has is
+-- `tenants.currency` — the gym's currency TODAY.
+--
+-- This product lets a gym change that column, from /settings and from the
+-- owner's phone. The moment it does, every session delivered before the change
+-- is relabelled: /sessions, /payroll and /coach/earnings all print last year's
+-- figures with this year's currency, and `recordSettlement` stamps today's code
+-- onto a permanent `payroll_settlements` row an accountant reads back as fact.
+-- The snapshot was built to stop exactly this and the currency change walks
+-- straight through it.
+--
+-- ── It is the only priced thing in this schema that does not carry one ─────
+--
+-- Both neighbours have the column AND enforce the pairing:
+--
+--   · `gym_shifts` (part 196) — `rate_cents` and `currency`, with
+--     `gym_shifts_priced_or_not check ((rate_cents is null) = (currency is
+--     null))`. Its own comment: "an amount with no currency is not an amount".
+--   · `gym_trainer_pay` (part 183) — `gym_trainer_pay_amount_has_currency
+--     check (currency is not null or (session_rate_cents is null and
+--     class_rate_cents is null))`.
+--
+-- And `payroll_settlements` (part 36) has had `currency` NOT NULL since part
+-- 150. The session that the settlement is COMPUTED FROM is the one row on the
+-- path with no unit on it.
+--
+-- ── Why `rate_currency` and not `currency` ────────────────────────────────
+--
+-- `gym_shifts.currency` is unambiguous because a shift has exactly one money
+-- column. `sessions` is a shared table — the gym's payroll rate, a coach's own
+-- client work, packs, slots and outcomes all live on it — and a bare `currency`
+-- there reads as "the currency of this session", which is a thing nobody has
+-- defined. `rate_currency` pairs by name with the column it is the unit of,
+-- which is the whole point of the file.
+--
+-- ── The rows already there: left as they are, deliberately ────────────────
+--
+-- Every existing session with a rate has no currency, and this part backfills
+-- NONE of them.
+--
+-- The tempting backfill is `tenants.currency`, and it is precisely the fiction
+-- the column exists to prevent. A gym that has never changed its currency would
+-- get the right answer; a gym that HAS changed it — the only gym for which any
+-- of this matters — would have its entire PT history stamped, permanently and
+-- invisibly, with the code it moved TO. A backfill cannot tell those two gyms
+-- apart, and the one it is wrong about is the one that needed it. Part 196
+-- refused a backfill "of a value nobody stated" for the same reason.
+--
+-- So a pre-part row keeps `rate_cents` with `rate_currency` null, and that is
+-- an honest record of what was filed: a figure whose unit was never written
+-- down. The application reads a null here as UNKNOWN, never as the gym's
+-- current currency, and says so on screen rather than labelling it.
+--
+-- ── Why the pairing is one-directional today ──────────────────────────────
+--
+-- `gym_shifts` can afford `(rate_cents is null) = (currency is null)` because
+-- every row in it predates both columns. This table cannot: rows with a rate
+-- and no currency already exist, so the symmetric check would fail to be added
+-- at all — and were it added NOT VALID, it would still be enforced on UPDATE,
+-- which would make `recordSettlement`'s `settlement_id` stamp fail on every
+-- legacy session and stop a coach being paid.
+--
+-- What is enforced here instead:
+--
+--   1. `rate_currency` is ISO-shaped when present. Same rule as
+--      `trainers_currency_is_iso` (part 940).
+--   2. A currency never appears WITHOUT a rate. That direction has no legacy
+--      rows and no writer that produces it, so it can be a hard check today: a
+--      currency with no amount beside it is a setting pretending to be money.
+--   3. The trigger below fills the unit at the moment a rate is written, so
+--      that the missing half stops accumulating from now on WITHOUT every
+--      writer having to be changed first.
+--
+-- The symmetric check becomes addable once no un-united rate remains. It is not
+-- added here on a promise.
+
+alter table public.sessions add column if not exists rate_currency text;
+
+alter table public.sessions drop constraint if exists sessions_rate_currency_is_iso;
+alter table public.sessions add constraint sessions_rate_currency_is_iso
+  check (rate_currency is null or rate_currency ~ '^[A-Z]{3}$');
+
+alter table public.sessions drop constraint if exists sessions_rate_currency_needs_rate;
+alter table public.sessions add constraint sessions_rate_currency_needs_rate
+  check (rate_currency is null or rate_cents is not null);
+
+comment on column public.sessions.rate_cents is
+  'What this session was worth at the moment of delivery, in minor units. Snapshotted so a later fee change cannot rewrite what last month cost. Read it with rate_currency or not at all — the integer alone names no money.';
+comment on column public.sessions.rate_currency is
+  'The currency rate_cents is denominated in, as it stood when the rate was snapshotted. No default: this product is white-label — see part 150. NULL means the unit was never recorded (every row written before this part), and must be read as unknown, NEVER as the gym''s currency today.';
+
+-- ── the unit, recorded at the same instant as the figure ──────────────────
+--
+-- Three screens snapshot a rate — app/(trainer)/sessions.tsx,
+-- app/(trainer)/calendar.tsx and app/(trainer)/log-session.tsx — all through
+-- `rateCentsToSnapshot` in src/lib/rateSnapshot.ts, which already RESOLVES the
+-- currency (`snapshotCurrency`: the gym's, else the coach's own when there is
+-- provably no gym) in order to ask `minorFromWhole` how many places it has, and
+-- then discards it. The number reached the database and the unit it was
+-- computed in did not.
+--
+-- This trigger records the same answer the application already computed, by the
+-- same precedence, at the same moment — `tenants.currency` for the gym on the
+-- session, otherwise `trainers.currency` for the coach, exactly as
+-- `snapshotCurrency` does. It is NOT a guess about the past: it fires only when
+-- a rate is being written NOW, and what it writes is the unit that write was
+-- denominated in.
+--
+-- It never overrides. A caller that names the currency wins, always, because
+-- the caller is the one that did the arithmetic.
+--
+-- It never touches a row whose rate is not moving. Stamping `settlement_id`,
+-- marking an outcome, cancelling a slot — none of them re-derive the unit, so a
+-- session delivered under one currency keeps it after the gym changes to
+-- another. That is the entire point of a snapshot.
+create or replace function public.sessions_fill_rate_currency() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  resolved text;
+begin
+  -- Only when a rate is arriving or changing, and only when nobody said what it
+  -- is in. `is distinct from` rather than `<>` so a NULL on either side counts
+  -- as a change.
+  if new.rate_cents is null then
+    return new;
+  end if;
+  if new.rate_currency is not null then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' and new.rate_cents is not distinct from old.rate_cents then
+    return new;
+  end if;
+
+  select t.currency into resolved
+    from public.tenants t
+   where t.id = new.tenant_id;
+
+  -- The coach's own column applies IF AND ONLY IF there is no gym currency —
+  -- the precedence rule in src/lib/currencySource.ts, stated once more here so
+  -- the two cannot drift.
+  if resolved is null then
+    select tr.currency into resolved
+      from public.trainers tr
+     where tr.id = new.trainer_id;
+  end if;
+
+  -- Still nothing? Then nothing is what is recorded. There is no default
+  -- currency in this product and there is none here: an unknown unit stays
+  -- unknown, and the row is honest about it.
+  new.rate_currency := resolved;
+  return new;
+end $$;
+
+drop trigger if exists trg_sessions_fill_rate_currency on public.sessions;
+create trigger trg_sessions_fill_rate_currency
+  before insert or update of rate_cents, rate_currency on public.sessions
+  for each row execute function public.sessions_fill_rate_currency();
+
+comment on function public.sessions_fill_rate_currency() is
+  'Records the currency a snapshotted session rate was denominated in, at the moment the rate is written, when the writer did not name one. Mirrors snapshotCurrency() in src/lib/rateSnapshot.ts. Never overrides a stated currency and never re-derives one for a row whose rate is not moving.';
+
+-- ▶ a-log-that-says-what-money-it-means.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Every money sentence in the gym's permanent log was divided by a hundred.
+--
+-- ── The defect ────────────────────────────────────────────────────────────
+--
+-- `gym_events` is composed AT WRITE TIME and never recomputed — that is the
+-- whole design of the table, and it is why it is the record a gym would hand to
+-- somebody asking who took what. Part 187 wrote seven money sentences into it,
+-- and every one of them formats the amount as
+--
+--     to_char(new.amount_cents / 100.0, 'FM999G999G990D00')
+--
+-- An unconditional division by a hundred, and a mandatory two decimal places
+-- after it. In a gym that prices in yen that sentence states a hundred times
+-- the money that changed hands; in one that prices in dinar, a tenth of it. It
+-- is the same division `money()` was fixed for in src/lib/gymRecord.ts and that
+-- `readMinorAmount` / `majorFromMinor` in src/lib/coachMoney.ts exist to end,
+-- still standing in the log — and part 700 named it, at :279, while declining
+-- to add a fourteenth site of it:
+--
+--     "Every existing money event in part 187 writes `to_char(amount_cents /
+--      100.0, …)` into its sentence, which is a hundred times the real figure
+--      in a gym that prices in yen and ten times it in one that prices in
+--      dinar… Adding a fourteenth site of it is not a trade worth making."
+--
+-- Correct, and the conclusion it reached — leave the amount off the
+-- cost-deletion sentence entirely — does not hold, for a reason the same
+-- paragraph half-states. The row an owner is told to "open to read the amount
+-- of" is the row that was just deleted. `gym_costs` has no UPDATE path at all,
+-- so removing a line is the only way to correct one, and after the delete the
+-- sum that month used to show is unrecoverable from anywhere in this product.
+--
+-- ── What this part does ───────────────────────────────────────────────────
+--
+--   1. `public.money_text(amount_cents, currency)` — one formatter, which asks
+--      the currency how many places its money has, exactly as
+--      `currencyDecimals` does in TypeScript.
+--   2. Part 187's seven sites are rewritten through it. Same sentences, same
+--      triggers, correct figures.
+--   3. The cost-deletion event carries its amount, because the formatter it was
+--      waiting for now exists.
+--
+-- ── What it does NOT do, and cannot ───────────────────────────────────────
+--
+-- It does not touch a single `gym_events` row already written. The summary is
+-- composed at write time and stored; there is nothing in a stored sentence that
+-- says which currency it was composed from, or what the raw figure was, so a
+-- hundredfold sentence cannot be told from a correct one after the fact. That
+-- is not a limitation of this part, it is what "composed at write time" means,
+-- and it is the reason this was worth fixing before more of them accumulated.
+--
+-- A gym reading its own history will therefore see sentences from before this
+-- part that are wrong by a factor of a hundred (sixteen currencies) or ten
+-- (five currencies), and sentences from after it that are right. Two-decimal
+-- gyms — which is most of them — are unaffected in both directions, because
+-- for those the old expression happened to be correct.
+
+-- ── the formatter ─────────────────────────────────────────────────────────
+--
+-- The three sets are Stripe's and are the same lists `ZERO_DECIMAL` and
+-- `THREE_DECIMAL` hold in src/lib/coachMoney.ts. Duplicated here rather than
+-- read from a table on purpose: this runs inside an AFTER trigger on the money
+-- tables, and a formatter that could fail on a missing lookup row would take
+-- the payment write down with it. The two lists are small, closed and set by
+-- ISO 4217 rather than by this product.
+--
+-- IMMUTABLE and STRICT: no I/O, and a null in gives a null out, which callers
+-- handle with `coalesce` where an amount may genuinely be absent.
+create or replace function public.money_text(p_amount_cents bigint, p_currency text)
+returns text language plpgsql immutable strict as $fn$
+declare
+  v_cur text := upper(btrim(p_currency));
+  v_places int;
+begin
+  if v_cur = '' then
+    -- No currency is not a formatting problem to be worked around. The caller
+    -- gets the integer and the fact that its unit is unknown, which is what is
+    -- actually true; inventing two decimal places here is the defect.
+    return p_amount_cents::text || ' (minor units, currency not recorded)';
+  end if;
+
+  v_places := case
+    when v_cur in ('BIF','CLP','DJF','GNF','JPY','KMF','KRW','MGA',
+                   'PYG','RWF','UGX','VND','VUV','XAF','XOF','XPF') then 0
+    when v_cur in ('BHD','JOD','KWD','OMR','TND') then 3
+    else 2
+  end;
+
+  -- Grouped, with exactly the number of decimal places this money has. The old
+  -- expression hard-coded 'D00' as well as the hundred, so even a correctly
+  -- divided yen figure would have been printed with two places it does not
+  -- have.
+  return case v_places
+    when 0 then to_char(p_amount_cents, 'FM999G999G999G990')
+    when 3 then to_char(p_amount_cents / 1000.0, 'FM999G999G990D000')
+    else to_char(p_amount_cents / 100.0, 'FM999G999G990D00')
+  end;
+end $fn$;
+
+comment on function public.money_text(bigint, text) is
+  'A minor-unit amount as words, in the places the currency actually has — 0 for the sixteen zero-decimal currencies, 3 for the five thousandth ones, 2 otherwise. The one formatter for money composed into a gym_events summary. Never divide by 100 in a trigger: see supabase/parts/1011.';
+
+-- ── part 187''s seven sites, through it ────────────────────────────────────
+--
+-- The sentences are unchanged word for word. Only the figure inside them moves,
+-- and only for the twenty-one currencies where the old one was wrong.
+
+create or replace function public.gym_event_payment()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+declare v_who text;
+begin
+  v_who := case when new.member_id is null then 'nobody named'
+                else public.gym_event_name_of(new.member_id) end;
+  if new.reverses_payment_id is not null then
+    perform public.log_gym_event(
+      new.tenant_id, 'payment-corrected', new.member_id,
+      -- The amount is written into the sentence WITH its currency, because a
+      -- log line reading "a correction of 5000" is read in whatever money the
+      -- reader is thinking in. Same rule as every screen in this product.
+      format('%s of %s %s against %s', initcap(new.kind), new.currency,
+             public.money_text(abs(new.amount_cents), new.currency), v_who));
+  else
+    perform public.log_gym_event(
+      new.tenant_id, 'payment-recorded', new.member_id,
+      format('%s %s taken from %s by %s', new.currency,
+             public.money_text(new.amount_cents, new.currency), v_who,
+             replace(new.method, '_', ' ')));
+  end if;
+  return new;
+end $fn$;
+
+create or replace function public.gym_event_invoice()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  perform public.log_gym_event(
+    new.tenant_id, 'invoice-raised', new.member_id,
+    format('Invoice %s for %s %s to %s',
+           coalesce(new.number::text, '(unnumbered)'), new.currency,
+           public.money_text(new.amount_cents, new.currency),
+           public.gym_event_name_of(new.member_id)));
+  return new;
+end $fn$;
+
+create or replace function public.gym_event_plan_changed()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  if new.price_cents is distinct from old.price_cents then
+    -- Each side formatted in ITS OWN currency. A gym that repriced and
+    -- redenominated in the same edit is two amounts in two monies, and the old
+    -- line divided both by a hundred whatever they were.
+    perform public.log_gym_event(
+      new.tenant_id, 'price-changed', null,
+      format('%s repriced from %s %s to %s %s', new.name,
+             old.currency, public.money_text(old.price_cents, old.currency),
+             new.currency, public.money_text(new.price_cents, new.currency)));
+  end if;
+  if old.active and not new.active then
+    perform public.log_gym_event(new.tenant_id, 'plan-retired', null,
+      format('%s taken off the price book', new.name));
+  end if;
+  return new;
+end $fn$;
+
+create or replace function public.gym_event_settlement()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  if tg_op = 'INSERT' then
+    perform public.log_gym_event(new.tenant_id, 'payroll-settled', new.trainer_id,
+      format('%s %s settled to %s for %s session(s)', new.currency,
+             public.money_text(new.amount_cents, new.currency),
+             public.gym_event_name_of(new.trainer_id), new.sessions_count));
+    return new;
+  end if;
+  if new.reversed_at is not null and old.reversed_at is null then
+    perform public.log_gym_event(new.tenant_id, 'payroll-reversed', new.trainer_id,
+      format('Settlement of %s %s to %s reversed — %s', new.currency,
+             public.money_text(new.amount_cents, new.currency),
+             public.gym_event_name_of(new.trainer_id), new.reverse_reason));
+  end if;
+  return new;
+end $fn$;
+
+-- ── the cost that was removed, and how much it was ────────────────────────
+--
+-- Part 700 left the amount off this sentence to avoid a fourteenth division by
+-- a hundred, and directed the reader to "open the row" instead. The row is the
+-- one that has just been hard-deleted by `deleteGymCost` — `gym_costs` has no
+-- UPDATE path, so removing a line is the only correction available, and
+-- studio-web/app/costs/page.tsx says so in the confirmation. After the delete
+-- the amount exists nowhere: not on the row, not in the log, and not in any
+-- total, because the total moved.
+--
+-- Which is the one event kind whose subject no longer exists, and therefore the
+-- one where the reasoning does not hold. With a formatter that asks the
+-- currency, it can now say what it was.
+--
+-- `gym_costs.currency` is nullable, so `coalesce` rather than a bare call: a
+-- cost filed with no currency says so in words instead of silently losing the
+-- amount to STRICT.
+create or replace function public.gym_event_cost()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  -- `subject_id` is who the event is ABOUT, and a cost is about nobody — no
+  -- member, no trainer. NULL rather than the actor, which part 187 already
+  -- carries separately and which is a different question.
+  if tg_op = 'DELETE' then
+    perform public.log_gym_event(
+      old.tenant_id, 'cost-deleted', null,
+      format('Cost removed: %s — %s, %s, paid %s',
+             old.category, old.description,
+             coalesce(
+               nullif(btrim(coalesce(old.currency, '')), '') || ' ' ||
+                 public.money_text(old.amount_cents, old.currency),
+               old.amount_cents::text || ' (minor units, currency not recorded)'),
+             old.paid_on));
+    return old;
+  end if;
+  perform public.log_gym_event(
+    new.tenant_id, 'cost-recorded', null,
+    format('Cost recorded: %s — %s, %s, paid %s',
+           new.category, new.description,
+           coalesce(
+             nullif(btrim(coalesce(new.currency, '')), '') || ' ' ||
+               public.money_text(new.amount_cents, new.currency),
+             new.amount_cents::text || ' (minor units, currency not recorded)'),
+           new.paid_on));
+  return new;
+end $fn$;
+
+revoke all on function public.gym_event_cost() from public, anon, authenticated;
+revoke all on function public.money_text(bigint, text) from public, anon, authenticated;
+
+-- ▶ the-coachs-own-macros-were-three-defaults.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A coach's daily calorie target was built from three answers nobody asked for.
+--
+-- ── What the screen was doing ─────────────────────────────────────────────
+--
+-- app/(trainer)/my-nutrition.tsx computes the coach's own target with
+--
+--     macrosFor({ weightKg, bodyFatPct, activity, goal, diet })
+--
+-- and the last three come from `useClientData` — a provider that reads
+-- `clients`, a table a coach HAS NO ROW IN. `provision_profile()` gives a
+-- role='trainer' signup a `trainers` row and nothing else, which
+-- app/(trainer)/my-progress.tsx already writes down in as many words: "the
+-- goal, diet and height on that provider are constructed defaults for a coach
+-- rather than answers a coach gave".
+--
+-- The defaults are `'muscle'`, `'meat'` and a literal `1.5`. Through
+-- src/lib/nutrition.ts that is a +12% surplus, protein at 2.0 g per kg of lean
+-- mass and fat at 27% — so a coach who is cutting was handed a bulking target,
+-- headed "Calories Remaining", and counted down against it all day.
+--
+-- Everything else on that screen is scrupulous: it withholds the hero under a
+-- truncated log, refuses a target without a measured body, and says so in
+-- words. The three inputs that actually decide the number were the three the
+-- coach was never asked for and had no control anywhere in the app to set.
+--
+-- ── Why the answers go here ───────────────────────────────────────────────
+--
+-- `coach_prefs` (part 129) is already "one row per account: the coach's own
+-- settings", self-only on every verb, and it already holds the other two
+-- numbers a coach authored rather than the app computing — the class rate and
+-- the monthly targets. A coach's own goal and diet are the same kind of fact
+-- and belong beside them.
+--
+-- NOT on `clients`. Giving a coach a `clients` row to hang three columns off
+-- would make them their own client: `is_my_client`, the roster reads, the
+-- coach's own book and every RLS policy written around that table all key off
+-- rows in it, and a self-row would surface the coach on their own roster. The
+-- boundary this schema keeps — a coach self-tracks through `profiles`-keyed
+-- tables (parts 95 and 1011), never through `clients` — is the reason those
+-- screens are safe to read, and this does not cross it.
+--
+-- NOT on `trainers` either. That table is the coach's PUBLIC face — bio,
+-- tagline, session fee, directory listing, public page — readable by clients
+-- through `trainers_public_r`. What somebody eats is not part of a public
+-- profile and must not be one column away from being read as one.
+--
+-- ── NULL is the whole point ───────────────────────────────────────────────
+--
+-- All three are nullable and null means UNASKED. That is what lets the screen
+-- withhold the target and ask the question instead of printing a number built
+-- from a default — which is the entire defect. There is deliberately no
+-- DEFAULT clause on any of them: a default here would recreate the bug in the
+-- database, where it would be even harder to see.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.coach_prefs add column if not exists own_goal text;
+alter table public.coach_prefs add column if not exists own_diet text;
+-- The activity multiplier the coach's target is built from — `tdee = bmr *
+-- activity` in src/lib/nutrition.ts. numeric(3,2) because the values are 1.20
+-- through 1.90 and the precision that matters is the hundredth; an integer
+-- column would have forced the app to store a code and translate it, and a
+-- translation table between two files is how the two come to disagree.
+alter table public.coach_prefs add column if not exists own_activity numeric(3,2);
+
+-- The two enumerations are checked HERE as well as in the app, because a value
+-- outside them does not fail — it falls through `macrosFor`'s switch to
+-- whatever its last branch is and produces a plausible number for a diet
+-- nobody follows. The lists are src/lib/types.ts's `Goal` and `Diet`, verbatim.
+alter table public.coach_prefs drop constraint if exists coach_prefs_own_goal_known;
+alter table public.coach_prefs add constraint coach_prefs_own_goal_known
+  check (own_goal is null or own_goal in ('fatloss', 'tone', 'muscle'));
+
+alter table public.coach_prefs drop constraint if exists coach_prefs_own_diet_known;
+alter table public.coach_prefs add constraint coach_prefs_own_diet_known
+  check (own_diet is null or own_diet in ('meat', 'vegetarian', 'vegan', 'paleo', 'keto'));
+
+-- The same bounds src/lib/coachMacros.ts states, so a row this app did not
+-- write cannot price a day at ten times maintenance. Sedentary is 1.2 and
+-- "athlete" is 1.9 in every published table this multiplier comes from; the
+-- constraint is the range and not the exact set, because a coach whose old row
+-- carries a value between two levels is not wrong, only unlabelled.
+alter table public.coach_prefs drop constraint if exists coach_prefs_own_activity_sane;
+alter table public.coach_prefs add constraint coach_prefs_own_activity_sane
+  check (own_activity is null or (own_activity >= 1.0 and own_activity <= 2.5));
+
+comment on column public.coach_prefs.own_goal is
+  'The coach''s OWN training goal, for their own macro target. NULL = never asked, which is why the app withholds a target rather than assuming ''muscle''. Nothing to do with any client''s goal.';
+comment on column public.coach_prefs.own_diet is
+  'The coach''s own diet, for their own macro split. NULL = never asked.';
+comment on column public.coach_prefs.own_activity is
+  'The activity multiplier their own TDEE is built from (bmr * activity). NULL = never asked; the app used a hardcoded 1.5 for every coach.';
+
+-- ▶ the-gym-a-coach-is-on-the-staff-of-now.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The gym a coach is on the staff of now, and the column that still names the
+-- one they left.
+--
+-- Part 941 found this and fixed exactly one caller. This is the sweep.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- `revoke_staff_role()` (part 711) takes a coach off a gym's staff by clearing
+-- `profiles.tenant_id`, and it KEEPS the `trainers` row on purpose. Its own
+-- comment gives the reason, and the reason is good: deleting the roster row
+-- would set `clients.trainer_id` null underneath the history and strand every
+-- per-coach figure that joins on it. A coach who left after delivering forty
+-- sessions is not the same thing as a coach who never existed.
+--
+-- `trainers.tenant_id` is NOT NULL. So after a revocation the coach has two
+-- answers to "which gym are you at": `profiles.tenant_id` says none, and
+-- `trainers.tenant_id` goes on naming the gym they left, for ever.
+--
+-- Part 941 corrected `issue_coach_invoice()`, because the document a client
+-- receives was being denominated in the old gym's currency. It fixed the
+-- currency chain and stopped there. Nobody swept the rest, and the rest is
+-- where the access decisions live.
+--
+-- ── WHAT THIS ONE WOULD LET SOMEBODY DO ──────────────────────────────────
+--
+-- `revoke_staff_role()` ends with a comment asserting that clearing the tenant
+-- on the profile "is what actually removes the access", because "every staff
+-- policy in this schema is `tenant_id = my_tenant()`". That is true for the
+-- policies where the departed coach is the READER. It is not true for the
+-- policies where the coach is the SUBJECT being read, and those are decided by
+-- `trainers.tenant_id` — the column that did not change.
+--
+-- The consequence, in both directions:
+--
+--   · The owner of the gym a coach has LEFT keeps reading that coach's
+--     sessions, client roster, purchases, subscription payments, Stripe
+--     Connect account and exercise videos — including the ones created
+--     afterwards, at a different gym, for people the first gym has never met.
+--     On `exercise_videos` the policy is FOR ALL, so it is not only a read:
+--     the old gym's owner can still delete them.
+--
+--   · Pointed the other way, `tenants_trainer_r` lets the DEPARTED COACH go on
+--     reading the `tenants` row of the gym they left — its brand, its currency,
+--     its settings — because that policy also matches on `trainers.tenant_id`.
+--
+-- Neither of those is a thing anybody decided. They are both the same column
+-- being asked a question it stopped being able to answer at the moment of
+-- revocation.
+--
+-- ── WHY A HELPER AND NOT A BACKFILL ──────────────────────────────────────
+--
+-- The obvious repair — clear `trainers.tenant_id` on revocation — is the one
+-- part 711 already refused, for reasons that have not changed. The column is
+-- NOT NULL and it is load-bearing for history. So the column stays exactly as
+-- it is and the QUESTION moves: `staff_tenant_of()` reads the live answer off
+-- `profiles`, which is the column `revoke_staff_role()` actually writes and the
+-- column every screen in the coach app already reads.
+--
+-- `tenant_of_user()` is corrected rather than replaced. It already consulted
+-- both tables — it simply asked them in the wrong order, putting the historical
+-- column first and only falling through to the live one when the roster row was
+-- missing. Reversing the coalesce is the whole change, and it is the same
+-- correction part 941 made to the currency chain, made in the same direction
+-- for the same reason. That single reversal fixes `coach_clients_owner_r` and
+-- `app_errors_owner` without either policy being touched.
+--
+-- The two fill triggers are the WRITE half of the same defect: they stamp a
+-- brand-new session or class with `trainers.tenant_id`, so a departed coach's
+-- future work was being filed under the old gym as it was created. Repointing
+-- them stops the drift being manufactured; part 1061 repoints the policies that
+-- read it.
+--
+-- ── WHAT THIS CHANGES FOR ANYBODY USING THE PRODUCT TODAY ────────────────
+--
+-- Nothing. Verified against the live catalogue on 3 Sep 2026: of 8 `trainers`
+-- rows, 8 carry a tenant, 0 disagree with the tenant on their profile, and 0
+-- have a tenant while their profile has none. There is no drifted row for this
+-- to move. For every coach who is currently on a gym's staff the two columns
+-- agree, so every expression below returns precisely what it returned before.
+-- This closes the path rather than repairing damage down it — which is the
+-- cheapest moment to do it, and the only one where the diff is provably inert.
+--
+-- Idempotent and safe to re-run: `create or replace function` replaces a
+-- definition in place, the grants are stated absolutely rather than added to,
+-- and the two trigger functions are replaced without dropping the triggers that
+-- point at them.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── The live answer ──────────────────────────────────────────────────────
+--
+-- Deliberately NOT a coalesce onto `trainers`. The whole point is that this
+-- function has one source, and it is the one `revoke_staff_role()` writes. An
+-- independent coach and a departed coach both correctly get null here, and
+-- `is_owner_of(null)` is false, which is the answer both cases want.
+
+create or replace function public.staff_tenant_of(u uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select p.tenant_id from public.profiles p where p.id = u;
+$$;
+
+comment on function public.staff_tenant_of(uuid) is
+  'The gym this person is on the staff of NOW, from profiles.tenant_id — the '
+  'column revoke_staff_role() clears. Never trainers.tenant_id, which is a '
+  'historical roster fact and goes on naming a gym the coach has left. See '
+  'part 1060.';
+
+-- Postgres grants EXECUTE to PUBLIC on every new function, and `anon` resolves
+-- through that grant. Stated absolutely so a re-run cannot widen it.
+revoke all on function public.staff_tenant_of(uuid) from public;
+revoke all on function public.staff_tenant_of(uuid) from anon;
+grant execute on function public.staff_tenant_of(uuid) to authenticated;
+grant execute on function public.staff_tenant_of(uuid) to service_role;
+
+-- ── The order reversed ───────────────────────────────────────────────────
+--
+-- Was: coalesce(trainers.tenant_id, profiles.tenant_id) — the historical column
+-- first, so it always won whenever a roster row existed, which is always.
+-- Now:  coalesce(profiles.tenant_id, trainers.tenant_id) — the live column
+-- first, falling back to the roster row only for a subject who has no profile
+-- tenant AND is on a roster, which is the case this function was reaching for
+-- in the first place.
+--
+-- Signature, volatility, security and search_path are character-for-character
+-- the live ones. `coach_clients_owner_r` and `app_errors_owner` are both
+-- defined in terms of this function and are corrected by this line alone.
+
+create or replace function public.tenant_of_user(u uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select coalesce(
+    (select p.tenant_id from profiles p where p.id = u),
+    (select t.tenant_id from trainers t where t.id = u)
+  );
+$$;
+
+-- ── The write half ───────────────────────────────────────────────────────
+--
+-- Both of these stamp a tenant onto a row at creation and only when the caller
+-- left it null, so the `if` is preserved exactly: a row that names its own gym
+-- keeps naming it. The only change is which table is asked. A session created
+-- by a coach who has left every gym now gets a null tenant, which is what an
+-- unaffiliated coach's session should carry — and `sessions_gym_owner_r` is
+-- already written `tenant_id is not null and is_owner_of(tenant_id)`, so a null
+-- there fails closed rather than opening anything.
+
+create or replace function public.sessions_fill_tenant()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if new.tenant_id is null then
+    select p.tenant_id into new.tenant_id from public.profiles p where p.id = new.trainer_id;
+  end if;
+  return new;
+end $$;
+
+create or replace function public.gym_classes_fill_tenant()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if new.tenant_id is null and new.trainer_id is not null then
+    select p.tenant_id into new.tenant_id from public.profiles p where p.id = new.trainer_id;
+  end if;
+  return new;
+end $$;
+
+-- ▶ the-policies-that-still-asked-the-old-column.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The policies that still asked the old column.
+--
+-- The second half of part 1060, and a separate file for part 941's reason: 1060
+-- changes three function bodies and adds a helper, this changes eleven row
+-- policies. They are applied together and they are read apart.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- Part 1060 has the full argument. In one paragraph: `revoke_staff_role()`
+-- clears `profiles.tenant_id` and deliberately keeps the `trainers` row, so
+-- `trainers.tenant_id` — which is NOT NULL — goes on naming the gym a coach has
+-- left. Part 941 corrected the one function that read it for currency. Every
+-- policy below still reads it for ACCESS.
+--
+-- 1060 fixed `coach_clients_owner_r` and `app_errors_owner` on its own, because
+-- both are written in terms of `tenant_of_user()` and that function's coalesce
+-- was simply in the wrong order. The eleven here name the column directly and
+-- have to be re-emitted one at a time.
+--
+-- ── WHAT SOMEBODY COULD ACTUALLY DO ──────────────────────────────────────
+--
+-- Sorted by what leaves the building. Every one of these is reachable by an
+-- ordinary gym owner with their own account and no special tooling — they do
+-- not have to do anything except keep using the console after a coach leaves.
+--
+--   · `sessions_owner_r`, `client_purchases`, `client_subscriptions`,
+--     `client_subscription_payments`, `billing_customers` — the old gym goes on
+--     reading the coach's diary and the money against it, including sessions
+--     delivered and packages sold at a DIFFERENT gym, to clients the old gym
+--     has no relationship with. This is the cross-tenant read the white-label
+--     promise exists to prevent.
+--
+--   · `connect_accounts` — the coach's Stripe Connect record, still readable by
+--     a gym they no longer work for.
+--
+--   · `exvid_owner_rw` is FOR ALL, not FOR SELECT. The old gym's owner can
+--     still UPDATE and DELETE a departed coach's exercise videos, including
+--     ones filmed afterwards. This is the only one on the list that is
+--     destructive rather than merely disclosing, which is why it is fixed at
+--     both `using` and `with check`.
+--
+--   · `sessions_gym_owner_i` is the write twin: the old gym could still INSERT
+--     sessions onto a departed coach's diary.
+--
+--   · `tenants_trainer_r` and `tenants_client_r` point the other way — the
+--     departed coach, and every client of theirs, kept reading the old gym's
+--     `tenants` row: brand, currency, settings. `revoke_staff_role()`'s closing
+--     comment claims clearing the profile tenant removes the coach's access.
+--     For these two policies that claim was false, because they match on the
+--     roster column rather than the profile one.
+--
+--   · `availability_templates_trainer_peer_r` is the mildest: a trainer still
+--     at the gym could read the availability template of one who had left.
+--
+-- ── WHY IT IS SHAPED THIS WAY ────────────────────────────────────────────
+--
+-- Every policy below keeps its name, its command, its roles and its overall
+-- shape. The ONLY thing that changes in each is the sub-expression that asks
+-- which gym a coach belongs to: `trainers.tenant_id` becomes
+-- `staff_tenant_of(...)` from part 1060. Nothing is widened, no branch is added
+-- or removed, and no policy gains or loses a role.
+--
+-- Where the original joined `trainers` in order to require that the subject or
+-- the reader HAS a roster row, that join is preserved even though the tenant no
+-- longer comes from it — `tenants_trainer_r`, `tenants_client_r` and
+-- `availability_templates_trainer_peer_r` all still require the roster row. It
+-- would have been shorter to collapse them to `my_tenant()`, and that would
+-- have been a widening: it would newly expose a gym's `tenants` row to its
+-- ordinary members, who are not who those policies were written for.
+--
+-- Two `is not null` guards are added, at the peer-availability policy and the
+-- 'gym' visibility branch of `exvid_read`. They are not strictly required —
+-- `null = null` is null, which fails closed either way — but the old expression
+-- was reading a NOT NULL column and the new one is not, and a comparison whose
+-- safety depends on three-valued logic should say so out loud rather than
+-- leaving the next reader to work it out.
+--
+-- ── WHAT THIS CHANGES FOR ANY EXISTING SCREEN ────────────────────────────
+--
+-- Nothing. Verified against the live catalogue on 3 Sep 2026: 0 of 8 `trainers`
+-- rows disagree with the tenant on their profile. For every coach currently on
+-- a gym's staff `trainers.tenant_id` and `profiles.tenant_id` are the same
+-- value, so every expression below evaluates exactly as it did before. The
+-- owner console, the coach app and the member app all see what they saw.
+--
+-- Idempotent and safe to re-run: every policy is dropped with `if exists` and
+-- recreated, so a second run lands on the same eleven definitions.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── The money and the record behind it ───────────────────────────────────
+
+drop policy if exists cust_read on public.billing_customers;
+create policy cust_read on public.billing_customers
+  for select
+  using (
+    trainer_id = (select auth.uid())
+    or public.is_owner_of(public.staff_tenant_of(trainer_id))
+  );
+
+drop policy if exists purch_read on public.client_purchases;
+create policy purch_read on public.client_purchases
+  for select
+  using (
+    client_id = (select auth.uid())
+    or trainer_id = (select auth.uid())
+    or public.is_owner_of(public.staff_tenant_of(trainer_id))
+  );
+
+drop policy if exists client_sub_pay_read on public.client_subscription_payments;
+create policy client_sub_pay_read on public.client_subscription_payments
+  for select
+  using (
+    client_id = (select auth.uid())
+    or trainer_id = (select auth.uid())
+    or public.is_owner_of(public.staff_tenant_of(trainer_id))
+  );
+
+drop policy if exists client_subs_read on public.client_subscriptions;
+create policy client_subs_read on public.client_subscriptions
+  for select
+  using (
+    client_id = (select auth.uid())
+    or trainer_id = (select auth.uid())
+    or public.is_owner_of(public.staff_tenant_of(trainer_id))
+  );
+
+drop policy if exists conn_read on public.connect_accounts;
+create policy conn_read on public.connect_accounts
+  for select
+  using (
+    trainer_id = (select auth.uid())
+    or public.is_owner_of(public.staff_tenant_of(trainer_id))
+  );
+
+drop policy if exists sub_read on public.subscriptions;
+create policy sub_read on public.subscriptions
+  for select
+  using (
+    trainer_id = (select auth.uid())
+    or public.is_owner_of(public.staff_tenant_of(trainer_id))
+  );
+
+-- ── The diary ────────────────────────────────────────────────────────────
+
+drop policy if exists sessions_owner_r on public.sessions;
+create policy sessions_owner_r on public.sessions
+  for select
+  using (public.is_owner_of(public.staff_tenant_of(trainer_id)));
+
+drop policy if exists sessions_gym_owner_i on public.sessions;
+create policy sessions_gym_owner_i on public.sessions
+  for insert
+  with check (public.is_owner_of(public.staff_tenant_of(trainer_id)));
+
+-- ── The one that could delete ────────────────────────────────────────────
+--
+-- FOR ALL, so both halves. `with check` matters as much as `using` here: a
+-- policy that let the old gym read a video but not write it would still have
+-- let them move one into their reach and then act on it.
+
+drop policy if exists exvid_owner_rw on public.exercise_videos;
+create policy exvid_owner_rw on public.exercise_videos
+  for all
+  using (public.is_owner_of(public.staff_tenant_of(trainer_id)))
+  with check (public.is_owner_of(public.staff_tenant_of(trainer_id)));
+
+-- Two of this policy's seven branches read the roster column: the 'gym'
+-- visibility branch and the owner branch. The other five — own video, unowned
+-- catalogue video, 'public', the client branch, and an explicit grant — are
+-- reproduced exactly and are not affected by any of this.
+
+drop policy if exists exvid_read on public.exercise_videos;
+create policy exvid_read on public.exercise_videos
+  for select
+  to authenticated
+  using (
+    trainer_id = (select auth.uid())
+    or (trainer_id is null and visibility = any (array['public'::text, 'clients'::text, 'gym'::text]))
+    or visibility = 'public'::text
+    or (visibility = 'clients'::text and exists (
+          select 1 from public.clients c
+           where c.id = (select auth.uid()) and c.trainer_id = exercise_videos.trainer_id))
+    or (visibility = 'gym'::text
+        and public.my_tenant() is not null
+        and public.staff_tenant_of(exercise_videos.trainer_id) = public.my_tenant())
+    or exists (
+          select 1 from public.exercise_video_grants g
+           where g.video_id = exercise_videos.id and g.client_id = (select auth.uid()))
+    or public.is_owner_of(public.staff_tenant_of(exercise_videos.trainer_id))
+  );
+
+-- ── The two that pointed the other way ───────────────────────────────────
+--
+-- The roster join is KEPT in both. It is no longer where the tenant comes from,
+-- but it is still the test for "this person is a coach", and dropping it would
+-- hand a gym's `tenants` row to its ordinary members.
+
+drop policy if exists tenants_trainer_r on public.tenants;
+create policy tenants_trainer_r on public.tenants
+  for select
+  using (exists (
+    select 1 from public.trainers t
+     where t.id = (select auth.uid())
+       and public.staff_tenant_of(t.id) = tenants.id
+  ));
+
+drop policy if exists tenants_client_r on public.tenants;
+create policy tenants_client_r on public.tenants
+  for select
+  using (exists (
+    select 1
+      from public.coach_clients cc
+      join public.trainers t on t.id = cc.trainer_id
+     where cc.id = (select auth.uid())
+       and public.staff_tenant_of(t.id) = tenants.id
+  ));
+
+-- ── The peer ─────────────────────────────────────────────────────────────
+
+drop policy if exists availability_templates_trainer_peer_r on public.availability_templates;
+create policy availability_templates_trainer_peer_r on public.availability_templates
+  for select
+  using (exists (
+    select 1 from public.trainers t1
+     where t1.id = (select auth.uid())
+       and public.staff_tenant_of(t1.id) is not null
+       and public.staff_tenant_of(t1.id)
+             = public.staff_tenant_of(availability_templates.trainer_id)
+  ));
+
+-- ▶ the-gym-a-row-says-it-belongs-to.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The gym a row says it belongs to, written by the person the row is about.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- This schema pins identity columns with BEFORE triggers, not with policies,
+-- and it does so because a row policy can only say WHICH ROWS you may touch —
+-- it cannot say which COLUMNS of them. Two such guards already exist and are
+-- exactly right:
+--
+--   · `guard_profile_identity` refuses an end-user change to `profiles.role`
+--     or `profiles.tenant_id`. "A profile cannot move itself between gyms."
+--   · `guard_client_trainer_link` refuses an end-user change to
+--     `clients.trainer_id`. "A client cannot set their own coach."
+--
+-- Both are right, both are load-bearing, and between them they cover the two
+-- columns somebody thought to protect. `clients.tenant_id` and
+-- `sessions.tenant_id` were not on the list, and both are freely writable by an
+-- ordinary account through policies that were only ever checking WHOSE row it
+-- is:
+--
+--   · `client_self` is `FOR ALL using (id = auth.uid())`, so a member may
+--     UPDATE every unguarded column of their own `clients` row.
+--   · `clients_trainer_update` is `using/with check (trainer_id = auth.uid())`,
+--     so a coach may UPDATE every unguarded column of their clients' rows.
+--   · `sessions_trainer` is `FOR ALL using/with check (trainer_id =
+--     auth.uid())`, so a coach may write every unguarded column of their own
+--     sessions, at INSERT as well as UPDATE.
+--
+-- `trg_sessions_fill_tenant` fires BEFORE INSERT ONLY, and only when the caller
+-- left the column null. A caller who supplies a value keeps it.
+--
+-- ── WHAT SOMEBODY COULD ACTUALLY DO ──────────────────────────────────────
+--
+-- `tenant_id` on these two tables is not a label. It is the left-hand side of
+-- the owner policies — `clients_owner_r` is `is_owner_of(tenant_id)`,
+-- `charges_owner_r` joins `clients.tenant_id`, and `sessions_gym_owner_r/u/d`
+-- are all `tenant_id is not null and is_owner_of(tenant_id)`. Writing it is
+-- choosing who may read the row.
+--
+--   1 · Defeating a refusal the product makes on purpose. `revoke_staff_role()`
+--       will not remove a coach who still has clients on their book, and its
+--       error message explains precisely why: "Removing them from the staff
+--       would NOT remove their access to those clients' training and health
+--       record, because that access follows the book and not the gym." The
+--       count it refuses on is
+--
+--           clients c where c.trainer_id = p_subject and c.tenant_id = v_tenant
+--
+--       A coach who blanks `tenant_id` on their clients drops that count to
+--       zero. The owner's removal then succeeds, the owner is told it
+--       succeeded, and the coach keeps a complete read of those people's health
+--       history for ever — because `is_my_client()` follows `clients.trainer_id`,
+--       which the existing guard protects and which nobody had to touch. The
+--       refusal is turned into its own bypass, and the gym is told the opposite
+--       of what happened.
+--
+--   2 · Cross-tenant disclosure, in one UPDATE. A coach — or a member on their
+--       own row — sets `tenant_id` to another gym's uuid. That gym's owner can
+--       now read the client row and, through `charges_owner_r`, the charges
+--       against it. Repple is white-label; this is the one thing the tenant
+--       column exists to prevent.
+--
+--   3 · Cross-tenant WRITE, on sessions. `sessions_gym_owner_u` and
+--       `sessions_gym_owner_d` are UPDATE and DELETE. A coach who points a
+--       session's `tenant_id` at another gym hands that gym's owner the ability
+--       to alter or delete it.
+--
+--   4 · Hiding from your own gym. Blanking `sessions.tenant_id` removes the
+--       session from `sessions_gym_owner_r`, which requires `tenant_id is not
+--       null`. Sessions the gym is owed a cut of stop appearing in the gym's
+--       own reporting.
+--
+-- None of this needs anything but a signed-in account and one PostgREST call.
+--
+-- ── WHY IT IS SHAPED THIS WAY ────────────────────────────────────────────
+--
+-- The `current_user in ('authenticated', 'anon')` test is copied deliberately
+-- from the two guards already in the schema rather than invented. Under
+-- PostgREST every signed-in request runs as the shared `authenticated` role and
+-- every unauthenticated one as `anon`, so those two names are the complete set
+-- of end-user callers. A SECURITY DEFINER function runs as its OWNER, so
+-- `current_user` inside one is not in that set and the guard stands aside —
+-- which is what makes the legitimate paths keep working without being
+-- enumerated here. `join_by_code()`, `accept_member_invite()`,
+-- `accept_trainer_invite()`, `link_coaching()`, `provision_profile()` and
+-- `_materialise_session_series()` are all SECURITY DEFINER and all pass
+-- untouched.
+--
+-- This is the one place `current_user` is a sound test, and it is worth saying
+-- why, because the same expression in a POLICY would be a serious defect: a
+-- policy written `current_user = ...` would be comparing against the shared
+-- role every signed-in request already has, and would therefore grant to
+-- everybody. Here it is not deciding whether a caller is a particular PERSON —
+-- `auth.uid()` does that. It is deciding whether the write arrived through the
+-- REST surface or through a function that has already done its own checking,
+-- and role identity is exactly the right question for that.
+--
+-- UPDATE refuses a change; INSERT computes the value instead. The asymmetry is
+-- deliberate. Forcing the value on UPDATE would silently re-stamp a historical
+-- session onto whatever gym its coach is at TODAY the next time anybody touched
+-- it — moving last quarter's revenue between two gyms' books as a side effect
+-- of marking an outcome. Refusing on UPDATE keeps history where it was written.
+-- On INSERT there is no history to preserve and no reason to accept a value
+-- from the caller at all: `staff_tenant_of()` computes exactly what
+-- `trg_sessions_fill_tenant` would have computed, so the row lands where it
+-- belongs whether the caller sent a tenant, sent the wrong one, or sent none.
+--
+-- On `clients` the INSERT rule is a flat refusal of a non-null tenant rather
+-- than a computed value, because a member does not choose their gym by
+-- inserting a row — they join one, and joining is `join_by_code()` or an
+-- invitation, both of which are SECURITY DEFINER and both of which set the
+-- column themselves.
+--
+-- Independent coaches are unaffected in every branch: `staff_tenant_of()`
+-- returns null for them, a null tenant is what their rows already carry, and
+-- every owner policy on both tables fails closed on null.
+--
+-- ── WHAT THIS CHANGES FOR ANY EXISTING SCREEN ────────────────────────────
+--
+-- Nothing that was doing the right thing. The coach app and the member app do
+-- not send `tenant_id` on either table — it is a column the database fills —
+-- so the INSERT branches compute the value those rows were already getting, and
+-- the UPDATE branches refuse a write neither client makes. A screen that DID
+-- start sending a tenant would now get a 42501 with a sentence explaining it,
+-- which is the correct outcome and the reason the message is written for a
+-- person rather than a log.
+--
+-- Idempotent and safe to re-run: `create or replace function` replaces the
+-- bodies in place, and each trigger is dropped with `if exists` before being
+-- created, so a second run lands on the same two triggers.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── clients ──────────────────────────────────────────────────────────────
+--
+-- SECURITY INVOKER on purpose — the same as the two guards it sits beside. The
+-- whole mechanism depends on `current_user` still being the CALLER's role when
+-- this runs; making it SECURITY DEFINER would set `current_user` to the owner
+-- and the guard would disable itself on every call.
+
+create or replace function public.guard_client_tenant()
+returns trigger
+language plpgsql
+set search_path to 'public', 'pg_temp'
+as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    if tg_op = 'INSERT' then
+      if new.tenant_id is not null then
+        raise exception 'A member cannot file themselves under a gym. Joining a gym happens by a join code or an invitation.'
+          using errcode = '42501';
+      end if;
+    elsif new.tenant_id is distinct from old.tenant_id then
+      -- Blanking this is how a coach makes revoke_staff_role() believe their
+      -- book is empty. Pointing it elsewhere is how a row reaches another
+      -- gym's owner. Both are the same write, so both are refused here.
+      raise exception 'A client''s gym cannot be changed from the app. It follows the membership, and the membership is changed by joining or by the gym owner.'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists guard_client_tenant_t on public.clients;
+create trigger guard_client_tenant_t
+  before insert or update on public.clients
+  for each row execute function public.guard_client_tenant();
+
+-- ── sessions ─────────────────────────────────────────────────────────────
+
+create or replace function public.guard_session_tenant()
+returns trigger
+language plpgsql
+set search_path to 'public', 'pg_temp'
+as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    if tg_op = 'INSERT' then
+      -- Computed, never accepted. This is the value trg_sessions_fill_tenant
+      -- would have reached for anyway; taking it here as well means a caller
+      -- who supplies a tenant does not get to keep it. Null for an independent
+      -- coach, which every owner policy on this table fails closed on.
+      new.tenant_id := public.staff_tenant_of(new.trainer_id);
+    elsif new.tenant_id is distinct from old.tenant_id then
+      -- Refused rather than recomputed: a session belongs to the gym it was
+      -- delivered under, and re-stamping it on a later edit would move settled
+      -- revenue between two gyms' books.
+      raise exception 'A session''s gym is set when the session is created and does not move afterwards.'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists guard_session_tenant_t on public.sessions;
+create trigger guard_session_tenant_t
+  before insert or update on public.sessions
+  for each row execute function public.guard_session_tenant();
+
+-- ▶ an-invitation-nobody-asked-was-still-open.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- An invitation nobody asked was still open.
+--
+-- The sweep of the `authenticated`-executable SECURITY DEFINER functions whose
+-- argument names an OBJECT rather than a principal found this class in two
+-- functions, and they are the same defect twice: an invite is looked up by the
+-- id the caller supplies, the caller's EMAIL is checked against it, and the
+-- invite's own `status` — the column that says whether the invitation is still
+-- an invitation — is never read at all.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- `accept_trainer_invite(p_invite)` and `accept_invite(p_invite)` both do
+-- exactly three things before they write: find the row, compare
+-- `lower(inv.email)` with the caller's address on `auth.users`, and act. There
+-- is no fourth thing. An invite that has already been accepted is accepted
+-- again. An invite the owner REVOKED is accepted as though it were live.
+--
+-- That the revoked state is real, and not something this file has invented, is
+-- already written into both tables:
+--
+--     coach_invites_status_check    CHECK (status IN ('pending','accepted','revoked'))
+--     trainer_invites_status_check  CHECK (status IN ('pending','accepted','revoked'))
+--
+-- The schema has always named three states. The accept path has only ever
+-- distinguished one thing, and it was not the state — it was the address.
+--
+-- The neighbouring function shows what the shape was meant to be.
+-- `accept_member_invite()` (part 37), on the same screen family, against the
+-- same kind of row, refuses an invite that is `accepted`, refuses one that is
+-- `revoked`, refuses one past `expires_at`, and refuses a role that has no
+-- business taking it. Two of its three siblings do none of that.
+--
+-- ── WHAT SOMEBODY COULD DO WITH ONE UUID ─────────────────────────────────
+--
+-- The uuid is not a secret and was never treated as one: it is the id the
+-- acceptance screen passes straight through as `p_invite`, so it reaches the
+-- invitee's own device the moment they are invited. The other half of the test
+-- is control of the invited email address, which the invitee has by
+-- construction. Both halves are permanently in the hands of the person the
+-- check is supposed to be aimed at.
+--
+-- On `accept_trainer_invite` that is staff reinstatement, and it defeats the
+-- one function in this schema written to prevent exactly it.
+--
+-- `revoke_staff_role()` (part 711) is a careful, expensive removal. It refuses
+-- outright while the coach still has a single client on their book, with a
+-- message explaining that ending staff access would NOT end their read of those
+-- people's training and health record. Only once the owner has unpicked the
+-- whole book does it do the removal, and its own comment states what the
+-- removal IS:
+--
+--     "Clearing the tenant is what actually removes the access: every staff
+--      policy in this schema is `tenant_id = my_tenant()` and `my_tenant()` is
+--      now null"
+--
+-- `update public.profiles set tenant_id = null where id = p_subject`. That is
+-- the whole of it. And `accept_trainer_invite` writes that column straight back:
+--
+--     update profiles set role = 'trainer', tenant_id = coalesce(ten, tenant_id)
+--
+-- So a coach an owner has removed from their gym — after the owner did the work
+-- of reassigning or ending every coaching relationship first — replays the
+-- invite they were originally sent and is staff again. Their `trainers` row was
+-- deliberately kept by part 711 and is waiting for them; the upsert below it
+-- re-points it at the tenant; `trainer_billing` gets a fresh trial. Every staff
+-- policy that reads `tenant_id = my_tenant()` opens: the gym's members, its
+-- classes, its documents, its roster. Nothing in the gym says it happened,
+-- because `staff_grants` is only written by `grant_staff_role()` and
+-- `revoke_staff_role()`, and this path is neither.
+--
+-- It is not once, either. There is no expiry column on `trainer_invites` at
+-- all, so the invite is a permanent key: the owner may revoke the staff role
+-- again and again and the same call puts it back every time.
+--
+-- On `accept_invite` the same replay resurrects a coaching relationship.
+-- `end_coaching()` (part 68) sets `coaching_relationships.status = 'ended'` and
+-- `clients.trainer_id = null`, and either side may call it. `accept_invite`
+-- calls `link_coaching()`, whose `on conflict ... do update set status =
+-- 'active'` and `update clients set trainer_id = p_coach` undo precisely those
+-- two writes. `link_coaching` itself is not at fault and is not touched here —
+-- its authorisation test passes honestly, because `auth.uid() = p_client` is
+-- true; the caller really is the client. What is false is the premise it was
+-- handed, that a live invitation was being accepted.
+--
+-- The result is that a coach who ended a relationship — the person who wanted
+-- distance from a client, which is the case that matters — cannot keep it.
+-- The former client puts themselves back on that coach's book, and back into
+-- the coach's messaging thread, with one call the coach cannot see coming.
+--
+-- Part 1062's header lists `accept_trainer_invite()` among the SECURITY DEFINER
+-- functions that "pass untouched" through its tenant guard because they have
+-- "already done its own checking". That is the assumption this file corrects.
+-- It had done one check, and the one it had done was not this one.
+--
+-- ── WHY THE FIX IS SHAPED THIS WAY ───────────────────────────────────────
+--
+-- One test per function, on the column that already exists, in the place the
+-- other checks already stand. What the test DOES is different for the two
+-- states, and the difference is the whole of the design here.
+--
+--   status = 'accepted'  → return, having written nothing.
+--   anything not 'pending' → raise.
+--
+-- The temptation is to raise on both, which is what `accept_member_invite()`
+-- does. Reading the two accept screens says not to. src/ui/invites.tsx:290 and
+-- src/ui/trainerInvites.tsx:224 both treat ANY error from the RPC as a failed
+-- acceptance: they put the invitation back in the list and, in invites.tsx,
+-- push the id into `acceptFailed`. That behaviour is deliberate and correct —
+-- its comment explains that dismissing a failed accept "makes a failure here
+-- permanent" and loses the client "the only route to their coach".
+--
+-- But it means an accept whose RESPONSE was lost — committed on the server,
+-- never seen by the phone — leaves the invitation on screen. Today the retry
+-- silently succeeds. If this file raised on 'accepted', that retry would fail,
+-- and would keep failing every time, for ever: an invitation that has already
+-- worked, permanently displayed as broken, with no way out from the phone.
+--
+-- So 'accepted' returns quietly. The end state the caller is asking for already
+-- holds, there is nothing to do, and a void function that has nothing to do has
+-- an honest way of saying so. Crucially this is NOT the old behaviour under a
+-- different name: the old code re-ran every write, and it is the WRITES that
+-- were the hole. Returning early performs none of them, so a revoked coach
+-- replaying their accepted invite gets a successful no-op and stays off the
+-- staff, which is the correct outcome for both questions at once.
+--
+-- 'revoked' raises, because there the end state does NOT hold and never will.
+-- Telling the caller their invitation was withdrawn is the only answer that
+-- does not leave them believing they have joined something they have not. The
+-- wording is `accept_member_invite()`'s, copied. This is not a case where the
+-- two states must be made indistinguishable to avoid leaking: the caller has
+-- already proved they control the invited address before either branch can be
+-- reached, so both facts are about an invitation that is genuinely theirs.
+--
+-- Tested as "not pending" rather than as "= revoked", so any fourth state the
+-- CHECK constraint gains later fails closed instead of falling through to the
+-- writes.
+--
+-- The explicit `auth.uid() is null` guard is added to both. Today the email
+-- comparison happens to refuse a signed-out caller — `lower(inv.email) <>
+-- lower('')` is true, so it falls into 'invite not addressed to you' — but that
+-- is an accident of a comparison written for a different purpose, and a
+-- security check that works by coincidence is one edit away from not working.
+-- `accept_member_invite()` states it outright; so do these now.
+--
+-- WHAT IS DELIBERATELY NOT DONE HERE:
+--
+--   · No expiry. `trainer_invites` and `coach_invites` have no `expires_at`
+--     column, and adding one is a schema change that would retroactively
+--     expire live invitations on a rule nobody was told about. That is a
+--     product decision about how long an invitation lasts, not a hole, and it
+--     does not belong in a security part. The status check makes every invite
+--     single-use, which is the property that was actually missing.
+--
+--   · No role guards on `accept_trainer_invite`. `accept_member_invite()`
+--     refuses an owner and refuses to move a trainer between gyms; this one
+--     does neither. But that path requires an owner to have deliberately typed
+--     that address into an invitation, which is a consented act by the person
+--     whose gym it is — a different question from a stale invite replaying
+--     itself, and one that should be decided on its own evidence rather than
+--     smuggled in here.
+--
+-- Both functions are re-emitted from `pg_get_functiondef` taken verbatim on
+-- 3 Sep 2026, with the guards added and nothing else altered. The signatures
+-- are character-for-character the live ones: an overload is not cosmetic here,
+-- it is PostgREST resolving `accept_invite` against two candidates and refusing
+-- the call entirely, which is what part 188 had to undo.
+--
+-- Idempotent and safe to re-run: `create or replace function` replaces a body
+-- in place, and re-running this file a second time produces the same two
+-- bodies. It reads no rows and writes no data.
+--
+-- Checked against the live project before writing: the only invitation that
+-- exists in either table is a single `trainer_invites` row with status
+-- 'pending', so this refuses nothing that anybody is currently holding.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create or replace function public.accept_trainer_invite(p_invite uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare inv trainer_invites; my_email text; ten uuid;
+begin
+  -- Stated rather than left to the email comparison below. See the header: a
+  -- signed-out caller is refused today only because `lower(inv.email) <>
+  -- lower('')` happens to be true.
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+
+  select email into my_email from auth.users where id = auth.uid();
+  select * into inv from trainer_invites where id = p_invite;
+  if inv.id is null then raise exception 'invite not found'; end if;
+  if lower(inv.email) <> lower(coalesce(my_email, '')) then
+    raise exception 'invite not addressed to you';
+  end if;
+
+  -- THE CHECK THAT WAS MISSING. Without it this function is a permanent key to
+  -- a gym's staff surface, held by whoever was ever invited to it: an invite
+  -- that has been accepted, or that the owner has since withdrawn, is accepted
+  -- again and writes `profiles.tenant_id` back — which is the single column
+  -- `revoke_staff_role()` clears to remove somebody from the staff.
+  --
+  -- An already-accepted invite RETURNS rather than raising, and the writes
+  -- below are what it is declining to repeat. See the header: the accept screen
+  -- re-queues on any error, so raising here would trap a lost-response retry in
+  -- a permanent failure loop — while returning early re-grants nothing, which
+  -- is what actually closes the hole.
+  if inv.status = 'accepted' then
+    return;
+  elsif inv.status <> 'pending' then
+    raise exception 'invite was withdrawn';
+  end if;
+
+  ten := coalesce(inv.tenant_id, (select tenant_id from profiles where id = inv.owner_id));
+  update profiles set role = 'trainer', tenant_id = coalesce(ten, tenant_id) where id = auth.uid();
+  if ten is not null then
+    insert into trainers (id, tenant_id) values (auth.uid(), ten)
+      on conflict (id) do update set tenant_id = excluded.tenant_id;
+    insert into trainer_billing (trainer_id, tenant_id, plan, mrr, status)
+      values (auth.uid(), ten, 'Pro', 0, 'trial')
+      on conflict (trainer_id) do nothing;
+  end if;
+  update trainer_invites
+     set status = 'accepted', accepted_at = now(), accepted_by = auth.uid()
+   where id = p_invite;
+end $function$;
+
+create or replace function public.accept_invite(p_invite uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare inv coach_invites; my_email text;
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+
+  select email into my_email from auth.users where id = auth.uid();
+  select * into inv from coach_invites where id = p_invite;
+  if inv.id is null then raise exception 'invite not found'; end if;
+  if lower(inv.email) <> lower(coalesce(my_email, '')) then
+    raise exception 'invite not addressed to you';
+  end if;
+
+  -- The same missing check, one level down, and the same two answers.
+  -- `link_coaching()` below sets the relationship back to 'active' and
+  -- re-points `clients.trainer_id`, which are exactly the two writes
+  -- `end_coaching()` undoes — so without this a former client replays an old
+  -- invitation and puts themselves back on a coach's book after that coach
+  -- ended the relationship. Returning early is what declines to re-link.
+  if inv.status = 'accepted' then
+    return;
+  elsif inv.status <> 'pending' then
+    raise exception 'invite was withdrawn';
+  end if;
+
+  perform link_coaching(inv.coach_id, auth.uid(), inv.mode);
+  update coach_invites
+     set status = 'accepted', accepted_at = now(), accepted_by = auth.uid()
+   where id = p_invite;
+end $function$;
+
+-- ▶ a-place-given-away-by-somebody-who-was-never-in-the-class.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A place given away by somebody who was never in the class.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- `cancel_class(p_class)` is two statements. The first is correctly scoped and
+-- always has been:
+--
+--     delete from class_bookings where class_id = p_class and user_id = auth.uid();
+--
+-- The second is not scoped to anything:
+--
+--     update class_bookings set status = 'booked'
+--      where id = (select cb.id from class_bookings cb
+--                    join gym_classes gc on gc.id = cb.class_id
+--                   where cb.class_id = p_class and cb.status = 'waitlist'
+--                     and (select count(*) ...) < gc.capacity
+--                   order by cb.created_at asc limit 1);
+--
+-- Nothing connects the two. The promotion does not ask whether the delete above
+-- it removed a row, whether the caller was in the class, or whether the caller
+-- has anything to do with the gym that owns it. It runs on every call. Because
+-- the function is SECURITY DEFINER, the `class_bookings` and `gym_classes`
+-- policies that would otherwise have stopped a stranger never run.
+--
+-- Its own sibling, twenty lines away, shows what the missing check looks like.
+-- `book_class(p_class)` reads the class's tenant and refuses:
+--
+--     -- A class outside your gym is indistinguishable from one that is not there.
+--     if v_tenant is distinct from my_tenant() then return 'notfound'; end if;
+--
+-- One of the pair guards the gym boundary deliberately and says why. The other
+-- does not test anything at all.
+--
+-- ── THE INVARIANT THE APPLICATION WROTE DOWN TWICE ───────────────────────
+--
+-- This is not a subtlety nobody had considered. Two files in `studio-web` state
+-- the property as settled fact, and both are wrong about it.
+--
+--   studio-web/app/classes/page.tsx:1126
+--     "`cancel_class` only promotes when the MEMBER cancels from their own
+--      phone, so every case the gym handles — the phone call, the no-show, the
+--      coach who says one more can squeeze in — had no path at all."
+--
+--   studio-web/app/timetable/page.tsx:1380
+--     "Automatic promotion only fires when the MEMBER cancels from their own
+--      app, because `cancel_class` deletes `where user_id = auth.uid()`."
+--
+-- The second sentence names the exact reasoning error: the DELETE is scoped to
+-- `auth.uid()`, and the conclusion drawn is about the UPDATE, which is not. A
+-- whole feature was then built on the belief — `promoteFromWaitlist()` and
+-- `returnToWaitlist()` in src/lib/gymSchedule.ts, and the register buttons that
+-- call them — because the console could not otherwise give a waiting member a
+-- place. Those are the authorised path, they go through RLS as the invoker, and
+-- this file does not touch them.
+--
+-- ── WHAT SOMEBODY COULD DO WITH ONE UUID ─────────────────────────────────
+--
+-- A signed-in account with a class id from a gym it has never belonged to calls
+-- `cancel_class` on it. The delete matches nothing. The promotion then moves the
+-- longest-waiting member of that class from 'waitlist' to 'booked'. Repeating
+-- the call walks the queue one person per call until the class is at capacity.
+--
+-- Class ids travel: they are on the timetable every member of that gym reads,
+-- they are the `class_id` on `gym_visits` and on `class_bookings`, and
+-- `my_class_history()` hands a member their own back. The caller needs one, and
+-- needs nothing else.
+--
+-- The damage is not overbooking — the `< gc.capacity` test holds, so no seat is
+-- created that does not exist. It is that the decision about WHO gets a place,
+-- and WHEN, is taken by somebody with no relationship to the gym, at a moment
+-- the gym did not choose, on rows belonging to people it cannot see. A promoted
+-- row is a booked seat: it is what `class_roster` shows the coach at the door,
+-- what `class_attendance_summary` counts, and what the member is marked absent
+-- against if they do not turn up to a class they were never told they were in.
+-- The gym's own undo for a promotion given to the wrong person is
+-- `returnToWaitlist()`, and its comment — "a promotion onto the wrong person's
+-- row is a place given away" — is the right description of the harm.
+--
+-- ── THE SAME LINE IS ALSO A PLAIN BUG ────────────────────────────────────
+--
+-- Ungated, the promotion also fires for the legitimate caller in a case where
+-- no place came free. src/ui/classes.tsx calls `cancel_class` for both of a
+-- member's states — its own `was` variable is 'booked' or 'waitlist' — so a
+-- member leaving the WAITING LIST promotes the next person behind them into a
+-- seat that nobody vacated. That is a seat given away against a cancellation
+-- that never freed one, and it is the ordinary, everyday path.
+--
+-- ── WHY THE FIX IS SHAPED THIS WAY ───────────────────────────────────────
+--
+-- The promotion is gated on what the caller actually gave up, taken from the
+-- delete itself via `returning`. Not on a tenant test, and the choice is
+-- deliberate: `my_tenant()` would keep a stranger out but would still leave a
+-- member of the RIGHT gym able to shuffle a class they are not in, and would
+-- still promote on a cancelled waitlist entry. The question that decides this
+-- correctly is not "may this caller see the class" but "did this call free a
+-- seat", and only one statement knows the answer.
+--
+--     v_was is null      → the caller had no booking. Nothing was freed.
+--     v_was = 'waitlist' → they left the queue. Nothing was freed.
+--     v_was = 'booked'   → a place came free, and the queue moves.
+--
+-- Written as `is distinct from 'booked'` so the null case and any future status
+-- fall on the same side, which is the side that does nothing.
+--
+-- `returning ... into` on a DELETE rather than a second SELECT: the row is gone
+-- by the time anything could re-read it, and re-reading before the delete would
+-- reintroduce the gap between deciding and acting that this file is closing.
+-- The delete matches at most one row — `class_bookings` is unique on
+-- (class_id, user_id), which is the same constraint `book_class`'s
+-- `on conflict (class_id, user_id)` relies on — so a single scalar `into` is
+-- exact rather than arbitrary.
+--
+-- The promotion statement itself is copied through unchanged, including the
+-- capacity test and the `order by cb.created_at asc` that makes the queue FIFO.
+--
+-- ── WHAT THIS CHANGES FOR SCREENS THAT EXIST ─────────────────────────────
+--
+-- Established by reading every caller of `cancel_class` in the repository:
+-- src/ui/classes.tsx:384 is the only one. `studio-web` calls neither
+-- `cancel_class` nor `book_class` anywhere — timetable/page.tsx:1375 says so
+-- outright — and the console's promote and demote buttons go through
+-- `promoteFromWaitlist` / `returnToWaitlist`, which write `class_bookings`
+-- directly under RLS and are untouched by this file.
+--
+--   · A member cancelling a BOOKED seat: identical. This is the path the two
+--     console comments describe, and it is the one that keeps working.
+--   · A member cancelling a WAITLIST entry: their row is still deleted, and the
+--     spurious promotion described above no longer happens. This is a fix, not
+--     a regression — there was no free place to give.
+--   · Anybody else: the call still returns void without error, and now writes
+--     nothing.
+--
+-- The signature and return type are character-for-character the live ones. An
+-- overload would leave PostgREST unable to resolve `cancel_class` at all.
+--
+-- Idempotent and safe to re-run: `create or replace function` replaces the body
+-- in place. It reads no rows and writes no data.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create or replace function public.cancel_class(p_class uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare v_was text;
+begin
+  -- Unchanged, and the only statement here that was ever scoped to the caller.
+  -- `returning` is new: what this row's status WAS is the fact the promotion
+  -- below has to be decided on, and after the delete there is nowhere else to
+  -- read it from. At most one row matches — `class_bookings` is unique on
+  -- (class_id, user_id) — so the scalar is exact.
+  delete from class_bookings
+   where class_id = p_class and user_id = auth.uid()
+  returning status into v_was;
+
+  -- THE GATE THAT WAS MISSING. See the header: without it this UPDATE runs on
+  -- every call from every account, so a signed-in stranger holding one class id
+  -- could walk another gym's waiting list into its seats one call at a time,
+  -- and a member leaving the queue promoted somebody into a place that had not
+  -- come free.
+  --
+  -- `is distinct from` so that the null case — the caller had no booking in
+  -- this class at all — lands here with 'waitlist' rather than falling through
+  -- a plain equality test on null.
+  if v_was is distinct from 'booked' then
+    return;
+  end if;
+
+  -- Unchanged from here down, capacity test and FIFO order included.
+  update class_bookings set status = 'booked'
+   where id = (
+     select cb.id from class_bookings cb join gym_classes gc on gc.id = cb.class_id
+     where cb.class_id = p_class and cb.status = 'waitlist'
+       and (select count(*) from class_bookings b where b.class_id = p_class and b.status = 'booked') < gc.capacity
+     order by cb.created_at asc limit 1
+   );
+end; $function$;
+
+-- ▶ the-spend-recorded-against-a-gym-the-coach-had-left.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The spend recorded against a gym the coach had left.
+--
+-- Part 941 fixed this chain in `issue_coach_invoice()`. Parts 1060–1062 swept
+-- the policies, the helper and the two writable `tenant_id` columns. Neither
+-- swept a SECURITY DEFINER FUNCTION BODY, and the join-code returns feature has
+-- the same wrong column in two of them — the one that WRITES the figure and the
+-- one that READS it back.
+--
+-- ── WHAT IS WRONG ────────────────────────────────────────────────────────
+--
+-- `revoke_staff_role()` (part 711) takes a coach off a gym's staff by clearing
+-- `profiles.tenant_id`, and KEEPS the `trainers` row deliberately — deleting it
+-- would set `clients.trainer_id` null underneath the history and strand every
+-- per-coach figure that joins on it. `trainers.tenant_id` is NOT NULL, so it
+-- goes on naming the gym the coach has left, for ever. One coach, two answers
+-- to "which gym are you at".
+--
+-- `set_code_spend()` resolves the currency of a recorded ad spend in two steps:
+-- the coach's own packages when they unanimously agree, then the gym. The gym
+-- link is
+--
+--     from public.tenants t
+--     join public.trainers tr on tr.tenant_id = t.id
+--    where tr.id = uid
+--
+-- and that is the column part 941 established is the wrong one. `my_code_returns()`
+-- carries a byte-for-byte copy of the same join in its `house` CTE, which is
+-- what supplies `revenue_currency` when a code's purchases cannot be totalled
+-- from the packages themselves.
+--
+-- ── WHAT IT COSTS ────────────────────────────────────────────────────────
+--
+-- This is not a capability — there is no id to supply and nothing here that
+-- another account can reach. Both functions are scoped to `auth.uid()` at every
+-- statement, and that scoping is correct. It is the third question this sweep
+-- asks: which gym does the body believe the caller is at.
+--
+-- A coach who has left a gym and has no packages with a unanimous currency gets
+-- their advertising spend stamped with their old gym's currency, and the
+-- returns screen prices their revenue in it too. The two figures then agree
+-- with each other and are both wrong, which is the worst available outcome:
+-- src/lib/coachChannels.ts and codeReturn.ts go to real trouble to render
+-- "unknown" rather than assert a unit nobody chose — a code whose purchases
+-- disagree about currency deliberately reports null — and this chain hands them
+-- a confident wrong answer instead of the null they are built to display.
+--
+-- What the screen is FOR is cost per acquisition: money spent against money
+-- taken. Denominating either side in a currency the coach does not trade in
+-- makes that ratio meaningless while looking entirely normal.
+--
+-- MEMORY on this project is explicit that white-label means per-tenant currency
+-- and that no default may be assumed anywhere. A currency inherited from a gym
+-- the coach has left is exactly the assumed default that rule exists to stop.
+--
+-- ── HONESTLY: THIS IS LATENT TODAY ───────────────────────────────────────
+--
+-- Established by probing the live project read-only before writing this file:
+--
+--     coaches with profiles.tenant_id null but trainers.tenant_id set  → none
+--     listed coaches whose two tenant columns disagree                 → none
+--
+-- Nobody has been through `revoke_staff_role()` yet, so no coach currently has
+-- the two answers, and this part changes no figure that anybody can see today.
+-- It is written anyway for the reason part 1060 gives: the divergence is
+-- created by a function that exists and is reachable, the fix is three lines
+-- against a chain already agreed in part 941, and a latent wrong currency is
+-- cheaper to close now than to find later in somebody's cost-per-acquisition.
+--
+-- ── WHY THE FIX IS SHAPED THIS WAY ───────────────────────────────────────
+--
+-- The chain becomes part 941's, exactly, so that all three places that resolve
+-- a coach's currency agree:
+--
+--   1 · what the caller stated.                    (set_code_spend only)
+--   2 · the coach's own packages, unanimous. Unchanged.
+--   3 · the gym on `profiles.tenant_id`.         ← was trainers.tenant_id
+--   4 · `trainers.currency` (part 940), and ONLY when there is no gym.  ← new
+--
+-- Link 4 is guarded on "no gym" rather than on "nothing has answered yet", and
+-- that guard is part 940's precedence rule rather than a convenience. A coach
+-- who IS inside a gym whose owner has not yet chosen a currency must keep
+-- getting nothing: answering them from their own dormant column would price
+-- their advertising in one currency while their packages charge in another,
+-- and they are legitimately waiting on their owner.
+--
+-- In `my_code_returns()` link 4 is written as a scalar subquery that joins
+-- `profiles` and requires `pr.tenant_id is null`, so it is self-guarding inside
+-- the `coalesce` and needs no procedural branch — the same rule as link 4 in
+-- `set_code_spend`, expressed in the form the surrounding CTE is written in.
+--
+-- Both bodies are `pg_get_functiondef` taken verbatim from the live project on
+-- 3 Sep 2026 with only the currency chain replaced and comments added at it.
+-- In `set_code_spend` every refusal, the code-ownership test, the delete branch
+-- and the two-statement upsert are untouched; in `my_code_returns` every other
+-- CTE, both arms of the union and the whole ordering are untouched. The
+-- signatures and RETURNS TABLE column lists are character-for-character the
+-- live ones — an overload is PostgREST refusing the call outright, which is
+-- what part 188 had to undo.
+--
+-- ── WHAT THIS CHANGES FOR SCREENS THAT EXIST ─────────────────────────────
+--
+-- Established by reading the callers: src/ui/joinCode.ts:109 calls
+-- `set_code_spend` and :84 calls `my_code_returns`, and those are the only two
+-- call sites in the repository. For every coach whose `profiles.tenant_id` and
+-- `trainers.tenant_id` agree — which the probe above says is all of them — the
+-- chain returns exactly what it returns now, because link 3 reads the same gym
+-- through a different column and link 4 cannot fire while a gym is present.
+--
+-- Idempotent and safe to re-run: `create or replace function` replaces a body
+-- in place. This file reads no rows and writes no data; it does not rewrite any
+-- currency already recorded on `coach_code_spend`, because a figure the coach
+-- entered under a stated unit is a fact about what they did, not a cache.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create or replace function public.set_code_spend(p_code_id uuid, p_amount_cents bigint, p_currency text default null::text)
+returns bigint
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  uid  uuid := auth.uid();
+  ccy  text;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  if p_code_id is not null and not exists (
+    select 1 from public.coach_join_codes c where c.id = p_code_id and c.trainer_id = uid
+  ) then
+    raise exception 'that is not your code';
+  end if;
+
+  if p_amount_cents is null then
+    delete from public.coach_code_spend s
+     where s.trainer_id = uid and s.code_id is not distinct from p_code_id;
+    return null;
+  end if;
+
+  -- 1 · what the caller stated.
+  ccy := nullif(btrim(upper(coalesce(p_currency, ''))), '');
+
+  -- 2 · the coach's own packages, unanimous or nothing. Unchanged.
+  if ccy is null then
+    select case when count(distinct upper(k.currency)) = 1 then max(upper(k.currency)) end
+      into ccy
+    from public.trainer_packages k
+    where k.trainer_id = uid;
+  end if;
+
+  -- 3 · the gym, read from `profiles.tenant_id`. Was `trainers.tenant_id`,
+  --     which part 711 deliberately leaves pointing at a gym the coach has
+  --     LEFT — so a departed coach's advertising spend was denominated in that
+  --     gym's currency while every other screen showed them a dash. Part 941
+  --     made this same correction in `issue_coach_invoice()`.
+  if ccy is null then
+    select upper(btrim(t.currency)) into ccy
+      from public.profiles pr
+      join public.tenants t on t.id = pr.tenant_id
+     where pr.id = uid and t.currency is not null and btrim(t.currency) <> '';
+  end if;
+
+  -- 4 · the coach's own currency (part 940), AND ONLY WHEN THERE IS NO GYM.
+  --     Guarded on `tenant_id is null` rather than on `ccy is still null`: a
+  --     coach who IS in a gym whose owner has not chosen must not be answered
+  --     from their own dormant column, or their advertising would be priced in
+  --     one currency while their packages charge in another.
+  if ccy is null and exists (
+    select 1 from public.profiles pr where pr.id = uid and pr.tenant_id is null
+  ) then
+    select upper(btrim(tr.currency)) into ccy
+      from public.trainers tr
+     where tr.id = uid and tr.currency is not null and btrim(tr.currency) <> '';
+  end if;
+
+  if ccy is null then
+    raise exception 'no currency set - record the currency for this spend, or set your gym currency first'
+      using errcode = '22023';
+  end if;
+  if length(ccy) not between 3 and 4 then
+    raise exception 'that is not a currency code';
+  end if;
+
+  -- Two statements rather than one ON CONFLICT: the conflict target differs
+  -- between the named and default case, and a single statement naming one of
+  -- them would silently insert duplicates in the other.
+  update public.coach_code_spend s
+     set amount_cents = p_amount_cents, currency = ccy, updated_at = now()
+   where s.trainer_id = uid and s.code_id is not distinct from p_code_id;
+  if not found then
+    insert into public.coach_code_spend (trainer_id, code_id, amount_cents, currency)
+    values (uid, p_code_id, p_amount_cents, ccy);
+  end if;
+  return p_amount_cents;
+end; $function$;
+
+create or replace function public.my_code_returns()
+returns table(id uuid, code text, label text, created_at timestamp with time zone, revoked_at timestamp with time zone, is_default boolean, joined bigint, active_now bigint, revenue_cents bigint, revenue_currency text, spend_cents bigint, spend_currency text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $function$
+  with me as (select auth.uid() as uid),
+  named as (
+    select c.id, upper(c.code) as code, c.label, c.created_at, c.revoked_at
+    from public.coach_join_codes c, me
+    where c.trainer_id = me.uid
+  ),
+  -- Their packages if those agree, else their gym's currency, else their own
+  -- currency when they have no gym, else NULL — never a literal. A null means
+  -- the revenue figure is a number with no unit, and the caller renders it
+  -- unknown rather than against a currency nobody chose.
+  --
+  -- The gym link reads `profiles.tenant_id`. It was `trainers.tenant_id`, which
+  -- part 711 leaves naming a gym the coach has LEFT — see this part's header,
+  -- and part 941, which made the same correction in `issue_coach_invoice()`.
+  -- The third arm is part 940's `trainers.currency`, and it carries its own
+  -- `pr.tenant_id is null` test so that it can only answer a coach who has no
+  -- gym at all: a coach inside a gym whose owner has not chosen keeps getting
+  -- null, because they are waiting on their owner rather than on themselves.
+  house as (
+    select coalesce(
+             (select case when count(distinct upper(k.currency)) = 1 then max(upper(k.currency)) end
+                from public.trainer_packages k, me where k.trainer_id = me.uid),
+             (select upper(btrim(t.currency))
+                from public.profiles pr
+                join public.tenants t on t.id = pr.tenant_id, me
+               where pr.id = me.uid and t.currency is not null and btrim(t.currency) <> ''),
+             (select upper(btrim(tr.currency))
+                from public.trainers tr
+                join public.profiles pr on pr.id = tr.id, me
+               where tr.id = me.uid and pr.tenant_id is null
+                 and tr.currency is not null and btrim(tr.currency) <> '')
+           ) as ccy
+  ),
+  -- One row per CLIENT: the code on their most recent accepted request.
+  -- Counting requests instead would double-count anybody who left and came
+  -- back, and double-count their money with them.
+  touch as (
+    select distinct on (q.client_id)
+           q.client_id, upper(btrim(q.via_code)) as via
+    from public.coach_requests q, me
+    where q.trainer_id = me.uid and q.source = 'code' and q.status = 'accepted'
+    order by q.client_id, coalesce(q.responded_at, q.created_at) desc, q.created_at desc
+  ),
+  attributed as (
+    select t.client_id, n.id as code_id
+    from touch t left join named n on n.code = t.via
+  ),
+  mine as (
+    select a.code_id, count(*)::bigint as clients
+    from attributed a group by a.code_id
+  ),
+  live as (
+    select a.code_id, count(*)::bigint as still
+    from attributed a
+    join public.coaching_relationships r
+      on r.client_id = a.client_id and r.status = 'active'
+    join me on r.coach_id = me.uid
+    group by a.code_id
+  ),
+  took as (
+    select a.code_id,
+           sum(p.amount_cents)::bigint as cents,
+           -- amount_cents is nullable and carries no currency of its own, and
+           -- package_id is nullable too. sum() skips nulls, so a code whose
+           -- purchases are all unreadable would total to zero and read as
+           -- clients who paid nothing. These counts are what let the row say
+           -- "unknown" instead. `buys` — not code_id, which is legitimately
+           -- null for the default bucket — distinguishes "no purchases" from
+           -- "did not join".
+           count(*) as buys,
+           count(*) filter (where p.amount_cents is null) as no_amount,
+           count(*) filter (where k.currency is null) as no_ccy,
+           min(upper(k.currency)) as lo,
+           max(upper(k.currency)) as hi
+    from attributed a
+    join public.client_purchases p on p.client_id = a.client_id and p.status = 'paid'
+    join me on p.trainer_id = me.uid
+    left join public.trainer_packages k on k.id = p.package_id
+    group by a.code_id
+  ),
+  spent as (
+    select s.code_id, s.amount_cents, upper(s.currency) as currency
+    from public.coach_code_spend s, me
+    where s.trainer_id = me.uid
+  )
+  -- Every column reference qualified: the RETURNS TABLE columns are OUT
+  -- parameters in scope here, so a bare `code` or `joined` is ambiguous and the
+  -- function fails to run at all.
+  select * from (
+    select n.id, n.code, n.label, n.created_at, n.revoked_at, false as is_default,
+           coalesce(mine.clients, 0) as clients, coalesce(live.still, 0) as still,
+           case when took.buys is null then 0
+                when took.no_amount > 0 or took.no_ccy > 0 or took.lo is distinct from took.hi then null
+                else took.cents end as took_cents,
+           case when took.buys is null then house.ccy
+                when took.no_amount > 0 or took.no_ccy > 0 or took.lo is distinct from took.hi then null
+                else took.lo end as took_ccy,
+           spent.amount_cents as spent_cents, spent.currency as spent_ccy
+    from named n
+    cross join house
+    left join mine on mine.code_id = n.id
+    left join live on live.code_id = n.id
+    left join took on took.code_id = n.id
+    left join spent on spent.code_id = n.id
+    union all
+    select null::uuid, t.join_code, 'Your main code', null::timestamptz, null::timestamptz, true,
+           coalesce(dmine.clients, 0), coalesce(dlive.still, 0),
+           case when dtook.buys is null then 0
+                when dtook.no_amount > 0 or dtook.no_ccy > 0 or dtook.lo is distinct from dtook.hi then null
+                else dtook.cents end,
+           case when dtook.buys is null then house.ccy
+                when dtook.no_amount > 0 or dtook.no_ccy > 0 or dtook.lo is distinct from dtook.hi then null
+                else dtook.lo end,
+           dspent.amount_cents, dspent.currency
+    from public.trainers t, me, house
+    -- `is null` rather than `= null`: the default bucket's key IS null, and an
+    -- equality test against null is null rather than true, so an equality join
+    -- would match nothing and report every coach's main code as having brought
+    -- in nobody.
+    left join mine  dmine  on dmine.code_id  is null
+    left join live  dlive  on dlive.code_id  is null
+    left join took  dtook  on dtook.code_id  is null
+    left join spent dspent on dspent.code_id is null
+    where t.id = me.uid and t.join_code is not null
+  ) all_codes
+  order by all_codes.is_default desc, (all_codes.revoked_at is not null), all_codes.created_at desc nulls first;
+$function$;
+
+-- ▶ the-files-an-erasure-left-behind.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The files an erasure left behind.
+--
+-- ── WHAT IS WRONG ─────────────────────────────────────────────────────────
+--
+-- There is exactly one thing in this database that chases bytes out of object
+-- storage when a person is deleted, and it is
+-- `on_progress_photo_delete` — the AFTER DELETE trigger part 45 puts on
+-- `progress_photos`. Counted live rather than assumed, on 3 Sep 2026:
+--
+--     select c.relname, t.tgname from pg_trigger t
+--       join pg_class c on c.oid = t.tgrelid
+--      where not t.tgisinternal;
+--
+-- returns one storage-chasing trigger, on that one table, for that one bucket.
+--
+-- Three buckets hold a member's files and have no delete path at all:
+--
+--     injury-docs     part 91   a physiotherapy report, a scan result, a
+--                               doctor's note. Diagnosis, clinician's name,
+--                               hospital number, date of birth.
+--     message-media   part 124  everything ever sent as an attachment in a
+--                               coach conversation.
+--     avatars         part 961  the member's face.
+--
+-- Part 91 says so itself, in its own operator note, and describes the fix it
+-- deliberately did not write: "Closing it wants a follow-up part that mirrors
+-- 45 for this bucket … It is not in this file because this file is the bucket
+-- and its policies." This is that part, for all three at once.
+--
+-- ── WHAT IT DOES TO A REAL PERSON ────────────────────────────────────────
+--
+-- A member photographs an oncology letter so the app can read an injury off
+-- it. Months later they leave the gym and delete their account. Every row goes
+-- — 26 tables directly, 39 down the chain (part 41). The letter does not. It
+-- sits in `injury-docs` under the uid of an account that no longer exists,
+-- with no row anywhere pointing at it, indefinitely, and the only person who
+-- could ever have deleted it is the one whose credentials were destroyed by
+-- the deletion.
+--
+-- The public deletion page is currently honest about this and that is the
+-- problem: web/delete-account.html says injury documents, message attachments
+-- and the profile photo "are removed by us rather than by the scheduled job
+-- that clears photographs", and invites the member to email and ask. A manual
+-- step behind an email address is not an erasure mechanism. It is the same
+-- class of fault as `request_account_deletion()` writing a timestamp nothing
+-- read, which part 41 had to fix, and as the queue part 48 had to schedule
+-- because nothing was draining it.
+--
+-- ── SHAPED THE SAME WAY AS PART 45, FOR THE SAME REASONS ─────────────────
+--
+-- Nothing here is invented. `storage.objects` carries Supabase's
+-- `protect_objects_delete` (verified live: BEFORE DELETE, FOR EACH STATEMENT),
+-- which refuses direct deletion and says to use the Storage API — and its own
+-- hint spells out why, because deleting the metadata row leaves the bytes.
+-- The only thing that removes bytes is a DELETE against the Storage HTTP API,
+-- which needs a credential the erased person is not holding. So, exactly as in
+-- part 45:
+--
+--   1. REMEMBER, before the row is gone. Here the paths are not in a row at
+--      all — that is part 91's deliberate decision and it still stands — so
+--      they are read out of `storage.objects` itself at the last moment the
+--      subject is still identifiable, and copied into a queue.
+--   2. PURGE asynchronously over pg_net, authenticating with the service_role
+--      key read from Vault at call time, and stamp `purged_at` ONLY from a
+--      reply that actually says the object is gone.
+--
+-- ── ONE QUEUE, THREE BUCKETS, AND NOT `photos` ───────────────────────────
+--
+-- Part 91 sketched an `injury_doc_purge`. This is one `object_purge` keyed on
+-- (bucket_id, path) instead, because three copies of the same machine is three
+-- places for the confirm logic to drift, and part 45's confirm logic is the
+-- part that was already wrong once and had to be repaired in place (the
+-- HTTP 400 / NoSuchKey case — a missing object was never confirmed, so the
+-- queue could not empty and retried forever).
+--
+-- `photos` is deliberately NOT in this queue. It has a working machine, a
+-- schedule (part 48) and one live row of history; two drains issuing DELETEs
+-- for the same path would race and each would read the other's 404 as its own
+-- confirmation. The check constraint below refuses 'photos' outright rather
+-- than leaving that to a convention.
+--
+-- ── WHERE THE HOOK GOES, AND WHY NOT IN `action_account_deletion` ────────
+--
+-- A BEFORE DELETE trigger on `public.profiles`, which is where part 184
+-- already hangs `profiles_retain_financial_record` for exactly this reason: a
+-- cascading delete fires row triggers on the child table, so a profile going
+-- because `auth.users` went fires this whether the erasure came from
+-- `action_account_deletion()`, from the dashboard, or from the admin API.
+-- Putting it inside `action_account_deletion()` would cover only the first of
+-- those three, and the other two are the routes an operator actually uses when
+-- something has gone wrong.
+--
+-- ── WHAT HAPPENS WHEN THE STORAGE DELETE FAILS ──────────────────────────
+--
+-- This is the whole point, so it is stated as four separate guarantees:
+--
+--   · The queue INSERT is NOT inside an exception block. A plpgsql EXCEPTION
+--     block is a savepoint, so catching an error there would roll back the
+--     record of the file as well — silently discarding the one piece of
+--     information that cannot be recovered afterwards. If the enqueue cannot
+--     happen, the erasure fails loudly and is retried, which is the correct
+--     end of that trade.
+--   · No HTTP call happens inside the erasure transaction AT ALL. Part 45's
+--     trigger sends inline and swallows the failure; this one only enqueues,
+--     and the cron drain sends. Part 48's own header gives the argument: "an
+--     HTTP call inside the transaction that deletes a member's account would
+--     make erasure depend on the storage service answering. It must not."
+--   · `purged_at` is set only from a reply that confirms the object is gone.
+--     200/204 = deleted. 404, or a 400 whose body carries NoSuchKey /
+--     "statusCode":"404" / not_found = already absent, which is the same end
+--     state. Everything else records the status AND the body and stays
+--     pending.
+--   · A failure is VISIBLE, never silent. A missing Vault secret writes
+--     'no storage_service_key in Vault — file NOT deleted' and leaves the row
+--     pending; a path that is not in the expected shape is refused rather than
+--     sent half-encoded at some other object; and `file_purge_backlog` below
+--     is the one query an operator runs to see everything outstanding and how
+--     many times it has been tried.
+--
+-- ── OPERATOR STEP ────────────────────────────────────────────────────────
+--
+-- The same Vault secret part 45 needs, and it is ALREADY PRESENT on this
+-- project (verified: one row named `storage_service_key` in vault.secrets; the
+-- value was not read):
+--
+--     name:  storage_service_key
+--     value: the project's service_role key
+--
+-- To see what is outstanding (SQL editor / service role — `object_purge` has
+-- RLS on and no policies, so no end user can read it):
+--
+--     select * from public.file_purge_backlog;
+--
+-- To drain by hand at any time:
+--
+--     select public.purge_account_files();
+--
+-- ── MEASURED BEFORE WRITING, SO NOBODY READS MORE INTO THIS THAN IS THERE ─
+--
+-- Live object counts on 3 Sep 2026: `exercise-demos` 1640, EVERY OTHER BUCKET
+-- ZERO. There is no member file in `injury-docs`, `message-media` or `avatars`
+-- today, and no orphan for the backfill below to find. So applying this
+-- changes nothing about any object that exists; it closes the hole before the
+-- first real document lands in it, which is the only cheap moment to do so —
+-- after that, every unqueued path is one nothing can enumerate a subject for.
+--
+-- Idempotent and safe to re-run: every create is `if not exists` or `or
+-- replace`, the trigger is dropped by name first, the cron job is unscheduled
+-- before it is scheduled, and the backfill inserts `on conflict do nothing`.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The queue
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Deliberately NOT a foreign key to anything, for the reason part 45 gives
+-- about `photo_purge`: the point of this table is that it outlives the row,
+-- the profile and the auth user. A reference would either block the erasure or
+-- null itself and lose the subject, and `subject_id` is how an operator
+-- answers "whose files are these" once the account is gone.
+
+create table if not exists public.object_purge (
+  bucket_id       text not null,
+  path            text not null,
+  subject_id      uuid not null,
+  queued_at       timestamptz not null default now(),
+  attempts        int not null default 0,
+  last_attempt_at timestamptz,
+  request_id      bigint,            -- pg_net request; reply in net._http_response
+  purged_at       timestamptz,       -- set only from a response that confirms it
+  note            text,
+  primary key (bucket_id, path)
+);
+
+-- The three buckets this queue is responsible for, named rather than implied.
+-- 'photos' is refused: it has its own queue, its own sender and its own
+-- schedule in parts 45 and 48, and two drains chasing one path would each read
+-- the other's 404 as confirmation of its own request.
+alter table public.object_purge drop constraint if exists object_purge_bucket_is_ours;
+alter table public.object_purge add constraint object_purge_bucket_is_ours
+  check (bucket_id in ('injury-docs', 'message-media', 'avatars'));
+
+create index if not exists idx_object_purge_pending
+  on public.object_purge (queued_at) where purged_at is null;
+
+-- RLS on, and no policies — the same restriction `photo_purge` carries. These
+-- rows name which member held which medical document; nothing an end user does
+-- should read or write this. The functions below are security definer and
+-- reach it as their owner, and an operator reads it in the SQL editor.
+alter table public.object_purge enable row level security;
+
+comment on table public.object_purge is
+  'Files whose owner has been erased but whose bytes are still in object storage. '
+  'Written by trg_profiles_queue_file_purge before a profile goes; drained by the '
+  'purge-account-files cron job. purged_at is set ONLY from a Storage API reply that '
+  'confirms the object is absent. See supabase/parts/1120.';
+
+
+-- What is outstanding, and how hard it has been tried. The one query an
+-- operator runs. security_invoker so it inherits object_purge's RLS — which is
+-- "no policies", so this is readable by the owner and the service role and by
+-- nobody else. Not granted to authenticated, on purpose.
+create or replace view public.file_purge_backlog
+with (security_invoker = true) as
+  select bucket_id,
+         path,
+         subject_id,
+         queued_at,
+         attempts,
+         last_attempt_at,
+         note,
+         (now() - queued_at) as outstanding_for
+    from public.object_purge
+   where purged_at is null
+   order by queued_at;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · Enumerating one person's files
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The step part 45 does not need and this cannot do without. A progress photo
+-- has a row carrying its path, so the trigger reads OLD.image_path. None of
+-- these three buckets has a row anywhere — part 91 refused one on purpose, and
+-- that decision is not being reversed here — so the paths are read out of
+-- `storage.objects` itself while the subject is still identifiable.
+--
+-- SECURITY DEFINER because `storage.objects` is owned by
+-- supabase_storage_admin and has RLS on. The owner of this function is the
+-- role that applies setup.sql (`postgres`), which has SELECT on the table and
+-- BYPASSRLS — verified live rather than assumed. The function reads; it never
+-- deletes from `storage.objects`, which `protect_objects_delete` would refuse
+-- anyway.
+--
+-- ── THE TWO-SEGMENT CASE ─────────────────────────────────────────────────
+--
+-- `injury-docs` and `avatars` are `<uid>/<file>`: one owner, first segment.
+--
+-- `message-media` is `<thread_id>/<sender_uid>/<file>` (part 124), and BOTH
+-- segments matter:
+--
+--   · segment 1 is the thread, which for a client is their own id. When a
+--     member is erased the thread ceases to exist — the messages cascade, and
+--     `can_use_message_thread()` stops answering true for anybody — so every
+--     object under it goes, including the clips their coach recorded for them.
+--     Leaving the coach's uploads behind would leave photographs OF the erased
+--     member in a conversation that no longer exists.
+--   · segment 2 is who uploaded it. When a COACH is erased their own uploads
+--     sit under other people's thread folders, and those are the coach's data.
+--
+-- So: first segment OR second segment. `storage.foldername()` returns NULL
+-- past the end of the array, which is not equal to anything, so a one-segment
+-- key in this bucket simply does not match rather than erroring.
+--
+-- NOT granted to authenticated or anon. This is the one function here that
+-- takes an arbitrary uuid and queues somebody's files for destruction; a grant
+-- would let any signed-in person aim it at anybody. Its only callers are the
+-- trigger below (which runs as this function's owner) and an operator.
+
+create or replace function public.queue_account_object_purges(p_uid uuid)
+returns int
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  n int := 0;
+begin
+  if p_uid is null then
+    return 0;
+  end if;
+
+  with queued as (
+    insert into public.object_purge (bucket_id, path, subject_id, note)
+    select o.bucket_id, o.name, p_uid, 'owner erased'
+      from storage.objects o
+     where (o.bucket_id in ('injury-docs', 'avatars')
+            and (storage.foldername(o.name))[1] = p_uid::text)
+        or (o.bucket_id = 'message-media'
+            and (   (storage.foldername(o.name))[1] = p_uid::text
+                 or (storage.foldername(o.name))[2] = p_uid::text))
+    -- do NOTHING, not do UPDATE. Part 45 requeues on conflict because a single
+    -- photo delete can be repeated; here a conflict means the path is either
+    -- already pending (leave it, with its attempt count intact) or already
+    -- confirmed gone (resurrecting it would send a DELETE for an object we
+    -- have a reply about). Object keys carry a random token and are never
+    -- reused, so there is no third case.
+    on conflict (bucket_id, path) do nothing
+    returning 1)
+  select count(*) into n from queued;
+
+  return n;
+end $$;
+
+revoke execute on function public.queue_account_object_purges(uuid) from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · The hook — BEFORE DELETE on profiles
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- BEFORE, because afterwards there is no subject to enumerate by: the uid is
+-- the only thing that connects a person to an object key, and after the delete
+-- nothing in the database holds it.
+--
+-- On `profiles` rather than inside `action_account_deletion()`, because a
+-- cascading delete fires row triggers on the child table — `profiles.id`
+-- references `auth.users(id) on delete cascade` — so this covers the owner
+-- actioning a request, an operator deleting the user in the dashboard, and the
+-- admin API. Part 184's `trg_profiles_retain_financial_record` is the same
+-- trigger point for the same reason, and the two are independent of each
+-- other's ordering.
+--
+-- No exception block, and no pg_net call. Both deliberate, and stated at
+-- length in the header: the enqueue must not be silently rolled back, and the
+-- erasure must not depend on the storage service answering.
+
+create or replace function public.profiles_queue_file_purge()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  perform public.queue_account_object_purges(old.id);
+  return old;
+end $$;
+
+drop trigger if exists trg_profiles_queue_file_purge on public.profiles;
+create trigger trg_profiles_queue_file_purge
+  before delete on public.profiles
+  for each row execute function public.profiles_queue_file_purge();
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Sending one DELETE
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Modelled line for line on `purge_photo_file()`. It acts ONLY on a
+-- (bucket, path) already sitting in the queue with `purged_at` null — that is,
+-- a file whose owner is already erased and which is already destined for
+-- removal. There is no argument shape that makes it touch anything else.
+--
+-- The path goes into a URL, so it is checked against the shape the app builds
+-- and the storage policies enforce, per bucket, and refused rather than sent
+-- half-encoded where it could address a different object. The three
+-- expressions are the SQL of `INJURY_DOC_PATH_RE` (src/ui/injuryDocs.ts),
+-- `avatarObjectKey` (src/lib/avatarImage.ts) and
+-- `MESSAGE_ATTACHMENT_PATH_RE` (src/lib/messageAttachments.ts).
+--
+-- Not granted to anon or authenticated: unlike part 45's, nothing in the app
+-- calls this. The drain is the cron job, which runs as the table owner.
+
+create or replace function public.purge_stored_object(p_bucket text, p_path text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_key text;
+  v_req bigint;
+  v_shape_ok boolean;
+begin
+  if p_bucket is null or p_path is null or not exists (
+    select 1 from public.object_purge
+     where bucket_id = p_bucket and path = p_path and purged_at is null
+  ) then
+    return;
+  end if;
+
+  v_shape_ok := case p_bucket
+    when 'injury-docs'   then p_path ~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    when 'avatars'       then p_path ~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    when 'message-media' then p_path ~ '^[0-9a-fA-F-]{36}/[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    else false
+  end;
+
+  if not v_shape_ok then
+    update public.object_purge
+       set note = 'path is not the expected shape for ' || p_bucket || ' — NOT sent',
+           last_attempt_at = now()
+     where bucket_id = p_bucket and path = p_path;
+    return;
+  end if;
+
+  select decrypted_secret into v_key
+    from vault.decrypted_secrets where name = 'storage_service_key' limit 1;
+
+  if v_key is null or v_key = '' then
+    update public.object_purge
+       set note = 'no storage_service_key in Vault — file NOT deleted',
+           last_attempt_at = now()
+     where bucket_id = p_bucket and path = p_path;
+    return;
+  end if;
+
+  select net.http_delete(
+    url     := 'https://phgfwzpkkwdysftlgkoq.supabase.co/storage/v1/object/'
+               || p_bucket || '/' || p_path,
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || v_key,
+      'apikey',        v_key)
+  ) into v_req;
+
+  update public.object_purge
+     set request_id = v_req,
+         attempts = attempts + 1,
+         last_attempt_at = now(),
+         note = 'sent'
+   where bucket_id = p_bucket and path = p_path;
+end $$;
+
+revoke execute on function public.purge_stored_object(text, text) from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · Reading the answer back
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Taken from `confirm_photo_purges()` including the repair part 45 had to make
+-- in place, because getting this wrong is the difference between a queue that
+-- empties and one that retries forever while reporting nothing:
+--
+--   Supabase Storage answers a DELETE for a MISSING object with HTTP 400 whose
+--   BODY carries the real story —
+--
+--     status_code 400
+--     {"statusCode":"404","error":"not_found","message":"Object not found",
+--      "code":"NoSuchKey"}
+--
+--   so a status-only check never confirms an already-absent file.
+--
+-- `net._http_response` is pruned by pg_net after a few hours. A request whose
+-- reply has aged out stays pending and is re-sent; a DELETE of an absent
+-- object is idempotent, so re-sending costs nothing.
+--
+-- Nothing in here marks a file deleted because it asked nicely. The failure
+-- branches keep the response BODY as well as the status, for the reason part
+-- 45 records: "storage returned 400" alone covers both a missing file and a
+-- genuine refusal, and those need different actions from an operator.
+
+create or replace function public.confirm_object_purges()
+returns int
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r record;
+  v_status int;
+  v_err text;
+  v_body text;
+  v_absent boolean;
+  n int := 0;
+begin
+  for r in
+    select bucket_id, path, request_id from public.object_purge
+     where purged_at is null and request_id is not null
+     limit 500
+  loop
+    select status_code, error_msg, content
+      into v_status, v_err, v_body
+      from net._http_response where id = r.request_id;
+
+    v_absent := v_body is not null
+                and (v_body like '%NoSuchKey%' or v_body like '%"statusCode":"404"%'
+                     or v_body like '%not_found%');
+
+    if v_status in (200, 204, 404) or (v_status = 400 and v_absent) then
+      update public.object_purge
+         set purged_at = now(),
+             note = case when v_status in (200, 204) then 'deleted' else 'already absent' end
+       where bucket_id = r.bucket_id and path = r.path;
+      n := n + 1;
+    elsif v_status is not null then
+      update public.object_purge
+         set note = 'storage returned ' || v_status
+                    || coalesce(' — ' || left(coalesce(v_body, v_err), 200), '')
+       where bucket_id = r.bucket_id and path = r.path;
+    elsif v_err is not null then
+      update public.object_purge set note = v_err
+       where bucket_id = r.bucket_id and path = r.path;
+    end if;
+    -- v_status and v_err both null: the reply has not arrived or has aged out.
+    -- Leave it pending; the next drain re-sends.
+  end loop;
+  return n;
+end $$;
+
+revoke execute on function public.confirm_object_purges() from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 6 · The drain
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Confirm what is outstanding, then re-send everything still pending. The
+-- operator's entry point and the retry, bounded so it cannot become a
+-- thundering herd against our own storage — 200 a run, at twelve runs an hour,
+-- which drains a large erasure inside a few minutes and cannot spike.
+--
+-- Ordered by attempts first so a path that has never been tried is never stuck
+-- behind one that is failing repeatedly. Part 45 orders by queued_at alone; a
+-- single permanently-refused object at the head of a 200-row window would
+-- otherwise be re-sent ahead of new work on every single run.
+
+create or replace function public.purge_account_files()
+returns table (confirmed int, sent int)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  r record;
+  n int := 0;
+begin
+  confirmed := public.confirm_object_purges();
+  for r in
+    select bucket_id, path from public.object_purge
+     where purged_at is null
+     order by attempts, queued_at
+     limit 200
+  loop
+    perform public.purge_stored_object(r.bucket_id, r.path);
+    n := n + 1;
+  end loop;
+  sent := n;
+  return next;
+end $$;
+
+revoke execute on function public.purge_account_files() from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 7 · Running it
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Every five minutes, the cadence part 48 argues for: the owner is already
+-- erased and nobody can reach these objects, so minutes of latency cost
+-- nothing, and the queue holds each path until storage confirms so a missed
+-- run is picked up by the next rather than losing the file for good.
+--
+-- Offset by two minutes from `purge-progress-photo-files`, which is on the
+-- same period. Both drains issue DELETEs against the same storage service with
+-- the same credential; there is no reason to have them fire in the same second
+-- every five minutes.
+--
+-- Unscheduled first so re-running this file cannot accumulate duplicate jobs
+-- each firing the same drain.
+
+create extension if not exists pg_cron;
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'purge-account-files') then
+    perform cron.unschedule('purge-account-files');
+  end if;
+end $$;
+
+select cron.schedule(
+  'purge-account-files',
+  '2-59/5 * * * *',
+  $cron$ select public.purge_account_files(); $cron$
+);
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 8 · The backlog that already exists
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Everything erased before this part was applied. Part 91 wrote the query for
+-- finding it — "Those are documents belonging to accounts that no longer
+-- exist" — and this is that query, widened to all three buckets and pointed at
+-- the queue instead of at a human.
+--
+-- On this project it finds nothing: all three buckets are empty today
+-- (measured, see the header). It is here so that a project which is NOT empty
+-- when this lands is caught up rather than starting clean from the date of the
+-- fix, which would leave exactly the files this part exists for.
+--
+-- The uid cast is inside a CASE, not beside a regex test in an AND. Nothing
+-- guarantees Postgres evaluates the arms of an AND in the order they are
+-- written, so `… ~ '<uuid shape>' and id = folder::uuid` can still attempt the
+-- cast on a junk folder name and raise 22P02, taking the whole statement with
+-- it. CASE does not evaluate the branches it does not take. This is the guard
+-- part 124 spells out for `can_use_message_thread`, for the same hazard.
+
+insert into public.object_purge (bucket_id, path, subject_id, note)
+select s.bucket_id, s.name, s.owner_uid,
+       'orphan found at apply time — owner already erased'
+  from (
+    select o.bucket_id,
+           o.name,
+           case when coalesce((storage.foldername(o.name))[1], '')
+                     ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                then ((storage.foldername(o.name))[1])::uuid
+           end as owner_uid
+      from storage.objects o
+     where o.bucket_id in ('injury-docs', 'avatars', 'message-media')
+  ) s
+ where s.owner_uid is not null
+   and not exists (select 1 from auth.users u where u.id = s.owner_uid)
+on conflict (bucket_id, path) do nothing;
+
+-- The other half of the message-media case: an object whose THREAD owner still
+-- exists but whose SENDER has been erased. Separate statement rather than an
+-- `or`, because the subject recorded has to be the erased person and that is a
+-- different segment.
+insert into public.object_purge (bucket_id, path, subject_id, note)
+select s.bucket_id, s.name, s.sender_uid,
+       'orphan found at apply time — sender already erased'
+  from (
+    select o.bucket_id,
+           o.name,
+           case when coalesce((storage.foldername(o.name))[2], '')
+                     ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                then ((storage.foldername(o.name))[2])::uuid
+           end as sender_uid
+      from storage.objects o
+     where o.bucket_id = 'message-media'
+  ) s
+ where s.sender_uid is not null
+   and not exists (select 1 from auth.users u where u.id = s.sender_uid)
+on conflict (bucket_id, path) do nothing;
+
+-- ▶ the-line-that-put-dirhams-back-on-every-run.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The line that put dirhams back on every run.
+--
+-- ── THE DEFECT ────────────────────────────────────────────────────────────
+--
+-- `99-tenant-currency.sql` ended with one statement:
+--
+--     update public.tenants set currency = 'AED' where currency is null;
+--
+-- setup.sql is a one-shot bundle you paste and Run, and every part in it is
+-- built to be idempotent. That statement is idempotent in the arithmetic sense
+-- — running it twice leaves the same rows — and is nothing of the kind in the
+-- sense that matters, because the set it matches is different every time. It
+-- re-fires against every tenant created since the last paste. A gym that
+-- signed up on Tuesday and had not yet chosen a currency was going to be told
+-- it charges in dirhams by an operator applying an unrelated migration on
+-- Thursday.
+--
+-- The part it lives in is the part that ARGUES AGAINST THIS, at length, four
+-- paragraphs above the line: "this is deliberately NULLABLE, and null means
+-- 'this gym has not told us' rather than a guess … A default that silently
+-- applies LOOKS right. 'AED 600' on a London gym's screen reads as a
+-- considered figure, not as a missing setting."
+--
+-- Three other parts state the same rule as their whole subject:
+--
+--   · 150 removed seven column defaults ('AED' six times, 'usd' once) so the
+--     database refuses a filed amount that does not name its money.
+--   · 940 gave a coach with no gym somewhere to name a currency rather than
+--     inventing one for them.
+--   · 941 made an invoice's currency follow the same order, ending in
+--     `raise exception 'no currency has been set…'` rather than a fallback.
+--
+-- `scripts/check-currency.mjs` fails the build on `?? 'AED'` anywhere in the
+-- app. This line is that expression, in SQL, running with more authority than
+-- any of them.
+--
+-- ── WHAT IT WOULD DO TO A REAL PERSON ────────────────────────────────────
+--
+-- A gym in Manchester signs up, works through setup, and has not reached the
+-- currency setting yet. Every screen correctly shows a dash and asks them to
+-- choose — that behaviour is already built, and the console disables the
+-- payment and plan forms with a stated reason while the currency is null. An
+-- operator applies a migration. The dash becomes AED. Nothing asked, nothing
+-- logged, no screen changed to say so. The owner then prices a £45 session and
+-- the app files it, and reads it back, as 45 dirhams — about a tenth of the
+-- money — with complete confidence, because a value that is present is
+-- indistinguishable from a value somebody chose.
+--
+-- ── MEASURED LIVE BEFORE CHANGING ANYTHING ───────────────────────────────
+--
+-- Counted on 3 Sep 2026, read-only:
+--
+--     54 tenants.  19 with currency = 'AED'.  35 with currency null.
+--     0 with any other currency.
+--     gym_invoices 0 · gym_payments 0 · membership_plans 0 · gym_pass_types 0
+--     gym_passes 0 · payroll_settlements 0 · trainer_packages 0
+--     trainers.currency: 8 rows, all null.
+--
+-- Two things follow from those numbers and they point in different directions,
+-- which is why this part does one and not the other.
+--
+-- THE 35 NULLS ARE THE URGENT HALF. They are the ones the next paste would
+-- have stamped. Every one of them was created after the last full run of
+-- setup.sql — the oldest is 31 Aug 2026 and every AED row predates it — so the
+-- boundary between the two groups is a date, not a decision. Removing the line
+-- is what protects them, and it is done: 99-tenant-currency.sql no longer
+-- carries it.
+--
+-- THE 19 AED ROWS ARE NOT TOUCHED HERE, AND THAT IS DELIBERATE.
+-- The evidence that they are stamped rather than chosen is strong: no tenant
+-- anywhere holds any currency other than AED, so no owner has ever exercised a
+-- choice through part 164's setter; the split falls exactly on a creation
+-- date; and part 99's own justification for the backfill — "the whole
+-- operating record around them is denominated in it" — is measurably false
+-- now, because every money table in the database is empty and there is no
+-- operating record at all.
+--
+-- Strong is not the same as certain, and nulling a gym's currency is a change
+-- somebody SEES: the console disables the payment and plan forms while it is
+-- null, and `issue_coach_invoice` refuses outright. A part that quietly did
+-- that to nineteen tenants would be committing the same sin in the opposite
+-- direction — deciding on somebody's behalf, in a migration, without asking.
+-- So this part reports and does not rewrite. The statement, if the decision is
+-- to make it, is one line and is left commented out at the foot of this file.
+--
+-- ── WHAT THIS PART ACTUALLY DOES ─────────────────────────────────────────
+--
+-- Nothing to any row. It is the standing assertion that the rule holds, so
+-- that the next time somebody adds a convenience default it fails on the paste
+-- instead of two months later in front of a customer. Three checks, each of
+-- which raises rather than repairing, because the repair for each is a
+-- decision and this file is not entitled to make it.
+--
+-- Idempotent and safe to re-run: it reads the catalogue, raises or does not,
+-- and re-states one comment.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · No default on the column
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The obvious way to reintroduce this bug, and the one part 150 had to undo
+-- across seven other columns. A `default 'AED'` here would apply to every
+-- tenant created afterwards and would never be visible in a diff of the data.
+
+do $$
+declare
+  v_default text;
+begin
+  select column_default into v_default
+    from information_schema.columns
+   where table_schema = 'public' and table_name = 'tenants' and column_name = 'currency';
+
+  if v_default is not null then
+    raise exception
+      'tenants.currency has acquired a column default (%). There is no default currency in this product — see parts 99, 150, 940, 941. Drop it: alter table public.tenants alter column currency drop default;',
+      v_default;
+  end if;
+end $$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · The column is still nullable
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- NOT NULL here would be the same invention wearing a stricter hat: it cannot
+-- be added without a backfill, and the backfill is the thing this file exists
+-- to have removed. Part 150 is explicit that nullable is right for THIS column
+-- and wrong for filed money, and the two must not be confused for each other.
+
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'tenants'
+       and column_name = 'currency' and is_nullable = 'NO'
+  ) then
+    raise exception
+      'tenants.currency has been made NOT NULL. Null is a real state here — it means the gym has not chosen — and NOT NULL cannot be added without inventing a currency for every gym that has not. See part 150.';
+  end if;
+end $$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · The check constraint still admits null
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `tenants_currency_is_iso` is written `currency is null or currency ~ …`.
+-- Dropping the null arm would turn every unchosen gym into a row that cannot
+-- be updated, which surfaces as an unrelated failure somewhere else entirely.
+-- Asserted by testing the constraint's own expression rather than by matching
+-- its text, so a rewrite that keeps the behaviour passes.
+
+do $$
+declare
+  v_src text;
+begin
+  select pg_get_constraintdef(c.oid) into v_src
+    from pg_constraint c
+   where c.conrelid = 'public.tenants'::regclass
+     and c.conname = 'tenants_currency_is_iso';
+
+  if v_src is null then
+    raise exception
+      'tenants_currency_is_iso is missing. Part 99 creates it; without it tenants.currency will accept anything at all.';
+  end if;
+
+  if v_src !~* 'is null' then
+    raise exception
+      'tenants_currency_is_iso no longer admits null (%). Null is how a gym says it has not chosen. See parts 99 and 150.',
+      v_src;
+  end if;
+end $$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Say it on the column, where the next person looks
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Re-stated rather than left to part 99, and extended with the one sentence
+-- that was missing: not merely what null means, but that nothing may write
+-- over it.
+
+comment on column public.tenants.currency is
+  'ISO 4217, uppercase. NULL means the gym has not set one — render a dash and ask, never assume. '
+  'No default, no backfill, and no migration may fill this in: a currency nobody chose is '
+  'indistinguishable from one somebody did. Set only by the gym, through set_my_tenant_currency() '
+  '(part 164) or the owner console. See parts 99, 150, 940, 941, 1121.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · The nineteen rows, and the decision that is not this file's to make
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Deliberately commented out. See the header for the evidence and for why it
+-- is reported rather than run.
+--
+-- If the decision is that those nineteen were stamped by the retired backfill
+-- and never chosen, this is the whole of it — and it is safe TODAY, while
+-- every money table is empty, and stops being safe the moment one is not,
+-- because after that a gym's filed amounts have three letters on them that
+-- this would remove the meaning of:
+--
+--     update public.tenants set currency = null where currency = 'AED';
+--
+-- If the decision is that some of them are real, the narrower form names them:
+--
+--     update public.tenants set currency = null
+--      where currency = 'AED' and id in ( … );
+--
+-- Either way it is run once, by hand, by somebody who has decided — not by a
+-- bundle that gets pasted again next week.
+
+-- ▶ two-buckets-that-existed-only-in-the-dashboard.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Two buckets that existed only in the dashboard.
+--
+-- ── WHAT IS WRONG ─────────────────────────────────────────────────────────
+--
+-- Nine of the eleven buckets on this project are created by a part — 49, 73,
+-- 91, 124, 135, 185, 330, 400 and 961 — and eight of those nine re-assert the
+-- bucket's `public` flag on the conflict branch as well as on the insert. The
+-- reason is written out in most of them and it is the same reason every time:
+-- a bucket somebody flipped in the dashboard is flipped back by re-running
+-- setup.sql, rather than silently kept that way. Part 124 names the incident it
+-- comes from: "`exercise-videos` was public for months for exactly that reason
+-- — created by hand, written down nowhere (part 49)."
+--
+-- (The ninth is part 73, `exercise-demos`, which ends `on conflict (id) do
+-- nothing` and so asserts nothing on a re-run. It is private live and is not
+-- this part's subject; section 3 below catches it anyway, along with every
+-- other bucket, which is the point of doing it as a set rather than one file
+-- at a time.)
+--
+-- Two buckets are not in that list:
+--
+--     photos   created 2026-07-11 04:46:03Z
+--     scans    created 2026-07-11 04:45:53Z
+--
+-- Both were made by hand, ninety seconds apart, before any part created a
+-- bucket at all. Neither appears in `supabase/parts/` anywhere. `photos` is
+-- the progress-photo bucket the whole of parts 45, 47 and 48 is about — the
+-- one holding pictures people take of themselves in a bathroom in their
+-- underwear — and its private flag is a checkbox in a web console that nothing
+-- in this repository asserts, checks or could restore.
+--
+-- Part 400's header lists the private buckets as "exercise-videos,
+-- exercise-demos, injury-docs, message-media, gym-docs, coach-docs,
+-- coach-logos. Seven for seven, and that is a decision rather than a habit."
+-- The count is off by two, and it is off by two in the direction of the bucket
+-- that matters most, because the file could only count the ones it could see.
+--
+-- ── WHAT IT WOULD DO TO A REAL PERSON ────────────────────────────────────
+--
+-- Somebody opens Storage in the dashboard, ticks "Public bucket" on `photos`
+-- to debug why an image will not render, and does not tick it back. Nothing
+-- fails. The app keeps working — a signed URL for an object in a public bucket
+-- resolves perfectly well — so there is no symptom at all, and every progress
+-- photograph in the product becomes fetchable by anyone who has the key,
+-- forever, with no session. Part 45 built two layers to stop a member's coach
+-- seeing those photographs without being given them one at a time. A public
+-- bucket is underneath both of them.
+--
+-- The only thing that would ever put it back is a paste of setup.sql, and
+-- setup.sql does not know these buckets exist.
+--
+-- ── CONFIRMED LIVE BEFORE ASSERTING ANYTHING ─────────────────────────────
+--
+-- Read-only on 3 Sep 2026, from `storage.buckets`:
+--
+--     photos   public = false   file_size_limit = null   allowed_mime_types = null
+--     scans    public = false   file_size_limit = null   allowed_mime_types = null
+--
+-- So this part asserts the state they are already in. Applying it changes no
+-- flag on either bucket today; what it changes is that from now on a re-run
+-- puts them back if somebody has moved them.
+--
+-- ── WHY THE SIZE AND MIME LIMITS ARE LEFT NULL ───────────────────────────
+--
+-- Every other bucket part writes `file_size_limit` and `allowed_mime_types`
+-- into the conflict branch too. This one deliberately does not, and the
+-- distinction is worth stating because the omission looks like an oversight.
+--
+-- Those parts are asserting a figure they CHOSE, with the reasoning beside it
+-- and a matching constant in the app — 2 MB for an avatar because
+-- src/lib/avatarImage.ts refuses at the same number, 64 MiB for message media
+-- because src/lib/messageAttachments.ts checks the same figure before
+-- uploading. Nothing has ever chosen one for `photos`. Inventing one here
+-- would be a NEW restriction wearing the clothes of a version-control fix: the
+-- first member whose phone produces a photograph over whatever number I picked
+-- would get an opaque 413 from a limit nobody decided on, and the app has no
+-- sentence prepared for it.
+--
+-- The flag that was actually at risk is `public`, and that is the flag this
+-- asserts. A size and MIME limit for `photos` is a real piece of work — it
+-- wants a figure, a matching constant in src/lib/progressPhotos.ts and a
+-- refusal message — and it belongs in its own part.
+--
+-- ── `scans` IS EMPTY AND UNUSED, AND IS STILL BROUGHT UNDER CONTROL ──────
+--
+-- `scans` holds zero objects, has zero policies on `storage.objects`, and
+-- nothing in `src/` or `studio-web/` references it as a bucket — the many
+-- `from('scans')` calls in the app are the `public.scans` TABLE, which is a
+-- different thing that happens to share a name. With RLS on and no policy,
+-- nobody but the service role can put anything in it or read anything out.
+--
+-- It is asserted anyway rather than ignored, for the same reason part 400
+-- drops policies it never created: a bucket that is not in the repo is a
+-- bucket whose flags nobody is watching, and an empty private bucket that
+-- somebody makes public later is a ready-made place for something to leak out
+-- of. If it turns out to have no purpose, deleting it is a separate decision
+-- and a separate part — `protect_buckets_delete` on `storage.buckets` refuses
+-- a plain DELETE anyway, so it cannot be done casually.
+--
+-- ── ORDERING ─────────────────────────────────────────────────────────────
+--
+-- This part sits after parts 45 and 47, which create policies naming the
+-- `photos` bucket. That is fine and is not an accident: a policy is an
+-- expression, not a reference, so it can be created before the bucket row
+-- exists and both are present by the end of the bundle. Putting the bucket at
+-- 45 instead would mean editing a part whose subject is the purge machine, in
+-- a file already carrying the longest header in the repository.
+--
+-- Idempotent and safe to re-run: `on conflict (id) do update` on both, setting
+-- only the flag being asserted.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · photos
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Progress photographs (part 45), and the one bucket in this product whose
+-- objects are read through a per-photo grant the member makes and can withdraw
+-- (part 47). PRIVATE, on the insert and on the conflict update, so a re-run
+-- restores it.
+--
+-- The insert branch is what a fresh project gets. The nulls are explicit
+-- rather than omitted so that a reader of this file sees that no limit is
+-- being set, instead of wondering whether two columns were forgotten.
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('photos', 'photos', false, null, null)
+on conflict (id) do update
+  set public = false;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · scans
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Empty, unreferenced, and private. See the header: asserted rather than
+-- ignored, and not given policies here — with RLS on and no policy the only
+-- role that can reach it is the service role, and that is the correct state
+-- for a bucket no feature uses. If a feature ever does use it, the part that
+-- adds the feature adds the policies, and this line is already here waiting
+-- for it.
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('scans', 'scans', false, null, null)
+on conflict (id) do update
+  set public = false;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · Say out loud that there are exactly two public buckets
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The assertion part 400 could not make, because at the time it was written it
+-- could not see `photos` or `scans` and `avatars` did not exist yet. Now that
+-- every bucket is created by a part, the set is knowable and this fails the
+-- paste if it ever changes.
+--
+--   avatars      part 961 — public because a profile photo is fetched by URL
+--                by the coach app, the console and the web pages, and a signed
+--                URL would have to be minted per viewer per render.
+--   share-cards  part 400 — public because Instagram FETCHES the image from
+--                its own servers with no Authorization header. It holds one
+--                object at a time, for a few seconds, and no role that can
+--                sign in has the privilege to write to it.
+--
+-- Everything else in this product is somebody's body, somebody's paperwork or
+-- somebody's private message. If this raises, the fix is not to widen the
+-- list; it is to find out who flipped the bucket and why.
+
+do $$
+declare
+  v_public text[];
+begin
+  select coalesce(array_agg(id order by id), '{}'::text[])
+    into v_public
+    from storage.buckets where public;
+
+  if v_public <> array['avatars', 'share-cards']::text[] then
+    raise exception
+      'The set of PUBLIC storage buckets is % — expected exactly {avatars, share-cards}. Everything else this product stores is somebody''s body, paperwork or private message. See parts 400, 961, 1122.',
+      v_public;
+  end if;
+end $$;
+
+-- ▶ a-printout-with-their-name-on-it-that-nobody-was-asked-about.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The answer a member gave before a picture of their body-composition sheet
+-- left their account.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- app/(client)/scans.tsx photographed the sheet an InBody prints out and, on
+-- every single photograph, posted the WHOLE PAGE to two named companies in
+-- parallel:
+--
+--   analyzeInBody()  →  vision-analyze  →  https://api.anthropic.com/v1/messages
+--   ocrInBody()      →  ocr-scan        →  https://api.ocr.space/parse/image
+--
+-- The only thing in front of that was a camera permission — "add a scan" —
+-- which is a question about hardware and not about a destination. Nothing on
+-- the screen said either company existed.
+--
+-- What is on that page is not the three figures the screen keeps. It is the
+-- member's NAME, their age or date of birth, their height, an ID number, the
+-- gym or clinic's name across the header, the date and time they stood on the
+-- machine, and then the whole breakdown: body water, protein, minerals, fat
+-- mass, lean mass segment by segment, visceral fat, BMR and a score. A person's
+-- body, measured, on somebody's letterhead, with their name on it.
+--
+-- The application-side fix is src/lib/scanSheetConsent.ts and the required
+-- `consent` argument on `readScanSheet` in src/ui/scanSheets.ts. This part is
+-- the half that makes the agreement a FACT rather than a claim.
+--
+-- ── WHY A ROW, AND WHY THIS IS NOT THE MEAL-PHOTO SHAPE ──────────────────
+--
+-- The same app asks about meal photographs with a remembered answer in
+-- AsyncStorage (src/lib/photoAI.ts) and about injury documents with a row
+-- written before the send (part 1000). This is the second shape, and the
+-- dividing line is argued in full at the top of src/lib/scanSheetConsent.ts:
+--
+--   A meal photograph is COMPOSED by the member, in the moment, looking at the
+--   frame. There is no gap between what they agreed to and what they can see,
+--   and the act is frequent enough that a per-item question would be tapped
+--   through rather than read.
+--
+--   A printout is composed by a machine in somebody else's building. The member
+--   did not choose what is on it and has not necessarily read it. Each sheet is
+--   different — the gym's InBody in January is not the hospital's DEXA report
+--   in June — so an answer given about the first cannot know what is on the
+--   second. And it is RARE: a handful a year, which is what keeps the question
+--   being read rather than dismissed.
+--
+-- So: one row per reading, written BEFORE either invoke, and if the row does not
+-- land nothing is sent. That ordering is the whole point — it makes the record
+-- load-bearing rather than decorative, and the app is never in a state where the
+-- page has gone and the agreement is not on file. A REFUSAL is recorded too,
+-- and if THAT write fails nothing is sent either: the refusal is honoured by
+-- not acting, not by the row.
+--
+-- ── WHY IT IS KEYED ON A READ ID AND NOT ON A SCAN ───────────────────────
+--
+-- An injury document is stored, so part 1000 can name an object path. A scan
+-- sheet is not stored anywhere: the photograph is read from and discarded, and
+-- `scans` has never held an image. There is no artefact to name.
+--
+-- So the key is a uuid minted on the device for that one reading. The row says
+-- exactly what it can support: on this date, this member was asked about a body
+-- composition sheet, was told these companies, and answered this.
+--
+-- It is deliberately NOT keyed to the saved scan. That would be null for every
+-- reading the member abandoned, and — the reason that decides it — it would tie
+-- the consent record to a row the member can delete. Deleting your own weigh-in
+-- must not delete the record that a copy of the printout went to two companies,
+-- because deleting your copy does not un-send theirs. The row goes when the
+-- account goes and only then (`on delete cascade` from profiles, which
+-- 41-account-deletion.sql already walks).
+--
+-- ── WHAT MUST NEVER BE ADDED BELOW ───────────────────────────────────────
+--
+-- A trainer branch, an owner branch, a tenant branch, or any policy reached
+-- through `is_my_client(...)`. Part 91 makes the argument for injury documents
+-- and it holds unchanged here: the record of what somebody agreed to about
+-- their own body is theirs alone. A gym owner reading which of their members
+-- sent a body-composition sheet to an OCR vendor is not a feature this file may
+-- grow — and the coach does not see the sheet either, only the figures the
+-- member saves.
+--
+-- ── WHY IT IS IMMUTABLE ──────────────────────────────────────────────────
+--
+-- No UPDATE policy and no DELETE policy, so neither exists for anyone coming
+-- through PostgREST. Same stance as part 1000, part 96 and part 84. A consent
+-- record the app can rewrite is one the app can manufacture, and the entire
+-- point of this table is that it cannot. Changing your mind is a new reading
+-- and a new question, which is a new row; the old one keeps saying what was
+-- true on the day.
+--
+-- ── WHAT THE ABSENCE OF A ROW MEANS, WHICH IS NOTHING ────────────────────
+--
+-- Every sheet photographed before this part existed was sent to both companies
+-- without anybody being asked, and has no row here. "No row" therefore means
+-- "no record either way", never "never sent", and src/lib/scanSheetConsent.ts
+-- carries that as a fourth state with its own sentence. Backfilling 'granted'
+-- rows for those readings would be this table's first lie.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.body_scan_sheet_consents (
+  id            uuid        primary key default uuid_generate_v4(),
+  -- profiles, not clients. A trainer tracking their own training uses the
+  -- client screens and the client hooks, and has a profile but need not have a
+  -- clients row; keying on clients would have made the consent write fail —
+  -- and therefore, by the ordering above, made the read fail — for exactly the
+  -- people who self-track. Same note as part 1000.
+  client_id     uuid        not null references public.profiles(id) on delete cascade,
+  -- The device-minted id of the ONE reading this decision was about. Not a
+  -- scan id and not an object path: see the header for why neither exists.
+  read_id       uuid        not null,
+  -- 'granted' or 'refused'. Both are recorded: the refusal is what lets the app
+  -- say later that nothing from that sheet was ever sent and mean it.
+  decision      text        not null check (decision in ('granted', 'refused')),
+  -- Who it was agreed to go to, and exactly where. Arrays because ONE answer
+  -- was given about a SET of destinations — splitting it into two rows would
+  -- imply the member made two decisions, and merging them into one name would
+  -- lose the one they might care about most. Written on the row rather than
+  -- assumed from today's code, so a row from today still says where the sheet
+  -- went if a function is ever re-pointed.
+  --
+  -- The list is what the build would actually attempt: OCR.space always,
+  -- Anthropic only where the vision reader is switched on. Naming a company
+  -- that was not going to receive it is as wrong as omitting one that was.
+  vendors       text[]      not null,
+  endpoints     text[]      not null,
+  decided_at    timestamptz not null default now(),
+  -- One decision per reading. A second row for the same read id could only be a
+  -- double-write, and would make "what did I agree to for that sheet"
+  -- ambiguous.
+  unique (client_id, read_id),
+  -- A decision about nobody is not a decision, and a vendor with no endpoint is
+  -- half a record. Checked in the database as well as in the writer, because
+  -- the service role and migrations do not go through the writer.
+  constraint body_scan_sheet_consents_recipients_present
+    check (array_length(vendors, 1) >= 1
+           and array_length(vendors, 1) = array_length(endpoints, 1))
+);
+
+-- The member's own consents, newest first, read by the screen that shows them
+-- what has been sent — the record is something they can SEE rather than
+-- something the app merely holds.
+create index if not exists body_scan_sheet_consents_client_idx
+  on public.body_scan_sheet_consents (client_id, decided_at desc);
+
+alter table public.body_scan_sheet_consents enable row level security;
+
+-- auth.uid(), never current_user: under PostgREST every signed-in request runs
+-- as the shared `authenticated` role, so a policy built on current_user grants
+-- everything to everyone. Same note as parts 79 and 1000.
+drop policy if exists body_scan_sheet_consent_own_read on public.body_scan_sheet_consents;
+create policy body_scan_sheet_consent_own_read on public.body_scan_sheet_consents
+  for select
+  to authenticated
+  using (client_id = (select auth.uid()));
+
+-- Only the person the consent is about may record one, and only about
+-- themselves. A consent somebody else can write is not a consent.
+drop policy if exists body_scan_sheet_consent_own_write on public.body_scan_sheet_consents;
+create policy body_scan_sheet_consent_own_write on public.body_scan_sheet_consents
+  for insert
+  to authenticated
+  with check (client_id = (select auth.uid()));
+
+-- No UPDATE policy and no DELETE policy. Deliberate — see the header. A later
+-- part adding one is adding the ability to manufacture or erase the record of a
+-- consent to send somebody's body composition to a third party, and that is the
+-- thing this file exists to make impossible.
+
+-- A blank vendor or endpoint passes the array_length check above and says
+-- nothing. RLS stops the WRITER being wrong; this stops the ROW being wrong,
+-- including for the service role and for migrations, which RLS does not
+-- constrain at all.
+create or replace function public.body_scan_sheet_consent_names_a_recipient()
+returns trigger
+language plpgsql
+as $fn$
+declare
+  v text;
+begin
+  foreach v in array new.vendors loop
+    if coalesce(btrim(v), '') = '' then
+      raise exception 'A scan sheet consent must name every company the sheet was to be sent to'
+        using errcode = '22023';
+    end if;
+  end loop;
+  foreach v in array new.endpoints loop
+    if coalesce(btrim(v), '') = '' then
+      raise exception 'A scan sheet consent must record the endpoint for every company named'
+        using errcode = '22023';
+    end if;
+  end loop;
+  return new;
+end $fn$;
+
+drop trigger if exists body_scan_sheet_consent_recipient_guard on public.body_scan_sheet_consents;
+create trigger body_scan_sheet_consent_recipient_guard
+  before insert on public.body_scan_sheet_consents
+  for each row execute function public.body_scan_sheet_consent_names_a_recipient();
+
+-- ▶ the-clip-a-client-was-given-could-be-swapped-underneath-them.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The clip a client was given could be swapped underneath them.
+--
+-- ── WHAT IS WRONG ─────────────────────────────────────────────────────────
+--
+-- There is exactly one UPDATE policy on `storage.objects` in this project.
+-- Counted live rather than assumed, on 3 Sep 2026:
+--
+--     select p.polname, p.polcmd from pg_policy p
+--       join pg_class c on c.oid = p.polrelid
+--       join pg_namespace n on n.oid = c.relnamespace
+--      where n.nspname = 'storage' and c.relname = 'objects' and p.polcmd = 'w';
+--
+-- returns one row: `exvid_object_u`, on the `exercise-videos` bucket, created
+-- by part 49 § 5 with no comment beside it. Twenty-six other policies on that
+-- table are SELECT, INSERT or DELETE.
+--
+-- Five parts refuse to write one of these, and each states the same argument
+-- in the same words:
+--
+--   91  injury-docs    "An UPDATE policy would allow overwriting the bytes
+--                       behind a key that has already been read and signed,
+--                       which is a change nobody could see afterwards."
+--   124 message-media  "…for the reason 91 gives".
+--   135 coach-docs     "…here it is not a general principle but the literal
+--                       failure mode."
+--   330 coach-logos    "…the bytes behind a key that has already been drawn".
+--   961 avatars        "…for the reason parts 91, 124 and 330 give", and it
+--                       goes further and `drop policy if exists
+--                       avatars_obj_update`, so one added by hand does not
+--                       survive a re-run.
+--
+-- `exercise-videos` is the one bucket that argument was never applied to. It
+-- is also the only bucket in this product whose objects are handed to NAMED
+-- OTHER PEOPLE by an explicit act: `exercise_video_grants` (part 49 § 3), one
+-- row per person per clip, reachable even for a clip whose visibility is
+-- 'private'. So the bucket with the sharing mechanism is the bucket with the
+-- overwrite hole, which is exactly the wrong way round.
+--
+-- ── WHAT IT DOES TO A REAL PERSON ────────────────────────────────────────
+--
+-- A coach records a technique demo, sets it to 'private', and grants it by
+-- name to one client — a rehab progression, say, filmed for one person's
+-- shoulder. The client opens it. `playbackUrl()` mints a signed URL good for
+-- an hour (src/ui/exerciseVideos.ts). The coach then writes different bytes to
+-- the same key.
+--
+-- Nothing downstream can tell. The row in `exercise_videos` is untouched, so
+-- the title, the exercise and the grant all still say what they said. The
+-- signed URL is still valid and still resolves — it signs the KEY, not the
+-- content. The client's app has no version, no checksum and no modified-at to
+-- compare, because nothing was ever built to expect the content behind a key
+-- to change. A clip a named person was given, and may have been told to follow,
+-- becomes a different clip with the same name and the same permission.
+--
+-- That is the whole of the argument parts 91, 124, 135, 330 and 961 make. It
+-- is stronger here than in any of them, because in the other five buckets the
+-- object has one reader and here it has an audience the coach chose.
+--
+-- ── WHAT ACTUALLY BREAKS IF IT GOES — MEASURED, NOT GUESSED ──────────────
+--
+-- One thing in the app uploads to this bucket, and it is the one thing in the
+-- product that asks for an overwrite:
+--
+--     src/ui/exerciseVideos.ts:92   const path = `${uid}/${Date.now()}.mp4`;
+--     src/ui/exerciseVideos.ts:95   .upload(path, ab, { contentType: 'video/mp4', upsert: true });
+--
+-- `upsert: true` sends `x-upsert: true`, which makes storage-api authorise the
+-- write as an upsert rather than an insert — an `insert … on conflict do
+-- update` against `storage.objects`. Two separate things decide whether that
+-- still works with no UPDATE policy, and they are not the same thing:
+--
+--   · The table-level GRANT. `insert … on conflict do update` requires the
+--     UPDATE privilege on the target table unconditionally, whether or not a
+--     row conflicts. Verified live: `authenticated` holds
+--     DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE on
+--     `storage.objects`. This part does not touch that grant, and must not —
+--     revoking it is what would break the upload.
+--   · The row-level POLICY. Postgres applies an UPDATE policy's USING
+--     expression only to a row that actually conflicts. With a fresh key there
+--     is no conflicting row, so no UPDATE policy is consulted and the insert
+--     proceeds under `exvid_object_w`.
+--
+-- The key is `<uid>/<epoch-millis>.mp4`. A conflict therefore needs the same
+-- coach to complete two uploads inside the same millisecond. Live: 0 rows in
+-- `exercise_videos`, 0 objects in `exercise-videos`, so there is not one
+-- object in this bucket for the removal to affect.
+--
+-- Nothing else in the repository writes here. `grep -rn 'exercise-videos' src
+-- app studio-web web scripts` returns four lines: the upload above, the
+-- signed-URL read, the `remove()` in `removeVideo`, and a comment. There is no
+-- `.move()` or `.copy()` anywhere in the codebase — both of which do need
+-- UPDATE — so no rename path is being taken away either.
+--
+-- ── SO THE POLICY GOES, AND THE APP GETS ONE LINE OF FOLLOW-UP ───────────
+--
+-- Removing it blind is what this part refuses to do, so the shape that makes
+-- the app correct rather than merely lucky is written down here and belongs to
+-- whoever owns src/ui/exerciseVideos.ts:
+--
+--     `upsert: true`  →  `upsert: false`, and a random token in the key beside
+--     the millisecond, exactly as coachLogoPath() and coachDocPath() already
+--     build them:  `${uid}/${Date.now()}-${token}.mp4`.
+--
+-- That is the convention all five refusing parts name — "the app uploads with
+-- upsert:false and a fresh key every time" — and this bucket is the only one
+-- that never adopted it. Until it lands, the failure mode is a refused upload
+-- in a millisecond collision, which the caller already handles: `if (error)
+-- return null`, and the clip stays local. That is a visible failure. The thing
+-- being removed is an invisible one.
+--
+-- ── WHAT THIS DELIBERATELY DOES NOT DO ───────────────────────────────────
+--
+--   · It does not revoke the table-level UPDATE grant on `storage.objects`.
+--     That grant is Supabase's, `x-upsert` needs it whether or not the object
+--     exists, and taking it away would break the upload this part is at pains
+--     to keep working.
+--   · It does not touch `exvid_object_w`, `exvid_object_r` or `exvid_object_d`.
+--     A coach still uploads into their own folder, still reads whatever
+--     `exvid_read` says they may, and still deletes their own clip.
+--   · It does not add a version column, a checksum or a modified-at to
+--     `exercise_videos`. Those would be a way to SEE an overwrite. Not being
+--     able to perform one is better than being able to notice it afterwards,
+--     and adding a column the app does not read would be a fix nobody checks.
+--   · It does not change `exercise_video_grants` or the read rule. The clip a
+--     client was given is the clip the coach uploaded; that was always the
+--     intent, and this is the line that makes it true.
+--
+-- Idempotent and safe to re-run: every statement is `drop policy if exists`,
+-- and the guard at the foot reads the catalogue rather than writing to it.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The policy
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Dropped, and not replaced. Part 49 § 5 is amended in place by this file
+-- rather than edited, for the reason 1122 gives about part 45: the argument
+-- for the removal is longer than the part that created it, and it belongs
+-- beside the four other buckets' versions of the same argument rather than
+-- buried in a file whose subject is a video library.
+
+drop policy if exists exvid_object_u on storage.objects;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · Every other name an UPDATE policy could have been added under
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 961 drops `avatars_obj_update` rather than merely not creating it, and
+-- says why: "so applying this part removes one if a later hand added it." The
+-- same treatment, for every bucket, by the name each part's own convention
+-- would give it. Dropping a policy that does not exist is free; the drift these
+-- lines catch — a policy added live in the dashboard and written down nowhere —
+-- is the drift that produced parts 121, 23–25, and the public `exercise-videos`
+-- bucket part 49 had to close.
+
+drop policy if exists photos_obj_update      on storage.objects;
+drop policy if exists injurydoc_obj_update   on storage.objects;
+drop policy if exists msgmedia_obj_update    on storage.objects;
+drop policy if exists coachdoc_obj_update    on storage.objects;
+drop policy if exists coachlogo_obj_update   on storage.objects;
+drop policy if exists gymdoc_obj_update      on storage.objects;
+drop policy if exists avatars_obj_update     on storage.objects;
+drop policy if exists exercise_demos_update  on storage.objects;
+drop policy if exists share_cards_update     on storage.objects;
+drop policy if exists scans_obj_update       on storage.objects;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · Say out loud that there are none
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Modelled on 1122 § 3. Five parts each state this rule for their own bucket
+-- and none of them can see the others, which is exactly how `exercise-videos`
+-- was missed for six weeks. A rule that holds across a whole table should be
+-- asserted against the whole table once.
+--
+-- If this raises, the fix is not to add an exception. It is to find out who
+-- added the policy and what they were trying to do, because there is a shape
+-- that does it without an invisible overwrite — delete the old object and
+-- insert a new one under a new key — and every other bucket in this product
+-- already uses it.
+
+do $$
+declare
+  v_update text[];
+begin
+  select coalesce(array_agg(p.polname order by p.polname), '{}'::text[])
+    into v_update
+    from pg_policy p
+    join pg_class c on c.oid = p.polrelid
+    join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'storage'
+     and c.relname = 'objects'
+     and p.polcmd in ('w', '*');   -- UPDATE, and ALL which contains it
+
+  if array_length(v_update, 1) is not null then
+    raise exception
+      'storage.objects carries % — there must be NO UPDATE policy on any bucket. An UPDATE policy lets the bytes behind a key that has already been signed and drawn be replaced, which is a change nobody downstream can see. Replacing a stored file is a DELETE plus an INSERT under a new key. See parts 91, 124, 135, 330, 961, 1150.',
+      v_update;
+  end if;
+end $$;
+
+-- ▶ a-coach-who-had-been-agreed-with-could-not-leave.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A coach who had been agreed with could not leave.
+--
+-- ── WHAT IS WRONG ─────────────────────────────────────────────────────────
+--
+-- Erasing a coach's account raises 23503 and nothing happens, for any coach
+-- one of whose documents anybody has ever accepted or been sent.
+--
+-- Read off the live catalogue on 3 Sep 2026 rather than reasoned from the SQL
+-- files, because the whole point is that no single file contains the fault —
+-- it is made of three foreign keys written in three different parts, each of
+-- which is right on its own:
+--
+--     coach_documents.coach_id             → trainers(id)        ON DELETE CASCADE
+--     coach_document_acceptances.document_id → coach_documents(id) ON DELETE RESTRICT
+--     coach_document_recipients.document_id  → coach_documents(id) ON DELETE RESTRICT
+--     trainers.id                          → profiles(id)        ON DELETE CASCADE
+--     profiles.id                          → auth.users(id)      ON DELETE CASCADE
+--
+-- `action_account_deletion()` (part 41) ends with `delete from auth.users where
+-- id = p_subject`. That cascades to `profiles`, to `trainers`, and then to
+-- `coach_documents` — where the RESTRICT from the acceptance stops it dead and
+-- takes the whole transaction with it. Nothing is deleted. The `deletion_log`
+-- insert that runs two lines earlier is rolled back with it, so there is not
+-- even a record that the attempt was made.
+--
+-- Each of the three keys is deliberate and each is argued for where it was
+-- written. Part 135 makes a coach's document immutable and undeletable because
+-- an acceptance points at it: "A coach who could edit the title or swap the
+-- file behind an accepted document would hold a signed acceptance of something
+-- nobody read." Part 156 repeats the choice for the recipient list and gives
+-- the reason in one line: "a cascade here would be the first route to removing
+-- one." Both are correct. Neither was thinking about the coach walking away.
+--
+-- ── WHAT IT DOES TO A REAL PERSON ────────────────────────────────────────
+--
+-- A personal trainer uploads their studio waiver, requires it, and eleven
+-- clients accept it over a year. They then stop trading, or fall out with the
+-- gym, or simply want out of a product they no longer use, and ask to be
+-- deleted. The gym owner taps the button. The RPC raises a foreign-key error
+-- with a constraint name in it, the screen shows whatever it shows for an
+-- unexpected failure, and the coach's account — their name, their photo, their
+-- bio, their paperwork, their clients' conversations with them — stays exactly
+-- where it is. There is no message anywhere that explains why, because nobody
+-- wrote one: this is not a refusal the product knows about, it is a constraint
+-- violation surfacing through an RPC that expected to succeed.
+--
+-- Part 41 exists because `request_account_deletion()` wrote a timestamp that
+-- nothing read. This is the same defect one layer further down: a deletion path
+-- that looks complete, is wired end to end, and cannot finish.
+--
+-- ── THE ANSWER, AND THE TWO IT IS NOT ────────────────────────────────────
+--
+-- The question part 135 and part 156 never had to answer is: when the person
+-- who OWNS the paperwork erases their account, what happens to the record that
+-- somebody agreed to it?
+--
+-- NOT (a) loosen the foreign keys to CASCADE. That is one line and it is
+-- wrong. RESTRICT is doing real work every other day of the year: it is the
+-- last thing standing between an accepted document and a route to deleting it,
+-- and part 156 names it as such. A cascade would make every future path to
+-- `delete from coach_documents` — an admin fixing a typo, a cleanup script, a
+-- policy somebody adds — silently take the acceptances with it. The
+-- constraints stay exactly as they are.
+--
+-- NOT (b) refuse the erasure and tell the coach they cannot leave while
+-- somebody holds an acceptance. That is what happens today, minus the
+-- explanation, and it is not defensible. The acceptance is a record about the
+-- COACH's document; the person asking to be erased is the coach. There is no
+-- statutory retention behind a personal trainer's own par-form the way there is
+-- behind an invoice (part 184, and `tenants.record_retention_years`), and this
+-- product does not get to keep somebody's identity indefinitely because their
+-- clients ticked a box.
+--
+-- SO (c): one named route, and only one. A BEFORE DELETE trigger on
+-- `public.profiles` releases the acceptances and the recipient rows for the
+-- documents that are about to cascade, and NOTHING ELSE can. The foreign keys
+-- keep refusing every other caller. Deleting an accepted document is still
+-- impossible; deleting the ACCOUNT THAT OWNS IT is now possible, and it is the
+-- only thing that is.
+--
+-- The consequence is stated plainly rather than buried: when a coach erases
+-- their account, the record that a client accepted that coach's waiver goes
+-- too. That is the correct end of the trade and it costs something real. The
+-- alternative is keeping the document — which means keeping the coach's uid in
+-- the object key, their file in the bucket and their row in `coach_documents`
+-- forever — which is not retention, it is a refusal to erase wearing
+-- retention's clothes.
+--
+-- ── WHERE THE TRIGGER GOES, AND WHY NOT IN action_account_deletion() ─────
+--
+-- On `profiles`, for the reason part 1120 gives at length and part 184 relies
+-- on: a cascading delete fires row triggers on the child table, so this runs
+-- whether the erasure came from `action_account_deletion()`, from the Supabase
+-- dashboard, or from the admin API. Inside the RPC it would cover the first
+-- only, and the other two are the routes an operator uses when something has
+-- already gone wrong.
+--
+-- BEFORE DELETE, because the release has to happen while `coach_documents`
+-- still exists to identify the rows by.
+--
+-- ── WHAT ELSE WAS CHECKED ────────────────────────────────────────────────
+--
+-- The same catalogue sweep, for every RESTRICT or NO ACTION delete rule in
+-- `public`, returns six and only these two sit on a path from `profiles`:
+--
+--     coach_document_acceptances.document_id → coach_documents  RESTRICT  ← this
+--     coach_document_recipients.document_id  → coach_documents  RESTRICT  ← this
+--     gym_agreement_signatures.agreement_id  → gym_agreements   RESTRICT
+--     gym_payments.reverses_payment_id       → gym_payments     RESTRICT
+--     exercise_videos.exercise_id            → exercises        NO ACTION
+--     workout_logs.exercise_id               → exercises        NO ACTION
+--
+-- The third blocks deleting a TENANT whose agreements have been signed, not a
+-- person: `gym_agreement_signatures.member_id` is `on delete set null`, so a
+-- member's erasure passes through it. Nothing in this product deletes a tenant,
+-- and whether a gym should be erasable at all is a different question from this
+-- one. It is written down here so the next person does not have to re-run the
+-- query. The last three are not on any erasure path.
+--
+-- ── MEASURED BEFORE WRITING ──────────────────────────────────────────────
+--
+-- Live on 3 Sep 2026, read-only: `coach_documents` 0 rows,
+-- `coach_document_acceptances` 0, `coach_document_recipients` 0, `trainers` 8,
+-- `profiles` 20. So no coach is stuck today and applying this deletes nothing.
+-- It closes the hole before the first coach uploads their first waiver, which
+-- is the only cheap moment — after that, the first person to hit it is a real
+-- coach being told nothing while an owner taps a button that does not work.
+--
+-- ── WHAT IT DELIBERATELY DOES NOT DO ─────────────────────────────────────
+--
+--   · It does not alter a foreign key. Every constraint above is untouched.
+--   · It does not delete a `coach_documents` row. The cascade does that, from
+--     `trainers`, exactly as part 135 wrote it.
+--   · It does not touch `liability_waivers` (part 84), which is Repple's own
+--     release and is nothing to do with this table — part 135 is emphatic about
+--     that and this file does not name it again.
+--   · It does not remove the bytes from `coach-docs`. That is part 1152, which
+--     must be applied with this one; see its header for the order.
+--   · It does not touch a CLIENT's erasure. That path already works and is
+--     already right: `coach_document_acceptances.client_id` references
+--     `clients(id) on delete cascade` and `clients.id` references
+--     `profiles(id) on delete cascade`, so an erased client's acceptances go
+--     with them and `coach_doc_unaccepted()` starts answering true again for
+--     any document nobody else has accepted — which is the coach regaining the
+--     right to delete a file that no longer anchors anybody's evidence. That is
+--     the correct behaviour and it needs no code.
+--
+-- Idempotent and safe to re-run: `or replace` on the function, the trigger
+-- dropped by name first.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The release
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- SECURITY DEFINER, and it must be: neither table has an UPDATE or DELETE
+-- policy and neither has a DELETE grant behind one — that is the whole of part
+-- 135 § 4 and part 156 § 1 — so nothing running as `authenticated` can remove
+-- these rows and nothing should be able to. The function's owner is the role
+-- that applies setup.sql. The trigger is the only caller.
+--
+-- Scoped by `coach_documents.coach_id = old.id` and by nothing else. It cannot
+-- reach an acceptance of a document belonging to any other coach, and it takes
+-- no argument, so there is no shape of it that could be aimed at somebody.
+--
+-- No exception block. If the release fails, the erasure must fail loudly rather
+-- than proceed to the RESTRICT and fail confusingly — and a caught exception
+-- here would be a savepoint rollback that leaves the same 23503 waiting two
+-- statements later. Part 1120 makes the same call for the same reason.
+
+create or replace function public.profiles_release_coach_documents()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- Recipients first. Neither table references the other, so the order is
+  -- arbitrary to Postgres; it is written this way because a recipient row is
+  -- the weaker record — who a document was put in front of — and an acceptance
+  -- is the one this file is arguing about.
+  delete from public.coach_document_recipients r
+   where exists (select 1 from public.coach_documents d
+                  where d.id = r.document_id and d.coach_id = old.id);
+
+  delete from public.coach_document_acceptances a
+   where exists (select 1 from public.coach_documents d
+                  where d.id = a.document_id and d.coach_id = old.id);
+
+  return old;
+end $$;
+
+revoke execute on function public.profiles_release_coach_documents() from public, anon, authenticated;
+
+comment on function public.profiles_release_coach_documents() is
+  'The ONLY route by which an accepted coach document''s acceptances can be removed, and it '
+  'exists so that a coach can erase their account at all. The RESTRICT foreign keys in parts '
+  '135 and 156 refuse every other caller and are deliberately unchanged. See supabase/parts/1151.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · The hook
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The third BEFORE DELETE trigger on `profiles`, beside part 184's
+-- `trg_profiles_retain_financial_record` and part 1120's
+-- `trg_profiles_queue_file_purge`. All three are independent of each other's
+-- ordering: this one touches only the two coach-document child tables, 184
+-- touches only memberships and the money tables, and 1120 only reads
+-- `storage.objects` and writes its own queue.
+--
+-- Dropped by name first so re-running this file cannot leave two.
+
+drop trigger if exists trg_profiles_release_coach_documents on public.profiles;
+create trigger trg_profiles_release_coach_documents
+  before delete on public.profiles
+  for each row execute function public.profiles_release_coach_documents();
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · Prove the path is open
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The assertion is not "the trigger exists" — a trigger that exists and does
+-- the wrong thing looks identical from the catalogue. It is that the two
+-- constraints this part is routing around are still RESTRICT, because if a
+-- later hand ever loosens them to CASCADE then this trigger is no longer the
+-- only route and the guarantee in its comment is false.
+--
+-- This is the assertion part 135 would have written if it had known to.
+
+do $$
+declare
+  v_bad text[];
+begin
+  select coalesce(array_agg(c.conname order by c.conname), '{}'::text[])
+    into v_bad
+    from pg_constraint c
+   where c.contype = 'f'
+     and c.confrelid = 'public.coach_documents'::regclass
+     and c.confdeltype <> 'r';   -- 'r' = RESTRICT
+
+  if array_length(v_bad, 1) is not null then
+    raise exception
+      'Foreign keys onto coach_documents are no longer RESTRICT: %. RESTRICT is what makes an accepted document undeletable (parts 135, 156); trg_profiles_release_coach_documents is meant to be the ONLY way past it. Loosening these makes that claim untrue. See supabase/parts/1151.',
+      v_bad;
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger t
+     where t.tgrelid = 'public.profiles'::regclass
+       and t.tgname = 'trg_profiles_release_coach_documents'
+       and not t.tgisinternal
+  ) then
+    raise exception 'trg_profiles_release_coach_documents is not on public.profiles — a coach whose document has been accepted cannot be erased. See supabase/parts/1151.';
+  end if;
+end $$;
+
+-- ▶ the-three-buckets-the-first-purge-left-out.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The three buckets the first purge left out.
+--
+-- ── WHAT IS WRONG ─────────────────────────────────────────────────────────
+--
+-- Part 1120 built one queue, one sender, one confirm and one drain, and pointed
+-- them at three buckets: `injury-docs`, `message-media`, `avatars`. It stopped
+-- there on purpose. Its own check constraint names the three and refuses
+-- everything else, so the remaining member-file buckets are not merely
+-- unhandled — they are structurally rejected if anybody tries.
+--
+-- Live on 3 Sep 2026, `storage.buckets` holds eleven. Setting aside the three
+-- 1120 covers, `photos` (which has its own machine, parts 45 and 48),
+-- `exercise-demos` (1640 stock animation files belonging to nobody),
+-- `share-cards` (one object at a time, for seconds) and `scans` (empty and
+-- unused, part 1122), what is left is four, and each needs a DIFFERENT answer
+-- rather than one more name in a check constraint:
+--
+--     coach-logos      the coach's own mark
+--     coach-docs       the coach's own paperwork
+--     exercise-videos  a clip the coach recorded
+--     gym-docs         the gym's filing cabinet
+--
+-- Three of them join the queue. One does not, and the argument for that is
+-- section 6 and is the longest in the file.
+--
+-- ── WHAT IT DOES TO A REAL PERSON ────────────────────────────────────────
+--
+-- A personal trainer runs their business through this app for two years. Their
+-- logo is in `coach-logos`, their studio waiver and par-form in `coach-docs`,
+-- forty technique clips with their face and voice in them in `exercise-videos`.
+-- They leave, and ask to be deleted. Every row goes. Every file stays: a
+-- photograph of the mark they trade under, PDFs carrying their business name
+-- and address, and forty videos of a named person demonstrating exercises,
+-- sitting in three private buckets under the uid of an account that no longer
+-- exists, with nothing pointing at them and nobody who could ever delete them —
+-- the one person entitled to is the one whose credentials the erasure
+-- destroyed.
+--
+-- ── ORDER OF APPLICATION ─────────────────────────────────────────────────
+--
+-- THIS PART REQUIRES 1120 AND 1151, IN THAT ORDER, BEFORE IT.
+--
+--   1120  creates `object_purge`, `queue_account_object_purges()`,
+--         `purge_stored_object()`, `confirm_object_purges()`,
+--         `purge_account_files()` and the cron drain. This file WIDENS them;
+--         it does not restate them, because two copies of the confirm logic is
+--         two places for it to drift and 1120 says so at length.
+--   1151  makes a coach's erasure possible at all. Without it, a coach one of
+--         whose documents has been accepted cannot be deleted, so the hook this
+--         file hangs on `profiles` never fires for exactly the person whose
+--         `coach-docs` folder it exists to clear.
+--
+-- Neither 1120 nor 1151 is applied to this project as this is written
+-- (verified: `public.object_purge` does not exist). setup.sql concatenates by
+-- number, so a paste of the bundle applies all three in the right order without
+-- anybody thinking about it. An operator running files one at a time gets a
+-- named sentence from section 0 rather than a half-built second queue.
+--
+-- ── HOW EACH BUCKET WAS DECIDED ──────────────────────────────────────────
+--
+-- `coach-logos` — SIMPLEST, AND THE QUESTION WAS "PER-COACH OR PER-TENANT".
+-- Per-coach, established rather than assumed. `trainers.logo_path` is the
+-- column (`trainers_logo_path_own_folder` constrains it to `<trainer id>/%`),
+-- `coachlogoPath()` in src/lib/coachLogo.ts builds `<coach uid>/<millis>-
+-- <token>.<ext>`, and all three storage policies in part 330 key on
+-- `(storage.foldername(name))[1] = auth.uid()::text`. Part 330 is explicit that
+-- a gym owner is NOT entitled to it: "A gym owner is not entitled to the mark a
+-- coach who works there trades under." So the subject is the coach, the folder
+-- is the coach's uid, and it goes into 1120's account hook unchanged — one more
+-- bucket in the single-segment arm. Live: 0 objects, 0 trainers with a
+-- logo_path set.
+--
+-- `coach-docs` — THE RETENTION QUESTION, ANSWERED IN TWO HALVES.
+-- Part 135 blocks the storage DELETE once a document has been accepted, via
+-- `coach_doc_unaccepted(name)` in `coachdoc_obj_delete`. That is retention and
+-- it is right. The question the sweep asked is what should happen when the
+-- person who accepted it erases their account, and it has two halves that pull
+-- in opposite directions:
+--
+--   · A CLIENT erases. Nothing in this bucket is theirs. The file is the
+--     coach's paperwork, the coach still exists, other clients may still hold
+--     it, and the client's own record — their acceptance — is a row, not a
+--     file, and it already goes: `coach_document_acceptances.client_id`
+--     references `clients(id) on delete cascade` and `clients.id` references
+--     `profiles(id) on delete cascade`. So this part queues NOTHING on a
+--     client's erasure, and that is a decision rather than an omission. What
+--     changes for the coach is a side effect worth naming: with the last
+--     acceptance gone, `coach_doc_unaccepted()` answers true again and the
+--     coach can delete a file that no longer anchors anybody's evidence.
+--
+--   · The COACH erases. Everything in their folder is theirs, `coach_documents`
+--     cascades away with `trainers`, and part 1151 has just removed the last
+--     thing that was refusing the cascade. The retention argument does not
+--     survive that: it exists to stop a coach quietly replacing paperwork
+--     somebody signed, not to keep a coach's own business documents after the
+--     coach has been erased. Keeping the file would mean keeping their uid in
+--     the object key indefinitely, which is not retention.
+--
+-- So `coach-docs` joins the account hook, on the FOLDER — which is the coach.
+-- The hook cannot fire for a client, because a client's uid is never the first
+-- segment of a key in this bucket (`coach_documents_path_chk` enforces
+-- `path like coach_id || '/%'`).
+--
+-- `exercise-videos` — HAS A ROW CARRYING THE PATH, SO IT WANTS PART 45's SHAPE.
+-- `exercise_videos.video_path` is the column, so this is the case 1120 says it
+-- did not have: "A progress photo has a row carrying its path, so the trigger
+-- reads OLD.image_path. None of these three buckets has a row anywhere." This
+-- one does. An AFTER DELETE trigger on the table is strictly better than the
+-- account hook here, and covers a second hole the account hook never could:
+--
+--     src/ui/exerciseVideos.ts:379
+--     try { await supabase.storage.from('exercise-videos').remove([target.path]); }
+--     catch { /* the row is gone; a stray file is not worth failing the delete */ }
+--
+-- A coach deleting ONE clip today loses the row and keeps the file whenever
+-- that call fails, and the comment says so out loud. The trigger catches that,
+-- the account cascade, and an operator deleting the row by hand, with one
+-- mechanism — because all three end in the same `delete from exercise_videos`.
+--
+-- `gym-docs` — DOES NOT JOIN, AND SECTION 6 IS WHY.
+--
+-- ── WHAT HAPPENS WHEN THE TWO HOOKS MEET ─────────────────────────────────
+--
+-- Erasing a coach fires both. `trg_profiles_queue_file_purge` (1120, BEFORE
+-- DELETE on `profiles`) enumerates `coach-logos` and `coach-docs` out of
+-- `storage.objects`; the row is then deleted, the cascade reaches `trainers`
+-- and then `exercise_videos`, and the AFTER DELETE trigger below queues each
+-- `video_path`. They cannot collide: it is ONE queue with a primary key on
+-- (bucket_id, path), both inserts are `on conflict do nothing`, and the two
+-- hooks name disjoint buckets anyway. There is still exactly one drain issuing
+-- exactly one DELETE per path, which is 1120's whole reason for refusing
+-- `photos` a place in this queue and is extended here rather than restated.
+--
+-- ── MEASURED BEFORE WRITING ──────────────────────────────────────────────
+--
+-- Live object counts on 3 Sep 2026: `exercise-demos` 1640, EVERY OTHER BUCKET
+-- ZERO. `exercise_videos` 0 rows, `exercise_video_grants` 0, `coach_documents`
+-- 0, `gym_documents` 0, `trainers` 8 of which 0 have a logo. So applying this
+-- changes nothing about any object that exists and the backfill in section 7
+-- finds nothing. It closes the hole before the first file lands in it.
+--
+-- Idempotent and safe to re-run: the constraint is dropped by name before it is
+-- added, every function is `or replace`, the trigger is dropped by name first,
+-- the view is `or replace`, and the backfill is `on conflict do nothing`.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 0 · Refuse to run without the machine this widens
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- A named sentence rather than a cascade of "relation does not exist". The
+-- alternative — creating the queue here if it is missing — is the one thing
+-- this file must not do: it would be the second copy of the confirm logic that
+-- 1120 § "ONE QUEUE, THREE BUCKETS" refuses on the grounds that part 45's
+-- confirm logic was already wrong once and had to be repaired in place.
+
+do $$
+begin
+  if to_regclass('public.object_purge') is null then
+    raise exception
+      'public.object_purge does not exist. Apply supabase/parts/1120 first — this part widens its queue rather than building a second one. setup.sql already orders them correctly; you are seeing this because parts are being applied one at a time.';
+  end if;
+  if not exists (
+    select 1 from pg_trigger t
+     where t.tgrelid = 'public.profiles'::regclass
+       and t.tgname = 'trg_profiles_release_coach_documents'
+       and not t.tgisinternal
+  ) then
+    raise exception
+      'trg_profiles_release_coach_documents is missing. Apply supabase/parts/1151 first — without it a coach whose document has been accepted cannot be erased at all, so the coach-docs half of this file could never fire.';
+  end if;
+end $$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · Widen what the queue is allowed to hold
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Six buckets now, and the same two exclusions as before, for the same reason
+-- and stated again because a check constraint is where somebody will look:
+--
+--   'photos' is REFUSED. It has its own queue, sender and schedule in parts 45
+--   and 48. Two drains issuing DELETEs for one path would each read the other's
+--   404 as confirmation of its own request, and the row would be marked purged
+--   by whichever ran second regardless of what actually happened.
+--
+--   'gym-docs' is REFUSED, and that is section 6's argument rather than an
+--   oversight. Naming it in the constraint is what makes the refusal
+--   deliberate: a future hook that tries to queue a gym document fails at the
+--   insert instead of quietly working.
+--
+-- 'exercise-demos', 'share-cards' and 'scans' are absent because nothing in
+-- them belongs to a person: 1640 stock animations, one share card at a time,
+-- and an empty bucket no feature uses (part 1122).
+
+alter table public.object_purge drop constraint if exists object_purge_bucket_is_ours;
+alter table public.object_purge add constraint object_purge_bucket_is_ours
+  check (bucket_id in (
+    'injury-docs',      -- part 91,  via the account hook
+    'message-media',    -- part 124, via the account hook
+    'avatars',          -- part 961, via the account hook
+    'coach-logos',      -- part 330, via the account hook   (added here)
+    'coach-docs',       -- part 135, via the account hook   (added here)
+    'exercise-videos'   -- part 49,  via the table trigger  (added here)
+  ));
+
+comment on constraint object_purge_bucket_is_ours on public.object_purge is
+  'The buckets this queue is responsible for. `photos` is refused because parts 45 and 48 '
+  'already drain it and two drains would race one path; `gym-docs` is refused because a gym''s '
+  'filing cabinet is not erased by a member leaving. See supabase/parts/1120 and 1152.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · Two more buckets in the account hook
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 1120's `queue_account_object_purges`, re-emitted with `coach-logos` and
+-- `coach-docs` added to the single-segment arm and NOTHING ELSE CHANGED. The
+-- security posture, the `on conflict do nothing`, the null guard, the comment
+-- about `storage.foldername()` returning NULL past the end of the array and the
+-- revoke below are all 1120's and are reproduced rather than rewritten.
+--
+-- Both new buckets are `<uid>/<file>`:
+--   coach-logos  coachLogoPath()  src/lib/coachLogo.ts
+--   coach-docs   coachDocPath()   src/lib/coachDocs.ts
+-- and in both the uid is the COACH. There is no second-segment case here — that
+-- is `message-media` only, where segment 2 is the sender.
+--
+-- `exercise-videos` is deliberately NOT added to this function. It has a row
+-- carrying its path and gets part 45's shape in section 3; putting it in both
+-- would be two mechanisms queueing one path, which works only because the
+-- primary key catches it, and "works because a constraint catches it" is not a
+-- design.
+--
+-- Still NOT granted to authenticated or anon, for 1120's reason: it takes an
+-- arbitrary uuid and queues somebody's files for destruction.
+
+create or replace function public.queue_account_object_purges(p_uid uuid)
+returns int
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  n int := 0;
+begin
+  if p_uid is null then
+    return 0;
+  end if;
+
+  with queued as (
+    insert into public.object_purge (bucket_id, path, subject_id, note)
+    select o.bucket_id, o.name, p_uid, 'owner erased'
+      from storage.objects o
+     where (o.bucket_id in ('injury-docs', 'avatars', 'coach-logos', 'coach-docs')
+            and (storage.foldername(o.name))[1] = p_uid::text)
+        or (o.bucket_id = 'message-media'
+            and (   (storage.foldername(o.name))[1] = p_uid::text
+                 or (storage.foldername(o.name))[2] = p_uid::text))
+    -- do NOTHING, not do UPDATE. Part 45 requeues on conflict because a single
+    -- photo delete can be repeated; here a conflict means the path is either
+    -- already pending (leave it, with its attempt count intact) or already
+    -- confirmed gone (resurrecting it would send a DELETE for an object we
+    -- have a reply about). Object keys carry a random token and are never
+    -- reused, so there is no third case.
+    on conflict (bucket_id, path) do nothing
+    returning 1)
+  select count(*) into n from queued;
+
+  return n;
+end $$;
+
+revoke execute on function public.queue_account_object_purges(uuid) from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · exercise-videos: the row is the hook
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 45's shape, minus the one thing 1120 argues part 45 got wrong.
+--
+-- Part 45's trigger enqueues AND sends, with the send wrapped in an exception
+-- block. 1120's header gives the argument against that and quotes part 48's own
+-- words back at it: "an HTTP call inside the transaction that deletes a
+-- member's account would make erasure depend on the storage service answering.
+-- It must not." So this one only enqueues. The cron drain sends, two minutes
+-- past every fifth minute, and the queue holds the path until storage confirms.
+--
+-- AFTER DELETE rather than BEFORE, which is the opposite of 1120's hook and is
+-- correct for the opposite reason: 1120 needs BEFORE because the uid is the
+-- only thing connecting a person to an object key and it disappears with the
+-- row. Here the path is IN the row, `OLD` carries it either way, and AFTER
+-- means a delete that is going to be rolled back for some other reason does not
+-- leave a queue entry behind claiming a live file is destined for destruction.
+--
+-- `on conflict do nothing`, following 1120. The condition that makes it safe is
+-- worth writing down because it is a property of the key rather than of this
+-- file: `uploadExerciseVideo()` builds `<uid>/<epoch-millis>-<token>.mp4`, and
+-- epoch millis do not go backwards, so a path already in this queue cannot be
+-- the path of a different object later. This said `<uid>/<epoch-millis>.mp4`
+-- when it was written; part 1150's follow-up — a random token beside the
+-- millisecond, which is what every other bucket already does — has since
+-- landed, and it strengthened the property rather than changing it.
+--
+-- No exception block, for 1120's reason: a caught error here is a savepoint
+-- rollback that would discard the record of the file along with the failure,
+-- and the record of the file is the one thing that cannot be recovered
+-- afterwards.
+
+create or replace function public.exercise_video_deleted()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if old.video_path is not null and btrim(old.video_path) <> '' then
+    insert into public.object_purge (bucket_id, path, subject_id, note)
+    values ('exercise-videos', old.video_path,
+            -- The subject is the coach who recorded it. A platform clip has
+            -- `trainer_id` null (part 49 § 4 calls it "a platform clip
+            -- belonging to no trainer"); those are not somebody's data and
+            -- their row is not deleted by any erasure, but if one is ever
+            -- deleted by hand the file should still go, so the row is queued
+            -- with the all-zero uuid rather than skipped. `subject_id` is
+            -- `not null` and it is how an operator answers "whose file is
+            -- this"; all-zeroes answers "nobody's", which is true.
+            coalesce(old.trainer_id, '00000000-0000-0000-0000-000000000000'::uuid),
+            'exercise_videos row deleted')
+    on conflict (bucket_id, path) do nothing;
+  end if;
+  return old;
+end $$;
+
+revoke execute on function public.exercise_video_deleted() from public, anon, authenticated;
+
+drop trigger if exists trg_exercise_video_deleted on public.exercise_videos;
+create trigger trg_exercise_video_deleted
+  after delete on public.exercise_videos
+  for each row execute function public.exercise_video_deleted();
+
+comment on function public.exercise_video_deleted() is
+  'Queues the stored clip when its row goes — whether that is a coach deleting one video, an '
+  'account erasure cascading through trainers, or an operator deleting the row by hand. Part 45''s '
+  'shape without part 45''s inline HTTP call. See supabase/parts/1152.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · Three more path shapes for the sender
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 1120's `purge_stored_object`, re-emitted with three arms added to the
+-- shape CASE and nothing else changed. The path goes into a URL, so it is
+-- checked against the shape the app builds and the storage policies enforce,
+-- per bucket, and refused rather than sent half-encoded where it could address
+-- a different object.
+--
+-- The three new expressions are the SQL of:
+--   coachLogoPath()        src/lib/coachLogo.ts   `<uid>/<millis>-<token>.<ext>`
+--   coachDocPath()         src/lib/coachDocs.ts   `<uid>/<millis>-<token>-<slug>.<ext>`
+--   uploadExerciseVideo()  src/ui/exerciseVideos.ts  `<uid>/<millis>-<token>.mp4`
+--
+-- That third line said `<uid>/<millis>.mp4` when this part was written, which
+-- was true for about an hour. Part 1150's follow-up landed the same day:
+-- `exerciseVideoPath()` in src/lib/exerciseVideoUpload.ts now builds
+-- `${uid}/${millis}-${token}.mp4` with the token lowercased, stripped to
+-- [a-z0-9] and capped at 12. The regex below did not need changing and was not
+-- changed — `-` and `.` are already in its character class, and 13 + 1 + 12 + 4
+-- is well inside the 120 — but the line is corrected because a reader checking
+-- whether a real key passes this CASE must be comparing it against the key the
+-- app actually writes.
+--
+-- All three are one folder deep with the uid as the folder, so all three are
+-- the same regex as `injury-docs` and `avatars`. They are written out
+-- separately anyway, following 1120's own layout: a reader checking whether a
+-- bucket is covered should find its name, not have to work out which arm of a
+-- collapsed expression it falls into. The 120-character allowance is measured,
+-- not picked — `coach-docs` builds the longest key of the three and
+-- `slugify()` caps its slug at 48 characters, on top of 13 for the millis, 12
+-- for the token, two separators and an extension.
+--
+-- Two lines differ from 1120 beyond the CASE, and they are a fix rather than a
+-- widening. The two branches that give up — a refused path shape and a missing
+-- Vault secret — set `last_attempt_at` but never touched `attempts`, so a
+-- permanently refused row stayed at zero attempts for ever and sorted to the
+-- HEAD of every drain window under 1120's own `order by attempts, queued_at`.
+-- The counter is incremented on both so the drain's ordering tells the truth.
+-- Part 1153 makes the identical correction to part 45's `purge_photo_file()`,
+-- which this function was modelled on and which has one row stuck behind it on
+-- this project today. Nothing else in this function moves.
+
+create or replace function public.purge_stored_object(p_bucket text, p_path text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_key text;
+  v_req bigint;
+  v_shape_ok boolean;
+begin
+  if p_bucket is null or p_path is null or not exists (
+    select 1 from public.object_purge
+     where bucket_id = p_bucket and path = p_path and purged_at is null
+  ) then
+    return;
+  end if;
+
+  v_shape_ok := case p_bucket
+    when 'injury-docs'     then p_path ~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    when 'avatars'         then p_path ~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    when 'coach-logos'     then p_path ~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    when 'coach-docs'      then p_path ~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    when 'exercise-videos' then p_path ~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    when 'message-media'   then p_path ~ '^[0-9a-fA-F-]{36}/[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$'
+    else false
+  end;
+
+  if not v_shape_ok then
+    update public.object_purge
+       set note = 'path is not the expected shape for ' || p_bucket || ' — NOT sent',
+           attempts = attempts + 1,
+           last_attempt_at = now()
+     where bucket_id = p_bucket and path = p_path;
+    return;
+  end if;
+
+  select decrypted_secret into v_key
+    from vault.decrypted_secrets where name = 'storage_service_key' limit 1;
+
+  if v_key is null or v_key = '' then
+    update public.object_purge
+       set note = 'no storage_service_key in Vault — file NOT deleted',
+           attempts = attempts + 1,
+           last_attempt_at = now()
+     where bucket_id = p_bucket and path = p_path;
+    return;
+  end if;
+
+  select net.http_delete(
+    url     := 'https://phgfwzpkkwdysftlgkoq.supabase.co/storage/v1/object/'
+               || p_bucket || '/' || p_path,
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || v_key,
+      'apikey',        v_key)
+  ) into v_req;
+
+  update public.object_purge
+     set request_id = v_req,
+         attempts = attempts + 1,
+         last_attempt_at = now(),
+         note = 'sent'
+   where bucket_id = p_bucket and path = p_path;
+end $$;
+
+revoke execute on function public.purge_stored_object(text, text) from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · Assert the two halves agree
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- A bucket in the check constraint with no arm in the shape CASE is the worst
+-- of the failure modes available here: the enqueue succeeds, the send refuses
+-- the shape every run, and the file sits in the queue for ever while the drain
+-- reports success. That is the defect part 1153 is about, arriving through the
+-- door this file just widened, so this file closes it behind itself.
+
+-- The arm is looked for in the function's own source rather than probed with a
+-- sample key, because probing means calling a SECURITY DEFINER function that
+-- sends HTTP, and a paste of setup.sql must not put a request on the wire.
+-- `pg_get_functiondef` is the same text this file wrote four sections up, so a
+-- bucket name missing from it is a bucket name missing from the CASE.
+
+do $$
+declare
+  b   text;
+  src text;
+begin
+  select pg_get_functiondef(p.oid) into src
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'purge_stored_object'
+   limit 1;
+
+  foreach b in array array['injury-docs','message-media','avatars',
+                           'coach-logos','coach-docs','exercise-videos']
+  loop
+    if src is null or position('when ''' || b || '''' in src) = 0 then
+      raise exception
+        'purge_stored_object() has no path-shape arm for bucket % — a file queued for it would be refused on every run and would never leave the queue, while the drain reported success. See supabase/parts/1152 § 4.', b;
+    end if;
+  end loop;
+end $$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 6 · gym-docs, and why it is not in the queue
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The sweep's view was that a gym's legal paperwork should probably survive an
+-- individual member's erasure. Tested rather than adopted, that view is right
+-- about the conclusion and wrong about the reason, and the reason matters
+-- because it decides what SHOULD be built instead.
+--
+-- THE REASON IT IS NOT "GYM PAPERWORK BELONGS TO THE GYM". Some of it is
+-- squarely about one person. `gym_documents.kind` is one of contract,
+-- insurance, service_report, certificate, incident, photo, other, and part 390
+-- exists precisely because four of those can be a member's: a signed contract,
+-- an incident report naming them, a photograph. Part 390 adds
+-- `member_attached` — "one boolean saying 'this was somebody's'" — and latches
+-- it on so that erasing the member cannot widen who may read their file. A
+-- blanket "the gym keeps everything" would be a claim about the file that part
+-- 390 already refuses to make.
+--
+-- THE FIRST REAL REASON: THE ERASURE CANNOT FIND THE FILES. Every other bucket
+-- in this queue is `<subject uid>/…`, which is what makes
+-- `queue_account_object_purges()` possible: the uid is in the key, so the files
+-- can be enumerated at the last moment the subject is identifiable. `gym-docs`
+-- is `<tenant uid>/<date>-<token>-<name>` — src/lib/gymDocs.ts documentPath()
+-- says why in as many words: "A gym's insurance certificate belongs to the
+-- building and has to outlive whichever member of staff uploaded it", and the
+-- storage policies in part 185 read `(storage.foldername(name))[1] =
+-- my_tenant()::text`. A member's uid appears nowhere in the key. The only thing
+-- connecting a member to an object here is `gym_documents.member_id`, which is
+-- `on delete set null` — so at the moment of erasure the link is severed by the
+-- same statement that would have to use it.
+--
+-- THE SECOND REAL REASON: THE DECISION IS PER-TENANT AND IT IS NOT OURS.
+-- Part 390 already wrote this out and it is quoted rather than re-derived,
+-- because the sweep is not the first thing to look at it: "deciding which of a
+-- gym's documents outlive the person they are about is a retention question
+-- with a statutory answer per country, not something to settle at the bottom of
+-- a policy file. `tenants.record_retention_years` is where that decision
+-- belongs and it is deliberately NULL by default." Part 184 uses that same
+-- column to stamp `retain_until` on an invoice when its member is erased. A
+-- gym-doc purge is the same shape of work and wants the same column, a
+-- `retain_until` of its own, and an owner-facing screen that says what is about
+-- to be destroyed. That is a part; it is not three lines in this one.
+--
+-- SO WHAT THIS FILE DOES INSTEAD IS MAKE THE OUTSTANDING SET VISIBLE. Part 390
+-- left the query in a comment. A query in a comment is not a mechanism — that
+-- is the same objection 1120 makes to web/delete-account.html inviting people
+-- to send an email — so it becomes a view, and the day somebody writes the
+-- retention part this is the list they work from.
+--
+-- security_invoker, so it inherits `gym_documents`' own SELECT policy
+-- (`gym_doc_readable(tenant_id, member_attached, kind)`, part 390). A gym owner
+-- sees their own building's outstanding paperwork and nobody else's, and a
+-- trainer sees none of it, which is exactly what part 390 decided and this must
+-- not quietly widen.
+
+create or replace view public.gym_documents_about_erased_members
+with (security_invoker = true) as
+  select d.id,
+         d.tenant_id,
+         d.kind,
+         d.title,
+         d.storage_path,
+         d.uploaded_at,
+         d.expires_on,
+         (now() - d.uploaded_at) as held_for
+    from public.gym_documents d
+   where d.member_attached
+     and d.member_id is null
+   order by d.uploaded_at;
+
+comment on view public.gym_documents_about_erased_members is
+  'Gym documents that are about a person who no longer has an account — member_attached is latched '
+  'on and member_id has been set null by the erasure. NOT a purge queue: whether a gym''s copy of '
+  'somebody''s contract outlives them is a per-country retention decision and belongs with '
+  'tenants.record_retention_years. This is the list that decision will be made against. '
+  'See supabase/parts/390 and 1152.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 7 · The backlog that already exists
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Everything erased before this part was applied, in the three buckets it adds.
+-- 1120's section 8 does this for its three; this is the same statement for
+-- `coach-logos`, `coach-docs` and `exercise-videos`, and the uid cast is inside
+-- a CASE for the same reason 1120 gives — nothing guarantees Postgres evaluates
+-- the arms of an AND left to right, so a regex test beside a cast can still
+-- attempt the cast on a junk folder name and raise 22P02, taking the whole
+-- statement with it.
+--
+-- On this project it finds nothing: all three buckets are empty today.
+--
+-- The rule is the OWNER, not the row: an object whose folder uid no longer
+-- exists in `auth.users`. `exercise-videos` deliberately does NOT get the
+-- other obvious rule — "an object no `exercise_videos` row points at" — because
+-- `uploadExerciseVideo()` returns the path and the caller inserts the row
+-- afterwards, so there is a window in which a perfectly live upload has no row,
+-- and a backfill that ran inside it would queue a coach's clip for destruction
+-- seconds after they recorded it. Objects stranded by the swallowed `remove()`
+-- failure are covered going forward by section 3's trigger; the ones already
+-- there, if any, are visible with:
+--
+--     select o.name, o.created_at
+--       from storage.objects o
+--      where o.bucket_id = 'exercise-videos'
+--        and o.created_at < now() - interval '1 day'
+--        and not exists (select 1 from public.exercise_videos v
+--                         where v.video_path = o.name)
+--      order by o.created_at;
+--
+-- and clearing them is an operator decision with eyes on it, not a statement in
+-- a migration.
+
+insert into public.object_purge (bucket_id, path, subject_id, note)
+select s.bucket_id, s.name, s.owner_uid,
+       'orphan found at apply time — owner already erased'
+  from (
+    select o.bucket_id,
+           o.name,
+           case when coalesce((storage.foldername(o.name))[1], '')
+                     ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                then ((storage.foldername(o.name))[1])::uuid
+           end as owner_uid
+      from storage.objects o
+     where o.bucket_id in ('coach-logos', 'coach-docs', 'exercise-videos')
+  ) s
+ where s.owner_uid is not null
+   and not exists (select 1 from auth.users u where u.id = s.owner_uid)
+on conflict (bucket_id, path) do nothing;
+
+-- ▶ a-queue-that-reported-success-every-five-minutes-and-never-moved.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A queue that reported success every five minutes and never moved.
+--
+-- ── WHAT IS WRONG ─────────────────────────────────────────────────────────
+--
+-- This one is not hypothetical. It is happening on this project right now, and
+-- the numbers below were read out of the live database on 3 Sep 2026 rather
+-- than reasoned about:
+--
+--     select * from public.photo_purge;
+--
+--       path             tf/verify/a.jpg
+--       queued_at        2026-08-31 20:34:05Z
+--       attempts         0
+--       last_attempt_at  null
+--       request_id       null
+--       purged_at        null
+--       note             'path is not in the expected <uid>/<name> shape — not sent'
+--
+--     select jobid, status, count(*), max(start_time) from cron.job_run_details
+--      where jobid = 1 group by 1, 2;
+--
+--       1   succeeded   2335   2026-09-03 10:25:00Z
+--
+-- One row has been pending for three days. The drain that is supposed to clear
+-- it has run two thousand three hundred and thirty-five times in that window,
+-- and every single run is recorded as `succeeded`. There is no failed run
+-- anywhere in `cron.job_run_details` for any job on this project.
+--
+-- Three separate things make that possible, and each has to be fixed or the
+-- next stuck row is invisible in the same way:
+--
+--   1 · `purge_photo_file()` (part 45) refuses a badly shaped path by writing a
+--       note — and it writes NOTHING ELSE. `attempts` stays at 0 and
+--       `last_attempt_at` stays null. So a row that has been refused 864 times
+--       is indistinguishable, in every column an operator would sort or filter
+--       on, from a row queued one second ago that has never been looked at.
+--
+--   2 · `purge_progress_photo_files()` (part 45) selects `order by queued_at
+--       limit 200`. A permanently refused row is the oldest thing in the queue
+--       by definition — it never leaves — so it sits at the head of the window
+--       for ever, and once there are 200 of them no new file is ever sent. Part
+--       1120 already spotted the ordering half of this and wrote `order by
+--       attempts, queued_at`, but that fix depends on `attempts` being
+--       incremented, which is fault 1, so on its own it would have moved the
+--       stuck rows to the front instead of the back.
+--
+--   3 · NOTHING LOOKS. `grep -rn 'job_run_details\|photo_purge' src studio-web
+--       app web scripts supabase/functions` returns nothing at all. There is no
+--       screen, no export, no check script and no alert. The only signal a
+--       stalled purge produces is a row sitting still in a table that nobody
+--       queries, and pg_cron's own record — which says `succeeded`, because the
+--       function returned without raising, which it does whether it moved two
+--       hundred files or none.
+--
+-- ── WHAT IT DOES TO A REAL PERSON ────────────────────────────────────────
+--
+-- A member deletes their account. Their progress photographs — the ones part 45
+-- describes as pictures people take of themselves in a bathroom in their
+-- underwear — are queued for destruction, and one of them has a key the sender
+-- will not accept. It is refused every five minutes for ever. The account is
+-- gone, the row is gone, the app tells the member their photographs are removed
+-- by a scheduled job, and the photograph is still there. Nobody finds out,
+-- because the job that is failing to remove it is reporting success on a
+-- schedule.
+--
+-- This is the same defect as `request_account_deletion()` writing a timestamp
+-- nothing read (part 41), and as the queue part 48 had to schedule because
+-- nothing was draining it. Both of those were found by somebody reading the
+-- code. This one has been running for three days.
+--
+-- ── THE THREE FIXES, AND WHY THE THIRD IS SHAPED LIKE THAT ───────────────
+--
+-- 1 and 2 are one line each and are taken from `pg_get_functiondef` verbatim
+-- with only the wrong lines changed. Part 1152 § 4 makes the identical
+-- correction to `purge_stored_object()`, which inherited the same refusal
+-- branch from part 45; the two are deliberately the same shape.
+--
+-- 3 is the interesting one, because a view nobody opens is not visibility.
+-- Part 1120 added `file_purge_backlog` and it is the right thing to have, but
+-- its own operator note is honest about what it is: "the one query an operator
+-- runs". Somebody has to run it.
+--
+-- So the alarm is a SECOND cron job whose only job is to fail. It reads the two
+-- queues, and if anything has been outstanding for more than a day it raises an
+-- exception. It writes nothing, so there is nothing for the exception to roll
+-- back, and pg_cron records a raised exception as `status = 'failed'` with the
+-- message in `return_message` — which is the row the Supabase dashboard's cron
+-- view shows in red and which
+--
+--     select jobname, start_time, return_message from cron.job_run_details d
+--       join cron.job j using (jobid) where d.status <> 'succeeded'
+--      order by start_time desc;
+--
+-- returns. That is a real signal in a place somebody already looks, produced by
+-- the scheduler this product already depends on, with no new table, no new
+-- service and no email.
+--
+-- It is deliberately NOT part of the drain. Raising inside
+-- `purge_account_files()` or `purge_progress_photo_files()` would roll back the
+-- confirmations and the sends that run had just made — the alarm would destroy
+-- the progress it was complaining about the absence of. Separate job, separate
+-- transaction, once a day.
+--
+-- ── THE ONE ROW THAT IS STUCK TODAY, AND WHY IT IS DELETED RATHER THAN
+--    MARKED PURGED ───────────────────────────────────────────────────────
+--
+-- `tf/verify/a.jpg` is not a member's photograph. The `photos` bucket holds
+-- zero objects (verified live, and part 1122 records the same count), the key
+-- has three segments where a progress photo has two, and the first segment is
+-- `tf` rather than a uuid — no code path in this product can produce it. It is
+-- what its name says it is: a row left behind by somebody verifying that part
+-- 45's refusal branch works. It does work. That is the only thing it proves.
+--
+-- It is DELETED from the queue, and specifically NOT stamped `purged_at`.
+-- Stamping it would be the one thing part 1120 says must never happen —
+-- "Nothing in here marks a file deleted because it asked nicely" — and would
+-- put a permanent lie in the record: a row claiming storage confirmed the
+-- removal of a file that no request was ever sent for. Removing the row says
+-- something different and true: this was never a member's file and does not
+-- belong in a queue of member files.
+--
+-- The delete is guarded four ways and fires only on that exact row, in that
+-- exact state, with no object behind it. If any of that has changed by the time
+-- this is applied, it matches nothing and the alarm in section 3 tells you
+-- about the row instead. That is the correct failure.
+--
+-- ── WHAT THIS DELIBERATELY DOES NOT DO ───────────────────────────────────
+--
+--   · It does not widen `purge_photo_file()` to accept the path it refused.
+--     The shape check is what stops a malformed key being pasted into a URL
+--     where it could address a different object, and part 45 is right to have
+--     it. A refused path should be loud, not accepted.
+--   · It does not give up on a row after N attempts. A file whose deletion
+--     keeps failing must stay queued: the alternative is a queue that
+--     eventually forgets a member's photograph, which is the whole fault this
+--     product keeps finding, one level of abstraction up.
+--   · It does not send anybody an email, add a table, or introduce a service.
+--     The signal rides on `cron.job_run_details`, which already exists, is
+--     already retained, and is already the first place anybody looks when a
+--     scheduled thing has stopped.
+--   · It does not touch `purge_stored_object()` or `confirm_object_purges()`.
+--     Those are 1120's and 1152's; the equivalent correction is made there.
+--
+-- ── ORDER OF APPLICATION ─────────────────────────────────────────────────
+--
+-- Sections 1, 2 and 4 need only parts 45 and 48, which are applied. Section 3's
+-- alarm reads `public.object_purge` if it exists and skips it if it does not,
+-- so this file is correct whether 1120 has been applied before it or not —
+-- though in setup.sql it always has, because 1120 sorts first.
+--
+-- Idempotent and safe to re-run: `or replace` on both functions, the cron job
+-- unscheduled before it is scheduled, the view `or replace`, and the delete in
+-- section 4 matches nothing on a second run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · A refusal that counts as an attempt
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `purge_photo_file()` exactly as it stands live, with `attempts` and
+-- `last_attempt_at` added to the two branches that give up. Nothing else in the
+-- function is touched: not the guard, not the regex, not the Vault read, not
+-- the URL, not the success update.
+--
+-- `attempts` is what tells an operator this has been happening for three days
+-- rather than three minutes, and it is what makes section 2's ordering work.
+-- `last_attempt_at` is what tells them when it last happened. Both were being
+-- written on the branch that succeeds and on neither of the two that do not,
+-- which is the wrong way round: a branch that gives up is the one an operator
+-- needs a count from.
+--
+-- The Vault branch is included even though it fails for every row at once
+-- rather than for one row for ever. A missing secret is still an attempt, and a
+-- run that touched two hundred rows and sent nothing should say so in the
+-- rows.
+
+create or replace function public.purge_photo_file(p_path text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_key text; v_req bigint;
+begin
+  if p_path is null or not exists (select 1 from public.photo_purge where path = p_path and purged_at is null) then
+    return;
+  end if;
+  if p_path !~ '^[0-9a-fA-F-]{36}/[A-Za-z0-9._-]{1,120}$' then
+    update public.photo_purge
+       set note = 'path is not in the expected <uid>/<name> shape — not sent',
+           attempts = attempts + 1,
+           last_attempt_at = now()
+     where path = p_path;
+    return;
+  end if;
+  select decrypted_secret into v_key from vault.decrypted_secrets where name = 'storage_service_key' limit 1;
+  if v_key is null or v_key = '' then
+    update public.photo_purge
+       set note = 'no storage_service_key in Vault — file NOT deleted',
+           attempts = attempts + 1,
+           last_attempt_at = now()
+     where path = p_path;
+    return;
+  end if;
+  select net.http_delete(
+    url := 'https://phgfwzpkkwdysftlgkoq.supabase.co/storage/v1/object/photos/' || p_path,
+    headers := jsonb_build_object('Authorization', 'Bearer ' || v_key, 'apikey', v_key)
+  ) into v_req;
+  update public.photo_purge set request_id = v_req, attempts = attempts + 1,
+         last_attempt_at = now(), note = 'sent' where path = p_path;
+end $$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A new file is never stuck behind an old failure
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `purge_progress_photo_files()` exactly as it stands live, with `order by
+-- queued_at` becoming `order by attempts, queued_at`. Part 1120 gives the
+-- argument and it applies here word for word: "a single permanently-refused
+-- object at the head of a 200-row window would otherwise be re-sent ahead of
+-- new work on every single run."
+--
+-- The two changes are one fix. Ordering by attempts is only meaningful because
+-- section 1 now increments it; incrementing it is only useful because something
+-- sorts on it. Applied on their own, either would look like an improvement and
+-- neither would move a photograph.
+
+create or replace function public.purge_progress_photo_files()
+returns table(confirmed integer, sent integer)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare r record; n int := 0;
+begin
+  confirmed := public.confirm_photo_purges();
+  for r in select path from public.photo_purge where purged_at is null
+            order by attempts, queued_at limit 200
+  loop
+    perform public.purge_photo_file(r.path);
+    n := n + 1;
+  end loop;
+  sent := n;
+  return next;
+end $$;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · The alarm
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- One view and one function, and the function's only purpose is to fail.
+--
+-- `storage_purge_backlog` is for `photo_purge`, which is the queue that had no
+-- backlog view at all — part 1120 wrote `file_purge_backlog` for its own queue
+-- and part 45 never wrote one for this. The column list is 1120's, deliberately,
+-- so an operator reading the two side by side is reading the same shape twice.
+-- The bucket is a literal because `photo_purge` has no such column: it predates
+-- there being more than one bucket to purge from.
+--
+-- The two are NOT unioned into a single view. `object_purge` may not exist —
+-- part 1120 is not applied to this project — and a view over a missing table
+-- cannot be created at all, so a union would make this file refuse to apply on
+-- exactly the project that has the older, unwatched queue. The function below
+-- reads both, guarded, which is where the two-queues-one-question job belongs.
+--
+-- security_invoker, following 1120's `file_purge_backlog`, so it inherits the
+-- underlying table's RLS. `photo_purge` has RLS on with no policies, which
+-- means the owner and the service role and nobody else. These rows name which
+-- member held which photograph; they are not for a screen.
+
+create or replace view public.storage_purge_backlog
+with (security_invoker = true) as
+  select 'photos'::text as bucket_id,
+         p.path,
+         p.subject_id,
+         p.queued_at,
+         p.attempts,
+         p.last_attempt_at,
+         p.note,
+         (now() - p.queued_at) as outstanding_for
+    from public.photo_purge p
+   where p.purged_at is null;
+
+comment on view public.storage_purge_backlog is
+  'Progress photographs this product has failed to delete — the photo_purge backlog, which had no '
+  'view of its own until now. The same column list as part 1120''s file_purge_backlog. Read by '
+  'check_storage_purge_backlog(), which the storage-purge-backlog-alarm cron job runs daily and '
+  'which RAISES if anything in EITHER queue has been outstanding for more than a day — so a '
+  'stalled queue turns a cron run red instead of sitting still in a table nobody opens. '
+  'The object_purge half is public.file_purge_backlog (part 1120). See supabase/parts/1153.';
+
+
+-- The function that fails. It writes nothing at all, which is what makes it
+-- safe to raise from: there is no work for the rollback to undo.
+--
+-- A day is the threshold because the drain runs every five minutes. Anything
+-- still here after 288 attempts is not slow, it is stuck, and the two failure
+-- modes that produce it — a refused path shape and a missing Vault secret —
+-- both need a person and neither resolves itself.
+--
+-- The message carries the count, the oldest, and the note the sender left,
+-- because `return_message` in `cron.job_run_details` is all an operator gets
+-- and "backlog is not empty" would send them looking for the query this
+-- function has already run.
+--
+-- `object_purge` is read through `to_regclass` rather than named directly, so
+-- this file is correct on a project where part 1120 has not been applied. A
+-- missing table is not an alarm condition; it is a project that does not have
+-- that queue yet.
+
+create or replace function public.check_storage_purge_backlog()
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_n       int;
+  v_oldest  interval;
+  v_path    text;
+  v_note    text;
+  v_bucket  text;
+begin
+  select count(*), max(now() - queued_at)
+    into v_n, v_oldest
+    from public.photo_purge where purged_at is null;
+
+  select 'photos', path, note into v_bucket, v_path, v_note
+    from public.photo_purge where purged_at is null
+   order by queued_at limit 1;
+
+  if to_regclass('public.object_purge') is not null then
+    declare
+      v_n2 int; v_oldest2 interval; v_b2 text; v_p2 text; v_note2 text;
+    begin
+      execute 'select count(*), max(now() - queued_at) from public.object_purge where purged_at is null'
+         into v_n2, v_oldest2;
+      execute 'select bucket_id, path, note from public.object_purge where purged_at is null order by queued_at limit 1'
+         into v_b2, v_p2, v_note2;
+      v_n := coalesce(v_n, 0) + coalesce(v_n2, 0);
+      if v_oldest2 is not null and (v_oldest is null or v_oldest2 > v_oldest) then
+        v_oldest := v_oldest2; v_bucket := v_b2; v_path := v_p2; v_note := v_note2;
+      end if;
+    end;
+  end if;
+
+  if coalesce(v_n, 0) = 0 or v_oldest is null or v_oldest <= interval '1 day' then
+    return;
+  end if;
+
+  raise exception
+    'STORAGE PURGE STALLED: % file(s) still queued for deletion; the oldest has been outstanding for % — %/% — last note: %. These are files belonging to people who have been erased. Read public.storage_purge_backlog and public.file_purge_backlog. See supabase/parts/1153.',
+    v_n, v_oldest, v_bucket, v_path, coalesce(v_note, '(none)');
+end $$;
+
+revoke execute on function public.check_storage_purge_backlog() from public, anon, authenticated;
+
+
+-- Once a day, at a minute nothing else is on. Every other job in this project
+-- sits at :07 past the hour or between 03:17 and 07:48; 09:04 is empty.
+--
+-- Daily rather than hourly on purpose. The condition it tests is "outstanding
+-- for more than a day", which cannot become true and then false again within an
+-- hour, and twenty-four red runs a day is how an alarm gets muted.
+--
+-- Unscheduled first so re-running this file cannot accumulate duplicates.
+
+create extension if not exists pg_cron;
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'storage-purge-backlog-alarm') then
+    perform cron.unschedule('storage-purge-backlog-alarm');
+  end if;
+end $$;
+
+select cron.schedule(
+  'storage-purge-backlog-alarm',
+  '4 9 * * *',
+  $cron$ select public.check_storage_purge_backlog(); $cron$
+);
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · The row that is stuck today
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- See the header for the argument. In short: `tf/verify/a.jpg` is a test
+-- artefact, no code path in this product can produce that key, the `photos`
+-- bucket is empty, and it is deleted rather than stamped `purged_at` because
+-- stamping it would record a confirmation that was never received.
+--
+-- Four guards, all of which must hold:
+--
+--   · the exact path, which is not a shape this product can generate;
+--   · still pending, so a row that has since been purged is left alone;
+--   · never sent — `request_id is null` — so if a request has gone out since
+--     this was written, the reply is the thing that should close the row and
+--     not this statement;
+--   · and no object behind it in `storage.objects`, so a row that turns out to
+--     name a real file is not quietly forgotten.
+--
+-- If any guard fails this matches nothing, and section 3's alarm reports the
+-- row the next morning. That is the intended behaviour, not a fallback.
+
+delete from public.photo_purge p
+ where p.path = 'tf/verify/a.jpg'
+   and p.purged_at is null
+   and p.request_id is null
+   and not exists (
+     select 1 from storage.objects o
+      where o.bucket_id = 'photos' and o.name = p.path
+   );
+
+-- ▶ a-photograph-with-no-caption-told-nobody.sql
+
+-- A photograph with no caption told nobody.
+--
+-- ── The hop that dropped it ────────────────────────────────────────────────
+--
+-- `notify_on_message` (part 26) posts four fields at the `notify-message` edge
+-- function: the secret, the thread key, the sender, and NEW.body. That was the
+-- whole of a message when it was written. It is not any more.
+--
+-- supabase/parts/124 added attachments and said so plainly: "`body` stays NOT
+-- NULL and an attachment-only message carries ''". src/ui/messaging.ts writes
+-- exactly that row whenever somebody sends a photo or a clip with no words on
+-- it — `hasSomethingToSend` lets the send through on the strength of the file
+-- alone, which is right.
+--
+-- The notifier then received `body: ''` and returned `{ skipped: 'missing
+-- fields' }`. It wrote no inbox row and sent no push. And that function is the
+-- ONLY writer of the inbox row for a chat message: src/lib/notifyInbox.ts
+-- refuses to write a second one, on the correct grounds that this trigger
+-- writes the first.
+--
+-- So the two filters in that function — a muted 'chat' channel (part 251) and
+-- quiet hours (part 530, and `notify_quiet_hours_rollout.enforced` is TRUE on
+-- this server) — had a push to suppress with no record standing behind them. A
+-- client photographing the machine they are stuck on at eleven at night, to a
+-- coach who has set quiet hours, reached that coach NOWHERE: no banner, no
+-- bell, no error anywhere, and the client's own screen said "Sent".
+--
+-- ── What this part changes, and what it deliberately does not ──────────────
+--
+-- One field. `attachment_kind` rides along beside `body`, so the notifier can
+-- say "Sent you a photo" instead of finding nothing to say and going home. The
+-- wording is NOT built here — a notification composed in a trigger is a
+-- sentence nobody can find, and src/lib/messagePreview.ts is where it lives,
+-- asserted under node in messagePreview.test.ts.
+--
+-- `attachment_path` is deliberately NOT sent. The notifier has no use for a
+-- storage key it cannot read and would only be able to put somewhere it does
+-- not belong, and the path carries the sender's uid in it (part 124's layout,
+-- <client_id>/<sender_uid>/<file>).
+--
+-- Everything else about this function is unchanged and is repeated verbatim
+-- rather than patched, because `create or replace` takes the whole body: the
+-- Vault read, the skip-when-unconfigured, and the EXCEPTION block.
+--
+-- ── The EXCEPTION block stays, and is now the smaller of two evils ─────────
+--
+-- `exception when others then return NEW` swallows the notification's failure
+-- so a broken notifier cannot stop a message being written. That is the right
+-- trade and it is kept: the message is the thing, and a member whose words are
+-- refused because a push failed is a worse product than one whose push is
+-- missing.
+--
+-- It is worth being exact about what it can now swallow, though. `net.http_post`
+-- only ENQUEUES the request — pg_net delivers it out of band — so a notifier
+-- that is down, undeployed, or refusing the secret raises nothing here at all
+-- and never has. This block catches the Vault read and the enqueue itself, and
+-- both of those failing means no notification for that message and no record
+-- of the fact. There is no place in a trigger to report that to a person, and
+-- inventing one (a table of failed notifications nobody reads) would be a
+-- second silent thing rather than the end of the first. The honest statement is
+-- the one in this comment: the delivery of a chat notification is best-effort
+-- from the trigger onwards, and the message itself is not.
+--
+-- UNAPPLIED as written. Requires, in the same sitting:
+--   • this part applied, and
+--   • supabase/functions/notify-message deployed — it is a WEBHOOK, so:
+--       supabase functions deploy notify-message --use-api --no-verify-jwt
+-- Deploying the function first is safe and is the recommended order: it reads
+-- `attachment_kind` when it is there and falls back to "Sent you a message"
+-- when it is not, so it is correct against the old trigger too. Applying this
+-- part first is also safe — the extra field is ignored by the old function,
+-- which drops caption-less messages either way.
+--
+-- Idempotent; safe to re-run.
+
+create or replace function public.notify_on_message()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_secret text;
+begin
+  -- Read the shared secret from Vault at call time. It is deliberately NOT a
+  -- literal in this body: the original version carried it in plaintext, where
+  -- anything able to read pg_proc could read it. Rotating means changing the
+  -- Vault secret and HOOK_SECRET, with no change to this function.
+  select decrypted_secret into v_secret
+    from vault.decrypted_secrets
+   where name = 'hook_secret'
+   limit 1;
+
+  -- No secret configured: skip rather than post an unauthenticated request.
+  if v_secret is null or v_secret = '' then
+    return NEW;
+  end if;
+
+  perform net.http_post(
+    url     := 'https://phgfwzpkkwdysftlgkoq.supabase.co/functions/v1/notify-message',
+    headers := jsonb_build_object('Content-Type', 'application/json'),
+    body    := jsonb_build_object(
+      'secret',    v_secret,
+      'client_id', NEW.client_id,
+      'sender',    NEW.sender,
+      'body',      NEW.body,
+      -- The new field, and the whole of this part. 'image' | 'video' | null,
+      -- checked by messages_attachment_kind_chk (part 124). Null for an
+      -- ordinary text message, which is the case the notifier already handled.
+      'attachment_kind', NEW.attachment_kind
+    )
+  );
+  return NEW;
+-- A failed notification must never block the message itself from being written.
+-- See the note above on exactly how much this can hide.
+exception when others then
+  return NEW;
+end;
+$function$;
+
+-- Unchanged, and restated so this file stands alone if it is ever read on its
+-- own: the trigger is AFTER INSERT, per row, and part 26 created it.
+drop trigger if exists on_message_insert on public.messages;
+create trigger on_message_insert
+  after insert on public.messages
+  for each row execute function notify_on_message();
+
+comment on function public.notify_on_message() is
+  'AFTER INSERT on messages: posts the thread key, the sender, the body and the attachment kind to the notify-message edge function via pg_net. The attachment kind is carried because an attachment-only message has body '''' (part 124) and the notifier used to read that as "nothing to notify anybody about", writing no inbox row and sending no push. See supabase/parts/1210.';

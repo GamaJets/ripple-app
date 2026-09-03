@@ -29,7 +29,7 @@
 // Everything on this screen comes from src/lib/intake.ts, which holds that rule
 // and has a test that fails if anything here starts ranking people.
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -46,6 +46,10 @@ import {
   readinessNote, readinessUnanswered,
 } from '../../src/lib/intake';
 import { fmtDay } from '../../src/lib/format';
+// The emergency number is the one thing on this screen that is read in a hurry,
+// and it was a plain <Text>. `telUrl` decides what may be offered as a call —
+// never a handle, never a number with an extension welded on.
+import { telUrl, DIAL_UNAVAILABLE_NOTE } from '../../src/lib/dialling';
 
 /** A label out of one of the option lists, or the raw id where a document
  *  written by a later build carries something this one does not know. Printing
@@ -98,6 +102,21 @@ export default function ClientIntakeScreen() {
 
   const disclosed = readinessDisclosed(intake);
   const unanswered = readinessUnanswered(intake);
+
+  /**
+   * The emergency number as something the phone can ring, or null.
+   *
+   * Null is drawn as the ordinary line: a handle, a note or a half-typed number
+   * gets no Call control rather than a control that opens nothing. See
+   * src/lib/dialling.ts.
+   */
+  const dialEmergency = telUrl(intake?.emergency.phone);
+  const callEmergency = () => {
+    if (!dialEmergency) return;
+    Linking.openURL(dialEmergency).catch(() => {
+      Alert.alert('Could not open the dialler', DIAL_UNAVAILABLE_NOTE);
+    });
+  };
 
   /** A line of the document, or nothing at all where they left it blank. An
    *  em-dash in a paragraph of somebody's own words reads as an answer they
@@ -306,7 +325,30 @@ export default function ClientIntakeScreen() {
             <Section>
               <SectionHead title="Who To Call" />
               <Line label="Name" value={intake.emergency.name} />
-              <Line label="Number" value={intake.emergency.phone} />
+              {/* ── the one line on this screen that gets read in a hurry ──
+                  This was a `<Line>`: a number in a Text node, four taps deep,
+                  on a screen a coach opens BEFORE a first session and not
+                  during an incident. In the situation this number exists for,
+                  the coach is holding a phone and cannot copy a string out of
+                  a paragraph. An enquiry from a stranger has been one tap away
+                  on app/(trainer)/leads.tsx all along.
+
+                  Offered as a call ONLY when it is dialable. A number that is
+                  not one falls back to the plain line rather than to a tap that
+                  opens nothing — the coach would find that out afterwards. */}
+              {dialEmergency ? (
+                <Pressable onPress={callEmergency} accessibilityRole="button"
+                  accessibilityLabel={`Call ${intake.emergency.name.trim() || 'the emergency contact'} on ${intake.emergency.phone.trim()}`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>Number</Text>
+                    <Text style={{ ...ty.body, color: t.brand, marginTop: sp.xs }}>{intake.emergency.phone.trim()}</Text>
+                  </View>
+                  <Text style={{ ...ty.body, fontWeight: '600', color: t.brand }}>Call</Text>
+                </Pressable>
+              ) : (
+                <Line label="Number" value={intake.emergency.phone} />
+              )}
               <Line label="Relationship" value={intake.emergency.relation} />
               {!intake.emergency.name.trim() || !intake.emergency.phone.trim() ? (
                 <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>

@@ -279,6 +279,15 @@ export function planVsActual(input: PlanVsActualInput): PlanVsActual {
   // last one is what lets a truncated read still answer: `capped()` returns the
   // newest rows, so a client with four thousand workouts has their last month
   // read in full and only their 2023 is missing.
+  // whole-ok: `landed` is not the whole gate and is not meant to be. It is
+  // ANDed with `reachesWindow` below, which is the condition that actually
+  // handles 'partial' — and handles it better than `isWhole` would, because it
+  // asks the question that matters rather than the blunt one. A capped read
+  // returns the newest rows, so a client with four thousand workouts still has
+  // their last month in full; `oldestDay <= fromDay` lets that answer, and
+  // refuses only when the truncation genuinely ate into the window asked about.
+  // `isWhole` here would refuse every such client a plan-versus-actual they
+  // have complete data for, which is a dash where an answer exists.
   const landed = input.log != null && input.logStatus !== 'error' && input.logStatus !== 'loading';
   const reachesWindow = input.logStatus === 'ready'
     || (input.oldestDay != null && fromDay != null && input.oldestDay <= fromDay);

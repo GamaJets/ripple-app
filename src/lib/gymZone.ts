@@ -204,6 +204,35 @@ export function gymDay(at: string | number | Date | null | undefined, zone: stri
   }
 }
 
+/**
+ * The weekday an instant falls on at the gym: 0 = Sunday, through 6 = Saturday.
+ *
+ * The same three nothings as `gymDay` — no instant, no zone, an unresolvable
+ * zone — return null, and null is the answer the caller must render as "we do
+ * not know whose Tuesday this is" rather than filling in with `getDay()`.
+ *
+ * ── What this is for ──────────────────────────────────────────────────────
+ *
+ * A timetable repeats by weekday and hour, and grouping classes into recurring
+ * slots by the BROWSER's `getDay()` and `getHours()` makes the same class two
+ * slots on two laptops. Worse than a cosmetic label: a 06:00 class either
+ * splits into two buckets side by side or merges with the 07:00 one, so the
+ * fill rate the grouping exists to compute is taken over the wrong set of
+ * classes, and "Tuesday 06:00 Spin is half empty" becomes something an owner
+ * abroad sees and an owner at the gym does not.
+ *
+ * Derived from `gymDay` rather than from a second `Intl` call, so the weekday
+ * and the date can never disagree about which day it is at the gym.
+ */
+export function gymWeekday(at: string | number | Date | null | undefined, zone: string | null | undefined): number | null {
+  const day = gymDay(at, zone);
+  if (!day) return null;
+  // Parsed as UTC midnight of the gym's own calendar date. The zone is already
+  // spent — `day` IS the gym's date — so any further offset would move it back.
+  const t = Date.parse(`${day}T00:00:00.000Z`);
+  return Number.isFinite(t) ? new Date(t).getUTCDay() : null;
+}
+
 /** The hour of the day, 0–23, an instant falls in at the gym. Null for the same
  *  three nothings `gymDay` returns null for. This is the figure the door-entry
  *  histogram is built on, and it is the one `getHours()` gets wrong by however

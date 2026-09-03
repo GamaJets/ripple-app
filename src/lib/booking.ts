@@ -197,6 +197,22 @@ export function unstatedCurrency(currency: string | null | undefined): string {
   return currency ? '' : ' Your coach hasn’t set a currency, so ask them what that amount is in.';
 }
 
+/**
+ * The same clause, said to the COACH.
+ *
+ * `unstatedCurrency` above addresses the client and tells them to ask their
+ * coach, which is exactly the wrong instruction on the coach's own screen. The
+ * three waive and reinstate confirmations in app/(trainer)/calendar.tsx printed
+ * the bare figure with no clause at all — so a coach confirmed forgiving "25"
+ * with nothing on the screen saying 25 of what, on the one list in the app that
+ * says what their clients owe them. It is also the screen a coach with no
+ * currency set is most likely to be on, because that is the state in which the
+ * figure comes through bare.
+ */
+export function unstatedCurrencyCoach(currency: string | null | undefined): string {
+  return currency ? '' : ' You have not set a currency, so that figure has no unit on it — set one in Settings and it will be priced everywhere.';
+}
+
 /** How the notice period reads in a sentence: "24 hours", "1 hour", "48 hours". */
 export function noticeLabel(hours: number): string {
   return `${hours} hour${hours === 1 ? '' : 's'}`;

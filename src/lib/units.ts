@@ -427,6 +427,51 @@ export function readLift(text: string | number | null | undefined, unit: WeightU
 }
 
 /**
+ * The range a human body weighs, stated separately in each unit for the reason
+ * `LIFT_MAX` is: 20–400 kg converts to 44–882 lb, and quoting a metric range to
+ * somebody typing pounds is refusing their number in a unit they do not use.
+ *
+ * The same 20/400 the check-in sheet and onboarding have always held. What was
+ * missing is the sheet in between them — app/(client)/profile.tsx, the main
+ * place a member edits their own weight — which clamped nothing at all.
+ */
+const BODY_MIN: Record<WeightUnit, number> = { kg: 20, lb: 44 };
+const BODY_MAX: Record<WeightUnit, number> = { kg: 400, lb: 880 };
+
+/** Either the body weight in kilograms, or the sentence to show whoever typed
+ *  it. A blank box is `kg: null` — no weight typed is not a refusal. */
+export type BodyWeightRead = { ok: true; kg: number | null } | { ok: false; reason: string };
+
+/**
+ * Read a BODY weight, with the bounds stated in the unit being typed.
+ *
+ * `weightToKg` below has no bound of any kind, and the sheet that is a member's
+ * main way of editing their own weight used it raw. A slipped keypress — 1800
+ * for 180 — went onto the health record permanently: it feeds the macro
+ * calculator, the goal projection, every weight chart, the pricing of every
+ * bodyweight set in the training log, and the coach's view of the member. There
+ * is no delete on that series, so the member's only clue was a calorie target
+ * that suddenly made no sense.
+ *
+ * Checked against the number AS TYPED, before any conversion — the figure being
+ * judged has to be the figure on screen. Checking a converted number against a
+ * metric range would wave 180 lb through as 180 kg, which is how this class of
+ * bug got into the check-in sheet before it was fixed there.
+ */
+export function readBodyWeight(text: string | number | null | undefined, unit: WeightUnit): BodyWeightRead {
+  if (text == null || String(text).trim() === '') return { ok: true, kg: null };
+  const n = parse(text);
+  if (n == null) return { ok: false, reason: 'That weight is not a number.' };
+  if (n < BODY_MIN[unit] || n > BODY_MAX[unit]) {
+    return {
+      ok: false,
+      reason: `Weight should be between ${plain(BODY_MIN[unit])} and ${plain(BODY_MAX[unit])} ${unit}. Check that figure — it is what your calorie targets and your whole weight history are built from.`,
+    };
+  }
+  return { ok: true, kg: roundTo(unit === 'lb' ? lbToKg(n) : n, STORED_DP) };
+}
+
+/**
  * What the client typed in their own unit, as kilograms to store — or null if
  * the field was empty or unreadable.
  *

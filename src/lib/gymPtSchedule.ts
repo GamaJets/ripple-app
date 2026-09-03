@@ -17,6 +17,7 @@
 // it.
 
 import { assertWhole, capLimit } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import type { SessionOutcome } from './gymSessions';
 import type { GymClass } from './gymSchedule';
 
@@ -80,10 +81,18 @@ export async function fetchPtSlots(
   // A failure to read the names must not be reported as "the sessions have no
   // names" — that is the difference between not loaded and loaded-and-empty,
   // one level down. So it throws like everything else.
+  // CHUNKED. The read above is `capLimit()`, so `rows` can be a thousand
+  // sessions, and every session carries TWO ids — a trainer and a client — so
+  // `ids` can be two thousand uuids. At about 39 bytes each inside an
+  // `in.("…","…")` list that is a 78KB request line; nginx and most CDNs refuse
+  // past 8KB, which is roughly two hundred. The 414 arrives as `data: null`,
+  // which is indistinguishable from "none of these people has a profile", and
+  // the board would render a whole week of one-to-ones with nobody's name on
+  // it. 150 at a time (src/lib/idLookup.ts) cannot reach that limit.
   const names = new Map<string, string>();
-  if (ids.length) {
+  for (const chunk of chunkIds(uniqueIds(ids))) {
     const { data: profs, error: nameErr } = await sb
-      .from('profiles').select('id, full_name').in('id', ids);
+      .from('profiles').select('id, full_name').in('id', chunk);
     if (nameErr) throw nameErr;
     (profs ?? []).forEach((p: any) => {
       const n = (p.full_name || '').trim();
@@ -640,12 +649,20 @@ export async function fetchTrainerOptions(
   const ids: string[] = assertWhole(data as any[] | null, "this gym's trainers").map((r: any) => r.id as string);
   if (!ids.length) return [];
 
-  const { data: profs, error: nameErr } = await sb
-    .from('profiles').select('id, full_name').in('id', ids);
-  if (nameErr) throw nameErr;
-  const names = new Map<string, string>(
-    (profs ?? []).map((p: any) => [p.id as string, (p.full_name || '').trim()]),
-  );
+  // Chunked for the same reason as fetchPtSlots above. The paragraph over the
+  // `trainers` read argues that a thousand trainers is not a gym, and that is
+  // true of the ROW count — it is not a bound on the request line, because
+  // `capLimit()` is the only thing standing between this list and a thousand
+  // uuids, and the 414 that a thousand would earn comes back as `data: null`:
+  // a picker with no trainers in it, on the screen that attaches one to a
+  // class.
+  const names = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(ids))) {
+    const { data: profs, error: nameErr } = await sb
+      .from('profiles').select('id, full_name').in('id', chunk);
+    if (nameErr) throw nameErr;
+    (profs ?? []).forEach((p: any) => names.set(p.id as string, (p.full_name || '').trim()));
+  }
 
   return ids
     .map((id) => ({ id, name: names.get(id) || null }))

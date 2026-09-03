@@ -96,6 +96,12 @@ import { areaLabel, INJURY_AREAS } from '../../src/lib/injuries';
 import { askToRecordInjury } from '../../src/ui/injuryAsk';
 import { askToCompleteIntake, useClientIntake } from '../../src/ui/intake';
 import { intakeLine, intakePrompt } from '../../src/lib/intake';
+// "Has this person signed it" — the coach's half of the question the client
+// portal has been able to answer since part 135.
+import { useClientPaperwork } from '../../src/ui/clientPaperwork';
+import { useToday } from '../../src/ui/today';
+import { paperworkLine, paperworkItemLine, paperworkOutstanding } from '../../src/lib/clientPaperwork';
+import { fmtDay } from '../../src/lib/format';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useAuthRevision } from '../../src/ui/authRevision';
 import { useAuth } from '../../src/ui/auth';
@@ -155,7 +161,7 @@ import {
 // "add up what somebody paid" is how a coach comes to be shown two answers to
 // the question they are about to end a relationship on.
 import {
-  clientValue, valueEmptyLine, valueSpanLine, valueStatus,
+  clientValue, valueEmptyLine, valueSpanLine, valueStatus, paymentsCounted, paymentsFloorLine,
   VALUE_IS_PAST, VALUE_MAY_DOUBLE_COUNT, VALUE_NEEDS_YOUR_RECORDS,
   type ClientValue,
 } from '../../src/lib/clientValue';
@@ -333,6 +339,21 @@ export default function ClientScreen() {
   const queryable = clientIsQueryable(id, client?.handAdded);
   const canRead = USE_SUPABASE && queryable && !!id;
 
+  /* ── has this person signed it ──────────────────────────────────────────
+   *
+   * The coach's question is never "who has signed the waiver", it is "has THIS
+   * person signed it", asked ninety seconds before a first session. The app
+   * could answer it and offered the answer only to the client:
+   * src/lib/coachDocs.ts's `outstanding()` is headed "the one question the
+   * client portal asks" and is imported by app/(client)/coach-documents.tsx
+   * alone. The coach's route was Documents → one document → a roster-length
+   * list of names, per document, per session. Nobody does that twice.
+   *
+   * Hand-added clients are passed as null: somebody with no account cannot have
+   * accepted anything, and the section says that rather than reading three
+   * tables to find nothing. */
+  const paperwork = useClientPaperwork(auth.user?.id ?? null, queryable ? id : null);
+
   /* ── when were they last seen at all ────────────────────────────────────── */
 
   const [drift, setDrift] = useState<Drift | null>(null);
@@ -383,15 +404,37 @@ export default function ClientScreen() {
         // regression this item must not introduce into a figure that was
         // working, and it costs one extra query only for the clients it
         // actually happens to.
-        const driftEvents = unusable
-          ? (await readClientActivity(supabase, [id], {
-              days: DEFAULT_WINDOWS.historyDays,
-              tenantId: tenant?.id ?? null,
-            })).byClient[id] ?? []
-          : (read.byClient[id] ?? []).filter((e) => {
-              const at = Date.parse(e.at);
-              return Number.isFinite(at) && at >= Date.now() - DEFAULT_WINDOWS.historyDays * 86_400_000;
-            });
+        let driftEvents: ActivityEvent[];
+        if (unusable) {
+          const narrow = await readClientActivity(supabase, [id], {
+            days: DEFAULT_WINDOWS.historyDays,
+            tenantId: tenant?.id ?? null,
+          });
+          if (!live) return;
+          // The narrow read's OWN flags, which used to be dropped on the floor
+          // — `.truncated` and `.notAsked` discarded, `driftFailed` left false,
+          // and the result handed to `assessDrift` regardless.
+          //
+          // src/lib/clientDrift.ts states the rule this broke: silence cannot
+          // be inferred from a set that was cut off. And this branch runs ONLY
+          // when the wide read was already too big, so it runs for the
+          // heaviest-logging clients — the ones who train most. The coach opened
+          // the record of somebody who was in yesterday, read a number of days
+          // since anything happened, and sent the message you send to somebody
+          // who has stopped coming.
+          if (narrow.truncated || narrow.notAsked.length > 0) {
+            setDrift(null);
+            setDriftFailed(true);
+            setActivity({ events: read.byClient[id] ?? [], readFromMs, truncated: true });
+            return;
+          }
+          driftEvents = narrow.byClient[id] ?? [];
+        } else {
+          driftEvents = (read.byClient[id] ?? []).filter((e) => {
+            const at = Date.parse(e.at);
+            return Number.isFinite(at) && at >= Date.now() - DEFAULT_WINDOWS.historyDays * 86_400_000;
+          });
+        }
         if (!live) return;
         // `since` is when they joined the book. Without it a client added
         // yesterday and a client silent for eight weeks are the same shape of
@@ -701,10 +744,14 @@ export default function ClientScreen() {
 
   // The gym pass has to be live on a DATE, and the date is local: a pass
   // expires at the gym, not at an instant in UTC.
-  const creditToday = useMemo(() => {
-    const d = new Date(); const z = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
-  }, []);
+  //
+  // `useToday`, not a `useMemo` with an empty dependency array. The local-day
+  // reasoning above is right and freezing it undid it: a coach who left this
+  // client open last night and picked the phone up in the morning was shown a
+  // pass that expired at midnight as live, pulled to refresh — which re-reads
+  // the passes and never recomputed the date they are judged against — and
+  // trained a session nothing is paying for. See src/ui/today.ts.
+  const creditToday = useToday();
   const coachPacks: Entitlement[] | null = useMemo(
     () => (packRows === undefined ? null : coachPackLines(packBalance(packRows ?? null).lines)), [packRows]);
   const gymPtPasses: Entitlement[] | null = useMemo(
@@ -917,6 +964,12 @@ export default function ClientScreen() {
    * from it would assert how somebody is coached on the strength of a read
    * that failed. 'partial' is fine: the people listed are real, this client is
    * one of them, and their row came back whole.
+   *
+   * whole-ok: 'partial' is the deliberate half of that. This screen does not
+   * count the roster or say anything about its size — it reads one field off
+   * one named client's row, and `!!client` is the proof that that row is in
+   * hand. A truncated read makes the SET a prefix; it does not make the row
+   * that came back any less that person's own.
    */
   const modeKnown = !!client && r.status !== 'error' && r.status !== 'loading';
 
@@ -1231,9 +1284,9 @@ export default function ClientScreen() {
     setReadNonce((n) => n + 1);
     return Promise.all([
       r.refresh(), Promise.resolve(ap.reload()), Promise.resolve(refreshTenant()),
-      gl.refresh(), Promise.resolve(ci.reload()),
+      gl.refresh(), Promise.resolve(ci.reload()), Promise.resolve(paperwork.reload()),
     ]);
-  }, [r, ap, refreshTenant, gl, ci]);
+  }, [r, ap, refreshTenant, gl, ci, paperwork]);
   const pull = usePullToRefresh(reloadEverything);
 
   /* ── and the same set when the coach comes back ─────────────────────────
@@ -1552,6 +1605,52 @@ export default function ClientScreen() {
           </Section>
         ) : null}
 
+        {/* ── your paperwork, for this person ─────────────────────────────
+            Directly under the intake, because the two are read in the same
+            breath and for the same reason: this is the material a coach goes
+            through BEFORE putting somebody through anything.
+
+            Every sentence here comes from src/lib/clientPaperwork.ts, which
+            takes the LoadStatus as its first argument on purpose — a failed
+            read, a truncated read and a client who has genuinely signed
+            everything all arrive as an empty list, and only one of them means
+            they are covered. */}
+        {id ? (
+          <Section>
+            <SectionHead title="Your Paperwork" />
+            {!queryable ? (
+              <Flag tone={t.ink3}>
+                {who} was added by hand and has no Repple account, so there is nothing for them to have
+                accepted. Paperwork starts applying to them when they join with your code.
+              </Flag>
+            ) : (
+              <>
+                {paperworkOutstanding(paperwork.status, paperwork.items) || paperwork.status === 'error' || paperwork.status === 'partial' ? (
+                  <Flag tone={t.warn}>{paperworkLine(paperwork.status, paperwork.items, who)}</Flag>
+                ) : (
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{paperworkLine(paperwork.status, paperwork.items, who)}</Text>
+                )}
+                {/* The documents themselves, outstanding first. Shown under
+                    'partial' as well — the rows are real; it is the COUNT above
+                    them that cannot be stated. */}
+                {paperwork.status === 'ready' || paperwork.status === 'partial' ? paperwork.items.map((it) => (
+                  <View key={it.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md, marginTop: sp.sm }}>
+                    <Text style={{ ...ty.caption, color: t.ink, flex: 1 }} numberOfLines={1}>{it.title}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      {/* The words say it; the dot is the mark beside them. */}
+                      {it.acceptedAt ? null : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />}
+                      <Text style={{ ...ty.caption, color: it.acceptedAt ? t.ink3 : t.ink2 }}>{paperworkItemLine(it, fmtDay)}</Text>
+                    </View>
+                  </View>
+                )) : null}
+                <View style={{ marginTop: sp.md, flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                  <Ghost label="Your Documents" icon="info" onPress={() => router.push('/(trainer)/documents')} />
+                </View>
+              </>
+            )}
+          </Section>
+        ) : null}
+
         {/* ── Blood sugar, if they have chosen to show it ──────────────────
             Three outcomes that a naive screen would render identically, and
             they mean opposite things:
@@ -1764,7 +1863,13 @@ export default function ClientScreen() {
                   ? value.ledger.total.pots.map((pp) => minorMoney(pp.minorUnits, pp.currency)).filter(Boolean).join(' · ')
                   : '—',
               },
-              { label: 'Payments', value: fig(value.payments) },
+              // `paymentsCounted`, not `value.payments`. The count on the
+              // value is the rows that ARRIVED — kept deliberately, so the
+              // sentence below can call it a floor — and printing it here, a
+              // finger's width from "Worth —", made the dash read as "we
+              // cannot price these four" instead of "we do not know there were
+              // four".
+              { label: 'Payments', value: fig(paymentsCounted(value)) },
               {
                 label: 'Owed Now',
                 value: owed.outstanding && owed.outstanding.pots.length
@@ -1775,6 +1880,12 @@ export default function ClientScreen() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {value.ledger.total ? (valueSpanLine(value, new Date(nowMs)) ?? '') : valueEmptyLine(value)}
             </Text>
+            {/* The count the KPI above may not state, said as the floor it is —
+                "we could not total 14 payments" is a more useful sentence to a
+                coach than "we could not total your payments". */}
+            {paymentsFloorLine(value) ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{paymentsFloorLine(value)}</Text>
+            ) : null}
             {/* An amount with no currency on it is a hole in the figure, and
                 the size of the hole is what is worth reporting. It is never
                 summed into a unit nobody stated. */}
@@ -1861,7 +1972,17 @@ export default function ClientScreen() {
             they have already been paid. */}
         <Section>
           <SectionHead title="Session Credits" />
-          {creditsLoading ? (
+          {unasked ? (
+            /* Gated on `unasked` like every other section on this screen —
+               :1494, :1552 and :1724 all are, and this one was not. The three
+               reads behind it return before they start for a client with no
+               account (`if (!canRead || !id) return;`), so all three stayed
+               `undefined` and the spinner below could not be resolved by any
+               pull, retry or reconnection. A hand-added client is the ordinary
+               case for a coach taking cash, and this is the section that says
+               whether that person has hours left. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>{unasked}</Text>
+          ) : creditsLoading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading what pays for their sessions…</Text>
           ) : creditsUnread ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>

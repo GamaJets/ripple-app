@@ -14,11 +14,13 @@
 // policy, no grant behind either. The wording is asserted against that, because
 // an app that offers to withdraw an acceptance has misdescribed the thing
 // somebody agreed to.
+import { BRAND, DEFAULT_BRAND_ID } from './brands';
 import {
-  COACH_DOC_ACCEPT_RULE, COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_NOT_REPPLE,
+  COACH_DOC_ACCEPT_RULE, COACH_DOC_ACCESS_ENDS_NOTE, COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_NOT_REPPLE,
   COACH_DOC_REACH_NOTE, DOC_MIME_TYPES, MAX_DOC_BYTES, checkUpload, coachDocPath,
   docLine, docState, extForMime, isCoachDocPath, isUuid, ownerOfPath,
   outstanding, outstandingCount, shapeDocs, sizeLabel, slugify, standingLine,
+  STANDING_TRUNCATED_NOTE,
   uploadRefusalLine, type CoachDoc, type RawCoachDoc,
 } from './coachDocs';
 
@@ -165,11 +167,17 @@ eq(standingLine(0, Number.NaN), null, 'and an uncountable roster gets none eithe
 /* ── The two things this feature must never misrepresent ──────────────────── */
 
 // Part 84 stays part 84.
-ok(/your coach’s own paperwork, not Repple’s/i.test(COACH_DOC_NOT_REPPLE),
+ok(new RegExp(`your coach’s own paperwork, not ${BRAND.label}’s`, 'i').test(COACH_DOC_NOT_REPPLE),
   'the client is told whose document this is');
 ok(/separate thing that your coach cannot read/i.test(COACH_DOC_NOT_REPPLE),
   'and that the Repple release is separate and remains unreadable to their coach');
 ok(!/liability_waivers/.test(COACH_DOC_NOT_REPPLE), 'without naming a table at somebody');
+// The paragraph whose job is naming the responsible party names THIS app's
+// publisher, not the supplier a white-label member has never heard of.
+ok(COACH_DOC_NOT_REPPLE.includes(BRAND.label),
+  'the sentence names the brand this bundle is published under');
+ok(BRAND.id === DEFAULT_BRAND_ID || !/Repple/.test(COACH_DOC_NOT_REPPLE),
+  'AND ON A WHITE-LABEL BUILD IT NAMES NOBODY ELSE');
 
 // There is no un-accept, so nothing offers one.
 ok(/can’t be edited or withdrawn/i.test(COACH_DOC_ACCEPT_RULE), 'accepting is described as permanent');
@@ -199,6 +207,35 @@ ok(!/except what they accepted/i.test(COACH_DOC_REACH_NOTE),
 eq(isUuid(COACH), true, 'a uuid is a uuid');
 eq(isUuid('e5135000-0000-0000-0000'), false, 'and a truncated one is not');
 eq(isUuid(null), false, 'nor is nothing');
+
+/* ── the one count that is a legal claim ────────────────────────────────── */
+
+ok(!/all \d+ of your clients/i.test(STANDING_TRUNCATED_NOTE),
+  'the truncated note never makes the claim it replaces');
+ok(!/\b\d+\b/.test(STANDING_TRUNCATED_NOTE), 'and states no number at all over a partial read');
+ok(/not all of them|cannot be stated/i.test(STANDING_TRUNCATED_NOTE),
+  'it says the list is not everybody');
+ok(/covered/i.test(STANDING_TRUNCATED_NOTE),
+  'and names the wrong conclusion a coach would otherwise draw — that everyone is covered');
+
+
+/* ── what the member is told about losing access ─────────────────────────── */
+
+// COACH_DOC_REACH_NOTE says this to the COACH and has one importer, which is
+// the coach's screen. The member was told only that their acceptance is
+// permanent — never that the document itself stops opening the day they change
+// coach, leaving them holding proof they agreed to something they can no longer
+// read.
+ok(/stop opening for you/i.test(COACH_DOC_ACCESS_ENDS_NOTE),
+  'THE MEMBER IS TOLD THE DOCUMENTS STOP OPENING');
+ok(/another coach|coaching ends/i.test(COACH_DOC_ACCESS_ENDS_NOTE), 'and when');
+ok(/including anything you have accepted/i.test(COACH_DOC_ACCESS_ENDS_NOTE),
+  'and that accepting one does not rescue it — can_read_coach_doc has no acceptance branch');
+ok(/saving a copy/i.test(COACH_DOC_ACCESS_ENDS_NOTE), 'and what they can do about it beforehand');
+ok(/record of having accepted it stays/i.test(COACH_DOC_ACCESS_ENDS_NOTE),
+  'and that the half which survives is the half they cannot read');
+ok(COACH_DOC_ACCESS_ENDS_NOTE !== COACH_DOC_ACCEPT_RULE,
+  'and it is a second sentence, not a rewording of the acceptance rule');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`coachDocs: ok (${DOC_MIME_TYPES.length} accepted types, limit ${sizeLabel(MAX_DOC_BYTES)})`);

@@ -581,7 +581,7 @@ export default function Settings() {
               <Row t={t} label="Deletion Requested" sub={`Asked on ${requestedDay(pendingAt)} · your account and data are due to be erased`} right={
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
               } />
-              <Pressable onPress={withdrawDeletion} disabled={withdrawBusy} accessibilityRole="button" accessibilityLabel="Withdraw my deletion request">
+              <Pressable onPress={withdrawDeletion} disabled={withdrawBusy} accessibilityState={{ disabled: withdrawBusy }} accessibilityRole="button" accessibilityLabel="Withdraw my deletion request">
                 <Row t={t} label={withdrawBusy ? 'Withdrawing…' : 'Withdraw My Deletion Request'} sub="Keep your account. You can withdraw until the deletion is actioned, and ask again at any time."
                   right={<Icon name={FORWARD_ICON} size={15} color={t.ink3} />} />
               </Pressable>

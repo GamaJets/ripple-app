@@ -122,14 +122,25 @@ export function deltaText(deltaKg: number | null | undefined, unit: WeightUnit):
  * and it holds here: a line of apology above every row is a nag, it trains
  * people to stop reading it, and it does not get the question answered.
  *
- * The wording differs from the phone's `deviceUnitNote` on purpose. That one
- * ends "Tap to choose", and it is rendered on the screen where the choice can
- * be made. This console has no Settings and does not write the column, so
- * telling somebody to tap something that is not here would be worse than saying
- * nothing. It names where the answer lives instead.
+ * The wording differs from the phone's `deviceUnitNote` on purpose — that one
+ * ends "Tap to choose" — but only in the verb.
+ *
+ * It used to end "Choose one in the Repple app and this follows it", and the
+ * paragraph above it read: "This console has no Settings and does not write the
+ * column, so telling somebody to tap something that is not here would be worse
+ * than saying nothing." That sentence was written before /settings existed, and
+ * it stopped being true twice over: this console writes five settings to the
+ * database from that screen, and `profiles.weight_unit` is on the row `loadMe()`
+ * already reads. The only reader of a weight here is a COACH on
+ * /coach/roster — signed in, on a screen that can write their own profile row —
+ * and telling them the answer lives in an app they may not have installed is a
+ * dead end with a working control two lines below it.
+ *
+ * So the note says the unit was guessed and stops. The screen that renders it
+ * puts the choice beside it, because that is the screen the reader is on.
  */
 export function unitSourceNote(u: ResolvedUnits): string | null {
   if (u.weightSource === 'chosen') return null;
   const word = u.weightUnit === 'kg' ? 'kilograms' : 'pounds';
-  return `Weights are shown in ${word}, read from this browser's region — nobody has set a unit on this account. Choose one in the Repple app and this follows it.`;
+  return `Weights are shown in ${word}, read from this browser's region — nobody has set a unit on this account.`;
 }

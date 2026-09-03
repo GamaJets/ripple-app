@@ -44,6 +44,7 @@
 // Nothing here is about payroll. Payroll is the gym's question and stays on the
 // gym's module, tenant filter and all.
 import { assertWhole, capLimit } from './rowCap';
+import { chunkIds, uniqueIds } from './idLookup';
 import { isAwaitingOutcome, namesById, sessionProfileIds, type PtSession } from './gymSessions';
 
 type Queryable = { from: (table: string) => any };
@@ -129,6 +130,7 @@ export function rowToSession(r: any, names: Map<string, string>): PtSession {
     outcome: r.outcome ?? null,
     outcomeAt: r.outcome_at ?? null,
     rateCents: r.rate_cents ?? null,
+    rateCurrency: r.rate_currency ?? null,
     settlementId: r.settlement_id ?? null,
     // What the CLIENT paid with (supabase/parts/370). Not the same question as
     // `settlementId`, which is what the GYM paid the coach: a session can be
@@ -147,11 +149,24 @@ export function rowToSession(r: any, names: Map<string, string>): PtSession {
  * marking queue over a label. Same call the gym module makes, same reason.
  */
 async function fetchNames(sb: Queryable, rows: any[]): Promise<Map<string, string>> {
-  const ids = sessionProfileIds(rows);
-  if (!ids.length) return new Map();
-  const { data, error } = await sb.from('profiles').select('id, full_name').in('id', ids);
-  if (error) return new Map();
-  return namesById((data ?? []) as Array<{ id: string; full_name?: string | null }>);
+  // Chunked, exactly as `fetchSessionNames` in gymSessions is, and for a reason
+  // the swallow above makes sharper rather than softer. `rows` comes from a
+  // `capLimit()` read and every session names TWO people, so this list can be
+  // two thousand uuids — a 78KB request line against an 8KB limit. The 414 is
+  // returned as `data: null`, the `return new Map()` above turns it into "no
+  // name for anybody", and a coach's marking queue for a busy quarter renders
+  // as a column of "Client". One unreadable name is the case that fallback was
+  // written for; all of them, because the request was refused before it was
+  // asked, is not.
+  const out = new Map<string, string>();
+  for (const chunk of chunkIds(uniqueIds(sessionProfileIds(rows)))) {
+    const { data, error } = await sb.from('profiles').select('id, full_name').in('id', chunk);
+    if (error) return out;
+    for (const [id, name] of namesById((data ?? []) as Array<{ id: string; full_name?: string | null }>)) {
+      out.set(id, name);
+    }
+  }
+  return out;
 }
 
 /**
@@ -170,7 +185,7 @@ export async function fetchMySessions(
 ): Promise<PtSession[]> {
   let q = sb
     .from('sessions')
-    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
+    .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, rate_currency, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
     .eq('trainer_id', trainerId)
     .gte('starts_at', sinceIso)
     .order('starts_at', { ascending: false });
@@ -229,18 +244,19 @@ export async function markMyOutcome(
   }
 }
 
-/** Undo a wrongly recorded outcome. Same zero-row refusal, same reason: an undo
- *  that silently does nothing leaves a "no show" on the record while telling
- *  the coach they took it back. */
-export async function clearMyOutcome(
-  sb: Queryable,
-  trainerId: string,
-  sessionId: string,
-): Promise<void> {
-  const { data, error } = await sb
-    .from('sessions').update({ outcome: null }).eq('id', sessionId).eq('trainer_id', trainerId).select('id');
-  if (error) throw error;
-  if (!Array.isArray(data) || data.length === 0) {
-    throw new Error('That outcome was not cleared — the session may no longer exist, or it is not yours to change.');
-  }
-}
+// ── `clearMyOutcome` lived here, and is gone ─────────────────────────────
+//
+// It undid a wrongly recorded outcome by writing `outcome: null` straight to
+// the server, and app/(trainer)/sessions.tsx was its only caller. That was the
+// defect: the MARK beside it went through the floor queue (src/ui/floorQueue.ts)
+// and the UNDO did not, so the two halves of one feature met in exactly the
+// conditions the queue exists for. Offline, the undo threw, the screen said so
+// honestly, and the queue then flushed the "no show" the coach had retracted in
+// front of the client — onto that client's record and onto payroll.
+//
+// A retraction is now an act like any other: `{ kind: 'session-outcome',
+// outcome: null }`. It carries the same supersede key as the mark it takes
+// back, so offline it replaces the queued mark in place and nothing false is
+// ever sent, and when the mark had already reached the server it is sent — and
+// retried — like everything else. The statement itself is one line in that
+// module's sender, matched on the session and the coach exactly as this was.

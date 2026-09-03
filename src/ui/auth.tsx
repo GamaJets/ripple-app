@@ -20,6 +20,7 @@ import {
 } from '../lib/supabase';
 import { resetPasswordUrl } from '../lib/deepLink';
 import { reportError } from '../lib/reportError';
+import { writeFailure } from '../lib/wroteRows';
 import { phoneAuthError, digitsOnly } from '../lib/phone';
 import { emailCodeError, emailResendError, type OtpOutcome } from './emailOtp';
 import { checkTenantBrand, stampTenantBrand, signUpWithBrand, brandSignUpMetadata } from '../lib/tenantBrand';
@@ -310,12 +311,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const wanted = (name || '').trim();
       if (wanted) {
-        // Only fills a blank. See the note above on not overwriting a name.
+        // ── Only fills a blank, and only when it KNOWS the blank is real ────
+        //
+        // Two things were wrong here and they compounded.
+        //
+        // The read carried `no-error-ok: an unreadable profile leaves the name
+        // unset, which is the same outcome as it already having one`. That
+        // sentence is not true of this code. A refused read gives `prof =
+        // null`, `(null)?.full_name` is undefined, `|| ''` makes it empty, and
+        // the `!` turns the failure into "there is no name" — so the branch
+        // below RUNS, and the update overwrites. Not "leaves the name unset":
+        // replaces it. The doc comment four lines above this says in as many
+        // words that an existing member verifying on a new phone must not have
+        // their profile name overwritten by whatever the sign-in screen
+        // happened to have in its field, and a read that merely failed was
+        // enough to do exactly that. Never writing a name is recoverable from
+        // Settings; silently replacing somebody's name with a stranger's typing
+        // is not, because nobody knows to go and look.
+        //
+        // And the write's result went nowhere. That was defended as
+        // "survivable — the sign-in has already succeeded and the name can be
+        // set again later", which is a good argument for NOT FAILING the
+        // sign-in and no argument at all for not looking. This is the only
+        // moment the name is offered: the caller passes it once, on the screen
+        // where it was typed, and nothing retries. A refusal or a zero-row
+        // match here means the member is nameless on every screen that names
+        // them — a coach's thread list, a class register — and the only trace
+        // is that they never had a name. Counted now, and reported; the
+        // sign-in still succeeds, which is the part that was right.
         try {
-          // no-error-ok: an unreadable profile leaves the name unset, which is the same outcome as it already having one — the sign-in itself has already succeeded either way
-          const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', data.session.user.id).maybeSingle();
-          if (!((prof as any)?.full_name || '').trim()) {
-            await supabase.from('profiles').update({ full_name: wanted }).eq('id', data.session.user.id);
+          const { data: prof, error: profErr } = await supabase
+            .from('profiles').select('full_name').eq('id', data.session.user.id).maybeSingle();
+          if (profErr) {
+            reportError('auth.verifyPhoneCode.name', profErr);
+          } else if (!((prof as any)?.full_name || '').trim()) {
+            const res = await supabase.from('profiles')
+              .update({ full_name: wanted }, { count: 'exact' })
+              .eq('id', data.session.user.id);
+            // `count: 'exact'`, because `profiles_self_rw` is `id = auth.uid()`
+            // and a row this session may not write matches nothing and returns
+            // `error: null`. Zero rows and success look identical without it.
+            const why = writeFailure('Your name', res);
+            if (why) reportError('auth.verifyPhoneCode.name', res.error ?? new Error(why));
           }
         } catch (e) { reportError('auth.verifyPhoneCode.name', e); }
       }

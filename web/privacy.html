@@ -72,7 +72,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="legal-head prose">
       <h1>Privacy</h1>
-      <p class="updated">Updated 23 August 2026</p>
+      <p class="updated">Updated 3 September 2026</p>
     </div>
 
     <nav class="legal-nav" aria-label="Contents">
@@ -84,6 +84,7 @@ addEventListener('DOMContentLoaded', function () {
         <li><a href="#apple-health">Apple Health &amp; Health Connect</a></li>
         <li><a href="#who-can-see">Who can see it</a></li>
         <li><a href="#processors">Services we rely on</a></li>
+        <li><a href="#ai">What the AI features send</a></li>
         <li><a href="#security">Keeping it safe</a></li>
         <li><a href="#retention">How long we keep it</a></li>
         <li><a href="#rights">Your rights</a></li>
@@ -96,7 +97,7 @@ addEventListener('DOMContentLoaded', function () {
 
     <div class="prose numbered">
       <div class="callout">
-        <p><strong>The short version.</strong> We collect what the app needs to do its job and nothing else. We do not sell your data. We do not use it for advertising. Health and fitness data is never used for anything but showing you your own training. You can export everything or have it deleted, at any time, by asking.</p>
+        <p><strong>The short version.</strong> We collect what the app needs to do its job and nothing else. We do not sell your data. We do not use it for advertising. Health and fitness data is never used for anything but showing you your own training. You can export everything or have it deleted, at any time, by asking. One thing we would rather you read than discover: several features work by sending material to a company outside this app to be read — a meal photo, an InBody sheet, an injury document, a question you ask the in-app coach. Each one is named in <a href="#ai">What the AI features send</a>, with the exact list of what goes.</p>
       </div>
 
       <h2 id="scope">What this covers</h2>
@@ -118,11 +119,13 @@ addEventListener('DOMContentLoaded', function () {
           <tr><td><strong>Apple Health data</strong> — heart rate, active energy, steps, resting heart rate, workouts</td><td>Live heart rate and calories during a session, and importing workouts you recorded on your watch.</td><td>Only if you grant Health permission. You can revoke it at any time.</td></tr>
           <tr><td><strong>Blood glucose</strong> &mdash; readings a continuous glucose monitor wrote into Apple Health or Health Connect</td><td>Shown beside your own food log, so you can see what happened around a meal. Repple does not interpret them and does not tell you what to eat.</td><td>Only if you ask for it on the Blood Sugar screen and grant that permission separately. Your coach sees none of it unless you turn sharing on yourself.</td></tr>
           <tr><td><strong>Body measurements and InBody scans</strong></td><td>To show change over time.</td><td>If you record them.</td></tr>
+          <tr><td><strong>Progress photographs</strong></td><td>To compare two of them side by side. Held in a private store, reachable only through a temporary link you ask for.</td><td>If you take them. A coach cannot see one unless you share that specific photo with them, and you can withdraw it.</td></tr>
+          <tr><td><strong>Injuries, and any document you upload about one</strong></td><td>So the training plan works around the area until you mark it recovered. Your coach sees the area and the severity, never the document.</td><td>If you record an injury. Uploading a document is a separate step, and sending one to be read as text is a separate question we ask you per document.</td></tr>
           <tr><td><strong>Food and meal logs</strong></td><td>Nutrition tracking, and sharing with your coach if you have one.</td><td>If you use the nutrition features.</td></tr>
           <tr><td><strong>Check-ins and habits</strong></td><td>Weekly progress and consistency.</td><td>If you use them.</td></tr>
           <tr><td><strong>Messages</strong> between you and your coach</td><td>To deliver them.</td><td>When you send one.</td></tr>
           <tr><td><strong>Device push token</strong></td><td>To send notifications you have asked for.</td><td>If you allow notifications.</td></tr>
-          <tr><td><strong>Connected device tokens</strong> (WHOOP, Oura, Fitbit, Garmin, Spotify)</td><td>To read the data you connected them for.</td><td>Only if you connect that service.</td></tr>
+          <tr><td><strong>Connected device tokens</strong> (WHOOP, Oura, Spotify)</td><td>To read the data you connected them for.</td><td>Only if you connect that service. Fitbit and Garmin are listed in the app but cannot be connected yet, so there is no token for either.</td></tr>
           <tr><td><strong>Crash and error reports</strong></td><td>To find and fix faults.</td><td>When the app hits an error.</td></tr>
           <tr><td><strong>Payment records</strong></td><td>For trainers and gyms taking payment through Repple.</td><td>Card details are handled by Stripe and never reach our servers.</td></tr>
         </tbody>
@@ -138,7 +141,8 @@ addEventListener('DOMContentLoaded', function () {
         <li>It is used solely to show you your own training, recovery and readings.</li>
         <li>It is <strong>never</strong> used for advertising or marketing, and never sold or shared with data brokers.</li>
         <li>It is not shared with anyone other than a coach you have deliberately linked to your account.</li>
-        <li>It is never transferred to any third party, and it is not used to train any model.</li>
+        <li>It is not sold, and it is not used to train any model.</li>
+        <li>One qualification, because &ldquo;it never leaves&rdquo; would be too strong. Repple turns your recent sleep into a readiness score, and if you switch on health sharing for the in-app coach chat, that score is sent to Anthropic along with your other body figures — as a number and a short phrase, such as &ldquo;68/100 (fair), from three nights&rdquo;. Your heart rate, steps, energy and workouts are not sent anywhere; they are read to draw your own charts and stay in your own record. Leave health sharing off and none of it goes.</li>
         <li>Revoke it whenever you like &mdash; on iPhone in <strong>Settings &rarr; Privacy &amp; Security &rarr; Health &rarr; Repple</strong>, on Android in <strong>Health Connect &rarr; App permissions &rarr; Repple</strong>. The app keeps working without it.</li>
       </ul>
       <p><strong>Blood glucose is asked for separately.</strong> It is not part of the permission Repple asks for when you connect a watch, because most people do not wear a monitor and a permission screen listing things an app will not use is a screen nobody reads. Repple asks for it once, when you first open the Blood Sugar screen, and never again on its own. Readings are shown to you beside your own food log. They are <strong>not</strong> visible to your coach unless you switch that on yourself, and switching it off again hides the history as well as the next reading. Repple does not diagnose, does not set targets, and does not tell anybody what to eat &mdash; the range it shows is the one commonly quoted for adults, and your own targets come from your clinician.</p>
@@ -149,29 +153,48 @@ addEventListener('DOMContentLoaded', function () {
         <li><strong>You.</strong> Always.</li>
         <li><strong>Your coach</strong>, if you accept a coaching link — they can see your training, and your nutrition and check-ins where those features are used together. You can end the link.</li>
         <li><strong>Your gym</strong>, if you are a member of one, sees membership and attendance information for running the gym. Owners do not get your private messages.</li>
-        <li><strong>Nobody else.</strong> We do not sell data, we do not share it for advertising, and we do not hand it to third parties for their own purposes.</li>
+        <li><strong>Nobody else is shown your record.</strong> We do not sell data, we do not share it for advertising, and we do not hand anything to a third party for their own purposes. The companies that process data so the app can function are a different thing from an audience, and they are listed by name in <a href="#processors">Services we rely on</a> rather than left to the phrase &ldquo;our partners&rdquo;.</li>
       </ul>
 
       <h2 id="processors">Services we rely on</h2>
-      <p>These process data on our behalf so the app can work. They are bound to use it only for that:</p>
+      <p>These process data on our behalf so the app can work. They are bound to use it only for that. The first four run for everyone; the rest only start when you use the feature beside them:</p>
       <ul>
         <li><strong>Supabase</strong> — database, sign-in and file storage.</li>
-        <li><strong>Expo</strong> — delivering push notifications.</li>
+        <li><strong>Expo</strong> — delivering push notifications. A push carries the sender&rsquo;s name and the first 180 characters of the message, because that is what a notification has to show on a locked screen.</li>
         <li><strong>Resend</strong> — sending account emails such as password resets.</li>
+        <li><strong>Cloudflare</strong> — serving this website.</li>
+        <li><strong>Anthropic</strong> — reading the things Repple asks a model to read. This is set out in full under <a href="#ai">What the AI features send, and where</a> below, because it is the part of this list most worth knowing about.</li>
+        <li><strong>OCR.space</strong> — turning a photographed or uploaded document into text. Also covered below.</li>
         <li><strong>Stripe</strong> — payments, where a trainer or gym takes them. Stripe handles card details directly; we never receive them.</li>
-        <li><strong>WHOOP, Oura, Fitbit, Garmin, Spotify</strong> — only if you connect them, and only for what you connected them for.</li>
+        <li><strong>Open Food Facts</strong> — barcode and food-name lookups. Your phone asks them directly, so they see the barcode you scanned and your IP address, but nothing that identifies your account.</li>
+        <li><strong>WHOOP, Oura, Spotify</strong> — only if you connect them, and only for what you connected them for. Spotify is the one that goes outwards rather than inwards: it creates a playlist in your own Spotify account.</li>
+        <li><strong>Google, Meta and TikTok</strong> — for coaches only, and only for a coach&rsquo;s own accounts: putting a coach&rsquo;s own sessions on their own calendar, and reading back what a coach&rsquo;s own advertising cost them. A client&rsquo;s name is never sent to any of the three. A calendar event Repple writes says &ldquo;Coaching session&rdquo; and nothing else.</li>
       </ul>
 
+      <h2 id="ai">What the AI features send, and where</h2>
+      <p>Several things in Repple are done by a model that does not run on your phone, which means the material it reads leaves this app. That is worth a section of its own rather than a line in a list.</p>
+      <p><strong>Anthropic</strong> processes the following, each only when you use that feature:</p>
+      <ul>
+        <li><strong>The in-app coach chat.</strong> What you type, plus a fixed list of facts about your training: your goal, your programme, your calorie and macro targets, what you have eaten today, your streak and when you last trained. Your name is not sent.</li>
+        <li><strong>Your body and health figures, but only if you switch that on.</strong> Weight, body fat, skeletal muscle, your readiness score, and the area and severity of any injury you have recorded. This is a separate switch from the chat itself, it is off until you turn it on, and the note you wrote against an injury is never sent — only the area and how bad it is.</li>
+        <li><strong>Photographs.</strong> A meal photo, a physique photo, an InBody result sheet or a photo of a gym machine is sent as an image when you ask Repple to read one. It is the image itself, not a description of it.</li>
+        <li><strong>A meal you describe in words</strong> — the text you typed, up to 500 characters, and nothing else about you.</li>
+      </ul>
+      <p><strong>OCR.space</strong> receives the whole of any document you ask Repple to read: an InBody printout, or an injury document such as a physiotherapy report or a scan result. It is sent as an image, page by page, to be turned back into text.</p>
+      <p>Two things about that are worth saying plainly rather than leaving you to assume them. Repple asks you before sending an injury document, names OCR.space when it asks, and keeps a record of your answer — so an injury document is only ever sent because you said yes to that document. But Repple does not currently ask OCR.space to avoid retaining the upload, so we cannot tell you how long a copy sits on their side. If you would rather not send a document at all, decline and type the detail in by hand; the injury feature works either way.</p>
+      <p>Repple does not use anything you record to train a model, and does not give any of these services permission to use it for their own purposes.</p>
+
       <h2 id="security">Keeping it safe</h2>
-      <p>Data is encrypted in transit and at rest. Access is enforced at the database itself: every table carries row-level rules, so one person's records are not reachable by another account even if the app asked. Nobody at Repple browses your training data as a matter of routine. <a href="/security">Security &amp; data</a> sets out the mechanism in detail &mdash; who can read what, and why a coach has no access to progress photos.</p>
+      <p>Every connection is encrypted in transit, and Supabase encrypts the disks underneath the database and the file store. Access is enforced at the database itself: every table carries row-level rules, so one person's records are not reachable by another account even if the app asked. No individual column carries a second layer of encryption on top of that, so what protects your row from another account is the rule rather than a key. Nobody at Repple browses your training data as a matter of routine. <a href="/security">Security &amp; data</a> sets out the mechanism in detail &mdash; who can read what, and why a progress photo reaches a coach only when you share that photo.</p>
 
       <h2 id="retention">How long we keep it</h2>
       <p>For as long as your account exists, because a training history is only useful over time. When you delete your account we remove your personal data within 30 days, except anything we are legally required to keep — payment records for tax purposes being the usual case.</p>
+      <p>Your records and your files are two different things in two different places. Deleting the account deletes the records outright; the files go on a queue, and a scheduled job sends a delete for each one within minutes. That covers progress photographs, injury documents, message attachments, your profile photo, and on the coaching side a logo, a published document or an exercise clip. An entry is closed only when the file store confirms the object is no longer there — a file that has been asked for is not yet a file that has gone, and we record the second of those. One store is deliberately not on that queue: a document a gym filed about a member is stored under the gym rather than under the person, and how long a gym must keep it is a legal question with a different answer in each country. That decision has not been made, so those files stay. The full position is set out on <a href="/delete-account">Deleting your account</a> rather than summarised into something more comfortable here.</p>
       <p><a href="/delete-account">Deleting your account</a> sets out exactly what is removed, what survives, and how to ask.</p>
 
       <h2 id="rights">Your rights</h2>
       <ul>
-        <li><strong>Get a copy.</strong> Ask and we will export everything we hold about you. There is also an export in the app, under <strong>Me → Settings → Your data</strong>.</li>
+        <li><strong>Get a copy.</strong> Ask and we will export everything we hold about you. There is also an export in the app, under <strong>Me → Settings → Your data</strong> &mdash; it is not quite everything, and <a href="/delete-account">Deleting your account</a> lists what the in-app one leaves out. Ask us and you get the rest.</li>
         <li><strong>Correct it.</strong> Most of it you can edit in the app; ask us for the rest.</li>
         <li><strong>Delete it.</strong> Request account deletion in <strong>Me → Settings</strong>, or email us.</li>
         <li><strong>Withdraw consent.</strong> Turn off Health access or disconnect a device whenever you like.</li>

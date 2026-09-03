@@ -42,18 +42,53 @@ import type { GymPass } from './gymPasses';
 import { remainingUses } from './gymPasses';
 import type { MemberInvite } from './memberInvites';
 
-/* ── three states, never two ───────────────────────────────────────────────
+/* ── four states, never two ────────────────────────────────────────────────
  *
  * "Not read yet", "read, and there is nothing there" and "the read failed" are
  * three different facts and a screen must not collapse them. The usual
  * `T[] | null` cannot: it has two states for three answers, and the one that
  * gets lost is always the failure — which then renders as an empty record, the
  * single most misleading thing this console could do.
+ *
+ * ── and the fourth ────────────────────────────────────────────────────────
+ *
+ * There is a second way to be wrong that has nothing to do with failing, and
+ * this type could not say it: a read that SUCCEEDED and came back short.
+ * PostgREST answers an unbounded request with a thousand rows and mentions
+ * nothing (src/lib/rowCap.ts), and a screen bounded on purpose — "the last
+ * hundred payment runs" — is a prefix by design. Either way the rows are real
+ * and there are more of them, which is not 'ready' and is not 'failed'.
+ *
+ * The console's previous answer was `assertWhole`: throw, and let the read
+ * arrive as 'failed'. That is honest for a figure and it is the wrong shape for
+ * a LIST — it takes a thousand real rows away from an owner to protect a total
+ * nobody was computing — and it left the type holding the decision rather than
+ * stating it. `src/ui/loadStatus.ts` on the phone has had the fourth member
+ * ('partial') since the same problem was met there, with the reasoning written
+ * out; this is that member, under this type's own names.
+ *
+ * The rule that makes it safe is that 'partial' is NOT 'ready'. Every gate in
+ * this console and its six screens is written `state === 'ready'`, so a
+ * truncated read fails all of them on its own and every figure over it renders
+ * as a dash. What a screen must then ADD is the sentence: `rowsToShow` hands
+ * back the rows it may list, and `truncationWarning` is the line that says the
+ * list is a prefix. Loading, failed, empty and truncated are four different
+ * sentences and this type is what keeps them four.
  */
 
 export type Slice<T> =
   | { state: 'loading' }
   | { state: 'ready'; rows: T[] }
+  /**
+   * The rows are real, and there are more of them than these.
+   *
+   * `cap` is how many were accepted, so a screen can say "the first 1,000"
+   * rather than "some". The probe row `capLimit()` asks for is NEVER in
+   * `rows` — see `sliceCapped`, which is the only constructor that should be
+   * used on a capped read precisely because slicing and flagging have to
+   * happen together.
+   */
+  | { state: 'partial'; rows: T[]; cap: number }
   | { state: 'failed'; reason: string };
 
 export const sliceLoading = <T>(): Slice<T> => ({ state: 'loading' });
@@ -61,14 +96,110 @@ export const sliceReady = <T>(rows: T[]): Slice<T> => ({ state: 'ready', rows })
 export const sliceFailed = <T>(reason: string): Slice<T> => ({ state: 'failed', reason });
 
 /**
+ * A read that is known to be a prefix.
+ *
+ * `cap` is the number of rows the caller was willing to accept, and `rows` is
+ * trimmed to it — never longer, so a caller that hands over its probe row does
+ * not accidentally render it.
+ */
+export const slicePartial = <T>(rows: T[], cap: number): Slice<T> =>
+  ({ state: 'partial', rows: rows.length > cap ? rows.slice(0, cap) : rows, cap });
+
+/**
+ * A `capLimit()` read as a slice: 'ready' when it came back whole, 'partial'
+ * when it came back at the ceiling.
+ *
+ * This is one function rather than a length test plus a `.slice()` at every
+ * call site for the reason src/lib/rowCap.ts gives for `capped()`: the two
+ * steps have to happen together, and when they come apart the screen shows a
+ * prefix as the whole set or renders the probe row as data.
+ */
+export function sliceCapped<T>(rows: T[] | null | undefined, cap: number): Slice<T> {
+  const r = rows ?? [];
+  return r.length > cap ? { state: 'partial', rows: r.slice(0, cap), cap } : { state: 'ready', rows: r };
+}
+
+/**
  * The rows, or null when there are none to be had.
  *
  * Deliberately lossy — it collapses "loading" and "failed" into null — so it is
  * only ever safe for computing a *value*. Ask `slice.state` when rendering:
  * that is where the distinction has to survive.
+ *
+ * 'partial' returns NULL here, and that is the whole point of the state. A sum,
+ * a count or an average over a prefix is not a smaller figure, it is a wrong
+ * one, and this is the function every derived figure in `buildDossier` goes
+ * through. A truncated payments read therefore produces `paidCents: null` — a
+ * dash the screen has to explain — rather than a subtotal printed as a total.
+ * Use `rowsToShow` when the rows are going to be LISTED rather than added up.
  */
 export function rowsOf<T>(s: Slice<T>): T[] | null {
   return s.state === 'ready' ? s.rows : null;
+}
+
+/**
+ * The rows a screen may put on the page, whether or not they are all of them.
+ *
+ * The list half of the pair. Safe for rendering rows and for nothing else: a
+ * screen that calls this owes the reader `truncationWarning` beside the table,
+ * because a prefix drawn silently is exactly the lie the fourth state exists to
+ * prevent.
+ */
+export function rowsToShow<T>(s: Slice<T>): T[] | null {
+  return s.state === 'ready' || s.state === 'partial' ? s.rows : null;
+}
+
+/** True when this read is all of the rows there are — the one condition under
+ *  which a screen may count, sum or average them. */
+export function isWholeSlice(s: Slice<unknown>): boolean {
+  return s.state === 'ready';
+}
+
+/**
+ * The sentence that says a list is a prefix.
+ *
+ * `what` is a plain-English noun phrase, for the reason `assertWhole`'s is: it
+ * reaches a gym owner's screen. Written once so that six screens cannot word
+ * the same truncation six ways, which is how they came to disagree about what
+ * it meant.
+ */
+export function truncationNote(what: string, cap: number): string {
+  return `Showing the first ${cap} of ${what}. There are more, so anything counted, summed or averaged over this list would be a subtotal presented as a total, and is withheld.`;
+}
+
+/**
+ * The half-sentence a screen puts beside a withheld figure, naming which of the
+ * three silences it is. Null when the read is whole and the figure stands.
+ *
+ * Every screen in this console had written its own two-armed version of this —
+ * `state === 'failed' ? 'x not read' : 'reading x…'` — and every one of those
+ * has a fourth state falling into the 'reading…' arm, where a truncated read
+ * would have claimed to still be in flight forever. One function, four arms,
+ * and the compiler keeps it four.
+ */
+export function sliceNote(s: Slice<unknown>, what: string): string | null {
+  switch (s.state) {
+    case 'loading': return `reading ${what}…`;
+    case 'failed': return `${what} could not be read`;
+    case 'partial': return `only the first ${s.cap} rows of ${what} were read, so this is withheld`;
+    case 'ready': return null;
+  }
+}
+
+/**
+ * The two or three words that go where a figure would have gone. Null when
+ * there is a figure to print.
+ *
+ * 'part read' rather than 'not read': the rows exist and some of them are on
+ * this page, which is a different thing for a reader to do something about.
+ */
+export function sliceDash(s: Slice<unknown>): string | null {
+  switch (s.state) {
+    case 'loading': return '…';
+    case 'failed': return 'not read';
+    case 'partial': return 'part read';
+    case 'ready': return null;
+  }
 }
 
 /** A booking of one member onto one class, flattened so this module needs no
@@ -151,16 +282,28 @@ export function pendingParts(rec: MemberRecord): RecordPart[] {
   return PART_ORDER.filter((p) => rec[p].state === 'loading');
 }
 
+/** The parts that came back, and came back short. */
+export function truncatedParts(rec: MemberRecord): RecordPart[] {
+  return PART_ORDER.filter((p) => rec[p].state === 'partial');
+}
+
 /**
  * Whether the page is entitled to present itself as a whole picture.
  *
  * 'broken' outranks 'loading': once something has definitively failed, the
  * screen is incomplete no matter what else is still arriving, and saying
  * "loading" would promise a completeness that is not coming.
+ *
+ * 'loading' outranks 'truncated' for the reason `worstStatus` in
+ * src/ui/loadStatus.ts gives: a part still in flight is not yet known to be
+ * anything, and calling the page truncated while it lands would let a screen
+ * start drawing a set that is about to change. Once everything has landed, any
+ * truncation left in the mix is what the page hears.
  */
-export function completeness(rec: MemberRecord): 'whole' | 'loading' | 'broken' {
+export function completeness(rec: MemberRecord): 'whole' | 'loading' | 'truncated' | 'broken' {
   if (brokenParts(rec).length) return 'broken';
-  return pendingParts(rec).length ? 'loading' : 'whole';
+  if (pendingParts(rec).length) return 'loading';
+  return truncatedParts(rec).length ? 'truncated' : 'whole';
 }
 
 /**
@@ -180,6 +323,27 @@ export function partialWarning(rec: MemberRecord): string | null {
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   const costs = broken.map((b) => b.cost).join('; ');
   return `Could not read ${list}. ${plural(broken.length, 'That section is', 'Those sections are')} missing from this page, not empty — ${costs} ${plural(broken.length, 'is', 'are')} unknown here.`;
+}
+
+/**
+ * The sentence to put above a member page whose reads came back SHORT, or null
+ * when nothing was truncated.
+ *
+ * A separate sentence from `partialWarning` above, deliberately, and not merged
+ * into it. "We could not read the door log" and "we read the first thousand
+ * visits of more" are two different states of the same page and a reader has to
+ * act on them differently: the first is a fault to chase, the second is a
+ * figure to stop quoting. One banner saying both would be read as neither.
+ */
+export function truncationWarning(rec: MemberRecord): string | null {
+  const cut = truncatedParts(rec);
+  if (!cut.length) return null;
+  const names = cut.map((p) => PART_LABEL[p]);
+  const list = names.length === 1
+    ? names[0]
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  const costs = cut.map((p) => PART_COST[p]).join('; ');
+  return `Read the first rows of ${list} and there are more. ${plural(cut.length, 'That section is', 'Those sections are')} a PREFIX, not the whole record — ${costs} ${plural(cut.length, 'is', 'are')} shown as a dash here rather than as a subtotal.`;
 }
 
 /* ── the dossier ───────────────────────────────────────────────────────────── */

@@ -45,6 +45,7 @@
 // argument, so the console and the phone can both use this.
 
 import { assertWhole, capLimit, readAll } from './rowCap';
+import { readByIds } from './idLookup';
 import { writeFailure } from './wroteRows';
 import { attributionOf, type SignatureAttribution } from './gymSigning';
 
@@ -461,6 +462,13 @@ export function documentBlocker(
  */
 export function documentPath(tenantId: string, fileName: string): string {
   const clean = fileName.replace(/[^A-Za-z0-9._-]/g, '-').slice(-60) || 'document';
+  // utc-day-ok: a storage key, not a date anybody is shown. Nothing reads this
+  // segment back — the document's real dates are `issued_on` and `expires_on`,
+  // which are columns — and the random segment on the next line is what makes
+  // the path unique, so the stamp is only there to keep a bucket listing in
+  // rough order for a human scrolling it. It is the same day for every reader
+  // by construction, which is the one property a path prefix wants and a figure
+  // must never have.
   const stamp = new Date().toISOString().slice(0, 10);
   const rand = Math.random().toString(36).slice(2, 10);
   return `${tenantId}/${stamp}-${rand}-${clean}`;
@@ -737,19 +745,53 @@ function errText(e: unknown): string {
  * this product could previously say so.
  */
 export function expiring(docs: GymDocument[], today: string, withinDays = 30): GymDocument[] {
-  const limit = new Date(Date.parse(`${today}T00:00:00Z`) + withinDays * 86400000)
-    .toISOString().slice(0, 10);
+  // utc-day-ok: `today` arrives as a bare day string and is anchored at UTC
+  // midnight one line down purely so that adding days is arithmetic; the same
+  // day string comes back out, so UTC is the carrier and it cancels. It has to
+  // cancel, because the value is compared with `<=` against `expires_on`, which
+  // is a `date` column and therefore already a bare day with no zone in it.
+  // Reading this back with the local getters would shift the horizon by a day
+  // for half the world and quietly change which certificates a gym is warned
+  // about. Whose day `today` is remains the caller's decision, which is why it
+  // is a parameter.
+  const limit = new Date(Date.parse(`${today}T00:00:00Z`) + withinDays * 86400000).toISOString().slice(0, 10);
   return docs
     .filter((d) => d.expiresOn != null && d.expiresOn <= limit)
     .sort((a, b) => (a.expiresOn ?? '').localeCompare(b.expiresOn ?? ''));
 }
 
+/**
+ * Member and uploader names, by id.
+ *
+ * CHUNKED, and the limit being argued about is the REQUEST LINE, not the row
+ * ceiling. Both callers moved to `readAll`, which PAGES — so the id list is
+ * bounded by `PAGE_CEILING`, fifty thousand, and not by a thousand any more.
+ * A uuid costs about 39 bytes inside a PostgREST `in.("…","…")` list, so even
+ * a modest gym's document history builds a query string past the 8KB request
+ * line nginx and most CDNs enforce by default. The proxy refuses it at roughly
+ * two hundred ids with a **414**, supabase-js does not reject on it, and it
+ * arrives as `data: null`.
+ *
+ * no-error-ok (about the ROW ceiling, which one row per id in chunks of 150
+ * cannot reach): an unreadable name renders as a dash beside the document; the
+ * document itself is still listed. That argument was always sound and is
+ * silent about the 414, which is not one name lost to RLS — it is EVERY name
+ * at once, so a gym's signature register becomes a page of dated dashes and
+ * there is nobody on it to chase for a lapsed waiver.
+ */
 async function namesFor(sb: Queryable, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
-  const unique = [...new Set(ids.filter((x): x is string => !!x))];
-  if (!unique.length) return new Map();
-  // no-error-ok: an unreadable name renders as a dash beside the document; the document itself is still listed
-  const { data } = await sb.from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  return new Map((data ?? [])
+  let rows: any[] = [];
+  try {
+    rows = await readByIds<any>(
+      ids,
+      // `.order('id')` on a primary-key lookup is total, which is the contract
+      // `readAll` requires of every page it is handed.
+      (chunk, from, to) => sb.from('profiles').select('id, full_name')
+        .in('id', chunk).order('id', { ascending: true }).range(from, to),
+      'the names on this gym’s documents',
+    );
+  } catch { return new Map(); }
+  return new Map(rows
     .map((p: any) => [p.id, (p.full_name || '').trim()] as [string, string])
     .filter(([, n]: [string, string]) => !!n));
 }

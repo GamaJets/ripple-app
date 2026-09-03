@@ -59,6 +59,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useLeads } from '../../src/ui/leads';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
@@ -66,6 +67,7 @@ import {
   FOLLOW_UP_LABEL, FOLLOW_UP_WHEN, followUpDraft, followUpLink, followUpRecord,
   type LeadRow, type LeadState, type FollowUpKind,
 } from '../../src/lib/leads';
+import { telUrl, DIAL_UNAVAILABLE_NOTE } from '../../src/lib/dialling';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { fetchMyCoachBrand } from '../../src/ui/coachBrand';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -173,9 +175,18 @@ export default function TrainerLeads() {
   };
 
   const reach = (lead: LeadRow) => {
+    // The tel: half is `telUrl` now (src/lib/dialling.ts), so the coach's
+    // emergency-contact screen and this one clean a number the same way and
+    // both refuse the same strings. `contactKind` has already answered which of
+    // the two this is; the fallback covers a 'phone' that `telUrl` will not
+    // dial, which is a string the coach must read rather than tap.
     const url = lead.contactKind === 'email'
       ? `mailto:${lead.contact}`
-      : `tel:${lead.contact.replace(/[^\d+]/g, '')}`;
+      : telUrl(lead.contact);
+    if (!url) {
+      Alert.alert('Not a number this phone can ring', DIAL_UNAVAILABLE_NOTE);
+      return;
+    }
     Linking.openURL(url).catch(() => {
       Alert.alert(
         'Could not open that',
@@ -411,7 +422,14 @@ export default function TrainerLeads() {
               {book.rows.length > 0 ? (
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, flexWrap: 'wrap' }}>
                   {FILTERS.map((f) => {
-                    const n = f.key === 'all' ? book.rows.length : book.rows.filter((r) => r.state === f.key).length;
+                    // Counted only when the read is the whole book. An
+                    // enquiry queue is worked TO ZERO: "New (18)" is a promise
+                    // that eighteen is the pile, so a coach clears eighteen,
+                    // watches the chip read zero and stops — which is the one
+                    // outcome a leads screen exists to prevent. The PartialRead
+                    // notice for this same read is drawn twelve lines above.
+                    const n = !isWhole(book.status) ? null
+                      : f.key === 'all' ? book.rows.length : book.rows.filter((r) => r.state === f.key).length;
                     return f.key === filter
                       ? <Cta key={f.key} label={`${f.label} (${num(n)})`} onPress={() => setFilter(f.key)} />
                       : <Ghost key={f.key} label={`${f.label} (${num(n)})`} onPress={() => setFilter(f.key)} />;

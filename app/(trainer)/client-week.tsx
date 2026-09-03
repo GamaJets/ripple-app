@@ -287,10 +287,18 @@ export default function ClientWeek() {
 
             <Section>
               <SectionHead title="Client" />
-              {r.roster.length === 0 && r.status !== 'error' ? (
+              {/* `isWhole`, not `!== 'error'`. The error case already has its own
+                  Notice above, so the status this gate was really letting
+                  through was 'loading': a coach opening this screen with a full
+                  book was told "Nobody is on your book yet" for as long as the
+                  roster took to arrive. An empty list is a claim, and it may
+                  only be made once the read has finished and come back whole. */}
+              {r.roster.length === 0 && isWhole(r.status) ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   Nobody is on your book yet, so there are no weeks to look at.
                 </Text>
+              ) : r.roster.length === 0 && r.status === 'loading' ? (
+                <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
               ) : (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                   {r.roster.map((c) => (
@@ -337,7 +345,14 @@ export default function ClientWeek() {
                         the past, so it stays on its row and out of here. */}
                     {board.conflicts.length ? (
                       <Section>
-                        <SectionHead title="Worth Raising" note={`${board.conflicts.length}`} />
+                        {/* Gated like the count twenty-seven lines below it,
+                            which has been right all along. This is the list a
+                            coach works through before a check-in call: clear
+                            three clashes over a truncated window, believe the
+                            week is straight, and the fourth was cut off the
+                            page. */}
+                        <SectionHead title="Worth Raising"
+                          note={isWhole(status) ? `${board.conflicts.length}` : undefined} />
                         <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                           Days where {who}&rsquo;s mark and the programme you assigned them say
                           different things. Neither has been changed by the other, and nothing on

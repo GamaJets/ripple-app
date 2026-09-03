@@ -81,6 +81,31 @@ export function ackState(
   return active.every((i) => seen.has(injuryKey(i))) ? 'covered' : 'stale';
 }
 
+/** How the SECOND client-side read stands — the programmes a coach assigned
+ *  knowing about a disclosure.
+ *
+ *  Separate from `ackState` because it is a separate table and a separate
+ *  failure. Folding the two together is what let a screen print "we couldn't
+ *  check whether your coach has read these" over an acknowledgement that had
+ *  been read, while the block that really had failed rendered as nothing at
+ *  all — a member reading that concludes their coach assigned nothing over
+ *  their knee, which is the one conclusion a failed read must not produce.
+ *
+ *   'unknown' — the read did not finish or did not land. An empty list here
+ *               means we do not know, and the screen must say so.
+ *   'none'    — the read finished and there are none. Sayable as a fact.
+ *   'some'    — the read finished and these are all of them.
+ *   'partial' — the rows are real but there are more than came back. The list
+ *               may be shown; "these are all of them" may not.
+ */
+export type ChoiceState = 'unknown' | 'none' | 'some' | 'partial';
+
+export function programmeChoiceState(status: LoadStatus, count: number): ChoiceState {
+  if (status === 'error' || status === 'loading') return 'unknown';
+  if (status === 'partial') return count > 0 ? 'partial' : 'unknown';
+  return count > 0 ? 'some' : 'none';
+}
+
 /**
  * May this coach assign a programme to this client?
  *

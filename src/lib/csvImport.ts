@@ -93,7 +93,19 @@ function ymdToIso(y: number, m: number, d: number): Parsed<string> {
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
     return { ok: false, reason: `${y}-${m}-${d} is not a real date` };
   }
-  return { ok: true, value: dt.toISOString().slice(0, 10) };
+  // Built from the parts that were parsed, not read back out of the Date.
+  //
+  // The Date exists to REJECT 31 February and nothing else; the day itself is
+  // the one the importer typed into a spreadsheet and it must come back out
+  // unchanged. `dt.toISOString().slice(0, 10)` happened to agree here because
+  // the Date was made with `Date.UTC` — but it agreed by accident, and the next
+  // person to change this to `new Date(y, m - 1, d)`, which is the more natural
+  // spelling, would silently move every imported date by one for half the
+  // world. These are membership start dates and payment dates on a file an
+  // owner is migrating from another system; a day out is a day of membership
+  // somebody paid for.
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return { ok: true, value: `${String(y).padStart(4, '0')}-${pad(m)}-${pad(d)}` };
 }
 
 /**
