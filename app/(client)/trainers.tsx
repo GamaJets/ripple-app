@@ -63,6 +63,7 @@ import { notifySuccess } from '../../src/ui/haptics';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode } from '../../src/lib/types';
 // Who coaches you, asked the way the database asks it — BOTH links, so this
 // screen and the photo-sharing screen can never disagree about whether somebody
@@ -515,18 +516,75 @@ export default function FindTrainer() {
       // coach by browsing was indistinguishable from a row created before the
       // column existed, and the coach's "where did people come from?" had one
       // real bucket and one permanently empty one.
-      const { error } = await supabase.from('coach_requests').insert({
+      // `.select('id')` so a genuine insert can be told from a duplicate. It
+      // matters for the push below: a client tapping Request twice must not
+      // buzz the coach's phone twice for one request.
+      const { data: made, error } = await supabase.from('coach_requests').insert({
         client_id: uid, trainer_id: coach.id, mode, status: 'pending', source: 'directory',
-      });
-      if (error && !/duplicate|unique/i.test(error.message)) {
+      }).select('id');
+      const duplicate = !!error && /duplicate|unique/i.test(error.message);
+      if (error && !duplicate) {
         Alert.alert('Could not send request', error.message);
         return;
       }
       setSent((s) => ({ ...s, [coach.id]: true }));
       notifySuccess();
+
+      if (duplicate || !made?.length) {
+        Alert.alert(
+          'Already asked',
+          `You have already asked ${coach.name} to coach you and they have not answered yet. Asking again does not move you up any list — they still have the first one.`,
+          [{ text: 'Got it' }],
+        );
+        return;
+      }
+
+      // ── the push that was never sent ──────────────────────────────────────
+      //
+      // Until now this insert was the whole of it. The row landed, the coach's
+      // dashboard would show it WHENEVER THEY NEXT OPENED THE APP, and the
+      // alert below said so plainly — which was honest and useless. A person
+      // deciding to be coached is at their most likely to change their mind in
+      // the hours after asking, and the coach had no way to know they had been
+      // asked until they happened to look.
+      //
+      // 'clients' is the channel COACH_CHANNELS calls "Somebody asking to be
+      // coached by you, and somebody ending their coaching", so a coach who has
+      // muted chat still hears about this one.
+      //
+      // The name is the CLIENT'S OWN, read from their own profile — a coach
+      // cannot read a stranger's row (no policy runs client to coach before a
+      // relationship exists), so it has to travel in the message rather than be
+      // looked up on the other side. A name that could not be read is left out
+      // of the sentence rather than dashed into it.
+      // no-error-ok: a name that could not be read is left out of the push
+      // sentence entirely — the fallback below says "Somebody" rather than
+      // dashing a blank into the middle of it. The request itself has already
+      // been written at this point, so a failure here costs a name and nothing
+      // else, and there is no honest way to report it that a person would act on.
+      const { data: me, error: meErr } = await supabase.from('profiles').select('full_name').eq('id', uid).maybeSingle();
+      // A failed read is not a nameless client, it is an unknown name — and both
+      // land on the same sentence below, which says 'Somebody' rather than
+      // dashing a blank into the middle of it.
+      const who = meErr ? '' : (me?.full_name || '').trim();
+      const push = await sendPushChecked(
+        [coach.id],
+        'New coaching request',
+        who
+          ? `${who} has asked you to coach them — ${COACHED_MODE_SHORT[mode].toLowerCase()}.`
+          : `Somebody has asked you to coach them — ${COACHED_MODE_SHORT[mode].toLowerCase()}.`,
+        { route: '/(trainer)/dashboard' },
+        'clients',
+      );
+
+      // Two different sentences, because they are two different situations for
+      // the person waiting. `sendPushChecked` records the inbox row before it
+      // sends, so a failed push still leaves something the coach will see.
       Alert.alert(
         'Request sent',
-        `${coach.name} will see your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request on their dashboard. You'll be connected once they accept — nothing changes on your app until then.`,
+        push.ok
+          ? `${coach.name} has been notified on their phone. You'll be connected once they accept — nothing changes on your app until then.`
+          : `${coach.name} will see your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request the next time they open their app — we couldn't reach their phone just now. You'll be connected once they accept.`,
         [{ text: 'Got it' }]
       );
     } catch (e) {

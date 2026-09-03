@@ -92,8 +92,13 @@ const LENGTHS = [30, 45, 60, 90];
  * would be UTC and would move a 7pm request by hours for most of the world;
  * this is the same discipline `dateParts` exists for elsewhere in this app.
  */
-const instantAt = (day: Date, hour: number): string =>
-  new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, 0, 0, 0).toISOString();
+const instantAt = (day: Date, hour: number, minute = 0): string =>
+  new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute, 0, 0).toISOString();
+
+/** The quarters a session can start on, matching the coach's own Add Session
+ *  grid and the slots a range generates. A client who can only ask on the hour
+ *  cannot ask for the 07:15 their coach actually offers. */
+const REQUEST_MINUTES = [0, 15, 30, 45];
 
 export default function RequestSessionScreen() {
   const t = useTheme();
@@ -116,6 +121,7 @@ export default function RequestSessionScreen() {
 
   const [dayIdx, setDayIdx] = useState(1);
   const [hour, setHour] = useState(18);
+  const [minute, setMinute] = useState(0);
   const [length, setLength] = useState(60);
   const [note, setNote] = useState('');
 
@@ -145,11 +151,15 @@ export default function RequestSessionScreen() {
   }, []);
 
   const chosen = days[dayIdx] ?? days[0];
-  const startsAt = chosen ? instantAt(chosen, hour) : '';
+  const startsAt = chosen ? instantAt(chosen, hour, minute) : '';
 
   const dayLabel = (d: Date) => d.toLocaleDateString(appLocale(), { weekday: 'short' });
   const dateLabel = (d: Date) => d.toLocaleDateString(appLocale(), { day: 'numeric' });
   const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString(appLocale(), { hour: 'numeric', minute: '2-digit' });
+  /** The whole time, for the quarter pills' spoken label. ":15" on its own tells
+   *  a screen-reader user nothing about what they are choosing. */
+  const timeLabel = (h: number, m: number) =>
+    new Date(2000, 0, 1, h, m).toLocaleTimeString(appLocale(), { hour: 'numeric', minute: '2-digit' });
   /** The hour a sentence is about, written out. Never assembled around a value
    *  that might not be there — a caller with no readable instant does not draw
    *  the row at all. */
@@ -334,6 +344,42 @@ export default function RequestSessionScreen() {
                       }}
                     >
                       <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>{hourLabel(h)}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* ── the quarters ────────────────────────────────────────────
+                  Hours alone could not ask for the 07:15 a coach actually
+                  offers: a range generates slots on every quarter and the
+                  coach's own Add Session grid has had these since it was
+                  written, so a client restricted to the hour could only ever
+                  ask for a quarter of the times that exist. */}
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                {REQUEST_MINUTES.map((m) => {
+                  const on = m === minute;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => setMinute(m)}
+                      hitSlop={hitSlopFor(MIN_TARGET)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      // The WHOLE time, not ":15" — a row of four pills each
+                      // announcing a bare minute tells a screen-reader user
+                      // nothing about what they are choosing.
+                      accessibilityLabel={timeLabel(hour, m)}
+                      style={{
+                        flex: 1, minHeight: MIN_TARGET,
+                        alignItems: 'center', justifyContent: 'center',
+                        borderRadius: radius.sm,
+                        backgroundColor: on ? t.brand : t.surface2,
+                        borderWidth: on ? 0 : hairline, borderColor: t.ring,
+                      }}
+                    >
+                      <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>
+                        :{String(m).padStart(2, '0')}
+                      </Text>
                     </Pressable>
                   );
                 })}

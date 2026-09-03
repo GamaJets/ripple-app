@@ -3147,7 +3147,43 @@ export default function TrainerSchedule() {
           <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, ...elevation.e2 }}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: t.surface3, alignSelf: 'center', marginBottom: sp.lg }} />
             <Text style={{ ...ty.head, color: t.ink }}>Add Session</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{DOW[selDate.getDay()]}, {MON[selM]} {selD}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>{DOW[selDate.getDay()]}, {MON[selM]} {selD}</Text>
+
+            {/* ── what is already on this day ──────────────────────────────
+                The sheet named the date and showed nothing that was on it, so
+                a coach picking a time was choosing blind and finding out from
+                the overlap refusal afterwards. The day sheet under the
+                calendar has had this all along; the screen where it decides
+                something did not.
+
+                Three states, not two: a diary that could not be read is not a
+                free day, and offering "nothing booked" over an unread one is
+                how a coach double-books themselves. */}
+            <View style={{ marginBottom: sp.lg }}>
+              {!known ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Your calendar could not be read, so this does not show what you already have on. Anything
+                  already booked is still there and an overlap will be refused.
+                </Text>
+              ) : selDaySessions.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Nothing on this day yet.</Text>
+              ) : (
+                <>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>
+                    Already on this day · {selDaySessions.length}
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm }}>
+                    {selDaySessions.map((s2) => (
+                      <View key={'ad' + s2.id} style={{ paddingVertical: 7, paddingHorizontal: 11, borderRadius: radius.pill, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                        <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>
+                          {timeLabel(s2.startsAt)} · {s2.status === 'booked' ? nameOf(s2.clientId) : s2.status === 'blocked' ? 'Blocked' : 'Open'}
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </>
+              )}
+            </View>
 
             <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Time · {avTime(addHour, addMinute)}</Text>
             <View style={{ marginBottom: sp.lg }}>
