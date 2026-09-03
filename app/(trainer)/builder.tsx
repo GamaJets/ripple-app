@@ -2030,6 +2030,132 @@ export default function Builder() {
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Program name</Text>
           <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
             style={[inp, { marginBottom: sp.lg }]} />
+
+          {/* ── the day the block begins ──────────────────────────────────
+              Coaches sit on their phone on a Sunday night and tap Assign at the
+              right moment, because an assignment IS a start: the write lands and
+              the client's Train tab reads the row on its next render.
+
+              This field records the day the coach chose. It does NOT hold the
+              programme back, and the sentence under it says so — because a
+              coach who believes it does, and assigns a block "starting Monday"
+              on a Thursday, has replaced their client's Friday session while
+              believing they did not. That is strictly worse than the alarm.
+
+              Left blank is the ordinary case and the default: "assign it now"
+              is what this control has always meant.
+
+              ── why it is HERE, beside the name, and not in the assign panel ──
+              It used to sit at the foot of the screen, directly above the
+              Assign button. That put it after the roster — a scrolling list —
+              so on a phone a coach met it last, having already scrolled past
+              every decision it belongs to, and one of them read a disabled
+              Assign button as a complaint about the date.
+
+              A coach decides when a block starts BEFORE they lay out its
+              weeks, not after: the start day is what makes "week one" mean
+              anything. So it belongs with the block's other two facts — its
+              name and its note — and above the Weeks section that reads week
+              numbers off it. Nothing about the write changed: `startsOn` is
+              still the same state, still optional, and still passed to
+              `assignProgramTo` only when `isStartDate` can read it. */}
+          <View style={{ marginBottom: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Starts on</Text>
+            {/* ── two ways to say a date, in one control ──────────────────
+                The field and the calendar button share a box, so tapping the
+                date's own space opens the month — which is what was asked for.
+                The TEXT half stays a real TextInput and keeps its keyboard,
+                because coaches paste dates out of a client's message and out of
+                their own notes, and a picker that took typing away would be a
+                regression for every one of them.
+
+                Not `@react-native-community/datetimepicker`. That is a native
+                module, a native module is a new binary, and this has to reach
+                coaches over the air on the build they are already running. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+              <View style={[inp, { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 0, paddingHorizontal: 0 }]}>
+                <TextInput value={startsOn} onChangeText={setStartsOn}
+                  placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
+                  autoCapitalize="none" autoCorrect={false}
+                  accessibilityLabel="The day this block begins, as year, month and day. You can type it, or use the calendar button beside it."
+                  style={{ ...ty.body, color: t.ink, flex: 1, paddingVertical: 9, paddingHorizontal: 12 }} />
+                <Pressable onPress={() => setStartPick(true)}
+                  hitSlop={hitSlopFor(MIN_TARGET)}
+                  accessibilityRole="button"
+                  accessibilityLabel={startsOn ? 'Pick the start day from a calendar. Currently ' + startsOn : 'Pick the start day from a calendar'}
+                  style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="calendar" size={18} color={t.ink2} />
+                </Pressable>
+              </View>
+              {startsOn ? (
+                <Ghost label="Clear" onPress={() => setStartsOn('')} />
+              ) : null}
+            </View>
+            {/* Refused rather than corrected, and said while they type. A date
+                this app cannot read is not stored at all — a stored value that
+                will not parse puts every screen reading it into "unreadable"
+                for ever, over a plan the coach believes carries a date. */}
+            {startsOn && !isStartDate(startsOn) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
+                Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
+                programme goes out with no start date rather than one nothing can read back.
+              </Flag>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{CLIENT_STARTS_NOW}</Text>
+            )}
+          </View>
+
+
+          {rosterStatus === 'error' ? (
+            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+              note="Nobody is listed here because the roster did not come back — it does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
+          ) : rosterStatus === 'partial' ? (
+            <PartialRead what="clients on your book" shown={roster.length} />
+          ) : null}
+
+          {roster.length === 0 && rosterStatus === 'ready' ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+              No clients yet — add or invite a client and they will appear here to assign to.
+            </Text>
+          ) : roster.length === 0 && rosterStatus === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Reading your roster…</Text>
+          ) : null}
+
+          {roster.map((c, i) => {
+            const on = !!picked[c.id];
+            // Only sayable off a whole read. Under any other status the absence
+            // of a programme means nothing was found out, and marking somebody
+            // "no program yet" on that basis is how a coach comes to overwrite
+            // one without realising.
+            const replaces = programStatus === 'ready' && !!getProgram(c.id);
+            const held = plan.blocked.find((b) => b.clientId === c.id);
+            return (
+              <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
+                accessibilityRole="button" accessibilityLabel={`${on ? 'Do not assign to' : 'Assign to'} ${c.name}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
+                  {/* The warning is a DOT, not the ink: warn as caption text
+                      measures under AA on the three light palettes, so the one
+                      sentence the coach most needs was the hardest to read.
+                      The words carry the meaning; the dot carries the tone. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                    <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
+                      {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                    </Text>
+                  </View>
+                  {/* Their own sentence, on their own row. A count of how many
+                      are held tells the coach nothing about whose knee it is. */}
+                  {held ? <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+
           {/* The letter at the top of the week. Cues about ONE movement go on
               that movement — a tempo note is useless attached to a Tuesday —
               which is what the Notes field under each exercise below is for. */}
@@ -2981,56 +3107,6 @@ export default function Builder() {
               screens come to disagree about who a bulk assign wrote to. */}
           <SectionHead title="Assign To" note={rosterStatus === 'ready' && pickedIds.length ? `${num(pickedIds.length)} of ${num(roster.length)}` : undefined} />
 
-          {rosterStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Nobody is listed here because the roster did not come back — it does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
-          ) : rosterStatus === 'partial' ? (
-            <PartialRead what="clients on your book" shown={roster.length} />
-          ) : null}
-
-          {roster.length === 0 && rosterStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              No clients yet — add or invite a client and they will appear here to assign to.
-            </Text>
-          ) : roster.length === 0 && rosterStatus === 'loading' ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Reading your roster…</Text>
-          ) : null}
-
-          {roster.map((c, i) => {
-            const on = !!picked[c.id];
-            // Only sayable off a whole read. Under any other status the absence
-            // of a programme means nothing was found out, and marking somebody
-            // "no program yet" on that basis is how a coach comes to overwrite
-            // one without realising.
-            const replaces = programStatus === 'ready' && !!getProgram(c.id);
-            const held = plan.blocked.find((b) => b.clientId === c.id);
-            return (
-              <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                accessibilityRole="button" accessibilityLabel={`${on ? 'Do not assign to' : 'Assign to'} ${c.name}`}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
-                  {/* The warning is a DOT, not the ink: warn as caption text
-                      measures under AA on the three light palettes, so the one
-                      sentence the coach most needs was the hardest to read.
-                      The words carry the meaning; the dot carries the tone. */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-                    <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
-                      {c.goal}{replaces ? ' · replaces the program they are on' : ''}
-                    </Text>
-                  </View>
-                  {/* Their own sentence, on their own row. A count of how many
-                      are held tells the coach nothing about whose knee it is. */}
-                  {held ? <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag> : null}
-                </View>
-              </Pressable>
-            );
-          })}
-
           {/* "Select All" over a roster that came back at its row limit ticks a
               page of people and calls it everybody. Nothing on screen is false
               and the coach is still acting on a set they cannot see, so the
@@ -3124,65 +3200,6 @@ export default function Builder() {
               </Flag>
             </View>
           ) : null}
-
-          {/* ── the day the block begins ──────────────────────────────────
-              Coaches sit on their phone on a Sunday night and tap Assign at the
-              right moment, because an assignment IS a start: the write lands and
-              the client's Train tab reads the row on its next render.
-
-              This field records the day the coach chose. It does NOT hold the
-              programme back, and the sentence under it says so — because a
-              coach who believes it does, and assigns a block "starting Monday"
-              on a Thursday, has replaced their client's Friday session while
-              believing they did not. That is strictly worse than the alarm.
-
-              Left blank is the ordinary case and the default: "assign it now"
-              is what this control has always meant. */}
-          <View style={{ marginBottom: sp.lg }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Starts on</Text>
-            {/* ── two ways to say a date, in one control ──────────────────
-                The field and the calendar button share a box, so tapping the
-                date's own space opens the month — which is what was asked for.
-                The TEXT half stays a real TextInput and keeps its keyboard,
-                because coaches paste dates out of a client's message and out of
-                their own notes, and a picker that took typing away would be a
-                regression for every one of them.
-
-                Not `@react-native-community/datetimepicker`. That is a native
-                module, a native module is a new binary, and this has to reach
-                coaches over the air on the build they are already running. */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
-              <View style={[inp, { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 0, paddingHorizontal: 0 }]}>
-                <TextInput value={startsOn} onChangeText={setStartsOn}
-                  placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
-                  autoCapitalize="none" autoCorrect={false}
-                  accessibilityLabel="The day this block begins, as year, month and day. You can type it, or use the calendar button beside it."
-                  style={{ ...ty.body, color: t.ink, flex: 1, paddingVertical: 9, paddingHorizontal: 12 }} />
-                <Pressable onPress={() => setStartPick(true)}
-                  hitSlop={hitSlopFor(MIN_TARGET)}
-                  accessibilityRole="button"
-                  accessibilityLabel={startsOn ? 'Pick the start day from a calendar. Currently ' + startsOn : 'Pick the start day from a calendar'}
-                  style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="calendar" size={18} color={t.ink2} />
-                </Pressable>
-              </View>
-              {startsOn ? (
-                <Ghost label="Clear" onPress={() => setStartsOn('')} />
-              ) : null}
-            </View>
-            {/* Refused rather than corrected, and said while they type. A date
-                this app cannot read is not stored at all — a stored value that
-                will not parse puts every screen reading it into "unreadable"
-                for ever, over a plan the coach believes carries a date. */}
-            {startsOn && !isStartDate(startsOn) ? (
-              <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
-                Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
-                programme goes out with no start date rather than one nothing can read back.
-              </Flag>
-            ) : (
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{CLIENT_STARTS_NOW}</Text>
-            )}
-          </View>
 
           {/* ── the reason, ABOVE the control it is about ───────────────────
               This sentence used to sit under the button. Both of those places
