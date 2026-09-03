@@ -62,6 +62,11 @@ import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../
 import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { isWhole, worstStatus } from '../../src/ui/loadStatus';
+// Not for anything this screen draws — for the STATUS. The roster provider
+// reads the tenant and drops its status (see the note beside `rosterStatus`),
+// so this screen has to ask for it directly.
+import { useTenant } from '../../src/ui/tenant';
 import { useMemberChurn, PHONE_MONTHS } from '../../src/ui/memberChurn';
 import { Fetched } from '../../src/ui/fetched';
 import { oldestFetch } from '../../src/lib/freshness';
@@ -80,6 +85,7 @@ export default function OwnerGrowth() {
   // retention row reported 0% idle. An owner checking whether their growth push
   // worked was shown a month with no signups by a query that had not finished.
   const { trainers, loading, status: trainersStatus, refresh } = usePlatformTrainers();
+  const { status: tenantStatus } = useTenant();
   // The gym's own members — joiners, leavers and the rate between them, from
   // the same module the console's Analytics page uses. Its own read and its own
   // three states: the roster failing has nothing to do with the roster of
@@ -120,8 +126,29 @@ export default function OwnerGrowth() {
   // query being caught mid-flight but a settled answer about the gym, and the
   // owner who came here to see whether their growth push worked is told it did
   // not. Overview tells the two apart; this is that check.
-  const trainersUnread = trainersStatus === 'error';
-  const trainersUnknown = loading || trainersUnread;
+  //
+  // ── And the roster is only as trustworthy as the TENANT read under it ────
+  //
+  // `PlatformTrainersProvider` (src/ui/trainers.tsx) destructures `tenant` from
+  // `useTenant()` and never reads its `status`. A refused tenant read leaves
+  // `tenant` null — which that provider treats as "this account has no gym at
+  // all, so there is no roster we are failing to read" — and it publishes an
+  // empty roster under status 'ready'. Every guard on this screen then passes
+  // cleanly, and the empty-roster sentence below is stated over a read that
+  // failed one level up.
+  //
+  // `worstStatus` is the house answer for a screen fed by more than one read:
+  // it is only as complete as its worst. `src/ui/memberChurn.ts` already checks
+  // the tenant status the same way, which is why the churn half of these
+  // screens has never had this hole.
+  const rosterStatus = worstStatus(tenantStatus, trainersStatus);
+  const trainersUnread = rosterStatus === 'error';
+  // `isWhole`, not `!== 'error'`. Neither read emits 'partial' today —
+  // `fetchGymTrainers` calls `assertWhole` and throws rather than degrading, and
+  // the tenant is a single row — so this is the house rule holding rather than a
+  // live miscount being fixed. That is the difference between a gate that is
+  // right and one that happens to be.
+  const trainersUnknown = loading || !isWhole(rosterStatus);
   // One sentence for every dash on the screen that is a dash for this reason.
   const unreadNote = 'could not be read';
   const roll = gymRollup(trainers as TrainerLike[], null);

@@ -39,6 +39,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Spark, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { gymRollup, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
@@ -63,15 +64,36 @@ export default function OwnerRevenue() {
   // client of a dash — a revenue console reporting no revenue, which is the one
   // thing an owner would act on and the one thing it had not yet asked.
   const { trainers, loading, status: trainersStatus, sessions30, refresh } = usePlatformTrainers();
+  const { tenant, status: tenantStatus } = useTenant();
   // `loading` was only half of it. A REFUSED roster read also leaves `trainers`
   // empty with `loading` false, and every roll-up below then computes a
   // confident 0 over it: "Sessions Delivered · 30 Days — 0", "Clients 0", a
   // forecast drawn from nothing. That is the same wrong screen the loading flag
   // was added to prevent, arriving a second later and staying. Overview already
   // tells the two apart; this is that check, here.
-  const trainersUnread = trainersStatus === 'error';
-  const trainersUnknown = loading || trainersUnread;
-  const { tenant } = useTenant();
+  //
+  // ── And the roster is only as trustworthy as the TENANT read under it ────
+  //
+  // `PlatformTrainersProvider` (src/ui/trainers.tsx) destructures `tenant` from
+  // `useTenant()` and never reads its `status`. A refused tenant read leaves
+  // `tenant` null — which that provider treats as "this account has no gym at
+  // all, so there is no roster we are failing to read" — and it publishes an
+  // empty roster under status 'ready'. Every guard on this screen then passes
+  // cleanly, and the empty-roster sentence below is stated over a read that
+  // failed one level up.
+  //
+  // `worstStatus` is the house answer for a screen fed by more than one read:
+  // it is only as complete as its worst. `src/ui/memberChurn.ts` already checks
+  // the tenant status the same way, which is why the churn half of these
+  // screens has never had this hole.
+  const rosterStatus = worstStatus(tenantStatus, trainersStatus);
+  const trainersUnread = rosterStatus === 'error';
+  // `isWhole`, not `!== 'error'`. Neither read emits 'partial' today —
+  // `fetchGymTrainers` calls `assertWhole` and throws rather than degrading, and
+  // the tenant is a single row — so this is the house rule holding rather than a
+  // live miscount being fixed. That is the difference between a gate that is
+  // right and one that happens to be.
+  const trainersUnknown = loading || !isWhole(rosterStatus);
   // The gym's own currency (`tenants.currency`, part 99). Null until the tenant
   // read returns, and gymMoney falls back to GYM_CURRENCY for that window.
   const cur = tenant?.currency ?? null;
@@ -160,6 +182,13 @@ export default function OwnerRevenue() {
   const fetchedAt = oldestFetch(tillAt, rosterAt);
   useEffect(() => {
     let on = true;
+    // A tenant read that FAILED is not a screen still loading. Without this the
+    // till read never starts — there is no `tenantId` to read it with — and the
+    // hero sat on "Reading what your gym was paid…" for ever, with the Refresh
+    // control re-entering this effect and returning at the same line. The
+    // failure is reported as what it is, in the sentence the `null` branch of
+    // the hero already carries.
+    if (tenantStatus === 'error') { setTakings(null); return; }
     if (!tenantId) { setTakings(undefined); return; }
     setBusy(true);
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
@@ -170,7 +199,7 @@ export default function OwnerRevenue() {
       .catch((e) => { reportError('ownerRevenue.payments', e); if (on) setTakings(null); })
       .finally(() => { if (on) setBusy(false); });
     return () => { on = false; };
-  }, [tenantId, again]);
+  }, [tenantId, tenantStatus, again]);
 
   // Both halves of the screen, together. The roster comes from the provider and
   // the till from the effect above, and an owner pressing one control expects

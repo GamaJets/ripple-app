@@ -58,7 +58,7 @@ import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/the
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { useAnnouncements } from '../../src/ui/announcements';
 import { deliverySummary, pushConsequence } from '../../src/lib/notifyCopy';
-import { fetchAllFeedback, type FeedbackRow } from '../../src/ui/appFeedback';
+import { fetchAllFeedbackPage, type FeedbackRow } from '../../src/ui/appFeedback';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings';
@@ -82,11 +82,16 @@ import { WEB_ORIGIN } from '../../src/lib/deepLink';
  * here is applied to a gym until somebody taps it.
  */
 const CURRENCIES = ['AED', 'GBP', 'USD', 'EUR', 'SAR', 'AUD', 'CAD', 'ZAR'] as const;
-import { capLimit } from '../../src/lib/rowCap';
+import { capLimit, capped } from '../../src/lib/rowCap';
+
+/** How far back the gym's activity feed reaches. A BOUND — the screen says
+ *  "the most recent hundred" — and a read that comes back at it is a prefix,
+ *  which is 'partial' rather than 'ready'. */
+const EVENT_LIMIT = 100;
 import { reportError } from '../../src/lib/reportError';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 
 /** One row of the gym's event feed. */
 interface GymEvent { id: string; kind: string; summary: string; at: string }
@@ -286,7 +291,7 @@ export default function OwnerOps() {
   // columns an update touches, and the value of this inbox is that the words in
   // it are the tester's.
   //
-  // Read separately from fetchAllFeedback() rather than through it: that
+  // Read separately from fetchAllFeedbackPage() rather than through it: that
   // function is shared with the Feedback screen and its row shape is not this
   // screen's to change.
   //
@@ -296,6 +301,8 @@ export default function OwnerOps() {
   // Which of the two nulls that is — still reading, or refused. Same pair the
   // inbox read carries, for the same reason.
   const [resolvedFailed, setResolvedFailed] = useState(false);
+  /** And whether the resolved-state read was the whole of it. */
+  const [resolvedTruncated, setResolvedTruncated] = useState(false);
   useEffect(() => {
     if (!USE_SUPABASE) { setResolvedAt({}); return; }
     let off = false;
@@ -303,10 +310,16 @@ export default function OwnerOps() {
       const { data, error } = await supabase.from('feedback').select('id, resolved_at')
         .order('created_at', { ascending: false }).limit(capLimit());
       if (off) return;
-      if (error) { reportError('ownerOps.resolved', error); setResolvedAt(null); setResolvedFailed(true); return; }
+      if (error) { reportError('ownerOps.resolved', error); setResolvedAt(null); setResolvedFailed(true); setResolvedTruncated(false); return; }
+      // `capLimit()` above asks for one row past the ceiling precisely so a
+      // full page and a truncated one stop looking identical, and nothing was
+      // reading the answer. Every ticket whose resolved_at row fell past the cap
+      // is drawn as OPEN — the mirror of the "3 open over a failed read" bug the
+      // note above this effect was written about, arriving by the other door.
+      const page = capped(data);
       const map: Record<string, string> = {};
-      for (const r of data ?? []) { if (r.resolved_at) map[String(r.id)] = String(r.resolved_at); }
-      setResolvedAt(map); setResolvedFailed(false); setResolvedAtStamp(Date.now());
+      for (const r of page.rows) { if (r.resolved_at) map[String(r.id)] = String(r.resolved_at); }
+      setResolvedAt(map); setResolvedFailed(false); setResolvedTruncated(page.truncated); setResolvedAtStamp(Date.now());
     })();
     return () => { off = true; };
   }, [readTick]);
@@ -323,20 +336,27 @@ export default function OwnerOps() {
       // so the policy already returns this owner's gym and nobody else's.
       const { data, error } = await supabase
         .from('gym_events').select('id, kind, summary, created_at')
-        .order('created_at', { ascending: false }).limit(100);
+        .order('created_at', { ascending: false }).limit(EVENT_LIMIT);
       if (off) return;
       if (error) { reportError('ownerOps.events', error); setEvStatus('error'); return; }
-      setEvents((data ?? []).map((r: any) => ({
+      const rows = data ?? [];
+      setEvents(rows.map((r: any) => ({
         id: String(r.id), kind: String(r.kind), summary: String(r.summary), at: String(r.created_at),
       })));
-      setEvStatus('ready');
+      // `.limit(100)` is a bound, not a cap, and a read that came back AT its
+      // bound is a prefix — which is what 'partial' means in this codebase's
+      // vocabulary. It was reported as 'ready' unconditionally, and the section
+      // header then printed the bare numeral 100 as the gym's activity count.
+      // The caption under the list already said "the most recent hundred"; the
+      // figure above it did not.
+      setEvStatus(rows.length >= EVENT_LIMIT ? 'partial' : 'ready');
       setEventsAt(Date.now());
     })();
     return () => { off = true; };
   }, [readTick]);
   // null is the inbox we do not have: it is the initial value AND what
-  // fetchAllFeedback returns for a refused read, which is deliberate — see the
-  // note on that function. It used to be collapsed here with `d ?? []`, one line
+  // fetchAllFeedbackPage returns for a refused read, which is deliberate — see
+  // the note on that function. It used to be collapsed here with `d ?? []`, one line
   // under a comment saying null means unread rather than empty, and the tab then
   // asserted "No tickets. Feedback sent from inside the app lands here." That is
   // the sentence you least want to be wrong about during a test round: it says
@@ -345,14 +365,32 @@ export default function OwnerOps() {
   // Which of the two nulls this is. Without it "still reading" and "the read
   // came back refused" draw the same screen and neither can be acted on.
   const [fbFailed, setFbFailed] = useState(false);
+  /** And whether the inbox that DID come back is the whole inbox. Every count
+   *  on this tab is over these rows, and a subtotal called "All resolved" is
+   *  the worst thing this screen can say. */
+  const [fbTruncated, setFbTruncated] = useState(false);
   // The await is guarded: an unhandled rejection here left the support inbox on
   // its initial [] with no record that anything had gone wrong, and the tab
   // stated "No tickets." over a read that never returned.
   useEffect(() => {
     let c = false;
     (async () => {
-      try { const d = await fetchAllFeedback(); if (!c) { setFbRows(d); setFbFailed(d === null); if (d !== null) setInboxAt(Date.now()); } }
-      catch (e) { reportError('ownerOps.feedback', e); if (!c) { setFbRows(null); setFbFailed(true); } }
+      // `fetchAllFeedbackPage`, not `fetchAllFeedback`. The latter is a thin
+      // wrapper that returns `page && page.rows` — it THROWS THE TRUNCATION FLAG
+      // AWAY. Under a capped read this tab held a thousand-row prefix with
+      // `inboxKnown` true, and stated "3 open" and, worse, "All resolved" over
+      // tickets it had never read. app/(owner)/feedback.tsx moved to the paged
+      // call for exactly this reason and this screen was not moved with it.
+      try {
+        const page = await fetchAllFeedbackPage();
+        if (!c) {
+          setFbRows(page ? page.rows : null);
+          setFbFailed(page === null);
+          setFbTruncated(page?.truncated ?? false);
+          if (page !== null) setInboxAt(Date.now());
+        }
+      }
+      catch (e) { reportError('ownerOps.feedback', e); if (!c) { setFbRows(null); setFbFailed(true); setFbTruncated(false); } }
     })();
     return () => { c = true; };
   }, [readTick]);
@@ -376,7 +414,13 @@ export default function OwnerOps() {
   }, [reloadNotices, refreshTenant]);
   const pull = usePullToRefresh(refreshAll);
 
-  const inboxKnown = fbRows != null && resolvedAt != null;
+  // Both reads landed AND both are whole. Either one being a prefix makes
+  // `openCount` a count over an unknown fraction, and "All resolved" a claim
+  // about tickets nobody read.
+  const inboxKnown = fbRows != null && resolvedAt != null && !fbTruncated && !resolvedTruncated;
+  /** Read, but not all of it — the state that needs a sentence rather than a
+   *  figure. Distinct from `fbFailed`, which has no rows at all. */
+  const inboxShort = fbRows != null && resolvedAt != null && (fbTruncated || resolvedTruncated);
   const fbTickets = (fbRows ?? []).map((r) => ({
     id: 'fb' + r.id,
     subject: (r.category || 'Feedback') + (r.rating ? ' · ' + '★'.repeat(r.rating) : ''),
@@ -656,7 +700,17 @@ export default function OwnerOps() {
                 <Empty tone={t.ink3}>Your notices could not be read just now. This is not a statement that you have sent none.</Empty>
               ) : myNotices.length === 0 ? (
                 <Empty tone={t.ink3}>
-                  {noticeStatus === 'loading' ? 'Reading your notices…' : 'Nothing sent yet — notices you post appear here.'}
+                  {/* Only 'error' and 'loading' were branched, so 'partial' fell
+                      into the assertion. `useAnnouncements` reads the gym's
+                      announcements newest-first at `capLimit()` and reports
+                      'partial' on truncation — so an owner whose own notices are
+                      older than the newest thousand TENANT-WIDE rows was told
+                      they had sent none. The count one line up was already gated
+                      on 'ready'; the sentence below it was not. */}
+                  {noticeStatus === 'loading' ? 'Reading your notices…'
+                    : !isWhole(noticeStatus)
+                    ? 'More notices than fit in one read, and none of yours is among the ones that came back. That is not the same as having sent none — pull down to read them again.'
+                    : 'Nothing sent yet — notices you post appear here.'}
                 </Empty>
               ) : myNotices.map((a, i) => (
                 <View key={a.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -687,6 +741,16 @@ export default function OwnerOps() {
                 <Empty tone={t.warn}>
                   Which of these you have already dealt with could not be read, so they are all shown as open.
                   Some of them may not be.
+                </Empty>
+              ) : inboxShort ? (
+                // Read, and not all of it. Distinct from the two failures above
+                // and from the read still being in flight below — the tickets
+                // shown are real, there are more of them, and no count over
+                // them is offered.
+                <Empty tone={t.warn}>
+                  There is more feedback than fits in one read, so these are the most recent rather
+                  than all of them and there is no count above. Anything older than these has not
+                  been looked at by this screen.
                 </Empty>
               ) : !inboxKnown ? (
                 <Empty tone={t.ink3}>Reading the support inbox…</Empty>

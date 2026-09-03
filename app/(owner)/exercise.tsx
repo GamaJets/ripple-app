@@ -47,7 +47,13 @@ export default function OwnerExercise() {
   const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
-  const { detail, display, status, reload } = useExerciseDetail(name);
+  // `signedOut` was dropped. `useExerciseDetail` sets it when the row read
+  // returns nothing, because the `exercises` policy is `to authenticated` and a
+  // session that has not restored is handed no row and no error — reported as
+  // 'ready'. Without the flag this screen tells an owner "This movement is not
+  // in our catalogue" and then explicitly rules out the thing that happened:
+  // "nothing here is missing because of an error". Both sibling screens read it.
+  const { detail, display, status, signedOut, reload } = useExerciseDetail(name);
 
   // Gated on the licence recorded against the row, not on anything this screen
   // knows: an evaluation asset from a CC BY-NC preview bundle renders while
@@ -120,9 +126,13 @@ export default function OwnerExercise() {
           // silhouette implying a demonstration we do not have — which on this
           // screen would misrepresent the product to the person buying it.
           <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No illustration for this one' : 'Not in Our Catalogue'}
+            title={detail ? 'No illustration for this one'
+              : signedOut ? 'Not read on this session'
+              : 'Not in Our Catalogue'}
             note={detail
               ? 'This movement has no artwork, so members see its name, its muscles and the written steps. Your coaches can film their own clip for it from the trainer app.'
+              : signedOut
+              ? 'This session was not allowed to read the catalogue, so nothing here says whether we hold this movement. That is a sign-in that has not restored, not a gap in the product.'
               : 'This movement is not in our catalogue, so there is no guide for it — nothing here is missing because of an error.'} />
         )}
 
@@ -201,7 +211,7 @@ export default function OwnerExercise() {
                   ))}
                 </Section>
               </>
-            ) : status === 'ready' ? (
+            ) : status === 'ready' && !signedOut ? (
               <>
                 <Rule />
                 <Section>

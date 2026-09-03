@@ -52,7 +52,7 @@ const Ctx = createContext<TrainersValue | null>(null);
 
 export function PlatformTrainersProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
   const [trainers, setTrainers] = useState<GymTrainer[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -61,9 +61,30 @@ export function PlatformTrainersProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     if (!USE_SUPABASE) { setLoading(false); setStatus('ready'); return; }
-    // No tenant at all is a real, knowable state — there is no gym whose
-    // trainers we are failing to read.
-    if (!tenant) { setTrainers([]); setLoading(false); setStatus('ready'); return; }
+    // ── "there is no gym" and "we could not read the gym" ────────────────
+    //
+    // This branch used to look at `tenant` alone and answer 'ready' with an
+    // empty list for both. They are not the same fact, and the second one is
+    // the failure this whole status exists to prevent: a refused tenant read
+    // reached here as "no gym", published an empty roster as WHOLE, and every
+    // `trainersUnread` guard downstream passed cleanly.
+    //
+    // Eight sentences on four owner screens were stated over it — "No trainers
+    // yet. Invite one by email", "Sessions Delivered · 30 Days — 0" — each one
+    // a claim about a gym nobody could read. The consumers now compute
+    // `worstStatus(tenantStatus, trainersStatus)` for themselves; this is the
+    // same correction at the source, so a consumer that forgets is no longer
+    // told a comfortable lie.
+    if (!tenant) {
+      setTrainers([]);
+      setLoading(false);
+      // A gym that could not be read is not a gym with no trainers. Loading
+      // stays loading; anything else that produced no tenant is an error here,
+      // because with no gym id there is no read to attempt and no way to
+      // improve the answer.
+      setStatus(tenantStatus === 'loading' ? 'loading' : tenantStatus === 'ready' ? 'ready' : 'error');
+      return;
+    }
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -80,7 +101,7 @@ export function PlatformTrainersProvider({ children }: { children: ReactNode }) 
       if (!cancelled) setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [tenant?.id, tick, authRev]);
+  }, [tenant?.id, tenantStatus, tick, authRev]);
 
   // Both are sums over `trainers`, and on a failed read `trainers` is empty —
   // so both summed to 0 and the owner's screens reported a real number: nought

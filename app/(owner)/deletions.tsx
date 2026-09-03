@@ -45,6 +45,12 @@ import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { FORWARD_ICON } from '../../src/ui/direction';
+import { capLimit, capped } from '../../src/lib/rowCap';
+
+/** How far back the audit trail is read. A BOUND, not a cap — the screen only
+ *  ever offered the recent history — so a read that comes back at it is
+ *  labelled as the most recent rather than counted as the whole. */
+const LOG_LIMIT = 50;
 
 /** A row of `pending_deletions`. Nulls are kept as nulls — see `fig`. */
 interface Pending {
@@ -101,6 +107,13 @@ export default function OwnerDeletions() {
   const [pending, setPending] = useState<Pending[] | null>(null);   // null = not loaded yet
   const [log, setLog] = useState<Actioned[] | null>(null);          // null = not loaded yet
   const [logFailed, setLogFailed] = useState(false);                // the audit read itself failed
+  /** Whether the audit read came back AT its bound, so what is held is the most
+   *  recent rows rather than the whole history. */
+  const [logShort, setLogShort] = useState(false);
+  /** And whether the QUEUE read came back at the row ceiling. The queue has no
+   *  natural bound, so a truncated one is not a shorter list — it is a set of
+   *  statutory deadlines with an unknown number of them missing. */
+  const [queueShort, setQueueShort] = useState(false);
   const [failed, setFailed] = useState(false);                      // the queue read itself failed
   const [busy, setBusy] = useState<string | null>(null);            // subject id being actioned
   /** When the QUEUE last came back. The audit log fails independently and does
@@ -116,12 +129,20 @@ export default function OwnerDeletions() {
       supabase
         .from('pending_deletions')
         .select('subject_id, full_name, role, deletion_requested_at, days_remaining')
-        .order('deletion_requested_at', { ascending: true }),
+        // Capped, where it had no bound at all. PostgREST stops at a thousand
+        // rows and says nothing (src/lib/rowCap.ts), and every figure on this
+        // screen — the hero, the "Waiting" KPI, the overdue filter — is a count
+        // over this array. Asking for one row past the ceiling is what makes a
+        // full page distinguishable from a truncated one. Implausible at this
+        // table's volume, and this is the screen where "implausible" is not a
+        // good enough reason to leave a count unprobed.
+        .order('deletion_requested_at', { ascending: true })
+        .limit(capLimit()),
       supabase
         .from('deletion_log')
         .select('id, subject_label, requested_at, actioned_at, note')
         .order('actioned_at', { ascending: false })
-        .limit(50),
+        .limit(LOG_LIMIT),
     ]);
 
     // supabase-js RESOLVES on a database error rather than rejecting, so the
@@ -132,7 +153,9 @@ export default function OwnerDeletions() {
     // all-clear is the single worst thing this screen could do, so the failure
     // is kept visible rather than smoothed into an empty list.
     if (q.status === 'fulfilled' && !q.value.error) {
-      setPending((q.value.data ?? []).map((r: any) => ({
+      const qPage = capped(q.value.data);
+      setQueueShort(qPage.truncated);
+      setPending(qPage.rows.map((r: any) => ({
         subjectId: String(r.subject_id),
         name: r.full_name ?? null,
         role: r.role ?? null,
@@ -155,7 +178,11 @@ export default function OwnerDeletions() {
     }
 
     if (l.status === 'fulfilled' && !l.value.error) {
-      setLog((l.value.data ?? []).map((r: any) => ({
+      const lRows = l.value.data ?? [];
+      // A read that came back AT its bound is the most recent rows, not the
+      // whole history — so the header below stops calling the number a total.
+      setLogShort(lRows.length >= LOG_LIMIT);
+      setLog(lRows.map((r: any) => ({
         id: String(r.id),
         label: r.subject_label ?? null,
         requestedAt: r.requested_at ?? null,
@@ -249,7 +276,11 @@ export default function OwnerDeletions() {
 
         <Hero
           label="Waiting on You"
-          figure={fig(loaded ? queue.length : null)}
+          // No count over a truncated queue. The rows below are still shown —
+          // they are real people with a real clock running — but "14 waiting"
+          // when there are more than the ceiling returned is a figure an owner
+          // works to, and this screen exists to hold them to a deadline.
+          figure={fig(loaded && !queueShort ? queue.length : null)}
           tone={failed || overdue ? t.crit : undefined}
           note={failed
             // Said "pull to retry" over a ScrollView with no RefreshControl, so
@@ -259,6 +290,9 @@ export default function OwnerDeletions() {
             ? 'The queue could not be read. This is NOT an all-clear — pull down or try again below.'
             : !loaded
             ? 'Reading the queue…'
+            : queueShort
+            ? 'More requests than fit in one read, so there is no count here and the list below is '
+              + 'not all of them. Work through what is shown and read it again.'
             : queue.length === 0
               ? 'Nobody is waiting to be erased. This is the good state.'
               : overdue
@@ -275,8 +309,8 @@ export default function OwnerDeletions() {
         <Section>
           <SectionHead title="The 30-day Promise" />
           <KpiRow items={[
-            { label: 'Waiting', value: fig(loaded ? queue.length : null) },
-            { label: 'Overdue', value: fig(loaded ? overdue : null) },
+            { label: 'Waiting', value: fig(loaded && !queueShort ? queue.length : null) },
+            { label: 'Overdue', value: fig(loaded && !queueShort ? overdue : null) },
             { label: 'Soonest', value: fig(soonest), unit: soonest == null ? undefined : 'd' },
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
@@ -362,7 +396,17 @@ export default function OwnerDeletions() {
         <Rule />
 
         <Section>
-          <SectionHead title="Already Actioned" note={log?.length ? `${log.length} recorded` : undefined} />
+          {/* The note said `${log.length} recorded` over a read bounded at
+              LOG_LIMIT, so a gym that has actioned two hundred erasures was
+              told fifty — a subtotal in the position of a total, on the record
+              a regulator asks for. It also stood over the failure message
+              below, claiming a count from the previous read while the sentence
+              beside it said the record could not be read. */}
+          <SectionHead
+            title="Already Actioned"
+            note={logFailed || !log?.length ? undefined
+              : logShort ? `most recent ${log.length}`
+              : `${log.length} recorded`} />
           {logFailed ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: log?.length ? sp.md : 0 }}>
               The record could not be read just now. Deletions you have already carried out are

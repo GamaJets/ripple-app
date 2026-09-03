@@ -17,6 +17,7 @@ import { num } from '../../src/lib/format';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
+import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { Fetched } from '../../src/ui/fetched';
 import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -29,15 +30,36 @@ export default function OwnerTrainers() {
   const t = useTheme();
   const router = useRouter();
   const { trainers, loading, status: trainersStatus, sessions30, payroll30, refresh } = usePlatformTrainers();
+  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
   // `trainers.length === 0` was read straight off as "the gym has no trainers",
   // and a refused read leaves exactly that. This is the screen where that costs
   // most: an owner with a full roster was shown an empty one and told "No
   // trainers yet. Invite one by email" — an instruction to fix a problem they
   // do not have, on the one screen whose job is to list the staff they employ.
   // Every branch that says something about the roster now asks this first.
-  const trainersUnread = trainersStatus === 'error';
-  const trainersUnknown = loading || trainersUnread;
-  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
+  //
+  // ── And the roster is only as trustworthy as the TENANT read under it ────
+  //
+  // `PlatformTrainersProvider` (src/ui/trainers.tsx) destructures `tenant` from
+  // `useTenant()` and never reads its `status`. A refused tenant read leaves
+  // `tenant` null — which that provider treats as "this account has no gym at
+  // all, so there is no roster we are failing to read" — and it publishes an
+  // empty roster under status 'ready'. Every guard on this screen then passes
+  // cleanly, and the empty-roster sentence below is stated over a read that
+  // failed one level up.
+  //
+  // `worstStatus` is the house answer for a screen fed by more than one read:
+  // it is only as complete as its worst. `src/ui/memberChurn.ts` already checks
+  // the tenant status the same way, which is why the churn half of these
+  // screens has never had this hole.
+  const rosterStatus = worstStatus(tenantStatus, trainersStatus);
+  const trainersUnread = rosterStatus === 'error';
+  // `isWhole`, not `!== 'error'`. Neither read emits 'partial' today —
+  // `fetchGymTrainers` calls `assertWhole` and throws rather than degrading, and
+  // the tenant is a single row — so this is the house rule holding rather than a
+  // live miscount being fixed. That is the difference between a gate that is
+  // right and one that happens to be.
+  const trainersUnknown = loading || !isWhole(rosterStatus);
   // The gym's own currency (`tenants.currency`, part 99), not the operating
   // record's fallback. Null while the tenant is unread, and gymMoney falls back
   // for exactly that window.
@@ -110,6 +132,14 @@ export default function OwnerTrainers() {
   const current = sel ? trainers.find((x) => x.id === sel.id) ?? null : null;
   const roll = gymRollup(trainers, tenant?.sessionFee ?? null);
   const pending = sentInvites.filter((i) => i.status === 'pending');
+  /** Whether the invite list is the whole one. `useTrainerInvites` reports
+   *  'partial' on a truncated read of `trainer_invites` (src/ui/trainerInvites.
+   *  tsx) — the sent list only grows, nothing is ever deleted from it, so it is
+   *  exactly the table that crosses a thousand rows by sitting there — and this
+   *  screen was counting `pending.length` under it with `String()`, which walks
+   *  straight past `fig()` and prints a subtotal as a total. */
+  const invitesWhole = isWhole(invitesStatus);
+  const invitesUnread = invitesStatus === 'error';
   const G = layout.gutter;
   const sheet = { backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: 30, ...elevation.e2 };
   const input = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
@@ -175,10 +205,30 @@ export default function OwnerTrainers() {
           </View>
         </Section>
 
-        {pending.length > 0 ? (<>
+        {/* The section used to appear only when `pending.length > 0`, so a
+            REFUSED invite read — which leaves the list empty — removed it from
+            the screen without a word. An owner concludes nobody is waiting on
+            them and either re-invites somebody they already invited, or stops
+            chasing a hire. Every other unread state on this screen gets a
+            sentence; this one got a disappearance. */}
+        {pending.length > 0 || invitesUnread ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Pending Invites" note={String(pending.length)} />
+            <SectionHead title="Pending Invites" note={invitesWhole && pending.length ? String(pending.length) : undefined} />
+            {invitesUnread ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                Your sent invitations could not be read, so this cannot say who is waiting on you.
+                That is a failed read, not an empty list — nobody&rsquo;s invitation has been
+                cancelled, and re-sending one on the strength of this screen would invite the same
+                person twice.
+              </Text>
+            ) : null}
+            {!invitesWhole && !invitesUnread ? (
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                More invitations than fit in one read, so the ones below are the most recent rather
+                than all of them and there is no count over them.
+              </Text>
+            ) : null}
             {pending.map((i, ix) => (
               <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: ix === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flex: 1 }}>

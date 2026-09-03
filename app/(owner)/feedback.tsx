@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, Ghost, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, Ghost, PartialRead, Flag } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
@@ -33,7 +33,19 @@ export default function OwnerFeedback() {
   const router = useRouter();
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errors, setErrors] = useState<AppErrorRow[]>([]);
+  /**
+   * The crash log, or nothing.
+   *
+   * `AppErrorRow[] | null`, not `AppErrorRow[]`. `fetchAppErrors` returns null
+   * for a refused read and says so in its own doc comment — "which is not the
+   * same as there having been no crashes" — and this screen collapsed that null
+   * to `[]` with `errs ?? []`. The section below is drawn only when the array is
+   * non-empty, so a refused `app_errors` read removed the crash list from the
+   * screen entirely, with nothing anywhere to distinguish it from a clean
+   * build. On the screen an owner opens during a test round, "no crashes" is
+   * the one sentence a silence must not be allowed to say.
+   */
+  const [errors, setErrors] = useState<AppErrorRow[] | null>(null);
   const [showErr, setShowErr] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   /** The inbox could not be read. Distinct from it being empty. */
@@ -64,7 +76,7 @@ export default function OwnerFeedback() {
     try {
       const [page, errs] = await Promise.all([fetchAllFeedbackPage(), fetchAppErrors(20)]);
       // null is "we could not read it" and must not become an empty list.
-      setRows(page?.rows ?? []); setErrors(errs ?? []);
+      setRows(page?.rows ?? []); setErrors(errs);
       setUnread(page == null);
       // Under a failed read there is no page to be truthful about, so the flag
       // is cleared rather than left standing from the previous attempt.
@@ -163,13 +175,23 @@ export default function OwnerFeedback() {
           ))}
         </Section>
 
-        {errors.length > 0 ? (<>
+        {errors === null ? (<>
+          <Rule />
+          <Section>
+            <Flag tone={t.warn}>
+              The crash log could not be read, so this cannot tell you whether the build has been
+              throwing. That is a failed read, not a clean build — do not sign anything off on it.
+            </Flag>
+          </Section>
+        </>) : null}
+
+        {errors && errors.length > 0 ? (<>
           <Rule />
           <Section>
             <Pressable onPress={() => setShowErr((v) => !v)} accessibilityRole="button"
               style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
               <Icon name="wrench" size={15} color={t.crit} />
-              <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Recent errors ({errors.length})</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Recent errors ({errors?.length ?? 0})</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{showErr ? 'Hide' : 'Show'}</Text>
             </Pressable>
             {showErr ? errors.map((e, i) => (

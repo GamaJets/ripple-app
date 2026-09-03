@@ -100,7 +100,14 @@ export default function OwnerLibrary() {
   const t = useTheme();
   const router = useRouter();
   const goBack = useBackFromHub('(owner)');
-  const { rows, status, reload } = useExerciseCatalogue();
+  // `signedOut` was not destructured, and it is the one flag this screen
+  // cannot do without. The `exercises` read policy is `to authenticated`, so a
+  // session that has not been restored yet is handed ZERO ROWS WITH NO ERROR
+  // and the hook reports 'ready'. Every gate below then passes and this screen
+  // told an owner sizing up the platform "The catalogue is empty." over nine
+  // hundred movements. The hook computes the flag for exactly this case;
+  // app/(client)/library.tsx and both exercise screens already read it.
+  const { rows, status, signedOut, reload } = useExerciseCatalogue();
   const [q, setQ] = useState('');
   const [group, setGroup] = useState(ALL);
 
@@ -152,7 +159,7 @@ export default function OwnerLibrary() {
   // 'partial' those rows are a prefix of the catalogue, so the counts would be
   // subtotals printed as totals — the exact thing src/lib/rowCap.ts exists to
   // stop. A dash is the honest answer, and PartialRead below says why.
-  const countable = status === 'ready';
+  const countable = status === 'ready' && !signedOut;
   // 'illustrated' is what the owner is being sold: a movement with artwork can
   // be shown to a member, one without is a name and some text.
   const illustrated = rows.filter((r) => r.hasDemo).length;
@@ -176,6 +183,13 @@ export default function OwnerLibrary() {
   ].filter(Boolean).join(' · ');
 
   const emptyLine = () => {
+    // A read we were not allowed to make is not an empty catalogue, and the
+    // difference matters most to the person this screen is selling to.
+    if (signedOut) {
+      return 'The catalogue could not be read on this session — that is a sign-in that has not '
+        + 'restored, not a catalogue with nothing in it. Nothing below is a statement about what '
+        + 'the platform covers.';
+    }
     if (!filtering) return 'The catalogue is empty.';
     const bits: string[] = [];
     if (term) bits.push(`“${q.trim()}”`);
@@ -207,6 +221,7 @@ export default function OwnerLibrary() {
               status === 'loading' ? 'Reading the catalogue…'
               : status === 'error' ? 'The catalogue could not be read, so this is unknown — not zero.'
               : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
+              : signedOut ? 'Not read on this session — this is a sign-in that has not restored, not an empty catalogue.'
               : rows.length === 0 ? 'The catalogue came back empty.'
               : 'Every one is available to your members and to your coaches, at no extra cost.'
             }

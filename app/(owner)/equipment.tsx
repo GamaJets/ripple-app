@@ -31,6 +31,7 @@ import { reportError } from '../../src/lib/reportError';
 import { isoDate } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { readState, staleNote } from '../../src/lib/staleRead';
 import {
   fetchEquipment, addEquipment, setStatus, recordService,
   summariseRegister, needsAttention, serviceState, nextServiceDue,
@@ -126,6 +127,13 @@ export default function OwnerEquipment() {
   const pull = usePullToRefresh(load);
 
   const today = todayIso();
+  // The loader above already keeps a register that HAD come back when a later
+  // read is refused. What it did not do is tell the screen apart from a screen
+  // that has never read anything — so the hero printed a real count from the
+  // earlier read under a note saying "nothing here is known", which is a figure
+  // and a disclaimer of that figure side by side. src/lib/staleRead.ts is the
+  // four states, and the two of them that were sharing one sentence.
+  const readSt = readState(items, failed);
   const loaded = items !== null;
   const list = items ?? [];
   const sum = loaded ? summariseRegister(list, today) : null;
@@ -266,8 +274,15 @@ export default function OwnerEquipment() {
         <Hero
           label="Needing Attention"
           figure={!loaded ? '—' : String(queue.length)}
-          note={failed
+          note={readSt === 'failed'
+            // Nothing has ever landed, so the figure above is a dash and this
+            // is the only thing on the screen worth reading.
             ? 'The register could not be read, so nothing here is known — that is a failed read, not an all-clear.'
+            : readSt === 'stale'
+            // Something DID land, and the count above is real as of the stamp
+            // under the title. The old copy said "nothing here is known" over
+            // it, which was the wrong half of the truth.
+            ? staleNote('register')
             : !loaded
             ? 'Reading the register…'
             : list.length === 0

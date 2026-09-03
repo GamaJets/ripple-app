@@ -18,6 +18,7 @@ import { sp, layout, hairline, type as ty, numeric, value } from '../../src/them
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { num } from '../../src/lib/format';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { Fetched } from '../../src/ui/fetched';
 import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -48,6 +49,7 @@ export default function OwnerOverview() {
   // retry of any kind. Revenue and Trainers both offer the provider's own
   // `refresh` behind a button; this is that, here.
   const { trainers, loading, status: trainersStatus, sessions30, payroll30, refresh } = usePlatformTrainers();
+  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
   /** When the roster every figure on this console is a roll-up of last came
    *  back. Derived from the provider's `status`, so a refresh that FAILED
    *  leaves the stamp on the read the figures actually came from. */
@@ -57,9 +59,29 @@ export default function OwnerOverview() {
   // FAILED — that also leaves `trainers` empty, and every roll-up below then
   // computes a confident 0 over it. Same wrong sentence, arrived at a second
   // later: an owner told their gym delivered nothing last month.
-  const trainersUnread = trainersStatus === 'error';
-  const trainersUnknown = loading || trainersUnread;
-  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
+  //
+  // ── And the roster is only as trustworthy as the TENANT read under it ────
+  //
+  // `PlatformTrainersProvider` (src/ui/trainers.tsx) destructures `tenant` from
+  // `useTenant()` and never reads its `status`. A refused tenant read leaves
+  // `tenant` null — which that provider treats as "this account has no gym at
+  // all, so there is no roster we are failing to read" — and it publishes an
+  // empty roster under status 'ready'. Every guard on this screen then passes
+  // cleanly, and the empty-roster sentence below is stated over a read that
+  // failed one level up.
+  //
+  // `worstStatus` is the house answer for a screen fed by more than one read:
+  // it is only as complete as its worst. `src/ui/memberChurn.ts` already checks
+  // the tenant status the same way, which is why the churn half of these
+  // screens has never had this hole.
+  const rosterStatus = worstStatus(tenantStatus, trainersStatus);
+  const trainersUnread = rosterStatus === 'error';
+  // `isWhole`, not `!== 'error'`. Neither read emits 'partial' today —
+  // `fetchGymTrainers` calls `assertWhole` and throws rather than degrading, and
+  // the tenant is a single row — so this is the house rule holding rather than a
+  // live miscount being fixed. That is the difference between a gate that is
+  // right and one that happens to be.
+  const trainersUnknown = loading || !isWhole(rosterStatus);
   // The gym's own currency (`tenants.currency`, part 99). Null until the tenant
   // read returns, and gymMoney falls back to GYM_CURRENCY for that window.
   const cur = tenant?.currency ?? null;

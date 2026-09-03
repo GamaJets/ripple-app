@@ -89,7 +89,7 @@ const FIELDS: { key: keyof FinInputs; label: string; hint?: string }[] = [
 export default function Financials() {
   const t = useTheme();
   const router = useRouter();
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus } = useTenant();
   // `?? null`, not `|| GYM_CURRENCY`. Every figure on this screen is one the
   // owner typed, so the amounts are known — but the money they are in is the
   // gym's own answer or nothing, and a form whose fields are headed "(AED)" at
@@ -99,6 +99,17 @@ export default function Financials() {
   const money = (n: number) => moneyIn(n, cur);
   const [fin, setFin] = useState<FinInputs>(emptyFinances);
   const [hydrated, setHydrated] = useState(false);
+  /**
+   * The stored P&L could not be READ back.
+   *
+   * The catch below swallowed it and set `hydrated` anyway, so a corrupt or
+   * refused `AsyncStorage` read left `fin` at `emptyFinances()` — and this
+   * screen headed itself "No Figures Yet" and said "Nothing is shown until it
+   * comes from you" to an owner who typed a full month last week. Worse, the
+   * next save writes that blank object back over the key, so the sentence
+   * becomes true by having been said.
+   */
+  const [hydrateFailed, setHydrateFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
 
@@ -162,7 +173,29 @@ export default function Financials() {
   useEffect(() => {
     let live = true;
     (async () => {
-      if (!tenant?.id) return;
+      // A tenant that could not be READ is not a gym with no register.
+      //
+      // This used to be `if (!tenant?.id) return;` alone, and the early return
+      // left `derivedFailed` false with all four derived figures null — which is
+      // byte for byte the state an empty register produces. `reconcile` then
+      // returned 'no_record' and this screen told an owner "Nothing recorded
+      // yet, so your MRR cannot be checked against the register", on all four
+      // checks at once. The comment on `derivedFailed` above calls that the
+      // worst available sentence on this screen, and the machinery built to
+      // prevent it was reachable only through the register read's own catch —
+      // so a failure one level up, in the TENANT read, walked straight past it.
+      //
+      // 'loading' takes the same branch on purpose. Between mount and the
+      // tenant landing there is a window in which the register genuinely cannot
+      // be checked, and "we could not read it" is true of that window while
+      // "you have recorded nothing" is not.
+      if (!tenant?.id) {
+        if (!live) return;
+        setDerivedMrr(null); setDerivedMembers(null);
+        setDerivedRevenue(null); setDerivedNew(null);
+        setDerivedFailed(tenantStatus !== 'ready');
+        return;
+      }
       setBusy(true);
       try {
         /**
@@ -227,7 +260,7 @@ export default function Financials() {
       }
     })();
     return () => { live = false; };
-  }, [tenant?.id, again]);
+  }, [tenant?.id, tenantStatus, again]);
 
   // `unreadable` rather than `reconcile(..., null)`: only this screen knows the
   // query threw, and it is the one piece of information that separates "your
@@ -247,7 +280,10 @@ export default function Financials() {
           for (const f of FIELDS) if (typeof parsed?.[f.key] === 'number') next[f.key] = parsed[f.key];
           setFin(next);
         }
-      } catch { /* ignore */ }
+      } catch (e) {
+        reportError('financials.hydrate', e);
+        setHydrateFailed(true);
+      }
       setHydrated(true);
     })();
   }, []);
@@ -271,7 +307,18 @@ export default function Financials() {
     }
     setFin(next);
     setEditing(false);
-    try { await AsyncStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    try {
+      await AsyncStorage.setItem(KEY, JSON.stringify(next));
+      // Whatever could not be read a moment ago has now been written over by
+      // something the owner typed deliberately, so the warning stops being true.
+      setHydrateFailed(false);
+    } catch (e) {
+      reportError('financials.save', e);
+      Alert.alert(
+        'Not saved on this phone',
+        'Your figures are on screen but could not be written to this phone\u2019s storage, so they will not survive closing the app. Nothing has been sent anywhere.',
+      );
+    }
   }, [draft]);
 
   const ready = hasFigures(fin);
@@ -418,6 +465,22 @@ export default function Financials() {
                 counts, left revenue blank, and would otherwise be told "nothing
                 is shown until it comes from you" about figures they had just
                 entered — which reads as the screen having lost them. */}
+            {/* A THIRD person arrives here: one whose figures are on this
+                phone and could not be read back off it. "No Figures Yet" is a
+                statement about what they have done, and it is false — and the
+                Save button below would then write the blank over the top of
+                what is still on disk, making the sentence true. */}
+            {hydrateFailed && !anyEntered(fin) ? (
+              <>
+                <SectionHead title="Your Figures Could Not Be Read" />
+                <Text style={{ ...ty.body, color: t.ink2 }}>
+                  This phone&rsquo;s stored copy of your monthly figures did not come back. That is
+                  a read that failed, not a month you have not filled in — anything you entered
+                  before is still on this phone. Close the app and open it again before typing
+                  anything here: saving now writes over whatever is still stored.
+                </Text>
+              </>
+            ) : (<>
             <SectionHead title={anyEntered(fin) ? 'Revenue Is Missing' : 'No Figures Yet'} />
             <Text style={{ ...ty.body, color: t.ink2 }}>
               {anyEntered(fin)
@@ -432,6 +495,7 @@ export default function Financials() {
             </Text>
             <View style={{ height: sp.lg }} />
             <Cta label={anyEntered(fin) ? 'Add My Revenue' : 'Enter My Figures'} wide onPress={openEditor} />
+            </>)}
           </Section>
         ) : r ? (
           <>
