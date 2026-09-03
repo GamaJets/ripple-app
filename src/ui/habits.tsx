@@ -797,7 +797,29 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // count past the number of rows on screen.
   const doneCount = habits.filter((h) => h.done).length;
 
-  return <Ctx.Provider value={{ habits, toggleHabit, status, gaps, doneCount, water, waterGoal, waterStatus, addWater, removeWater, unsent: pendingCount, reload }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useHabits`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.toggleHabit(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ toggleHabit, addWater, removeWater });
+  impl.current = { toggleHabit, addWater, removeWater };
+  const toggleHabitStable = useCallback((...a: Parameters<typeof toggleHabit>) => impl.current.toggleHabit(...a), []);
+  const addWaterStable = useCallback((...a: Parameters<typeof addWater>) => impl.current.addWater(...a), []);
+  const removeWaterStable = useCallback((...a: Parameters<typeof removeWater>) => impl.current.removeWater(...a), []);
+  const value = useMemo<HabitsValue>(() => ({ habits, toggleHabit: toggleHabitStable, status, gaps, doneCount, water, waterGoal, waterStatus, addWater: addWaterStable, removeWater: removeWaterStable, unsent: pendingCount, reload }), [habits, toggleHabitStable, status, gaps, doneCount, water, waterGoal, waterStatus, addWaterStable, removeWaterStable, pendingCount, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useHabits(): HabitsValue {

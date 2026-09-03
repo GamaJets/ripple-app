@@ -1,7 +1,7 @@
 // Shared UI primitives + the live theme. The theme is one of 10 palettes
 // (Elevated Teal default), selectable by client & trainer. An optional accent
 // override sits on top for owner white-labelling. Both persist.
-import { ReactNode, createContext, useContext, useState, useEffect } from 'react';
+import { ReactNode, createContext, useCallback, useContext, useMemo, useRef, useState, useEffect } from 'react';
 import { View, Text, Pressable, TextInput, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -130,13 +130,32 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   const branded: Theme = accent
     ? { ...withVariant, brand: accent, brandInk: brandInkFor(accent) }
     : withVariant;
-  const theme: Theme = contrast ? highContrast(branded) : branded;
-  return (
-    <ThemeCtx.Provider value={{
-      palette, setPalette, accent, setAccent, follow, setFollow, contrast, setContrast,
-      scheme, shownPalette, palettes: PALETTES, theme,
-    }}>{children}</ThemeCtx.Provider>
-  );
+  // ── Why the theme and the four setters are held still ─────────────────────
+  //
+  // `theme` is built out of spreads, so it used to be a NEW object on every
+  // render of this provider — and `useTheme()` is called by very nearly every
+  // component in all three apps, most of which build their styles in a
+  // `useMemo` keyed on it. A fresh theme is a fresh everything, downstream, for
+  // a colour nobody changed. The four setters were plain arrows, so the context
+  // value was new on every render too; see src/ui/roster.tsx for what a
+  // consumer that keys an effect on such a value ends up doing.
+  //
+  // The setters go through a ref rather than being frozen in place, because
+  // `setPalette` and the rest read this render's state. Freezing them would
+  // freeze that state with them, which is the same defect one level down.
+  const theme = useMemo<Theme>(() => (contrast ? highContrast(branded) : branded), [contrast, shownPalette, palette, accent]); // eslint-disable-line react-hooks/exhaustive-deps -- `branded` is a pure function of exactly these four
+  const impl = useRef({ setPalette, setAccent, setFollow, setContrast });
+  impl.current = { setPalette, setAccent, setFollow, setContrast };
+  const setPaletteStable = useCallback((...a: Parameters<typeof setPalette>) => impl.current.setPalette(...a), []);
+  const setAccentStable = useCallback((...a: Parameters<typeof setAccent>) => impl.current.setAccent(...a), []);
+  const setFollowStable = useCallback((...a: Parameters<typeof setFollow>) => impl.current.setFollow(...a), []);
+  const setContrastStable = useCallback((...a: Parameters<typeof setContrast>) => impl.current.setContrast(...a), []);
+  const value = useMemo<ThemeControls>(() => ({
+    palette, setPalette: setPaletteStable, accent, setAccent: setAccentStable,
+    follow, setFollow: setFollowStable, contrast, setContrast: setContrastStable,
+    scheme, shownPalette, palettes: PALETTES, theme,
+  }), [palette, setPaletteStable, accent, setAccentStable, follow, setFollowStable, contrast, setContrastStable, scheme, shownPalette, theme]);
+  return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>;
 }
 
 export function useTheme(): Theme {

@@ -26,7 +26,7 @@
 //
 // `status`, `scansStatus` and `saveFailed` make each of those visible. The
 // values themselves are unchanged: nothing here starts guessing.
-import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
 import { manualBeatsScan } from '../lib/bodyFigures';
@@ -726,28 +726,28 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const weightKg = (manualWeight != null && manualIsCurrent) ? manualWeight : (latest ? latest.weightKg : null);
   const bodyFatPct = (manualBodyFat != null && manualIsCurrent) ? manualBodyFat : (latest ? latest.bodyFatPct : null);
 
-  const value: Value = {
-    id: sbUid ?? 'unknown', name, init: initials(name), setName,
-    dob, setDob, photo, setPhoto, heightCm, setHeightCm,
-    goal, setGoal, diet, setDiet, avoid, setAvoid,
-    injuries,
-    focusAreas, setFocusAreas,
-    addInjury: (v) => setInjuries((p) => [v, ...p]),
-    updateInjury: (id, patch) => setInjuries((p) => p.map((i) => (i.id === id ? { ...i, ...patch } : i))),
-    removeInjury: (id) => setInjuries((p) => p.filter((i) => i.id !== id)),
-    coachingMode, setCoachingMode, coachLinked,
-    activity: 1.5, mealsPerDay, setMealsPerDay,
-    stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
-    weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
-    setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
-    saveWeightNow,
-    scans: sorted,
-    // A scan is the single most consequential thing a client records: it moves
-    // weight, body fat, muscle, every chart, and the macro targets they eat to.
-    // The insert used to be fire-and-forget — `.then(res => …, () => {})`, with
-    // `error` never read — so a refused write left the scan on screen, driving
-    // all of that, until the next launch dropped it. Now the caller is told.
-    addScan: async (s: ScanRec): Promise<boolean> => {
+  // ── Why this value is memoised and its writers go through a ref ──────────
+  //
+  // This provider used to publish a plain object literal, rebuilt on every
+  // render — and with it eight fresh functions and three fresh arrays. That is
+  // the defect src/ui/roster.tsx documents at length: `useClientData()` handed
+  // back a different value every time, so a consumer keying an effect on it, or
+  // on any array off it, re-ran that effect for a body record nobody had
+  // touched. src/ui/badgeWatch.tsx keys its unlock check on `cd.weightSeries`
+  // and was re-running it on every render of this provider for exactly that
+  // reason.
+  //
+  // The writers are hoisted out and handed through a ref rather than frozen in
+  // a `useCallback`: `deleteScan` needs the CURRENT `scans` to put a row back
+  // after a refused delete, and every one of them needs the current `sbUid`, so
+  // freezing the implementations would freeze that state with them — the same
+  // bug one level down.
+  const addInjury: Value['addInjury'] = (v) => setInjuries((prev) => [v, ...prev]);
+  const updateInjury: Value['updateInjury'] = (id, patch) => setInjuries((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+  const removeInjury: Value['removeInjury'] = (id) => setInjuries((prev) => prev.filter((i) => i.id !== id));
+  const setWeightKg: Value['setWeightKg'] = (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); };
+  const setBodyFat: Value['setBodyFat'] = (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); };
+  const addScan: Value['addScan'] = async (s: ScanRec): Promise<boolean> => {
       setScans((p) => [...p, s]);
       if (s.metrics && Object.values(s.metrics).some((v) => v != null)) {
         setScanMetrics((prev) => { const nm = { ...prev, [s.takenAt.slice(0, 10)]: s.metrics! }; AsyncStorage.setItem('repple.scanMetrics', JSON.stringify(nm)).catch(() => {}); return nm; });
@@ -779,8 +779,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         }
         return true;
       } catch (e) { reportError('clientData.addScan', e); return false; }
-    },
-    updateScan: async (id, patch): Promise<boolean> => {
+  };
+  const updateScan: Value['updateScan'] = async (id, patch): Promise<boolean> => {
       // Applied locally first, exactly as addScan does, so the correction is on
       // screen while the write is in flight — and reported honestly afterwards
       // rather than assumed.
@@ -817,8 +817,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         if (error) { reportError('clientData.updateScan', error); return false; }
         return Array.isArray(data) && data.length > 0;
       } catch (e) { reportError('clientData.updateScan', e); return false; }
-    },
-    deleteScan: async (id): Promise<boolean> => {
+  };
+  const deleteScan: Value['deleteScan'] = async (id): Promise<boolean> => {
       const before = scans;
       setScans((p) => p.filter((row) => row.id !== id));
       if (!USE_SUPABASE || !sbUid) return false;
@@ -840,24 +840,75 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         reportError('clientData.deleteScan', e);
         return false;
       }
-    },
-    weightSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
-    bodyFatSeries: [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],
-    // Scans that reported no muscle figure contribute no POINT, rather than a
-    // point at zero. A charted zero is not a small reading, it is a cliff: it
-    // dominates the axis and reads as total muscle loss between two scans.
-    muscleSeries: sorted.flatMap((s) => (s.skeletalMuscleKg != null ? [{ t: s.takenAt, v: s.skeletalMuscleKg }] : [])),
-    profileStatus: publishedProfileStatus, scansStatus: publishedScansStatus, saveFailed, reload,
-    // The combined view: 'error' the moment either half failed, because a
-    // profile screen shows both at once and cannot honestly present half of it
-    // as the client's own data. 'partial' rolls up the same way — a truncated
-    // scan history makes the profile's total change since starting a figure
-    // over an unknown fraction of the record.
-    status: worstStatus(publishedProfileStatus, publishedScansStatus),
   };
+  const impl = useRef({ addInjury, updateInjury, removeInjury, setWeightKg, setBodyFat, addScan, updateScan, deleteScan });
+  impl.current = { addInjury, updateInjury, removeInjury, setWeightKg, setBodyFat, addScan, updateScan, deleteScan };
+  const addInjuryStable = useCallback((...a: Parameters<typeof addInjury>) => impl.current.addInjury(...a), []);
+  const updateInjuryStable = useCallback((...a: Parameters<typeof updateInjury>) => impl.current.updateInjury(...a), []);
+  const removeInjuryStable = useCallback((...a: Parameters<typeof removeInjury>) => impl.current.removeInjury(...a), []);
+  const setWeightKgStable = useCallback((...a: Parameters<typeof setWeightKg>) => impl.current.setWeightKg(...a), []);
+  const setBodyFatStable = useCallback((...a: Parameters<typeof setBodyFat>) => impl.current.setBodyFat(...a), []);
+  const addScanStable = useCallback((...a: Parameters<typeof addScan>) => impl.current.addScan(...a), []);
+  const updateScanStable = useCallback((...a: Parameters<typeof updateScan>) => impl.current.updateScan(...a), []);
+  const deleteScanStable = useCallback((...a: Parameters<typeof deleteScan>) => impl.current.deleteScan(...a), []);
+
+  // The three charted series. Memoised for the same reason the value is: each
+  // used to be a freshly-built array on every render, and a chart keyed on one
+  // of them re-drew for a scan history that had not changed.
+  const weightSeries = useMemo(
+    () => [...sorted.map((s) => ({ t: s.takenAt, v: s.weightKg })), ...(manualIsCurrent && manualWeight != null ? [{ t: manualAt as string, v: manualWeight }] : [])],
+    [sorted, manualIsCurrent, manualWeight, manualAt],
+  );
+  const bodyFatSeries = useMemo(
+    () => [...sorted.map((s) => ({ t: s.takenAt, v: s.bodyFatPct })), ...(manualIsCurrent && manualBodyFat != null ? [{ t: manualAt as string, v: manualBodyFat }] : [])],
+    [sorted, manualIsCurrent, manualBodyFat, manualAt],
+  );
+  // Scans that reported no muscle figure contribute no POINT, rather than a
+  // point at zero. A charted zero is not a small reading, it is a cliff: it
+  // dominates the axis and reads as total muscle loss between two scans.
+  const muscleSeries = useMemo(
+    () => sorted.flatMap((s) => (s.skeletalMuscleKg != null ? [{ t: s.takenAt, v: s.skeletalMuscleKg }] : [])),
+    [sorted],
+  );
+  // The combined view: 'error' the moment either half failed, because a
+  // profile screen shows both at once and cannot honestly present half of it
+  // as the client's own data. 'partial' rolls up the same way — a truncated
+  // scan history makes the profile's total change since starting a figure
+  // over an unknown fraction of the record.
+  const status = worstStatus(publishedProfileStatus, publishedScansStatus);
+
+  const value = useMemo<Value>(() => ({
+    id: sbUid ?? 'unknown', name, init: initials(name), setName,
+    dob, setDob, photo, setPhoto, heightCm, setHeightCm,
+    goal, setGoal, diet, setDiet, avoid, setAvoid,
+    injuries,
+    focusAreas, setFocusAreas,
+    addInjury: addInjuryStable, updateInjury: updateInjuryStable, removeInjury: removeInjuryStable,
+    coachingMode, setCoachingMode, coachLinked,
+    activity: 1.5, mealsPerDay, setMealsPerDay,
+    stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
+    weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
+    setWeightKg: setWeightKgStable, setBodyFat: setBodyFatStable,
+    saveWeightNow,
+    scans: sorted,
+    addScan: addScanStable, updateScan: updateScanStable, deleteScan: deleteScanStable,
+    weightSeries, bodyFatSeries, muscleSeries,
+    profileStatus: publishedProfileStatus, scansStatus: publishedScansStatus, saveFailed, reload,
+    status,
+  }), [
+    sbUid, name, setName, dob, setDob, photo, setPhoto, heightCm, setHeightCm,
+    goal, setGoal, diet, setDiet, avoid, setAvoid, injuries, focusAreas, setFocusAreas,
+    addInjuryStable, updateInjuryStable, removeInjuryStable,
+    coachingMode, setCoachingMode, coachLinked, mealsPerDay, setMealsPerDay,
+    stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
+    weightKg, bodyFatPct, latest, setWeightKgStable, setBodyFatStable, saveWeightNow, sorted,
+    addScanStable, updateScanStable, deleteScanStable,
+    weightSeries, bodyFatSeries, muscleSeries,
+    publishedProfileStatus, publishedScansStatus, saveFailed, reload, status,
+  ]);
   // Re-run these reads when the signal comes back, without the member having
   // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
-  useRecoverRead('clientData', value.status, reload);
+  useRecoverRead('clientData', status, reload);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

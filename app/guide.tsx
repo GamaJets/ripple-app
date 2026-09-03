@@ -72,13 +72,35 @@ export default function Guide() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 48 }}>
-        <Text style={{ ...ty.micro, color: t.ink3 }}>User guide</Text>
-        <Text style={{ ...ty.title, color: t.ink, marginTop: 2 }}>{VARIANT_LABEL[VARIANT]}</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{GUIDE_INTRO[VARIANT]}</Text>
+        {/* ── the way out ──────────────────────────────────────────────────
+            Seen on an iPhone 17 Pro: this screen had no back control at all.
+            It is pushed from the Profile tab, it hides the tab bar, and the
+            only control that leaves it was the "Done" ghost at the foot of a
+            scroll that is six tab sections plus every cross-app topic long. A
+            reader who opened the guide to look one thing up had to scroll past
+            the whole of it to get out of it, or kill the app.
+
+            Leading edge with an a11yLabel, which is the house form — see
+            src/ui/FeedbackScreen.tsx for the argument. "Done" stays where it
+            is: somebody who read to the end should not have to scroll back. */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>User guide</Text>
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 2 }}>{VARIANT_LABEL[VARIANT]}</Text>
+          </View>
+        </View>
+        {/* marginBottom, not nothing. The rule below sat on the last line of
+            this paragraph — a hairline touching descenders reads as an
+            underline on the sentence rather than as the end of the header. */}
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>{GUIDE_INTRO[VARIANT]}</Text>
 
         <Rule />
 
-        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>The tabs</Text>
+        {/* marginTop to match "Across the app" below. Without it this kicker
+            sat hard against the rule above it and read as part of the header
+            paragraph rather than as the label on the list under it. */}
+        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>The tabs</Text>
         {tabs.map((s) => <Block key={s.title} s={s} />)}
 
         {topics.length ? (

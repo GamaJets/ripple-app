@@ -311,6 +311,9 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   // pressed the notice is owed, and a launch that redrew it would be right to.
   const clearLapsed = useCallback(() => { setLapsedList([]); }, []);
 
+  // provider-deps-ok: `enqueue` reads refs only — uidRef, writable, listRef —
+  // so an older copy of it behaves identically to this render's, and listing
+  // it would give every consumer a new context value on every queued write.
   const value = useMemo<OutboxValue>(
     () => ({ pending, status, countOf, enqueue, registerHandler, lapsed, clearLapsed, flush }),
     // `enqueue` closes over refs only, so it is stable in everything that

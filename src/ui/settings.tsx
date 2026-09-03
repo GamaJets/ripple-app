@@ -65,7 +65,7 @@
 // launch, forever. Nothing is written here until the row for this uid has come
 // back — and if that read FAILS, nothing is ever written for that session,
 // because a failed read is not permission to assume the server has nothing.
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -614,9 +614,34 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // an answer. Screens get a unit they can always render; the `*Chosen` and
   // `*Source` fields beside it are what stop that unit being mistaken for
   // something the member said.
-  const units = resolveUnits(s.weightUnit, s.lengthUnit, DEVICE_REGION);
+  // Memoised because `resolveUnits` builds a fresh object every time it is
+  // called, and that object is spread straight into the context value below.
+  // See the note under it.
+  const units = useMemo(() => resolveUnits(s.weightUnit, s.lengthUnit, DEVICE_REGION), [s.weightUnit, s.lengthUnit]);
+
+  // ── Why `set` and `setPushEnabled` are handed out through a ref ───────────
+  //
+  // This provider used to publish an inline object literal, so `useSettings()`
+  // returned a different value on every render — and both functions on it were
+  // different functions again. A consumer that keys an effect on the context
+  // value, or on either function, then re-runs that effect on every render of
+  // this provider, and any effect that writes a setting builds a machine that
+  // cannot stop. src/ui/roster.tsx documents the shape at length.
+  //
+  // The wrappers are created once and read the current implementations out of
+  // a ref, so they are stable for the life of the provider while still closing
+  // over this render's `s` — `set` merges a patch into the CURRENT settings, so
+  // freezing the implementation would freeze the settings it merges into.
+  const impl = useRef({ set, setPushEnabled });
+  impl.current = { set, setPushEnabled };
+  const setStable = useCallback((...a: Parameters<typeof set>) => impl.current.set(...a), []);
+  const setPushEnabledStable = useCallback((...a: Parameters<typeof setPushEnabled>) => impl.current.setPushEnabled(...a), []);
+  const value = useMemo<SettingsValue>(
+    () => ({ notifPush: s.notifPush, restSound: s.restSound, ...units, set: setStable, setPushEnabled: setPushEnabledStable, unitsLoaded }),
+    [s.notifPush, s.restSound, units, setStable, setPushEnabledStable, unitsLoaded],
+  );
   return (
-    <Ctx.Provider value={{ notifPush: s.notifPush, restSound: s.restSound, ...units, set, setPushEnabled, unitsLoaded }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

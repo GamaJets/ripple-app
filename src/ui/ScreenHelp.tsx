@@ -30,7 +30,7 @@ import { sp, radius, hairline, type as ty } from '../theme/scale';
 import {
   SCREEN_HELP, dismissedFrom, isDismissed, withDismissed, type ScreenHelpKey,
 } from '../lib/screenHelp';
-import { FORWARD_ICON } from './direction';
+import { FORWARD_ICON, turn } from './direction';
 
 const KEY = 'repple.screenHelp.dismissed';
 
@@ -83,7 +83,16 @@ export function ScreenHelp({ screen }: { screen: ScreenHelpKey }) {
       >
         <Icon name="info" size={16} color={t.brand} />
         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{help.title}</Text>
-        <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
+        {/* The chevron turns when the card is open. It did not: the row kept
+            drawing a forward chevron while three paragraphs sat underneath it,
+            so the one visible affordance said "there is more over there" about
+            content that was already on screen — and nothing said the tap that
+            would put it away. `accessibilityState` had been telling a screen
+            reader all along; this is the same fact for the eye, in the house
+            form used by every other disclosure in the app. */}
+        <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}>
+          <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
+        </View>
       </Pressable>
 
       {open ? (

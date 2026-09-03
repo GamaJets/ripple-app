@@ -517,7 +517,15 @@ export default function ImportPage() {
     let ok = 0; const bad: { line: number; why: string }[] = [];
     for (const { line, plan } of planRows) {
       try {
-        const { error } = await supabase.from('membership_plans').insert({
+        // `.select('id')`, and the count comes off what came BACK.
+        //
+        // This was a bare insert with `ok++` under `if (error) throw error` —
+        // counting what was sent, which is the one rule src/lib/gymImports.ts
+        // states in as many words for the payments import ("count what the
+        // server confirmed, never what you sent") and which this path did not
+        // follow. The line under the button is what an owner uses to decide the
+        // price book is now right; it must be a count of rows that exist.
+        const { data: wrote, error } = await supabase.from('membership_plans').insert({
           tenant_id: tenantId,
           name: plan.name,
           price_cents: plan.priceCents,
@@ -527,8 +535,16 @@ export default function ImportPage() {
           currency: plan.currency ?? ccy,
           interval: plan.interval,
           active: plan.active,
-        });
+        }).select('id').single();
         if (error) throw error;
+        // No error and no id back is not a success and it is not a plain
+        // failure either. It is the one case an owner must not resolve by
+        // running the file again — plans carry no import key, so a second run
+        // writes a second price book — so the sentence says to look before
+        // retrying rather than counting it in either direction silently.
+        if (!wrote?.id) {
+          throw new Error('the database accepted this row without confirming it. Check your price book for it before running this file again — a plan carries no import key, so a second run would add it twice.');
+        }
         ok++;
       } catch (e: any) {
         bad.push({ line, why: e?.message ?? 'write failed' });

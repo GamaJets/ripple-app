@@ -271,7 +271,30 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
   };
   const removeTemplate = async (id: string): Promise<boolean> => (await removeTemplateFrom(id)).ok;
 
-  const value = useMemo(() => ({ templates, status, saveTemplate, saveTemplateTo, removeTemplate, removeTemplateFrom, isStarter, reload }), [templates, status, uid, reload]);
+  // ── Why the four writers are handed out through a ref ─────────────────────
+  //
+  // This value was already memoised, and it was memoised WRONGLY: the four
+  // writers below are plain arrows rebuilt on every render, and the dependency
+  // list was `[templates, status, uid, reload]` — so the object handed to
+  // consumers carried whichever copy of them existed when one of those four
+  // last moved. That is the second half of the trap src/ui/roster.tsx spells
+  // out: a memo whose deps do not cover its members hands out stale closures,
+  // and listing the members instead would have made the memo do nothing at all
+  // because their identity changes every render.
+  //
+  // The ref is the way out of both. The wrappers are created once, so the value
+  // is stable; the implementations behind them are this render's, so they still
+  // close over the current `templates` and `uid`.
+  const impl = useRef({ saveTemplate, saveTemplateTo, removeTemplate, removeTemplateFrom });
+  impl.current = { saveTemplate, saveTemplateTo, removeTemplate, removeTemplateFrom };
+  const saveTemplateStable = useCallback((...a: Parameters<typeof saveTemplate>) => impl.current.saveTemplate(...a), []);
+  const saveTemplateToStable = useCallback((...a: Parameters<typeof saveTemplateTo>) => impl.current.saveTemplateTo(...a), []);
+  const removeTemplateStable = useCallback((...a: Parameters<typeof removeTemplate>) => impl.current.removeTemplate(...a), []);
+  const removeTemplateFromStable = useCallback((...a: Parameters<typeof removeTemplateFrom>) => impl.current.removeTemplateFrom(...a), []);
+  const value = useMemo<TemplatesValue>(
+    () => ({ templates, status, saveTemplate: saveTemplateStable, saveTemplateTo: saveTemplateToStable, removeTemplate: removeTemplateStable, removeTemplateFrom: removeTemplateFromStable, isStarter, reload }),
+    [templates, status, saveTemplateStable, saveTemplateToStable, removeTemplateStable, removeTemplateFromStable, isStarter, reload],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
