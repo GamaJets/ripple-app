@@ -34,6 +34,8 @@
     "src/lib/failedWrite.test.ts",
     "src/lib/monthEnd.ts",
     "src/lib/staffView.ts",
+    "src/lib/packDeadline.ts",
+    "src/lib/packDeadline.test.ts",
     "src/lib/submitOnce.ts",
     "src/lib/submitOnce.test.ts",
     "src/lib/bestSet.ts",
@@ -438,6 +440,8 @@
     "src/lib/changedRows.test.ts",
     "src/lib/registerGaps.ts",
     "src/lib/registerGaps.test.ts",
+    "src/lib/awaitingReply.ts",
+    "src/lib/awaitingReply.test.ts",
     "src/lib/blockPlan.ts",
     "src/lib/blockPlan.test.ts",
     "src/lib/templateUsage.ts",
@@ -449,6 +453,10 @@
     "src/lib/programCache.ts",
     "src/lib/programCache.test.ts",
     "src/lib/closeCosts.ts",
-    "src/lib/closeCosts.test.ts"
+    "src/lib/closeCosts.test.ts",
+    "src/lib/assignmentMerge.ts",
+    "src/lib/assignmentMerge.test.ts",
+    "src/lib/memberLookup.ts",
+    "src/lib/memberLookup.test.ts"
   ]
 }

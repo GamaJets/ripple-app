@@ -62,7 +62,7 @@
 // "Given by the member" column and the How These Were Given panel show the
 // split, and the member's own path is app/(client)/agreements.tsx.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { type Unread, type Read, reading } from '@/lib/read';
 import { Shell } from '@/components/Shell';
@@ -320,10 +320,26 @@ function Retention({ years, why, tenantId, onChange }: {
     // src/lib/wroteRows.ts. `tenants_owner_rw` is the only write policy on this
     // table, so a trainer who reached this form changes nothing and would
     // otherwise be told the period was saved.
-    const { error, count } = await supabase
-      .from('tenants')
-      .update({ record_retention_years: value }, { count: 'exact' })
-      .eq('id', tenantId);
+    // In a try, because the ceiling in lib/supabase.ts made a throw possible
+    // here for the first time: a request nobody answers now rejects at thirty
+    // seconds, and this `await` had nothing around it — so the form simply sat
+    // with its spinner on and an unhandled rejection in the console.
+    let error: { message?: string | null } | null = null;
+    let count: number | null = null;
+    try {
+      ({ error, count } = await supabase
+        .from('tenants')
+        .update({ record_retention_years: value }, { count: 'exact' })
+        .eq('id', tenantId));
+    } catch (e) {
+      setBusy(false);
+      setMsg(writeFailedText(e, {
+        what: 'That retention period',
+        unchanged: 'the period is unchanged',
+        howToCheck: 'Reload this page: the period shown above is whatever is actually stored.',
+      }));
+      return;
+    }
     setBusy(false);
     if (error) {
       setMsg(`That was NOT saved: ${error.message}. The period is unchanged.`);
@@ -473,7 +489,11 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
       setTitle(''); setBody('');
       onChange();
     } catch (e: any) {
-      setErr(`That was NOT published: ${e?.message ?? 'the write was refused'}. Whatever was in force before still is.`);
+      setErr(writeFailedText(e, {
+        what: 'That agreement',
+        unchanged: 'whatever was in force before still is',
+        howToCheck: 'Reload this page and read the version numbers in the list below before publishing it again — two rows for one wording is two things for a member to sign.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -733,7 +753,11 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
       // this console is holding wording the gym has since replaced.
       const why = memberId === me.id
         ? 'You cannot record your own signature from the desk — that would file a staff entry as though you had signed it yourself. Sign it in the app, from your own account.'
-        : `That signature was NOT recorded: ${e?.message ?? 'the write was refused'}. Nothing is on file and this person has still signed nothing.`;
+        : writeFailedText(e, {
+          what: 'That signature',
+          unchanged: 'nothing is on file and this person has still signed nothing',
+          howToCheck: 'Reload this page and check the signature count against this agreement before recording it again.',
+        });
       onErr(why);
     } finally { setBusy(false); }
   };
@@ -871,7 +895,14 @@ function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
       setTitle(''); setFile(null); setExpiresOn('');
       onChange();
     } catch (e: any) {
-      setErr(`That file was NOT filed: ${e?.message ?? 'the upload was refused'}. Nothing has been added to the record.`);
+      // The object is taken back out above when the ROW fails, so "nothing has
+      // been added" holds for a refusal. It does not hold for a row nobody
+      // answered about — the delete is best-effort and the row may be there.
+      setErr(writeFailedText(e, {
+        what: 'That file',
+        unchanged: 'nothing has been added to the record',
+        howToCheck: 'Reload this page and look for it in the document list below before filing it again.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -923,7 +954,14 @@ function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
               setRemoving(null);
               deleteDocument(supabase, d)
                 .then(() => { setErr(null); onChange(); })
-                .catch((e: any) => { setErr(e?.message ?? 'That document was not removed.'); onChange(); });
+                .catch((e: any) => {
+                  setErr(writeFailedText(e, {
+                    what: 'That document',
+                    unchanged: 'it is still on file',
+                    howToCheck: 'The list below has been re-read — it shows whether the document is actually gone.',
+                  }));
+                  onChange();
+                });
             }}
           >
             Delete it

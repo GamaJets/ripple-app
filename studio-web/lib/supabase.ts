@@ -63,12 +63,21 @@ if (!url || !key) {
 // with the phone; it should not give up at a different moment.
 //
 // One thing it does NOT close, and it is worth writing down: a WRITE that timed
-// out may have committed and had only its reply lost. The screens here word a
+// out may have committed and had only its reply lost. The screens here worded a
 // thrown write as "was NOT closed", "Nothing was taken back", "the original
 // still stands in full" — which is true of a refusal and is a claim this
 // console cannot make about a request nobody answered. `retryOnTimeout` already
-// refuses to resend one for exactly that reason; the wording has not caught up.
+// refuses to resend one for exactly that reason.
+//
+// The wording has now caught up, and it is `writeFailed` at the bottom of this
+// file: three states rather than two, with the ambiguous one asserting nothing
+// about the database and saying instead how to find out. It lives here because
+// this is the file that introduced the ambiguity — the ceiling above is what
+// made a throw mean something new — and because the `online` half of the
+// evidence is a browser fact that src/lib is not allowed to know.
 import { withRequestTimeout } from '@lib/requestTimeout';
+import { failedWriteNote, writeFate, mayRetryWrite, type WriteSubject } from '@lib/failedWrite';
+import { refused, type Said } from '@lib/consoleSay';
 
 export const supabase = createClient(url, key, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
@@ -212,3 +221,79 @@ export async function loadMe(): Promise<MeRead> {
   };
 }
 
+
+/* ── what a failed write may honestly be said to have done ─────────────────
+ *
+ * See the note beside `withRequestTimeout` above, and src/lib/failedWrite.ts
+ * for the argument in full. Three states:
+ *
+ *   REFUSED      the database read it and declined. Nothing happened.
+ *   UNREACHABLE  this browser was offline. Nothing was sent.
+ *   UNANSWERED   it went out and nothing came back. WE DO NOT KNOW — it may be
+ *                in the database with only the reply lost.
+ *
+ * Every screen that words a thrown write goes through here, so the sentence
+ * cannot drift back to fourteen versions of "Nothing was saved".
+ */
+
+export type { WriteSubject };
+
+/**
+ * Whether this browser believes it has a connection.
+ *
+ * The ONLY positive evidence that a request never left, and the reason this
+ * wrapper exists rather than the screens calling `failedWriteNote` directly.
+ * `navigator.onLine` is famously weak — it is true behind a captive portal —
+ * but it is only ever consulted to move an answer TOWARDS "nothing was sent",
+ * and the direction it is weak in is the harmless one: a portal that swallows
+ * the request leaves `onLine` true, so the fate stays 'unanswered' and the
+ * screen says it does not know. Null where it cannot be asked at all, which is
+ * every server render.
+ */
+function deviceOnline(): boolean | null {
+  try {
+    if (typeof navigator === 'undefined') return null;
+    const v = (navigator as { onLine?: boolean }).onLine;
+    return typeof v === 'boolean' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a plain "try again" may be offered after this failure.
+ *
+ * False for the ambiguous one — a retry control beside "we do not know whether
+ * that went through" is an invitation to create the duplicate the sentence has
+ * just warned about, which is the same judgement `retryOnTimeout` makes about
+ * resending a write automatically.
+ */
+export function mayRetryAfter(err: unknown): boolean {
+  return mayRetryWrite(writeFate(err, { online: deviceOnline() }));
+}
+
+/**
+ * The `Said` a console form sets after a write threw.
+ *
+ * Always `refused`, in `consoleSay`'s sense — the tone is about whether the
+ * thing the person wanted has demonstrably happened, and in none of the three
+ * states has it. `crit` is right for the ambiguous one too: "we do not know
+ * whether that payment went through" is exactly the sentence that must not wait
+ * politely behind a screen reader's queue.
+ */
+export function writeFailed(err: unknown, subject: WriteSubject): Said {
+  return refused(failedWriteNote(err, subject, { online: deviceOnline() }));
+}
+
+/**
+ * The same sentence as a bare string, for the screens that hold their error in
+ * a `useState<string | null>` rather than a `Said`.
+ *
+ * Two entry points rather than one wrapped in the other at every call site,
+ * because half this console predates `consoleSay` and converting those forms is
+ * a separate change from telling the truth about a timed-out write. Both go
+ * through `failedWriteNote`, so the wording cannot differ between them.
+ */
+export function writeFailedText(err: unknown, subject: WriteSubject): string {
+  return failedWriteNote(err, subject, { online: deviceOnline() });
+}

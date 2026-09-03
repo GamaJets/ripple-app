@@ -21,7 +21,7 @@
 // that draws as an empty record is how a gym concludes a member has paid
 // nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailed, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
@@ -1005,7 +1005,11 @@ function GymRecordEditor({ memberId, name, rec, read, zone, tenantId, me, onSave
       setMsg(wrote('Saved.'));
       onSaved();
     } catch (x: any) {
-      setMsg(refused(x?.message, 'That was not saved, so the record is unchanged.'));
+      setMsg(writeFailed(x, {
+        what: 'That record',
+        unchanged: 'the record is unchanged',
+        howToCheck: 'Reload this page: the boxes above are filled from whatever is actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -1451,7 +1455,14 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
       // a notice is lost between the owner and the server.
       setBody('');
     } catch (e: any) {
-      setMsg(refused(e?.message, 'Nothing was posted, so nobody has seen it. Your words are still here.'));
+      // A notice sent twice is two notifications to every member of a segment,
+      // which is the one failure this form can produce that reaches people
+      // outside the gym.
+      setMsg(writeFailed(e, {
+        what: 'That notice',
+        unchanged: 'nobody has seen it, and your words are still here',
+        howToCheck: 'Reload this page and read the list of sent notices below before posting it again.',
+      }));
     } finally { setBusy(false); }
   };
 

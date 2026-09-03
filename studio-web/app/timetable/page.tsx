@@ -15,7 +15,7 @@
 // adds the other thing an owner cannot otherwise see: where their trainers
 // actually are.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // The reader's locale, the GYM's zone for instants; no zone at all for the
 // calendar days the week strip is built from. Both were the reader's clock,
 // which is how a 06:00 class on a Dubai timetable read 02:00 — and, for a
@@ -299,13 +299,21 @@ export default function Timetable() {
     if (why === null) return;
     cancelClass(supabase, c.id, why)
       .then(() => { setErr(null); refresh(); })
-      .catch((x: any) => setErr(x?.message ?? 'That class was not called off, so it is still on the timetable.'));
+      .catch((x: any) => setErr(writeFailedText(x, {
+        what: 'Calling off that class',
+        unchanged: 'it is still on the timetable',
+        howToCheck: 'Reload this page: the timetable shows whether the class is actually called off. Members are told from the stored row, not from this screen.',
+      })));
   };
 
   const putBack = (c: GymClass) => {
     restoreClass(supabase, c.id)
       .then(() => { setErr(null); refresh(); })
-      .catch((x: any) => setErr(x?.message ?? 'That class was not put back on.'));
+      .catch((x: any) => setErr(writeFailedText(x, {
+        what: 'Putting that class back on',
+        unchanged: 'it is still called off',
+        howToCheck: 'Reload this page: the timetable shows whether the class is actually back on.',
+      })));
   };
 
   const remove = (e: TimetableEntry) => {
@@ -320,13 +328,21 @@ export default function Timetable() {
       if (!confirm(`Delete "${e.title}"? Nobody has booked it, so nothing is lost. Use “Call off” instead if it was meant to run.`)) return;
       deleteClass(supabase, e.sourceId)
         .then(() => { setErr(null); refresh(); })
-        .catch((x: any) => setErr(x?.message ?? 'Could not remove that.'));
+        .catch((x: any) => setErr(writeFailedText(x, {
+          what: 'Deleting that class',
+          unchanged: 'it is still on the timetable',
+          howToCheck: 'Reload this page: the timetable shows whether the class is actually gone.',
+        })));
       return;
     }
     if (!confirm('Remove that one-to-one from the timetable?')) return;
     removePtSlot(supabase, e.sourceId)
       .then(() => { setErr(null); refresh(); })
-      .catch((x: any) => setErr(x?.message ?? 'Could not remove that.'));
+      .catch((x: any) => setErr(writeFailedText(x, {
+        what: 'Removing that one-to-one',
+        unchanged: 'it is still on the timetable',
+        howToCheck: 'Reload this page: the timetable shows whether the slot is actually gone.',
+      })));
   };
 
   const cols: Column<TimetableEntry>[] = [
@@ -679,7 +695,11 @@ function EditClass({ gymClass, tenantId, zone, onClose }: {
       }
       onClose(true);
     } catch (x: any) {
-      setMsg(x?.message ?? 'That change was refused, so the class is unchanged.');
+      setMsg(writeFailedText(x, {
+        what: 'That change to the class',
+        unchanged: 'the class is unchanged',
+        howToCheck: 'Close this and reload the page: the timetable carries whichever version is actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -1058,9 +1078,17 @@ function BookTo({ slot, members, membersErr, onDone }: {
       onDone(null);
     } catch (e: any) {
       const who = options.find((o) => o.id === next)?.name ?? 'that member';
-      onDone(next
-        ? `${who} was not booked in: ${e?.message ?? 'the change was refused'}. The slot is unchanged.`
-        : `That slot was not freed: ${e?.message ?? 'the change was refused'}. It is still booked.`);
+      onDone(writeFailedText(e, next
+        ? {
+          what: `Booking ${who} in`,
+          unchanged: 'the slot is unchanged',
+          howToCheck: 'Reload this page: the slot shows whoever is actually booked into it.',
+        }
+        : {
+          what: 'Freeing that slot',
+          unchanged: 'it is still booked',
+          howToCheck: 'Reload this page: the slot shows whoever is actually booked into it.',
+        }));
     } finally { setBusy(false); }
   };
 

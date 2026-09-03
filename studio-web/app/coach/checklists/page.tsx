@@ -61,7 +61,7 @@
 // which every one of these already renders honestly as null-not-empty — rather
 // than as a short set wearing the whole set's clothes.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate } from '@/components/Gate';
 import { Shell } from '@/components/Shell';
 import {
@@ -311,9 +311,24 @@ export default function CoachChecklists() {
   const setActive = async (it: Item, active: boolean) => {
     if (busy) return;
     setBusy(true); setWriteErr(null);
-    const { data, error } = await supabase
-      .from('coach_checklist_items').update({ active }).eq('id', it.id)
-      .select(COLS);
+    // In a try: the ceiling in lib/supabase.ts made this `await` able to throw,
+    // and it had nothing around it — so a hung request left the row busy for
+    // ever with an unhandled rejection behind it.
+    let data: unknown[] | null = null;
+    let error: { message?: string | null } | null = null;
+    try {
+      ({ data, error } = await supabase
+        .from('coach_checklist_items').update({ active }).eq('id', it.id)
+        .select(COLS));
+    } catch (e) {
+      setBusy(false);
+      setWriteErr(writeFailedText(e, {
+        what: 'That change',
+        unchanged: 'their list is unchanged',
+        howToCheck: 'Reload this page: the list below is drawn from whatever is actually stored.',
+      }));
+      return;
+    }
     setBusy(false);
     // Counting the rows is the point. An update matching nothing is not an
     // error in PostgREST — it succeeds having changed nothing at all.

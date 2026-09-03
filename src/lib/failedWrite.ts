@@ -205,12 +205,18 @@ export function mayRetryWrite(fate: WriteFate): boolean {
 }
 
 /**
- * Whether the screen may still assert that nothing changed.
- *
- * The one-line form, for a caller with its own sentence to guard. A `false`
- * here means every "nothing was saved", "the original still stands", "the month
- * is still open" on the screen is a claim the console cannot make.
+ * The other half of the same judgement, said as its own sentence because it is
+ * the one a REVIEWER checks: a `false` here means every "nothing was saved",
+ * "the original still stands", "the month is still open" on the screen is a
+ * claim the console cannot make. It is the same predicate as `mayRetryWrite` —
+ * deliberately, because they are the same fact — and it is separate so that a
+ * later change to one of them has to be an argument about which.
  */
 export function mayAssertUnchanged(fate: WriteFate): boolean {
-  return fate !== 'unanswered';
+  return !isAmbiguous(fate);
+}
+
+/** The state with no evidence in it. */
+function isAmbiguous(fate: WriteFate): boolean {
+  return fate === 'unanswered';
 }

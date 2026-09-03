@@ -113,6 +113,16 @@ for (const zone of [DUBAI, SYDNEY, LA]) {
   eq(on?.date, MON, `a 23:00 shift at ${zone} is filed under the day it runs on`);
   eq(rotaTimeLabel(s.startsAt, zone), '23:00', `and is labelled 23:00 at ${zone}`);
 
+  // And the mirror of it, for a reader on the OTHER side. A 23:00 shift moves a
+  // day forward for a reader far EAST of the gym and an early one moves a day
+  // back for a reader far WEST, so both are needed or the bucket can stay on
+  // the reader's clock and still look right from half the world.
+  const early = shiftFromHours(TRAINER, MON, 6, 14, 'floor', zone)!;
+  const earlyOn = shiftsByDay(days, [shiftOf('early', early.startsAt, early.endsAt)], zone)
+    .find((d) => d.shifts.some((x) => x.id === 'early'));
+  eq(earlyOn?.date, MON, `an 06:00 shift at ${zone} is filed under the day it runs on too`);
+  eq(rotaTimeLabel(early.startsAt, zone), '06:00', `and is labelled 06:00 at ${zone}`);
+
   const cells = hoursSpanned(s.startsAt, s.endsAt, zone);
   eq(cells.length, 1, `it occupies one hour at ${zone}`);
   eq(cells[0]?.date, MON, `that hour is on ${MON} at ${zone}`);

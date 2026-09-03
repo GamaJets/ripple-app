@@ -10,7 +10,7 @@
 // Before this, "delivered" was inferred as "booked, and the clock has passed" —
 // which counted no-shows and slots nobody cancelled, and then paid for them.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // The reader's locale, the GYM's zone. A session's date decides which payroll
 // month it falls in, and it was being drawn on whichever desk this was open at.
 import { gymDateText, gymDateTimeText, calendarDateText } from '@lib/gymWhen';
@@ -461,7 +461,15 @@ export default function Sessions() {
       });
       await load(me.tenantId);
     } catch (e: any) {
-      setErr(e?.message ?? 'Could not record that settlement.');
+      // The worst duplicate in the product: a settlement written twice pays a
+      // trainer twice, out of a table /accounting and /close both read back as
+      // fact. Neither "it was refused" nor "it worked" may be assumed from a
+      // request nobody answered.
+      setErr(writeFailedText(e, {
+        what: 'That settlement',
+        unchanged: 'nothing has been paid and those sessions are still owed',
+        howToCheck: 'Reload this page and read whether those sessions still show as payable before settling them again.',
+      }));
     } finally { setSettling(null); }
   };
 

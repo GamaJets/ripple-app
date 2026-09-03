@@ -150,6 +150,31 @@ const power = (month: string, over: Partial<CostLine> = {}) =>
   eq(st[0]?.lastSeen, '2026-06', 'and the last sighting is stated as what it is');
 }
 
+/* ── the amount beside the name is the LAST one, not the first read ─────── */
+{
+  // Rows are handed over in whatever order a read returned them, and the rent
+  // went up in June. A version that kept whichever sighting it saw first put
+  // last spring's rent beside the landlord's name on the screen an owner is
+  // about to act on.
+  const past = [
+    rent('2026-05', { amountCents: 250_000 }),
+    rent('2026-06', { amountCents: 275_000 }),
+    rent('2026-07', { amountCents: 275_000 }),
+  ];
+  const st = standingCosts(past, WINDOW);
+  eq(st[0]?.usual?.cents, 275_000, 'what it last cost, not what it first cost');
+  eq(st[0]?.lastSeen, '2026-07', 'and the month of that sighting');
+
+  // Two in one month: the later DAY wins, not the later row.
+  const twice = standingCosts(
+    [rent('2026-07', { amountCents: 250_000 }),
+     cost({ paidOn: '2026-07-28', amountCents: 300_000 }),
+     rent('2026-06'), rent('2026-05')],
+    WINDOW,
+  );
+  eq(twice[0]?.usual?.cents, 300_000, 'and inside one month it is the later day');
+}
+
 /* ── 4. two currencies, no usual figure ─────────────────────────────────── */
 {
   const past = [

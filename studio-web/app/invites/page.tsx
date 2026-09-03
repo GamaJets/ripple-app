@@ -40,7 +40,7 @@
 // answered is the commonest thing an owner wants and there was no second
 // message anywhere in the product.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
@@ -613,7 +613,11 @@ function TheList({ invites, readErr, gymName, zone, tenantId, onChange }: {
       // extendInvite counts the rows it changed, so this fires for a refusal AND
       // for an invite that is no longer pending — both of which leave the
       // original expiry standing, and neither of which may look like success.
-      setErr(`${i.email} was not extended: ${x?.message ?? 'the change was refused'}. Its date is unchanged.`);
+      setErr(writeFailedText(x, {
+        what: `Extending the invitation to ${i.email}`,
+        unchanged: 'its date is unchanged',
+        howToCheck: 'Reload this page: the expiry shown against that invitation is whatever is actually stored.',
+      }));
     }
   };
 

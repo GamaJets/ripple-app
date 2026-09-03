@@ -28,7 +28,7 @@
 // empty month, and an empty month here is a filed return that says the gym
 // took nothing.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { type Unread, type Read, reading, landed, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
@@ -1199,15 +1199,25 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
       setAmount(''); setNote('');
       onChange();
     } catch (e: any) {
-      setWriteErr(`That invoice was NOT raised: ${e?.message ?? 'the write was refused'}. Nothing has been billed and nobody has been asked for anything.`);
+      // An invoice raised twice is a member billed twice, which is the failure
+      // "Nothing has been billed" invites when it is said about a request nobody
+      // answered.
+      setWriteErr(writeFailedText(e, {
+        what: 'That invoice',
+        unchanged: 'nothing has been billed and nobody has been asked for anything',
+        howToCheck: 'Reload this page and look for it in the invoice list below before raising it again.',
+      }));
     } finally { setBusy(false); }
   };
 
   const setStatus = (inv: Invoice, next: string) => {
     setInvoiceStatus(supabase, inv.id, next as any)
       .then(() => { setWriteErr(null); setSaved(null); onChange(); })
-      .catch((err: any) => setWriteErr(
-        `Could not change that invoice: ${err?.message ?? 'the change was refused'}. It is still ${inv.status ?? 'in whatever state it was'}.`));
+      .catch((err: any) => setWriteErr(writeFailedText(err, {
+        what: 'That change to the invoice',
+        unchanged: `it is still ${inv.status ?? 'in whatever state it was'}`,
+        howToCheck: 'Reload this page: the invoice list carries whichever state is actually stored.',
+      })));
   };
 
   const cols: Column<Invoice>[] = [

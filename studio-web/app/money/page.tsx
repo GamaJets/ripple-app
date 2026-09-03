@@ -6,7 +6,7 @@
 // a dashboard: until a gym records what it sells and what it takes, there is
 // nothing for a chart to draw and nothing for a forecast to learn from.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, mayRetryAfter, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
@@ -344,7 +344,14 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
       // list that has not refreshed yet rather than as a write that did not
       // happen. The typed name and price are deliberately left in the form —
       // nothing was saved, so there is something to retry.
-      setWriteErr(`That plan was not saved: ${e?.message ?? 'the write was refused'}. Nothing has changed in the price book.`);
+      // Three states, not two — see lib/supabase.ts. "Nothing has changed in the
+      // price book" is true of a refusal and is a claim this console cannot make
+      // about a request nobody answered.
+      setWriteErr(writeFailedText(e, {
+        what: 'That plan',
+        unchanged: 'nothing has changed in the price book',
+        howToCheck: 'Reload this page and look for it in the table below before adding it again.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -363,8 +370,11 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
         <button
           onClick={() => setPlanActive(supabase, p.id, !p.active)
             .then(() => { setWriteErr(null); onChange(); })
-            .catch((e: any) => setWriteErr(
-              `Could not ${p.active ? 'retire' : 'reinstate'} ${p.name}: ${e?.message ?? 'the change was refused'}. It is still ${p.active ? 'on sale' : 'retired'}.`))}
+            .catch((e: any) => setWriteErr(writeFailedText(e, {
+              what: `${p.active ? 'Retiring' : 'Reinstating'} ${p.name}`,
+              unchanged: `it is still ${p.active ? 'on sale' : 'retired'}`,
+              howToCheck: 'Reload this page: the Status column carries whichever side of the price book it is actually on.',
+            })))}
           style={linkBtn}
         >
           {p.active ? 'Retire' : 'Reinstate'}
@@ -510,7 +520,11 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
       setName(''); setPrice('');
       onChange();
     } catch (x: any) {
-      setWriteErr(`That pass was not added: ${x?.message ?? 'the write was refused'}. Nothing has changed at the desk.`);
+      setWriteErr(writeFailedText(x, {
+        what: 'That pass',
+        unchanged: 'nothing has changed at the desk',
+        howToCheck: 'Reload this page and look for it in the table below before adding it again.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -542,8 +556,11 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
         <button
           onClick={() => setPassTypeActive(supabase, t.id, !t.active)
             .then(() => { setWriteErr(null); onChange(); })
-            .catch((x: any) => setWriteErr(
-              `Could not ${t.active ? 'retire' : 'put back on sale'} ${t.name}: ${x?.message ?? 'the change was refused'}. It is still ${t.active ? 'on sale' : 'retired'} at the desk.`))}
+            .catch((x: any) => setWriteErr(writeFailedText(x, {
+              what: `${t.active ? 'Retiring' : 'Putting'} ${t.name}${t.active ? '' : ' back on sale'}`,
+              unchanged: `it is still ${t.active ? 'on sale' : 'retired'} at the desk`,
+              howToCheck: 'Reload this page: the Status column carries whichever side of the desk it is actually on.',
+            })))}
           style={linkBtn}
         >
           {t.active ? 'Retire' : 'Back on sale'}
@@ -692,15 +709,22 @@ function Members({ members, readErr, plans, tenantId, zone, onChange }: {
       });
       setMemberId(''); onChange();
     } catch (e: any) {
-      setWriteErr(e?.message ?? 'Could not add that membership.');
+      setWriteErr(writeFailedText(e, {
+        what: 'That membership',
+        unchanged: 'nobody has been put on a plan',
+        howToCheck: 'Reload this page and look for it in the table below before adding it again — a membership added twice bills twice.',
+      }));
     } finally { setBusy(false); }
   };
 
   const savePlan = (m: Membership, next: string) => {
     setMembershipPlan(supabase, m.id, next || null)
       .then(() => { setWriteErr(null); onChange(); })
-      .catch((err: any) => setWriteErr(
-        `Could not move ${m.memberName || 'that membership'} onto another plan: ${err?.message ?? 'the change was refused'}. It is still on ${m.planName ?? 'no plan'}.`));
+      .catch((err: any) => setWriteErr(writeFailedText(err, {
+        what: `Moving ${m.memberName || 'that membership'} onto another plan`,
+        unchanged: `it is still on ${m.planName ?? 'no plan'}`,
+        howToCheck: 'Reload this page: the Plan column carries whichever plan is actually stored.',
+      })));
   };
 
   const cols: Column<Membership>[] = [
@@ -746,8 +770,11 @@ function Members({ members, readErr, plans, tenantId, zone, onChange }: {
             const next = e.target.value as any;
             setMembershipStatus(supabase, m.id, next)
               .then(() => { setWriteErr(null); onChange(); })
-              .catch((err: any) => setWriteErr(
-                `Could not set ${m.memberName || 'that membership'} to ${next}: ${err?.message ?? 'the change was refused'}. It is still ${m.status}.`));
+              .catch((err: any) => setWriteErr(writeFailedText(err, {
+                what: `Setting ${m.memberName || 'that membership'} to ${next}`,
+                unchanged: `it is still ${m.status}`,
+                howToCheck: 'Reload this page: the Status column carries whichever state is actually stored.',
+              })));
           }}
           style={{ ...field, padding: '4px 6px', fontSize: 12 }}
         >
@@ -854,7 +881,11 @@ function MembershipDates({ m, onDone, onErr }: {
       // setMembershipDates checks the ROW COUNT, so a refusal by
       // `memberships_owner` arrives here rather than as a silent 204 that
       // leaves the old dates on screen looking saved.
-      onErr(`Those dates were NOT changed: ${e?.message ?? 'the write was refused'}. The membership still starts ${m.startedOn}.`);
+      onErr(writeFailedText(e, {
+        what: 'Those dates',
+        unchanged: `the membership still starts ${m.startedOn}`,
+        howToCheck: 'Reload this page: the Started and Ends columns carry whichever dates are actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -906,6 +937,18 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
   const [membershipId, setMembershipId] = useState('');
   const [busy, setBusy] = useState(false);
   const [writeErr, setWriteErr] = useState<string | null>(null);
+  /**
+   * The last attempt may have gone through, and the button is closed until
+   * somebody says they have looked.
+   *
+   * The behavioural half of the three-state wording. A refused payment leaves
+   * Record live, because pressing it again is exactly right; a payment nobody
+   * answered about leaves it closed, because pressing it again is how the gym
+   * takes the same money twice. `mayRetryAfter` is the same judgement
+   * `retryOnTimeout` makes about resending a write automatically, applied to
+   * the button that does it by hand.
+   */
+  const [unsure, setUnsure] = useState(false);
   /** The payment being corrected, or null. One at a time, deliberately. */
   const [correcting, setCorrecting] = useState<GymPayment | null>(null);
 
@@ -951,15 +994,24 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
         note: note.trim() || null,
         membershipId: membershipId || null,
       });
-      setAmount(''); setNote(''); setMembershipId(''); onChange();
+      setAmount(''); setNote(''); setMembershipId(''); setUnsure(false); onChange();
     } catch (e: any) {
+      setUnsure(!mayRetryAfter(e));
       // recordPayment throws on a PostgREST error. With a try/finally and no
       // catch, a refused write looked exactly like a successful one whose list
       // had not refreshed yet — and this is money. An owner who believes a
       // payment is recorded and finds it missing will chase a member who has
       // already paid, or never chase one who has not. The amount stays in the
       // box on purpose: nothing was written, so the row is still owed.
-      setWriteErr(`That payment was NOT recorded: ${e?.message ?? 'the write was refused'}. Nothing was saved — the money is not in the gym record and has to be entered again.`);
+      // The most expensive sentence on this console, and it is why the three
+      // states exist. "Nothing was saved — enter it again" said about a request
+      // nobody answered is an instruction to take the same money twice, into a
+      // ledger /accounting, /close, /tax and the export all read back as fact.
+      setWriteErr(writeFailedText(e, {
+        what: 'That payment',
+        unchanged: 'the money is not in the gym record and has to be entered again',
+        howToCheck: 'Reload this page and look for it in the payment list below. Enter it again only if it is not there.',
+      }));
     } finally { setBusy(false); }
   };
 
@@ -1045,7 +1097,10 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
             assumes. The Members screen's twin of this form had its label
             corrected and its write left alone, which is how a GBP gym came to
             hold dirhams. */}
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={ccy ? `Amount (${ccy})` : 'Amount'} inputMode="decimal" style={{ ...field, flex: 1 }} />
+        {/* Editing the amount is the acknowledgement: somebody has been back to
+            the form after reading the sentence above, which is the only signal
+            available that they went and looked. */}
+        <input value={amount} onChange={(e) => { setAmount(e.target.value); setUnsure(false); }} placeholder={ccy ? `Amount (${ccy})` : 'Amount'} inputMode="decimal" style={{ ...field, flex: 1 }} />
         <select aria-label="Who paid" value={memberId} onChange={(e) => setMemberId(e.target.value)} style={{ ...field, flex: 2 }}>
           {/* When the member list did not read, this dropdown holds nobody —
               which looks like a gym with no members rather than a list that
@@ -1077,7 +1132,7 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
         </select>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note"
                style={{ ...field, flex: 2 }} aria-label="A note on this payment" />
-        <button type="submit" disabled={busy || !ccy} style={primaryBtn}>Record</button>
+        <button type="submit" disabled={busy || !ccy || unsure} style={primaryBtn}>Record</button>
       </form>
       <p style={{ margin: '0 14px 12px', fontSize: 12, color: 'var(--ink3)' }}>
         Leave the date empty to record the money as arriving now. Saying which membership a payment
@@ -1087,6 +1142,13 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
       </p>
       {ccy ? null : <Banner>Payments cannot be recorded until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. A recorded amount is permanent, and it is only a number until it says what money it is.</Banner>}
       {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
+      {unsure ? (
+        <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '80ch' }}>
+          Record is closed until the amount is retyped. That is deliberate: the last attempt may
+          already be in the ledger, and a second press would take the same money twice. Check the
+          list below first.
+        </p>
+      ) : null}
       {correcting ? (
         <Correction
           p={correcting}
@@ -1180,7 +1242,11 @@ function Correction({ p, all, tenantId, me, onDone, onCancel, onErr }: {
       onErr(null);
       onDone();
     } catch (e: any) {
-      onErr(`Nothing was taken back: ${e?.message ?? 'the write was refused'}. The original payment of ${money(p.amountCents, p.currency) ?? 'that amount'} still stands in full.`);
+      onErr(writeFailedText(e, {
+        what: 'That correction',
+        unchanged: `nothing was taken back and the original payment of ${money(p.amountCents, p.currency) ?? 'that amount'} still stands in full`,
+        howToCheck: 'Reload this page and look for the negative row in the payment list below. Write it again only if it is not there — two corrections hand back the money twice.',
+      }));
     } finally { setBusy(false); }
   };
 

@@ -25,7 +25,7 @@
 // has an unknown outcome, it sits in its own queue, and it stays out of every
 // delivered figure on this page until a human says what happened.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // `Unresolved` comes from here rather than being declared at the bottom of
 // this file. Seven console screens held a byte-identical copy, every one of
 // them a plain `<div>` — so the sentence saying THIS section's rows could not
@@ -806,7 +806,15 @@ function Requests({ requests, unread, names, me, onChange, setErr, zone }: {
         });
         // Stop here rather than carrying on. A roster row written after this
         // failed is the exact half-linked state described above.
-        if (linkErr) { setMsg(`${linkErr.message} — nothing was changed.`); setBusy(null); return; }
+        if (linkErr) {
+          setMsg(writeFailedText(linkErr, {
+            what: 'Accepting that request',
+            unchanged: 'nothing was changed and they are not on your roster',
+            howToCheck: 'Reload this page and read whether they appear on your roster before accepting again.',
+          }));
+          setBusy(null);
+          return;
+        }
 
         // coach_clients.name is NOT NULL and this trainer usually cannot read a
         // stranger's profile until the link exists, so 'A client' is a

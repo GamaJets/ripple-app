@@ -74,7 +74,7 @@
 // page uses those and the shared rate maths from classRates.ts, which imports
 // nothing and is what classAttendance itself re-exports.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // `Unresolved` comes from here rather than being declared at the bottom of
 // this file. Seven console screens held a byte-identical copy, every one of
 // them a plain `<div>` — so the sentence saying THIS section's rows could not
@@ -1152,7 +1152,11 @@ function Roster({ gymClass, zone, onClose }: { gymClass: GymClass; zone: string 
       await promoteFromWaitlist(supabase, r.bookingId);
       await load();
     } catch (e: any) {
-      setMsg(e?.message ?? 'That place was not given, so they are still waiting.');
+      setMsg(writeFailedText(e, {
+        what: 'That place',
+        unchanged: 'they are still waiting',
+        howToCheck: 'Reload this roster before giving it again — a place given twice puts the class over its cap.',
+      }));
     }
   };
 

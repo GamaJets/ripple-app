@@ -55,7 +55,7 @@
 // quarter in which the gym took nothing — and this is the page somebody works
 // from at a deadline.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate } from '@/components/Gate';
 // `landed` comes from here too. This file declared its own copy, byte for
 // byte, three lines under the import that already brings in `Read` and
@@ -326,7 +326,11 @@ function Profile({ profile, state, tenantId, onSaved }: {
       onSaved(draft);
       setSaved('Saved. Repple holds this exactly as typed and has checked it against nothing.');
     } catch (e2: any) {
-      setErr(`That was NOT saved: ${e2?.message ?? 'the write was refused'}. What this gym had on record is unchanged.`);
+      setErr(writeFailedText(e2, {
+        what: 'What this gym says about tax',
+        unchanged: 'what this gym had on record is unchanged',
+        howToCheck: 'Reload this page: the boxes above are filled from whatever is actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 

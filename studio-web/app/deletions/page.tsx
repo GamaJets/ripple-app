@@ -35,7 +35,7 @@
 // source of truth and a way for a not-yet-loaded tenant to render an empty
 // queue that looks exactly like the good state.
 import { useCallback, useEffect, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate } from '@/components/Gate';
 import { type Unread } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
@@ -306,7 +306,16 @@ export default function Deletions() {
       // The database's own refusals are written for a person to read ("That
       // member has not asked to be deleted."), so they are shown rather than a
       // generic failure that hides which guard fired.
-      setMsg(e?.message ?? 'Nothing was deleted.');
+      // The database's own refusals are the reason this is worth classifying
+      // rather than replacing: `writeFailedText` prints the refusal's own words
+      // ("That member has not asked to be deleted.") for a refusal, and refuses
+      // to assert anything at all when nobody answered — which for an
+      // irreversible deletion is the one case that must not be guessed at.
+      setMsg(writeFailedText(e, {
+        what: 'That deletion',
+        unchanged: 'nothing was deleted and the account is still here',
+        howToCheck: 'Reload this page: an account that has actually been deleted is gone from the list below.',
+      }));
     } finally { setBusy(null); }
   };
 

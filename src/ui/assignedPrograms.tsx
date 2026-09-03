@@ -23,7 +23,7 @@
 // src/lib/programCache.ts with a test. The two that shape this file: the copy
 // is layered UNDER a live read rather than merged into `programs`, and the
 // SERVER's answer is what gets written, including when that answer is empty.
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
@@ -37,6 +37,7 @@ import {
   mayCache, mayServeCached, packPrograms, programCacheKey, readPrograms,
   type CachedPrograms,
 } from '../lib/programCache';
+import { mergeAssignments, mergeStartsOn } from '../lib/assignmentMerge';
 import { useRecoverRead } from './readRefresh';
 
 interface AssignedProgramsValue {
@@ -111,6 +112,20 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   const [programs, setPrograms] = useState<Record<string, Program>>({});
   const [startsOn, setStartsOn] = useState<Record<string, string>>({});
   const [uid, setUid] = useState<string | null>(null);
+  /**
+   * How many of this device's own writes are outstanding.
+   *
+   * A ref rather than state: nothing renders from it, and a re-render between
+   * the increment and the read is exactly what it must survive. A COUNT, not a
+   * flag — a bulk assign is twelve writes settling one at a time, and a flag
+   * cleared by the first would let a read land on the other eleven. See
+   * src/lib/assignmentMerge.ts for what it decides.
+   */
+  const writing = useRef(0);
+  /** The programmes as of the last render, so the read can work out which
+   *  survive without calling a setter from inside another setter's updater. */
+  const programsRef = useRef<Record<string, Program>>(programs);
+  programsRef.current = programs;
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   // Bumped by `reload`. Beside `authRev` in the read's dependency array so a
   // refresh runs the one read this provider has.
@@ -181,6 +196,12 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
         // stable key here and an unordered cap lets the server return a
         // different thousand each launch — a coach would see a client's
         // programme appear on Monday and be gone on Tuesday.
+        // Snapshotted BEFORE the request goes out. What matters is whether any
+        // write of this device's OVERLAPPED the read: one that started before
+        // the select and finished before the answer came back may still be
+        // missing from that answer, and the counter would already be back at
+        // zero by the time it is processed.
+        const writesBefore = writing.current;
         const { data, error } = await supabase.from('assigned_programs').select('*')
           .or('client_id.eq.' + id + ',coach_id.eq.' + id)
           .order('client_id', { ascending: true }).limit(capLimit());
@@ -202,8 +223,24 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
           // `startsOn` on the interface above.
           if (typeof r.starts_on === 'string' && r.starts_on) d[r.client_id] = r.starts_on;
         }
-        if (Object.keys(m).length) setPrograms((prev) => ({ ...prev, ...m }));
-        if (Object.keys(d).length) setStartsOn((prev) => ({ ...prev, ...d }));
+        // ── and a programme the server no longer lists is taken away ───────
+        //
+        // This was `if (Object.keys(m).length) setPrograms(prev => …)`, which
+        // is a merge with no way to say "gone" — and zero rows, the shape a
+        // removal arrives in, was the one case the guard skipped entirely. A
+        // coach taking somebody off a block had no effect on a running app at
+        // all. That was small while a re-read meant somebody pulling down on a
+        // screen; src/lib/readRefresh.ts re-reads on every reconnect, so the
+        // session that shows the ended block now survives days.
+        //
+        // It cannot simply replace, either: a truncated page is missing rows
+        // for reasons that are nothing to do with those clients, and a read
+        // that raced this device's own write returns the world without it.
+        // src/lib/assignmentMerge.ts holds all three outcomes with a test.
+        const facts = { whole: !page.truncated, writesInFlight: Math.max(writesBefore, writing.current) };
+        const kept = mergeAssignments(programsRef.current, m, facts);
+        setPrograms(kept);
+        setStartsOn((prevD) => mergeStartsOn(prevD, d, kept, facts));
         // The server has answered, so the device's copy stops being consulted
         // from here — including when this answer is EMPTY, which is what a
         // coach taking somebody off a block looks like.
@@ -313,6 +350,12 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       putBack();
       return { ok: false, why: 'This programme was not saved — the app could not confirm who you are signed in as, so nothing was sent to the server.' };
     }
+    // Counted from before the request is sent, so a read that lands while it
+    // is out cannot treat this client's absence from the server's answer as a
+    // removal. src/lib/assignmentMerge.ts. Decremented on every path out,
+    // including the refusals — a counter that leaks pins the merge open and
+    // the removals stop arriving again.
+    writing.current += 1;
     try {
       // `starts_on` is sent ONLY when the caller passed one, and `undefined` is
       // dropped by the driver rather than written as null. That matters on an
@@ -353,6 +396,8 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       reportError('assignedPrograms.assignProgram', e, { clientId });
       putBack();
       return { ok: false, why: 'That programme did not reach the server, so nothing has changed for them.' };
+    } finally {
+      writing.current = Math.max(0, writing.current - 1);
     }
   };
   const assignProgram = async (clientId: string, program: Program): Promise<boolean> =>
@@ -421,6 +466,9 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       putBack();
       return { ok: false, why: 'The app could not confirm who you are signed in as, so nothing was sent to the server.' };
     }
+    // As above: this device's own removal must not be undone by a read that
+    // raced it. src/lib/assignmentMerge.ts.
+    writing.current += 1;
     try {
       const r = await supabase.from('assigned_programs').delete({ count: 'exact' }).eq('client_id', clientId);
       const why = writeFailure('That programme', r);
@@ -434,6 +482,8 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       reportError('assignedPrograms.clearProgram', e, { clientId });
       putBack();
       return { ok: false, why: 'That removal did not reach the server, so nothing has changed for them.' };
+    } finally {
+      writing.current = Math.max(0, writing.current - 1);
     }
   };
   const clearProgram = async (clientId: string): Promise<boolean> =>

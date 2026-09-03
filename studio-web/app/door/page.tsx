@@ -9,7 +9,7 @@
 // of people who booked a class, and retention is inferred from a number that
 // is missing most of its input.
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailed, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // The reader's locale, the GYM's zone. This screen lives at a front desk, where
 // the two are usually the same clock — and it is also the screen an owner opens
 // from another country, where they are not, and where "today" deciding whether
@@ -36,6 +36,11 @@ import {
   type Visit, type Admission, type PendingDoorWrite,
 } from '@lib/gymVisits';
 import { searchRows } from '@lib/consoleSearch';
+// The number the member is holding up. src/lib/memberLookup.ts says at length
+// why this could not be done with a fifth search field.
+import {
+  findByMemberNo, scanNote, memberNoFor, type RosterState,
+} from '@lib/memberLookup';
 import { wrote, refused as sayRefused, sayText, sayTone, type Said } from '@lib/consoleSay';
 import {
   fetchPasses, fetchPassTypes, issuePass, redeemPass,
@@ -440,7 +445,7 @@ export default function Door() {
         records={records} tenantId={tenantId}
         membersUnread={unread(members)} classesUnread={unread(classes)}
         recordsUnread={recordsUnread}
-        today={today} zone={zone} queue={queue} onChange={refresh}
+        today={today} zone={zone} queue={queue} gymName={gymName} onChange={refresh}
       />
       <Inside
         inside={inside} openBefore={openBefore.length} swept={sweptBefore.length}
@@ -457,7 +462,7 @@ export default function Door() {
       <Passes
         passes={passes} types={types} members={members} summary={pSum}
         passesUnread={unread(passes)} typesUnread={unread(types)}
-        tenantId={tenantId} today={today} zone={zone} me={me} onChange={refresh}
+        tenantId={tenantId} today={today} zone={zone} me={me} gymName={gymName} onChange={refresh}
       />
     </Shell>
   );
@@ -627,12 +632,15 @@ function useDoorQueue(tenantId: string, onChange: () => void): DoorQueue {
 
 /* ── check-in ──────────────────────────────────────────────────────────────── */
 
-function CheckInBar({ members, passes, classes, visits, records, tenantId, membersUnread, classesUnread, recordsUnread, today, zone, queue, onChange }: {
+function CheckInBar({ members, passes, classes, visits, records, tenantId, membersUnread, classesUnread, recordsUnread, today, zone, queue, gymName, onChange }: {
   members: Membership[] | null; passes: GymPass[] | null; classes: GymClass[] | null;
   visits: Visit[] | null;
   records: Map<string, GymMemberRecord> | null;
   tenantId: string;
   membersUnread: Unread; classesUnread: Unread; recordsUnread: Unread;
+  /** `tenants.name`, for drawing a member's own number beside their name in
+   *  the picker. Never used to match one. */
+  gymName: string | null;
   today: string;
   /** `tenants.timezone`, or null when the gym has not set one. Every clock on
    *  this screen is drawn on it. */
@@ -826,7 +834,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
       <form onSubmit={go} style={formRow}>
         <MemberPicker
           members={members} value={memberId} onPick={pickMember}
-          unread={membersUnread}
+          unread={membersUnread} gymName={gymName}
         />
         <select value={reason} onChange={(e) => setReason(e.target.value)} style={{ ...field, flex: 2 }}
                 aria-label="What this visit was for">
@@ -939,7 +947,15 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
                         overrideReason: `recorded at the desk while offline at ${gymTimeText(p.atIso, zone) ?? p.atIso}`,
                       })
                         .then(() => { queue.settled(p.id); onChange(); })
-                        .catch((e: any) => setMsg(sayRefused(e?.message, 'That arrival was still not recorded.')));
+                        // An arrival recorded twice is two visits against one
+                        // pass, and this is the RETRY of a write that was already
+                        // held once — so the ambiguous sentence matters more here
+                        // than anywhere: it is the one path that invites a third.
+                        .catch((e: any) => setMsg(writeFailed(e, {
+                          what: 'That arrival',
+                          unchanged: 'it is still not recorded and stays in the queue below',
+                          howToCheck: 'Reload this page and read today’s arrivals before recording it again — one arrival written twice takes two visits off a pass.',
+                        })));
                     }}
                   >
                     Record it anyway
@@ -1071,11 +1087,14 @@ const PICKER_ROWS = 8;
  * Anonymous stays available and stays the default: an unattributable head-count
  * is a real answer and it still counts toward the day.
  */
-function MemberPicker({ members, value, onPick, unread }: {
+function MemberPicker({ members, value, onPick, unread, gymName }: {
   members: Membership[] | null;
   value: string;
   onPick: (id: string) => void;
   unread: Unread;
+  /** `tenants.name`, for drawing a member's number the way their own app draws
+   *  it. Never used to MATCH one — see `memberNoBody` in memberLookup.ts. */
+  gymName: string | null;
 }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -1109,7 +1128,7 @@ function MemberPicker({ members, value, onPick, unread }: {
   // membership wins the status label, because that is what the desk is being
   // asked about.
   const people = useMemo(() => {
-    const byPerson = new Map<string, { id: string; name: string; status: string; plan: string | null }>();
+    const byPerson = new Map<string, { id: string; name: string; status: string; plan: string | null; no: string | null }>();
     for (const m of members ?? []) {
       const seen = byPerson.get(m.memberId);
       const rank = (s: string) => (s === 'active' ? 3 : s === 'frozen' ? 2 : 1);
@@ -1119,22 +1138,82 @@ function MemberPicker({ members, value, onPick, unread }: {
           name: m.memberName ?? m.memberId,
           status: m.status,
           plan: m.planName ?? null,
+          /*
+           * The number this gym's app prints for them. Computed once per read
+           * rather than per keystroke, and shown beside the name so the desk
+           * can read it back to somebody who cannot find their own screen.
+           *
+           * NULL, not a number, when the gym's name did not read.
+           * `memberNoFor(id, null)` is a real string — "MEM-4APA10E5Y" — and
+           * the member is holding "RUO-4APA10E5Y", so printing it would put a
+           * number on this screen that matches nothing the member can see and
+           * invite the desk to read it out. The lookup is unaffected either
+           * way: it matches on the body, which has no prefix in it.
+           */
+          no: gymName ? memberNoFor(m.memberId, gymName) : null,
         });
       }
     }
     return [...byPerson.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [members]);
+  }, [members, gymName]);
+
+  /*
+   * How the roster read came back, in the four answers the lookup needs.
+   *
+   * 'partial' cannot arise from this caller — `fetchMemberships` goes through
+   * `readAll`, which PAGES rather than stopping at the cap, so the roster it
+   * hands over is the whole roster or an exception. It is in the type because
+   * the thing that must never happen is a future caller that truncates
+   * discovering, at a front desk, that "nobody has that number" was being said
+   * over a prefix.
+   */
+  const rosterState: RosterState =
+    unread === 'failed' ? 'failed' : unread === 'loading' ? 'loading' : members === null ? 'loading' : 'ready';
+
+  /*
+   * The number on the member's own screen.
+   *
+   * Resolved EXACTLY, and separately from the substring search below, for the
+   * reason memberLookup.ts gives: the three letters in front of the hyphen come
+   * from whatever brand label the member's phone had cached, so two members of
+   * one gym can be holding two different prefixes for the same number, and a
+   * substring match on the number as this console spells it would find one of
+   * them and not the other.
+   */
+  const scan = useMemo(() => findByMemberNo(q, people, rosterState), [q, people, rosterState]);
+  const scanSays = scanNote(scan);
 
   const hits = useMemo(
     // Searchable on the plan too, because "who is on Gold" is a question the
-    // desk asks out loud, and on the id because that is what a barcode scanner
-    // types into a text field.
-    () => searchRows(people, q, (p) => [p.name, p.plan, p.status, p.id]),
+    // desk asks out loud, and on the member number so that a partly typed one
+    // narrows the list. NOT on the raw id: the comment here used to say that
+    // was "what a barcode scanner types into a text field", and it is not —
+    // `profiles.id` is a uuid and appears on no screen a member can open. What
+    // the scanner types is the number in `no`, and `scan` above is what
+    // actually resolves it.
+    () => searchRows(people, q, (p) => [p.name, p.plan, p.status, p.no]),
     [people, q],
   );
 
-  // What the arrow keys can actually land on: the rows drawn, not every match.
-  const options = hits.slice(0, PICKER_ROWS);
+  /*
+   * What the arrow keys can land on, and what the list draws.
+   *
+   * A resolved member number wins over the substring search, and it wins by
+   * REPLACING the list rather than by sorting to the top. A scan is not a
+   * search: the desk has pointed a reader at a barcode and there is exactly one
+   * person it means, and leaving eleven other rows under them is how the wrong
+   * one gets clicked by somebody who is not looking at the screen.
+   *
+   * A number matching two people is the one case that draws a list of its own —
+   * those two, and nobody else — because that is the case the desk has to
+   * resolve by asking a name.
+   */
+  const options =
+    scan.kind === 'one'
+      ? [scan.person]
+      : scan.kind === 'ambiguous'
+        ? scan.people.slice(0, PICKER_ROWS)
+        : hits.slice(0, PICKER_ROWS);
   // Typing changes the matches, so a highlight held over from the last keystroke
   // would point at somebody else. It is cleared on every change of the query.
   const cur = active >= 0 && active < options.length ? options[active] : null;
@@ -1150,10 +1229,23 @@ function MemberPicker({ members, value, onPick, unread }: {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault(); setOpen(true);
       setActive((i) => (i <= 0 ? options.length - 1 : i - 1));
-    } else if (e.key === 'Enter' && cur) {
-      // Only when something is actually highlighted. Enter on a typed query
-      // with no highlight must not check in whoever happens to sort first.
-      e.preventDefault(); take(cur.id);
+    } else if (e.key === 'Enter' && (cur || scan.kind === 'one')) {
+      /*
+       * Only when something is actually highlighted, OR when a member NUMBER
+       * resolved to exactly one person.
+       *
+       * The original rule stands and is the reason for the `cur` half: Enter on
+       * a typed query with no highlight must not check in whoever happens to
+       * sort first. A scan is the other case entirely. Most barcode readers
+       * send a carriage return after the digits, so the whole gesture at a desk
+       * is: point, and the person is chosen. Requiring an arrow key first would
+       * mean the reader typed a number and then did nothing visible, which at a
+       * front desk reads as a broken scanner.
+       *
+       * `scan.kind === 'one'` is the only arm that may do this. 'ambiguous' is
+       * two people and Enter must not pick one of them.
+       */
+      e.preventDefault(); take(cur ? cur.id : (scan as { person: { id: string } }).person.id);
     }
   };
 
@@ -1168,6 +1260,11 @@ function MemberPicker({ members, value, onPick, unread }: {
           {chosen.name}
           {chosen.status !== 'active'
             ? <span style={{ color: 'var(--warn)', marginLeft: 7, fontSize: 11.5 }}>{chosen.status}</span>
+            : null}
+          {/* The number their own app shows them, so the desk can confirm out
+              loud that the right person was picked off a scan. */}
+          {chosen.no
+            ? <span className="mono" style={{ color: 'var(--ink3)', marginLeft: 8, fontSize: 11 }}>{chosen.no}</span>
             : null}
         </span>
         <button type="button" style={linkBtn} onClick={() => { onPick(''); setQ(''); setActive(-1); }}>change</button>
@@ -1188,7 +1285,9 @@ function MemberPicker({ members, value, onPick, unread }: {
         // options are not tab stops, so the next Tab genuinely leaves this
         // control rather than landing on a button about to be unmounted.
         onBlur={() => window.setTimeout(() => setOpen(false), 150)}
-        placeholder={unread === 'failed' ? 'Member list unread — check in anonymously' : 'Search a member, or leave blank for a walk-in'}
+        placeholder={unread === 'failed'
+          ? 'Member list unread — check in anonymously'
+          : 'Name, member number or scan, or leave blank for a walk-in'}
         aria-label="Search for the member at the desk"
         role="combobox"
         aria-expanded={open && !!q.trim()}
@@ -1238,14 +1337,36 @@ function MemberPicker({ members, value, onPick, unread }: {
                 <span style={{ color: 'var(--warn)', marginLeft: 8, fontSize: 11.5 }}>{p.status}</span>
               ) : null}
               {p.plan ? <span style={{ color: 'var(--ink3)', marginLeft: 8, fontSize: 11.5 }}>{p.plan}</span> : null}
+              {/* The number, so a desk resolving a duplicate can read both back
+                  and so anybody who has forgotten theirs can be told it. */}
+              {p.no ? <span className="mono" style={{ color: 'var(--ink3)', marginLeft: 8, fontSize: 11 }}>{p.no}</span> : null}
             </button>
           ))}
-          {hits.length > PICKER_ROWS ? (
+          {/* Only about the SEARCH. When a scan resolved, `options` is that one
+              person and the number of other members whose name happens to
+              contain the typed text is not a thing the desk needs to know. */}
+          {scan.kind !== 'one' && scan.kind !== 'ambiguous' && hits.length > PICKER_ROWS ? (
             <span style={{ display: 'block', padding: '7px 11px', color: 'var(--ink3)', fontSize: 11.5 }}>
               {hits.length - PICKER_ROWS} more match — keep typing.
             </span>
           ) : null}
-          {hits.length === 0 ? (
+          {/* What the number said, above the rows. Four sentences for four
+              outcomes — see `scanNote`. Nothing at all for a name search or a
+              number that resolved, because at a desk with somebody waiting the
+              right answer to "it worked" is silence. */}
+          {scanSays ? (
+            <span
+              role="status"
+              style={{
+                display: 'block', padding: '9px 11px', fontSize: 12,
+                color: scan.kind === 'unknown' ? 'var(--warn)' : 'var(--ink2)',
+                borderBottom: options.length ? '1px solid var(--ring2)' : 'none',
+              }}
+            >
+              {scanSays}
+            </span>
+          ) : null}
+          {hits.length === 0 && !scanSays ? (
             <span style={{ display: 'block', padding: '9px 11px', color: 'var(--ink3)', fontSize: 12 }}>
               {/* Three different sentences for three different facts, the same
                   distinction the rest of this screen makes. An empty result
@@ -1648,7 +1769,7 @@ function Occupancy({ visits, unread, days }: {
 
 /* ── passes ────────────────────────────────────────────────────────────────── */
 
-function Passes({ passes, types, members, summary, passesUnread, typesUnread, tenantId, today, zone, me, onChange }: {
+function Passes({ passes, types, members, summary, passesUnread, typesUnread, tenantId, today, zone, me, gymName, onChange }: {
   passes: GymPass[] | null; types: PassType[] | null; members: Membership[] | null;
   summary: ReturnType<typeof summarisePasses> | null;
   passesUnread: Unread; typesUnread: Unread;
@@ -1656,7 +1777,10 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
   /** `tenants.timezone`, or null when the gym has not set one. Every clock on
    *  this screen is drawn on it. */
   zone: string | null;
-  me: Me; onChange: () => void;
+  me: Me;
+  /** `tenants.name`, for the picker's member numbers. */
+  gymName: string | null;
+  onChange: () => void;
 }) {
   const [typeId, setTypeId] = useState('');
   /**
@@ -1960,6 +2084,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
             members={members} value={holderId}
             onPick={(id) => { setHolderId(id); if (id) setHolderName(''); }}
             unread={members === null ? 'failed' : null}
+            gymName={gymName}
           />
           {/* Disabled rather than hidden once a member is picked: the two are a
               real either/or — `issuePass` nulls the name when it is given an id

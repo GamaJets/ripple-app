@@ -27,7 +27,7 @@
 // the way in the same render, because `escalate` is a pure function of the live
 // status and not a latch.
 import { useEffect, useState } from 'react';
-import { READ_DEADLINE_MS, escalate } from '../lib/readDeadline';
+import { READ_DEADLINE_MS, escalate, stalled } from '../lib/readDeadline';
 import type { LoadStatus } from './loadStatus';
 
 /**
@@ -47,7 +47,7 @@ export function useReadDeadline(status: LoadStatus, ceilingMs: number = READ_DEA
   // Whether the ceiling has passed for the read currently in flight. State and
   // not a ref: the returned status is derived from it and a ref would not
   // redraw, which is the whole failure being fixed — nothing else on the screen
-  // is going to render at the twenty-fifth second.
+  // is going to render at the sixty-fifth second.
   const [hitCeiling, setHit] = useState(false);
 
   useEffect(() => {
@@ -58,8 +58,17 @@ export function useReadDeadline(status: LoadStatus, ceilingMs: number = READ_DEA
     // A fresh 'loading' — a reload, a re-auth — starts the wait again rather
     // than inheriting the verdict on the last one.
     setHit(false);
-    if (!Number.isFinite(ceilingMs) || ceilingMs <= 0) return;
-    const id = setTimeout(() => setHit(true), ceilingMs);
+    const startedAt = Date.now();
+    // The timer is the trigger; `stalled` is the JUDGEMENT, and it is asked
+    // again against the wall clock rather than trusted. React re-runs effects
+    // on a development double-mount and a suspended app fires its timers late
+    // and in a bunch on resume, so "the timer fired" is not on its own evidence
+    // that the wait was long enough. The rule about what counts as too long
+    // lives in src/lib/readDeadline.ts with a test on it, in one place, rather
+    // than being implied here by an argument to setTimeout.
+    const id = setTimeout(() => {
+      setHit(stalled(status, Date.now() - startedAt, ceilingMs));
+    }, ceilingMs);
     return () => clearTimeout(id);
   }, [status, ceilingMs]);
 

@@ -173,6 +173,12 @@ export function costLineKey(row: Pick<CostLine, 'supplier' | 'category'>): strin
   const supplier = normalise(row.supplier);
   const category = normalise(row.category);
   if (!supplier) return null;
+  // A NUL between the halves rather than a space or a pipe. Both halves are
+  // free text after folding, so a supplier called "rent a mat" under category
+  // 'other' and one called "a mat" under a category spelled 'other rent' join
+  // to the same string over any separator a person can type. NUL is the one
+  // byte `normalise` cannot leave in either half, so the key cannot collide.
+  // It is never shown: the screen prints `supplier` and `category`.
   return `${category}\u0000${supplier}`;
 }
 

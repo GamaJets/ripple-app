@@ -39,6 +39,7 @@ import { coachPackLines, gymPtLines, chooseRoute, creditsLeft, payingLines, ledg
   clientLedgerLine, bookingCreditNote, type CreditSession } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
+import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 // One definition of "today, locally", shared with the membership screen and
 // with the pass code itself — see the note on `todayISO` below.
@@ -253,6 +254,36 @@ export default function Bookings() {
   const creditsRemaining = useMemo(
     () => creditsLeft(payingLines(creditRoute, coachLines, gymLines)), [creditRoute, coachLines, gymLines]);
   const creditNote = useMemo(() => bookingCreditNote(creditRoute, creditsRemaining), [creditRoute, creditsRemaining]);
+
+  // ── a pack with a closing window, and whether this diary covers it ─────
+  //
+  // The same question `app/(client)/session-credits.tsx` answers, asked on the
+  // screen where the diary is. `expiryLine` in src/lib/packExpiry.ts says when
+  // a pack ends and is printed on Memberships & Packs; what a member wants to
+  // know while looking at their bookings is whether the ones in front of them
+  // are enough to use it up. Both halves are already on this screen.
+  //
+  // `bookedByThen` is null unless exactly ONE pack has a window — an upcoming
+  // session is not attributed to a pack until it draws, so with two windows in
+  // play no honest attribution exists. See src/lib/packDeadline.ts.
+  const payingEntitlements = useMemo(
+    () => payingLines(creditRoute, coachLines, gymLines), [creditRoute, coachLines, gymLines]);
+  const soleWindow = useMemo(() => {
+    const w = (payingEntitlements ?? []).filter((l) => l.expiresOn);
+    return w.length === 1 ? w[0] : null;
+  }, [payingEntitlements]);
+  const deadline = useMemo(() => {
+    if (!soleWindow) return null;
+    // Only the member's own PT bookings, and only when BOTH reads that make
+    // this list landed. A short diary counted as a whole one would report
+    // coverage that is not there — `bookingsWhole` is the same gate the empty
+    // state on this screen is already held to.
+    const booked = bookingsWhole
+      ? bookedBy(sessions.filter((x) => x.clientId === cd.id && x.status === 'booked'
+          && Date.parse(x.startsAt) > Date.now() - 3600_000), soleWindow.expiresOn)
+      : null;
+    return packDeadline({ left: soleWindow.left, expiresOn: soleWindow.expiresOn, today: todayISO, bookedByThen: booked });
+  }, [soleWindow, sessions, cd.id, bookingsWhole, todayISO]);
   const creditById = useMemo(() => {
     const m = new Map<string, CreditSession>();
     for (const c of credits ?? []) m.set(c.id, c);
@@ -595,6 +626,15 @@ export default function Bookings() {
               promise is worded once. Null for a member who holds nothing, who
               needs no sentence about packs at all. */}
           {creditNote ? <Flag tone={t.brand} style={{ marginBottom: sp.md }}>{creditNote}</Flag> : null}
+          {/* Sessions already paid for that this diary is not going to use.
+              Under the balance rather than over it, because the balance is what
+              the sentence is about. A 'covered' answer is drawn quietly — it is
+              reassurance, not a warning. */}
+          {deadline && deadline.text ? (
+            deadline.urgent
+              ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{deadline.text}</Flag>
+              : <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{deadline.text}</Text>
+          ) : null}
           {/* One of the two lists came off this phone rather than off the
               server. Said above the rows for the same reason the gap notice is:
               a member who reads a cached booking as a confirmed one turns up to

@@ -22,7 +22,7 @@
 // come back Unknown with a sentence saying which kind of nothing it is — never
 // a green dot, and never buried under the healthy rows.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, writeFailed, type Me } from '@/lib/supabase';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
@@ -1198,14 +1198,32 @@ function Rota({ tenantId, trainers, ccy, zone, zoneRead }: {
       setRate('');
       await load();
     } catch (x: any) {
-      setMsg(refused(x?.message, 'That shift was not added, so nobody is rostered for it.'));
+      // Three states, not two. "That shift was not added" is true of a refusal
+      // and is a claim this console cannot make about a request nobody answered
+      // — and the wrong half of it is the expensive half: a coach rostered twice
+      // for the same hours reads as cover the gym does not have.
+      setMsg(writeFailed(x, {
+        what: 'That shift',
+        unchanged: 'nobody is rostered for it',
+        howToCheck: 'Reload this page and look for it in the week below before adding it again.',
+      }));
     } finally { setBusy(false); }
   };
 
   const act = async (job: Promise<void>, done: string) => {
     setMsg(null);
     try { await job; setMsg(wrote(done)); await load(); }
-    catch (x: any) { setMsg(refused(x?.message, 'That change was refused, so the rota is unchanged.')); }
+    catch (x: any) {
+      // Pull, put back and delete all land here. A pull that we cannot confirm
+      // is the worst of the three: the screen exists to make a hole visible, and
+      // reporting "the rota is unchanged" over a pull that may have gone through
+      // leaves the owner with a hole they have been told is not there.
+      setMsg(writeFailed(x, {
+        what: 'That change to the rota',
+        unchanged: 'the rota is unchanged',
+        howToCheck: 'Reload this page and read the shift’s state in the table below before changing it again.',
+      }));
+    }
   };
 
   const options = trainers.state === 'ready' ? trainers.rows : null;
@@ -1503,7 +1521,11 @@ function EditShift({ shift, ccy, zone, onClose }: {
       });
       onClose(true);
     } catch (x: any) {
-      setMsg(refused(x?.message, 'That change was refused, so the shift is unchanged.'));
+      setMsg(writeFailed(x, {
+        what: 'That change to the shift',
+        unchanged: 'the shift is unchanged',
+        howToCheck: 'Close this and reload the page: the row in the rota carries whichever times are actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 

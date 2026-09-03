@@ -97,7 +97,7 @@
 // no error and this sheet would otherwise say "Saved" over a row that did not
 // move.
 import { useCallback, useEffect, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate } from '@/components/Gate';
 import { type Unread } from '@/lib/read';
 import { Shell } from '@/components/Shell';
@@ -330,7 +330,11 @@ export default function Settings() {
       // was sent, which is the same distinction as everywhere else here.
       await load(tenantId);
     } catch (x: any) {
-      setWriteErr(x?.message ?? 'The write was refused. Nothing has changed.');
+      setWriteErr(writeFailedText(x, {
+        what: 'Those gym settings',
+        unchanged: 'nothing has changed',
+        howToCheck: 'Reload this page — the boxes are re-read from the stored row after every save, so what they show is what is actually stored.',
+      }));
     } finally { setBusy(false); }
   };
 

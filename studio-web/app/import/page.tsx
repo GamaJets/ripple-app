@@ -34,7 +34,7 @@
 //    loud rather than dropped: an invitation is addressed to an address, and
 //    a name is not one.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
@@ -396,8 +396,11 @@ export default function ImportPage() {
     } catch (e: any) {
       setBusy(false);
       setDone({
-        text: `Nothing was written: the import could not be opened (${e?.message ?? 'the write was refused'}). `
-          + 'No payment was recorded, so the file is still to run.',
+        text: writeFailedText(e, {
+          what: 'Opening that import',
+          unchanged: 'no payment was recorded and the file is still to run',
+          howToCheck: 'Reload this page and look for a run of this file in the receipts below before running it again — an import run twice files every payment twice.',
+        }),
         outcome: 'none',
       });
       return;
@@ -454,7 +457,11 @@ export default function ImportPage() {
       setUndoMsg(`${removed} payment${removed === 1 ? '' : 's'} removed. Every total is back to what it was before that import.`);
       await loadGym(tenantId);
     } catch (e: any) {
-      setUndoMsg(`Nothing was removed: ${e?.message ?? 'the delete was refused'}. The ledger is unchanged.`);
+      setUndoMsg(writeFailedText(e, {
+        what: 'That undo',
+        unchanged: 'nothing was removed and the ledger is unchanged',
+        howToCheck: 'Reload this page and read the run’s state below — the payments it wrote are either gone or they are not.',
+      }));
     } finally {
       setUndoing(null);
     }
@@ -548,9 +555,13 @@ export default function ImportPage() {
     } catch (e: any) {
       setFailed([]);
       setDone({
-        text: `Nothing was recorded: ${e?.message ?? 'the write was refused'}. The whole list is `
-          + 'written in one statement, so not one invitation went out — the file is still to run, '
-          + 'and running it again will not send anything twice.',
+        // The one-statement argument survives a refusal and does not survive a
+        // silence: a statement nobody answered about may have committed whole.
+        text: writeFailedText(e, {
+          what: 'That list of invitations',
+          unchanged: 'the whole list is written in one statement, so not one invitation went out and the file is still to run',
+          howToCheck: 'Reload this page and read the invitation list before running the file again.',
+        }),
         outcome: 'none',
       });
     } finally { setBusy(false); }
